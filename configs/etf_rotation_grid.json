@@ -1,0 +1,40 @@
+{
+  "name": "ETF 轮动参数扫描",
+  "max_parallelism": 2,
+  "base": {
+    "name": "ETF 轮动",
+    "start": "2016-01-01",
+    "end": null,
+    "initial_cash": 1000000.0,
+    "lot_size": 100,
+    "strategy": {
+      "lookback_days": 20,
+      "top_n": 3,
+      "rebalance_every": 20,
+      "momentum_short_days": 20,
+      "momentum_long_days": 60,
+      "volatility_window": 20,
+      "trend_window": 60,
+      "use_trend_filter": true,
+      "short_momentum_weight": 1.0,
+      "long_momentum_weight": 1.0,
+      "volatility_weight": 1.0
+    },
+    "research": { "forward_days": 5, "quantiles": 5 },
+    "costs": {
+      "commission_rate": 0.0003,
+      "minimum_commission": 5.0,
+      "buy_tax_rate": 0.0,
+      "sell_tax_rate": 0.0,
+      "buy_slippage_bps": 2.0,
+      "sell_slippage_bps": 2.0
+    }
+  },
+  "grid": {
+    "momentum_short_days": [20, 40],
+    "momentum_long_days": [60, 120],
+    "top_n": [2, 3],
+    "rebalance_every": [10, 20],
+    "use_trend_filter": [true, false]
+  }
+}

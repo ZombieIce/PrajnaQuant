@@ -1,0 +1,4 @@
+# Project-local compatibility with the legacy global Cargo configuration.
+# It keeps the global source alias but uses the mirror's sparse protocol.
+[source.ustc]
+registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"

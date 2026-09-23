@@ -1,0 +1,21 @@
+{
+  "name": "ETF 轮动批量验证",
+  "max_parallelism": 2,
+  "base": {
+    "name": "ETF 轮动批量验证",
+    "start": "2023-01-01",
+    "initial_cash": 1000000.0,
+    "strategy": {
+      "top_n": 2,
+      "rebalance_every": 20,
+      "momentum_short_days": 20,
+      "momentum_long_days": 60,
+      "volatility_window": 20,
+      "trend_window": 60,
+      "use_trend_filter": true
+    }
+  },
+  "grid": {
+    "top_n": [2, 3]
+  }
+}

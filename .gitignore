@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+data/
+data-core/
+target/
+research-output/
+.DS_Store
+apps/web/node_modules/
+apps/web/dist/
+apps/web/tsconfig.tsbuildinfo
