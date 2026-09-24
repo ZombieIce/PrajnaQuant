@@ -3,6 +3,7 @@
 pub mod sources;
 
 use std::{
+    collections::BTreeMap,
     fs::{self, File},
     path::{Path, PathBuf},
 };
@@ -15,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-pub const SCHEMA_VERSION: i32 = 4;
+pub const SCHEMA_VERSION: i32 = 6;
 
 #[derive(Debug)]
 pub struct Warehouse {
@@ -72,10 +73,75 @@ pub struct WarehouseStatus {
 }
 
 #[derive(Debug, Serialize)]
+pub struct HistoryLengthAudit {
+    pub symbol: String,
+    pub expected_windows: usize,
+    pub recorded_windows: usize,
+    pub failed_windows: usize,
+    pub source_rows: i64,
+    pub stored_days: i64,
+    pub first_date: Option<String>,
+    pub last_date: Option<String>,
+    pub row_count_matches: bool,
+    pub coverage_complete: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SymbolCalendarAudit {
+    pub symbol: String,
+    pub observed_bar_days: usize,
+    pub expected_open_days: usize,
+    pub bars_on_uncovered_calendar_dates: usize,
+    pub missing_open_dates: Vec<String>,
+    pub bars_on_closed_dates: Vec<String>,
+    pub matches_calendar_on_covered_dates: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TradingCalendarAudit {
+    pub start: String,
+    pub end: String,
+    pub natural_days: usize,
+    pub calendar_days: usize,
+    pub open_days: usize,
+    pub missing_calendar_dates: Vec<String>,
+    pub calendar_complete: bool,
+    pub symbols: Vec<SymbolCalendarAudit>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct SnapshotResult {
     pub parquet: PathBuf,
     pub rows: i64,
     pub sha256: String,
+}
+
+/// Membership fact parsed from a historical index source. Generic imports are
+/// always stored as `unknown`; only a source-specific validator may certify PIT.
+#[derive(Debug, Clone)]
+pub struct IndexMembershipFact {
+    pub index_code: String,
+    pub instrument_id: String,
+    pub effective_from: NaiveDate,
+    pub effective_to: Option<NaiveDate>,
+    pub published_at: Option<DateTime<Utc>>,
+    pub effective_to_published_at: Option<DateTime<Utc>>,
+    pub publication_time_method: String,
+    pub source_ref: String,
+    pub source_revision_hash: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct IndexMembershipCoverage {
+    pub index_code: String,
+    pub coverage_start: NaiveDate,
+    pub coverage_end: NaiveDate,
+    /// Claim made by the source/importer. `complete` is not trusted by the
+    /// generic warehouse importer and is persisted as `unverified`.
+    pub declared_status: String,
+    pub gap_detail: Option<String>,
+    pub source_ref: String,
+    pub source_revision_hash: String,
 }
 
 struct RawArchiveRequest<'a> {
@@ -107,6 +173,12 @@ impl Warehouse {
             .with_context(|| format!("open DuckDB database {}", database.display()))?;
         conn.execute_batch(include_str!("../sql/schema.sql"))
             .context("apply warehouse schema")?;
+        conn.execute_batch(include_str!("../sql/migrations/005_index_membership.sql"))
+            .context("apply index membership schema migration 5")?;
+        conn.execute_batch(include_str!(
+            "../sql/migrations/006_membership_simulated_exit_known_at.sql"
+        ))
+        .context("apply index membership schema migration 6")?;
         Ok(Self {
             conn,
             _writer_lock: writer_lock,
@@ -123,8 +195,8 @@ impl Warehouse {
         request_url: &str,
     ) -> Result<IngestResult> {
         validate_symbol(symbol)?;
-        if start > end || (end - start).num_days() >= 700 {
-            bail!("a daily ingestion window must be between 1 and 700 calendar days");
+        if start > end || (end - start).num_days() >= 800 {
+            bail!("a daily ingestion window must be between 1 and 800 calendar days");
         }
         let run_id = Uuid::new_v4();
         let observed_at = Utc::now();
@@ -275,6 +347,215 @@ impl Warehouse {
         Ok(statement
             .query_map([], |row| row.get(0))?
             .collect::<std::result::Result<Vec<String>, _>>()?)
+    }
+
+    /// Symbols in the currently observed SH/SZ equity and ETF pool. This is not
+    /// a point-in-time universe and cannot include securities absent from the
+    /// local instrument table (for example, delisted names never observed here).
+    pub fn observed_market_symbols(&self) -> Result<Vec<String>> {
+        let mut statement = self.conn.prepare(
+            "SELECT CASE market WHEN 'SH' THEN 'sh' ELSE 'sz' END || code
+             FROM core.instrument
+             WHERE market IN ('SH','SZ')
+               AND asset_class IN ('EQUITY_CANDIDATE','EQUITY','ETF')
+             ORDER BY market, code",
+        )?;
+        Ok(statement
+            .query_map([], |row| row.get(0))?
+            .collect::<std::result::Result<Vec<String>, _>>()?)
+    }
+
+    pub fn market_backfill_window_done(
+        &self,
+        symbol: &str,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<bool> {
+        Ok(self.conn.query_row(
+            "SELECT count(*)>0 FROM ops.history_backfill_window
+             WHERE dataset='observed_market_daily_bar' AND symbol=? AND window_start=? AND window_end=?
+               AND source='tencent' AND status IN ('SUCCESS','EMPTY')",
+            params![symbol, start.to_string(), end.to_string()],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub fn record_market_backfill_window(
+        &self,
+        symbol: &str,
+        start: NaiveDate,
+        end: NaiveDate,
+        status: &str,
+        rows: usize,
+        error: Option<&str>,
+    ) -> Result<()> {
+        if !matches!(status, "SUCCESS" | "EMPTY" | "FAILED") {
+            bail!("invalid backfill status");
+        }
+        self.conn.execute(
+            "INSERT INTO ops.history_backfill_window VALUES ('observed_market_daily_bar', ?, ?, ?, 'tencent', ?, ?, ?, ?)
+             ON CONFLICT(dataset,symbol,window_start,window_end,source) DO UPDATE SET
+             status=excluded.status,row_count=excluded.row_count,error=excluded.error,updated_at=excluded.updated_at",
+            params![symbol, start.to_string(), end.to_string(), status, i64::try_from(rows)?, error, Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    pub fn audit_market_history_length(
+        &self,
+        symbol: &str,
+        start: NaiveDate,
+        end: NaiveDate,
+        expected_windows: usize,
+    ) -> Result<HistoryLengthAudit> {
+        let mut recorded_windows = 0_usize;
+        let mut failed_windows = 0_usize;
+        let mut source_rows = 0_i64;
+        let mut window_start = start;
+        while window_start <= end {
+            let window_end = std::cmp::min(window_start + chrono::Duration::days(799), end);
+            let marker: Option<(String, i64)> = self
+                .conn
+                .query_row(
+                    "SELECT status, row_count FROM ops.history_backfill_window
+                     WHERE dataset='observed_market_daily_bar' AND symbol=? AND source='tencent'
+                       AND window_start=? AND window_end=?",
+                    params![symbol, window_start.to_string(), window_end.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            match marker {
+                Some((status, rows)) if status == "SUCCESS" || status == "EMPTY" => {
+                    recorded_windows += 1;
+                    source_rows += rows;
+                }
+                Some((status, _)) if status == "FAILED" => failed_windows += 1,
+                _ => {}
+            }
+            window_start = window_end + chrono::Duration::days(1);
+        }
+        let (stored_days, first_date, last_date) = self.conn.query_row(
+            "SELECT count(DISTINCT trade_date), min(trade_date)::VARCHAR, max(trade_date)::VARCHAR
+             FROM staging.daily_bar_revision
+             WHERE symbol=? AND source='tencent' AND adjustment='none' AND trade_date BETWEEN ? AND ?",
+            params![symbol, start.to_string(), end.to_string()],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?)),
+        )?;
+        Ok(HistoryLengthAudit {
+            symbol: symbol.to_owned(),
+            expected_windows,
+            recorded_windows,
+            failed_windows,
+            source_rows,
+            stored_days,
+            first_date,
+            last_date,
+            row_count_matches: source_rows == stored_days,
+            coverage_complete: recorded_windows == expected_windows && failed_windows == 0,
+        })
+    }
+
+    /// Compares source-recorded daily bars with the official SZSE calendar.
+    /// Missing calendar dates remain unknown; they are never inferred as closed.
+    pub fn audit_trading_calendar(
+        &self,
+        start: NaiveDate,
+        end: NaiveDate,
+        symbols: &[String],
+    ) -> Result<TradingCalendarAudit> {
+        if start > end {
+            bail!("start cannot be later than end");
+        }
+        let mut calendar = BTreeMap::<NaiveDate, bool>::new();
+        let mut statement = self.conn.prepare(
+            "SELECT trade_date::VARCHAR, is_open FROM core.trading_calendar_latest
+             WHERE market='CN' AND source='szse' AND trade_date BETWEEN ? AND ?
+             ORDER BY trade_date",
+        )?;
+        for row in statement.query_map(params![start.to_string(), end.to_string()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+        })? {
+            let (date, is_open) = row?;
+            calendar.insert(NaiveDate::parse_from_str(&date, "%Y-%m-%d")?, is_open);
+        }
+        let mut missing_calendar_dates = Vec::new();
+        let mut date = start;
+        loop {
+            if !calendar.contains_key(&date) {
+                missing_calendar_dates.push(date.to_string());
+            }
+            if date == end {
+                break;
+            }
+            date = date
+                .succ_opt()
+                .context("date range exceeds supported calendar")?;
+        }
+        let calendar_open_dates = calendar
+            .iter()
+            .filter_map(|(date, is_open)| is_open.then_some(*date))
+            .collect::<Vec<_>>();
+        let mut audits = Vec::with_capacity(symbols.len());
+        for symbol in symbols {
+            let mut observed = BTreeMap::<NaiveDate, ()>::new();
+            let mut statement = self.conn.prepare(
+                "SELECT DISTINCT trade_date::VARCHAR FROM staging.daily_bar_latest
+                 WHERE symbol=? AND source='tencent' AND adjustment='none'
+                   AND trade_date BETWEEN ? AND ? ORDER BY trade_date",
+            )?;
+            for row in statement
+                .query_map(params![symbol, start.to_string(), end.to_string()], |row| {
+                    row.get::<_, String>(0)
+                })?
+            {
+                observed.insert(NaiveDate::parse_from_str(&row?, "%Y-%m-%d")?, ());
+            }
+            let expected_open_dates = calendar_open_dates
+                .iter()
+                .filter(|date| calendar.contains_key(date))
+                .copied()
+                .collect::<Vec<_>>();
+            let missing_open_dates = expected_open_dates
+                .iter()
+                .filter(|date| !observed.contains_key(date))
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            let bars_on_closed_dates = observed
+                .keys()
+                .filter(|date| calendar.get(date) == Some(&false))
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            let bars_on_uncovered_calendar_dates = observed
+                .keys()
+                .filter(|date| !calendar.contains_key(date))
+                .count();
+            let observed_bar_days = observed.len();
+            let matches_calendar_on_covered_dates =
+                missing_open_dates.is_empty() && bars_on_closed_dates.is_empty();
+            audits.push(SymbolCalendarAudit {
+                symbol: symbol.clone(),
+                observed_bar_days,
+                expected_open_days: expected_open_dates.len(),
+                bars_on_uncovered_calendar_dates,
+                missing_open_dates,
+                bars_on_closed_dates,
+                matches_calendar_on_covered_dates,
+            });
+        }
+        let natural_days = (end - start).num_days() as usize + 1;
+        let calendar_days = calendar.len();
+        let open_days = calendar.values().filter(|is_open| **is_open).count();
+        let calendar_complete = calendar_days == natural_days;
+        Ok(TradingCalendarAudit {
+            start: start.to_string(),
+            end: end.to_string(),
+            natural_days,
+            calendar_days,
+            open_days,
+            missing_calendar_dates,
+            calendar_complete,
+            symbols: audits,
+        })
     }
 
     pub fn backfill_window_done(
@@ -551,6 +832,243 @@ impl Warehouse {
 }
 
 impl Warehouse {
+    /// Stores raw historical index membership source material and parsed facts.
+    /// This generic path deliberately cannot certify `verified_pit` or complete
+    /// coverage: no trusted historical constituent adapter is currently wired.
+    pub fn ingest_index_membership_source(
+        &mut self,
+        source_name: &str,
+        request_url: &str,
+        response: &[u8],
+        facts: &[IndexMembershipFact],
+        coverage: &[IndexMembershipCoverage],
+    ) -> Result<IngestResult> {
+        if source_name.is_empty()
+            || !source_name.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'_'
+            })
+            || request_url.trim().is_empty()
+            || response.is_empty()
+        {
+            bail!("index membership import requires source, reference, and non-empty raw response");
+        }
+        let snapshot_hash = sha256(response);
+        let mut fact_keys = std::collections::BTreeSet::new();
+        for fact in facts {
+            validate_index_code(&fact.index_code)?;
+            if fact.instrument_id.trim().is_empty() || fact.source_ref.trim().is_empty() {
+                bail!("membership fact requires instrument_id and source_ref");
+            }
+            if !matches!(
+                fact.publication_time_method.as_str(),
+                "source_reported" | "simulated_minus_14_calendar_days" | "unknown"
+            ) {
+                bail!("invalid membership publication time method");
+            }
+            if fact
+                .effective_to
+                .is_some_and(|end| end <= fact.effective_from)
+            {
+                bail!("membership effective interval must be non-empty and half-open");
+            }
+            validate_sha256(&fact.source_revision_hash)?;
+            let key = (
+                fact.index_code.as_str(),
+                fact.instrument_id.as_str(),
+                fact.effective_from,
+                fact.effective_to,
+            );
+            if !fact_keys.insert(key) {
+                bail!("duplicate index membership fact in import");
+            }
+        }
+        let mut coverage_keys = std::collections::BTreeSet::new();
+        for item in coverage {
+            validate_index_code(&item.index_code)?;
+            if item.coverage_end < item.coverage_start
+                || item.source_ref.trim().is_empty()
+                || !matches!(
+                    item.declared_status.as_str(),
+                    "complete" | "gaps" | "unverified"
+                )
+            {
+                bail!("invalid index membership coverage record");
+            }
+            validate_sha256(&item.source_revision_hash)?;
+            if !coverage_keys.insert((
+                item.index_code.as_str(),
+                item.coverage_start,
+                item.coverage_end,
+                item.source_ref.as_str(),
+            )) {
+                bail!("duplicate index membership coverage record in import");
+            }
+        }
+
+        let run_id = self.create_run(source_name, request_url)?;
+        let outcome = (|| -> Result<IngestResult> {
+            let path = self.archive_raw_source(
+                run_id,
+                RawArchiveRequest {
+                    source: source_name,
+                    extension: "bin",
+                    response,
+                    metadata: serde_json::json!({
+                        "adapter_version": "index-membership-generic-v1",
+                        "url": request_url,
+                        "fact_count": facts.len(),
+                        "coverage_count": coverage.len(),
+                        "verification": "unknown",
+                        "publication_time_methods": facts.iter().map(|fact| fact.publication_time_method.as_str()).collect::<std::collections::BTreeSet<_>>()
+                    }),
+                },
+            )?;
+            self.conn.execute(
+                "UPDATE ops.ingest_run SET raw_path=?, raw_sha256=? WHERE run_id=?",
+                params![
+                    path.display().to_string(),
+                    snapshot_hash,
+                    run_id.to_string()
+                ],
+            )?;
+            let observed_at = Utc::now();
+            let transaction = self.conn.transaction()?;
+            let mut inserted = 0;
+            for fact in facts {
+                let hash = sha256(
+                    format!(
+                        "{}|{}|{}|{}|{}|{}|{}|{}|{}|unknown",
+                        fact.index_code,
+                        fact.instrument_id,
+                        fact.effective_from,
+                        fact.effective_to
+                            .map_or_else(String::new, |date| date.to_string()),
+                        fact.published_at
+                            .map_or_else(String::new, |date| date.to_rfc3339()),
+                        fact.effective_to_published_at
+                            .map_or_else(String::new, |date| date.to_rfc3339()),
+                        fact.publication_time_method,
+                        fact.source_ref,
+                        fact.source_revision_hash
+                    )
+                    .as_bytes(),
+                );
+                let existing: Option<String> = transaction
+                    .query_row(
+                        "SELECT row_hash FROM core.index_membership_latest
+                     WHERE index_code=? AND instrument_id=? AND effective_from=? AND source_ref=?",
+                        params![
+                            fact.index_code,
+                            fact.instrument_id,
+                            fact.effective_from.to_string(),
+                            fact.source_ref
+                        ],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if existing.as_deref() == Some(hash.as_str()) {
+                    continue;
+                }
+                transaction.execute(
+                    "INSERT INTO core.index_membership_revision
+                     (revision_id,index_code,instrument_id,effective_from,effective_to,published_at,
+                      source_ref,source_snapshot_sha256,source_revision_hash,verification_status,
+                      observed_at,run_id,row_hash,effective_to_published_at,publication_time_method)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'unknown', ?, ?, ?, ?, ?)",
+                    params![
+                        Uuid::new_v4().to_string(),
+                        fact.index_code,
+                        fact.instrument_id,
+                        fact.effective_from.to_string(),
+                        fact.effective_to.map(|date| date.to_string()),
+                        fact.published_at.map(|date| date.to_rfc3339()),
+                        fact.source_ref,
+                        snapshot_hash,
+                        fact.source_revision_hash,
+                        observed_at.to_rfc3339(),
+                        run_id.to_string(),
+                        hash,
+                        fact.effective_to_published_at.map(|date| date.to_rfc3339()),
+                        fact.publication_time_method
+                    ],
+                )?;
+                inserted += 1;
+            }
+            for item in coverage {
+                let verified_state = if item.declared_status == "gaps" {
+                    "gaps"
+                } else {
+                    "unverified"
+                };
+                let hash = sha256(
+                    format!(
+                        "{}|{}|{}|{}|{}|{}|{}",
+                        item.index_code,
+                        item.coverage_start,
+                        item.coverage_end,
+                        item.declared_status,
+                        verified_state,
+                        item.source_ref,
+                        item.source_revision_hash
+                    )
+                    .as_bytes(),
+                );
+                let existing: Option<String> = transaction
+                    .query_row(
+                        "SELECT row_hash FROM ops.index_membership_coverage_latest
+                     WHERE index_code=? AND coverage_start=? AND coverage_end=? AND source_ref=?",
+                        params![
+                            item.index_code,
+                            item.coverage_start.to_string(),
+                            item.coverage_end.to_string(),
+                            item.source_ref
+                        ],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if existing.as_deref() == Some(hash.as_str()) {
+                    continue;
+                }
+                transaction.execute(
+                    "INSERT INTO ops.index_membership_coverage_revision VALUES
+                     (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    params![
+                        Uuid::new_v4().to_string(),
+                        item.index_code,
+                        item.coverage_start.to_string(),
+                        item.coverage_end.to_string(),
+                        item.declared_status,
+                        verified_state,
+                        item.gap_detail,
+                        item.source_ref,
+                        snapshot_hash,
+                        item.source_revision_hash,
+                        observed_at.to_rfc3339(),
+                        run_id.to_string(),
+                        hash
+                    ],
+                )?;
+                inserted += 1;
+            }
+            transaction.commit()?;
+            Ok(IngestResult {
+                run_id,
+                source_rows: facts.len() + coverage.len(),
+                new_revisions: inserted,
+            })
+        })();
+        match outcome {
+            Ok(result) => {
+                self.finish_run(run_id, result.source_rows, result.new_revisions)?;
+                Ok(result)
+            }
+            Err(error) => {
+                self.fail_run(run_id, &error)?;
+                Err(error)
+            }
+        }
+    }
+
     pub fn ingest_calendar_response(
         &mut self,
         year: i32,
@@ -816,6 +1334,177 @@ impl Warehouse {
         }
     }
 
+    /// Imports the third-party CSI 300 interval CSV with synthetic announcement
+    /// times. Synthetic times are stored for analysis but never certify PIT.
+    pub fn import_index_constitution_csv(
+        &mut self,
+        csv_bytes: &[u8],
+        request_url: &str,
+    ) -> Result<IngestResult> {
+        #[derive(Debug)]
+        struct CsvRow {
+            symbol: String,
+            name: String,
+            opt_in: NaiveDate,
+            opt_out: Option<NaiveDate>,
+        }
+
+        let mut reader = csv::Reader::from_reader(csv_bytes);
+        let headers = reader.headers()?.clone();
+        let column = |name: &str| {
+            headers
+                .iter()
+                .position(|header| header == name)
+                .with_context(|| format!("index constitution CSV lacks {name} column"))
+        };
+        let (symbol_col, name_col, opt_in_col, opt_out_col) = (
+            column("symbol")?,
+            column("name")?,
+            column("opt-in")?,
+            column("opt-out")?,
+        );
+        let mut rows = Vec::new();
+        let mut unresolved_opt_in = Vec::new();
+        for (row_index, record) in reader.records().enumerate() {
+            let record = record.with_context(|| format!("invalid CSV row {}", row_index + 2))?;
+            let symbol = record.get(symbol_col).unwrap_or_default().trim().to_owned();
+            let name = record.get(name_col).unwrap_or_default().trim().to_owned();
+            let opt_in_raw = record.get(opt_in_col).unwrap_or_default().trim();
+            if opt_in_raw.is_empty() {
+                if !matches!(symbol.get(..2), Some("SH" | "SZ"))
+                    || symbol.len() != 8
+                    || !symbol[2..].bytes().all(|byte| byte.is_ascii_digit())
+                    || name.is_empty()
+                {
+                    bail!("invalid CSI 300 history row {}", row_index + 2);
+                }
+                unresolved_opt_in.push(symbol);
+                continue;
+            }
+            let opt_in = NaiveDate::parse_from_str(opt_in_raw, "%Y-%m-%d")
+                .with_context(|| format!("invalid opt-in date at CSV row {}", row_index + 2))?;
+            let opt_out_raw = record.get(opt_out_col).unwrap_or_default().trim();
+            let opt_out = if opt_out_raw.is_empty() {
+                None
+            } else {
+                Some(
+                    NaiveDate::parse_from_str(opt_out_raw, "%Y-%m-%d").with_context(|| {
+                        format!("invalid opt-out date at CSV row {}", row_index + 2)
+                    })?,
+                )
+            };
+            if !matches!(symbol.get(..2), Some("SH" | "SZ"))
+                || symbol.len() != 8
+                || !symbol[2..].bytes().all(|byte| byte.is_ascii_digit())
+                || name.is_empty()
+                || opt_out.is_some_and(|end| end <= opt_in)
+            {
+                bail!("invalid CSI 300 history row {}", row_index + 2);
+            }
+            rows.push(CsvRow {
+                symbol,
+                name,
+                opt_in,
+                opt_out,
+            });
+        }
+        if rows.is_empty() {
+            bail!("index constitution CSV contains no membership rows");
+        }
+
+        let source_ref = request_url.to_owned();
+        let mut facts = Vec::with_capacity(rows.len());
+        let mut coverage_end = NaiveDate::from_ymd_opt(2016, 1, 1).unwrap();
+        let import_date = Utc::now().date_naive();
+        for row in rows {
+            let market = &row.symbol[..2];
+            let code = &row.symbol[2..];
+            let instrument_id: String = match self
+                .conn
+                .query_row(
+                    "SELECT instrument_id FROM core.instrument WHERE market=? AND code=?",
+                    params![market, code],
+                    |query| query.get(0),
+                )
+                .optional()?
+            {
+                Some(id) => id,
+                None => {
+                    // The CSV supplies identity but not verified asset classification or
+                    // local market-observation history. Register it as unknown, observed now.
+                    let id = Uuid::new_v4().to_string();
+                    let observed = Utc::now().to_rfc3339();
+                    self.conn.execute(
+                        "INSERT INTO core.instrument VALUES (?, ?, ?, 'UNKNOWN', ?, ?, ?, ?)",
+                        params![
+                            id,
+                            market,
+                            code,
+                            import_date.to_string(),
+                            import_date.to_string(),
+                            observed,
+                            observed
+                        ],
+                    )?;
+                    id
+                }
+            };
+            let start_known = (row.opt_in - chrono::Duration::days(14))
+                .and_hms_opt(0, 0, 0)
+                .context("invalid simulated opt-in publication time")?
+                .and_utc();
+            let end_known = row.opt_out.map(|date| {
+                (date - chrono::Duration::days(14))
+                    .and_hms_opt(0, 0, 0)
+                    .expect("valid midnight")
+                    .and_utc()
+            });
+            coverage_end = coverage_end.max(row.opt_out.unwrap_or(row.opt_in));
+            let row_hash = sha256(
+                format!(
+                    "{}|{}|{}|{}",
+                    row.symbol,
+                    row.name,
+                    row.opt_in,
+                    row.opt_out
+                        .map_or_else(String::new, |date| date.to_string())
+                )
+                .as_bytes(),
+            );
+            facts.push(IndexMembershipFact {
+                index_code: "sh000300".into(),
+                instrument_id,
+                effective_from: row.opt_in,
+                effective_to: row.opt_out,
+                published_at: Some(start_known),
+                effective_to_published_at: end_known,
+                publication_time_method: "simulated_minus_14_calendar_days".into(),
+                source_ref: source_ref.clone(),
+                source_revision_hash: row_hash,
+            });
+        }
+        let coverage = [IndexMembershipCoverage {
+            index_code: "sh000300".into(),
+            coverage_start: NaiveDate::from_ymd_opt(2016, 1, 1).unwrap(),
+            coverage_end,
+            declared_status: "unverified".into(),
+            gap_detail: Some(format!(
+                "Third-party normalized CSV; historical codes/names are canonicalized and source notice publication timestamps and completeness have not been independently verified. All announcement times are synthetic: effective date minus 14 calendar days at 00:00 UTC. Omitted {} rows with missing opt-in dates: {}.",
+                unresolved_opt_in.len(),
+                unresolved_opt_in.join(", ")
+            )),
+            source_ref: source_ref.clone(),
+            source_revision_hash: sha256(csv_bytes),
+        }];
+        self.ingest_index_membership_source(
+            "index-constitution",
+            request_url,
+            csv_bytes,
+            &facts,
+            &coverage,
+        )
+    }
+
     pub fn import_security_status_csv(
         &mut self,
         csv_bytes: &[u8],
@@ -1070,6 +1759,28 @@ pub fn validate_symbol(symbol: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_index_code(index_code: &str) -> Result<()> {
+    if index_code.len() != 8
+        || !matches!(index_code.get(..2), Some("sh" | "sz"))
+        || !index_code.as_bytes()[2..].iter().all(u8::is_ascii_digit)
+    {
+        bail!("index code must be an explicit sh/sz prefix plus six digits");
+    }
+    Ok(())
+}
+
+fn validate_sha256(value: &str) -> Result<()> {
+    if value.len() != 64
+        || !value
+            .as_bytes()
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
+    {
+        bail!("source revision hash must be lowercase SHA-256 hex");
+    }
+    Ok(())
+}
+
 fn backfill_dataset(symbol: &str) -> &'static str {
     if symbol == "sh000300" {
         "benchmark_daily_bar"
@@ -1164,6 +1875,181 @@ mod tests {
         .unwrap();
         assert_eq!(bars[0].volume_shares, "12345.000000");
         assert_eq!(bars[0].high, "12.000000");
+    }
+
+    #[test]
+    fn index_membership_import_preserves_provenance_and_downgrades_unverified_claims() {
+        let temporary = TempDir::new().unwrap();
+        let mut warehouse = Warehouse::open(temporary.path()).unwrap();
+        warehouse
+            .conn
+            .execute_batch(include_str!("../sql/migrations/005_index_membership.sql"))
+            .unwrap();
+        let raw = b"official fixture attachment bytes";
+        let day = NaiveDate::from_ymd_opt(2025, 5, 30).unwrap();
+        let fact = IndexMembershipFact {
+            index_code: "sh000300".into(),
+            instrument_id: "SH:600000".into(),
+            effective_from: day,
+            effective_to: None,
+            published_at: None,
+            effective_to_published_at: None,
+            publication_time_method: "unknown".into(),
+            source_ref: "https://example.invalid/adjustment.pdf".into(),
+            source_revision_hash: "a".repeat(64),
+        };
+        let coverage = IndexMembershipCoverage {
+            index_code: "sh000300".into(),
+            coverage_start: day,
+            coverage_end: day,
+            declared_status: "complete".into(),
+            gap_detail: None,
+            source_ref: fact.source_ref.clone(),
+            source_revision_hash: fact.source_revision_hash.clone(),
+        };
+        let imported = warehouse
+            .ingest_index_membership_source(
+                "csindex",
+                "https://example.invalid/adjustment.pdf",
+                raw,
+                std::slice::from_ref(&fact),
+                std::slice::from_ref(&coverage),
+            )
+            .unwrap();
+        assert_eq!(imported.new_revisions, 2);
+        let snapshot_hash = sha256(raw);
+        let stored: (String, String, String) = warehouse
+            .conn
+            .query_row(
+                "SELECT source_snapshot_sha256, verification_status, published_at
+             FROM core.index_membership_latest WHERE index_code='sh000300'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2).unwrap_or_default())),
+            )
+            .unwrap();
+        assert_eq!(stored.0, snapshot_hash);
+        assert_eq!(stored.1, "unknown");
+        assert!(stored.2.is_empty());
+        let coverage_status: (String, String) = warehouse
+            .conn
+            .query_row(
+                "SELECT declared_status, coverage_status FROM ops.index_membership_coverage_latest",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(coverage_status, ("complete".into(), "unverified".into()));
+        let repeated = warehouse
+            .ingest_index_membership_source(
+                "csindex",
+                "https://example.invalid/adjustment.pdf",
+                raw,
+                &[fact],
+                &[coverage],
+            )
+            .unwrap();
+        assert_eq!(repeated.new_revisions, 0);
+        assert_eq!(
+            warehouse
+                .conn
+                .query_row::<i64, _, _>(
+                    "SELECT count(*) FROM core.index_membership_revision",
+                    [],
+                    |row| row.get(0)
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            warehouse
+                .conn
+                .query_row::<i64, _, _>("SELECT max(version) FROM ops.schema_version", [], |row| {
+                    row.get(0)
+                })
+                .unwrap(),
+            6
+        );
+    }
+
+    #[test]
+    fn index_constitution_csv_marks_both_simulated_announcement_times() {
+        let temporary = TempDir::new().unwrap();
+        let mut warehouse = Warehouse::open(temporary.path()).unwrap();
+        let csv = b"symbol,name,opt-in,opt-out\nSH600000,\xe6\xb5\xa6\xe5\x8f\x91\xe9\x93\xb6\xe8\xa1\x8c,2020-01-20,2020-06-15\nSH600001,missing,,2020-06-15\n";
+        let imported = warehouse
+            .import_index_constitution_csv(
+                csv,
+                "https://raw.githubusercontent.com/unliftedq/index-constitution/main/history/csi300.csv",
+            )
+            .unwrap();
+        assert_eq!(imported.source_rows, 2);
+        let stored: (String, String, String, String, String) = warehouse
+            .conn
+            .query_row(
+                "SELECT CAST(published_at AS VARCHAR), CAST(effective_to_published_at AS VARCHAR),
+                        publication_time_method, verification_status, CAST(effective_to AS VARCHAR)
+                 FROM core.index_membership_latest WHERE index_code='sh000300'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert!(stored.0.starts_with("2020-01-06 00:00:00"));
+        assert!(stored.1.starts_with("2020-06-01 00:00:00"));
+        assert_eq!(stored.2, "simulated_minus_14_calendar_days");
+        assert_eq!(stored.3, "unknown");
+        assert_eq!(stored.4, "2020-06-15");
+        let (coverage_status, gap_detail): (String, String) = warehouse
+            .conn
+            .query_row(
+                "SELECT coverage_status, gap_detail FROM ops.index_membership_coverage_latest",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(coverage_status, "unverified");
+        assert!(gap_detail.contains("SH600001"));
+        let repeated = warehouse
+            .import_index_constitution_csv(
+                csv,
+                "https://raw.githubusercontent.com/unliftedq/index-constitution/main/history/csi300.csv",
+            )
+            .unwrap();
+        assert_eq!(repeated.new_revisions, 0);
+    }
+
+    #[test]
+    fn rejects_malformed_index_provenance_and_membership_intervals() {
+        let temporary = TempDir::new().unwrap();
+        let mut warehouse = Warehouse::open(temporary.path()).unwrap();
+        let fact = IndexMembershipFact {
+            index_code: "sh000300".into(),
+            instrument_id: "SH:600000".into(),
+            effective_from: NaiveDate::from_ymd_opt(2025, 5, 30).unwrap(),
+            effective_to: Some(NaiveDate::from_ymd_opt(2025, 5, 30).unwrap()),
+            published_at: None,
+            effective_to_published_at: None,
+            publication_time_method: "unknown".into(),
+            source_ref: "fixture://source".into(),
+            source_revision_hash: "not-a-sha".into(),
+        };
+        assert!(
+            warehouse
+                .ingest_index_membership_source("csindex", "fixture://source", b"x", &[fact], &[])
+                .is_err()
+        );
+        assert!(
+            warehouse
+                .ingest_index_membership_source("../escape", "fixture://source", b"x", &[], &[])
+                .is_err()
+        );
     }
 
     #[test]
@@ -1313,6 +2199,101 @@ mod tests {
             )
             .unwrap();
         assert!(tradable);
+
+        // Synthetic status history exercises the execution view's explicit states and
+        // its conservative behavior when no status observation exists. This validates
+        // the warehouse view only; the ETF backtest currently consumes plain Bar rows
+        // and does not use daily_bar_execution as an execution gate.
+        let halted_date = NaiveDate::from_ymd_opt(2026, 9, 21).unwrap();
+        let unknown_date = NaiveDate::from_ymd_opt(2026, 9, 22).unwrap();
+        let missing_status_date = NaiveDate::from_ymd_opt(2026, 9, 23).unwrap();
+        for bar_date in [halted_date, unknown_date, missing_status_date] {
+            let raw = payload(serde_json::json!([[
+                bar_date.to_string(),
+                "10",
+                "11",
+                "12",
+                "9",
+                "123.45"
+            ]]));
+            warehouse
+                .ingest_tencent_day_response(
+                    "sh600519",
+                    bar_date,
+                    bar_date,
+                    &raw,
+                    "fixture://tencent-status",
+                )
+                .unwrap();
+        }
+        let status_history = b"symbol,effective_date,trade_status,is_st,limit_rule_id\nsh600519,2026-09-18,TRADABLE,false,mainboard\nsh600519,2026-09-21,HALTED,false,mainboard\nsh600519,2026-09-22,UNKNOWN,,mainboard\n";
+        warehouse
+            .import_security_status_csv(status_history, "fixture", "fixture://status-history")
+            .unwrap();
+
+        let execution_row = |effective_date: &str| {
+            warehouse
+                .conn
+                .query_row(
+                    "SELECT trade_status, is_tradable FROM research.daily_bar_execution WHERE symbol='sh600519' AND trade_date=?",
+                    [effective_date],
+                    |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, bool>(1)?)),
+                )
+                .unwrap()
+        };
+        assert_eq!(execution_row("2026-09-18"), (Some("TRADABLE".into()), true));
+        assert_eq!(execution_row("2026-09-21"), (Some("HALTED".into()), false));
+        assert_eq!(execution_row("2026-09-22"), (Some("UNKNOWN".into()), false));
+        assert_eq!(execution_row("2026-09-23"), (None, false));
+    }
+
+    #[test]
+    fn trading_calendar_audit_keeps_uncovered_dates_unknown_and_finds_bar_gaps() {
+        let temporary = TempDir::new().unwrap();
+        let mut warehouse = Warehouse::open(temporary.path()).unwrap();
+        let dates = [
+            ("2026-01-05", false),
+            ("2026-01-06", true),
+            ("2026-01-07", true),
+            ("2026-01-08", false),
+        ];
+        let calendar = dates
+            .iter()
+            .map(|(date, is_open)| sources::CalendarDay {
+                trade_date: NaiveDate::parse_from_str(date, "%Y-%m-%d").unwrap(),
+                is_open: *is_open,
+            })
+            .collect::<Vec<_>>();
+        warehouse
+            .ingest_calendar_response(2026, 1, "fixture://szse", b"{}", &calendar)
+            .unwrap();
+        let rows = serde_json::json!([
+            ["2026-01-06", "10", "11", "12", "9", "100"],
+            ["2026-01-08", "10", "11", "12", "9", "100"]
+        ]);
+        warehouse
+            .ingest_tencent_day_response(
+                "sh600519",
+                NaiveDate::from_ymd_opt(2026, 1, 5).unwrap(),
+                NaiveDate::from_ymd_opt(2026, 1, 9).unwrap(),
+                &payload(rows),
+                "fixture://tencent",
+            )
+            .unwrap();
+        let audit = warehouse
+            .audit_trading_calendar(
+                NaiveDate::from_ymd_opt(2026, 1, 5).unwrap(),
+                NaiveDate::from_ymd_opt(2026, 1, 9).unwrap(),
+                &["sh600519".into()],
+            )
+            .unwrap();
+        assert!(!audit.calendar_complete);
+        assert_eq!(audit.missing_calendar_dates, vec!["2026-01-09"]);
+        assert_eq!(audit.open_days, 2);
+        assert_eq!(audit.symbols[0].bars_on_uncovered_calendar_dates, 0);
+        assert_eq!(audit.symbols[0].missing_open_dates, vec!["2026-01-07"]);
+        assert_eq!(audit.symbols[0].bars_on_closed_dates, vec!["2026-01-08"]);
+        assert!(!audit.symbols[0].matches_calendar_on_covered_dates);
     }
 
     #[test]

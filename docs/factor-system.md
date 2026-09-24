@@ -12,22 +12,24 @@
 | required_fields / backend | `dependencies=[close]`；实现只在 Rust，未有正式 backend 字段 |
 | Factor Storage / Cache | 报告 JSON 及实验 JSON，网格按 `feature_key` 在一次运行内复用评分；无持久因子值缓存 |
 
-基础算子位于 `feature.rs`。`signal.rs`/`factor.rs` 计算因子观察/评价；轮动综合分数及其观察位于 `strategy.rs`。`factor.rs::momentum_observations` 与 `signal.rs` 动量规格存在口径维护重叠，暂不删除。因子结果以当前日期收盘可知的值和未来 close-to-close 标签组成；未来标签不输入回测选股。
+基础算子位于 `feature.rs`。`signal.rs`/`factor.rs` 计算因子观察/评价；轮动综合分数及其观察位于 `strategy.rs`。`factor.rs::momentum_observations` 与 `signal.rs` 动量规格存在口径维护重叠，暂不删除。评分值只用 T 日收盘及之前数据；默认评价标签为下一行情日开盘入场、H 个市场日区间后开盘退出（`next_open_to_forward_open`），并保留 `close_to_close` 诊断选项。标签不输入回测选股。
 
 ## Factor Evaluation
 
 | 评价项 | 后端状态 | 当前界面 |
 | --- | --- | --- |
-| coverage、missing rate | Partial：`observation_count`、逐日有效 `count`；无应有 universe 分母或 missing rate | 观察数/有效 ETF 数，非覆盖率 |
+| coverage、missing rate | Partial：逐日 `expected_count`、因子数、有效标签数、缺分数/标签数、总体 coverage；分母需由调用方提供 | 详情展示覆盖率和缺失计数 |
 | distribution：mean/std/quantile/skewness/kurtosis | Missing：没有完整因子值分布报告 | Missing；旧未接入 HTML 有 IC 分布，非因子分布 |
-| Pearson IC | Missing | Missing |
-| Spearman Rank IC / Mean / Std / ICIR / positive ratio | Implemented：逐日 Rank IC 和汇总；未定义风险调整年化 | 目录和详情展示 Mean/ICIR/正率；逐日 IC 图 |
-| Quantile Return / Long-short Return | Implemented：逐日分组平均未来收益和 Q高－Q低；**不是可成交组合收益** | 分组/多空累计图是浏览器把重叠未来收益复利，口径不成立，见 STATUS |
-| Rolling IC / Decay | Partial：逐日 IC；多个 horizon 的 `signal-research` 报告可用于 decay；没有后端滚动 IC 输出 | React 60 期简单滚动平均与多 horizon decay 图 |
-| Factor Autocorrelation / Turnover / Factor Correlation Matrix | Missing | Missing；旧 HTML 占位不算实现 |
+| Pearson IC | Implemented：逐日及均值；无有效值时为 null | 因子详情指标和时序图 |
+| Spearman Rank IC / Mean / Std / ICIR / positive ratio | Implemented：逐日 Rank IC 和汇总；少于 2 个有效日期或标准差为 0 时 ICIR 为 null | 目录和详情展示 Mean/ICIR/正率；逐日 IC 图 |
+| Quantile Return / Long-short Return | Implemented：逐日分组平均前瞻标签和 Q高－Q低；**不是可成交组合收益，也不复利** | 展示逐期标签，不绘制累计净值 |
+| Rolling IC / Decay | Partial：逐日 IC；多个 horizon 的 `signal-research` 报告可用于 decay；滚动均值由页面按最多 60 个报告日展示 | 简单滚动 Rank IC 均值与多 horizon decay 图 |
+| Factor Autocorrelation / Turnover / Factor Correlation Matrix | Partial：相邻报告日同证券分数 Pearson 自相关和 Top 分位成分更换比例；没有交易组合换手和多因子相关矩阵 | 展示前两项；相关矩阵仍缺 |
 
-`signal-research` 可传多个正的 forward periods/分组数，存 `signal-reports/<uuid>/report.json`。策略 `run` 的因子报告由配置中的一个 `forward_days` 生成。更详细的可视化边界见 `architecture.md` 和 STATUS。
+评价需至少 `max(quantiles, 3)` 个带标签截面值，否则 IC/分组结果为 null/空数组，并带 `insufficient_cross_section` 状态；常量截面相关系数也保持 null，不能解释成 0。分母未知时 coverage 为 null。市场日历优先取快照 manifest 指定的交易日历文件（开市日），否则使用输入 ETF bar 日期并集，并在报告写明 `calendar_basis`。缺单只证券 bar 会得到缺标签；代码不插值、不将缺 bar 视为可成交。
+
+`signal-research` 可传多个正的 forward periods/分组数，存 `signal-reports/<uuid>/report.json`。策略 `run` 的因子报告由配置中的一个 `forward_days` 生成。日历不完整时范围边界或未来交易日仍可能不可知；基于观察日期并集的 fallback 不能发现所有证券同日缺失。更详细的可视化边界见 `architecture.md` 和 STATUS。
 
 ## 正确性约束与建议
 
-`signal.rs` 中波动率把首个不存在的日收益置为 `0.0`，首个可计算窗口可能含这个占位，导致首个波动率值偏差；应以确定样例验证后修正。评估标签按单证券可用 bar 序号推进，停牌/缺数时“5 日”可能跨过超过五个市场交易日。分组跨日高频重叠，不得累积成 NAV；前端应展示统计量或建立明确的可交易持仓/执行模型。未来若统一因子接口，先确定 factor_id、version、参数序列化、数据快照、可知时刻与后端归属，并写 ADR。
+波动率使用完整的已观测日收益窗口，不再把第一日未知收益当作 0。`next_open_to_forward_open` 按市场日历推进；若对应单只 ETF 缺少入场或退出 bar，标签为空。`close_to_close` 仍是每证券有效 bar 序号诊断口径，可能跨越超过 H 个市场交易日。分组标签跨日可能重叠，不得累积成 NAV；前端展示逐期统计，若需组合净值须另建明确的可交易持仓/执行模型。因子 ID/version、完整参数元数据、分布统计和相关矩阵仍待设计。

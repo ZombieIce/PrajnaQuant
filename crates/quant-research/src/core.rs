@@ -1,8 +1,19 @@
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 pub type SymbolId = u32;
 pub type DateId = u32;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ForwardReturnMethod {
+    /// Close(T) to close at the instrument's H-th subsequent observed bar.
+    CloseToClose,
+    /// Open(T+1) to open H market-bar intervals later.
+    #[default]
+    NextOpenToForwardOpen,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bar {
@@ -16,6 +27,15 @@ pub struct Bar {
     pub volume: f64,
     pub amount: Option<f64>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExecutionStatus {
+    pub trade_status: Option<String>,
+    pub is_tradable: bool,
+    pub sources: Option<String>,
+}
+
+pub type ExecutionStatusMap = HashMap<(NaiveDate, String), ExecutionStatus>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -129,6 +149,7 @@ impl StrategyConfig {
 pub struct ResearchConfig {
     pub forward_days: usize,
     pub quantiles: usize,
+    pub label_method: ForwardReturnMethod,
 }
 
 impl Default for ResearchConfig {
@@ -136,6 +157,7 @@ impl Default for ResearchConfig {
         Self {
             forward_days: 5,
             quantiles: 5,
+            label_method: ForwardReturnMethod::NextOpenToForwardOpen,
         }
     }
 }
@@ -144,6 +166,10 @@ impl Default for ResearchConfig {
 #[serde(default)]
 pub struct ExperimentConfig {
     pub name: String,
+    /// Immutable universe selection for new runs. Missing values are retained
+    /// only for backwards-compatible loading of legacy experiment configs.
+    #[serde(default)]
+    pub universe: Option<crate::universe::UniverseSelection>,
     pub start: Option<NaiveDate>,
     pub end: Option<NaiveDate>,
     pub initial_cash: f64,
@@ -157,6 +183,7 @@ impl Default for ExperimentConfig {
     fn default() -> Self {
         Self {
             name: "ETF 动量研究".into(),
+            universe: None,
             start: None,
             end: None,
             initial_cash: 1_000_000.0,
@@ -175,6 +202,12 @@ impl ExperimentConfig {
             "initial_cash must be positive"
         );
         anyhow::ensure!(self.lot_size > 0, "lot_size must be positive");
+        if let Some(universe) = &self.universe {
+            anyhow::ensure!(
+                crate::universe::strategy_capability(universe.asset_scope).ready,
+                "capability_not_ready: stock ETF Rotation execution has not been validated"
+            );
+        }
         anyhow::ensure!(
             self.strategy.lookback_days > 0
                 && self.strategy.top_n > 0

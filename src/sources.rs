@@ -57,8 +57,8 @@ pub fn fetch_tencent_raw_daily(
     if symbol.starts_with("bj") {
         bail!("Tencent historical K-lines do not support Beijing exchange symbols")
     }
-    if start > end || (end - start).num_days() >= 700 {
-        bail!("Tencent daily window must be between 1 and 700 calendar days")
+    if start > end || (end - start).num_days() >= 800 {
+        bail!("Tencent daily window must be between 1 and 800 calendar days")
     }
     let parameter = format!("{symbol},day,{start},{end},640,");
     let client = http_client()?;

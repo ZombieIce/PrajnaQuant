@@ -2,7 +2,7 @@
 
 ## Project Scope
 
-当前主线是 ETF Rotation MVP。仓库还有 A 股版本化行情底座。不得把旧方案中的全市场、严格 PIT、分红总回报、Python 研究平台或服务端交互配置当作现有能力。功能/风险状态见 `docs/STATUS.md`。
+产品初级目标是可在本地运行、可部署到服务器远程使用的 A 股股票与 ETF 日频研究回测平台：每日增量同步日频数据；Rust 承担数据、回测、指标和 API；Python 承担因子探索与研究；React 展示因子评价、策略组合绩效、选股池以及股票/ETF K 线。目标与当前实现及分阶段验收见 `docs/product-roadmap.md`。当前已实现的纵向验证场景仍是 ETF Rotation MVP，不能把它等同于完整产品。不得把旧方案中的全市场、严格 PIT、分红总回报、Python 研究平台或服务端交互配置当作现有能力。功能/风险状态见 `docs/STATUS.md`。
 
 ## Architecture Principles
 
@@ -14,11 +14,11 @@
 
 ## Python Responsibilities
 
-现有 `warehouse.py` 仅为样本入库原型。未来探索分析可调用 Rust 结果，但当前没有 Python 调用 Rust 的正式接口、研究包或回测引擎。不得宣称已接通。
+现有 `warehouse.py` 仅为样本入库原型。目标是让 Python 承担因子探索、统计分析与研究实验，通过明确版本和时间语义的数据/结果契约与 Rust 互通；回测及绩效权威继续在 Rust。当前没有 Python 调用 Rust 的正式接口、研究包或回测引擎。不得宣称已接通。
 
 ## React Responsibilities
 
-`apps/web/` 是当前服务端实际托管的界面。展示、排序和交互应与后端报告语义一致；不得让浏览器成为绩效/因子结果的权威计算方。仓库中的旧 HTML 页面未被当前 `server.rs` 引用。
+`apps/web/` 是当前服务端实际托管的界面。目标界面还包括选股池、股票/ETF K 线及更完整的因子和策略报告。展示、排序和交互应与后端报告语义一致；不得让浏览器成为绩效/因子结果的权威计算方。仓库中的旧 HTML 页面未被当前 `server.rs` 引用。
 
 ## Quant Correctness Rules
 
@@ -49,7 +49,7 @@
 
 ## New Agent Startup
 
-按顺序读：1 `AGENTS.md`；2 `README.md`；3 `docs/architecture.md`；4 `docs/time-model.md`；5 `docs/data-model.md`；6 `docs/factor-system.md`；7 `docs/strategy-system.md`；8 `docs/backtest-engine.md`；9 `docs/STATUS.md`（及其引用的 `docs/priorities.md`）；10 `HANDOFF.md`；11 相关 ADR；12 任务代码；13 任务测试。然后 `git status`、`git log -5 --oneline`，运行相关验证。
+按顺序读：1 `AGENTS.md`；2 `README.md`；3 `docs/product-roadmap.md`；4 `docs/architecture.md`；5 `docs/time-model.md`；6 `docs/data-model.md`；7 `docs/factor-system.md`；8 `docs/strategy-system.md`；9 `docs/backtest-engine.md`；10 `docs/STATUS.md`（及其引用的 `docs/priorities.md`）；11 `HANDOFF.md`；12 相关 ADR；13 任务代码；14 任务测试。然后 `git status`、`git log -5 --oneline`，运行相关验证。
 
 ## Agent Completion Checklist
 

@@ -1,9 +1,9 @@
 use crate::{
     core::ExperimentConfig,
-    data::SnapshotManifest,
+    data::{self, SnapshotManifest},
     experiment::ExperimentSummary,
     factor,
-    runner::run_experiment_with_inputs,
+    runner::run_experiment_with_inputs_and_statuses,
     strategy::{feature_key, rotation_scores},
 };
 use anyhow::{Context, Result, ensure};
@@ -149,6 +149,11 @@ pub fn run_batch(
     benchmark_bars: &[crate::core::Bar],
 ) -> Result<(BatchResult, PathBuf)> {
     let configs = config.expand()?;
+    let execution_statuses = if snapshot.file.is_file() {
+        data::load_snapshot_execution_statuses(&snapshot.file)?
+    } else {
+        None
+    };
     ensure!(
         config.max_parallelism > 0,
         "max_parallelism must be positive"
@@ -160,33 +165,76 @@ pub fn run_batch(
     let mut groups: BTreeMap<String, Vec<ExperimentConfig>> = BTreeMap::new();
     for item in configs {
         groups
-            .entry(feature_key(&item.strategy))
+            .entry(format!(
+                "{}:{}:{}:{:?}:{:?}:{:?}",
+                feature_key(&item.strategy),
+                item.research.forward_days,
+                item.research.quantiles,
+                item.research.label_method,
+                item.start,
+                item.end
+            ))
             .or_default()
             .push(item);
     }
     let mut results = Vec::new();
     for (_, group) in groups {
         let template = group.first().context("empty feature group")?;
-        let factor = if template.strategy.uses_rotation_score() {
-            factor::evaluate_observations(
-                "etf_rotation_score",
-                template.strategy.score_lookback(),
+        let calendar = crate::data::load_snapshot_trading_calendar(snapshot)?
+            .unwrap_or_else(|| factor::observed_market_calendar(bars));
+        let observations = if template.strategy.uses_rotation_score() {
+            crate::strategy::rotation_factor_observations_with_calendar(
+                bars,
+                &template.strategy,
                 template.research.forward_days,
-                template.research.quantiles,
-                crate::strategy::rotation_factor_observations(
-                    bars,
-                    &template.strategy,
-                    template.research.forward_days,
-                ),
+                template.research.label_method,
+                &calendar,
             )
         } else {
-            factor::evaluate_momentum(
+            factor::momentum_observations_with_calendar(
                 bars,
                 template.strategy.score_lookback(),
                 template.research.forward_days,
-                template.research.quantiles,
+                template.research.label_method,
+                &calendar,
             )
         };
+        let observations = observations
+            .into_iter()
+            .filter(|observation| {
+                template.start.is_none_or(|start| observation.date >= start)
+                    && template.end.is_none_or(|end| observation.date <= end)
+            })
+            .collect();
+        let expected_by_date = bars
+            .iter()
+            .filter(|bar| {
+                template.start.is_none_or(|start| bar.trade_date >= start)
+                    && template.end.is_none_or(|end| bar.trade_date <= end)
+            })
+            .fold(BTreeMap::new(), |mut counts, bar| {
+                *counts.entry(bar.trade_date).or_insert(0) += 1;
+                counts
+            });
+        let labelable_expected = factor::expected_with_forward_window(
+            &expected_by_date,
+            template.research.forward_days,
+            template.research.label_method,
+            &calendar,
+        );
+        let factor = factor::evaluate_observations_with_context(
+            if template.strategy.uses_rotation_score() {
+                "etf_rotation_score"
+            } else {
+                "momentum_close_to_close"
+            },
+            template.strategy.score_lookback(),
+            template.research.forward_days,
+            template.research.quantiles,
+            template.research.label_method,
+            observations,
+            &labelable_expected,
+        );
         let scores = if template.strategy.uses_rotation_score() {
             rotation_scores(bars, &template.strategy)
         } else {
@@ -200,13 +248,14 @@ pub fn run_batch(
             group
                 .into_par_iter()
                 .map(|item| {
-                    run_experiment_with_inputs(
+                    run_experiment_with_inputs_and_statuses(
                         item,
                         snapshot.clone(),
                         factor.clone(),
                         &scores,
                         bars,
                         benchmark_bars,
+                        execution_statuses.as_ref(),
                     )
                 })
                 .collect::<Result<Vec<_>>>()

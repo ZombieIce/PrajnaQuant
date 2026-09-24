@@ -10,6 +10,8 @@ use ashare_warehouse::{Warehouse, sources};
 use chrono::{Duration as ChronoDuration, NaiveDate};
 use clap::{Parser, Subcommand};
 
+const MARKET_HISTORY_WINDOW_DAYS: i64 = 800;
+
 #[derive(Parser)]
 #[command(about = "A versioned local A-share research warehouse")]
 struct Cli {
@@ -47,12 +49,47 @@ enum Command {
         #[arg(long, default_value_t = false)]
         quiet: bool,
     },
+    /// Backfills raw daily bars for the SH/SZ equity and ETF instruments currently observed locally.
+    BackfillMarketHistory {
+        #[arg(long)]
+        start: NaiveDate,
+        #[arg(long)]
+        end: NaiveDate,
+        /// Limit the number of symbols for a controlled batch; zero means all.
+        #[arg(long, default_value_t = 0)]
+        limit: usize,
+        #[arg(long, default_value_t = 250)]
+        sleep_ms: u64,
+        /// Suppress human-readable progress on stderr; final JSON is still printed.
+        #[arg(long, default_value_t = false)]
+        quiet: bool,
+    },
+    /// Compares source-recorded window lengths with distinct Tencent dates in storage.
+    AuditMarketHistory {
+        #[arg(long, default_value = "2016-01-01")]
+        start: NaiveDate,
+        #[arg(long, default_value = "2026-09-24")]
+        end: NaiveDate,
+        /// Repeat for each symbol; defaults to a small SH/SZ stock and ETF sample.
+        #[arg(long)]
+        symbol: Vec<String>,
+    },
     /// Downloads and imports an official SZSE monthly trading calendar.
     FetchCalendar {
         #[arg(long)]
         year: i32,
         #[arg(long)]
         month: u32,
+    },
+    /// Compares Tencent daily bars with the saved official SZSE calendar.
+    AuditTradingCalendar {
+        #[arg(long, default_value = "2016-01-01")]
+        start: NaiveDate,
+        #[arg(long, default_value = "2026-09-24")]
+        end: NaiveDate,
+        /// Repeat for each symbol; defaults to a small SH/SZ stock and ETF sample.
+        #[arg(long)]
+        symbol: Vec<String>,
     },
     /// Downloads one TDX official post-close ZIP package and stages all priced records.
     FetchTdxDay {
@@ -81,6 +118,16 @@ enum Command {
         source_url: String,
         #[arg(long)]
         input: PathBuf,
+    },
+    /// Imports the third-party CSI 300 history with explicitly simulated notice times.
+    ImportIndexConstitutionCsv {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(
+            long,
+            default_value = "https://raw.githubusercontent.com/unliftedq/index-constitution/main/history/csi300.csv"
+        )]
+        source_url: String,
     },
     /// Publishes a daily Parquet snapshot only after calendar and market-coverage checks pass.
     PublishDaily {
@@ -276,11 +323,255 @@ fn main() -> Result<()> {
                 "errors": errors,
             })
         }
+        Command::BackfillMarketHistory {
+            start,
+            end,
+            limit,
+            sleep_ms,
+            quiet,
+        } => {
+            if start > end {
+                anyhow::bail!("start cannot be later than end");
+            }
+            let mut symbols = warehouse.observed_market_symbols()?;
+            if limit > 0 {
+                symbols.truncate(limit);
+            }
+            let total_calendar_days = (end - start).num_days() as usize + 1;
+            let total_windows_per_symbol =
+                total_calendar_days.div_ceil(MARKET_HISTORY_WINDOW_DAYS as usize);
+            let total_windows = symbols.len().saturating_mul(total_windows_per_symbol);
+            let mut completed_windows = 0_usize;
+            let mut success_windows = 0_usize;
+            let mut empty_windows = 0_usize;
+            let mut skipped_windows = 0_usize;
+            let mut failed_windows = 0_usize;
+            let mut imported_rows = 0_usize;
+            let mut errors = Vec::new();
+            let started = Instant::now();
+            if !quiet {
+                eprintln!(
+                    "沪深市场历史日线回填开始: {}只本地已观察证券, {} 至 {}, 每窗口最长{}天, 约{}个窗口",
+                    symbols.len(),
+                    start,
+                    end,
+                    MARKET_HISTORY_WINDOW_DAYS,
+                    total_windows
+                );
+                eprintln!(
+                    "证券池不含本机从未观察到的退市证券；腾讯历史接口不支持北交所。原始价、不含成交额。已成功窗口可断点跳过。2026-09-23直连测试：2016日线返回HTTP 200。时间模型采用采集时可见现时，非历史公告发布时间。"
+                );
+            }
+            for (symbol_index, symbol) in symbols.iter().enumerate() {
+                let mut window_start = start;
+                while window_start <= end {
+                    let window_end = std::cmp::min(
+                        window_start + ChronoDuration::days(MARKET_HISTORY_WINDOW_DAYS - 1),
+                        end,
+                    );
+                    if warehouse.market_backfill_window_done(symbol, window_start, window_end)? {
+                        skipped_windows += 1;
+                        completed_windows += 1;
+                        window_start = window_end + ChronoDuration::days(1);
+                        continue;
+                    }
+                    let mut window_rows = 0_usize;
+                    let status = match sources::fetch_tencent_raw_daily(
+                        symbol,
+                        window_start,
+                        window_end,
+                    ) {
+                        Ok((url, body)) if sources::tencent_raw_daily_is_empty(&body, symbol)? => {
+                            warehouse.archive_empty_tencent_window(
+                                symbol,
+                                window_start,
+                                window_end,
+                                &url,
+                                &body,
+                            )?;
+                            empty_windows += 1;
+                            "EMPTY"
+                        }
+                        Ok((url, body)) => match warehouse.ingest_tencent_day_response(
+                            symbol,
+                            window_start,
+                            window_end,
+                            &body,
+                            &url,
+                        ) {
+                            Ok(result) => {
+                                window_rows = result.source_rows;
+                                imported_rows += result.source_rows;
+                                success_windows += 1;
+                                "SUCCESS"
+                            }
+                            Err(error) => {
+                                failed_windows += 1;
+                                if errors.len() < 20 {
+                                    errors.push(format!(
+                                        "{symbol} {window_start}..{window_end}: {error:#}"
+                                    ));
+                                }
+                                if !quiet {
+                                    eprintln!(
+                                        "  入库失败 {symbol} {window_start}..{window_end}: {error}"
+                                    );
+                                }
+                                warehouse.record_market_backfill_window(
+                                    symbol,
+                                    window_start,
+                                    window_end,
+                                    "FAILED",
+                                    0,
+                                    Some(&error.to_string()),
+                                )?;
+                                completed_windows += 1;
+                                thread::sleep(Duration::from_millis(sleep_ms));
+                                window_start = window_end + ChronoDuration::days(1);
+                                continue;
+                            }
+                        },
+                        Err(error) => {
+                            failed_windows += 1;
+                            if errors.len() < 20 {
+                                errors.push(format!(
+                                    "{symbol} {window_start}..{window_end}: {error:#}"
+                                ));
+                            }
+                            if !quiet {
+                                eprintln!(
+                                    "  下载失败 {symbol} {window_start}..{window_end}: {error}"
+                                );
+                            }
+                            warehouse.record_market_backfill_window(
+                                symbol,
+                                window_start,
+                                window_end,
+                                "FAILED",
+                                0,
+                                Some(&error.to_string()),
+                            )?;
+                            completed_windows += 1;
+                            thread::sleep(Duration::from_millis(sleep_ms));
+                            window_start = window_end + ChronoDuration::days(1);
+                            continue;
+                        }
+                    };
+                    warehouse.record_market_backfill_window(
+                        symbol,
+                        window_start,
+                        window_end,
+                        status,
+                        window_rows,
+                        None,
+                    )?;
+                    completed_windows += 1;
+                    if !quiet && (completed_windows % 25 == 0 || completed_windows == total_windows)
+                    {
+                        let elapsed = started.elapsed();
+                        let eta = if completed_windows > 0 && completed_windows < total_windows {
+                            Duration::from_secs_f64(
+                                elapsed.as_secs_f64() / completed_windows as f64
+                                    * (total_windows - completed_windows) as f64,
+                            )
+                        } else {
+                            Duration::ZERO
+                        };
+                        eprintln!(
+                            "[{}/{} {:>5.1}%] 当前{} {}..{}: {}行 | 成功{} 空窗{} 跳过{} 失败{} | 已用{} | 预计剩余{}",
+                            completed_windows,
+                            total_windows,
+                            if total_windows == 0 {
+                                100.0
+                            } else {
+                                completed_windows as f64 * 100.0 / total_windows as f64
+                            },
+                            symbol,
+                            window_start,
+                            window_end,
+                            window_rows,
+                            success_windows,
+                            empty_windows,
+                            skipped_windows,
+                            failed_windows,
+                            format_duration(elapsed),
+                            format_duration(eta)
+                        );
+                    }
+                    thread::sleep(Duration::from_millis(sleep_ms));
+                    window_start = window_end + ChronoDuration::days(1);
+                }
+                if !quiet && symbol_index + 1 == symbols.len() {
+                    eprintln!("全部证券窗口已处理。");
+                }
+            }
+            serde_json::json!({
+                "scope": "currently_observed_SH_SZ_equities_and_ETFs",
+                "start": start.to_string(),
+                "end": end.to_string(),
+                "symbols": symbols.len(),
+                "total_windows": total_windows,
+                "completed_windows": completed_windows,
+                "success_windows": success_windows,
+                "empty_windows": empty_windows,
+                "skipped_windows": skipped_windows,
+                "failed_windows": failed_windows,
+                "imported_rows": imported_rows,
+                "unsupported": "Beijing market; historical symbols absent from local instrument table",
+                "errors": errors,
+            })
+        }
+        Command::AuditMarketHistory { start, end, symbol } => {
+            if start > end {
+                anyhow::bail!("start cannot be later than end");
+            }
+            let symbols = if symbol.is_empty() {
+                vec![
+                    "sh600000".to_owned(),
+                    "sh600519".to_owned(),
+                    "sh510050".to_owned(),
+                    "sz000528".to_owned(),
+                    "sz159919".to_owned(),
+                ]
+            } else {
+                symbol
+            };
+            let total_days = (end - start).num_days() as usize + 1;
+            let expected_windows = total_days.div_ceil(MARKET_HISTORY_WINDOW_DAYS as usize);
+            let mut audits = Vec::with_capacity(symbols.len());
+            for symbol in symbols {
+                sources::validate_explicit_symbol(&symbol, false)?;
+                audits.push(warehouse.audit_market_history_length(
+                    &symbol,
+                    start,
+                    end,
+                    expected_windows,
+                )?);
+            }
+            serde_json::to_value(audits)?
+        }
         Command::FetchCalendar { year, month } => {
             let (url, body, days) = sources::fetch_szse_calendar(year, month)?;
             serde_json::to_value(
                 warehouse.ingest_calendar_response(year, month, &url, &body, &days)?,
             )?
+        }
+        Command::AuditTradingCalendar { start, end, symbol } => {
+            let symbols = if symbol.is_empty() {
+                vec![
+                    "sh600000".to_owned(),
+                    "sh600519".to_owned(),
+                    "sh510050".to_owned(),
+                    "sz000528".to_owned(),
+                    "sz159919".to_owned(),
+                ]
+            } else {
+                symbol
+            };
+            for symbol in &symbols {
+                sources::validate_explicit_symbol(symbol, false)?;
+            }
+            serde_json::to_value(warehouse.audit_trading_calendar(start, end, &symbols)?)?
         }
         Command::FetchTdxDay { trade_date } => {
             let expected_url = format!(
@@ -327,6 +618,18 @@ fn main() -> Result<()> {
                 &source,
                 &source_url,
             )?)?
+        }
+        Command::ImportIndexConstitutionCsv { input, source_url } => {
+            let bytes = fs::read(&input)
+                .with_context(|| format!("read index constitution CSV {}", input.display()))?;
+            eprintln!("沪深300历史成分导入开始: {} bytes", bytes.len());
+            let result = warehouse.import_index_constitution_csv(&bytes, &source_url)?;
+            eprintln!(
+                "沪深300历史成分导入完成: {} 条成员区间, 新增修订 {} 条",
+                result.source_rows - 1,
+                result.new_revisions
+            );
+            serde_json::to_value(result)?
         }
         Command::PublishDaily { trade_date } => {
             serde_json::to_value(warehouse.publish_daily(trade_date)?)?

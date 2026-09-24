@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use quant_research::{
     batch::{self, BatchConfig},
-    core::ExperimentConfig,
+    core::{ExperimentConfig, ForwardReturnMethod},
     data, runner, server,
     signal::{self, SignalResearchRequest},
 };
@@ -55,6 +55,14 @@ enum Command {
         forward_periods: Vec<usize>,
         #[arg(long, default_value_t = 5)]
         quantiles: usize,
+        #[arg(long, default_value = "next_open_to_forward_open", value_parser = ["close_to_close", "next_open_to_forward_open"])]
+        label_method: String,
+        #[arg(long)]
+        universe_id: Option<Uuid>,
+        #[arg(long)]
+        version_id: Option<Uuid>,
+        #[arg(long, default_value_t = false)]
+        strict_pit: bool,
     },
     /// Serve the local visualization workbench.
     Serve {
@@ -84,7 +92,9 @@ async fn main() -> Result<()> {
             )?;
             config.validate()?;
             let snapshot = data::create_etf_snapshot(&warehouse, &output)?;
-            let bars = data::load_bars(&snapshot.file, config.start, config.end)?;
+            // Keep pre-start warmup and post-end label windows available; the runner
+            // limits only the actual backtest event loop to the configured range.
+            let bars = data::load_bars(&snapshot.file, None, None)?;
             let benchmark_path = snapshot
                 .benchmark_file
                 .as_ref()
@@ -108,7 +118,7 @@ async fn main() -> Result<()> {
                 &fs::read(&config).with_context(|| format!("read config {}", config.display()))?,
             )?;
             let snapshot = data::create_etf_snapshot(&warehouse, &output)?;
-            let bars = data::load_bars(&snapshot.file, config.base.start, config.base.end)?;
+            let bars = data::load_bars(&snapshot.file, None, None)?;
             let benchmark_path = snapshot
                 .benchmark_file
                 .as_ref()
@@ -130,17 +140,66 @@ async fn main() -> Result<()> {
             signal: signal_key,
             forward_periods,
             quantiles,
+            label_method,
+            universe_id,
+            version_id,
+            strict_pit,
         } => {
             let snapshot = data::create_etf_snapshot(&warehouse, &output)?;
             let bars = data::load_bars(&snapshot.file, None, None)?;
-            let report = signal::analyze(
-                &bars,
-                &SignalResearchRequest {
-                    signal: signal_key,
-                    forward_periods,
-                    quantiles,
-                },
-            )?;
+            anyhow::ensure!(
+                universe_id.is_some() == version_id.is_some(),
+                "--universe-id and --version-id must be specified together"
+            );
+            let label_method = match label_method.as_str() {
+                "close_to_close" => ForwardReturnMethod::CloseToClose,
+                "next_open_to_forward_open" => ForwardReturnMethod::NextOpenToForwardOpen,
+                _ => anyhow::bail!("unsupported label method"),
+            };
+            let request = SignalResearchRequest {
+                signal: signal_key,
+                forward_periods,
+                quantiles,
+                label_method,
+                universe_id,
+                version_id,
+                strict_pit,
+            };
+            let mut expected_by_date =
+                std::collections::BTreeMap::<chrono::NaiveDate, usize>::new();
+            for bar in &bars {
+                *expected_by_date.entry(bar.trade_date).or_default() += 1;
+            }
+            let calendar = data::load_snapshot_trading_calendar(&snapshot)?
+                .unwrap_or_else(|| quant_research::factor::observed_market_calendar(&bars));
+            let calendar_basis = snapshot
+                .trading_calendar_source
+                .as_deref()
+                .unwrap_or("observed_etf_bar_dates");
+            let report = if let (Some(universe_id), Some(version_id)) = (universe_id, version_id) {
+                let definition = server::load_universe_version(&output, universe_id, version_id)?;
+                signal::analyze_with_universe(
+                    &bars,
+                    &request,
+                    &definition,
+                    strict_pit,
+                    &snapshot.sha256,
+                    &calendar,
+                    calendar_basis,
+                )?
+            } else {
+                anyhow::ensure!(
+                    !strict_pit,
+                    "--strict-pit requires a published Universe version"
+                );
+                signal::analyze_with_evaluation_calendar(
+                    &bars,
+                    &request,
+                    &expected_by_date,
+                    &calendar,
+                    calendar_basis,
+                )?
+            };
             let report_id = Uuid::new_v4();
             let directory = output.join("signal-reports").join(report_id.to_string());
             fs::create_dir_all(&directory)?;

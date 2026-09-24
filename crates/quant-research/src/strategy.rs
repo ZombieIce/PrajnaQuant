@@ -1,4 +1,4 @@
-use crate::core::{Bar, StrategyConfig};
+use crate::core::{Bar, ForwardReturnMethod, StrategyConfig};
 use crate::factor::FactorObservation;
 use chrono::NaiveDate;
 use std::collections::{BTreeMap, HashMap};
@@ -74,6 +74,31 @@ pub fn rotation_factor_observations(
     config: &StrategyConfig,
     forward: usize,
 ) -> Vec<FactorObservation> {
+    rotation_factor_observations_with_method(
+        bars,
+        config,
+        forward,
+        ForwardReturnMethod::CloseToClose,
+    )
+}
+
+pub fn rotation_factor_observations_with_method(
+    bars: &[Bar],
+    config: &StrategyConfig,
+    forward: usize,
+    method: ForwardReturnMethod,
+) -> Vec<FactorObservation> {
+    let calendar = crate::factor::observed_market_calendar(bars);
+    rotation_factor_observations_with_calendar(bars, config, forward, method, &calendar)
+}
+
+pub fn rotation_factor_observations_with_calendar(
+    bars: &[Bar],
+    config: &StrategyConfig,
+    forward: usize,
+    method: ForwardReturnMethod,
+    calendar: &[NaiveDate],
+) -> Vec<FactorObservation> {
     let scores = rotation_scores(bars, config);
     let mut by_symbol: BTreeMap<&str, Vec<&Bar>> = BTreeMap::new();
     for bar in bars {
@@ -86,9 +111,16 @@ pub fn rotation_factor_observations(
             let Some(value) = scores.get(&(bar.trade_date, symbol.to_owned())).copied() else {
                 continue;
             };
-            let forward_return = series
-                .get(index + forward)
-                .map(|future| future.close / bar.close - 1.0);
+            if !crate::factor::has_forward_calendar_window(
+                bar.trade_date,
+                forward,
+                method,
+                calendar,
+            ) {
+                continue;
+            }
+            let forward_return =
+                crate::factor::forward_return_for_series(&series, index, forward, method, calendar);
             if forward_return.is_none_or(f64::is_finite) {
                 observations.push(FactorObservation {
                     date: bar.trade_date,

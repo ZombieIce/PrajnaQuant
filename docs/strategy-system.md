@@ -5,18 +5,18 @@
 | 阶段 | 状态 | 当前证据/含义 |
 | --- | --- | --- |
 | ETF Universe | Partially Implemented | `research.etf_daily_bar` 由**当前** `core.instrument.asset_class='ETF'` 取历史日线；没有历史在市/退市全集 |
-| Eligibility Filter | Partially Implemented | 需要当日 bar、足够该证券历史、有限分数、可选趋势；没有历史交易状态、上市天数/成交额门槛 |
+| Eligibility Filter | Partially Implemented | 需要当日 bar、足够该证券历史、有限分数、可选趋势；执行层对新版冻结快照有交易状态门槛；没有经验证的历史状态可用时刻、上市天数/成交额门槛 |
 | Market Data | Implemented | 原始日线快照和沪深300快照；证券日缺口/分红未调整 |
 | Factor Calculation | Implemented | 单动量或短/长动量减波动率，趋势过滤；`strategy.rs` |
 | Factor Normalization | Missing | 分数以原始小数加权，权重不要求和为 1，无横截面标准化 |
 | Composite Score | Implemented | 短动量权重×收益＋长动量权重×收益－波动率权重×样本标准差 |
 | Ranking / Top-K Selection | Implemented | 分数降序、symbol 作为平局排序；选 `top_n` |
-| Weighting | Partially Implemented | Top-N 目标等权，按开盘价/手数向下取整；买入可能因现金/费用减少，缺持仓权重输出 |
+| Weighting | Partially Implemented | Top-N 目标等权，按开盘价/手数向下取整；买入可能因现金/费用减少，有逐日资金占用率与各标的数量，缺逐证券权重序列 |
 | Rebalance | Implemented | 每 `rebalance_every` 个有候选的行情日，T 收盘设目标，下一组行情日开盘执行 |
 | Execution | Partially Implemented | 开盘价、方向性滑点、佣金/最低佣金、税、先卖后买；无独立订单/部分成交/流动性约束 |
-| Portfolio Accounting / NAV | Partially Implemented | 现金、整数持仓、成本、收盘权益、回撤；无逐日证券级估值明细/恒等式测试 |
+| Portfolio Accounting / NAV | Partially Implemented | 现金、整数持仓、成本、收盘权益、回撤；已有逐日证券级估值明细、估值日期与合成账本恒等式测试 |
 | Performance Metrics | Partially Implemented | Rust 有收益、年化波动、夏普、卡玛、回撤、换手、成本；缺基准派生/Sortino 等 |
-| Visualization | Partially Implemented | React 展示目录、策略净值、回撤、因子图；缺成交/仓位/成本和基准图 |
+| Visualization | Partially Implemented | React 展示目录、策略净值、回撤、因子图；有仓位数量/资金占用率与逐标的盈亏，缺成交/成本明细和基准图 |
 
 ## Strategy Configuration
 
@@ -30,6 +30,6 @@
 
 ## 风险边界
 
-当前 ETF 分类来自今天的证券状态，是已证实的选择机制，存在幸存者偏差风险。`first_observed_date` 非上市日期，没有 `listing_date`/`delisting_date` 或最短上市历史限制（窗口长度仅保证可计算）。既有状态和前复权视图未接回测。长仓数量由买卖逻辑保持非负，但无逐日权重/敞口不变量测试。`top_n` 不必等于实际持仓数；现金、交易费用、执行缺失会影响暴露。详见 `time-model.md` 与 `backtest-engine.md`。
+当前 ETF 分类来自今天的证券状态，是已证实的选择机制，存在幸存者偏差风险。`first_observed_date` 非上市日期，没有 `listing_date`/`delisting_date` 或最短上市历史限制（窗口长度仅保证可计算）。既有状态和前复权视图未接回测。长仓数量由买卖逻辑保持非负，但已有逐日资金占用率与合成账本恒等式，尚无通用逐仓权重/敞口接口。`top_n` 不必等于实际持仓数；现金、交易费用、执行缺失会影响暴露。详见 `time-model.md` 与 `backtest-engine.md`。
 
 本机五个已保存 `top_n=5` 实验中，每日 `positions` 最大分别为 7、6、7、7、7，验证了缺 bar 时旧仓滞留的实际结果。这些既有产物只用于诊断，不证明新代码/新环境的可复现性。
