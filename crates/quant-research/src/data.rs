@@ -77,6 +77,42 @@ pub struct SecurityDirectoryEntry {
     pub delisted_date: Option<String>,
 }
 
+/// Distinct identities captured inside one immutable daily snapshot. This reader deliberately
+/// returns only one row per security; it does not consult the live warehouse directory.
+pub fn load_snapshot_security_directory(snapshot: &Path) -> Result<Vec<SecurityDirectoryEntry>> {
+    ensure!(
+        snapshot.is_file(),
+        "snapshot does not exist: {}",
+        snapshot.display()
+    );
+    let conn = Connection::open_in_memory()?;
+    let path = sql_path(snapshot);
+    let mut statement = conn.prepare(&format!(
+        "SELECT instrument_id, symbol, code, first(name ORDER BY trade_date DESC), exchange, asset_type,
+                CAST(min(trade_date) AS VARCHAR), CAST(max(trade_date) AS VARCHAR)
+         FROM read_parquet('{path}') WHERE NOT is_preheat
+         GROUP BY instrument_id, symbol, code, exchange, asset_type
+         ORDER BY exchange, code"
+    ))?;
+    let rows = statement.query_map([], |row| {
+        Ok(SecurityDirectoryEntry {
+            instrument_id: row.get(0)?,
+            symbol: row.get(1)?,
+            code: row.get(2)?,
+            name: row.get(3)?,
+            exchange: row.get(4)?,
+            asset_type: row.get(5)?,
+            classification_source: None,
+            identity_source: None,
+            first_observed_date: row.get(6)?,
+            last_observed_date: row.get(7)?,
+            listed_date: None,
+            delisted_date: None,
+        })
+    })?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
 /// Nullable, source-bearing daily row used by shared security search and chart APIs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DailyResearchRow {
@@ -765,7 +801,7 @@ pub fn load_daily_research_rows(
     let conn = Connection::open_in_memory()?;
     let path = sql_path(snapshot);
     let sql = format!(
-        "SELECT instrument_id,symbol,code,name,exchange,asset_type,CAST(trade_date AS VARCHAR),open,high,low,close,volume,amount,source,observed_at,trade_status,is_tradable,status_sources,status_observed_at,execution_status_covered FROM read_parquet('{path}') WHERE {filter} AND trade_date BETWEEN DATE '{start}' AND DATE '{end}' ORDER BY trade_date,symbol"
+        "SELECT instrument_id,symbol,code,name,exchange,asset_type,CAST(trade_date AS VARCHAR),open,high,low,close,volume,amount,source,observed_at,trade_status,is_tradable,status_sources,status_observed_at,execution_status_covered FROM read_parquet('{path}') WHERE {filter} AND NOT is_preheat AND trade_date BETWEEN DATE '{start}' AND DATE '{end}' ORDER BY trade_date,symbol"
     );
     let mut statement = conn.prepare(&sql)?;
     let rows = statement.query_map([], |r| {

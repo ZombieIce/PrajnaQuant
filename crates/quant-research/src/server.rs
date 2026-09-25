@@ -32,6 +32,8 @@ use tower_http::{
 };
 use uuid::Uuid;
 
+#[path = "market_api.rs"]
+mod market_api;
 #[path = "universe_api.rs"]
 mod universe_api;
 use universe_api::{UniverseDraft, UniverseStore, UniverseSummary};
@@ -55,11 +57,17 @@ pub fn load_universe_version(
         .ok_or_else(|| anyhow::anyhow!("universe version not found"))
 }
 
-pub async fn serve(address: &str, output: PathBuf, web_dist: PathBuf) -> Result<()> {
+pub async fn serve(
+    address: &str,
+    output: PathBuf,
+    market_data_dir: PathBuf,
+    web_dist: PathBuf,
+) -> Result<()> {
     let socket = validate_loopback_address(address)?;
+    let output = Arc::new(output);
     let state = AppState {
         universes: Arc::new(UniverseStore::new(&output)),
-        output: Arc::new(output),
+        output: output.clone(),
     };
     let api = Router::new()
         .route("/api/v1/health", get(health))
@@ -69,7 +77,6 @@ pub async fn serve(address: &str, output: PathBuf, web_dist: PathBuf) -> Result<
         .route("/api/experiments", get(experiments))
         .route("/api/experiments/{id}", get(experiment))
         .route("/api/v1/factor-reports", get(factor_reports))
-        .route("/api/v1/instruments", get(instruments))
         .route("/api/v1/universes", get(universes).post(create_universe))
         .route(
             "/api/v1/universes/{id}",
@@ -85,6 +92,7 @@ pub async fn serve(address: &str, output: PathBuf, web_dist: PathBuf) -> Result<
         .route("/api/v1/universes/{id}/coverage", get(universe_coverage))
         // /runs is intentionally absent: no asynchronous queue/state store and no runner mask yet.
         .with_state(state)
+        .merge(market_api::router(Arc::new(market_data_dir)))
         .layer(CorsLayer::permissive());
     let app = api.fallback_service(
         ServeDir::new(&web_dist)
@@ -102,113 +110,6 @@ async fn health() -> Json<Value> {
     Json(json!({"status":"ok", "service":"prajna-quant"}))
 }
 
-#[derive(Deserialize)]
-struct InstrumentQuery {
-    q: Option<String>,
-    asset_type: Option<String>,
-}
-
-async fn instruments(
-    State(state): State<AppState>,
-    Query(query): Query<InstrumentQuery>,
-) -> ApiResponse {
-    let q = query.q.unwrap_or_default().trim().to_owned();
-    if q.chars().count() < 2 {
-        return Json(json!({"items": [], "catalog": "local ETF history snapshot"})).into_response();
-    }
-    if query
-        .asset_type
-        .as_deref()
-        .is_some_and(|kind| kind != "etf" && kind != "stock")
-    {
-        return error(
-            StatusCode::BAD_REQUEST,
-            "invalid_request",
-            "asset_type must be etf or stock",
-            Value::Null,
-        );
-    }
-    // Current immutable research snapshots only contain ETF instruments. Never infer stock
-    // identities from a code family; stock names require a verified instrument catalog.
-    if query.asset_type.as_deref() == Some("stock") {
-        return Json(json!({"items": [], "catalog": "ETF-only", "message": "本地证券名称目录当前仅覆盖 ETF；股票可继续手工填写名称。"})).into_response();
-    }
-    match search_etf_instruments(&state.output, &q) {
-        Ok(items) => Json(json!({"items": items, "catalog": "ETF-only"})).into_response(),
-        Err(e) => error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "instrument_lookup_failed",
-            &e.to_string(),
-            Value::Null,
-        ),
-    }
-}
-
-#[derive(serde::Serialize)]
-struct InstrumentSuggestion {
-    instrument_id: String,
-    exchange: String,
-    code: String,
-    name: String,
-    asset_type: &'static str,
-}
-
-fn search_etf_instruments(output: &FsPath, query: &str) -> Result<Vec<InstrumentSuggestion>> {
-    let snapshots = output.join("snapshots");
-    let mut candidates = fs::read_dir(&snapshots)
-        .with_context(|| format!("read research snapshots at {}", snapshots.display()))?
-        .filter_map(std::result::Result::ok)
-        .map(|entry| entry.path().join("etf_daily.parquet"))
-        .filter(|path| path.is_file())
-        .collect::<Vec<_>>();
-    candidates.sort_by_key(|path| {
-        fs::metadata(path)
-            .and_then(|metadata| metadata.modified())
-            .unwrap_or(SystemTime::UNIX_EPOCH)
-    });
-    let Some(file) = candidates.pop() else {
-        return Ok(Vec::new());
-    };
-    let query = query.replace('\'', "''").to_lowercase();
-    let code_query = query
-        .chars()
-        .filter(char::is_ascii_digit)
-        .collect::<String>();
-    let conn = duckdb::Connection::open_in_memory()?;
-    let path = file.to_string_lossy().replace('\'', "''");
-    let code_filter = if code_query.is_empty() {
-        "FALSE".to_owned()
-    } else {
-        format!("starts_with(substr(symbol, 3), '{code_query}')")
-    };
-    let sql = format!(
-        "SELECT symbol, coalesce(name, symbol) FROM read_parquet('{path}') WHERE {code_filter} OR contains(lower(coalesce(name, '')), '{query}') GROUP BY symbol, name ORDER BY CASE WHEN substr(symbol, 3)='{code_query}' THEN 0 WHEN {code_filter} THEN 1 WHEN starts_with(lower(coalesce(name, '')), '{query}') THEN 2 ELSE 3 END, symbol LIMIT 12"
-    );
-    let mut stmt = conn
-        .prepare(&sql)
-        .context("prepare ETF instrument lookup")?;
-    let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
-    rows.map(|row| {
-        let (symbol, name) = row?;
-        let (exchange, code) = if let Some(code) = symbol.strip_prefix("sh") {
-            ("XSHG", code)
-        } else if let Some(code) = symbol.strip_prefix("sz") {
-            ("XSHE", code)
-        } else {
-            ("", symbol.as_str())
-        };
-        Ok(InstrumentSuggestion {
-            instrument_id: format!("{exchange}:{code}"),
-            exchange: exchange.to_owned(),
-            code: code.to_owned(),
-            name,
-            asset_type: "etf",
-        })
-    })
-    .collect()
-}
 async fn signals() -> Json<Vec<signal::SignalDefinition>> {
     Json(signal::registry())
 }
@@ -1025,30 +926,6 @@ mod tests {
         MembershipAction, UniverseDefinition,
     };
     use tempfile::tempdir;
-
-    #[test]
-    fn etf_lookup_matches_code_prefix_and_name_without_guessing_exchange() {
-        let dir = tempdir().unwrap();
-        let snapshot_dir = dir.path().join("snapshots/test");
-        fs::create_dir_all(&snapshot_dir).unwrap();
-        let parquet = snapshot_dir.join("etf_daily.parquet");
-        let escaped = parquet.to_string_lossy().replace('\'', "''");
-        let conn = duckdb::Connection::open_in_memory().unwrap();
-        conn.execute_batch(&format!(
-            "COPY (SELECT * FROM (VALUES ('sz159612', '国泰标普500ETF'), ('sh513300', '纳指ETF'), ('sh518880', '黄金ETF')) AS t(symbol, name)) TO '{escaped}' (FORMAT PARQUET)"
-        )).unwrap();
-
-        let prefix = search_etf_instruments(dir.path(), "1596").unwrap();
-        assert_eq!(prefix.len(), 1);
-        assert_eq!(prefix[0].code, "159612");
-        assert_eq!(prefix[0].exchange, "XSHE");
-        assert_eq!(prefix[0].name, "国泰标普500ETF");
-
-        let by_name = search_etf_instruments(dir.path(), "黄金").unwrap();
-        assert_eq!(by_name.len(), 1);
-        assert_eq!(by_name[0].code, "518880");
-        assert_eq!(by_name[0].asset_type, "etf");
-    }
 
     fn draft() -> UniverseDraft {
         UniverseDraft {

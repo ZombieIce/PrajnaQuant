@@ -52,3 +52,9 @@
 | 集成负责人 | 本契约、共享类型和公共 CLI/路由冲突、`STATUS`、`HANDOFF`、优先级、路线、API/数据文档、必要 ADR 与最终验收 | 接收 A/B/C 已审查改动后统一解决公共文件冲突；不得清理或覆盖别人的未提交成果 |
 
 交付顺序：A 可先审外部源及合成状态，B 可在隔离库用固定响应验证增量/幂等，C 可用合成发布快照完成 API/页面；共同字段固定后才接生产输入。C 只读已发布不可变快照；A 状态事实经 B 单写者或隔离库；B 发布不能改变已固定的查询或回测版本。
+
+## 集成状态（2026-09-25）
+
+- B 的任务、迁移 007、`snapshots/current.json` 发布目录和 `import-status-evidence` 已实现并在隔离库/小样本测试；生产库与自动调度未验。B manifest 使用 schema 7、`daily.parquet`、`securities.json` 和 `trading_calendar.txt`，不采用 C 最初的 `publication.json`。
+- C 的两个 GET 路由、分页/原始 OHLCV、`/market` 已实现。集成方让服务 `--market-data-dir`（默认 `data-core`）解析 B 的 current 或指定 ID，调用 B 只读 resolver 复验 manifest、Parquet、证券目录与日历 hash；合成 schema 1 reader 保留。B 真实样本目录没有 `instrument_id` 时 C 不猜主键，搜索为空。股票/ETF 页面仅用合成发布快照完成浏览器验收。
+- A 的来源审计与 UNKNOWN 占位复跑已实现，但 1205 格全未知，未取得官方逐日来源/完整性/历史可用时刻，未向生产库导入状态。P0-3 仍开放。最终证据与状态按 [`Batch 2 集成验收`](../handoffs/batch2-integration-acceptance.md) 为准；本契约前文的 Planned 项只在相应代码/测试列明的范围内转为 Implemented。

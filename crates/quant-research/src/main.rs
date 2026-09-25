@@ -68,6 +68,9 @@ enum Command {
     Serve {
         #[arg(long, default_value = "research-output")]
         output: PathBuf,
+        /// Directory containing the warehouse's immutable published daily snapshots.
+        #[arg(long, default_value = "data-core")]
+        market_data_dir: PathBuf,
         #[arg(long, default_value = "127.0.0.1:7878")]
         address: String,
         #[arg(long, default_value = "apps/web/dist")]
@@ -222,9 +225,10 @@ async fn main() -> Result<()> {
         }
         Command::Serve {
             output,
+            market_data_dir,
             address,
             web_dist,
-        } => server::serve(&address, output, web_dist).await?,
+        } => server::serve(&address, output, market_data_dir, web_dist).await?,
     }
     Ok(())
 }

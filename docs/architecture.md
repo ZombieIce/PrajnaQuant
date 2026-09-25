@@ -1,5 +1,9 @@
 # 实际系统架构（2026-09-23 扫描）
 
+## Batch 2 增量（2026-09-25）
+
+仓库单写者新增 `sync-daily`/`publish-sync`：原文与修订进入 DuckDB，按显式证券/已确认日历审计后发布 `data-core/snapshots/<id>/` 的不可变 Parquet、证券目录、日历和 manifest，原子替换 `snapshots/current.json`。`quant-research serve --market-data-dir data-core` 的 `market_api.rs` 只读该发布目录并固定 ID/hash，提供证券搜索与日线分页；React `/market` 展示原始未复权股票/ETF 日 K 和成交量。旧 ETF 研究快照/回测链仍独立，未把股票行情查询接为股票回测。调度模板存在但未安装，Python 因子研究/远程认证仍缺。生产同步和股票快照未验，详情见 [`Batch 2 集成验收`](handoffs/batch2-integration-acceptance.md)。
+
 ## System Overview
 
 这是本地模块化单体：Rust 仓库写 DuckDB；Rust 研究进程从仓库产生 ETF 和沪深300 Parquet 快照，计算研究/回测并将 JSON 落盘；Axum 读取结果文件并管理本地 Universe JSON；React 展示结果，并通过本地 API 管理 Universe 与筛选已保存结果。旧 `warehouse.py` 是旁支原型。当前没有 Python 因子研究包、Python↔Rust 绑定、外部任务调度或 CI；仓库现有 005 可回放迁移。

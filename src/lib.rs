@@ -9,14 +9,14 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, Timelike, Utc};
 use duckdb::{Connection, OptionalExt, params};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-pub const SCHEMA_VERSION: i32 = 6;
+pub const SCHEMA_VERSION: i32 = 7;
 
 #[derive(Debug)]
 pub struct Warehouse {
@@ -116,6 +116,136 @@ pub struct SnapshotResult {
     pub sha256: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct DailySyncResult {
+    pub job_id: Uuid,
+    pub request_fingerprint: String,
+    pub symbols: Vec<String>,
+    pub requested_start: String,
+    pub requested_end: String,
+    pub attempts: usize,
+    pub source_rows: usize,
+    pub inserted_revisions: usize,
+    pub duplicate_rows: usize,
+    pub empty_responses: usize,
+    pub snapshot: Option<DailySnapshotResult>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DailySnapshotResult {
+    pub snapshot_id: Uuid,
+    pub manifest_path: PathBuf,
+    pub data_path: PathBuf,
+    pub manifest_sha256: String,
+    pub data_sha256: String,
+    pub coverage_status: String,
+    pub data_cutoff_date: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct StatusCoverageEvidence {
+    pub symbol: String,
+    pub coverage_start: NaiveDate,
+    pub coverage_end: NaiveDate,
+    pub declared_coverage: String,
+    pub verification_status: String,
+    pub source_ref: String,
+    pub detail: Option<String>,
+}
+
+type SecurityDirectoryDbRow = (
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+    String,
+);
+
+/// Read-only snapshot resolver for research/API processes. It never opens the
+/// DuckDB and fixes the selected ID before any Parquet read begins.
+pub fn resolve_published_daily_snapshot(
+    data_dir: &Path,
+    requested_id: Option<Uuid>,
+) -> Result<DailySnapshotResult> {
+    let root = data_dir.join("snapshots");
+    let (id, pointer_manifest_hash) = match requested_id {
+        Some(id) => (id, None),
+        None => {
+            let pointer: serde_json::Value = serde_json::from_slice(
+                &fs::read(root.join("current.json"))
+                    .context("no current published daily snapshot")?,
+            )?;
+            let id = Uuid::parse_str(
+                pointer["snapshot_id"]
+                    .as_str()
+                    .context("current pointer has no snapshot_id")?,
+            )?;
+            let manifest_hash = pointer["manifest_sha256"]
+                .as_str()
+                .context("current pointer lacks manifest hash")?
+                .to_owned();
+            (id, Some(manifest_hash))
+        }
+    };
+    let directory = root.join(id.to_string());
+    let manifest_path = directory.join("manifest.json");
+    let manifest_bytes =
+        fs::read(&manifest_path).context("requested daily snapshot is not published")?;
+    let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes)?;
+    if manifest["snapshot_id"].as_str() != Some(&id.to_string()) {
+        bail!("snapshot ID does not match manifest");
+    }
+    let manifest_hash = sha256(&manifest_bytes);
+    let data_path = directory.join("daily.parquet");
+    let data_hash = manifest["data_sha256"]
+        .as_str()
+        .context("manifest lacks data hash")?
+        .to_owned();
+    if sha256(&fs::read(&data_path)?) != data_hash {
+        bail!("daily snapshot Parquet hash mismatch");
+    }
+    let catalog_file = manifest["catalog_file"]
+        .as_str()
+        .context("manifest lacks securities catalog")?;
+    let catalog_path = directory.join(catalog_file);
+    let catalog_hash = manifest["catalog_sha256"]
+        .as_str()
+        .context("manifest lacks catalog hash")?;
+    if sha256(&fs::read(catalog_path)?) != catalog_hash {
+        bail!("daily snapshot securities catalog hash mismatch");
+    }
+    let calendar_file = manifest["calendar_file"]
+        .as_str()
+        .context("manifest lacks calendar sidecar")?;
+    let calendar_path = directory.join(calendar_file);
+    let expected_calendar = manifest["calendar_sha256"]
+        .as_str()
+        .context("manifest lacks calendar hash")?;
+    if sha256(&fs::read(calendar_path)?) != expected_calendar {
+        bail!("daily snapshot calendar hash mismatch");
+    }
+    if let Some(expected_hash) = pointer_manifest_hash {
+        if expected_hash != manifest_hash {
+            bail!("current pointer manifest hash mismatch");
+        }
+    }
+    Ok(DailySnapshotResult {
+        snapshot_id: id,
+        manifest_path,
+        data_path,
+        manifest_sha256: manifest_hash,
+        data_sha256: data_hash,
+        coverage_status: manifest["coverage_status"]
+            .as_str()
+            .unwrap_or("unverified")
+            .into(),
+        data_cutoff_date: manifest["data_cutoff_date"].as_str().unwrap_or("").into(),
+    })
+}
+
 /// Membership fact parsed from a historical index source. Generic imports are
 /// always stored as `unknown`; only a source-specific validator may certify PIT.
 #[derive(Debug, Clone)]
@@ -179,6 +309,8 @@ impl Warehouse {
             "../sql/migrations/006_membership_simulated_exit_known_at.sql"
         ))
         .context("apply index membership schema migration 6")?;
+        conn.execute_batch(include_str!("../sql/migrations/007_daily_sync.sql"))
+            .context("apply daily sync schema migration 7")?;
         Ok(Self {
             conn,
             _writer_lock: writer_lock,
@@ -313,6 +445,665 @@ impl Warehouse {
             etf_history_symbols,
             earliest_etf_history_date,
         })
+    }
+
+    /// Runs an explicit, bounded Tencent daily sync. Every invocation re-reads
+    /// the requested lookback so source revisions are not hidden by a high-water mark.
+    pub fn sync_daily_tencent(
+        &mut self,
+        symbols: &[String],
+        start: NaiveDate,
+        end: NaiveDate,
+        lookback_days: u32,
+        max_retries: u32,
+    ) -> Result<DailySyncResult> {
+        self.sync_daily_tencent_with_fetch(
+            symbols,
+            start,
+            end,
+            lookback_days,
+            max_retries,
+            sources::fetch_tencent_raw_daily,
+        )
+    }
+
+    fn sync_daily_tencent_with_fetch<F>(
+        &mut self,
+        symbols: &[String],
+        start: NaiveDate,
+        end: NaiveDate,
+        lookback_days: u32,
+        max_retries: u32,
+        mut fetch: F,
+    ) -> Result<DailySyncResult>
+    where
+        F: FnMut(&str, NaiveDate, NaiveDate) -> Result<(String, Vec<u8>)>,
+    {
+        if symbols.is_empty()
+            || start > end
+            || lookback_days > 799
+            || max_retries > 5
+            || (end - start).num_days() + i64::from(lookback_days) > 799
+        {
+            bail!(
+                "sync requires symbols, start <= end, request window <= 800 days, lookback <= 799 days, retries <= 5"
+            );
+        }
+        let mut canonical_symbols = symbols.to_vec();
+        canonical_symbols.sort();
+        canonical_symbols.dedup();
+        if canonical_symbols.len() != symbols.len() {
+            bail!("sync securities must be unique");
+        }
+        for symbol in &canonical_symbols {
+            validate_symbol(symbol)?;
+        }
+        let mut digest = Sha256::new();
+        digest.update(canonical_symbols.join(",").as_bytes());
+        digest.update(start.to_string().as_bytes());
+        digest.update(end.to_string().as_bytes());
+        digest.update(lookback_days.to_le_bytes());
+        let fingerprint = format!("{:x}", digest.finalize());
+        // A same-day bar is eligible only after the exchange session's close
+        // and only when the independent calendar confirms an open date.
+        let shanghai_now = Utc::now() + chrono::Duration::hours(8);
+        let shanghai_today = shanghai_now.date_naive();
+        if end > shanghai_today {
+            bail!("target end cannot be later than the current Asia/Shanghai date");
+        }
+        if end == shanghai_today {
+            let calendar_open:Option<bool>=self.conn.query_row("SELECT is_open FROM core.trading_calendar_latest WHERE market='CN' AND source='szse' AND trade_date=?",params![end.to_string()],|row|row.get(0)).optional()?;
+            if calendar_open != Some(true)
+                || shanghai_now.hour() < 18
+                || (shanghai_now.hour() == 18 && shanghai_now.minute() < 30)
+            {
+                self.record_not_published_job(
+                    &fingerprint,
+                    &canonical_symbols,
+                    start,
+                    end,
+                    lookback_days,
+                    "same-day daily bars remain non-final until 18:30 Asia/Shanghai and a confirmed open-calendar record exists",
+                )?;
+                bail!(
+                    "same-day daily bars remain non-final until 18:30 Asia/Shanghai and a confirmed open-calendar record exists"
+                );
+            }
+        }
+        let prior: Option<(String, String)> = self.conn.query_row(
+            "SELECT job_id,status FROM ops.daily_sync_job WHERE request_fingerprint=? ORDER BY started_at DESC LIMIT 1",
+            params![fingerprint], |row| Ok((row.get(0)?,row.get(1)?)),
+        ).optional()?;
+        let job_id = match prior {
+            Some((id, status)) if status == "RUNNING" || status == "FAILED" => {
+                let id = Uuid::parse_str(&id)?;
+                self.conn.execute("UPDATE ops.daily_sync_job SET status='RUNNING',error=NULL,error_class=NULL,updated_at=? WHERE job_id=?",params![Utc::now().to_rfc3339(),id.to_string()])?;
+                id
+            }
+            _ => {
+                let id = Uuid::new_v4();
+                let now = Utc::now();
+                self.conn.execute(
+                    "INSERT INTO ops.daily_sync_job(job_id,request_fingerprint,dataset,source,symbols_json,range_start,range_end,lookback_days,status,started_at,updated_at) VALUES (?,?, 'daily_bar','tencent',?,?,?,?,'RUNNING',?,?)",
+                    params![id.to_string(), fingerprint, serde_json::to_string(&canonical_symbols)?, start.to_string(), end.to_string(), i64::from(lookback_days), now.to_rfc3339(), now.to_rfc3339()],
+                )?;
+                id
+            }
+        };
+        let (prior_rows,prior_inserted,prior_empty): (i64,i64,i64)=self.conn.query_row(
+            "SELECT coalesce(sum(source_rows),0),coalesce(sum(inserted_revisions),0),count(*) FILTER(WHERE status='EMPTY') FROM ops.daily_sync_attempt WHERE job_id=?",
+            params![job_id.to_string()],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+        )?;
+
+        let mut result = DailySyncResult {
+            job_id,
+            request_fingerprint: fingerprint,
+            symbols: canonical_symbols.clone(),
+            requested_start: start.to_string(),
+            requested_end: end.to_string(),
+            attempts: 0,
+            source_rows: usize::try_from(prior_rows)?,
+            inserted_revisions: usize::try_from(prior_inserted)?,
+            duplicate_rows: usize::try_from(prior_rows.saturating_sub(prior_inserted))?,
+            empty_responses: usize::try_from(prior_empty)?,
+            snapshot: None,
+        };
+        let mut cursor_error: Option<(String, String)> = None;
+        for symbol in &canonical_symbols {
+            let window_start = start - chrono::Duration::days(i64::from(lookback_days));
+            let prior_status: Option<String>=self.conn.query_row("SELECT status FROM ops.daily_sync_attempt WHERE job_id=? AND symbol=? AND window_start=? AND window_end=? ORDER BY attempt_no DESC LIMIT 1",params![job_id.to_string(),symbol,window_start.to_string(),end.to_string()],|row|row.get(0)).optional()?;
+            if matches!(prior_status.as_deref(), Some("SUCCESS" | "EMPTY")) {
+                continue;
+            }
+            let prior_attempts: i64=self.conn.query_row("SELECT count(*) FROM ops.daily_sync_attempt WHERE job_id=? AND symbol=? AND window_start=? AND window_end=?",params![job_id.to_string(),symbol,window_start.to_string(),end.to_string()],|row|row.get(0))?;
+            self.conn.execute(
+                "UPDATE ops.daily_sync_job SET cursor_symbol=?,cursor_start=?,cursor_end=?,updated_at=? WHERE job_id=?",
+                params![symbol, window_start.to_string(), end.to_string(), Utc::now().to_rfc3339(), job_id.to_string()],
+            )?;
+            let mut completed = false;
+            for attempt_no in u32::try_from(prior_attempts)? + 1
+                ..=u32::try_from(prior_attempts)? + max_retries + 1
+            {
+                result.attempts += 1;
+                let attempt_id = Uuid::new_v4();
+                let attempt_started = Utc::now();
+                let request = fetch(symbol, window_start, end);
+                match request {
+                    Ok((url, body)) => {
+                        let is_empty = sources::tencent_raw_daily_is_empty(&body, symbol);
+                        match is_empty {
+                            Ok(true) => {
+                                let raw_path = self.archive_empty_tencent_window(
+                                    symbol,
+                                    window_start,
+                                    end,
+                                    &url,
+                                    &body,
+                                )?;
+                                self.record_daily_sync_attempt(
+                                    &attempt_id,
+                                    &job_id,
+                                    symbol,
+                                    window_start,
+                                    end,
+                                    attempt_no,
+                                    "EMPTY",
+                                    0,
+                                    0,
+                                    Some(&raw_path.display().to_string()),
+                                    Some(&url),
+                                    None,
+                                    None,
+                                    attempt_started,
+                                )?;
+                                result.empty_responses += 1;
+                                completed = true;
+                                break;
+                            }
+                            Ok(false) => {
+                                match self.ingest_tencent_day_response(
+                                    symbol,
+                                    window_start,
+                                    end,
+                                    &body,
+                                    &url,
+                                ) {
+                                    Ok(ingest) => {
+                                        let raw_path: Option<String> = self.conn.query_row("SELECT raw_path FROM ops.ingest_run WHERE run_id=?", params![ingest.run_id.to_string()], |row| row.get(0)).optional()?;
+                                        let raw_hash: Option<String> = self.conn.query_row("SELECT raw_sha256 FROM ops.ingest_run WHERE run_id=?", params![ingest.run_id.to_string()], |row| row.get(0)).optional()?;
+                                        self.record_daily_sync_attempt(
+                                            &attempt_id,
+                                            &job_id,
+                                            symbol,
+                                            window_start,
+                                            end,
+                                            attempt_no,
+                                            "SUCCESS",
+                                            ingest.source_rows,
+                                            ingest.new_revisions,
+                                            raw_path.as_deref(),
+                                            Some(&url),
+                                            None,
+                                            None,
+                                            attempt_started,
+                                        )?;
+                                        result.source_rows += ingest.source_rows;
+                                        result.inserted_revisions += ingest.new_revisions;
+                                        result.duplicate_rows +=
+                                            ingest.source_rows.saturating_sub(ingest.new_revisions);
+                                        let _ = raw_hash; // Raw hash remains indexed by the ingest run and archive manifest.
+                                        completed = true;
+                                        break;
+                                    }
+                                    Err(error) => {
+                                        let failed_path:Option<String>=self.conn.query_row("SELECT raw_path FROM ops.ingest_run WHERE source='tencent' AND request_url=? AND started_at>=? ORDER BY started_at DESC LIMIT 1",params![url,attempt_started.to_rfc3339()],|row|row.get(0)).optional()?;
+                                        self.record_daily_sync_attempt(
+                                            &attempt_id,
+                                            &job_id,
+                                            symbol,
+                                            window_start,
+                                            end,
+                                            attempt_no,
+                                            "FAILED",
+                                            0,
+                                            0,
+                                            failed_path.as_deref(),
+                                            Some(&url),
+                                            Some("validation_or_write"),
+                                            Some(&error.to_string()),
+                                            attempt_started,
+                                        )?
+                                    }
+                                }
+                            }
+                            Err(error) => self.record_daily_sync_attempt(
+                                &attempt_id,
+                                &job_id,
+                                symbol,
+                                window_start,
+                                end,
+                                attempt_no,
+                                "FAILED",
+                                0,
+                                0,
+                                None,
+                                Some(&url),
+                                Some("source_format"),
+                                Some(&error.to_string()),
+                                attempt_started,
+                            )?,
+                        }
+                    }
+                    Err(error) => self.record_daily_sync_attempt(
+                        &attempt_id,
+                        &job_id,
+                        symbol,
+                        window_start,
+                        end,
+                        attempt_no,
+                        "FAILED",
+                        0,
+                        0,
+                        None,
+                        None,
+                        Some("network_or_rate_limit"),
+                        Some(&error.to_string()),
+                        attempt_started,
+                    )?,
+                }
+                if !completed && attempt_no < u32::try_from(prior_attempts)? + max_retries + 1 {
+                    std::thread::sleep(std::time::Duration::from_millis(
+                        (250_u64.saturating_mul(2_u64.saturating_pow(attempt_no - 1))).min(2_000),
+                    ));
+                }
+            }
+            if !completed {
+                cursor_error = Some((symbol.clone(), "bounded retry limit exhausted".into()));
+                break;
+            }
+        }
+        if let Some((symbol, error)) = cursor_error {
+            self.conn.execute(
+                "UPDATE ops.daily_sync_job SET status='FAILED',error_class='retry_exhausted',error=?,attempted_count=(SELECT count(*) FROM ops.daily_sync_attempt WHERE job_id=?),finished_at=?,updated_at=? WHERE job_id=?",
+                params![format!("{symbol}: {error}"),job_id.to_string(), Utc::now().to_rfc3339(), Utc::now().to_rfc3339(), job_id.to_string()],
+            )?;
+            bail!("daily sync failed: {symbol}: {error}");
+        }
+        self.conn.execute(
+            "UPDATE ops.daily_sync_job SET status='SUCCESS',source_rows=?,inserted_revisions=?,duplicate_rows=?,empty_responses=?,attempted_count=(SELECT count(*) FROM ops.daily_sync_attempt WHERE job_id=?),finished_at=?,updated_at=? WHERE job_id=?",
+            params![i64::try_from(result.source_rows)?, i64::try_from(result.inserted_revisions)?, i64::try_from(result.duplicate_rows)?, i64::try_from(result.empty_responses)?, job_id.to_string(), Utc::now().to_rfc3339(), Utc::now().to_rfc3339(), job_id.to_string()],
+        )?;
+        Ok(result)
+    }
+
+    // These fields map one-for-one to the durable attempt ledger row.
+    #[allow(clippy::too_many_arguments)]
+    fn record_daily_sync_attempt(
+        &self,
+        attempt_id: &Uuid,
+        job_id: &Uuid,
+        symbol: &str,
+        start: NaiveDate,
+        end: NaiveDate,
+        attempt_no: u32,
+        status: &str,
+        rows: usize,
+        inserted: usize,
+        raw_path: Option<&str>,
+        request_url: Option<&str>,
+        error_class: Option<&str>,
+        error: Option<&str>,
+        started: DateTime<Utc>,
+    ) -> Result<()> {
+        let raw_hash = raw_path
+            .and_then(|path| fs::read(path).ok())
+            .map(|bytes| sha256(&bytes));
+        self.conn.execute(
+            "INSERT INTO ops.daily_sync_attempt VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            params![
+                attempt_id.to_string(),
+                job_id.to_string(),
+                symbol,
+                start.to_string(),
+                end.to_string(),
+                i64::from(attempt_no),
+                status,
+                i64::try_from(rows)?,
+                i64::try_from(inserted)?,
+                raw_path,
+                raw_hash,
+                request_url,
+                error_class,
+                error,
+                started.to_rfc3339(),
+                Utc::now().to_rfc3339()
+            ],
+        )?;
+        self.conn.execute(
+            "UPDATE ops.daily_sync_job SET attempted_count=attempted_count+1,updated_at=? WHERE job_id=?",
+            params![Utc::now().to_rfc3339(),job_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    fn record_not_published_job(
+        &self,
+        fingerprint: &str,
+        symbols: &[String],
+        start: NaiveDate,
+        end: NaiveDate,
+        lookback_days: u32,
+        reason: &str,
+    ) -> Result<()> {
+        let job_id = Uuid::new_v4();
+        let now = Utc::now();
+        self.conn.execute(
+            "INSERT INTO ops.daily_sync_job(job_id,request_fingerprint,dataset,source,symbols_json,range_start,range_end,lookback_days,status,error_class,error,started_at,finished_at,updated_at) VALUES (?,?,'daily_bar','tencent',?,?,?,?,'NOT_PUBLISHED','publication_condition',?,?,?,?)",
+            params![job_id.to_string(),fingerprint,serde_json::to_string(symbols)?,start.to_string(),end.to_string(),i64::from(lookback_days),reason,now.to_rfc3339(),now.to_rfc3339(),now.to_rfc3339()],
+        )?;
+        let window_start = start - chrono::Duration::days(i64::from(lookback_days));
+        for symbol in symbols {
+            self.conn.execute(
+                "INSERT INTO ops.daily_sync_attempt VALUES (?,?,?,?,?,0,'NOT_PUBLISHED',0,0,NULL,NULL,NULL,'publication_condition',?,?,?)",
+                params![Uuid::new_v4().to_string(),job_id.to_string(),symbol,window_start.to_string(),end.to_string(),reason,now.to_rfc3339(),now.to_rfc3339()],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Audits and publishes one explicit request as an immutable Parquet snapshot.
+    /// A failed audit or interrupted rename never changes `snapshots/current.json`.
+    pub fn publish_daily_sync(&mut self, job_id: Uuid) -> Result<DailySnapshotResult> {
+        self.publish_daily_sync_with_hook(job_id, || Ok(()))
+    }
+
+    fn publish_daily_sync_with_hook<F>(
+        &mut self,
+        job_id: Uuid,
+        mut after_directory_publish: F,
+    ) -> Result<DailySnapshotResult>
+    where
+        F: FnMut() -> Result<()>,
+    {
+        let (status, symbols_json, start, end, lookback_days): (String, String, String, String, i64) = self.conn.query_row(
+            "SELECT status,symbols_json,range_start::VARCHAR,range_end::VARCHAR,lookback_days FROM ops.daily_sync_job WHERE job_id=?",
+            params![job_id.to_string()], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?)),
+        )?;
+        if status != "SUCCESS" && status != "AUDIT_FAILED" {
+            bail!("only a successfully ingested sync job can be published");
+        }
+        let symbols: Vec<String> = serde_json::from_str(&symbols_json)?;
+        let start = NaiveDate::parse_from_str(&start, "%Y-%m-%d")?;
+        let end = NaiveDate::parse_from_str(&end, "%Y-%m-%d")?;
+        let natural_days = (end - start).num_days() + 1;
+        let calendar_days: i64 = self.conn.query_row(
+            "SELECT count(*) FROM core.trading_calendar_latest WHERE market='CN' AND source='szse' AND trade_date BETWEEN ? AND ?",
+            params![start.to_string(),end.to_string()], |row| row.get(0),
+        )?;
+        let open_days: Vec<String> = {
+            let mut statement = self.conn.prepare("SELECT trade_date::VARCHAR FROM core.trading_calendar_latest WHERE market='CN' AND source='szse' AND is_open AND trade_date BETWEEN ? AND ? ORDER BY trade_date")?;
+            statement
+                .query_map(params![start.to_string(), end.to_string()], |row| {
+                    row.get(0)
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let mut missing = Vec::new();
+        for symbol in &symbols {
+            for day in &open_days {
+                let exists: bool = self.conn.query_row("SELECT count(*)>0 FROM staging.daily_bar_latest WHERE symbol=? AND trade_date=? AND adjustment='none'", params![symbol,day], |row| row.get(0))?;
+                if !exists {
+                    missing.push(format!("{symbol}@{day}"));
+                }
+            }
+        }
+        let mut observed_outside_calendar = 0_i64;
+        let mut unit_anomalies = 0_i64;
+        let mut duplicate_source_keys = 0_i64;
+        let empty_source_attempts: i64 = self.conn.query_row(
+            "SELECT count(*) FROM ops.daily_sync_attempt WHERE job_id=? AND status='EMPTY'",
+            params![job_id.to_string()],
+            |row| row.get(0),
+        )?;
+        for symbol in &symbols {
+            observed_outside_calendar += self.conn.query_row(
+                "SELECT count(*) FROM staging.daily_bar_latest b LEFT JOIN core.trading_calendar_latest c ON c.market='CN' AND c.source='szse' AND c.trade_date=b.trade_date WHERE b.symbol=? AND b.trade_date BETWEEN ? AND ? AND (c.is_open IS NULL OR c.is_open=false)",
+                params![symbol,start.to_string(),end.to_string()], |row| row.get::<_,i64>(0),
+            )?;
+            unit_anomalies += self.conn.query_row(
+                "SELECT count(*) FROM staging.daily_bar_latest b WHERE b.symbol=? AND b.trade_date BETWEEN ? AND ? AND (b.open<=0 OR b.high<=0 OR b.low<=0 OR b.close<=0 OR b.low>least(b.open,b.close) OR b.high<greatest(b.open,b.close) OR b.volume_shares<0 OR b.volume_shares<>floor(b.volume_shares) OR (b.amount_cny IS NOT NULL AND b.amount_cny<0))",
+                params![symbol,start.to_string(),end.to_string()], |row| row.get::<_,i64>(0),
+            )?;
+            duplicate_source_keys += self.conn.query_row(
+                "SELECT count(*) FROM (SELECT trade_date,source FROM staging.daily_bar_latest WHERE symbol=? AND adjustment='none' AND trade_date BETWEEN ? AND ? GROUP BY trade_date,source HAVING count(*)>1)",
+                params![symbol,start.to_string(),end.to_string()], |row| row.get::<_,i64>(0),
+            )?;
+        }
+        let coverage_status = if calendar_days != natural_days
+            || !missing.is_empty()
+            || observed_outside_calendar > 0
+            || unit_anomalies > 0
+            || duplicate_source_keys > 0
+            || empty_source_attempts > 0
+        {
+            "gaps"
+        } else {
+            "complete"
+        };
+        let (mut unknown_state_days, mut conflicting_state_days) = (0_i64, 0_i64);
+        for symbol in &symbols {
+            for day in &open_days {
+                let (facts,unknown,distinct):(i64,i64,i64)=self.conn.query_row(
+                    "SELECT count(*),count(*) FILTER(WHERE trade_status='UNKNOWN'),count(DISTINCT trade_status) FROM core.security_status_latest WHERE symbol=? AND effective_date=?",
+                    params![symbol,day],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+                )?;
+                if facts == 0 || unknown > 0 {
+                    unknown_state_days += 1;
+                }
+                if distinct > 1 {
+                    conflicting_state_days += 1;
+                }
+            }
+        }
+        let mut status_coverage_gaps = 0_i64;
+        for symbol in &symbols {
+            status_coverage_gaps+=self.conn.query_row("SELECT count(*) FROM ops.security_status_coverage WHERE symbol=? AND coverage_start<=? AND coverage_end>=? AND (declared_coverage<>'complete' OR verification_status<>'verified')",params![symbol,end.to_string(),start.to_string()],|row|row.get::<_,i64>(0))?;
+        }
+        let audit = serde_json::json!({"status":coverage_status,"coverage_basis":"explicit_symbols_x_confirmed_SZSE_open_days_only","requested_start":start.to_string(),"requested_end":end.to_string(),"symbols":symbols,"calendar_days":calendar_days,"natural_days":natural_days,"confirmed_open_days":open_days.len(),"missing_symbol_days":missing,"empty_source_attempts":empty_source_attempts,"bars_on_closed_or_uncovered_dates":observed_outside_calendar,"duplicate_symbol_date_source_keys":duplicate_source_keys,"ohlc_or_volume_unit_anomalies":unit_anomalies,"unknown_state_security_days":unknown_state_days,"conflicting_state_security_days":conflicting_state_days,"unverified_or_gapped_state_coverage_records":status_coverage_gaps,"state_semantics":"status/source preserved; absent status remains UNKNOWN"});
+        self.conn.execute(
+            "UPDATE ops.daily_sync_job SET audit_json=? WHERE job_id=?",
+            params![audit.to_string(), job_id.to_string()],
+        )?;
+        if coverage_status != "complete" {
+            self.conn.execute("UPDATE ops.daily_sync_job SET status='AUDIT_FAILED',error_class='coverage_validation',error=?,updated_at=? WHERE job_id=?",params![audit.to_string(),Utc::now().to_rfc3339(),job_id.to_string()])?;
+            bail!(
+                "daily snapshot audit did not prove complete coverage: {}",
+                audit
+            );
+        }
+        self.conn.execute("UPDATE ops.daily_sync_job SET status='SUCCESS',error=NULL,error_class=NULL,updated_at=? WHERE job_id=?",params![Utc::now().to_rfc3339(),job_id.to_string()])?;
+        let snapshot_id = Uuid::new_v4();
+        let snapshots_dir = self.data_dir.join("snapshots");
+        fs::create_dir_all(&snapshots_dir)?;
+        let temp_dir = snapshots_dir.join(format!(".tmp-{}", snapshot_id));
+        fs::create_dir(&temp_dir)?;
+        let parquet = temp_dir.join("daily.parquet");
+        let symbols_sql = symbols
+            .iter()
+            .map(|s| format!("'{}'", s.replace('\'', "''")))
+            .collect::<Vec<_>>()
+            .join(",");
+        let query = format!("(SELECT b.*,
+            coalesce((SELECT CASE WHEN count(DISTINCT s.trade_status)>1 THEN 'CONFLICT' ELSE max(s.trade_status) END FROM core.security_status_latest s WHERE s.symbol=b.symbol AND s.effective_date=b.trade_date), 'UNKNOWN') AS trade_status,
+            (SELECT string_agg(DISTINCT s.source, ',') FROM core.security_status_latest s WHERE s.symbol=b.symbol AND s.effective_date=b.trade_date) AS status_source,
+            (SELECT string_agg(DISTINCT s.revision_id, ',') FROM core.security_status_latest s WHERE s.symbol=b.symbol AND s.effective_date=b.trade_date) AS status_revision_ids,
+            (SELECT string_agg(DISTINCT s.row_hash, ',') FROM core.security_status_latest s WHERE s.symbol=b.symbol AND s.effective_date=b.trade_date) AS status_source_hashes,
+            (SELECT string_agg(DISTINCT s.source_ref, '|') FROM core.security_status_latest s WHERE s.symbol=b.symbol AND s.effective_date=b.trade_date) AS status_source_refs,
+            (SELECT string_agg(DISTINCT s.raw_sha256, ',') FROM core.security_status_latest s WHERE s.symbol=b.symbol AND s.effective_date=b.trade_date) AS status_raw_sha256,
+            (SELECT string_agg(DISTINCT cast(s.published_at AS VARCHAR), '|') FROM core.security_status_latest s WHERE s.symbol=b.symbol AND s.effective_date=b.trade_date) AS status_published_at,
+            (SELECT string_agg(DISTINCT cast(s.available_at AS VARCHAR), '|') FROM core.security_status_latest s WHERE s.symbol=b.symbol AND s.effective_date=b.trade_date) AS status_available_at,
+            (SELECT string_agg(DISTINCT cast(s.observed_at AS VARCHAR), '|') FROM core.security_status_latest s WHERE s.symbol=b.symbol AND s.effective_date=b.trade_date) AS status_observed_at,
+            (SELECT string_agg(DISTINCT s.verification_status, '|') FROM core.security_status_latest s WHERE s.symbol=b.symbol AND s.effective_date=b.trade_date) AS status_verification_status,
+            (SELECT string_agg(DISTINCT s.coverage_ref, '|') FROM core.security_status_latest s WHERE s.symbol=b.symbol AND s.effective_date=b.trade_date) AS status_coverage_refs,
+            coalesce((SELECT string_agg(DISTINCT c.source || ':' || c.declared_coverage || ':' || c.verification_status || ':' || c.source_ref, '|') FROM ops.security_status_coverage c WHERE c.symbol=b.symbol AND b.trade_date BETWEEN c.coverage_start AND c.coverage_end), 'unverified') AS status_coverage,
+            coalesce((SELECT count(*)>0 FROM core.security_status_latest s WHERE s.symbol=b.symbol AND s.effective_date=b.trade_date), false) AS status_covered
+            FROM staging.daily_bar_latest b WHERE b.symbol IN ({symbols_sql}) AND b.trade_date BETWEEN DATE '{start}' AND DATE '{end}' AND b.adjustment='none'
+            QUALIFY row_number() OVER(PARTITION BY b.symbol,b.trade_date ORDER BY CASE b.source WHEN 'tencent' THEN 1 WHEN 'tdx' THEN 2 ELSE 3 END,b.observed_at DESC,b.revision_id DESC)=1 ORDER BY b.symbol,b.trade_date)");
+        self.conn.execute_batch(&format!(
+            "COPY {query} TO '{}' (FORMAT PARQUET, COMPRESSION ZSTD)",
+            parquet.display().to_string().replace('\'', "''")
+        ))?;
+        let data = fs::read(&parquet)?;
+        let data_hash = sha256(&data);
+        let mut directory = Vec::with_capacity(symbols.len());
+        for symbol in &symbols {
+            let identity: Option<SecurityDirectoryDbRow> = self.conn.query_row(
+                "SELECT i.instrument_id,i.market,i.code,i.asset_class,i.first_observed_date::VARCHAR,i.last_observed_date::VARCHAR,coalesce(n.name,''),coalesce(n.source,'') FROM core.instrument i LEFT JOIN LATERAL (SELECT name,source FROM core.instrument_symbol_latest n WHERE n.instrument_id=i.instrument_id ORDER BY n.valid_from DESC,n.observed_at DESC LIMIT 1) n ON true WHERE (CASE i.market WHEN 'SH' THEN 'sh' WHEN 'SZ' THEN 'sz' ELSE 'bj' END || i.code)=?",
+                params![symbol],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?)),
+            ).optional()?;
+            match identity {
+                Some((instrument_id,market,code,asset_type,first,last,name,name_source))=>directory.push(serde_json::json!({"instrument_id":instrument_id,"symbol":symbol,"code":code,"market":market,"asset_type":asset_type,"name":if name.is_empty(){None}else{Some(name)},"name_source":if name_source.is_empty(){None}else{Some(name_source)},"first_observed_date":first,"last_observed_date":last,"listed_date":null,"delisted_date":null})),
+                None=>directory.push(serde_json::json!({"instrument_id":null,"symbol":symbol,"code":&symbol[2..],"market":&symbol[..2],"asset_type":"UNKNOWN","name":null,"name_source":null,"first_observed_date":null,"last_observed_date":null,"listed_date":null,"delisted_date":null})),
+            }
+        }
+        let directory_bytes = serde_json::to_vec_pretty(&directory)?;
+        let directory_hash = sha256(&directory_bytes);
+        fs::write(temp_dir.join("securities.json"), &directory_bytes)?;
+        let calendar_json: String = self.conn.query_row("SELECT coalesce(string_agg(trade_date::VARCHAR || ':' || is_open::VARCHAR, ',' ORDER BY trade_date),'') FROM core.trading_calendar_latest WHERE market='CN' AND source='szse' AND trade_date BETWEEN ? AND ?",params![start.to_string(),end.to_string()],|row|row.get(0))?;
+        let calendar_hash = sha256(calendar_json.as_bytes());
+        fs::write(
+            temp_dir.join("trading_calendar.txt"),
+            calendar_json.as_bytes(),
+        )?;
+        let attempt_provenance: Vec<serde_json::Value> = {
+            let mut statement=self.conn.prepare("SELECT a.symbol,a.window_start::VARCHAR,a.window_end::VARCHAR,a.attempt_no,a.status,a.source_rows,a.inserted_revisions,a.raw_path,a.raw_sha256,a.request_url,a.error_class,a.error,r.run_id FROM ops.daily_sync_attempt a LEFT JOIN ops.ingest_run r ON r.raw_path=a.raw_path WHERE a.job_id=? ORDER BY a.symbol,a.attempt_no")?;
+            statement.query_map(params![job_id.to_string()],|row|Ok(serde_json::json!({"symbol":row.get::<_,String>(0)?,"start":row.get::<_,String>(1)?,"end":row.get::<_,String>(2)?,"attempt":row.get::<_,i64>(3)?,"status":row.get::<_,String>(4)?,"source_rows":row.get::<_,i64>(5)?,"inserted_revisions":row.get::<_,i64>(6)?,"raw_path":row.get::<_,Option<String>>(7)?,"raw_sha256":row.get::<_,Option<String>>(8)?,"request_url":row.get::<_,Option<String>>(9)?,"error_class":row.get::<_,Option<String>>(10)?,"error":row.get::<_,Option<String>>(11)?,"source_run_id":row.get::<_,Option<String>>(12)?})))?.collect::<std::result::Result<Vec<_>,_>>()?
+        };
+        let manifest = serde_json::json!({"schema_version":SCHEMA_VERSION,"snapshot_id":snapshot_id,"job_id":job_id,"created_at":Utc::now().to_rfc3339(),"source":"tencent (Tencent preferred, then TDX for overlapping rows)","source_attempts":attempt_provenance,"symbols":symbols,"revision_lookback_days":lookback_days,"revision_lookback_start":(start-chrono::Duration::days(lookback_days)).to_string(),"requested_start":start.to_string(),"as_of_date":end.to_string(),"data_cutoff_date":end.to_string(),"coverage_status":coverage_status,"price_adjustment":"none","calendar_source":"SZSE CN calendar","calendar_file":"trading_calendar.txt","calendar_sha256":calendar_hash,"catalog_file":"securities.json","catalog_sha256":directory_hash,"data_file":"daily.parquet","data_sha256":data_hash,"rows":self.conn.query_row::<i64,_,_>(&format!("SELECT count(*) FROM read_parquet('{}')",parquet.display().to_string().replace('\'',"''")),[],|row|row.get(0))?,"audit":audit,"status_unknowns_preserved":true});
+        let manifest_bytes = serde_json::to_vec_pretty(&manifest)?;
+        let manifest_hash = sha256(&manifest_bytes);
+        fs::write(temp_dir.join("manifest.json"), &manifest_bytes)?;
+        // Re-open and hash every payload before publishing its immutable directory.
+        if sha256(&fs::read(&parquet)?) != data_hash
+            || sha256(&fs::read(temp_dir.join("securities.json"))?) != directory_hash
+            || sha256(&fs::read(temp_dir.join("trading_calendar.txt"))?) != calendar_hash
+            || sha256(&fs::read(temp_dir.join("manifest.json"))?) != manifest_hash
+        {
+            bail!("snapshot validation failed before publish");
+        }
+        let final_dir = snapshots_dir.join(snapshot_id.to_string());
+        fs::rename(&temp_dir, &final_dir)?;
+        after_directory_publish()?;
+        let current_tmp = snapshots_dir.join(format!(".current-{}.json", snapshot_id));
+        fs::write(
+            &current_tmp,
+            serde_json::to_vec_pretty(
+                &serde_json::json!({"snapshot_id":snapshot_id,"manifest":format!("{snapshot_id}/manifest.json"),"manifest_sha256":manifest_hash}),
+            )?,
+        )?;
+        fs::rename(&current_tmp, snapshots_dir.join("current.json"))?;
+        let manifest_path = final_dir.join("manifest.json");
+        self.conn.execute(
+            "INSERT INTO ops.daily_snapshot VALUES (?,?,?,?,?,?,?,?)",
+            params![
+                snapshot_id.to_string(),
+                job_id.to_string(),
+                end.to_string(),
+                end.to_string(),
+                coverage_status,
+                manifest_path.display().to_string(),
+                manifest_hash,
+                Utc::now().to_rfc3339()
+            ],
+        )?;
+        self.conn.execute("INSERT INTO ops.daily_snapshot_current VALUES ('daily_bar',?,?,?) ON CONFLICT(dataset) DO UPDATE SET snapshot_id=excluded.snapshot_id,manifest_path=excluded.manifest_path,updated_at=excluded.updated_at",params![snapshot_id.to_string(),manifest_path.display().to_string(),Utc::now().to_rfc3339()])?;
+        self.conn.execute("UPDATE ops.daily_sync_job SET status='PUBLISHED',snapshot_id=?,updated_at=? WHERE job_id=?",params![snapshot_id.to_string(),Utc::now().to_rfc3339(),job_id.to_string()])?;
+        Ok(DailySnapshotResult {
+            snapshot_id,
+            manifest_path,
+            data_path: final_dir.join("daily.parquet"),
+            manifest_sha256: manifest_hash,
+            data_sha256: data_hash,
+            coverage_status: coverage_status.into(),
+            data_cutoff_date: end.to_string(),
+        })
+    }
+
+    pub fn current_daily_snapshot(&self) -> Result<Option<DailySnapshotResult>> {
+        let pointer = self.data_dir.join("snapshots/current.json");
+        if !pointer.exists() {
+            return Ok(None);
+        }
+        let value: serde_json::Value = serde_json::from_slice(&fs::read(&pointer)?)?;
+        let id = value["snapshot_id"]
+            .as_str()
+            .context("invalid current snapshot pointer")?;
+        let manifest_path = self
+            .data_dir
+            .join("snapshots")
+            .join(id)
+            .join("manifest.json");
+        let bytes = fs::read(&manifest_path)?;
+        let expected = value["manifest_sha256"]
+            .as_str()
+            .context("pointer lacks manifest hash")?;
+        if sha256(&bytes) != expected {
+            bail!("current snapshot manifest hash mismatch")
+        }
+        let manifest: serde_json::Value = serde_json::from_slice(&bytes)?;
+        let data_path = manifest_path
+            .parent()
+            .context("manifest has no parent")?
+            .join("daily.parquet");
+        let data_hash = manifest["data_sha256"]
+            .as_str()
+            .context("manifest lacks data hash")?
+            .to_owned();
+        if sha256(&fs::read(&data_path)?) != data_hash {
+            bail!("current snapshot data hash mismatch")
+        }
+        Ok(Some(DailySnapshotResult {
+            snapshot_id: Uuid::parse_str(id)?,
+            manifest_path,
+            data_path,
+            manifest_sha256: expected.to_owned(),
+            data_sha256: data_hash,
+            coverage_status: manifest["coverage_status"]
+                .as_str()
+                .unwrap_or("unverified")
+                .into(),
+            data_cutoff_date: manifest["data_cutoff_date"].as_str().unwrap_or("").into(),
+        }))
+    }
+
+    pub fn latest_confirmed_daily_sync(
+        &mut self,
+        symbols: &[String],
+        lookback_days: u32,
+        retries: u32,
+    ) -> Result<DailySyncResult> {
+        let today = (Utc::now() + chrono::Duration::hours(8)).date_naive();
+        let today_calendar: Option<bool> = self
+            .conn
+            .query_row(
+                "SELECT is_open FROM core.trading_calendar_latest WHERE market='CN' AND source='szse' AND trade_date=?",
+                params![today.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if today_calendar.is_none() {
+            return self.sync_daily_tencent(symbols, today, today, lookback_days, retries);
+        }
+        let latest: Option<String>=self.conn.query_row("SELECT max(trade_date)::VARCHAR FROM core.trading_calendar_latest WHERE market='CN' AND source='szse' AND is_open AND trade_date<=?",params![today.to_string()],|row|row.get(0))?;
+        let day = latest
+            .context("no previously confirmed open day in SZSE calendar; import calendar first")?;
+        let day = NaiveDate::parse_from_str(&day, "%Y-%m-%d")?;
+        if (today - day).num_days() > 7 {
+            bail!(
+                "latest confirmed open day {day} is stale; refresh the SZSE calendar before scheduled sync"
+            );
+        }
+        self.sync_daily_tencent(symbols, day, day, lookback_days, retries)
     }
 
     pub fn export_snapshot(&self) -> Result<SnapshotResult> {
@@ -603,7 +1394,7 @@ impl Warehouse {
         end: NaiveDate,
         request_url: &str,
         response: &[u8],
-    ) -> Result<()> {
+    ) -> Result<PathBuf> {
         let run_id = self.create_run("tencent", request_url)?;
         let path = self.archive_raw_source(
             run_id,
@@ -629,7 +1420,8 @@ impl Warehouse {
                 run_id.to_string()
             ],
         )?;
-        self.finish_run(run_id, 0, 0)
+        self.finish_run(run_id, 0, 0)?;
+        Ok(path)
     }
 
     fn export_daily_snapshot(&self, trade_date: NaiveDate) -> Result<SnapshotResult> {
@@ -1547,10 +2339,27 @@ impl Warehouse {
                 if !matches!(row.trade_status.as_str(), "TRADABLE" | "HALTED" | "UNKNOWN") {
                     bail!("invalid trade_status");
                 }
+                for timestamp in [&row.published_at, &row.available_at].into_iter().flatten() {
+                    DateTime::parse_from_rfc3339(timestamp)
+                        .context("status publication timestamps must be RFC3339 with an offset")?;
+                }
+                let verification_status = row.verification_status.as_deref().unwrap_or("unknown");
+                if !matches!(verification_status, "verified" | "unverified" | "unknown") {
+                    bail!("invalid status verification_status");
+                }
                 let hash = sha256(
                     format!(
-                        "{}|{}|{}|{:?}|{:?}",
-                        row.symbol, date, row.trade_status, row.is_st, row.limit_rule_id
+                        "{}|{}|{}|{:?}|{:?}|{:?}|{:?}|{}|{:?}|{:?}",
+                        row.symbol,
+                        date,
+                        row.trade_status,
+                        row.is_st,
+                        row.limit_rule_id,
+                        row.source_ref,
+                        row.published_at,
+                        verification_status,
+                        row.available_at,
+                        row.coverage_ref
                     )
                     .as_bytes(),
                 );
@@ -1559,7 +2368,7 @@ impl Warehouse {
                 if existing.as_deref() == Some(&hash) {
                     continue;
                 }
-                transaction.execute("INSERT INTO core.security_status_revision VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", params![Uuid::new_v4().to_string(),row.symbol,date.to_string(),row.trade_status,row.is_st,row.limit_rule_id,source_name,observed.to_rfc3339(),run_id.to_string(),hash])?;
+                transaction.execute("INSERT INTO core.security_status_revision (revision_id,symbol,effective_date,trade_status,is_st,limit_rule_id,source,observed_at,run_id,row_hash,source_ref,raw_path,raw_sha256,published_at,available_at,verification_status,coverage_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", params![Uuid::new_v4().to_string(),row.symbol,date.to_string(),row.trade_status,row.is_st,row.limit_rule_id,source_name,observed.to_rfc3339(),run_id.to_string(),hash,row.source_ref,path.display().to_string(),sha256(csv_bytes),row.published_at,row.available_at,verification_status,row.coverage_ref])?;
                 inserted += 1;
             }
             transaction.commit()?;
@@ -1582,6 +2391,73 @@ impl Warehouse {
                 Err(error)
             }
         }
+    }
+
+    /// Imports A's source facts and their explicit coverage claims through the
+    /// warehouse's single writer. Missing rows remain UNKNOWN; declared coverage
+    /// and independent verification are stored separately.
+    pub fn import_security_status_evidence(
+        &mut self,
+        csv_bytes: &[u8],
+        source_name: &str,
+        source_url: &str,
+        coverage: &[StatusCoverageEvidence],
+    ) -> Result<IngestResult> {
+        if coverage.is_empty() {
+            bail!("status evidence import requires explicit coverage records");
+        }
+        for item in coverage {
+            sources::validate_explicit_symbol(&item.symbol, true)?;
+            if item.coverage_start > item.coverage_end
+                || !matches!(
+                    item.declared_coverage.as_str(),
+                    "complete" | "gaps" | "unverified"
+                )
+                || !matches!(item.verification_status.as_str(), "verified" | "unverified")
+                || item.source_ref.trim().is_empty()
+            {
+                bail!("invalid status coverage evidence");
+            }
+        }
+        let result = self.import_security_status_csv(csv_bytes, source_name, source_url)?;
+        let raw_path: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT raw_path FROM ops.ingest_run WHERE run_id=?",
+                params![result.run_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let raw_hash: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT raw_sha256 FROM ops.ingest_run WHERE run_id=?",
+                params![result.run_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let tx = self.conn.transaction()?;
+        for item in coverage {
+            tx.execute(
+                "INSERT INTO ops.security_status_coverage VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                params![
+                    Uuid::new_v4().to_string(),
+                    source_name,
+                    item.symbol,
+                    item.coverage_start.to_string(),
+                    item.coverage_end.to_string(),
+                    item.declared_coverage,
+                    item.verification_status,
+                    item.source_ref,
+                    raw_path,
+                    raw_hash,
+                    item.detail,
+                    Utc::now().to_rfc3339()
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(result)
     }
 
     pub fn publish_daily(&mut self, trade_date: NaiveDate) -> Result<SnapshotResult> {
@@ -1671,6 +2547,16 @@ struct StatusCsvRow {
     symbol: String,
     effective_date: String,
     trade_status: String,
+    #[serde(default)]
+    source_ref: Option<String>,
+    #[serde(default)]
+    published_at: Option<String>,
+    #[serde(default)]
+    available_at: Option<String>,
+    #[serde(default)]
+    verification_status: Option<String>,
+    #[serde(default)]
+    coverage_ref: Option<String>,
     is_st: Option<bool>,
     limit_rule_id: Option<String>,
 }
@@ -1857,6 +2743,17 @@ mod tests {
             .unwrap()
     }
 
+    fn symbol_payload(symbol: &str, rows: serde_json::Value) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({"code":0,"data":{symbol:{"day":rows}}})).unwrap()
+    }
+
+    fn fixture_bar(symbol: &str, date: NaiveDate, close: &str) -> Vec<u8> {
+        symbol_payload(
+            symbol,
+            serde_json::json!([[date.to_string(), "10", "11", "12", "9", close, "100"]]),
+        )
+    }
+
     #[test]
     fn converts_lots_to_shares_and_orders_ohlc() {
         let bars = parse_tencent_day_response(
@@ -1967,8 +2864,463 @@ mod tests {
                     row.get(0)
                 })
                 .unwrap(),
-            6
+            7
         );
+    }
+
+    #[test]
+    fn daily_sync_is_idempotent_tracks_revisions_and_publishes_immutable_snapshot() {
+        let temporary = TempDir::new().unwrap();
+        let mut warehouse = Warehouse::open(temporary.path()).unwrap();
+        let symbol = "sh600519".to_owned();
+        let day = NaiveDate::from_ymd_opt(2025, 1, 2).unwrap();
+        let first = fixture_bar(&symbol, day, "10.5");
+        let mut fetched = first.clone();
+        let synced = warehouse
+            .sync_daily_tencent_with_fetch(
+                std::slice::from_ref(&symbol),
+                day,
+                day,
+                0,
+                1,
+                |_, _, _| Ok(("fixture://tencent".into(), fetched.clone())),
+            )
+            .unwrap();
+        assert_eq!(synced.inserted_revisions, 1);
+        assert_eq!(synced.attempts, 1);
+        let calendar = [sources::CalendarDay {
+            trade_date: day,
+            is_open: true,
+        }];
+        warehouse
+            .ingest_calendar_response(2025, 1, "fixture://calendar", b"calendar", &calendar)
+            .unwrap();
+        let published = warehouse.publish_daily_sync(synced.job_id).unwrap();
+        assert_eq!(published.coverage_status, "complete");
+        let old_id = published.snapshot_id;
+        let empty = warehouse
+            .sync_daily_tencent_with_fetch(
+                std::slice::from_ref(&symbol),
+                day,
+                day,
+                0,
+                0,
+                |symbol, _, _| {
+                    Ok((
+                        "fixture://empty-after-prior-bar".into(),
+                        serde_json::to_vec(
+                            &serde_json::json!({"code":0,"data":{symbol:{"day":[]}}}),
+                        )
+                        .unwrap(),
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(empty.empty_responses, 1);
+        assert!(warehouse.publish_daily_sync(empty.job_id).is_err());
+        assert_eq!(
+            warehouse
+                .current_daily_snapshot()
+                .unwrap()
+                .unwrap()
+                .snapshot_id,
+            old_id
+        );
+        let empty_audit: String = warehouse
+            .conn
+            .query_row(
+                "SELECT audit_json FROM ops.daily_sync_job WHERE job_id=?",
+                params![empty.job_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&empty_audit).unwrap()["empty_source_attempts"],
+            1
+        );
+        let snapshot_rows: i64 = warehouse
+            .conn
+            .query_row(
+                &format!(
+                    "SELECT count(*) FROM read_parquet('{}')",
+                    published.data_path.display()
+                ),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(snapshot_rows, 1);
+        let unknown_status: String = warehouse
+            .conn
+            .query_row(
+                &format!(
+                    "SELECT trade_status FROM read_parquet('{}')",
+                    published.data_path.display()
+                ),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(unknown_status, "UNKNOWN");
+
+        let repeat = warehouse
+            .sync_daily_tencent_with_fetch(
+                std::slice::from_ref(&symbol),
+                day,
+                day,
+                0,
+                1,
+                |_, _, _| Ok(("fixture://tencent".into(), first.clone())),
+            )
+            .unwrap();
+        assert_eq!(repeat.inserted_revisions, 0);
+        assert_eq!(repeat.duplicate_rows, 1);
+        let repeat_snapshot = warehouse.publish_daily_sync(repeat.job_id).unwrap();
+        assert_eq!(repeat_snapshot.data_sha256, published.data_sha256);
+        fetched = fixture_bar(&symbol, day, "10.75");
+        let revised = warehouse
+            .sync_daily_tencent_with_fetch(
+                std::slice::from_ref(&symbol),
+                day,
+                day,
+                0,
+                1,
+                |_, _, _| Ok(("fixture://tencent".into(), fetched.clone())),
+            )
+            .unwrap();
+        assert_eq!(revised.inserted_revisions, 1);
+        assert_eq!(
+            warehouse
+                .conn
+                .query_row::<i64, _, _>(
+                    "SELECT count(*) FROM staging.daily_bar_revision WHERE symbol=?",
+                    params![symbol],
+                    |row| row.get(0)
+                )
+                .unwrap(),
+            2
+        );
+        let new_snapshot = warehouse.publish_daily_sync(revised.job_id).unwrap();
+        assert_ne!(old_id, new_snapshot.snapshot_id);
+        assert!(published.data_path.exists());
+        assert_eq!(
+            warehouse
+                .current_daily_snapshot()
+                .unwrap()
+                .unwrap()
+                .snapshot_id,
+            new_snapshot.snapshot_id
+        );
+        assert_eq!(
+            resolve_published_daily_snapshot(temporary.path(), Some(old_id))
+                .unwrap()
+                .snapshot_id,
+            old_id
+        );
+        assert_eq!(
+            resolve_published_daily_snapshot(temporary.path(), None)
+                .unwrap()
+                .snapshot_id,
+            new_snapshot.snapshot_id
+        );
+        let next_day = day.succ_opt().unwrap();
+        let interrupted = warehouse
+            .sync_daily_tencent_with_fetch(
+                std::slice::from_ref(&symbol),
+                next_day,
+                next_day,
+                0,
+                0,
+                |_, _, _| {
+                    Ok((
+                        "fixture://next-day".into(),
+                        fixture_bar(&symbol, next_day, "10.8"),
+                    ))
+                },
+            )
+            .unwrap();
+        warehouse
+            .ingest_calendar_response(
+                2025,
+                1,
+                "fixture://calendar-next-day",
+                b"calendar-next",
+                &[sources::CalendarDay {
+                    trade_date: next_day,
+                    is_open: true,
+                }],
+            )
+            .unwrap();
+        assert!(
+            warehouse
+                .publish_daily_sync_with_hook(interrupted.job_id, || {
+                    bail!("simulated interruption after immutable directory rename")
+                })
+                .is_err()
+        );
+        assert_eq!(
+            resolve_published_daily_snapshot(temporary.path(), None)
+                .unwrap()
+                .snapshot_id,
+            new_snapshot.snapshot_id
+        );
+
+        let missing_day = next_day.succ_opt().unwrap();
+        let incomplete = warehouse
+            .sync_daily_tencent_with_fetch(
+                std::slice::from_ref(&symbol),
+                missing_day,
+                missing_day,
+                0,
+                0,
+                |_, _, _| {
+                    Ok((
+                        "fixture://missing-calendar".into(),
+                        fixture_bar(&symbol, missing_day, "10.9"),
+                    ))
+                },
+            )
+            .unwrap();
+        assert!(warehouse.publish_daily_sync(incomplete.job_id).is_err());
+        assert_eq!(
+            warehouse
+                .conn
+                .query_row::<String, _, _>(
+                    "SELECT status FROM ops.daily_sync_job WHERE job_id=?",
+                    params![incomplete.job_id.to_string()],
+                    |row| row.get(0)
+                )
+                .unwrap(),
+            "AUDIT_FAILED"
+        );
+        assert_eq!(
+            warehouse
+                .current_daily_snapshot()
+                .unwrap()
+                .unwrap()
+                .snapshot_id,
+            new_snapshot.snapshot_id
+        );
+        warehouse
+            .ingest_calendar_response(
+                2025,
+                1,
+                "fixture://calendar-missing-day",
+                b"calendar-repair",
+                &[sources::CalendarDay {
+                    trade_date: missing_day,
+                    is_open: true,
+                }],
+            )
+            .unwrap();
+        let retried_publish = warehouse.publish_daily_sync(incomplete.job_id).unwrap();
+        assert_eq!(retried_publish.coverage_status, "complete");
+    }
+
+    #[test]
+    fn daily_sync_retries_errors_resumes_interrupted_jobs_and_keeps_empty_unknown() {
+        let temporary = TempDir::new().unwrap();
+        let mut warehouse = Warehouse::open(temporary.path()).unwrap();
+        let symbol = "sh600519".to_owned();
+        let day = NaiveDate::from_ymd_opt(2025, 1, 2).unwrap();
+        let body = fixture_bar(&symbol, day, "10.5");
+        let mut calls = 0;
+        let result = warehouse
+            .sync_daily_tencent_with_fetch(
+                std::slice::from_ref(&symbol),
+                day,
+                day,
+                0,
+                2,
+                |_, _, _| {
+                    calls += 1;
+                    if calls == 1 {
+                        bail!("simulated timeout")
+                    }
+                    Ok(("fixture://retry".into(), body.clone()))
+                },
+            )
+            .unwrap();
+        assert_eq!(result.attempts, 2);
+        let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = warehouse.sync_daily_tencent_with_fetch(
+                &["sh600001".into()],
+                day,
+                day,
+                0,
+                0,
+                |_, _, _| panic!("simulated interruption"),
+            );
+        }));
+        assert!(interrupted.is_err());
+        let running_job: String = warehouse
+            .conn
+            .query_row(
+                "SELECT job_id FROM ops.daily_sync_job WHERE status='RUNNING'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let resumed = warehouse
+            .sync_daily_tencent_with_fetch(&["sh600001".into()], day, day, 0, 0, |_, _, _| {
+                Ok((
+                    "fixture://resume".into(),
+                    symbol_payload(
+                        "sh600001",
+                        serde_json::json!([[day.to_string(), "10", "11", "12", "9", "10", "100"]]),
+                    ),
+                ))
+            })
+            .unwrap();
+        assert_eq!(resumed.job_id.to_string(), running_job);
+        assert_eq!(
+            warehouse
+                .conn
+                .query_row::<String, _, _>(
+                    "SELECT status FROM ops.daily_sync_job WHERE job_id=?",
+                    params![resumed.job_id.to_string()],
+                    |row| row.get(0)
+                )
+                .unwrap(),
+            "SUCCESS"
+        );
+
+        let empty_symbol = "sz159919".to_owned();
+        let empty = warehouse
+            .sync_daily_tencent_with_fetch(&[empty_symbol], day, day, 0, 0, |symbol, _, _| {
+                Ok((
+                    "fixture://empty".into(),
+                    serde_json::to_vec(&serde_json::json!({"code":0,"data":{symbol:{"day":[]}}}))
+                        .unwrap(),
+                ))
+            })
+            .unwrap();
+        assert_eq!(empty.empty_responses, 1);
+        assert!(warehouse.publish_daily_sync(empty.job_id).is_err());
+        assert_eq!(
+            warehouse
+                .conn
+                .query_row::<String, _, _>(
+                    "SELECT status FROM ops.daily_sync_attempt WHERE job_id=?",
+                    params![empty.job_id.to_string()],
+                    |row| row.get(0)
+                )
+                .unwrap(),
+            "EMPTY"
+        );
+    }
+
+    #[test]
+    fn daily_sync_excludes_current_shanghai_day_and_writer_lock_is_exclusive() {
+        let temporary = TempDir::new().unwrap();
+        let mut first = Warehouse::open(temporary.path()).unwrap();
+        assert!(Warehouse::open(temporary.path()).is_err());
+        let today = (Utc::now() + chrono::Duration::hours(8)).date_naive();
+        assert!(
+            first
+                .sync_daily_tencent_with_fetch(
+                    &["sh600519".into()],
+                    today,
+                    today,
+                    0,
+                    0,
+                    |_, _, _| unreachable!()
+                )
+                .is_err()
+        );
+        assert_eq!(
+            first
+                .conn
+                .query_row::<String, _, _>("SELECT status FROM ops.daily_sync_job", [], |row| row
+                    .get(0))
+                .unwrap(),
+            "NOT_PUBLISHED"
+        );
+        assert!(
+            first
+                .latest_confirmed_daily_sync(&["sh600001".into()], 0, 0)
+                .is_err()
+        );
+        assert_eq!(
+            first
+                .conn
+                .query_row::<i64, _, _>(
+                    "SELECT count(*) FROM ops.daily_sync_job WHERE status='NOT_PUBLISHED'",
+                    [],
+                    |row| row.get(0)
+                )
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            first
+                .conn
+                .query_row::<String, _, _>("SELECT status FROM ops.daily_sync_attempt", [], |row| {
+                    row.get(0)
+                })
+                .unwrap(),
+            "NOT_PUBLISHED"
+        );
+    }
+
+    #[test]
+    fn status_coverage_claim_and_unknown_semantics_are_frozen_without_promotion() {
+        let temporary = TempDir::new().unwrap();
+        let mut warehouse = Warehouse::open(temporary.path()).unwrap();
+        let symbol = "sh600519".to_owned();
+        let day = NaiveDate::from_ymd_opt(2025, 1, 2).unwrap();
+        let body = fixture_bar(&symbol, day, "10.5");
+        let sync = warehouse
+            .sync_daily_tencent_with_fetch(
+                std::slice::from_ref(&symbol),
+                day,
+                day,
+                0,
+                0,
+                |_, _, _| Ok(("fixture://bar".into(), body.clone())),
+            )
+            .unwrap();
+        let status_csv=b"symbol,effective_date,trade_status,is_st,limit_rule_id,source_ref,published_at,available_at,verification_status,coverage_ref\nsh600519,2025-01-02,TRADABLE,false,,fixture://status-fact,2025-01-01T09:00:00+08:00,2025-01-01T09:05:00+08:00,unverified,fixture://coverage\n";
+        warehouse
+            .import_security_status_evidence(
+                status_csv,
+                "fixture-status",
+                "fixture://status",
+                &[StatusCoverageEvidence {
+                    symbol: symbol.clone(),
+                    coverage_start: day,
+                    coverage_end: day,
+                    declared_coverage: "gaps".into(),
+                    verification_status: "unverified".into(),
+                    source_ref: "fixture://coverage".into(),
+                    detail: Some("fixture has only one confirmed row".into()),
+                }],
+            )
+            .unwrap();
+        warehouse
+            .ingest_calendar_response(
+                2025,
+                1,
+                "fixture://calendar",
+                b"calendar",
+                &[sources::CalendarDay {
+                    trade_date: day,
+                    is_open: true,
+                }],
+            )
+            .unwrap();
+        let published = warehouse.publish_daily_sync(sync.job_id).unwrap();
+        let row:(String,String,bool,String,String,String,String,String,String,String) = warehouse.conn.query_row(&format!("SELECT trade_status,status_source,status_covered,status_coverage,status_source_hashes,status_source_refs,status_available_at,status_published_at,status_verification_status,status_coverage_refs FROM read_parquet('{}')",published.data_path.display()),[],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?,row.get(8)?,row.get(9)?))).unwrap();
+        assert_eq!(row.0, "TRADABLE");
+        assert_eq!(row.1, "fixture-status");
+        assert!(row.2);
+        assert!(row.3.contains("gaps:unverified"));
+        assert_eq!(row.4.len(), 64);
+        assert_eq!(row.5, "fixture://status-fact");
+        assert!(row.6.contains("2025-01-01 01:05:00"));
+        assert!(row.7.contains("2025-01-01 01:00:00"));
+        assert_eq!(row.8, "unverified");
+        assert_eq!(row.9, "fixture://coverage");
     }
 
     #[test]

@@ -1,0 +1,19 @@
+[
+  {
+    "code": "513300",
+    "source": "secondary report citing issuer/SSE temporary suspension notice; primary not captured",
+    "source_ref": "https://finance.eastmoney.com/a/202609173877453845.html",
+    "raw_path": null,
+    "raw_sha256": null,
+    "verification_status": "unverified_primary_not_captured",
+    "effective_from": "2026-09-18",
+    "effective_to": "2026-09-19",
+    "trade_status": "HALTED",
+    "scope": "intraday",
+    "intraday_start": "09:30",
+    "intraday_end": "10:30",
+    "published_at": "2026-09-17T19:13:00+08:00",
+    "available_at": "2026-09-17T19:13:00+08:00",
+    "historical_scope": "event_list"
+  }
+]

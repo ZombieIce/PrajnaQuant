@@ -38,7 +38,7 @@ export async function api<T>(url: string, init?: RequestInit): Promise<T> {
 
 export function Panel({ title, children }: { title: string; children: ReactNode }) { return <section className="panel"><h2>{title}</h2>{children}</section>; }
 
-export function Header() { return <header><b>Prajna Quant</b><nav><a href="/">策略绩效</a><a href="/factors">因子研究</a><a href="/universes">Universe</a></nav></header>; }
+export function Header() { return <header><b>Prajna Quant</b><nav><a href="/">策略绩效</a><a href="/factors">因子研究</a><a href="/universes">Universe</a><a href="/market">证券行情</a></nav></header>; }
 
 export class PageErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
   state = { error: null as string | null };

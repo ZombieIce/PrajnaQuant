@@ -6,7 +6,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use ashare_warehouse::{Warehouse, sources};
+use ashare_warehouse::{StatusCoverageEvidence, Warehouse, sources};
 use chrono::{Duration as ChronoDuration, NaiveDate};
 use clap::{Parser, Subcommand};
 
@@ -119,6 +119,17 @@ enum Command {
         #[arg(long)]
         input: PathBuf,
     },
+    /// Imports A's status facts plus explicit per-security coverage evidence.
+    ImportStatusEvidence {
+        #[arg(long)]
+        source: String,
+        #[arg(long)]
+        source_url: String,
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        coverage: PathBuf,
+    },
     /// Imports the third-party CSI 300 history with explicitly simulated notice times.
     ImportIndexConstitutionCsv {
         #[arg(long)]
@@ -133,6 +144,34 @@ enum Command {
     PublishDaily {
         #[arg(long)]
         trade_date: NaiveDate,
+    },
+    /// Incrementally sync an explicit security list, rechecking a bounded lookback,
+    /// then audit and atomically publish a frozen snapshot.
+    SyncDaily {
+        #[arg(long, required = true)]
+        symbol: Vec<String>,
+        #[arg(long)]
+        start: NaiveDate,
+        #[arg(long)]
+        end: NaiveDate,
+        #[arg(long, default_value_t = 10)]
+        lookback_days: u32,
+        #[arg(long, default_value_t = 2)]
+        retries: u32,
+    },
+    /// Sync and publish the latest prior open day confirmed by the imported calendar.
+    SyncDailyLatest {
+        #[arg(long, required = true)]
+        symbol: Vec<String>,
+        #[arg(long, default_value_t = 10)]
+        lookback_days: u32,
+        #[arg(long, default_value_t = 2)]
+        retries: u32,
+    },
+    /// Retry audit/publication for a completed daily-sync job without refetching.
+    PublishSync {
+        #[arg(long)]
+        job_id: uuid::Uuid,
     },
     /// Imports a saved Tencent day-K JSON response. Network fetching stays in a separate adapter.
     ImportTencentFixture {
@@ -619,6 +658,37 @@ fn main() -> Result<()> {
                 &source_url,
             )?)?
         }
+        Command::ImportStatusEvidence {
+            source,
+            source_url,
+            input,
+            coverage,
+        } => {
+            let bytes =
+                fs::read(&input).with_context(|| format!("read status CSV {}", input.display()))?;
+            let coverage_bytes = fs::read(&coverage)
+                .with_context(|| format!("read status coverage CSV {}", coverage.display()))?;
+            let mut reader = csv::Reader::from_reader(coverage_bytes.as_slice());
+            let mut items = Vec::new();
+            for record in reader.deserialize::<StatusCoverageCsv>() {
+                let record = record?;
+                items.push(StatusCoverageEvidence {
+                    symbol: record.symbol,
+                    coverage_start: NaiveDate::parse_from_str(&record.coverage_start, "%Y-%m-%d")?,
+                    coverage_end: NaiveDate::parse_from_str(&record.coverage_end, "%Y-%m-%d")?,
+                    declared_coverage: record.declared_coverage,
+                    verification_status: record.verification_status,
+                    source_ref: record.source_ref,
+                    detail: record.detail,
+                });
+            }
+            serde_json::to_value(warehouse.import_security_status_evidence(
+                &bytes,
+                &source,
+                &source_url,
+                &items,
+            )?)?
+        }
         Command::ImportIndexConstitutionCsv { input, source_url } => {
             let bytes = fs::read(&input)
                 .with_context(|| format!("read index constitution CSV {}", input.display()))?;
@@ -633,6 +703,35 @@ fn main() -> Result<()> {
         }
         Command::PublishDaily { trade_date } => {
             serde_json::to_value(warehouse.publish_daily(trade_date)?)?
+        }
+        Command::SyncDaily {
+            symbol,
+            start,
+            end,
+            lookback_days,
+            retries,
+        } => {
+            let mut result =
+                warehouse.sync_daily_tencent(&symbol, start, end, lookback_days, retries)?;
+            match warehouse.publish_daily_sync(result.job_id) {
+                Ok(snapshot) => { result.snapshot=Some(snapshot); serde_json::to_value(result)? }
+                Err(error) => return Err(error).context(format!("sync job {} ingested but audit/publication failed; retry with `publish-sync --job-id {}`",result.job_id,result.job_id)),
+            }
+        }
+        Command::SyncDailyLatest {
+            symbol,
+            lookback_days,
+            retries,
+        } => {
+            let mut result =
+                warehouse.latest_confirmed_daily_sync(&symbol, lookback_days, retries)?;
+            match warehouse.publish_daily_sync(result.job_id) {
+                Ok(snapshot) => { result.snapshot=Some(snapshot); serde_json::to_value(result)? }
+                Err(error) => return Err(error).context(format!("sync job {} ingested but audit/publication failed; retry with `publish-sync --job-id {}`",result.job_id,result.job_id)),
+            }
+        }
+        Command::PublishSync { job_id } => {
+            serde_json::to_value(warehouse.publish_daily_sync(job_id)?)?
         }
         Command::ImportTencentFixture {
             symbol,
@@ -654,6 +753,17 @@ fn main() -> Result<()> {
     };
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
+}
+
+#[derive(serde::Deserialize)]
+struct StatusCoverageCsv {
+    symbol: String,
+    coverage_start: String,
+    coverage_end: String,
+    declared_coverage: String,
+    verification_status: String,
+    source_ref: String,
+    detail: Option<String>,
 }
 
 fn format_duration(duration: Duration) -> String {

@@ -1,12 +1,16 @@
 # Project Status
 
-扫描日期：2026-09-24。状态含义：Implemented=代码存在；Partially Implemented=只覆盖部分契约；Planned=有明确路线但无实现；Missing=未见实现；Unknown=仓库证据不足。**Implemented 不表示量化正确性已被充分测试或数据已被验收。**代码仓库已关联 GitHub `ZombieIce/PrajnaQuant`；本机被忽略的数据仍不是可交接资产。
+扫描日期：2026-09-25。状态含义：Implemented=代码存在；Partially Implemented=只覆盖部分契约；Planned=有明确路线但无实现；Missing=未见实现；Unknown=仓库证据不足。**Implemented 不表示量化正确性已被充分测试或数据已被验收。**代码仓库已关联 GitHub `ZombieIce/PrajnaQuant`；本机被忽略的数据仍不是可交接资产。
 
 完整的问题排序、解决路径及验收判据见 [`priorities.md`](priorities.md)。这里保留按领域归类的事实状态。
 
 ## Current Phase
 
-产品初级目标已明确为本地与可远程部署的 A 股股票/ETF 日频研究回测平台，含 Python 因子研究、每日自动增量同步、网页因子/组合/选股池/K 线展示；这是**目标**，交付依赖和验收见 [`product-roadmap.md`](product-roadmap.md)。当前仍是本地日频 ETF Rotation MVP 原型，另有 A 股 DuckDB 仓库。单动量与轮动综合评分/参数扫描及手算金标准已存在；Universe 契约、管理 API、前端管理/结果筛选和 version-aware 计算入口已落地；五 ETF 固定版本/快照真实复跑与 API/浏览器闭环已验收。通用股票/ETF 冻结日频快照是代码与合成测试能力，不等于股票回测。服务端运行作业仍缺；执行状态门槛只有合成快照验证，本次真实实验使用旧快照 `legacy_bar_only`，P0-3 仍开放。
+产品初级目标是本地与可远程部署的 A 股股票/ETF 日频研究回测平台，含 Python 因子研究、自动日更和网页研究/行情展示；交付依赖见 [`product-roadmap.md`](product-roadmap.md)。当前仍是本地 ETF Rotation MVP 加 A 股仓库。Batch 2 已有显式证券增量同步/失败恢复/不可变发布代码，隔离股票+ETF 真实小样本通过；已发布快照的只读证券/日线 API 和 K 线页面在合成目录通过。生产同步/调度、生产股票快照、Python 研究包、运行作业和远程认证部署仍未验。五 ETF 真实状态覆盖不足，旧实验仍 `legacy_bar_only`，新 `status_gated` 占位跑全 UNKNOWN，P0-3 开放；股票回测没有开放。
+
+## Batch 2 Integration Acceptance (2026-09-25)
+
+总评**部分通过**；要求、代码/测试/真实样本/浏览器证据及限制见 [`handoffs/batch2-integration-acceptance.md`](handoffs/batch2-integration-acceptance.md)。A：241×5 状态格全 UNKNOWN，只有一条无交易所原文的盘中限制二级消息；同价面板/Universe 复跑 0 成交、24 个 unknown 拒单，只验证缺证拒单。B：仓库迁移 007 和 `sync-daily`/`publish-sync` 支持显式证券增量、修订回看、重试/断点、审计和不可变快照；隔离真实样本重复同步不增有效修订，生产状态 Unknown。C：新增 `/api/v1/instruments` 通用发布快照搜索、`/api/v1/daily-bars` 分页与 `/market` 页面；B 格式的发布指针与 C 只读 API 已接通并测试固定版本。B 真实小样本证券目录缺身份/分类，因此生产股票/ETF 行情页面仍未验。调度脚本未安装/启用。
 
 
 ## Batch 1 Integration Acceptance (2026-09-24)
@@ -31,22 +35,22 @@ Signal Registry Lite、单因子 Pearson/Rank IC、分组/multi-horizon 报告�
 
 ## P3 — Future
 
-严格 PIT ETF/股票数据、财务披露时点、行业/指数历史成分、分钟/实盘、分布式执行、正式数据发布和十年数据查询优化仍是未来方向；旧设计文件详述目标，不能视为当前状态。
+严格 PIT ETF/股票数据、财务披露时点、行业/指数历史成分、分钟/实盘、分布式执行、生产级数据发布和十年数据查询优化仍是未来方向；旧设计文件详述目标，不能视为当前状态。
 
 ## Completed
 
 - Rust 仓库：原文/hash/run、版本化日线、ETF 当前分类、基础日历/状态/复权因子表与研究视图、Parquet 导出。
 - Rust 研究：快照 manifest/hash、带日历与标签口径的单因子评价（Pearson/Rank IC、coverage/missing、Top 分位更换与分数自相关）、综合轮动评分、批量参数扫描、T 后下一行情日开盘模拟、绩效/成本汇总、实验 JSON。
 - Axum 原有结果 GET 与新增本地 Universe CRUD/筛选路由；React 因子目录/详情、策略目录/详情、API 驱动的 Universe 管理与已保存结果筛选页面。`apps/web` 可构建。
-- Universe 手工成员支持查询本地 ETF 快照并按证券代码前缀/名称匹配，选择后自动填写名称、市场及资产类型；股票名称目录尚未接入，允许用户手工填名。发布只冻结本次版本，草稿继续可编辑并可发布后续版本。
+- Universe 手工成员与 `/api/v1/instruments` 已可查询发布快照中的证券；股票候选保留未核验分类，不能当作历史 PIT 名录。发布只冻结本次版本，草稿继续可编辑并可发布后续版本。
 - Universe 页面将发布操作放在草稿视图顶部的吸附操作栏，并在按钮旁显示发布进度/结果；PIT、覆盖与运行能力说明可展开，日期成员明细默认收起。
 - Universe 发布新增服务端 preview/hash 再校验：确认前展示与上一版本的差异，有变化才允许发布；草稿内容相同则不新增版本，过期确认会被拒绝。成员表按“代码 · 名称”展示。
 - 策略详情新增持仓资金占用率及各标的持股数量曲线，两者与净值/回撤共用所选日期区间；新增逐标的已实现、浮动与总盈亏表。盈亏使用移动加权平均成本并披露成本/估值规则；旧报告无字段时明确提示重跑。口径与兼容规则见 `docs/decisions/0006-instrument-pnl-attribution.md`。
-- 发布差异接口与重复发布保护有单测；本批全工作区验收为仓库 10 项、研究 49 项、真实 opt-in 1 项另行通过。格式、Clippy 和前端构建均通过。
+- 发布差异接口与重复发布保护有单测；Batch 2 集成全工作区为仓库 14 项、研究 56 项通过，真实五 ETF opt-in 1 项默认 ignored。格式、Clippy 和前端构建均通过；真实状态覆盖仍未验。
 
 ## In Progress
 
-本批代码/合成测试和五 ETF 真实 bar-only 闭环已集成；待验收的是可信状态源历史覆盖与可用时刻、带状态真实快照复跑、历史 PIT 成员和公司行动。既有 `research-output/` 历史样本不自动升级为新规则结果。
+Batch 2 的增量同步/行情页已有代码、隔离小样本和合成浏览器验收；仍待可信五 ETF 状态源的历史覆盖与可用时刻、带真实状态快照复跑、生产股票证券身份与日线验证、生产调度启用、历史 PIT 成员和公司行动。既有 `research-output/` 历史样本不自动升级为新规则结果。
 
 ## Missing
 
@@ -55,8 +59,8 @@ Signal Registry Lite、单因子 Pearson/Rank IC、分组/multi-horizon 报告�
 - 后端 Sortino、Win Rate、Benchmark Return、Excess Return、Tracking Error、Information Ratio。
 - 历史指数成分 provider 和完整覆盖证明；当前指数 Universe API 对历史成分明确返回空、unknown/gaps。
 - React 的基准/超额净值、月度收益热图、年度收益、逐日持仓权重、组合换手、成交与交易成本明细；因子值分布与相关热图。策略详情现有逐日资金占用率、持股数量和期末逐标的盈亏摘要。
-- API 完整 cursor 分页、日期范围、降采样；Universe 历史成分 provider、完整覆盖的独立跨交易所日历尚未连接；ETF 快照已有 SZSE 完整月份旁车及共同缺日校验；异步运行状态/队列与网页发起新运行尚无。独立 CI、迁移回填/版本管理工具、Python 研究包。
-- 初级产品目标已有显式证券列表的股票/ETF 通用研究快照代码与合成测试，但缺生产股票快照验收、股票回测和正式 Python 因子研究互通、证券 K 线 API/页面、交易日后自动增量同步调度与失败恢复、远程认证/部署配置；现有 Rust 本地 CLI/loopback API 不等于这些能力。
+- 实验/Universe API 的完整 cursor 分页、日期范围与大型序列聚合仍缺；证券搜索和日线 API 已有范围与 cursor，但十年生产性能未验。Universe 历史成分 provider、完整覆盖的独立跨交易所日历尚未连接；ETF 快照已有 SZSE 完整月份旁车及共同缺日校验；异步运行状态/队列与网页发起新运行尚无。独立 CI、迁移回填/版本管理工具、Python 研究包。
+- 初级产品目标已有显式证券列表的股票/ETF 通用研究快照、增量同步/恢复、证券 K 线 API/页面代码及合成或隔离小样本测试；仍缺生产股票快照验收、股票回测、正式 Python 因子研究互通、已启用的日更调度与远程认证/部署配置。现有 Rust 本地 CLI/loopback API 不等于这些生产能力。
 
 ## Known Bugs
 

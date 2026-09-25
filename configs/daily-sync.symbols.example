@@ -1,0 +1,4 @@
+# Copy to configs/daily-sync.symbols and replace with an explicitly approved,
+# small stock/ETF set. One canonical symbol per line; never enumerate all shares.
+sh600519
+sh510300

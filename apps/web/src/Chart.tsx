@@ -1,11 +1,11 @@
 import { useEffect, useRef } from 'react';
 import type { EChartsOption } from 'echarts';
 import { use, init } from 'echarts/core';
-import { BarChart, LineChart } from 'echarts/charts';
+import { BarChart, CandlestickChart, LineChart } from 'echarts/charts';
 import { DataZoomComponent, GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 
-use([BarChart, LineChart, DataZoomComponent, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
+use([BarChart, CandlestickChart, LineChart, DataZoomComponent, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
 export function Chart({ option }: { option: EChartsOption }) {
   const ref = useRef<HTMLDivElement>(null);

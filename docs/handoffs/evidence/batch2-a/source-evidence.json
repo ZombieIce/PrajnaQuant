@@ -1,0 +1,73 @@
+{
+  "capture_schema": "prajna-source-evidence-capture-v1",
+  "retrieved_at": "2026-09-24",
+  "capture_method": "web search/index excerpts; the source host could not be fetched from the shell because DNS/network access is unavailable",
+  "captures": [
+    {
+      "source": "Shanghai Stock Exchange public suspension query (fund category)",
+      "url": "https://www.sse.com.cn/disclosure/dealinstruc/suspension/fund/",
+      "source_class": "official event list / query UI",
+      "scope_evidence": "The query presents fund code/name, suspension start/end date, suspension time, and reason, with code/keyword/date-range filters.",
+      "coverage_semantics": "No public completeness guarantee for all ETF × session cells was found. Silence is not evidence of full-day tradability.",
+      "historical_publication_time": null,
+      "original_bytes_saved": false,
+      "original_sha256": null,
+      "excerpt_sha256": null
+    },
+    {
+      "source": "Shanghai Stock Exchange LDDS reference data interface description",
+      "url": "https://bsp.sseinfo.com/admin/static/public/2024-06-07/163dba54e4334131b2d953ede8a8368c/%E4%B8%8A%E6%B5%B7%E8%AF%81%E5%88%B8%E4%BA%A4%E6%98%93%E6%89%80LDDS%E7%B3%BB%E7%BB%9F%E4%B8%BB%E5%8F%82%E8%80%83%E6%95%B0%E6%8D%AE%E6%8E%A5%E5%8F%A3%E8%AF%B4%E6%98%8E%E4%B9%A6%E6%8A%80%E6%9C%AF%E5%BC%80%E5%8F%91%E7%A8%BF.pdf",
+      "source_class": "official technical specification",
+      "scope_evidence": "Search-indexed text describes a historical suspension file covering Shanghai listed securities through data date T and a daily status code distinguishing all-day suspension, one-hour suspension, resumed-after-suspension and other.",
+      "coverage_semantics": "Strong candidate for a full daily status feed, but the actual dated files and distribution access for these ETFs were not obtained. File availability/published-at timestamps for the requested window are unknown.",
+      "historical_publication_time": null,
+      "original_bytes_saved": false,
+      "original_sha256": null,
+      "excerpt_sha256": null
+    },
+    {
+      "source": "Shenzhen Stock Exchange fund/ETF technical exchange interface specification TS03",
+      "url": "https://www.szse.cn/marketServices/technicalservice/column/history/P020180328468135161873.pdf",
+      "source_class": "official technical specification; not ETF-own-status data",
+      "scope_evidence": "The document describes an ETF constituent-equity halt database supplied to fund managers for next-day PCF construction, with T/N/F codes.",
+      "coverage_semantics": "This describes constituent security status, not the ETF's own exchange execution state; excluded as a source for 159612/159952 daily tradability.",
+      "historical_publication_time": null,
+      "original_bytes_saved": false,
+      "original_sha256": null,
+      "excerpt_sha256": null
+    },
+    {
+      "source": "BaoStock historical K-line tradestatus endpoint (skill candidate)",
+      "url": "https://www.baostock.com/",
+      "source_class": "third-party full-day daily status candidate",
+      "scope_evidence": "The a-stock-data skill documents tradestatus=1 normal / 0 suspended and warns only that Beijing codes are unsupported. The public site describes historical A-share and ETF daily K-line queries.",
+      "coverage_semantics": "Not accepted for this run: the SDK is not installed, shell DNS is unavailable, no API response/raw payload was captured, and per-row historical publication/availability time and feed completeness for the five ETFs were not established.",
+      "historical_publication_time": null,
+      "original_bytes_saved": false,
+      "original_sha256": null,
+      "excerpt_sha256": null
+    },
+    {
+      "source": "513300 temporary suspension report for 2026-09-18",
+      "url": "https://finance.eastmoney.com/a/202609173877453845.html",
+      "secondary_corroboration_url": "https://xueqiu.com/S/SH513300",
+      "official_query_url": "https://www.sse.com.cn/disclosure/dealinstruc/suspension/fund/",
+      "source_class": "secondary report of issuer/exchange temporary-suspension notice; primary PDF not captured",
+      "event": {
+        "code": "513300",
+        "effective_date": "2026-09-18",
+        "effective_time_from": "09:30",
+        "effective_time_to": "10:30",
+        "status": "HALTED",
+        "published_date": "2026-09-17",
+        "published_at": "2026-09-17T19:13:00+08:00",
+        "available_at": "2026-09-17T19:13:00+08:00"
+      },
+      "excerpt_sha256": null,
+      "original_bytes_saved": false,
+      "original_sha256": null,
+      "verification_status": "unverified_primary_not_captured",
+      "model_limit": "A daily status cell cannot represent 09:30-10:30 suspension; keep the day UNKNOWN for daily-open execution, while preserving the event interval separately."
+    }
+  ]
+}

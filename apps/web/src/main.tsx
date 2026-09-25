@@ -8,10 +8,12 @@ const FactorDetail = lazy(() => import('./pages/FactorDetail'));
 const StrategyDirectory = lazy(() => import('./pages/StrategyDirectory'));
 const StrategyDetail = lazy(() => import('./pages/StrategyDetail'));
 const UniverseDirectory = lazy(() => import('./pages/UniverseDirectory'));
+const MarketPage = lazy(() => import('./pages/MarketPage'));
 
 function Page() {
   const path = location.pathname;
-  const route = path === '/factors' ? <FactorDirectory />
+  const route = path === '/market' ? <MarketPage />
+    : path === '/factors' ? <FactorDirectory />
     : path.startsWith('/factors/') ? <FactorDetail />
       : path === '/universes' ? <UniverseDirectory />
         : path.startsWith('/strategies/') ? <StrategyDetail />

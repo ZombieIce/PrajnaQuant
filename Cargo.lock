@@ -1640,6 +1640,7 @@ name = "quant-research"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ashare-warehouse",
  "axum",
  "chrono",
  "clap",

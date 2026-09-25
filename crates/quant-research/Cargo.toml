@@ -7,6 +7,7 @@ publish = false
 license = "MIT"
 
 [dependencies]
+ashare-warehouse = { path = "../.." }
 anyhow = "1.0"
 axum = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
