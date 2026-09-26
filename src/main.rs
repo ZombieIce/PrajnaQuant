@@ -25,6 +25,8 @@ struct Cli {
 enum Command {
     Init,
     Status,
+    /// Reports actual recorded backfill windows, daily-sync jobs, attempts and current snapshot.
+    DailySyncStatus,
     Export,
     /// Exports ETF bars for one date to an immutable ZSTD Parquet snapshot.
     ExportEtfDay {
@@ -130,6 +132,15 @@ enum Command {
         #[arg(long)]
         coverage: PathBuf,
     },
+    /// Imports a small official current-security directory with per-row source references.
+    ImportSecurityDirectoryCsv {
+        #[arg(long)]
+        source: String,
+        #[arg(long)]
+        source_url: String,
+        #[arg(long)]
+        input: PathBuf,
+    },
     /// Imports the third-party CSI 300 history with explicitly simulated notice times.
     ImportIndexConstitutionCsv {
         #[arg(long)]
@@ -190,9 +201,14 @@ enum Command {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let mut warehouse = Warehouse::open(&cli.data_dir)?;
+    let mut warehouse = if matches!(&cli.command, Command::DailySyncStatus) {
+        Warehouse::open_readonly_status(&cli.data_dir)?
+    } else {
+        Warehouse::open(&cli.data_dir)?
+    };
     let output = match cli.command {
         Command::Init | Command::Status => serde_json::to_value(warehouse.status()?)?,
+        Command::DailySyncStatus => warehouse.daily_sync_status_report()?,
         Command::Export => serde_json::to_value(warehouse.export_snapshot()?)?,
         Command::ExportEtfDay { trade_date } => {
             serde_json::to_value(warehouse.export_etf_daily_snapshot(trade_date)?)?
@@ -687,6 +703,19 @@ fn main() -> Result<()> {
                 &source,
                 &source_url,
                 &items,
+            )?)?
+        }
+        Command::ImportSecurityDirectoryCsv {
+            source,
+            source_url,
+            input,
+        } => {
+            let bytes = fs::read(&input)
+                .with_context(|| format!("read security directory CSV {}", input.display()))?;
+            serde_json::to_value(warehouse.import_security_directory_csv(
+                &bytes,
+                &source,
+                &source_url,
             )?)?
         }
         Command::ImportIndexConstitutionCsv { input, source_url } => {

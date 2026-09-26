@@ -1,6 +1,17 @@
 #!/bin/sh
 set -eu
 PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+if [ -n "${CARGO_BIN:-}" ]; then
+  CARGO_CMD=$CARGO_BIN
+elif [ -x "${HOME:?}/.cargo/bin/cargo" ]; then
+  CARGO_CMD="$HOME/.cargo/bin/cargo"
+else
+  CARGO_CMD=$(command -v cargo || true)
+fi
+if [ -z "$CARGO_CMD" ] || [ ! -x "$CARGO_CMD" ]; then
+  echo "cargo executable not found; set CARGO_BIN or install Rust under ~/.cargo/bin" >&2
+  exit 127
+fi
 SYMBOL_FILE=${DAILY_SYNC_SYMBOL_FILE:-"$PROJECT_DIR/configs/daily-sync.symbols"}
 if [ ! -r "$SYMBOL_FILE" ]; then
   echo "missing symbol configuration: $SYMBOL_FILE (copy configs/daily-sync.symbols.example and edit it)" >&2
@@ -17,4 +28,4 @@ if [ "$#" -eq 0 ]; then
   exit 2
 fi
 cd "$PROJECT_DIR"
-exec cargo run --release --locked -- --data-dir data-core sync-daily-latest "$@"
+exec "$CARGO_CMD" run --release --locked -- --data-dir data-core sync-daily-latest "$@"

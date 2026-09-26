@@ -10,7 +10,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, NaiveDate, Timelike, Utc};
-use duckdb::{Connection, OptionalExt, params};
+use duckdb::{AccessMode, Config, Connection, OptionalExt, params};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -153,6 +153,16 @@ pub struct StatusCoverageEvidence {
     pub detail: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct SecurityDirectoryCsvRow {
+    market: String,
+    code: String,
+    asset_class: String,
+    name: String,
+    effective_date: String,
+    source_ref: String,
+}
+
 type SecurityDirectoryDbRow = (
     String,
     String,
@@ -282,6 +292,30 @@ struct RawArchiveRequest<'a> {
 }
 
 impl Warehouse {
+    /// Opens an existing warehouse for status inspection without creating files,
+    /// migrating schema, or taking the exclusive writer lock. The shared lock
+    /// ensures the report cannot observe a concurrent app writer.
+    pub fn open_readonly_status(data_dir: impl AsRef<Path>) -> Result<Self> {
+        let data_dir = data_dir.as_ref().to_path_buf();
+        let lock_path = data_dir.join(".writer.lock");
+        let writer_lock = File::options()
+            .read(true)
+            .open(&lock_path)
+            .with_context(|| format!("open existing warehouse lock {}", lock_path.display()))?;
+        FileExt::try_lock_shared(&writer_lock)
+            .context("another warehouse writer is active; status read deferred")?;
+
+        let database = data_dir.join("market.duckdb");
+        let config = Config::default().access_mode(AccessMode::ReadOnly)?;
+        let conn = Connection::open_with_flags(&database, config)
+            .with_context(|| format!("open warehouse read-only {}", database.display()))?;
+        Ok(Self {
+            conn,
+            _writer_lock: writer_lock,
+            data_dir,
+        })
+    }
+
     /// Opens the only allowed writer. Readers must consume immutable Parquet releases.
     pub fn open(data_dir: impl AsRef<Path>) -> Result<Self> {
         let data_dir = data_dir.as_ref().to_path_buf();
@@ -1073,6 +1107,197 @@ impl Warehouse {
                 .unwrap_or("unverified")
                 .into(),
             data_cutoff_date: manifest["data_cutoff_date"].as_str().unwrap_or("").into(),
+        }))
+    }
+
+    /// Read the recorded daily-sync and historical backfill state while the
+    /// caller holds the warehouse's exclusive writer lock. No network or data
+    /// mutation is performed; immutable snapshot files remain the reader path.
+    pub fn daily_sync_status_report(&self) -> Result<serde_json::Value> {
+        let backfills: Vec<serde_json::Value> = {
+            let mut statement = self.conn.prepare(
+                "SELECT dataset,source,status,count(*) AS windows,
+                        min(window_start)::VARCHAR AS first_window_start,
+                        max(window_end)::VARCHAR AS last_window_end,
+                        max(updated_at)::VARCHAR AS latest_update
+                 FROM ops.history_backfill_window
+                 GROUP BY dataset,source,status ORDER BY dataset,source,status",
+            )?;
+            statement
+                .query_map([], |row| {
+                    Ok(serde_json::json!({
+                        "dataset": row.get::<_, String>(0)?,
+                        "source": row.get::<_, String>(1)?,
+                        "status": row.get::<_, String>(2)?,
+                        "windows": row.get::<_, i64>(3)?,
+                        "first_window_start": row.get::<_, Option<String>>(4)?,
+                        "last_window_end": row.get::<_, Option<String>>(5)?,
+                        "latest_update": row.get::<_, Option<String>>(6)?,
+                    }))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let jobs: Vec<serde_json::Value> = {
+            let mut statement = self.conn.prepare(
+                "SELECT job_id,dataset,source,symbols_json,range_start::VARCHAR,
+                        range_end::VARCHAR,lookback_days,status,cursor_symbol,
+                        cursor_start::VARCHAR,cursor_end::VARCHAR,attempted_count,
+                        source_rows,inserted_revisions,duplicate_rows,empty_responses,
+                        snapshot_id,error_class,error,started_at::VARCHAR,
+                        finished_at::VARCHAR,updated_at::VARCHAR
+                 FROM ops.daily_sync_job ORDER BY started_at DESC LIMIT 50",
+            )?;
+            statement
+                .query_map([], |row| {
+                    Ok(serde_json::json!({
+                        "job_id": row.get::<_, String>(0)?,
+                        "dataset": row.get::<_, String>(1)?,
+                        "source": row.get::<_, String>(2)?,
+                        "symbols": serde_json::from_str::<serde_json::Value>(&row.get::<_, String>(3)?).unwrap_or(serde_json::Value::Null),
+                        "range_start": row.get::<_, String>(4)?,
+                        "range_end": row.get::<_, String>(5)?,
+                        "lookback_days": row.get::<_, i64>(6)?,
+                        "status": row.get::<_, String>(7)?,
+                        "cursor_symbol": row.get::<_, Option<String>>(8)?,
+                        "cursor_start": row.get::<_, Option<String>>(9)?,
+                        "cursor_end": row.get::<_, Option<String>>(10)?,
+                        "attempted_count": row.get::<_, i64>(11)?,
+                        "source_rows": row.get::<_, i64>(12)?,
+                        "inserted_revisions": row.get::<_, i64>(13)?,
+                        "duplicate_rows": row.get::<_, i64>(14)?,
+                        "empty_responses": row.get::<_, i64>(15)?,
+                        "snapshot_id": row.get::<_, Option<String>>(16)?,
+                        "error_class": row.get::<_, Option<String>>(17)?,
+                        "error": row.get::<_, Option<String>>(18)?,
+                        "started_at": row.get::<_, String>(19)?,
+                        "finished_at": row.get::<_, Option<String>>(20)?,
+                        "updated_at": row.get::<_, String>(21)?,
+                    }))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let attempts: Vec<serde_json::Value> = {
+            let mut statement = self.conn.prepare(
+                "SELECT a.status,count(*) AS attempts,max(a.finished_at)::VARCHAR AS latest_finish
+                 FROM ops.daily_sync_attempt a GROUP BY a.status ORDER BY a.status",
+            )?;
+            statement
+                .query_map([], |row| {
+                    Ok(serde_json::json!({
+                        "status": row.get::<_, String>(0)?,
+                        "attempts": row.get::<_, i64>(1)?,
+                        "latest_finish": row.get::<_, Option<String>>(2)?,
+                    }))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let failed_windows: Vec<serde_json::Value> = {
+            let mut statement = self.conn.prepare(
+                "SELECT dataset,symbol,window_start::VARCHAR,window_end::VARCHAR,
+                        row_count,error,updated_at::VARCHAR
+                 FROM ops.history_backfill_window WHERE status='FAILED'
+                 ORDER BY updated_at DESC LIMIT 100",
+            )?;
+            statement
+                .query_map([], |row| {
+                    Ok(serde_json::json!({
+                        "dataset": row.get::<_, String>(0)?,
+                        "symbol": row.get::<_, String>(1)?,
+                        "window_start": row.get::<_, String>(2)?,
+                        "window_end": row.get::<_, String>(3)?,
+                        "row_count": row.get::<_, i64>(4)?,
+                        "error": row.get::<_, Option<String>>(5)?,
+                        "updated_at": row.get::<_, String>(6)?,
+                    }))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let sample_identities: Vec<serde_json::Value> = {
+            let mut statement = self.conn.prepare(
+                "SELECT CASE i.market WHEN 'SH' THEN 'sh' WHEN 'SZ' THEN 'sz' WHEN 'BJ' THEN 'bj' END || i.code AS symbol,
+                        i.instrument_id,i.market,i.code,i.asset_class,
+                        n.name,n.source,n.valid_from::VARCHAR AS name_valid_from,
+                        c.source AS classification_source,c.method AS classification_method,
+                        c.effective_date::VARCHAR AS classification_effective_date
+                 FROM core.instrument i
+                 LEFT JOIN LATERAL (SELECT name,source,valid_from FROM core.instrument_symbol_latest n
+                                    WHERE n.instrument_id=i.instrument_id ORDER BY n.valid_from DESC,n.observed_at DESC LIMIT 1) n ON true
+                 LEFT JOIN LATERAL (SELECT source,method,effective_date FROM core.instrument_classification_latest c
+                                    WHERE c.instrument_id=i.instrument_id ORDER BY c.effective_date DESC LIMIT 1) c ON true
+                 WHERE (i.market='SH' AND i.code IN ('600519','510300'))
+                 ORDER BY i.code",
+            )?;
+            statement
+                .query_map([], |row| {
+                    Ok(serde_json::json!({
+                        "symbol": row.get::<_, String>(0)?,
+                        "instrument_id": row.get::<_, String>(1)?,
+                        "market": row.get::<_, String>(2)?,
+                        "code": row.get::<_, String>(3)?,
+                        "asset_class": row.get::<_, String>(4)?,
+                        "name": row.get::<_, Option<String>>(5)?,
+                        "name_source": row.get::<_, Option<String>>(6)?,
+                        "name_valid_from": row.get::<_, Option<String>>(7)?,
+                        "classification_source": row.get::<_, Option<String>>(8)?,
+                        "classification_method": row.get::<_, Option<String>>(9)?,
+                        "classification_effective_date": row.get::<_, Option<String>>(10)?,
+                    }))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let calendar: Vec<serde_json::Value> = {
+            let mut statement = self.conn.prepare(
+                "SELECT source,count(*) AS dates,min(trade_date)::VARCHAR AS first_date,
+                        max(trade_date)::VARCHAR AS last_date
+                 FROM core.trading_calendar_latest WHERE market='CN' GROUP BY source ORDER BY source",
+            )?;
+            statement
+                .query_map([], |row| {
+                    Ok(serde_json::json!({
+                        "source": row.get::<_, String>(0)?,
+                        "dates": row.get::<_, i64>(1)?,
+                        "first_date": row.get::<_, Option<String>>(2)?,
+                        "last_date": row.get::<_, Option<String>>(3)?,
+                    }))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let calendar_tail: Vec<serde_json::Value> = {
+            let mut statement = self.conn.prepare(
+                "SELECT trade_date::VARCHAR,is_open,observed_at::VARCHAR,run_id
+                 FROM core.trading_calendar_latest WHERE market='CN' AND source='szse'
+                 ORDER BY trade_date DESC LIMIT 10",
+            )?;
+            statement
+                .query_map([], |row| {
+                    Ok(serde_json::json!({
+                        "trade_date": row.get::<_, String>(0)?,
+                        "is_open": row.get::<_, bool>(1)?,
+                        "observed_at": row.get::<_, String>(2)?,
+                        "run_id": row.get::<_, String>(3)?,
+                    }))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let current = self.current_daily_snapshot()?.map(|snapshot| {
+            serde_json::json!({
+                "snapshot_id": snapshot.snapshot_id,
+                "manifest_path": snapshot.manifest_path,
+                "manifest_sha256": snapshot.manifest_sha256,
+                "data_sha256": snapshot.data_sha256,
+                "coverage_status": snapshot.coverage_status,
+                "data_cutoff_date": snapshot.data_cutoff_date,
+            })
+        });
+        Ok(serde_json::json!({
+            "backfill_windows": backfills,
+            "failed_backfill_windows_recent": failed_windows,
+            "calendar_coverage": calendar,
+            "calendar_tail": calendar_tail,
+            "sample_security_identities": sample_identities,
+            "daily_sync_jobs_recent": jobs,
+            "daily_sync_attempts_by_status": attempts,
+            "current_daily_snapshot": current,
         }))
     }
 
@@ -2393,6 +2618,192 @@ impl Warehouse {
         }
     }
 
+    /// Imports a small, explicitly sourced current security directory through
+    /// the same exclusive warehouse writer. This is not historical PIT master
+    /// data; callers must provide primary-source evidence per row.
+    pub fn import_security_directory_csv(
+        &mut self,
+        csv_bytes: &[u8],
+        source_name: &str,
+        source_url: &str,
+    ) -> Result<IngestResult> {
+        if source_name.is_empty()
+            || !source_name.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'_'
+            })
+            || source_url.trim().is_empty()
+        {
+            bail!("source name and source URL are required");
+        }
+        let run_id = self.create_run(source_name, source_url)?;
+        let outcome = (|| -> Result<IngestResult> {
+            let path = self.archive_raw_source(
+                run_id,
+                RawArchiveRequest {
+                    source: source_name,
+                    extension: "csv",
+                    response: csv_bytes,
+                    metadata: serde_json::json!({
+                        "adapter_version": "security-directory-evidence-csv-v1",
+                        "url": source_url,
+                        "scope": "explicit_current_security_directory_only",
+                    }),
+                },
+            )?;
+            self.conn.execute(
+                "UPDATE ops.ingest_run SET raw_path=?,raw_sha256=? WHERE run_id=?",
+                params![
+                    path.display().to_string(),
+                    sha256(csv_bytes),
+                    run_id.to_string()
+                ],
+            )?;
+            let mut reader = csv::Reader::from_reader(csv_bytes);
+            let headers = reader.headers()?.clone();
+            for required in [
+                "market",
+                "code",
+                "asset_class",
+                "name",
+                "effective_date",
+                "source_ref",
+            ] {
+                if !headers.iter().any(|header| header == required) {
+                    bail!("security directory CSV is missing column {required}");
+                }
+            }
+            let mut records = Vec::new();
+            for row in reader.deserialize::<SecurityDirectoryCsvRow>() {
+                let record = row?;
+                if !matches!(record.market.as_str(), "SH" | "SZ" | "BJ")
+                    || !matches!(record.asset_class.as_str(), "EQUITY" | "ETF")
+                    || !record.code.bytes().all(|byte| byte.is_ascii_digit())
+                    || record.code.len() != 6
+                    || record.name.trim().is_empty()
+                    || record.name.contains('\0')
+                    || record.source_ref.trim().is_empty()
+                {
+                    bail!("security directory row has invalid market/code/class/name/source_ref");
+                }
+                NaiveDate::parse_from_str(&record.effective_date, "%Y-%m-%d")?;
+                let prefix = match record.market.as_str() {
+                    "SH" => "sh",
+                    "SZ" => "sz",
+                    "BJ" => "bj",
+                    _ => unreachable!(),
+                };
+                sources::validate_explicit_symbol(&format!("{prefix}{}", record.code), true)?;
+                records.push(record);
+            }
+            if records.is_empty() {
+                bail!("security directory CSV has no evidence rows");
+            }
+            let transaction = self.conn.transaction()?;
+            let observed = Utc::now();
+            let mut inserted = 0_usize;
+            for record in &records {
+                let effective_date = NaiveDate::parse_from_str(&record.effective_date, "%Y-%m-%d")?;
+                let instrument_id: Option<String> = transaction
+                    .query_row(
+                        "SELECT instrument_id FROM core.instrument WHERE market=? AND code=?",
+                        params![record.market, record.code],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let instrument_id =
+                    instrument_id.unwrap_or_else(|| format!("{}:{}", record.market, record.code));
+                let date = effective_date.to_string();
+                let class_hash = sha256(
+                    format!(
+                        "{}|{}|{}|{}|{}|{}",
+                        instrument_id,
+                        record.asset_class,
+                        date,
+                        record.source_ref,
+                        source_name,
+                        sha256(csv_bytes)
+                    )
+                    .as_bytes(),
+                );
+                let symbol = format!(
+                    "{}{}",
+                    match record.market.as_str() {
+                        "SH" => "sh",
+                        "SZ" => "sz",
+                        "BJ" => "bj",
+                        _ => unreachable!(),
+                    },
+                    record.code
+                );
+                let name = record.name.trim();
+                let name_hash = sha256(
+                    format!(
+                        "{}|{}|{}|{}|{}|{}",
+                        instrument_id,
+                        symbol,
+                        name,
+                        date,
+                        record.source_ref,
+                        sha256(csv_bytes)
+                    )
+                    .as_bytes(),
+                );
+                transaction.execute(
+                    "INSERT INTO core.instrument(instrument_id,market,code,asset_class,first_observed_date,last_observed_date,created_at,updated_at)
+                     VALUES (?,?,?,?,?,?,?,?)
+                     ON CONFLICT(market,code) DO UPDATE SET asset_class=excluded.asset_class,
+                       last_observed_date=greatest(core.instrument.last_observed_date,excluded.last_observed_date),
+                       updated_at=excluded.updated_at",
+                    params![instrument_id, record.market, record.code, record.asset_class, date, date, observed.to_rfc3339(), observed.to_rfc3339()],
+                )?;
+                let prior_class: Option<String> = transaction
+                    .query_row(
+                        "SELECT row_hash FROM core.instrument_classification_latest WHERE instrument_id=? AND source=?",
+                        params![instrument_id, source_name],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if prior_class.as_deref() != Some(&class_hash) {
+                    transaction.execute(
+                        "INSERT INTO core.instrument_classification_revision VALUES (?,?,?,?,?,?,?,?,?)",
+                        params![Uuid::new_v4().to_string(), instrument_id, record.asset_class, date, source_name, "official-source-directory-evidence-v1", observed.to_rfc3339(), run_id.to_string(), class_hash],
+                    )?;
+                    inserted += 1;
+                }
+                let prior_name: Option<String> = transaction
+                    .query_row(
+                        "SELECT row_hash FROM core.instrument_symbol_latest WHERE instrument_id=? AND symbol=? AND source=? AND valid_from=?",
+                        params![instrument_id, symbol, source_name, date],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if prior_name.as_deref() != Some(&name_hash) {
+                    transaction.execute(
+                        "INSERT INTO core.instrument_symbol_revision VALUES (?,?,?,?,?,NULL,?,?,?,?)",
+                        params![Uuid::new_v4().to_string(), instrument_id, symbol, name, date, source_name, observed.to_rfc3339(), run_id.to_string(), name_hash],
+                    )?;
+                    inserted += 1;
+                }
+            }
+            transaction.commit()?;
+            Ok(IngestResult {
+                run_id,
+                source_rows: records.len(),
+                new_revisions: inserted,
+            })
+        })();
+        match outcome {
+            Ok(result) => {
+                self.finish_run(run_id, result.source_rows, result.new_revisions)?;
+                Ok(result)
+            }
+            Err(error) => {
+                self.fail_run(run_id, &error)?;
+                Err(error)
+            }
+        }
+    }
+
     /// Imports A's source facts and their explicit coverage claims through the
     /// warehouse's single writer. Missing rows remain UNKNOWN; declared coverage
     /// and independent verification are stored separately.
@@ -3486,6 +3897,20 @@ mod tests {
     }
 
     #[test]
+    fn status_uses_shared_lock_and_read_only_database_access() {
+        let temporary = TempDir::new().unwrap();
+        {
+            let _writer = Warehouse::open(temporary.path()).unwrap();
+            assert!(Warehouse::open_readonly_status(temporary.path()).is_err());
+        }
+
+        let status_reader = Warehouse::open_readonly_status(temporary.path()).unwrap();
+        assert!(Warehouse::open(temporary.path()).is_err());
+        let report = status_reader.daily_sync_status_report().unwrap();
+        assert!(report["current_daily_snapshot"].is_null());
+    }
+
+    #[test]
     fn calendar_factors_and_status_are_versioned_for_research_queries() {
         let temporary = TempDir::new().unwrap();
         let mut warehouse = Warehouse::open(temporary.path()).unwrap();
@@ -3658,5 +4083,36 @@ mod tests {
         assert!(!is_etf_instrument("SH", "501018", "南方原油LOF"));
         assert!(!is_etf_instrument("SZ", "150001", "瑞福进取"));
         assert!(!is_etf_instrument("SH", "600000", "浦发ETF公司"));
+    }
+
+    #[test]
+    fn official_security_directory_import_is_idempotent_and_source_bearing() {
+        let temporary = TempDir::new().unwrap();
+        let mut warehouse = Warehouse::open(temporary.path()).unwrap();
+        let bytes = "market,code,asset_class,name,effective_date,source_ref\nSH,600519,EQUITY,贵州茅台,2026-09-26,https://example.test/stock\nSH,510300,ETF,沪深300ETF华泰柏瑞,2026-09-26,https://example.test/etf\n";
+        let first = warehouse
+            .import_security_directory_csv(
+                bytes.as_bytes(),
+                "sse-official",
+                "https://example.test/combined-directory",
+            )
+            .unwrap();
+        let repeated = warehouse
+            .import_security_directory_csv(
+                bytes.as_bytes(),
+                "sse-official",
+                "https://example.test/combined-directory",
+            )
+            .unwrap();
+        assert_eq!(first.source_rows, 2);
+        assert_eq!(first.new_revisions, 4);
+        assert_eq!(repeated.new_revisions, 0);
+        let report = warehouse.daily_sync_status_report().unwrap();
+        let identities = report["sample_security_identities"].as_array().unwrap();
+        assert_eq!(identities.len(), 2);
+        assert_eq!(identities[0]["name_source"], "sse-official");
+        assert_eq!(identities[0]["asset_class"], "ETF");
+        assert_eq!(identities[1]["name_source"], "sse-official");
+        assert_eq!(identities[1]["asset_class"], "EQUITY");
     }
 }
