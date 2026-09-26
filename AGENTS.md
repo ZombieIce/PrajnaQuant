@@ -2,7 +2,7 @@
 
 ## Project Scope
 
-产品初级目标是可在本地运行、可部署到服务器远程使用的 A 股股票与 ETF 日频研究回测平台：每日增量同步日频数据；Rust 承担数据、回测、指标和 API；Python 承担因子探索与研究；React 展示因子评价、策略组合绩效、选股池以及股票/ETF K 线。目标与当前实现及分阶段验收见 `docs/product-roadmap.md`。当前已实现的纵向验证场景仍是 ETF Rotation MVP，不能把它等同于完整产品。不得把旧方案中的全市场、严格 PIT、分红总回报、Python 研究平台或服务端交互配置当作现有能力。功能/风险状态见 `docs/STATUS.md`。
+项目主路线是 Rust-first 的多市场研究、并行回测与未来实盘平台；当前先执行 POC-0，再按三级引擎与能力路由分阶段建设。目标决策见根目录 `ARCHITECTURE.md`，交付顺序见 `docs/product-roadmap.md`，领域词汇见 `CONTEXT.md`。现有实现仍是 A 股日频仓库和 ETF Rotation 纵向场景，React 页面已经存在；新平台 MVP 暂不以 Web 为验收项。不得把多市场、三级引擎、严格 PIT、分红总回报、Python 研究平台或实盘当作现有能力。功能/风险状态见 `docs/STATUS.md`。
 
 ## Architecture Principles
 
@@ -49,8 +49,22 @@
 
 ## New Agent Startup
 
-按顺序读：1 `AGENTS.md`；2 `README.md`；3 `docs/product-roadmap.md`；4 `docs/architecture.md`；5 `docs/time-model.md`；6 `docs/data-model.md`；7 `docs/factor-system.md`；8 `docs/strategy-system.md`；9 `docs/backtest-engine.md`；10 `docs/STATUS.md`（及其引用的 `docs/priorities.md`）；11 `HANDOFF.md`；12 相关 ADR；13 任务代码；14 任务测试。然后 `git status`、`git log -5 --oneline`，运行相关验证。
+按顺序读：1 `AGENTS.md`；2 `README.md`；3 `ARCHITECTURE.md` 与 `CONTEXT.md`；4 `docs/product-roadmap.md`；5 `docs/architecture.md`；6 `docs/time-model.md`；7 `docs/data-model.md`；8 `docs/factor-system.md`；9 `docs/strategy-system.md`；10 `docs/backtest-engine.md`；11 `docs/STATUS.md`（及其引用的 `docs/priorities.md`）；12 `HANDOFF.md`；13 相关 ADR 与 POC 规范；14 任务代码；15 任务测试。然后 `git status`、`git log -5 --oneline`，运行相关验证。
 
 ## Agent Completion Checklist
 
 运行相关测试、formatter/lint；复查未来函数、时序、组合核算和交易成本；更新 `docs/STATUS.md` 与 `HANDOFF.md`。仅在发生重要决策/契约变化时更新 ADR、API、README。交接中写明已验证命令、失败、开放问题和唯一建议下一步。
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as Markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five default triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Use the single-context layout with a root `CONTEXT.md` and decisions in `docs/decisions/`. See `docs/agents/domain.md`.

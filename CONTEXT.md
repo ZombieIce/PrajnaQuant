@@ -1,0 +1,59 @@
+# Prajna Quant
+
+量化研究、实验与交易模拟的共同词汇。此文件定义领域概念；实现状态和技术选择见 `docs/STATUS.md` 与 `ARCHITECTURE.md`。
+
+## Market and data
+
+**Venue**:
+提供行情或执行交易的市场场所；同一资产可在不同 Venue 有不同规则。
+
+**Instrument**:
+可被观察、评分、持有或交易的具体金融标的，身份须能区分 Venue 与资产类型。
+_Avoid_: 仅用裸 symbol 代表跨市场唯一身份。
+
+**Universe**:
+某个决策时点按明确来源、版本和成员可知性规则得到的候选 Instrument 集合。
+_Avoid_: 把今天的静态名单称为历史可投资全集。
+
+**Dataset Version**:
+可追溯到原始资料、规范化规则和内容身份的一版研究输入；修订产生新版本。
+
+## Research and execution
+
+**Factor**:
+在指定观察与可用时刻、Universe 和数据版本上产生可比较数值的研究定义。
+
+**Strategy**:
+依据可用信息产生目标权重或交易意图的版本化规则；其所需数据与执行能力由 Strategy Capability 声明。
+
+**Strategy Capability**:
+策略运行所需的输入粒度与交互语义，用于判断其能在哪类 Engine 上执行。
+
+**Engine**:
+按明确时间、成本和成交语义执行 Strategy 并产生结果的计算层；Vector、Fast Event 与 Accurate Event 是不同层级。
+
+**Order**:
+请求按指定方向和数量交易 Instrument 的意图；提交不保证成交。
+
+**Fill**:
+Order 实际成交的一次记录，包含数量、价格、时间与费用依据。
+
+## Capital and experiments
+
+**Trading Account**:
+持有实际现金、负债和仓位，并作为成交与清算账本权威的账户。
+
+**Virtual Portfolio**:
+在 Trading Account 内分配给一个或多个策略的资本和风险视图；其合并不能重复计算账户资产。
+
+**PortfolioResult**:
+在声明的估值、成本和执行假设下得到的组合表现及可用明细；不同 Engine 可提供不同粒度。
+
+**Experiment**:
+由固定研究问题、策略、数据、参数空间、成本与 Engine 选择构成的一组可比较 Run。
+
+**Run**:
+Experiment 中一组确定参数和输入身份的一次执行，结果须可追溯到代码、数据、成本与随机种子。
+
+**ResultLevel**:
+Run 持久化结果的详细程度：Summary、Standard 或 Full；省略的明细表示未保存。

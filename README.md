@@ -1,10 +1,10 @@
 # Prajna Quant / A 股量化
 
-初级产品目标是可本地运行并部署到服务器远程使用的 **A 股股票与 ETF 日频研究回测平台**：Rust 负责数据、回测和 API，Python 负责因子研究，网页展示因子评价、策略组合绩效、选股池及股票/ETF K 线，并在交易日后自动同步日频数据。目标、现状和交付顺序见 [产品路线](docs/product-roadmap.md)。当前仍是本地 ETF Rotation MVP 与 A 股行情仓库。Batch 2 已实现显式证券增量同步/恢复、不可变日频发布、只读证券/日线 API 和股票/ETF K 线页面；同步仅在隔离真实小样本验证，页面在合成快照验证，生产日更调度尚未启用。Python 研究包与远程认证服务仍缺。真实五 ETF 旧实验是 `legacy_bar_only`；新全 UNKNOWN 状态占位跑只证明拒单门槛，P0-3 未关闭。股票回测尚未开放。**研究结果尚不能视作无偏历史业绩**；证据见 [Batch 2 验收](docs/handoffs/batch2-integration-acceptance.md) 和 [STATUS](docs/STATUS.md)。代码、配置与文档保存在 Git，真实行情库和回测产物仍保留在本地。
+项目主目标已更新为 **Rust-first 多市场研究、并行回测与未来实盘平台**；设计基线见 [ARCHITECTURE](ARCHITECTURE.md)，交付顺序从 [POC-0](docs/poc-0-benchmark-spec.md) 开始，见[产品路线](docs/product-roadmap.md)。当前代码仍是本地 ETF Rotation 场景与 A 股行情仓库，并有 React 网页；新平台 MVP 不以 Web 为验收项。Batch 2 已实现显式证券增量同步/恢复、不可变日频发布、只读证券/日线 API 和股票/ETF K 线页面；同步仅在隔离真实小样本验证，页面在合成快照验证，生产日更调度尚未启用。Python 研究包与远程认证服务仍缺。真实五 ETF 旧实验是 `legacy_bar_only`；新全 UNKNOWN 状态占位跑只证明拒单门槛，P0-3 未关闭。股票回测尚未开放。**研究结果尚不能视作无偏历史业绩**；证据见 [Batch 2 验收](docs/handoffs/batch2-integration-acceptance.md) 和 [STATUS](docs/STATUS.md)。代码、配置与文档保存在 Git，真实行情库和回测产物仍保留在本地。
 
 ## 从这里开始
 
-新 Agent 按 [AGENTS.md](AGENTS.md) 的顺序阅读；先区分[产品目标与交付路线](docs/product-roadmap.md)和已实现状态。当前工作与下一步看 [HANDOFF.md](HANDOFF.md)，问题排序与解决路径看 [priorities.md](docs/priorities.md)。架构、时间、数据、因子、策略、引擎与 API 的实际状态分别在 `docs/` 同名文档。
+新 Agent 按 [AGENTS.md](AGENTS.md) 的顺序阅读；先区分[目标架构](ARCHITECTURE.md)、[产品路线](docs/product-roadmap.md)与已实现状态。当前工作与下一步看 [HANDOFF.md](HANDOFF.md)，既有 A 股正确性问题看 [priorities.md](docs/priorities.md)。架构、时间、数据、因子、策略、引擎与 API 的实际状态分别在 `docs/` 同名文档。
 
 ## 实际组成
 
