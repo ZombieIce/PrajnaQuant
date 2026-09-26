@@ -83,6 +83,7 @@ def build_snapshot(
 
     rows: list[dict[str, Any]] = []
     cell_counts: dict[str, dict[str, int]] = {code: defaultdict(int) for code in SECURITIES}
+    evidence_counts: dict[str, dict[str, int]] = {code: defaultdict(int) for code in SECURITIES}
     conflicts: list[dict[str, Any]] = []
     duplicates: list[dict[str, Any]] = []
     for day in dates:
@@ -119,26 +120,41 @@ def build_snapshot(
             statuses = {fact["trade_status"] for fact in available_facts}
             if len(statuses) > 1:
                 status = "CONFLICT"
+                evidence_state = "conflict"
                 conflicts.append({"code": code, "trade_date": day.isoformat(), "statuses": sorted(statuses)})
                 reason = "conflicting full-day facts available by execution open"
             elif statuses:
                 status = next(iter(statuses))
+                evidence_state = "evidenced"
                 reason = "full-day source fact"
             elif any(f.get("scope") == "intraday" for f in unique):
                 status = "UNKNOWN"
+                evidence_state = "not_representable"
                 reason = "intraday restriction cannot be represented by daily status"
             elif unavailable_count:
                 status = "UNKNOWN"
+                evidence_state = "unverifiable"
                 reason = "full-day fact lacks proven availability by 09:30 Shanghai execution cutoff"
+            elif any(f.get("historical_scope") == "current_only" for f in unique):
+                status = "UNKNOWN"
+                evidence_state = "unverifiable"
+                reason = "current-only query is not historical execution-state evidence"
+            elif unique:
+                status = "UNKNOWN"
+                evidence_state = "insufficient_source_semantics"
+                reason = "source fact does not establish a full-day historical status"
             else:
                 status = "UNKNOWN"
+                evidence_state = "missing"
                 reason = "no complete full-day status evidence"
             # A current-only source can inform only its query date, never historical dates.
             current_only = [f for f in unique if f.get("historical_scope") == "current_only"]
             if current_only:
                 status = "UNKNOWN"
+                evidence_state = "unverifiable"
                 reason = "current-only query is not historical execution-state evidence"
             cell_counts[code][status] += 1
+            evidence_counts[code][evidence_state] += 1
             rows.append({
                 "instrument_id": instrument_id,
                 "symbol": symbol,
@@ -146,6 +162,7 @@ def build_snapshot(
                 "market": market,
                 "trade_date": day.isoformat(),
                 "trade_status": status,
+                "evidence_state": evidence_state,
                 "is_tradable": status == "TRADABLE",
                 "reason": reason,
                 "sources": sorted({f.get("source", "") for f in unique if f.get("source")}),
@@ -181,6 +198,7 @@ def build_snapshot(
             code: {
                 "instrument_id": identity[0], "symbol": identity[1], "market": identity[2],
                 "expected_dates": len(dates), "counts_by_status": dict(cell_counts[code]),
+                "counts_by_evidence_state": dict(evidence_counts[code]),
                 "known_full_day_dates": sum(cell_counts[code][s] for s in ("TRADABLE", "HALTED")),
                 "unknown_dates": cell_counts[code]["UNKNOWN"],
                 "conflict_dates": cell_counts[code]["CONFLICT"],

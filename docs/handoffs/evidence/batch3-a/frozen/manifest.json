@@ -1,0 +1,18 @@
+{
+  "schema_version": "prajna-batch3-a-frozen-status-evidence-v1",
+  "created_at": "2026-09-26T09:36:21+00:00",
+  "source_audit_path": "../source-audit.json",
+  "source_audit_sha256": "e6d56634d4f8da0f6a68dcc52074bc56cffef7c4ea39df7b874de1b7121cb5e8",
+  "calendar_path": "expected-trading-dates.json",
+  "calendar_sha256": "e4c39876272086c375c37ff9be1137c40a08b130e8b42d4249fa753e0945c875",
+  "status_snapshot_path": "status-snapshot-v1.json",
+  "status_snapshot_sha256": "422f9fec89b56af93c7639915bd104c2bc23cc4875641059496ceb6b25a59df4",
+  "coverage_report_path": "status-coverage-report.json",
+  "coverage_report_sha256": "d002da4a7a6a4e6265f24f931b7a34d761c777b769a2df7b91b910175ff3611e",
+  "coverage_status": "gaps",
+  "expected_status_rows": 1205,
+  "import_status": "not_imported_no_qualifying_real_status_facts",
+  "price_snapshot_id": "fe1dd8a3-d227-4e06-bb98-f0a6b3be0f34",
+  "universe_id": "d8811237-6c37-4189-86b8-9b05fbccc405",
+  "universe_version_id": "3fcfed9c-b8c1-4cce-a933-bc2b79ebf0da"
+}

@@ -1,0 +1,97 @@
+{
+  "schema_version": "prajna-etf-status-evidence-v1",
+  "window": {
+    "start": "2025-09-23",
+    "end": "2026-09-21"
+  },
+  "expected_dates_source": "caller-supplied exchange calendar; bars are not used as a calendar or status source",
+  "expected_trading_dates": 241,
+  "source_integrity": "unverified",
+  "coverage_status": "gaps",
+  "securities": {
+    "513300": {
+      "instrument_id": "SH:513300",
+      "symbol": "sh513300",
+      "market": "SSE",
+      "expected_dates": 241,
+      "counts_by_status": {
+        "UNKNOWN": 241
+      },
+      "counts_by_evidence_state": {
+        "missing": 240,
+        "not_representable": 1
+      },
+      "known_full_day_dates": 0,
+      "unknown_dates": 241,
+      "conflict_dates": 0
+    },
+    "518880": {
+      "instrument_id": "SH:518880",
+      "symbol": "sh518880",
+      "market": "SSE",
+      "expected_dates": 241,
+      "counts_by_status": {
+        "UNKNOWN": 241
+      },
+      "counts_by_evidence_state": {
+        "missing": 241
+      },
+      "known_full_day_dates": 0,
+      "unknown_dates": 241,
+      "conflict_dates": 0
+    },
+    "510320": {
+      "instrument_id": "SH:510320",
+      "symbol": "sh510320",
+      "market": "SSE",
+      "expected_dates": 241,
+      "counts_by_status": {
+        "UNKNOWN": 241
+      },
+      "counts_by_evidence_state": {
+        "missing": 241
+      },
+      "known_full_day_dates": 0,
+      "unknown_dates": 241,
+      "conflict_dates": 0
+    },
+    "159612": {
+      "instrument_id": "SZ:159612",
+      "symbol": "sz159612",
+      "market": "SZSE",
+      "expected_dates": 241,
+      "counts_by_status": {
+        "UNKNOWN": 241
+      },
+      "counts_by_evidence_state": {
+        "missing": 241
+      },
+      "known_full_day_dates": 0,
+      "unknown_dates": 241,
+      "conflict_dates": 0
+    },
+    "159952": {
+      "instrument_id": "SZ:159952",
+      "symbol": "sz159952",
+      "market": "SZSE",
+      "expected_dates": 241,
+      "counts_by_status": {
+        "UNKNOWN": 241
+      },
+      "counts_by_evidence_state": {
+        "missing": 241
+      },
+      "known_full_day_dates": 0,
+      "unknown_dates": 241,
+      "conflict_dates": 0
+    }
+  },
+  "conflicts": [],
+  "duplicate_facts": [],
+  "normalization_errors": [],
+  "limitations": [
+    "No TRADABLE value is inferred from a bar, event-list silence, or missing record.",
+    "Intraday restrictions are preserved, but daily open execution cannot model the restriction interval.",
+    "published_at and available_at stay empty when their historical publication/availability instant is not evidenced."
+  ]
+}

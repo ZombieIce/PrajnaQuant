@@ -39,6 +39,7 @@ class StatusAuditTests(unittest.TestCase):
         self.assertEqual(len(snapshot["status_rows"]), 20)
         self.assertEqual(report["coverage_status"], "gaps")
         self.assertEqual(self.row(snapshot["status_rows"], "513300", "2025-09-23")["trade_status"], "UNKNOWN")
+        self.assertEqual(self.row(snapshot["status_rows"], "513300", "2025-09-23")["evidence_state"], "missing")
         self.assertFalse(self.row(snapshot["status_rows"], "513300", "2025-09-23")["is_tradable"])
 
     def test_half_open_halt_and_resume_boundary(self):
@@ -60,6 +61,7 @@ class StatusAuditTests(unittest.TestCase):
         snapshot, report = audit.build_snapshot(self.dates, [event], "2026-09-24T00:00:00+00:00")
         row = self.row(snapshot["status_rows"], "513300", "2026-09-18")
         self.assertEqual(row["trade_status"], "UNKNOWN")
+        self.assertEqual(row["evidence_state"], "not_representable")
         self.assertEqual(row["intraday_restrictions"][0]["to"], "10:30")
         self.assertEqual(row["available_at"], [])
         self.assertEqual(report["coverage_status"], "gaps")
@@ -67,6 +69,7 @@ class StatusAuditTests(unittest.TestCase):
     def test_conflict_preserves_all_facts_and_marks_conflict(self):
         snapshot, report = audit.build_snapshot(self.dates, [fact(), fact(source="other", trade_status="HALTED")], "now")
         self.assertEqual(self.row(snapshot["status_rows"], "513300", "2026-09-18")["trade_status"], "CONFLICT")
+        self.assertEqual(self.row(snapshot["status_rows"], "513300", "2026-09-18")["evidence_state"], "conflict")
         self.assertEqual(len(report["conflicts"]), 1)
 
     def test_exact_duplicate_is_deduped_but_audited(self):
@@ -81,6 +84,7 @@ class StatusAuditTests(unittest.TestCase):
         row = self.row(snapshot["status_rows"], "513300", "2026-09-18")
         self.assertEqual(row["available_at"], ["2026-09-19T09:00:00+08:00"])
         self.assertEqual(row["trade_status"], "UNKNOWN")
+        self.assertEqual(row["evidence_state"], "unverifiable")
         self.assertGreater(dt.datetime.fromisoformat(row["available_at"][0]), dt.datetime.fromisoformat("2026-09-18T09:30:00+08:00"))
 
     def test_full_day_state_without_historical_available_at_stays_unknown(self):
@@ -95,6 +99,7 @@ class StatusAuditTests(unittest.TestCase):
         snapshot, _ = audit.build_snapshot(self.dates, [current], "now")
         self.assertEqual(self.row(snapshot["status_rows"], "513300", "2025-09-23")["trade_status"], "UNKNOWN")
         self.assertEqual(self.row(snapshot["status_rows"], "513300", "2026-09-18")["trade_status"], "UNKNOWN")
+        self.assertEqual(self.row(snapshot["status_rows"], "513300", "2026-09-18")["evidence_state"], "unverifiable")
 
     def test_no_unknown_rows_still_needs_coverage_attestation(self):
         facts = []
@@ -105,7 +110,24 @@ class StatusAuditTests(unittest.TestCase):
         _, unverified = audit.build_snapshot(self.dates, facts, "now")
         _, verified_fixture = audit.build_snapshot(self.dates, facts, "now", coverage_verified=True)
         self.assertEqual(unverified["coverage_status"], "unverified")
+        self.assertEqual(unverified["source_integrity"], "unverified")
+        self.assertEqual(unverified["securities"]["513300"]["counts_by_evidence_state"], {"evidenced": len(self.dates)})
         self.assertEqual(verified_fixture["coverage_status"], "complete")
+
+    def test_event_list_fact_with_inadequate_semantics_does_not_prove_silence(self):
+        event_list_hit = fact(historical_scope="event_list", scope="event_list")
+        snapshot, report = audit.build_snapshot(self.dates, [event_list_hit], "now")
+        row = self.row(snapshot["status_rows"], "513300", "2026-09-18")
+        self.assertEqual(row["trade_status"], "UNKNOWN")
+        self.assertEqual(row["evidence_state"], "missing")
+        self.assertEqual(report["coverage_status"], "gaps")
+
+    def test_current_query_and_event_list_have_distinct_unknown_reasons(self):
+        current = fact(historical_scope="current_only")
+        snapshot, _ = audit.build_snapshot(self.dates, [current], "now")
+        row = self.row(snapshot["status_rows"], "513300", "2026-09-18")
+        self.assertEqual(row["evidence_state"], "unverifiable")
+        self.assertIn("current-only", row["reason"])
 
     def test_invalid_scope_is_reported_and_cannot_become_tradable(self):
         snapshot, report = audit.build_snapshot(self.dates, [fact(scope="event_list")], "now")

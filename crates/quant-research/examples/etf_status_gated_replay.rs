@@ -17,9 +17,16 @@ fn sql_path(path: &std::path::Path) -> String {
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     let mut output = PathBuf::from("research-output");
+    let mut evidence_dir = PathBuf::from("research-output/batch3-a-status-evidence");
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--output" => output = args.next().context("--output requires a directory")?.into(),
+            "--evidence-dir" => {
+                evidence_dir = args
+                    .next()
+                    .context("--evidence-dir requires a directory")?
+                    .into()
+            }
             other => anyhow::bail!("unknown argument: {other}"),
         }
     }
@@ -66,8 +73,20 @@ fn main() -> Result<()> {
         calendar_dates.len() == 241,
         "locked official calendar no longer has 241 expected dates"
     );
-    let evidence_dir = output.join("batch2-a-status-evidence");
     fs::create_dir_all(&evidence_dir)?;
+    let audit_manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(evidence_dir.join("manifest.json")).with_context(|| {
+            format!(
+                "read status audit manifest under {}",
+                evidence_dir.display()
+            )
+        })?,
+    )?;
+    ensure!(
+        audit_manifest["coverage_status"] == "gaps"
+            && audit_manifest["expected_status_rows"] == 1205,
+        "real-status audit must remain an explicit 1205-cell gap before replay"
+    );
     fs::write(
         evidence_dir.join("expected-trading-dates.json"),
         serde_json::to_vec_pretty(&calendar_dates)?,
@@ -88,7 +107,7 @@ fn main() -> Result<()> {
                 false AS is_tradable,
                 CASE WHEN symbol IN ('sh513300','sh518880','sh510320','sz159612','sz159952')
                           AND trade_date BETWEEN DATE '2025-09-23' AND DATE '2026-09-21'
-                     THEN 'batch2_a_source_coverage_unresolved'::VARCHAR ELSE NULL::VARCHAR END AS status_sources,
+                     THEN 'batch3_a_no_qualifying_historical_evidence'::VARCHAR ELSE NULL::VARCHAR END AS status_sources,
                 NULL::VARCHAR AS status_observed_at, false AS execution_status_covered
          FROM read_parquet('{source}')) TO '{target}' (FORMAT PARQUET, COMPRESSION ZSTD)"
     ))?;
@@ -100,7 +119,7 @@ fn main() -> Result<()> {
     snapshot.file = file.clone();
     snapshot.sha256 = sha256.clone();
     snapshot.limitations.push("status cells are deliberately UNKNOWN placeholders because complete historical exchange status evidence was not obtained; this snapshot is an audit/blocking input, not real status data".into());
-    snapshot.limitations.push("source audit manifest, frozen status fact snapshot, and coverage report are stored under research-output/batch2-a-status-evidence; the experiment comparison records their hashes".into());
+    snapshot.limitations.push(format!("source audit manifest, frozen status fact snapshot, and coverage report are stored under {}; this is an UNKNOWN blocking overlay, not a real status input", evidence_dir.display()));
     fs::write(
         dir.join("manifest.json"),
         serde_json::to_vec_pretty(&snapshot)?,
@@ -157,7 +176,8 @@ fn main() -> Result<()> {
             && covered_window_rows.iter().all(|(_, status)| {
                 status.trade_status.as_deref() == Some("UNKNOWN")
                     && !status.is_tradable
-                    && status.sources.as_deref() == Some("batch2_a_source_coverage_unresolved")
+                    && status.sources.as_deref()
+                        == Some("batch3_a_no_qualifying_historical_evidence")
             }),
         "status snapshot contains a non-UNKNOWN or covered row"
     );
@@ -181,7 +201,9 @@ fn main() -> Result<()> {
         "price_snapshot_sha256": baseline.snapshot.sha256,
         "status_snapshot_id": id,
         "status_snapshot_sha256": sha256,
-        "source_audit_manifest": "research-output/batch2-a-status-evidence/manifest.json",
+        "source_audit_manifest": evidence_dir.join("manifest.json"),
+        "source_audit_path": "docs/handoffs/evidence/batch3-a/source-audit.json",
+        "source_audit_sha256": "e6d56634d4f8da0f6a68dcc52074bc56cffef7c4ea39df7b874de1b7121cb5e8",
         "source_audit": serde_json::from_slice::<serde_json::Value>(&fs::read(evidence_dir.join("manifest.json"))?)?,
         "status_rows": covered_window_rows.len(),
         "status_coverage": "unverified_unknown_placeholder",
@@ -191,12 +213,12 @@ fn main() -> Result<()> {
         "status_max_independent_nav_error": status_nav_error,
         "max_independent_nav_error": max_nav_error,
         "status_experiment_path": path,
-        "accounting_note": "price bars are identical; the gated run uses all-UNKNOWN placeholders and is intentionally blocking, not a real-market performance estimate"
+        "accounting_note": "price bars are identical; the gated run uses all-UNKNOWN placeholders because no qualifying historical source was acquired, and is intentionally blocking, not a real-market performance estimate"
     });
     let comparison_path = output
         .join("experiments")
         .join(result.experiment_id.to_string())
-        .join("batch2-a-comparison.json");
+        .join("batch3-a-comparison.json");
     fs::write(&comparison_path, serde_json::to_vec_pretty(&comparison)?)?;
     println!("{}", serde_json::to_string_pretty(&comparison)?);
     Ok(())
