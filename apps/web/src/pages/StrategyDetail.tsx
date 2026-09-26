@@ -63,6 +63,7 @@ export default function StrategyDetail() {
       <h1>{exp.name}</h1>
       <p>{exp.config.strategy.momentum_short_days && exp.config.strategy.momentum_long_days ? `轮动综合评分（短动量 ${exp.config.strategy.momentum_short_days} 日 / 长动量 ${exp.config.strategy.momentum_long_days} 日）` : `${exp.config.strategy.lookback_days}日动量`} · Top{exp.config.strategy.top_n} · 每{exp.config.strategy.rebalance_every}个交易日调仓</p>
       <p>{exp.universe ? `${exp.universe.name} · ${exp.universe.pit_status} · ${exp.universe.coverage}` : 'Universe 未知（旧实验）'}</p>
+      {exp.run_mode?.startsWith('diagnostic_') && <div className="blocked"><strong>诊断实验 · 不代表可信历史绩效</strong><span>执行模式 {exp.backtest.execution_status_mode ?? 'unknown'} · 回溯静态成员名单 · 零分红 · 原始价格。全部收益与风险指标只用于验证作业及计算链路。</span></div>}
       <p>执行状态：{exp.backtest.execution_status_mode === 'status_gated' ? '冻结快照状态门槛（历史可知性未验证）' : exp.backtest.execution_status_mode === 'legacy_bar_only' ? '旧快照仅按行情价判断，未验证可交易状态' : '旧报告未记录执行状态模式'}</p>
       <details><summary>实验身份与假设</summary><p>Universe ID：{exp.universe?.universe_id ?? '旧结果缺失'} · 版本 ID：{exp.universe?.version_id ?? '旧结果缺失'} · 成员内容 hash：{exp.universe?.content_hash ?? '旧结果缺失'}</p><p>快照 ID：{exp.snapshot?.snapshot_id ?? '缺失'} · SHA-256：{exp.snapshot?.sha256 ?? '缺失'}</p>{exp.assumptions?.length ? <ul>{exp.assumptions.map((item, index) => <li key={index}>{item}</li>)}</ul> : <p>旧结果未保存假设，不能据此推断历史 PIT、分红或收益口径。</p>}</details>
       <section className="metrics">{[

@@ -31,6 +31,9 @@ pub struct ExperimentResult {
     pub factor: FactorReport,
     pub backtest: BacktestReport,
     pub assumptions: Vec<String>,
+    /// Missing on historical files; diagnostic jobs are explicitly distinguished from trusted runs.
+    #[serde(default)]
+    pub run_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,7 +200,7 @@ impl ExperimentResult {
             "a later scheduled rebalance signal replaces the deferred target; deferred attempts and blocked symbols are recorded in the backtest report".into(),
             execution_assumption.into(),
             "cash earns no interest and ETF distributions are only reflected when present in source prices/data".into(),
-        ]}
+        ],run_mode:None}
     }
     pub fn with_universe_identity(mut self, universe: UniverseReportIdentity) -> Self {
         self.universe = Some(universe);
@@ -248,6 +251,31 @@ impl ExperimentResult {
         fs::write(&path, serde_json::to_vec_pretty(self)?)
             .with_context(|| format!("write {}", path.display()))?;
         Ok(path)
+    }
+
+    /// Write an experiment as a complete directory, then atomically expose the directory.
+    /// A failed serialization or write leaves no readable experiment at the final path.
+    pub fn save_atomic(&self, root: &Path) -> Result<PathBuf> {
+        use std::io::Write;
+        let experiments = root.join("experiments");
+        fs::create_dir_all(&experiments)?;
+        let final_dir = experiments.join(self.experiment_id.to_string());
+        anyhow::ensure!(!final_dir.exists(), "experiment directory already exists");
+        let temp_dir = experiments.join(format!(".{}.{}.tmp", self.experiment_id, Uuid::new_v4()));
+        fs::create_dir(&temp_dir)?;
+        let result = (|| -> Result<()> {
+            let path = temp_dir.join("experiment.json");
+            let mut file = fs::File::create(&path)?;
+            file.write_all(&serde_json::to_vec_pretty(self)?)?;
+            file.sync_all()?;
+            fs::rename(&temp_dir, &final_dir).context("atomically publish experiment directory")?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            let _ = fs::remove_dir_all(&temp_dir);
+            return Err(error);
+        }
+        Ok(final_dir.join("experiment.json"))
     }
 }
 

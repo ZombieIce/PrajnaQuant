@@ -34,6 +34,8 @@ use uuid::Uuid;
 
 #[path = "market_api.rs"]
 mod market_api;
+#[path = "run_jobs.rs"]
+mod run_jobs;
 #[path = "universe_api.rs"]
 mod universe_api;
 use universe_api::{UniverseDraft, UniverseStore, UniverseSummary};
@@ -69,6 +71,7 @@ pub async fn serve(
         universes: Arc::new(UniverseStore::new(&output)),
         output: output.clone(),
     };
+    let run_jobs = run_jobs::RunJobApi::start(output.as_ref().clone(), state.universes.clone());
     let api = Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/signals", get(signals))
@@ -90,8 +93,8 @@ pub async fn serve(
         .route("/api/v1/universes/{id}/versions", post(publish_version))
         .route("/api/v1/universes/{id}/members", get(universe_members))
         .route("/api/v1/universes/{id}/coverage", get(universe_coverage))
-        // /runs is intentionally absent: no asynchronous queue/state store and no runner mask yet.
         .with_state(state)
+        .merge(run_jobs.router())
         .merge(market_api::router(Arc::new(market_data_dir)))
         .layer(CorsLayer::permissive());
     let app = api.fallback_service(
