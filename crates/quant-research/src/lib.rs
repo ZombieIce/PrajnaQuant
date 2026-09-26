@@ -5,6 +5,7 @@ pub mod data;
 pub mod experiment;
 pub mod factor;
 pub mod feature;
+pub mod poc0_benchmark;
 pub mod runner;
 pub mod server;
 pub mod signal;

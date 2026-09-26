@@ -1,0 +1,69 @@
+{
+  "dataset_version": "poc0.synthetic.etf-daily.v1",
+  "seed": 20260926,
+  "seed_semantics": "stable fixture identity; the deliberately small price path is hand-authored, not randomly sampled",
+  "source_identity": "poc0-hand-authored-golden-v1",
+  "calendar_basis": "fixed_synthetic_weekday_sessions",
+  "timezone": "Asia/Shanghai",
+  "calendar": [
+    "2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09",
+    "2026-01-12", "2026-01-13", "2026-01-14", "2026-01-15", "2026-01-16"
+  ],
+  "bar_defaults": {
+    "open": 100.0,
+    "volume": 1000000.0,
+    "amount": 100000000.0,
+    "high_rule": "max(open, close)",
+    "low_rule": "min(open, close)",
+    "open_available_at": "09:30:00+08:00",
+    "close_available_at": "15:00:00+08:00"
+  },
+  "instruments": [
+    {"symbol": "A", "currency": "CNY", "price_precision": 2, "quantity_precision": 0, "closes": [100.0, 101.0, 102.0, 103.0, 99.0, 98.0, 100.0, 101.0, 102.0, 103.0]},
+    {"symbol": "B", "currency": "CNY", "price_precision": 2, "quantity_precision": 0, "closes": [100.0, 99.0, 98.0, 99.0, 102.0, 103.0, 101.0, 100.0, 99.0, 98.0]},
+    {"symbol": "C", "currency": "CNY", "price_precision": 2, "quantity_precision": 0, "closes": [100.0, 100.0, 101.0, 100.0, 101.0, 102.0, 103.0, 104.0, 103.0, 105.0]}
+  ],
+  "missing_bars": [
+    {"symbol": "B", "date": "2026-01-16", "reason": "deliberate_missing_bar"}
+  ],
+  "execution_status_default": {
+    "trade_status": "TRADABLE",
+    "is_tradable": true,
+    "sources": "poc0-fixture-default",
+    "available_at": "08:50:00+08:00"
+  },
+  "execution_status_overrides": [
+    {"symbol": "C", "date": "2026-01-08", "trade_status": "UNKNOWN", "is_tradable": false, "sources": "poc0-fixture-override", "available_at": "08:50:00+08:00"},
+    {"symbol": "B", "date": "2026-01-13", "trade_status": "HALTED", "is_tradable": false, "sources": "poc0-fixture-override", "available_at": "08:50:00+08:00"}
+  ],
+  "time_model": {
+    "signal": "after session close using that session close and earlier closes only",
+    "execution": "pending target executes at the next available session open",
+    "execution_status": "available before the session open",
+    "final_session": "target remains pending because no future execution session exists"
+  },
+  "result_model_boundary": "This fixture is an event ledger with explicit fills, cash, holdings, costs and NAV. A Vector candidate uses a separately declared target-weight × return model and is compared only under shared assumptions; the Vector result is not asserted to be this account ledger.",
+  "account": {"initial_cash": 100000.0, "lot_size": 100},
+  "strategy": {
+    "name": "Momentum Rotation",
+    "version": "poc0-golden-v1",
+    "momentum_short_days": 1,
+    "momentum_long_days": 1,
+    "volatility_window": 2,
+    "short_momentum_weight": 1.0,
+    "long_momentum_weight": 1.0,
+    "volatility_weight": 0.0,
+    "trend_filter": false,
+    "top_n": 1,
+    "rebalance_every": 1,
+    "tie_break": "symbol ascending"
+  },
+  "costs": {
+    "commission_rate": 0.001,
+    "minimum_commission": 100.0,
+    "buy_tax_rate": 0.0,
+    "sell_tax_rate": 0.0,
+    "buy_slippage_bps": 10.0,
+    "sell_slippage_bps": 10.0
+  }
+}

@@ -64,6 +64,15 @@ enum Command {
         #[arg(long, default_value_t = false)]
         strict_pit: bool,
     },
+    /// Run the fixed POC-0 dataset through the shared correctness-first benchmark harness.
+    BenchmarkPoc0 {
+        #[arg(long, default_value = "poc/poc0-benchmark/fixtures/dataset-v1.json")]
+        dataset: PathBuf,
+        #[arg(long, default_value = "poc/poc0-benchmark/fixtures/expected-v1.json")]
+        expected: PathBuf,
+        #[arg(long, default_value = "target/poc-0/benchmark-report.json")]
+        output: PathBuf,
+    },
     /// Serve the local visualization workbench.
     Serve {
         #[arg(long, default_value = "research-output")]
@@ -222,6 +231,22 @@ async fn main() -> Result<()> {
                     "result": path,
                 }))?
             );
+        }
+        Command::BenchmarkPoc0 {
+            dataset,
+            expected,
+            output,
+        } => {
+            let report = quant_research::poc0_benchmark::run(&dataset, &expected)?;
+            let passed = quant_research::poc0_benchmark::write_and_exit_status(&report, &output)?;
+            println!(
+                "POC-0 correctness {}: {}",
+                report.correctness_status(),
+                output.display()
+            );
+            if !passed {
+                std::process::exit(2);
+            }
         }
         Command::Serve {
             output,

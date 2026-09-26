@@ -1,0 +1,58 @@
+{
+  "expected_version": "poc0-golden-ledger.v1",
+  "dataset_content_sha256": "8c16742a2031cab19e08456dbbe009769b02f0331276618831cefdb6827b5a6f",
+  "projection": {
+    "rankings": [
+      {"date": "2026-01-07", "candidates": [{"symbol": "C", "score": 0.02}, {"symbol": "A", "score": 0.01980198019801982}, {"symbol": "B", "score": -0.02020202020202022}]},
+      {"date": "2026-01-08", "candidates": [{"symbol": "B", "score": 0.020408163265306145}, {"symbol": "A", "score": 0.019607843137254832}, {"symbol": "C", "score": -0.01980198019801982}]},
+      {"date": "2026-01-09", "candidates": [{"symbol": "B", "score": 0.06060606060606055}, {"symbol": "C", "score": 0.02}, {"symbol": "A", "score": -0.0776699029126213}]},
+      {"date": "2026-01-12", "candidates": [{"symbol": "C", "score": 0.01980198019801982}, {"symbol": "B", "score": 0.019607843137254832}, {"symbol": "A", "score": -0.02020202020202022}]},
+      {"date": "2026-01-13", "candidates": [{"symbol": "A", "score": 0.04081632653061229}, {"symbol": "C", "score": 0.019607843137254832}, {"symbol": "B", "score": -0.03883495145631066}]},
+      {"date": "2026-01-14", "candidates": [{"symbol": "A", "score": 0.02}, {"symbol": "C", "score": 0.01941747572815533}, {"symbol": "B", "score": -0.01980198019801982}]},
+      {"date": "2026-01-15", "candidates": [{"symbol": "A", "score": 0.01980198019801982}, {"symbol": "C", "score": -0.019230769230769162}, {"symbol": "B", "score": -0.020000000000000018}]},
+      {"date": "2026-01-16", "candidates": [{"symbol": "C", "score": 0.03883495145631066}, {"symbol": "A", "score": 0.019607843137254832}]}
+    ],
+    "signals": [
+      {"date": "2026-01-07", "target_symbols": ["C"]},
+      {"date": "2026-01-08", "target_symbols": ["B"]},
+      {"date": "2026-01-09", "target_symbols": ["B"]},
+      {"date": "2026-01-12", "target_symbols": ["C"]},
+      {"date": "2026-01-13", "target_symbols": ["A"]},
+      {"date": "2026-01-14", "target_symbols": ["A"]},
+      {"date": "2026-01-15", "target_symbols": ["A"]},
+      {"date": "2026-01-16", "target_symbols": ["C"]}
+    ],
+    "fills": [
+      {"date": "2026-01-09", "symbol": "B", "side": "BUY", "quantity": 900, "reference_price": 100.0, "fill_price": 100.1, "gross_value": 90090.0, "commission": 100.0, "tax": 0.0, "slippage_cost": 90.0},
+      {"date": "2026-01-14", "symbol": "B", "side": "SELL", "quantity": 900, "reference_price": 100.0, "fill_price": 99.9, "gross_value": 89910.0, "commission": 100.0, "tax": 0.0, "slippage_cost": 90.0},
+      {"date": "2026-01-14", "symbol": "A", "side": "BUY", "quantity": 900, "reference_price": 100.0, "fill_price": 100.1, "gross_value": 90090.0, "commission": 100.0, "tax": 0.0, "slippage_cost": 90.0}
+    ],
+    "unexecuted_orders": [
+      {"decision_date": "2026-01-07", "attempt_date": "2026-01-08", "symbol": "C", "side": "BUY", "desired_quantity": 1000, "trade_status": "UNKNOWN", "status_sources": "poc0-fixture-override", "reason": "unknown_status"},
+      {"decision_date": "2026-01-12", "attempt_date": "2026-01-13", "symbol": "B", "side": "SELL", "desired_quantity": 900, "trade_status": "HALTED", "status_sources": "poc0-fixture-override", "reason": "halted"},
+      {"decision_date": "2026-01-16", "attempt_date": "2026-01-16", "symbol": "C", "side": "TARGET", "desired_quantity": null, "trade_status": "TRADABLE", "status_sources": "poc0-fixture-default", "reason": "no_future_execution_session"}
+    ],
+    "ledger": [
+      {"date": "2026-01-05", "cash": 100000.0, "holdings": [], "nav": 100000.0},
+      {"date": "2026-01-06", "cash": 100000.0, "holdings": [], "nav": 100000.0},
+      {"date": "2026-01-07", "cash": 100000.0, "holdings": [], "nav": 100000.0},
+      {"date": "2026-01-08", "cash": 100000.0, "holdings": [], "nav": 100000.0},
+      {"date": "2026-01-09", "cash": 9810.0, "holdings": [{"symbol": "B", "quantity": 900, "mark_price": 102.0}], "nav": 101610.0},
+      {"date": "2026-01-12", "cash": 9810.0, "holdings": [{"symbol": "B", "quantity": 900, "mark_price": 103.0}], "nav": 102510.0},
+      {"date": "2026-01-13", "cash": 9810.0, "holdings": [{"symbol": "B", "quantity": 900, "mark_price": 101.0}], "nav": 100710.0},
+      {"date": "2026-01-14", "cash": 9430.0, "holdings": [{"symbol": "A", "quantity": 900, "mark_price": 101.0}], "nav": 100330.0},
+      {"date": "2026-01-15", "cash": 9430.0, "holdings": [{"symbol": "A", "quantity": 900, "mark_price": 102.0}], "nav": 101230.0},
+      {"date": "2026-01-16", "cash": 9430.0, "holdings": [{"symbol": "A", "quantity": 900, "mark_price": 103.0}], "nav": 102130.0}
+    ],
+    "summary": {
+      "initial_cash": 100000.0,
+      "final_equity": 102130.0,
+      "final_positions": {"A": 900},
+      "trade_count": 3,
+      "commission": 300.0,
+      "tax": 0.0,
+      "slippage_cost": 270.0,
+      "total_cost": 570.0
+    }
+  }
+}
