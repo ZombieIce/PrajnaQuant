@@ -1,0 +1,12 @@
+[package]
+name = "poc-b1-layout"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+arrow-array = "=60.0.0"
+polars = { version = "=0.55.2", default-features = false }
+sha2 = "0.10"

@@ -1,0 +1,106 @@
+{
+  "status": "smoke_only_no_architecture_decision",
+  "scope": "scalar nullable close access and momentum; no Polars expressions, Parquet IO, ranking, portfolio, or out-of-core",
+  "command": [
+    "cargo",
+    "run",
+    "--manifest-path",
+    "/Users/yibinzhang/Documents/ChatGPT/A股量化/poc/b1-layout/Cargo.toml",
+    "--release",
+    "--locked",
+    "--offline",
+    "--",
+    "128",
+    "4096",
+    "20",
+    "10"
+  ],
+  "git_revision": "b49ec8bea456b4248c4401a189a9b931360ff853",
+  "worktree_dirty": true,
+  "source_sha256": "8c0948cabed4272647e3a3c8877ea3ed20a48ac9b8d7fb318fa403ae839521c7",
+  "lock_sha256": "788449592386dc6c77ca3db7b9a2b64c58f41abd17d48bad229b89bc94311e65",
+  "capture_sha256": "e1d0e5111e66a793007598b5eb6c713e23be052b3ba0e6f3e982c9df9bf0d2a1",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+  "platform": "macOS-26.2-x86_64-i386-64bit",
+  "cpu_arch": "x86_64",
+  "cpu_model": null,
+  "compiler_stderr": [
+    "    Finished `release` profile [optimized] target(s) in 1.78s",
+    "     Running `poc/b1-layout/target/release/poc-b1-layout 128 4096 20 10`",
+    "symbols=128 days=4096 lookback=20 repetitions=10"
+  ],
+  "measurements": [
+    {
+      "kind": "input",
+      "symbols": 128,
+      "days": 4096,
+      "lookback": 20,
+      "repetitions": 10,
+      "input_sha256": "ce48d8ef991e8cdc170eaca738f9daa9dc01bd3eae9a5ecd5e69143464735530"
+    },
+    {
+      "kind": "candidate",
+      "candidate": "soa",
+      "median_us": 931,
+      "p95_us": 1037,
+      "samples_us": [
+        928,
+        929,
+        929,
+        930,
+        930,
+        931,
+        932,
+        936,
+        980,
+        1037
+      ],
+      "factor_values": 510970,
+      "sum": 814.158235255952,
+      "sum_squares": 1.311858349001
+    },
+    {
+      "kind": "candidate",
+      "candidate": "arrow",
+      "median_us": 1303,
+      "p95_us": 1453,
+      "samples_us": [
+        1292,
+        1292,
+        1293,
+        1293,
+        1293,
+        1303,
+        1310,
+        1315,
+        1317,
+        1453
+      ],
+      "factor_values": 510970,
+      "sum": 814.158235255952,
+      "sum_squares": 1.311858349001
+    },
+    {
+      "kind": "candidate",
+      "candidate": "polars",
+      "median_us": 3533,
+      "p95_us": 3822,
+      "samples_us": [
+        3522,
+        3523,
+        3523,
+        3524,
+        3525,
+        3533,
+        3541,
+        3614,
+        3691,
+        3822
+      ],
+      "factor_values": 510970,
+      "sum": 814.158235255952,
+      "sum_squares": 1.311858349001
+    }
+  ]
+}
