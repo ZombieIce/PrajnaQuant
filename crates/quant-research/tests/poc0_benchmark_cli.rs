@@ -127,3 +127,119 @@ fn benchmark_cli_skips_timing_when_the_independent_golden_mismatches() {
             .is_empty()
     );
 }
+
+#[test]
+fn fast_event_buy_and_hold_has_an_independent_l1_ledger() {
+    let dir = tempfile::tempdir().unwrap();
+    let report_path = dir.path().join("report.json");
+    let result = run(&fixture("expected-v1.json"), &report_path);
+    assert!(result.status.success());
+    let report: Value = serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
+    let event = &report["b2_fast_event_buy_hold"];
+    assert_eq!(event["status"], "correctness_passed_and_measured");
+    assert!(event["correctness_checks"].as_array().unwrap().is_empty());
+    assert_eq!(event["projection"]["fills"].as_array().unwrap().len(), 3);
+    assert_eq!(event["projection"]["fills"][0]["date"], "2026-01-13");
+    assert_eq!(event["projection"]["fills"][2]["symbol"], "B");
+    assert_eq!(event["projection"]["fills"][2]["date"], "2026-01-14");
+    assert_eq!(event["projection"]["summary"]["total_cost"], 390.0);
+    assert_eq!(event["projection"]["summary"]["final_equity"], 101710.0);
+    let rejected = event["projection"]["orders"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|order| order["symbol"] == "B" && order["attempt_date"] == "2026-01-13")
+        .unwrap();
+    assert_eq!(rejected["reason"], "HALTED");
+    let expected_cash = [
+        100000.0, 100000.0, 100000.0, 100000.0, 100000.0, 100000.0, 39740.0, 9610.0, 9610.0, 9610.0,
+    ];
+    let expected_nav = [
+        100000.0, 100000.0, 100000.0, 100000.0, 100000.0, 100000.0, 100640.0, 101110.0, 100810.0,
+        101710.0,
+    ];
+    let ledger = event["projection"]["ledger"].as_array().unwrap();
+    for ((row, cash), nav) in ledger.iter().zip(expected_cash).zip(expected_nav) {
+        assert!((row["cash"].as_f64().unwrap() - cash).abs() < 1e-8);
+        assert!((row["nav"].as_f64().unwrap() - nav).abs() < 1e-8);
+    }
+    let last_b = ledger[9]["holdings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|holding| holding["symbol"] == "B")
+        .unwrap();
+    assert_eq!(last_b["mark_price"], 99.0);
+    for phase in [
+        "raw_samples_ns",
+        "initialization_samples_ns",
+        "event_processing_samples_ns",
+        "end_to_end_samples_ns",
+    ] {
+        assert_eq!(event[phase].as_array().unwrap().len(), 5);
+    }
+    let second_path = dir.path().join("second.json");
+    assert!(
+        run(&fixture("expected-v1.json"), &second_path)
+            .status
+            .success()
+    );
+    let second: Value = serde_json::from_slice(&fs::read(second_path).unwrap()).unwrap();
+    assert_eq!(
+        event["checksum_sha256"],
+        second["b2_fast_event_buy_hold"]["checksum_sha256"]
+    );
+}
+
+#[test]
+fn fast_event_keeps_unfilled_target_and_buy_tax_traceable() {
+    let dir = tempfile::tempdir().unwrap();
+    let dataset_path = dir.path().join("pending-dataset.json");
+    let mut dataset: Value =
+        serde_json::from_slice(&fs::read(fixture("dataset-v1.json")).unwrap()).unwrap();
+    dataset["costs"]["buy_tax_rate"] = Value::from(0.02);
+    for date in ["2026-01-13", "2026-01-14", "2026-01-15", "2026-01-16"] {
+        dataset["missing_bars"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "symbol": "A", "date": date, "reason": "no_open_before_dataset_end"
+            }));
+    }
+    fs::write(&dataset_path, serde_json::to_vec_pretty(&dataset).unwrap()).unwrap();
+    let report_path = dir.path().join("pending-report.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_quant-research"))
+        .current_dir(root())
+        .args([
+            "benchmark-poc0",
+            "--dataset",
+            dataset_path.to_str().unwrap(),
+            "--expected",
+            fixture("expected-v1.json").to_str().unwrap(),
+            "--output",
+            report_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "changed input must fail the S2 golden"
+    );
+    let report: Value = serde_json::from_slice(&fs::read(report_path).unwrap()).unwrap();
+    let event = &report["b2_fast_event_buy_hold"];
+    assert_eq!(event["status"], "correctness_passed_and_measured");
+    assert_eq!(event["projection"]["unexecuted_targets"][0]["symbol"], "A");
+    assert_eq!(
+        event["projection"]["unexecuted_targets"][0]["reason"],
+        "no_successful_open_fill_before_dataset_end"
+    );
+    assert!((event["projection"]["summary"]["tax"].as_f64().unwrap() - 1201.2).abs() < 1e-8);
+    assert!(
+        event["projection"]["ledger"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["cash"].as_f64().unwrap() >= 0.0)
+    );
+}

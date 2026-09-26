@@ -363,7 +363,95 @@ pub struct Poc0Report {
     correctness: CorrectnessReport,
     measurements: MeasurementReport,
     result: ReportResult,
+    b2_fast_event_buy_hold: FastEventReport,
     conclusion: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct FastEventReport {
+    status: &'static str,
+    correctness_checks: Vec<String>,
+    engine: &'static str,
+    version: &'static str,
+    semantics: &'static str,
+    checksum_sha256: String,
+    projection: FastEventProjection,
+    warmup_runs: usize,
+    raw_samples_ns: Vec<u128>,
+    median_ns: Option<u128>,
+    p95_ns: Option<u128>,
+    initialization_samples_ns: Vec<u128>,
+    event_processing_samples_ns: Vec<u128>,
+    end_to_end_samples_ns: Vec<u128>,
+    measurement_scope: &'static str,
+}
+
+struct FastEventRun {
+    projection: FastEventProjection,
+    initialization_ns: u128,
+    event_processing_ns: u128,
+    end_to_end_ns: u128,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+struct FastEventProjection {
+    orders: Vec<FastEventOrder>,
+    fills: Vec<FastEventFill>,
+    ledger: Vec<FastEventLedger>,
+    unexecuted_targets: Vec<FastEventPendingTarget>,
+    summary: FastEventSummary,
+}
+#[derive(Debug, Serialize, PartialEq)]
+struct FastEventOrder {
+    decision_date: NaiveDate,
+    attempt_date: NaiveDate,
+    symbol: String,
+    side: String,
+    quantity: i64,
+    reason: Option<String>,
+}
+#[derive(Debug, Serialize, PartialEq)]
+struct FastEventFill {
+    date: NaiveDate,
+    symbol: String,
+    side: String,
+    quantity: i64,
+    reference_price: f64,
+    fill_price: f64,
+    gross_value: f64,
+    commission: f64,
+    tax: f64,
+    slippage_cost: f64,
+}
+#[derive(Debug, Serialize, PartialEq)]
+struct FastEventHolding {
+    symbol: String,
+    quantity: i64,
+    mark_price: f64,
+}
+#[derive(Debug, Serialize, PartialEq)]
+struct FastEventLedger {
+    date: NaiveDate,
+    cash: f64,
+    holdings: Vec<FastEventHolding>,
+    nav: f64,
+}
+#[derive(Debug, Serialize, PartialEq)]
+struct FastEventPendingTarget {
+    decision_date: NaiveDate,
+    attempt_date: NaiveDate,
+    symbol: String,
+    reason: String,
+}
+#[derive(Debug, Serialize, PartialEq)]
+struct FastEventSummary {
+    initial_cash: f64,
+    final_equity: f64,
+    final_positions: BTreeMap<String, i64>,
+    commission: f64,
+    tax: f64,
+    slippage_cost: f64,
+    total_cost: f64,
 }
 
 impl Poc0Report {
@@ -438,6 +526,33 @@ pub fn run(dataset_path: &Path, expected_path: &Path) -> Result<Poc0Report> {
             Vec::new(),
         )
     };
+    let fast_event_run = run_fast_event(&prepared);
+    let fast_event_checksum = sha256(&serde_json::to_vec(&fast_event_run.projection)?);
+    let repeated_projection = run_fast_event(&prepared).projection;
+    let fast_event_checks =
+        fast_event_checks(&prepared, &fast_event_run.projection, &repeated_projection)?;
+    let fast_event_correct = fast_event_checks.is_empty();
+    let mut fast_event_runs = Vec::new();
+    if fast_event_correct {
+        for _ in 0..WARMUP_RUNS {
+            let _ = run_fast_event(&prepared);
+        }
+        for _ in 0..MEASUREMENT_RUNS {
+            fast_event_runs.push(run_fast_event(&prepared));
+        }
+    }
+    let initialization_samples_ns = fast_event_runs
+        .iter()
+        .map(|r| r.initialization_ns)
+        .collect::<Vec<_>>();
+    let event_processing_samples_ns = fast_event_runs
+        .iter()
+        .map(|r| r.event_processing_ns)
+        .collect::<Vec<_>>();
+    let end_to_end_samples_ns = fast_event_runs
+        .iter()
+        .map(|r| r.end_to_end_ns)
+        .collect::<Vec<_>>();
     differences.extend(measurement_differences);
     let correctness_passed = correctness_passed && measurements.status == "measured";
     let provenance = provenance_report();
@@ -504,8 +619,298 @@ pub fn run(dataset_path: &Path, expected_path: &Path) -> Result<Poc0Report> {
             checksum_sha256,
             projection,
         },
+        b2_fast_event_buy_hold: FastEventReport {
+            status: if fast_event_correct {
+                "correctness_passed_and_measured"
+            } else {
+                "correctness_failed_timing_skipped"
+            },
+            correctness_checks: fast_event_checks,
+            engine: "poc0-fast-event",
+            version: "0.1",
+            semantics: "single venue; long only; market orders; L1 next-session open fills; fixed commission, tax, and slippage; buy-and-hold equal weight; stale last close marks missing bars; not a production engine",
+            checksum_sha256: fast_event_checksum,
+            projection: fast_event_run.projection,
+            warmup_runs: if fast_event_correct { WARMUP_RUNS } else { 0 },
+            raw_samples_ns: end_to_end_samples_ns.clone(),
+            median_ns: sorted_median(&end_to_end_samples_ns),
+            p95_ns: sorted_p95(&end_to_end_samples_ns),
+            initialization_samples_ns,
+            event_processing_samples_ns,
+            end_to_end_samples_ns,
+            measurement_scope: "initialization (day index construction), event processing (orders, fills, marks and ledger), and end-to-end (both phases plus summary); excludes dataset parsing and JSON report serialization",
+        },
         conclusion: "unresolved: one fixture validates the harness and reference path; no architecture performance choice is supported",
     })
+}
+
+fn sorted_median(samples: &[u128]) -> Option<u128> {
+    let mut sorted = samples.to_vec();
+    sorted.sort_unstable();
+    (!sorted.is_empty()).then(|| sorted[sorted.len() / 2])
+}
+fn sorted_p95(samples: &[u128]) -> Option<u128> {
+    let mut sorted = samples.to_vec();
+    sorted.sort_unstable();
+    (!sorted.is_empty()).then(|| {
+        sorted[(sorted.len() * 95)
+            .div_ceil(100)
+            .saturating_sub(1)
+            .min(sorted.len() - 1)]
+    })
+}
+
+fn fast_event_checks(
+    dataset: &PreparedDataset,
+    projection: &FastEventProjection,
+    repeated: &FastEventProjection,
+) -> Result<Vec<String>> {
+    let mut failures = Vec::new();
+    if projection != repeated {
+        failures.push("repeated run ledger differs".into());
+    }
+    for row in &projection.ledger {
+        let calculated = row.cash
+            + row
+                .holdings
+                .iter()
+                .map(|holding| holding.quantity as f64 * holding.mark_price)
+                .sum::<f64>();
+        if (row.nav - calculated).abs() > FLOAT_TOLERANCE {
+            failures.push(format!("NAV identity failed on {}", row.date));
+        }
+    }
+    if projection
+        .orders
+        .iter()
+        .any(|order| order.attempt_date <= order.decision_date)
+    {
+        failures.push("an order did not execute after its signal date".into());
+    }
+    let first_execution_date = dataset
+        .spec
+        .calendar
+        .get(dataset.spec.calendar.len().saturating_sub(4))
+        .copied();
+    let saw_halt = projection.orders.iter().any(|order| {
+        Some(order.attempt_date) == first_execution_date
+            && order.symbol == "B"
+            && order.reason.as_deref() == Some("HALTED")
+    });
+    if !saw_halt {
+        failures.push("fixture HALTED order was not rejected".into());
+    }
+    let final_row = projection
+        .ledger
+        .last()
+        .context("Fast Event ledger is empty")?;
+    let prior_row = projection
+        .ledger
+        .get(projection.ledger.len().saturating_sub(2))
+        .context("Fast Event ledger has fewer than two rows")?;
+    let stale_b_mark = final_row
+        .holdings
+        .iter()
+        .find(|holding| holding.symbol == "B")
+        .map(|holding| holding.mark_price);
+    let prior_b_mark = prior_row
+        .holdings
+        .iter()
+        .find(|holding| holding.symbol == "B")
+        .map(|holding| holding.mark_price);
+    if stale_b_mark != prior_b_mark {
+        failures.push("missing final B bar did not retain the last observed mark".into());
+    }
+    if projection.fills.is_empty() || projection.summary.total_cost <= 0.0 {
+        failures.push("fills or non-zero fixed transaction costs are missing".into());
+    }
+    if projection
+        .ledger
+        .iter()
+        .any(|row| row.cash < -FLOAT_TOLERANCE)
+    {
+        failures.push("account cash became negative".into());
+    }
+    Ok(failures)
+}
+
+/// Minimal, independent L1 event path for S1. The first close creates an equal-weight
+/// target across the fixture universe; the following sessions submit market buys at
+/// their opens. Targets blocked by status or missing bars remain pending. Holdings are
+/// marked at the latest observed close, never at a fabricated zero price.
+fn run_fast_event(dataset: &PreparedDataset) -> FastEventRun {
+    let end_to_end_started = Instant::now();
+    let calendar = &dataset.spec.calendar;
+    let initial_cash = dataset.spec.account.initial_cash;
+    let targets = dataset
+        .spec
+        .instruments
+        .iter()
+        .map(|i| i.symbol.clone())
+        .collect::<Vec<_>>();
+    let decision_index = calendar.len().saturating_sub(5);
+    let decision_date = calendar[decision_index];
+    let budget = initial_cash / targets.len() as f64;
+    let lot = dataset.spec.account.lot_size;
+    let initialization_started = Instant::now();
+    let mut by_day: BTreeMap<NaiveDate, BTreeMap<&str, &Bar>> = BTreeMap::new();
+    for bar in &dataset.bars {
+        by_day
+            .entry(bar.trade_date)
+            .or_default()
+            .insert(&bar.symbol, bar);
+    }
+    let initialization_ns = initialization_started.elapsed().as_nanos();
+    let event_processing_started = Instant::now();
+    let mut cash = initial_cash;
+    let mut positions: BTreeMap<String, i64> = BTreeMap::new();
+    let mut marks: BTreeMap<String, f64> = BTreeMap::new();
+    let mut orders = Vec::new();
+    let mut fills = Vec::new();
+    let mut ledger = Vec::new();
+    let mut pending = Vec::new();
+    let mut commission_total = 0.0;
+    let mut tax_total = 0.0;
+    let mut slippage_total = 0.0;
+    for (day_index, date) in calendar.iter().enumerate() {
+        let day_bars = by_day.get(date);
+        if day_index > decision_index {
+            for symbol in &targets {
+                if positions.contains_key(symbol) {
+                    continue;
+                }
+                let order = FastEventOrder {
+                    decision_date,
+                    attempt_date: *date,
+                    symbol: symbol.clone(),
+                    side: "BUY".into(),
+                    quantity: 0,
+                    reason: None,
+                };
+                let Some(bar) = day_bars.and_then(|bars| bars.get(symbol.as_str())) else {
+                    let mut blocked = order;
+                    blocked.reason = Some("missing_open".into());
+                    orders.push(blocked);
+                    continue;
+                };
+                if dataset
+                    .statuses
+                    .get(&(*date, symbol.clone()))
+                    .is_none_or(|s| {
+                        !s.is_tradable
+                            || s.trade_status.as_deref() != Some("TRADABLE")
+                            || s.sources.as_deref().is_none_or(str::is_empty)
+                    })
+                {
+                    let mut blocked = order;
+                    blocked.reason = Some(
+                        dataset
+                            .statuses
+                            .get(&(*date, symbol.clone()))
+                            .and_then(|s| s.trade_status.clone())
+                            .unwrap_or_else(|| "missing_status".into()),
+                    );
+                    orders.push(blocked);
+                    continue;
+                }
+                let costs = &dataset.spec.costs;
+                let fill_price = bar.open * (1.0 + costs.buy_slippage_bps / 10_000.0);
+                let mut quantity = ((budget / fill_price) as i64 / lot) * lot;
+                let commission_for = |qty: i64| {
+                    (fill_price * qty as f64 * costs.commission_rate).max(costs.minimum_commission)
+                };
+                while quantity > 0
+                    && fill_price * quantity as f64
+                        + commission_for(quantity)
+                        + fill_price * quantity as f64 * costs.buy_tax_rate
+                        > cash
+                {
+                    quantity -= lot;
+                }
+                if quantity > 0 {
+                    let gross = fill_price * quantity as f64;
+                    let commission = commission_for(quantity);
+                    let tax = gross * costs.buy_tax_rate;
+                    let slippage_cost = (fill_price - bar.open) * quantity as f64;
+                    cash -= gross + commission + tax;
+                    positions.insert(symbol.clone(), quantity);
+                    fills.push(FastEventFill {
+                        date: *date,
+                        symbol: symbol.clone(),
+                        side: "BUY".into(),
+                        quantity,
+                        reference_price: bar.open,
+                        fill_price,
+                        gross_value: gross,
+                        commission,
+                        tax,
+                        slippage_cost,
+                    });
+                    orders.push(FastEventOrder { quantity, ..order });
+                    commission_total += commission;
+                    tax_total += tax;
+                    slippage_total += slippage_cost;
+                }
+            }
+        }
+        if let Some(bars) = day_bars {
+            for (symbol, bar) in bars {
+                marks.insert((*symbol).to_owned(), bar.close);
+            }
+        }
+        let holdings = positions
+            .iter()
+            .map(|(symbol, quantity)| FastEventHolding {
+                symbol: symbol.clone(),
+                quantity: *quantity,
+                mark_price: marks[symbol],
+            })
+            .collect::<Vec<_>>();
+        let nav = cash
+            + holdings
+                .iter()
+                .map(|h| h.quantity as f64 * h.mark_price)
+                .sum::<f64>();
+        ledger.push(FastEventLedger {
+            date: *date,
+            cash,
+            holdings,
+            nav,
+        });
+    }
+    for symbol in &targets {
+        if !positions.contains_key(symbol) {
+            pending.push(FastEventPendingTarget {
+                decision_date,
+                attempt_date: *calendar.last().expect("validated non-empty calendar"),
+                symbol: symbol.clone(),
+                reason: "no_successful_open_fill_before_dataset_end".into(),
+            });
+        }
+    }
+    let final_equity = ledger.last().map_or(initial_cash, |row| row.nav);
+    let projection = FastEventProjection {
+        orders,
+        fills,
+        ledger,
+        unexecuted_targets: pending,
+        summary: FastEventSummary {
+            initial_cash,
+            final_equity,
+            final_positions: positions,
+            commission: commission_total,
+            tax: tax_total,
+            slippage_cost: slippage_total,
+            total_cost: commission_total + tax_total + slippage_total,
+        },
+    };
+    let event_processing_ns = event_processing_started.elapsed().as_nanos();
+    FastEventRun {
+        projection,
+        initialization_ns,
+        event_processing_ns,
+        end_to_end_ns: end_to_end_started.elapsed().as_nanos(),
+    }
 }
 
 fn prepare_dataset(spec: DatasetInput) -> Result<PreparedDataset> {
