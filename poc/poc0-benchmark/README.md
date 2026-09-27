@@ -43,9 +43,43 @@ python3 poc/poc0-benchmark/measure-parquet-rss.py \
 ```
 
 Add `--limit-mib 256` only on a host where `RLIMIT_AS` is supported. On the current macOS host,
-`setrlimit` failed before launching the child, so the constrained-memory acceptance remains
-unresolved. The unrestricted 10-million-row run and failure evidence are recorded in
+`setrlimit` failed before launching the child. The constrained-memory acceptance instead passed
+in a local Colima Linux ARM64 VM using Docker's cgroup v2 limit, without `--limit-mib`. The
+unrestricted 10-million-row run, macOS failure, and Linux cgroup evidence are recorded in
 [`ticket 05`](../../.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md).
+Build the Linux binary without the cap, regenerate the large file, then limit only the read:
+
+```bash
+docker run --rm -v "$PWD:/work" -v poc05-build:/build -e CARGO_TARGET_DIR=/build \
+  -e CARGO_BUILD_JOBS=2 -e CARGO_INCREMENTAL=0 -w /work rust:bookworm \
+  cargo build -p quant-research --no-default-features --locked
+docker run --rm -v "$PWD:/work" -v poc05-build:/build -w /work rust:bookworm \
+  /build/debug/quant-research benchmark-poc0-parquet \
+  --parquet target/poc-0/large-10m.parquet --output target/poc-0/large-generated.json \
+  --filler-rows 10000000 --symbol A --start 2026-01-06 --end 2026-01-07
+docker run --name poc05-evidence --memory=256m --memory-swap=256m --network=none \
+  -v "$PWD:/work" -v poc05-build:/build -w /work python:3.12-bookworm sh -c '
+    cat /sys/fs/cgroup/memory.max
+    python3 poc/poc0-benchmark/measure-parquet-rss.py \
+      --binary /build/debug/quant-research --parquet target/poc-0/large-10m.parquet \
+      --output poc/poc0-benchmark/results/parquet-large-10m-limited-cgroup-2026-09-27.json \
+      --symbol A --start 2026-01-06 --end 2026-01-07
+    result=$?
+    cat /sys/fs/cgroup/memory.peak /sys/fs/cgroup/memory.events
+    exit "$result"
+  '
+docker inspect poc05-evidence --format \
+  'exit={{.State.ExitCode}} oomKilled={{.State.OOMKilled}} memory={{.HostConfig.Memory}} swap={{.HostConfig.MemorySwap}}'
+```
+
+Use a different container name for a second run. The pinned reports are
+[`constrained projection`](results/parquet-large-10m-limited-cgroup-2026-09-27.json),
+[`child RSS`](results/parquet-large-10m-limited-cgroup-2026-09-27.rss.json), and
+[`Docker/cgroup evidence`](results/parquet-large-10m-limited-cgroup-2026-09-27.cgroup.json).
+`memory.peak` includes the reader's file cache and the Python parent; it reached the 256 MiB
+limit with `memory.events.max=646`, but `oom_kill=0` and the command exited 0. Do not compare
+these single-run timings across uncontrolled cache conditions. Check the 10 GiB disk reserve
+before building or regenerating a large file.
 
 Run the fixed three-ETF, ten-session fixture from the repository root:
 

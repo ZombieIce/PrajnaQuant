@@ -1,0 +1,149 @@
+{
+  "cache_condition": "not controlled; reads existing file",
+  "candidates": {
+    "arrow": {
+      "conversion_ns": [
+        1000,
+        834,
+        792,
+        750,
+        751
+      ],
+      "phases": {
+        "factor_ns": [
+          2001,
+          1834,
+          1793,
+          1835,
+          1834
+        ],
+        "ranking_topk_weights_ns": [
+          750,
+          667,
+          668,
+          668,
+          710
+        ],
+        "return_projection_ns": [
+          375,
+          417,
+          375,
+          375,
+          334
+        ]
+      },
+      "samples_ns": [
+        4919,
+        4669,
+        4419,
+        4419,
+        4460
+      ]
+    },
+    "polars": {
+      "conversion_ns": [
+        38896,
+        36808,
+        37101,
+        73702,
+        38102
+      ],
+      "phases": {
+        "factor_ns": [
+          2191262,
+          2195180,
+          2230615,
+          2824412,
+          2309362
+        ],
+        "ranking_topk_weights_ns": [
+          747957,
+          624605,
+          749083,
+          1324620,
+          741413
+        ],
+        "return_projection_ns": [
+          234076,
+          251793,
+          244081,
+          327580,
+          230699
+        ]
+      },
+      "samples_ns": [
+        3182090,
+        3080289,
+        3231990,
+        4491912,
+        3291353
+      ]
+    },
+    "soa": {
+      "phases": {
+        "factor_ns": [
+          1418,
+          1542,
+          1501,
+          1501,
+          1459
+        ],
+        "ranking_topk_weights_ns": [
+          584,
+          793,
+          709,
+          626,
+          585
+        ],
+        "return_projection_ns": [
+          333,
+          333,
+          291,
+          250,
+          292
+        ]
+      },
+      "samples_ns": [
+        3377,
+        3502,
+        3210,
+        3085,
+        3043
+      ]
+    }
+  },
+  "dataset_content_sha256": "b2273b149d88b5dedd30f8dd6c8fbccc018c023ee7f5aaa2a28a6c4acb20ba19",
+  "filler_rows": 10000000,
+  "filter": {
+    "end": "2026-01-07",
+    "history_included_for_rolling_windows": true,
+    "read_end": "2026-01-08",
+    "read_start": "2026-01-05",
+    "start": "2026-01-06",
+    "symbols": [
+      "A"
+    ]
+  },
+  "format": "poc0-b1-parquet.v1",
+  "parquet_bytes": 404509661,
+  "parquet_sha256": "3b5aa86057352c4f00774b253132cc4fd95fb3e5a14024a3832617a149a73e2e",
+  "projection_sha256": "75747678129f7004a1f75d6e60937d705ba48a887f4aa290b315e510bed06d75",
+  "pruning": {
+    "decoded_columns": 3,
+    "scanned_groups": 1,
+    "selected_bars": 4,
+    "source_columns": 7,
+    "source_groups": 2448,
+    "source_rows": 10000029
+  },
+  "result_boundary": "B1 close-to-close evaluation projection; not an executable account ledger",
+  "status": "passed",
+  "timing_ns": {
+    "compute_all_candidates": 25448552,
+    "generation": 0,
+    "scan_conversion": 31223,
+    "scan_decode": 54705798,
+    "serialization": 44481,
+    "total": 12599748815
+  }
+}

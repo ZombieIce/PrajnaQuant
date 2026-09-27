@@ -1,0 +1,26 @@
+{
+  "status": "passed",
+  "command": [
+    "/build/debug/quant-research",
+    "benchmark-poc0-parquet",
+    "--reuse",
+    "--parquet",
+    "target/poc-0/large-10m.parquet",
+    "--output",
+    "poc/poc0-benchmark/results/parquet-large-10m-limited-cgroup-2026-09-27.json",
+    "--symbol",
+    "A",
+    "--start",
+    "2026-01-06",
+    "--end",
+    "2026-01-07"
+  ],
+  "exit_code": 0,
+  "launch_error": null,
+  "wall_ns": 12607026869,
+  "peak_rss_bytes": 58933248,
+  "address_space_limit_bytes": null,
+  "source_bytes": 404509661,
+  "stdout": "POC-0 Parquet correctness \"passed\": poc/poc0-benchmark/results/parquet-large-10m-limited-cgroup-2026-09-27.json\n",
+  "stderr": ""
+}

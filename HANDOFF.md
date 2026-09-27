@@ -4,9 +4,11 @@
 
 ## 当前交接（2026-09-27）
 
-本轮继续 POC-0 票据 05：本地 `polars-io` vendor 解开离线 Parquet 依赖；新增固定 fixture 的版本化 Parquet/manifest、`--reuse`、列与 row group 裁剪、三候选对拍和分阶段报告。复核时修正了 `ParallelStrategy::None` 对零重叠组仍进入列读取路径的问题。10,000,029 行、404,509,661 字节源文件改用解码前跳过无关组的策略后，2,448 组中选 1 组，独立进程 RSS 57,573,376 字节；原始结果见 [票据 05](.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md)。256 MiB 地址空间限制在本机启动前失败，受限内存验收仍 **Unresolved**。**唯一建议下一步：**在可审计设置 256 MiB 内存上限的主机/容器中复跑既有 Parquet `--reuse` 路径，并保存峰值 RSS 与退出状态。
+票据 05 的 256 MiB 受限内存路径已在本机 Colima Linux ARM64 VM 复跑通过，票据改为 `ready-for-human`：10,000,029 行、404,509,661 字节的 Parquet 在 cgroup v2 `memory.max=268435456` 下 `--reuse` 退出 0，`oom_kill=0`，只读取 2,448 组中的 1 组、7 列中的 3 列，三候选结果一致。子进程 RSS 58,933,248 字节，容器峰值 268,435,456 字节（含文件缓存及 Python 测量进程），`memory.events.max=646` 表示出现回收压力；不能将子进程 RSS 当作整个容器峰值。原始报告和 cgroup/Docker 配置证据见 [票据 05](.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md) 与 [POC README](poc/poc0-benchmark/README.md#parquet-b1-path-ticket-05)。复跑顺序：构建 Linux 无默认 feature 二进制、在无内存限制下生成大样本、只对复读容器施加 256 MiB 上限；两次复读均退出 0，存档第二次。macOS `RLIMIT_AS` 启动失败是历史记录，不影响这次 cgroup 结论；缓存不受控，仍不能据此选择 B1 布局。**唯一建议下一步：**人工核验票据 05 的受限内存证据并完成验收，然后推进票据 06 的代表性规模/缓存比较。
 
-本轮通过 `cargo fmt --all -- --check`、`cargo check -p quant-research --no-default-features --locked --offline`、`cargo test -p quant-research --no-default-features --locked --offline --test poc0_benchmark_cli parquet_cli_round_trips_fixture_and_prunes_groups_and_columns`、`cargo test --workspace --locked --offline`（16 + 65 + 9 passed，1 ignored）、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 和 `git diff --check`；大文件 `--reuse` 校验与 RSS 记录通过。依赖 vendor 仍打印未使用项警告，Clippy 退出成功；受限内存子进程未启动是唯一未通过的验收，不得视作硬内存限制下运行成功。
+前次交接：本地 `polars-io` vendor 解开离线 Parquet 依赖；新增固定 fixture 的版本化 Parquet/manifest、`--reuse`、列与 row group 裁剪、三候选对拍和分阶段报告。复核时修正了 `ParallelStrategy::None` 对零重叠组仍进入列读取路径的问题。10,000,029 行、404,509,661 字节源文件改用解码前跳过无关组的策略后，2,448 组中选 1 组，独立进程 RSS 57,573,376 字节；原始结果见 [票据 05](.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md)。当时 256 MiB 地址空间限制在 macOS 启动前失败；此缺口现由上方 Linux cgroup 测量补齐。
+
+前次代码验证通过 `cargo fmt --all -- --check`、`cargo check -p quant-research --no-default-features --locked --offline`、`cargo test -p quant-research --no-default-features --locked --offline --test poc0_benchmark_cli parquet_cli_round_trips_fixture_and_prunes_groups_and_columns`、`cargo test --workspace --locked --offline`（16 + 65 + 9 passed，1 ignored）、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 和 `git diff --check`。本轮 Linux `cargo build -p quant-research --no-default-features --locked`、大样本生成和两次受限 `--reuse` 均通过；本轮未重跑全工作区测试。依赖 vendor 编译有未使用项警告；macOS 原生限制试验仍失败，不应冒充 Linux cgroup 的成功证据。
 
 2026-09-27 构建资源决策（票据 13 完成前的交接记录）：用户确认先优化 POC-0 spec/票据，再由新 [票据 13](.scratch/poc-0-benchmark/issues/13-build-resource-boundary.md) 实施轻量构建边界。现场只读清点：根 `target/` 约 58 GB、独立 B1 target 约 1 GB、卷可用约 14 GiB，重复的 bundled DuckDB 构建产物是主要占用。新增构建须开工及预计结束均保留至少 10 GiB；记录增量/release 构建耗时与产物增量，冷构建仅在预算允许时测。票据 03/04 均已由用户确认验收。不得自动清空整个 target。本轮未清理文件。后续票据 13 已完成，当前票据 05 状态见上方交接。
 
@@ -14,7 +16,7 @@
 
 提交已按领域拆分：旧 A 股状态取证 `e8764e1`、日更与身份导入 `8e8bff9`、诊断作业与页面 `c7906ab`；Agent 工具配置 `d8fab3a`；新平台架构与旧路线归档 `15cc6d5`；POC-0 计划 `20eb209`、B1 标量 smoke `e8c3bd8`、01 已验收 harness `6401651`、07 最小事件原型 `a907212`、02 SoA 候选 `d78df42`。各提交仅含所属批次文件，未推送远端。
 
-当前 POC 状态：01–04 已验收；03 Arrow 为用户确认的实现验收，release 性能样本仍缺。Parquet 扫描、内存与 out-of-core 对比尚缺，B1 布局仍 Unresolved；07 是最小事件原型，不能支持 Fast Event 选型。Nautilus、PyO3 和真实 ETF 历史可信度门槛均未完成。所有已记录结果均来自固定 3×10 合成样本，不构成性能/架构决策证据。
+当前 POC 状态：01–04 已验收；03 Arrow 为用户确认的实现验收，release 性能样本仍缺。05 大文件裁剪与受限内存复读通过，待人工验收；代表性规模三候选性能比较和 B1 布局选择仍 Unresolved。07 是最小事件原型，不能支持 Fast Event 选型。Nautilus、PyO3 和真实 ETF 历史可信度门槛均未完成。现有大样本只增加了无关 filler 行，不代表三候选在大规模真实信号工作负载上的性能。
 
 2026-09-27 票据 03 Arrow：用户已确认实现验收并标记 `resolved`。`benchmark-poc0 --candidate arrow` 使用 Arrow `RecordBatch` 完成 S2 因子、排序、TopK、权重和下一会话 close-to-close 收益；独立用例覆盖首个有效日、排名分数、符号升序平局、末日缺 bar 排除、所选目标下一日缺 bar 返回 `None` 和手算收益。报告含五次 raw 样本、分阶段耗时、checksum 和单独转换耗时。`cargo check -p quant-research --locked`、全工作区测试（89 passed、1 ignored）、Arrow 定向测试、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings`、`cargo fmt --all -- --check` 与 `git diff --check` 通过。没有生成 Arrow release 性能样本，架构性能比较仍 Unresolved；验收不表示采用 Arrow 布局。
 
