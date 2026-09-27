@@ -10,6 +10,8 @@
 
 POC-0 工作范围与验收已发布为本地 [`ready-for-agent` spec](../.scratch/poc-0-benchmark/spec.md)。独立 [`poc/b1-layout`](../poc/b1-layout/README.md) 标量读取 smoke 只对拍三种布局的动量；票据 02 的 SoA、票据 03 的 Arrow 完整 S2 候选和票据 04 的 Polars 候选已验收。Arrow 与 Polars 定向 CLI 用例及全工作区测试通过（89 passed、1 ignored）；Clippy 与格式检查通过。Arrow release 计时尚未生成，因此性能比较与 B1 布局决策仍为 **Unresolved**。Parquet 扫描、峰值内存和 out-of-core 测量仍缺。B2 只有票据 07 的最小原型，B3 未启动。
 
+2026-09-27 票据 05 实施尝试在依赖解析阶段受阻，未改代码或启动构建：离线 Cargo 索引缺少 Polars Parquet feature 依赖的 `brotli`/`polars-sql` 元数据，联网解析也无法连接配置的 mirror。详细命令和复跑条件记在 [票据 05](../.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md)；Parquet/out-of-core/RSS 仍 Unresolved。
+
 2026-09-27 实现与验收：票据 04 Polars 已由用户确认并标记 `resolved`。`--candidate polars` 通过 Polars lazy expressions 计算加权因子评分、排序、TopK、按实际入选数量均分的目标权重及下一交易日组合收益；正确性通过后才测量。报告保留五个原始样本、阶段计时、DataFrame 构造时间和投影 checksum。固定 3 ETF × 10 日 fixture 仅验证语义与 CLI，不支持布局决策。当前工作树也包含此前已有的 Arrow 候选改动，最终提交须保留其独立归属；验证状态以本轮 HANDOFF 为准。
 
 POC-0 票据 01 已验收：新增固定 3 ETF × 10 个交易日的版本化 fixture、独立排名/信号/事件账本金标准，以及 correctness-first 的 `benchmark-poc0` CLI。金标准通过后会记录 Rust 参考回测的原始耗时；不通过时输出差异报告并跳过计时。机器/代码/数据 provenance 已进入报告；该票据尚未测峰值 RSS，报告将其明确标为未知。这不是 B1 完整布局比较；当前实现位置和复跑方式见 [`POC-0 harness`](../poc/poc0-benchmark/README.md)。2026-09-27 复验：全工作区 83 项通过、1 项按既定条件跳过，格式、Clippy 与 release CLI 均通过。

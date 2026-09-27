@@ -4,15 +4,15 @@
 
 ## 当前交接（2026-09-27）
 
-2026-09-27 构建资源决策：用户确认先优化 POC-0 spec/票据，再由新 [票据 13](.scratch/poc-0-benchmark/issues/13-build-resource-boundary.md) 实施轻量构建边界。现场只读清点：根 `target/` 约 58 GB、独立 B1 target 约 1 GB、卷可用约 14 GiB，重复的 bundled DuckDB 构建产物是主要占用。新增构建须开工及预计结束均保留至少 10 GiB；记录增量/release 构建耗时与产物增量，冷构建仅在预算允许时测。票据 03/04 均已由用户确认验收。不得自动清空整个 target。本轮仅同步验收状态和文档，未清理文件。**唯一建议下一步：**先完成票据 13 的只读依赖/产物基线与轻量路径实测，再启动 05/08/10 的资源密集构建。
+本轮尝试执行 POC-0 票据 05。未写源码：离线 Cargo 依赖解析启用 Polars Parquet 时分别缺少 `brotli` 与 `polars-sql` 索引元数据；联网 Cargo 无法解析 `mirrors.ustc.edu.cn`。构建资源 recorder 在依赖图阶段退出，未开始编译；当时可用空间约 13 GiB，按 2 GiB 上界满足 10 GiB 保留线。证据与建议复跑条件见 [票据 05](.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md)。**唯一建议下一步：**恢复 Cargo mirror/索引可用后，从票据 05 的依赖图与构建资源记录重试，再进行 Parquet 三候选与受限内存分块验收。
 
-2026-09-27 票据 04 已由用户确认验收并标记 `resolved`：`benchmark-poc0 --candidate polars` 使用 Polars lazy expressions 从压缩的 observed-close 序列计算短/长动量与样本波动率、复合分数、确定性排序、TopK/等权目标和简化组合收益；权重分母按实际入选数量计算。独立 CLI 用例覆盖 4 观察期首个有效日及手算分数、符号零平局、固定 fixture 手算收益、缺少次日 bar 返回 null、少于 top_n 时实际入选数量均分，以及错误/变体输入跳过计时。release 原始报告保存在 [`Polars results`](poc/poc0-benchmark/results/b1-polars-2026-09-27.json)。此前复验：`cargo test --workspace --locked --offline`（89 passed、1 ignored）、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings`、`cargo fmt --all -- --check` 均通过。第一次 release 构建因磁盘空间不足中断；只清理了当时创建的临时 Cargo target 后，release 构建和运行成功。当前工作树还含 Arrow 未提交改动；两票代码尚未提交。固定 3×10 样本不支持布局/性能决策。票据 03 此后亦由用户确认验收；下一步按资源边界票据 13 推进受控测量。
+2026-09-27 构建资源决策（票据 13 完成前的交接记录）：用户确认先优化 POC-0 spec/票据，再由新 [票据 13](.scratch/poc-0-benchmark/issues/13-build-resource-boundary.md) 实施轻量构建边界。现场只读清点：根 `target/` 约 58 GB、独立 B1 target 约 1 GB、卷可用约 14 GiB，重复的 bundled DuckDB 构建产物是主要占用。新增构建须开工及预计结束均保留至少 10 GiB；记录增量/release 构建耗时与产物增量，冷构建仅在预算允许时测。票据 03/04 均已由用户确认验收。不得自动清空整个 target。本轮未清理文件。后续票据 13 已完成，当前票据 05 状态见上方交接。
+
+2026-09-27 票据 04 已由用户确认验收并标记 `resolved`：`benchmark-poc0 --candidate polars` 使用 Polars lazy expressions 从压缩的 observed-close 序列计算短/长动量与样本波动率、复合分数、确定性排序、TopK/等权目标和简化组合收益；权重分母按实际入选数量计算。独立 CLI 用例覆盖 4 观察期首个有效日及手算分数、符号零平局、固定 fixture 手算收益、缺少次日 bar 返回 null、少于 top_n 时实际入选数量均分，以及错误/变体输入跳过计时。release 原始报告保存在 [`Polars results`](poc/poc0-benchmark/results/b1-polars-2026-09-27.json)。此前复验：`cargo test --workspace --locked --offline`（89 passed、1 ignored）、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings`、`cargo fmt --all -- --check` 均通过。第一次 release 构建因磁盘空间不足中断；只清理了当时创建的临时 Cargo target 后，release 构建和运行成功。当前工作树还含 Arrow 未提交改动；两票代码尚未提交。固定 3×10 样本不支持布局/性能决策。票据 03 此后亦由用户确认验收；票据 13 之后完成，当前待办更新见上方。
 
 提交已按领域拆分：旧 A 股状态取证 `e8764e1`、日更与身份导入 `8e8bff9`、诊断作业与页面 `c7906ab`；Agent 工具配置 `d8fab3a`；新平台架构与旧路线归档 `15cc6d5`；POC-0 计划 `20eb209`、B1 标量 smoke `e8c3bd8`、01 已验收 harness `6401651`、07 最小事件原型 `a907212`、02 SoA 候选 `d78df42`。各提交仅含所属批次文件，未推送远端。
 
 当前 POC 状态：01–04 已验收；03 Arrow 为用户确认的实现验收，release 性能样本仍缺。Parquet 扫描、内存与 out-of-core 对比尚缺，B1 布局仍 Unresolved；07 是最小事件原型，不能支持 Fast Event 选型。Nautilus、PyO3 和真实 ETF 历史可信度门槛均未完成。所有已记录结果均来自固定 3×10 合成样本，不构成性能/架构决策证据。
-
-**唯一建议下一步：**按资源边界票据 13 要求推进后续受控测量，再启动 [票据 05 Parquet 与超内存数据路径](.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md)。
 
 2026-09-27 票据 03 Arrow：用户已确认实现验收并标记 `resolved`。`benchmark-poc0 --candidate arrow` 使用 Arrow `RecordBatch` 完成 S2 因子、排序、TopK、权重和下一会话 close-to-close 收益；独立用例覆盖首个有效日、排名分数、符号升序平局、末日缺 bar 排除、所选目标下一日缺 bar 返回 `None` 和手算收益。报告含五次 raw 样本、分阶段耗时、checksum 和单独转换耗时。`cargo check -p quant-research --locked`、全工作区测试（89 passed、1 ignored）、Arrow 定向测试、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings`、`cargo fmt --all -- --check` 与 `git diff --check` 通过。没有生成 Arrow release 性能样本，架构性能比较仍 Unresolved；验收不表示采用 Arrow 布局。
 
@@ -24,7 +24,7 @@
 
 本轮另建立独立的 [`poc/b1-layout`](poc/b1-layout/README.md) 标量读取切片，锁定 Polars 0.55.2、Arrow 60.0.0，自定义 SoA 与两者的动量输出通过独立手算小例和 checksum 对拍。`cargo check --manifest-path poc/b1-layout/Cargo.toml --locked --offline`、`cargo fmt --manifest-path poc/b1-layout/Cargo.toml -- --check`、`cargo clippy --manifest-path poc/b1-layout/Cargo.toml --all-targets --locked --offline -- -D warnings`、release 运行与 `git diff --check` 通过。一次 128 证券 × 4096 日、lookback 20、10 次重复的原始 smoke 结果与输入 hash 保存在 [`poc/b1-layout/results/2026-09-26-local-smoke.json`](poc/b1-layout/results/2026-09-26-local-smoke.json)；SoA / Arrow / Polars 标量访问中位数分别为 931 / 1303 / 3533 微秒，计数和 checksum 相同。CPU 型号无法读取，工作树含现有未提交改动；固定候选顺序且只测标量访问，**不能据此选择布局**。未运行主仓库全量测试，未变更其量化代码。
 
-**唯一建议下一步：**完成 POC-0 B1 的同语义完整工作负载：独立 S2 期望输出、Polars 表达式、Parquet 扫描/转换、排名/TopK/组合收益、内存与 out-of-core 测量；然后接入 B2/B3。真实 ETF 历史结果继续受 PIT、总回报和状态证据门槛约束。
+（历史建议，已由上方“当前交接”中的票据 05 复跑步骤取代。）完成 POC-0 B1 的同语义完整工作负载：独立 S2 期望输出、Polars 表达式、Parquet 扫描/转换、排名/TopK/组合收益、内存与 out-of-core 测量；然后接入 B2/B3。真实 ETF 历史结果继续受 PIT、总回报和状态证据门槛约束。
 
 2026-09-26 票据交接：用户确认了 12 张 POC-0 纵向票据，已按依赖顺序发布在 [本地 issues](.scratch/poc-0-benchmark/issues/01-fixed-dataset-and-benchmark-entry.md)。01 是当前唯一无阻塞票据；其余票据仍 `ready-for-agent`，尚未执行。本轮只编辑 Markdown，没有运行代码、格式器或测试；现有工作区未提交改动已保留。**唯一建议下一步：**从 01 的固定数据集、独立金标准和统一基准入口开始，完成后再解锁 02 与 07。
 
