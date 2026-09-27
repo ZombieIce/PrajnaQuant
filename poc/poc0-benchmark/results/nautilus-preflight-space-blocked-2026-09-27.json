@@ -1,0 +1,28 @@
+{
+  "schema_version": "poc0.nautilus-preflight.v1",
+  "checked_at_utc": "2026-09-27T13:35:20.021892+00:00",
+  "status": "unresolved",
+  "reason": "projected remaining space -54018637824 is below the 10 GiB reserve",
+  "minimum_free_bytes": 10737418240,
+  "free_bytes_before": 53355544576,
+  "estimated_install_bytes": 0,
+  "estimated_build_bytes": 107374182400,
+  "projected_remaining_bytes": -54018637824,
+  "estimate_basis": "1 GiB pinned wheel/install allowance; 2 GiB shared-target warm build allowance from ticket 13",
+  "installed_version_before": "2.0.0rc5",
+  "required_version": "2.0.0rc5",
+  "python": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/.venv/bin/python",
+  "build_command": [
+    "cargo",
+    "build",
+    "-p",
+    "quant-research",
+    "--no-default-features",
+    "--locked",
+    "--offline",
+    "--profile",
+    "release"
+  ],
+  "build_record": "/private/tmp/nautilus-space-blocked-build.json",
+  "report_output": "/private/tmp/nautilus-space-blocked-output.json"
+}

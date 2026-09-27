@@ -302,18 +302,26 @@ This is a prototype and a correctness smoke on one tiny fixture. It does not est
 
 ## B2 Nautilus adapter comparison (ticket 08)
 
-The Nautilus candidate is selected through the same correctness-first command. The default
-Python executable is the repository `.venv/bin/python`; install the pinned wheel first:
+Use the guarded entry point for the pinned wheel, shared-target release build, and
+correctness-first comparison. It skips installation when the exact wheel is already present:
 
 ```bash
-.venv/bin/python -m pip install -r poc/poc0-benchmark/requirements-nautilus.txt
-cargo run -p quant-research --no-default-features --locked --offline -- \
-  benchmark-poc0 --backend nautilus \
-  --output target/poc-0/nautilus-report.json
+.venv/bin/python poc/poc0-benchmark/nautilus_preflight.py \
+  --output target/poc-0/nautilus-report.json \
+  --preflight-record target/poc-0/nautilus-preflight.json \
+  --build-record target/poc-0/nautilus-build.json
 ```
 
-`--backend nautilus` first writes the Rust reference report, then adds the adapter projection
-to that same JSON file. The pin is `nautilus_trader==2.0.0rc5`; this run used Python 3.12 on
+The wrapper measures free space before any pip install or Cargo build, reserves at least
+10 GiB after a conservative completion estimate, monitors the build, and saves an
+`unresolved` preflight record if the gate fails. A forced estimate failure is preserved in
+[`space-gate refusal`](results/nautilus-preflight-space-blocked-2026-09-27.json).
+The [successful preflight](results/nautilus-preflight-review-2026-09-27.json) and
+[warm release build](results/nautilus-build-review-2026-09-27.json) record actual space,
+commands and target changes. Cold build remains Unknown; no target was cleared.
+
+`--backend nautilus` first writes the Rust reference report, then adds the Adapter projection
+to that JSON file. The pin is `nautilus_trader==2.0.0rc5`; this run used Python 3.12 on
 macOS ARM64. The Adapter maps each project instrument to a Nautilus `Equity`, converts daily
 bars into separate synthetic open/close `QuoteTick`s, submits a market order only when the
 next open quote arrives, and maps Nautilus fills into the project report fields. At each close,
@@ -322,20 +330,25 @@ account snapshot is checked separately from the project ledger reconstructed fro
 Python process owns all Nautilus types and engine lifecycle.
 
 Nautilus 2.x has no native next-bar-open mode for bar-only data, so the QuoteTick adapter is
-the measured timing seam. All six fixed-fixture checks pass: exact project order attempts and
-reasons, fill quantity/price/commission, direct account cash/positions, daily cash/holdings/NAV,
-and total cost. The Adapter reads the fixture's 08:50 status at the 09:30 open. B's Jan 13
-`HALTED` status produces a project rejection with zero quantity; no B order is submitted to
-Nautilus that day. The next tradable open creates a new Nautilus order and fills on Jan 14.
-This is an Adapter status gate, not a native Nautilus matching-engine rejection. Synthetic
-quotes, spread-based slippage and fixed per-fill commission remain documented comparison
-boundaries. One conversion/initialization/event/end-to-end timing sample is a correctness
-probe, not throughput evidence. See the [status-gated comparison](results/nautilus-adapter-comparison-status-gated-2026-09-27.json)
-and the preserved [initial lifecycle mismatch](results/nautilus-adapter-comparison-2026-09-27.json).
+the measured timing seam. The Adapter reads the fixture's 08:50 status at the 09:30 open.
+B's Jan 13 `HALTED` status produces a **project-level** zero-quantity rejection without
+submitting a Nautilus order. A new Nautilus order fills on Jan 14. The project events match
+Rust's four attempts, but Nautilus receives only three orders; native HALTED rejection was
+never exercised. Native order lifecycle and cross-engine throughput therefore remain
+`unresolved`. Fill, direct account cash/positions, daily ledger and costs match on this fixed
+fixture. The event sequence and hand calculation are in [ADR 0012](../../docs/decisions/0012-poc0-nautilus-status-gate.md).
 
-The first restricted pip attempt failed DNS; the fixed wheel was then installed successfully
-with the available approved network path. The space gate remained above 10 GiB. Install and
-build identity are in [`install/build resources`](results/nautilus-install-attempt-2026-09-27.json),
-with raw shared-target dev and release records in [`dev build`](results/nautilus-adapter-build-dev-2026-09-27.json)
-and [`release build`](results/nautilus-adapter-build-release-2026-09-27.json). No target cache
-was cleaned.
+The [review report](results/nautilus-adapter-review-2026-09-27.json) retains one warmup and
+five raw conversion/initialization/event/end-to-end samples, with median, p95, range and a
+stable projection hash. These samples are an internal Nautilus repeatability probe; no
+cross-engine speed conclusion is drawn. The report includes Cargo.lock and pinned requirements
+hashes, a resolved `pip freeze` snapshot hash, Rust/Python versions and build flags. Python
+transitive packages are observed, not fully locked. The cold build and cold-start timing
+remain Unknown. Earlier [Adapter-gated](results/nautilus-adapter-comparison-status-gated-2026-09-27.json)
+and [initial](results/nautilus-adapter-comparison-2026-09-27.json) reports remain as history;
+their pass/fail summaries are superseded by the separated native comparison above.
+
+The earlier wheel installation and first warm-cache dev/release measurements remain in
+[`install evidence`](results/nautilus-install-attempt-2026-09-27.json),
+[`dev build`](results/nautilus-adapter-build-dev-2026-09-27.json) and
+[`release build`](results/nautilus-adapter-build-release-2026-09-27.json).

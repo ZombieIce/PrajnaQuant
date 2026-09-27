@@ -9,7 +9,13 @@ from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 import importlib.metadata
 import json
+import math
+import os
 import platform
+import resource
+import statistics
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -170,6 +176,7 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
                     "side": "BUY",
                     "reason": str(event.reason),
                     "ts_event": int(event.ts_event),
+                    "origin": "nautilus_rejection",
                 }
             )
 
@@ -356,10 +363,13 @@ def build_report(dataset_path: Path, reference_path: Path) -> dict[str, Any]:
 
     rust_b2 = reference.get("b2_fast_event_buy_hold", {})
     adapter_result = None
+    measured_runs: list[dict[str, Any]] = []
     adapter_error = None
     if probe_error is None:
         try:
-            adapter_result = _run_nautilus(dataset)
+            _run_nautilus(dataset)  # Warm the pinned runtime; do not mix this run into samples.
+            measured_runs = [_run_nautilus(dataset) for _ in range(5)]
+            adapter_result = measured_runs[0]
         except Exception as error:
             adapter_error = f"{type(error).__name__}: {error}"
 
@@ -381,9 +391,43 @@ def build_report(dataset_path: Path, reference_path: Path) -> dict[str, Any]:
             }
         )
 
+    projection_bytes = [json.dumps(run["projection"], sort_keys=True).encode() for run in measured_runs]
+    repeated_projections_equal = len(set(projection_bytes)) == 1 if measured_runs else None
+    if repeated_projections_equal is False:
+        unresolved_reasons.append({
+            "code": "repeated_projection_mismatch",
+            "detail": "The five measured Nautilus runs produced different project projections.",
+            "replay_condition": "Investigate nondeterminism before comparing timing samples.",
+        })
+
     adapter_builds = (install_evidence or {}).get("adapter_builds", {})
     dev_build = adapter_builds.get("dev", {})
     release_build = adapter_builds.get("release", {})
+    requirements = ROOT / "poc/poc0-benchmark/requirements-nautilus.txt"
+    pip_freeze = subprocess.run(
+        [sys.executable, "-m", "pip", "freeze"], text=True, capture_output=True, check=False
+    )
+    resolved_packages = sorted(pip_freeze.stdout.splitlines()) if pip_freeze.returncode == 0 else None
+    preflight_path = os.environ.get("NAUTILUS_POC_PREFLIGHT")
+    preflight = json.loads(Path(preflight_path).read_text(encoding="utf-8")) if preflight_path else None
+
+    def timing_summary(stage: str) -> dict[str, Any] | None:
+        if not measured_runs:
+            return None
+        samples = [run["timings_ns"][stage] for run in measured_runs]
+        ordered = sorted(samples)
+        return {
+            "raw_samples_ns": samples,
+            "median_ns": statistics.median(samples),
+            "p95_ns": ordered[math.ceil(0.95 * len(ordered)) - 1],
+            "min_ns": ordered[0],
+            "max_ns": ordered[-1],
+        }
+
+    native_orders = None if adapter_result is None else [
+        order for order in adapter_result["projection"]["orders"]
+        if order.get("origin") == "nautilus_order"
+    ]
     report = {
         "schema_version": "poc0.nautilus-adapter.v1",
         "status": "unresolved" if adapter_result is None else "executed_with_semantic_differences",
@@ -416,6 +460,7 @@ def build_report(dataset_path: Path, reference_path: Path) -> dict[str, Any]:
             "checks": [] if adapter_result is None else _compare(adapter_result["projection"], rust_b2.get("projection", {})),
             "differences": unresolved_reasons,
             "orders": None if adapter_result is None else adapter_result["projection"]["orders"],
+            "nautilus_native_submissions": native_orders,
             "fills": None if adapter_result is None else adapter_result["projection"]["fills"],
             "cash": None if adapter_result is None else [x["cash"] for x in adapter_result["projection"]["ledger"]],
             "holdings": None if adapter_result is None else [x["holdings"] for x in adapter_result["projection"]["ledger"]],
@@ -423,18 +468,46 @@ def build_report(dataset_path: Path, reference_path: Path) -> dict[str, Any]:
             "daily_nav": None if adapter_result is None else [x["nav"] for x in adapter_result["projection"]["ledger"]],
             "adapter_projection": None if adapter_result is None else adapter_result["projection"],
             "known_semantic_differences": [] if adapter_result is None else [
-                "The adapter applies the project's 08:50 execution status gate at the open: HALTED creates a project rejection without submitting a Nautilus order, and a later tradable open creates a new order. This does not claim a native Nautilus matching-engine rejection.",
+                "The adapter applies the project's 08:50 execution status gate at the open: HALTED creates a project rejection without submitting a Nautilus order. Nautilus has three native submissions while Rust has four project attempts; native HALTED rejection was not exercised or verified.",
                 "Daily bars are converted to synthetic open and close L1 QuoteTicks; the strategy arms at close and submits at the next available open quote because Nautilus documents no native next-bar-open mode for bar-only data.",
                 "The fixture's 10 bp buy slippage is represented by a synthetic bid/ask around the open; Rust stores it as fill price plus explicit slippage cost.",
                 "The fixture's 100 CNY minimum commission is represented by FixedFeeModel(100 CNY) per fill; this fixture's one fill per instrument makes totals numerically comparable, while the general fee schedules are not equivalent.",
             ],
         },
         "timings": {
-            "status": "not_measured" if adapter_result is None else "single_run_probe",
-            "conversion_samples_ns": None if adapter_result is None else [adapter_result["timings_ns"]["conversion"]],
-            "initialization_samples_ns": None if adapter_result is None else [adapter_result["timings_ns"]["initialization"]],
-            "event_processing_samples_ns": None if adapter_result is None else [adapter_result["timings_ns"]["event_processing"]],
-            "end_to_end_samples_ns": None if adapter_result is None else [adapter_result["timings_ns"]["end_to_end"]],
+            "status": "not_measured" if adapter_result is None else "five_warm_runs_internal_only",
+            "warmup_runs": 1 if adapter_result is not None else 0,
+            "requested_runs": 5,
+            "completed_runs": len(measured_runs),
+            "conversion": timing_summary("conversion"),
+            "initialization": timing_summary("initialization"),
+            "event_processing": timing_summary("event_processing"),
+            "end_to_end": timing_summary("end_to_end"),
+            "repeated_projection_equal": repeated_projections_equal,
+            "projection_sha256": hashlib.sha256(projection_bytes[0]).hexdigest() if projection_bytes else None,
+            "peak_process_rss_bytes": (
+                resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+                * (1024 if sys.platform.startswith("linux") else 1)
+            ) if adapter_result is not None else None,
+            "cold_start_end_to_end_ns": None,
+            "throughput_comparison": "unresolved_native_order_lifecycle",
+        },
+        "measurement_protocol": {
+            "reference_provenance": reference.get("provenance"),
+            "cargo_lock_sha256": _sha256(ROOT / "Cargo.lock"),
+            "python_requirements_sha256": _sha256(requirements),
+            "resolved_python_packages": resolved_packages,
+            "resolved_python_packages_sha256": (
+                hashlib.sha256("\n".join(resolved_packages).encode()).hexdigest()
+                if resolved_packages is not None else None
+            ),
+            "python_dependencies_fully_locked": False,
+            "pip_freeze_error": pip_freeze.stderr if pip_freeze.returncode else None,
+            "rust_build_profile": "release (--no-default-features --locked --offline)",
+            "rustflags": os.environ.get("RUSTFLAGS"),
+            "rustc_version": (reference.get("provenance") or {}).get("rustc"),
+            "python_executable": sys.executable,
+            "preflight": preflight,
         },
         "build_resources": {
             "status": "prebuilt_wheel_installed_no_native_build" if adapter_result is not None else "installation_or_runtime_blocked",
@@ -447,6 +520,8 @@ def build_report(dataset_path: Path, reference_path: Path) -> dict[str, Any]:
             "incremental_build_ns": None if dev_build.get("wall_seconds") is None else int(dev_build["wall_seconds"] * 1_000_000_000),
             "release_build_ns": None if release_build.get("wall_seconds") is None else int(release_build["wall_seconds"] * 1_000_000_000),
             "cache_identity": dev_build.get("dependency_graph_sha256"),
+            "cold_build_status": "unknown; no cache was cleared or isolated cold target built",
+            "cold_build_ns": None,
         },
         "unresolved_reasons": unresolved_reasons,
     }
@@ -454,20 +529,22 @@ def build_report(dataset_path: Path, reference_path: Path) -> dict[str, Any]:
         all_checks_passed = all(
             check["passed"] for check in report["semantic_comparison"]["checks"]
         )
-        report["semantic_comparison"]["status"] = (
-            "passed_with_documented_semantic_differences" if all_checks_passed else "mismatch"
-        )
-        if all_checks_passed:
-            report["status"] = "passed_with_documented_semantic_differences"
-        else:
-            report["status"] = "unresolved"
-            report["unresolved_reasons"].append(
-                {
+        report["status"] = "unresolved" if not all_checks_passed or unresolved_reasons else "passed"
+        report["semantic_comparison"]["status"] = "mismatch" if not all_checks_passed else "passed"
+        failed_fields = [check["field"] for check in report["semantic_comparison"]["checks"] if not check["passed"]]
+        if "orders.nautilus_native_lifecycle" in failed_fields:
+            report["unresolved_reasons"].append({
+                "code": "nautilus_native_order_lifecycle_unverified",
+                "detail": "Adapter status gating matches four Rust project attempts, but Nautilus received only three orders and did not reject B on the halted day.",
+                "replay_condition": "Exercise native Nautilus halt rejection or retain this dimension as an explicit cross-engine gap.",
+            })
+        for field in failed_fields:
+            if field != "orders.nautilus_native_lifecycle":
+                report["unresolved_reasons"].append({
                     "code": "semantic_comparison_mismatch",
-                    "detail": "At least one order/fill/account comparison did not match the Rust reference.",
-                    "replay_condition": "Resolve or accept the listed event lifecycle difference and rerun the fixture comparison.",
-                }
-            )
+                    "detail": f"Project comparison failed for {field}.",
+                    "replay_condition": "Inspect the raw field values and rerun the fixed fixture.",
+                })
     return report
 
 
@@ -476,6 +553,11 @@ def _compare(actual: dict[str, Any], expected: dict[str, Any]) -> list[dict[str,
     order_fields = ("decision_date", "attempt_date", "symbol", "side", "quantity", "reason")
     expected_orders = [tuple(order.get(field) for field in order_fields) for order in expected.get("orders", [])]
     actual_orders = [tuple(order.get(field) for field in order_fields) for order in actual.get("orders", [])]
+    native_orders = [
+        tuple(order.get(field) for field in order_fields)
+        for order in actual.get("orders", [])
+        if order.get("origin") == "nautilus_order"
+    ]
     expected_fills = expected.get("fills", [])
     actual_fills = actual.get("fills", [])
     expected_by_key = {(x["date"], x["symbol"], x["side"]): x for x in expected_fills}
@@ -516,11 +598,20 @@ def _compare(actual: dict[str, Any], expected: dict[str, Any]) -> list[dict[str,
     )
     return [
         {
-            "field": "orders.lifecycle_and_attempts",
+            "field": "orders.adapter_project_contract",
             "passed": actual_orders == expected_orders,
             "expected_order_events": len(expected.get("orders", [])),
             "actual_adapter_order_events": len(actual.get("orders", [])),
             "project_order_fields": list(order_fields),
+        },
+        {
+            "field": "orders.nautilus_native_lifecycle",
+            "passed": native_orders == expected_orders,
+            "expected_rust_attempts": len(expected_orders),
+            "actual_nautilus_submissions": len(native_orders),
+            "adapter_rejections_excluded": sum(
+                order.get("origin") == "adapter_status_gate" for order in actual.get("orders", [])
+            ),
         },
         {"field": "fills.quantity_price_commission", "passed": fill_fields_equal, "expected_fill_count": len(expected_fills), "actual_fill_count": len(actual_fills)},
         {"field": "daily.cash_nav", "passed": cash_nav_equal, "session_count": len(expected_ledger)},

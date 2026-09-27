@@ -85,7 +85,7 @@ enum Command {
         output: PathBuf,
         #[arg(long, value_parser = ["reference", "soa", "arrow", "polars"], default_value = "reference")]
         candidate: String,
-        /// Select the backtest engine used for the B2 comparison.
+        /// Compare the Rust bar/open reference with Nautilus synthetic L1 quote fills.
         #[arg(long, value_parser = ["rust", "nautilus"], default_value = "rust")]
         backend: String,
         /// Python executable used by the optional Nautilus adapter.
@@ -310,14 +310,22 @@ async fn main() -> Result<()> {
                 std::process::exit(2);
             }
             if backend == "nautilus" {
-                poc0_benchmark::run_nautilus_adapter(&dataset, &output, &python)?;
+                let adapter_status =
+                    poc0_benchmark::run_nautilus_adapter(&dataset, &output, &python)?;
+                println!(
+                    "POC-0 Rust correctness {}; Nautilus comparison {}: {}",
+                    report.correctness_status(),
+                    adapter_status,
+                    output.display()
+                );
+            } else {
+                println!(
+                    "POC-0 correctness {}; backend {}: {}",
+                    report.correctness_status(),
+                    backend,
+                    output.display()
+                );
             }
-            println!(
-                "POC-0 correctness {}; backend {}: {}",
-                report.correctness_status(),
-                backend,
-                output.display()
-            );
         }
         Command::BenchmarkPoc0Sweep {
             dataset,

@@ -13,8 +13,9 @@ class NautilusAdapterReportTests(unittest.TestCase):
         "requires the pinned Nautilus runtime",
     )
     def test_halted_order_is_rejected_at_open_then_retried(self):
+        dataset_path = nautilus_adapter.ROOT / "poc/poc0-benchmark/fixtures/dataset-v1.json"
         dataset = json.loads(
-            (nautilus_adapter.ROOT / "poc/poc0-benchmark/fixtures/dataset-v1.json").read_text(
+            dataset_path.read_text(
                 encoding="utf-8"
             )
         )
@@ -46,6 +47,22 @@ class NautilusAdapterReportTests(unittest.TestCase):
         self.assertIsNone(rejected["submission_ts"])
         self.assertEqual(retried["origin"], "nautilus_order")
         self.assertGreater(retried["submission_ts"], rejected["decision_ts"])
+        self.assertEqual(
+            sum(order["origin"] == "nautilus_order" for order in projection["orders"]), 3
+        )
+
+        reference = (
+            nautilus_adapter.ROOT
+            / "poc/poc0-benchmark/results/nautilus-adapter-comparison-status-gated-2026-09-27.json"
+        )
+        report = nautilus_adapter.build_report(dataset_path, reference)
+        checks = {check["field"]: check for check in report["semantic_comparison"]["checks"]}
+        self.assertEqual(report["status"], "unresolved")
+        self.assertTrue(checks["orders.adapter_project_contract"]["passed"])
+        self.assertFalse(checks["orders.nautilus_native_lifecycle"]["passed"])
+        self.assertEqual(report["timings"]["completed_runs"], 5)
+        self.assertEqual(len(report["timings"]["event_processing"]["raw_samples_ns"]), 5)
+        self.assertTrue(report["timings"]["repeated_projection_equal"])
 
     def test_unavailable_or_unverified_runtime_keeps_measurements_unknown(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -88,7 +105,7 @@ class NautilusAdapterReportTests(unittest.TestCase):
         self.assertEqual(report["project_contract"]["reference_checksum_sha256"], "abc")
         self.assertEqual(report["semantic_comparison"]["status"], "not_run")
         self.assertIsNone(report["semantic_comparison"]["orders"])
-        self.assertIsNone(report["timings"]["conversion_samples_ns"])
+        self.assertIsNone(report["timings"]["conversion"])
         self.assertIsNone(report["build_resources"]["release_build_ns"])
         self.assertTrue(report["unresolved_reasons"])
 
@@ -121,7 +138,8 @@ class NautilusAdapterReportTests(unittest.TestCase):
         checks = nautilus_adapter._compare(actual, expected)
 
         self.assertFalse(checks[0]["passed"])
-        self.assertTrue(all(check["passed"] for check in checks[1:]))
+        self.assertFalse(checks[1]["passed"])
+        self.assertTrue(all(check["passed"] for check in checks[2:]))
 
     def test_order_comparison_checks_rejection_reason_and_attempt_date(self):
         expected = {

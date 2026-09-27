@@ -43,6 +43,8 @@ POC-0 与新平台实现按当前任务的 spec/ADR 确定时间语义；修改�
 
 本轮文档记录的是现状，不构成开发许可。改动前读相关代码和测试，先 `git status`，保留用户的未提交文件。接口、数据 schema 或量化口径变更时同步文档与必要 ADR。
 
+单个 implementation 完成后先保留未提交差异，交给未参与该实现的 agent 对照票据/spec 和仓库规范独立 review。实现 agent 处理审查发现并交付复核结果；若仍有问题，明确记录而不宣称验收通过。不要因实现完成就自动 `git commit`。用户明确要求提交时，在 review 后按票据或独立变更分批提交；已授予的提交授权按其范围执行。
+
 ## Testing Rules
 
 `cargo fmt --all -- --check`、`cargo test --workspace --locked --offline`、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings`；Python 有环境时 `.venv/bin/python -m unittest discover -s tests -v`；前端 `cd apps/web && npm run build`。仓库缺少独立端到端的 3 ETF / 10 日金标准用例。每次相关变更需检查 look-ahead、日期对齐、现金持仓恒等式与成本。不要把编译通过当量化正确性证明。
@@ -58,7 +60,7 @@ POC-0 与新平台实现按当前任务的 spec/ADR 确定时间语义；修改�
 
 ## Agent Completion Checklist
 
-运行相关测试、formatter/lint；复查未来函数、时序、组合核算和交易成本；更新 `docs/STATUS.md` 与 `HANDOFF.md`。仅在发生重要决策/契约变化时更新 ADR、API、README。交接中写明已验证命令、失败、开放问题和唯一建议下一步。
+运行相关测试、formatter/lint；复查未来函数、时序、组合核算和交易成本；完成独立 agent review 并处理发现；更新 `docs/STATUS.md` 与 `HANDOFF.md`。仅在发生重要决策/契约变化时更新 ADR、API、README。交接中写明已验证命令、review 结果、失败、开放问题和唯一建议下一步。
 
 ## Agent skills
 

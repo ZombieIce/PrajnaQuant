@@ -2661,7 +2661,7 @@ pub fn write_and_exit_status(report: &Poc0Report, output: &Path) -> Result<bool>
 
 /// Enrich the canonical Rust B2 report with the fixed-version Nautilus adapter result.
 /// The Python boundary owns all Nautilus objects; the Rust report remains the project contract.
-pub fn run_nautilus_adapter(dataset: &Path, report: &Path, python: &Path) -> Result<()> {
+pub fn run_nautilus_adapter(dataset: &Path, report: &Path, python: &Path) -> Result<String> {
     let adapter = Path::new("poc/poc0-benchmark/nautilus_adapter.py");
     let output = Command::new(python)
         .arg(adapter)
@@ -2681,7 +2681,12 @@ pub fn run_nautilus_adapter(dataset: &Path, report: &Path, python: &Path) -> Res
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    Ok(())
+    let adapter_output: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("parse Nautilus adapter status output")?;
+    let status = adapter_output["status"]
+        .as_str()
+        .context("Nautilus adapter output missing status")?;
+    Ok(status.to_owned())
 }
 
 #[cfg(test)]
