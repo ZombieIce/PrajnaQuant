@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "captured_at_utc": "2026-09-27T02:17:57.289201+00:00",
+  "git_revision": "d7494050aac1d3d1a9719cf6c88a7a475f268876",
+  "cargo_version": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+  "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "root_lock_sha256": "0a85e66902b4fc5b567eed50253c01b068895dc5e4dfcebf6422b9a17408fdc0",
+  "standalone_b1_lock_sha256": "788449592386dc6c77ca3db7b9a2b64c58f41abd17d48bad229b89bc94311e65",
+  "target_layout": {
+    "workspace": "target/",
+    "standalone_b1_default": "poc/b1-layout/target/"
+  },
+  "profiles": "Cargo default dev and release profiles; no repository [profile.*] override found",
+  "dependency_graphs": {
+    "application_default": "dependency-tree-app-2026-09-27.txt",
+    "poc_no_default_features": "dependency-tree-light-2026-09-27.txt",
+    "standalone_b1": "dependency-tree-standalone-b1-2026-09-27.txt"
+  },
+  "target_measurement_definition": "resource JSON workspace_target_bytes is the sum of regular-file st_size (logical bytes), whereas the earlier du -sh output reflects allocated filesystem blocks; these values are not directly comparable.",
+  "current_volume_free_bytes": 14184071168,
+  "cargo_lock_observation": {
+    "tool": "/usr/sbin/lsof",
+    "exit_code": 1,
+    "output": "",
+    "stderr": "",
+    "scope_note": "captured after the measured builds; pre-build process enumeration was unavailable in the sandbox."
+  },
+  "cache_actions": "No cargo clean or target deletion was run.",
+  "recorded_pre_build_observations": {
+    "target_du_human": "59G",
+    "standalone_b1_target_du_human": "1.0G",
+    "volume_free_human": "14GiB"
+  },
+  "inventory_timing_note": "This inventory file was assembled after the initial dev/release builds; recorded_pre_build_observations are the earlier measurements from before those builds, while captured_at_utc timestamps this consolidated inventory."
+}

@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "started_at_utc": "2026-09-27T02:01:24.483321+00:00",
+  "finished_at_utc": "2026-09-27T02:05:57.010091+00:00",
+  "command": [
+    "cargo",
+    "build",
+    "-p",
+    "quant-research",
+    "--no-default-features",
+    "--locked",
+    "--offline",
+    "--profile",
+    "release"
+  ],
+  "working_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316",
+  "target_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/target",
+  "cache_state": "warm_existing_workspace_target",
+  "estimated_max_additional_bytes": 1073741824,
+  "minimum_free_bytes": 10737418240,
+  "git_revision": "d7494050aac1d3d1a9719cf6c88a7a475f268876",
+  "working_tree_dirty": true,
+  "cargo_version": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+  "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "cargo_lock_sha256": "0a85e66902b4fc5b567eed50253c01b068895dc5e4dfcebf6422b9a17408fdc0",
+  "dependency_graph_sha256": "5aa7f1c14c5b318b00e2b61a3122e99c5214ab19ea79d8e4fafe1d879c3ea1c4",
+  "dependency_graph_contains_duckdb": false,
+  "profile": "release",
+  "features": [
+    "poc0 benchmark path; default app features disabled"
+  ],
+  "build_wall_seconds": 264.239194,
+  "status": "completed",
+  "exit_code": 0,
+  "before": {
+    "volume_free_bytes": 13267410944,
+    "workspace_target_bytes": 80078058581
+  },
+  "after": {
+    "volume_free_bytes": 12736319488,
+    "workspace_target_bytes": 80539337947
+  },
+  "target_delta_bytes": 461279366,
+  "stdout": "",
+  "stderr": "warning: `/Users/yibinzhang/.cargo/config` is deprecated in favor of `config.toml`\n  |\n  = help: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n   Compiling serde_core v1.0.229\n   Compiling libc v0.2.189\n   Compiling cc v1.4.7\n   Compiling syn v3.0.6\n   Compiling memchr v2.8.3\n   Compiling futures-core v0.3.34\n   Compiling futures-sink v0.3.34\n   Compiling num-derive v0.4.2\n   Compiling strum_macros v0.28.0\n   Compiling futures-channel v0.3.34\n   Compiling object v0.39.1\n   Compiling errno v0.3.14\n   Compiling getrandom v0.4.3\n   Compiling signal-hook-registry v1.4.8\n   Compiling parking_lot_core v0.9.12\n   Compiling rand v0.10.3\n   Compiling stacker v0.1.25\n   Compiling parking_lot v0.12.5\n   Compiling signal-hook v0.4.4\n   Compiling polars-error v0.55.2\n   Compiling mio v1.2.3\n   Compiling objc2-io-kit v0.3.2\n   Compiling socket2 v0.6.5\n   Compiling sysinfo v0.39.6\n   Compiling polars-config v0.55.2\n   Compiling memmap2 v0.9.11\n   Compiling rand_distr v0.6.0\n   Compiling blake3 v1.8.7\n   Compiling recursive-proc-macro-impl v0.1.1\n   Compiling hashbrown v0.17.1\n   Compiling uuid v1.26.1\n   Compiling cpufeatures v0.3.1\n   Compiling sha2 v0.11.0\n   Compiling num-integer v0.1.47\n   Compiling serde_derive v1.0.229\n   Compiling bytemuck_derive v1.12.1\n   Compiling ar_archive_writer v0.5.3\n   Compiling futures-macro v0.3.34\n   Compiling tokio-macros v2.7.2\n   Compiling polars-plan v0.55.2\n   Compiling indexmap v2.14.2\n   Compiling async-trait v0.1.92\n   Compiling tokio v1.53.1\n   Compiling psm v0.1.32\n   Compiling futures-util v0.3.34\n   Compiling bytemuck v1.25.2\n   Compiling num-bigint v0.4.8\n   Compiling half v2.7.1\n   Compiling getrandom v0.3.4\n   Compiling arrow-schema v58.4.0\n   Compiling argminmax v0.6.3\n   Compiling serde v1.0.229\n   Compiling ahash v0.8.12\n   Compiling digest v0.10.7\n   Compiling clap_derive v4.6.7\n   Compiling bytes v1.12.1\n   Compiling futures-executor v0.3.34\n   Compiling compact_str v0.9.1\n   Compiling futures v0.3.34\n   Compiling chrono v0.4.45\n   Compiling polars-utils v0.55.2\n   Compiling recursive v0.1.1\n   Compiling arrow-buffer v58.4.0\n   Compiling cpufeatures v0.2.17\n   Compiling sha2 v0.10.9\n   Compiling clap v4.6.7\n   Compiling chrono-tz v0.10.4\n   Compiling polars-schema v0.55.2\n   Compiling polars-buffer v0.55.2\n   Compiling polars-async v0.55.2\n   Compiling arrow-data v58.4.0\n   Compiling serde_json v1.0.151\n   Compiling arrow-array v58.4.0\n   Compiling polars-arrow v0.55.2\n   Compiling polars-dtype v0.55.2\n   Compiling polars-compute v0.55.2\n   Compiling polars-row v0.55.2\n   Compiling polars-core v0.55.2\n   Compiling polars-ops v0.55.2\n   Compiling polars-io v0.55.2\n   Compiling polars-expr v0.55.2\n   Compiling polars-mem-engine v0.55.2\n   Compiling polars-lazy v0.55.2\n   Compiling polars v0.55.2\n   Compiling quant-research v0.1.0 (/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/crates/quant-research)\nwarning: unused import: `Context`\n --> crates/quant-research/src/main.rs:1:14\n  |\n1 | use anyhow::{Context, Result};\n  |              ^^^^^^^\n  |\n  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default\n\nwarning: `quant-research` (bin \"quant-research\") generated 1 warning (run `cargo fix --bin \"quant-research\" -p quant-research` to apply 1 suggestion)\n    Finished `release` profile [optimized] target(s) in 4m 24s\n",
+  "compiled_source_manifest": "build-source-manifest-2026-09-27.json",
+  "compiled_source_manifest_sha256": "3e7e3ecaf032335ad9f3068b683b1eefb4374f92d89789498d4b3a11934e3795",
+  "compiled_source_identity_exact": true
+}

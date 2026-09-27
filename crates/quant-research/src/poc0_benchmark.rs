@@ -6,7 +6,10 @@ use crate::{
     strategy::rotation_scores,
 };
 use anyhow::{Context, Result, ensure};
+use arrow_array::{Array, Float64Array, RecordBatch};
+use arrow_schema::{DataType, Field, Schema};
 use chrono::{DateTime, Datelike, NaiveDate};
+use polars::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -15,6 +18,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::Arc,
     time::Instant,
 };
 
@@ -364,6 +368,8 @@ pub struct Poc0Report {
     measurements: MeasurementReport,
     result: ReportResult,
     b1_soa: B1SoaReport,
+    b1_arrow: B1ArrowReport,
+    b1_polars: B1PolarsReport,
     b2_fast_event_buy_hold: FastEventReport,
     conclusion: &'static str,
 }
@@ -469,6 +475,36 @@ struct B1SoaReport {
     model_boundary: &'static str,
 }
 
+#[derive(Debug, Serialize)]
+struct B1ArrowReport {
+    correctness_status: &'static str,
+    checksum_sha256: String,
+    projection: B1SoaProjection,
+    warmup_runs: usize,
+    raw_samples_ns: Vec<u128>,
+    median_ns: Option<u128>,
+    p95_ns: Option<u128>,
+    phase_samples_ns: B1PhaseSamples,
+    conversion_samples_ns: Vec<u128>,
+    measurement_scope: &'static str,
+    model_boundary: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct B1PolarsReport {
+    correctness_status: &'static str,
+    checksum_sha256: String,
+    projection: B1SoaProjection,
+    warmup_runs: usize,
+    raw_samples_ns: Vec<u128>,
+    median_ns: Option<u128>,
+    p95_ns: Option<u128>,
+    phase_samples_ns: B1PhaseSamples,
+    conversion_samples_ns: Vec<u128>,
+    measurement_scope: &'static str,
+    model_boundary: &'static str,
+}
+
 #[derive(Debug, Default, Serialize)]
 struct B1PhaseSamples {
     factor_ns: Vec<u128>,
@@ -518,7 +554,7 @@ pub fn run(
     selected_candidate: &str,
 ) -> Result<Poc0Report> {
     ensure!(
-        matches!(selected_candidate, "reference" | "soa"),
+        matches!(selected_candidate, "reference" | "soa" | "arrow" | "polars"),
         "unknown POC-0 candidate {selected_candidate}"
     );
     let dataset_bytes = fs::read(dataset_path)
@@ -541,6 +577,8 @@ pub fn run(
     let report = run_candidate(&prepared, &config);
     let projection = project_result(&prepared, &config, &report);
     let b1_projection = run_soa(&prepared, &config, false).0;
+    let (arrow_projection, _, _, _) = run_arrow(&prepared, &config, false);
+    let (polars_projection, _, _, _) = run_polars(&prepared, &config, false)?;
     let expected_targets = projection
         .signals
         .iter()
@@ -551,6 +589,12 @@ pub fn run(
         .collect::<Vec<_>>();
     let b1_correct =
         b1_projection.rankings == projection.rankings && b1_projection.targets == expected_targets;
+    let arrow_correct = arrow_projection.rankings == b1_projection.rankings
+        && arrow_projection.targets == b1_projection.targets
+        && projections_match(&arrow_projection, &b1_projection);
+    let polars_correct = polars_projection.rankings == b1_projection.rankings
+        && polars_projection.targets == b1_projection.targets
+        && projections_match(&polars_projection, &b1_projection);
     let mut differences = compare_values(
         &expected.projection,
         &serde_json::to_value(&projection)?,
@@ -570,7 +614,9 @@ pub fn run(
     let correctness_passed = differences.is_empty()
         && accounting_checks.is_empty()
         && time_checks.is_empty()
-        && b1_correct;
+        && b1_correct
+        && arrow_correct
+        && polars_correct;
     let checksum_sha256 = sha256(&serde_json::to_vec(&projection)?);
 
     let (measurements, measurement_differences) = if correctness_passed
@@ -603,6 +649,20 @@ pub fn run(
     } else {
         (Vec::new(), B1PhaseSamples::default())
     };
+    let (arrow_ns, arrow_phase_samples, arrow_conversion_samples) =
+        if correctness_passed && selected_candidate == "arrow" {
+            let (_, samples, phases, conversion) = run_arrow(&prepared, &config, true);
+            (samples, phases, conversion)
+        } else {
+            (Vec::new(), B1PhaseSamples::default(), Vec::new())
+        };
+    let (polars_ns, polars_phase_samples, polars_conversion_samples) =
+        if correctness_passed && selected_candidate == "polars" {
+            let (_, samples, phases, conversion) = run_polars(&prepared, &config, true)?;
+            (samples, phases, conversion)
+        } else {
+            (Vec::new(), B1PhaseSamples::default(), Vec::new())
+        };
     let fast_event_run = run_fast_event(&prepared);
     let fast_event_checksum = sha256(&serde_json::to_vec(&fast_event_run.projection)?);
     let repeated_projection = run_fast_event(&prepared).projection;
@@ -635,8 +695,12 @@ pub fn run(
     differences.extend(measurement_differences);
     let candidate_measurement_passed = if selected_candidate == "reference" {
         measurements.status == "measured"
-    } else {
+    } else if selected_candidate == "soa" {
         b1_ns.len() == MEASUREMENT_RUNS
+    } else if selected_candidate == "arrow" {
+        arrow_ns.len() == MEASUREMENT_RUNS
+    } else {
+        polars_ns.len() == MEASUREMENT_RUNS
     };
     let correctness_passed = correctness_passed && candidate_measurement_passed;
     let provenance = provenance_report();
@@ -681,10 +745,11 @@ pub fn run(
     Ok(Poc0Report {
         schema_version: "poc0.report.v1",
         run_id,
-        candidate: if selected_candidate == "soa" {
-            "custom-soa-momentum-rotation"
-        } else {
-            "existing-rust-etf-backtest-reference"
+        candidate: match selected_candidate {
+            "soa" => "custom-soa-momentum-rotation",
+            "arrow" => "apache-arrow-column-batch-momentum-rotation",
+            "polars" => "polars-expression-momentum-rotation",
+            _ => "existing-rust-etf-backtest-reference",
         }
         .into(),
         strategy,
@@ -719,6 +784,32 @@ pub fn run(
             phase_samples_ns: b1_phase_samples,
             measurement_scope: "symbol-major SoA factor windows, cross-sectional rank/top-k, equal weights, and next-session return projection; excludes parsing and fixture construction",
             model_boundary: "equal-weight target-weight × next-session close-to-close return; missing selected bar makes that interval unavailable; no cash, fees, fills, or event-account NAV",
+        },
+        b1_arrow: B1ArrowReport {
+            correctness_status: if arrow_correct { "passed" } else { "failed" },
+            checksum_sha256: sha256(&serde_json::to_vec(&arrow_projection)?),
+            projection: arrow_projection,
+            warmup_runs: if arrow_ns.is_empty() { 0 } else { WARMUP_RUNS },
+            raw_samples_ns: arrow_ns.clone(),
+            median_ns: sorted_median(&arrow_ns),
+            p95_ns: sorted_p95(&arrow_ns),
+            phase_samples_ns: arrow_phase_samples,
+            conversion_samples_ns: arrow_conversion_samples,
+            measurement_scope: "Arrow RecordBatch construction and symbol-column S2 factor windows, cross-sectional rank/top-k, equal weights, and next-session return projection; excludes fixture parsing and JSON serialization",
+            model_boundary: "equal-weight target-weight × next-session close-to-close return; missing selected bar makes that interval unavailable; no cash, fees, fills, or event-account NAV",
+        },
+        b1_polars: B1PolarsReport {
+            correctness_status: if polars_correct { "passed" } else { "failed" },
+            checksum_sha256: sha256(&serde_json::to_vec(&polars_projection)?),
+            projection: polars_projection,
+            warmup_runs: if polars_ns.is_empty() { 0 } else { WARMUP_RUNS },
+            median_ns: sorted_median(&polars_ns),
+            p95_ns: sorted_p95(&polars_ns),
+            raw_samples_ns: polars_ns,
+            phase_samples_ns: polars_phase_samples,
+            conversion_samples_ns: polars_conversion_samples,
+            measurement_scope: "Polars lazy expressions for factor score, ordered rank/TopK, equal weights, and next-session return projection; excludes fixture parsing",
+            model_boundary: "same simplified equal-weight next-session close-to-close return labels as SoA; no cash, fees, fills, or event-account NAV",
         },
         b2_fast_event_buy_hold: FastEventReport {
             status: if fast_event_correct {
@@ -1165,6 +1256,512 @@ fn run_soa(
     (projection, samples, phase_samples)
 }
 
+/// S2 over symbol columns in an Arrow RecordBatch. Batch construction is included in
+/// end-to-end timings and also reported separately so conversion cost stays visible.
+fn run_arrow(
+    dataset: &PreparedDataset,
+    config: &ExperimentConfig,
+    measure: bool,
+) -> (B1SoaProjection, Vec<u128>, B1PhaseSamples, Vec<u128>) {
+    let mut symbols = dataset
+        .spec
+        .instruments
+        .iter()
+        .map(|i| i.symbol.clone())
+        .collect::<Vec<_>>();
+    symbols.sort();
+    let days = dataset.spec.calendar.len();
+    let schema = Arc::new(Schema::new(
+        symbols
+            .iter()
+            .map(|symbol| Field::new(symbol, DataType::Float64, true))
+            .collect::<Vec<_>>(),
+    ));
+    let mut aligned = vec![vec![None; days]; symbols.len()];
+    for bar in &dataset.bars {
+        let si = symbols.binary_search(&bar.symbol).expect("sorted symbols");
+        let di = dataset
+            .spec
+            .calendar
+            .binary_search(&bar.trade_date)
+            .unwrap();
+        aligned[si][di] = Some(bar.close);
+    }
+    let batch = arrow_batch(&schema, &aligned);
+    let calculate = |batch: &RecordBatch| {
+        let mut rankings = Vec::new();
+        let mut targets = Vec::new();
+        let mut target_weights = Vec::new();
+        let mut phases = B1PhaseSamples::default();
+        let mut eligible_dates = 0usize;
+        for di in 0..days {
+            let factor_started = Instant::now();
+            let mut candidates = Vec::new();
+            for (si, symbol) in symbols.iter().enumerate() {
+                let close = batch
+                    .column(si)
+                    .as_any()
+                    .downcast_ref::<Float64Array>()
+                    .unwrap();
+                if !close.is_valid(di) {
+                    continue;
+                }
+                let observed = (0..=di)
+                    .filter(|day| close.is_valid(*day))
+                    .collect::<Vec<_>>();
+                if let Some(score) = arrow_factor_score(close, &observed, di, &config.strategy) {
+                    candidates.push(RankingCandidate {
+                        symbol: symbol.clone(),
+                        score,
+                    });
+                }
+            }
+            phases.factor_ns.push(factor_started.elapsed().as_nanos());
+            let rank_started = Instant::now();
+            candidates.sort_by(|a, b| {
+                b.score
+                    .total_cmp(&a.score)
+                    .then_with(|| a.symbol.cmp(&b.symbol))
+            });
+            if !candidates.is_empty() {
+                let rebalance = config.strategy.rebalance_every.max(1);
+                let should_rebalance = eligible_dates % rebalance == 0;
+                eligible_dates += 1;
+                let date = dataset.spec.calendar[di];
+                if should_rebalance {
+                    let chosen = candidates
+                        .iter()
+                        .take(config.strategy.top_n)
+                        .map(|c| c.symbol.clone())
+                        .collect::<Vec<_>>();
+                    target_weights.extend(chosen.iter().map(|symbol| WeightedTarget {
+                        date,
+                        symbol: symbol.clone(),
+                        weight: 1.0 / chosen.len() as f64,
+                    }));
+                    targets.push(SignalProjection {
+                        date,
+                        target_symbols: chosen,
+                    });
+                }
+                rankings.push(RankingProjection { date, candidates });
+            }
+            phases
+                .ranking_topk_weights_ns
+                .push(rank_started.elapsed().as_nanos());
+        }
+        let return_started = Instant::now();
+        let mut portfolio_returns = Vec::new();
+        for signal in &targets {
+            let di = dataset.spec.calendar.binary_search(&signal.date).unwrap();
+            if di + 1 >= days {
+                continue;
+            }
+            let mut values = Vec::new();
+            for symbol in &signal.target_symbols {
+                let si = symbols.binary_search(symbol).unwrap();
+                let close = batch
+                    .column(si)
+                    .as_any()
+                    .downcast_ref::<Float64Array>()
+                    .unwrap();
+                if close.is_valid(di) && close.is_valid(di + 1) {
+                    values.push(close.value(di + 1) / close.value(di) - 1.0);
+                }
+            }
+            let return_pct = if values.len() == signal.target_symbols.len() && !values.is_empty() {
+                Some(values.iter().sum::<f64>() / values.len() as f64)
+            } else {
+                None
+            };
+            portfolio_returns.push(PortfolioReturn {
+                from: signal.date,
+                to: dataset.spec.calendar[di + 1],
+                return_pct,
+            });
+        }
+        phases
+            .return_projection_ns
+            .push(return_started.elapsed().as_nanos());
+        (
+            B1SoaProjection {
+                rankings,
+                targets,
+                target_weights,
+                portfolio_returns,
+            },
+            phases,
+        )
+    };
+    let mut conversion_samples = Vec::new();
+    let mut samples = Vec::new();
+    let mut phase_samples = B1PhaseSamples::default();
+    let (mut projection, _) = calculate(&batch);
+    if measure {
+        let _ = calculate(&batch);
+        for _ in 0..MEASUREMENT_RUNS {
+            let started = Instant::now();
+            let convert_started = Instant::now();
+            let batch = arrow_batch(&schema, &aligned);
+            conversion_samples.push(convert_started.elapsed().as_nanos());
+            let (measured, phases) = std::hint::black_box(calculate(&batch));
+            projection = measured;
+            samples.push(started.elapsed().as_nanos());
+            phase_samples.factor_ns.push(phases.factor_ns.iter().sum());
+            phase_samples
+                .ranking_topk_weights_ns
+                .push(phases.ranking_topk_weights_ns.iter().sum());
+            phase_samples
+                .return_projection_ns
+                .push(phases.return_projection_ns.iter().sum());
+        }
+    }
+    (projection, samples, phase_samples, conversion_samples)
+}
+
+fn arrow_batch(schema: &Arc<Schema>, columns: &[Vec<Option<f64>>]) -> RecordBatch {
+    let columns = columns
+        .iter()
+        .map(|values| Arc::new(Float64Array::from(values.clone())) as arrow_array::ArrayRef)
+        .collect::<Vec<_>>();
+    RecordBatch::try_new(Arc::clone(schema), columns).expect("valid Arrow close batch")
+}
+
+#[cfg(test)]
+mod arrow_tests {
+    use super::{DatasetInput, experiment_config, prepare_dataset, run_arrow};
+    use chrono::NaiveDate;
+    use std::{fs, path::Path};
+
+    fn prepared_fixture() -> super::PreparedDataset {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("poc/poc0-benchmark/fixtures/dataset-v1.json");
+        let input: DatasetInput = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        prepare_dataset(input).unwrap()
+    }
+
+    #[test]
+    fn arrow_checks_window_ties_missing_bars_and_return_dates() {
+        let mut missing_next_bar = prepared_fixture();
+        let missing_date = NaiveDate::from_ymd_opt(2026, 1, 8).unwrap();
+        missing_next_bar
+            .bars
+            .retain(|bar| !(bar.symbol == "C" && bar.trade_date == missing_date));
+        let config = experiment_config(&missing_next_bar.spec);
+        let (projection, _, _, _) = run_arrow(&missing_next_bar, &config, false);
+        assert_eq!(
+            projection.rankings[0].date,
+            NaiveDate::from_ymd_opt(2026, 1, 7).unwrap()
+        );
+        assert_eq!(projection.targets[0].target_symbols, ["C"]);
+        assert_eq!(
+            projection.portfolio_returns[0].from,
+            projection.targets[0].date
+        );
+        assert_eq!(projection.portfolio_returns[0].to, missing_date);
+        assert_eq!(projection.portfolio_returns[0].return_pct, None);
+        let final_symbols = projection
+            .rankings
+            .last()
+            .unwrap()
+            .candidates
+            .iter()
+            .map(|row| row.symbol.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(final_symbols, ["C", "A"]);
+
+        let tied = prepared_fixture();
+        let tie_date = NaiveDate::from_ymd_opt(2026, 1, 7).unwrap();
+        let mut config = experiment_config(&tied.spec);
+        config.strategy.short_momentum_weight = 0.0;
+        config.strategy.long_momentum_weight = 0.0;
+        config.strategy.volatility_weight = 0.0;
+        let (projection, _, _, _) = run_arrow(&tied, &config, false);
+        let first_day = &projection.rankings[0];
+        assert_eq!(first_day.date, tie_date);
+        assert_eq!(first_day.candidates[0].symbol, "A");
+        assert_eq!(first_day.candidates[1].symbol, "C");
+        assert_eq!(first_day.candidates[2].symbol, "B");
+        assert_eq!(first_day.candidates[0].score, first_day.candidates[1].score);
+    }
+}
+
+fn run_polars(
+    dataset: &PreparedDataset,
+    config: &ExperimentConfig,
+    measure: bool,
+) -> Result<(B1SoaProjection, Vec<u128>, B1PhaseSamples, Vec<u128>)> {
+    let mut symbols = dataset
+        .spec
+        .instruments
+        .iter()
+        .map(|i| i.symbol.clone())
+        .collect::<Vec<_>>();
+    symbols.sort();
+    let days = dataset.spec.calendar.len();
+    let mut closes = vec![f64::NAN; symbols.len() * days];
+    for bar in &dataset.bars {
+        let si = symbols.binary_search(&bar.symbol).expect("sorted symbols");
+        let di = dataset
+            .spec
+            .calendar
+            .binary_search(&bar.trade_date)
+            .unwrap();
+        closes[si * days + di] = bar.close;
+    }
+    let calculate = || -> Result<(B1SoaProjection, B1PhaseSamples, u128)> {
+        let strategy = &config.strategy;
+        let short = strategy
+            .momentum_short_days
+            .unwrap_or(strategy.lookback_days);
+        let long = strategy
+            .momentum_long_days
+            .unwrap_or(strategy.lookback_days);
+        let volatility = strategy.volatility_window.unwrap_or(short.max(2));
+        let mut phases = B1PhaseSamples::default();
+        let mut conversion_ns = 0;
+        let mut feature_rows = Vec::new();
+        for (si, symbol) in symbols.iter().enumerate() {
+            let factor_started = Instant::now();
+            let observed = (0..days)
+                .filter(|day| closes[si * days + day].is_finite())
+                .collect::<Vec<_>>();
+            if observed.is_empty() {
+                continue;
+            }
+            let observed_closes = observed
+                .iter()
+                .map(|day| closes[si * days + day])
+                .collect::<Vec<_>>();
+            let conversion_started = Instant::now();
+            let frame = DataFrame::new(
+                observed_closes.len(),
+                vec![Series::new("close".into(), observed_closes).into()],
+            )?;
+            conversion_ns += conversion_started.elapsed().as_nanos();
+            let mut return_sum = lit(0.0);
+            let mut return_squared_sum = lit(0.0);
+            for lag in 0..volatility {
+                let daily_return = col("close").shift(lit(lag as i64))
+                    / col("close").shift(lit((lag + 1) as i64))
+                    - lit(1.0);
+                return_sum = return_sum + daily_return.clone();
+                return_squared_sum = return_squared_sum + daily_return.clone() * daily_return;
+            }
+            let volatility_expr = ((return_squared_sum
+                - return_sum.clone() * return_sum / lit(volatility as f64))
+                / lit((volatility - 1) as f64))
+            .sqrt();
+            let scored = frame
+                .lazy()
+                .with_columns([
+                    (col("close") / col("close").shift(lit(short as i64)) - lit(1.0))
+                        .alias("short"),
+                    (col("close") / col("close").shift(lit(long as i64)) - lit(1.0)).alias("long"),
+                    volatility_expr.alias("volatility"),
+                ])
+                .with_column(
+                    (col("short") * lit(strategy.short_momentum_weight)
+                        + col("long") * lit(strategy.long_momentum_weight)
+                        - col("volatility") * lit(strategy.volatility_weight))
+                    .alias("score"),
+                )
+                .select([col("score")])
+                .collect()?;
+            let scores = scored.column("score")?.f64()?;
+            feature_rows.push((
+                symbol.clone(),
+                observed,
+                (0..scores.len())
+                    .map(|row| scores.get(row))
+                    .collect::<Vec<_>>(),
+            ));
+            phases.factor_ns.push(factor_started.elapsed().as_nanos());
+        }
+        let mut projection = B1SoaProjection {
+            rankings: Vec::new(),
+            targets: Vec::new(),
+            target_weights: Vec::new(),
+            portfolio_returns: Vec::new(),
+        };
+        let mut eligible_dates = 0usize;
+        for di in 0..days {
+            let rank_started = Instant::now();
+            let mut day_column = Vec::new();
+            let mut symbol_column = Vec::new();
+            let mut score_column = Vec::new();
+            let mut order_column = Vec::new();
+            for (symbol, observed, scores) in &feature_rows {
+                let Ok(row) = observed.binary_search(&di) else {
+                    continue;
+                };
+                let Some(score) = scores[row].filter(|score| score.is_finite()) else {
+                    continue;
+                };
+                let order = sortable_float_key(score);
+                day_column.push(di as u32);
+                symbol_column.push(symbol.clone());
+                score_column.push(score);
+                order_column.push(order);
+            }
+            let conversion_started = Instant::now();
+            let frame = DataFrame::new(
+                day_column.len(),
+                vec![
+                    Series::new("day".into(), day_column).into(),
+                    Series::new("symbol".into(), symbol_column).into(),
+                    Series::new("score".into(), score_column).into(),
+                    Series::new("score_order".into(), order_column).into(),
+                ],
+            )?;
+            conversion_ns += conversion_started.elapsed().as_nanos();
+            let evaluated = frame
+                .lazy()
+                .sort_by_exprs(
+                    [col("score_order"), col("symbol")],
+                    SortMultipleOptions::default().with_order_descending_multi([true, false]),
+                )
+                .collect()?;
+            if evaluated.height() > 0 {
+                let scores = evaluated.column("score")?.f64()?;
+                let sorted_symbols = evaluated.column("symbol")?.str()?;
+                let candidates = (0..evaluated.height())
+                    .map(|row| RankingCandidate {
+                        symbol: sorted_symbols.get(row).unwrap().to_owned(),
+                        score: scores.get(row).unwrap(),
+                    })
+                    .collect::<Vec<_>>();
+                let rebalance = strategy.rebalance_every.max(1);
+                let should_rebalance = eligible_dates % rebalance == 0;
+                eligible_dates += 1;
+                let date = dataset.spec.calendar[di];
+                if should_rebalance {
+                    let mut top = evaluated
+                        .clone()
+                        .lazy()
+                        .limit(strategy.top_n as u32)
+                        .collect()?;
+                    let weight = 1.0 / top.height().max(1) as f64;
+                    top.with_column(
+                        Series::new("weight".into(), vec![weight; top.height()]).into(),
+                    )?;
+                    let top_symbols = top.column("symbol")?.str()?;
+                    let weights = top.column("weight")?.f64()?;
+                    let chosen = (0..top.height())
+                        .map(|row| top_symbols.get(row).unwrap().to_owned())
+                        .collect::<Vec<_>>();
+                    projection
+                        .target_weights
+                        .extend((0..top.height()).map(|row| WeightedTarget {
+                            date,
+                            symbol: chosen[row].clone(),
+                            weight: weights.get(row).unwrap(),
+                        }));
+                    projection.targets.push(SignalProjection {
+                        date,
+                        target_symbols: chosen,
+                    });
+                }
+                projection
+                    .rankings
+                    .push(RankingProjection { date, candidates });
+            }
+            phases
+                .ranking_topk_weights_ns
+                .push(rank_started.elapsed().as_nanos());
+        }
+        let return_started = Instant::now();
+        for target in &projection.targets {
+            let di = dataset.spec.calendar.binary_search(&target.date).unwrap();
+            if di + 1 >= days {
+                continue;
+            }
+            let mut from_values = Vec::new();
+            let mut to_values = Vec::new();
+            for symbol in &target.target_symbols {
+                let si = symbols.binary_search(symbol).unwrap();
+                let from = closes[si * days + di];
+                let to = closes[si * days + di + 1];
+                from_values.push(from.is_finite().then_some(from));
+                to_values.push(to.is_finite().then_some(to));
+            }
+            let conversion_started = Instant::now();
+            let frame = DataFrame::new(
+                from_values.len(),
+                vec![
+                    Series::new("from".into(), from_values).into(),
+                    Series::new("to".into(), to_values).into(),
+                ],
+            )?;
+            conversion_ns += conversion_started.elapsed().as_nanos();
+            let returns = frame
+                .lazy()
+                .select([
+                    ((col("to") / col("from")) - lit(1.0))
+                        .mean()
+                        .alias("mean_return"),
+                    ((col("to") / col("from")) - lit(1.0))
+                        .count()
+                        .alias("available_count"),
+                ])
+                .collect()?;
+            let available = returns
+                .column("available_count")?
+                .u32()?
+                .get(0)
+                .unwrap_or(0) as usize;
+            let mean = returns.column("mean_return")?.f64()?.get(0);
+            let return_pct = if available == target.target_symbols.len() {
+                mean
+            } else {
+                None
+            };
+            projection.portfolio_returns.push(PortfolioReturn {
+                from: target.date,
+                to: dataset.spec.calendar[di + 1],
+                return_pct,
+            });
+        }
+        phases
+            .return_projection_ns
+            .push(return_started.elapsed().as_nanos());
+        Ok((projection, phases, conversion_ns))
+    };
+    let (mut projection, _, _) = calculate()?;
+    let mut samples = Vec::new();
+    let mut phases_out = B1PhaseSamples::default();
+    let mut conversion_samples = Vec::new();
+    if measure {
+        let _ = calculate()?;
+        for _ in 0..MEASUREMENT_RUNS {
+            let started = Instant::now();
+            let (result, phases, conversion) = std::hint::black_box(calculate()?);
+            projection = result;
+            samples.push(started.elapsed().as_nanos());
+            phases_out.factor_ns.push(phases.factor_ns.iter().sum());
+            phases_out
+                .ranking_topk_weights_ns
+                .push(phases.ranking_topk_weights_ns.iter().sum());
+            phases_out
+                .return_projection_ns
+                .push(phases.return_projection_ns.iter().sum());
+            conversion_samples.push(conversion);
+        }
+    }
+    Ok((projection, samples, phases_out, conversion_samples))
+}
+
+/// Map finite IEEE-754 values to unsigned keys whose ascending order matches `total_cmp`.
+fn sortable_float_key(value: f64) -> u64 {
+    let bits = value.to_bits();
+    if bits >> 63 == 1 {
+        !bits
+    } else {
+        bits ^ (1 << 63)
+    }
+}
+
 fn soa_factor_score(
     close: &[f64],
     observed_days: &[usize],
@@ -1196,6 +1793,48 @@ fn soa_factor_score(
         + strategy.long_momentum_weight * long_return
         - strategy.volatility_weight * variance.sqrt();
     score.is_finite().then_some(score)
+}
+
+fn arrow_factor_score(
+    close: &Float64Array,
+    observed_days: &[usize],
+    signal_day: usize,
+    strategy: &StrategyConfig,
+) -> Option<f64> {
+    let short = strategy
+        .momentum_short_days
+        .unwrap_or(strategy.lookback_days);
+    let long = strategy
+        .momentum_long_days
+        .unwrap_or(strategy.lookback_days);
+    let volatility = strategy.volatility_window.unwrap_or(short.max(2));
+    let observation = observed_days.len().checked_sub(1)?;
+    let required = short.max(long).max(volatility);
+    if observed_days[observation] != signal_day || observation < required || volatility <= 1 {
+        return None;
+    }
+    let now = close.value(signal_day);
+    let short_return = now / close.value(observed_days[observation - short]) - 1.0;
+    let long_return = now / close.value(observed_days[observation - long]) - 1.0;
+    let returns = (observation - volatility + 1..=observation)
+        .map(|j| close.value(observed_days[j]) / close.value(observed_days[j - 1]) - 1.0)
+        .collect::<Vec<_>>();
+    let mean = returns.iter().sum::<f64>() / volatility as f64;
+    let variance =
+        returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (volatility - 1) as f64;
+    let score = strategy.short_momentum_weight * short_return
+        + strategy.long_momentum_weight * long_return
+        - strategy.volatility_weight * variance.sqrt();
+    score.is_finite().then_some(score)
+}
+
+fn projections_match(left: &B1SoaProjection, right: &B1SoaProjection) -> bool {
+    compare_values(
+        &serde_json::to_value(left).expect("serializable Arrow projection"),
+        &serde_json::to_value(right).expect("serializable SoA projection"),
+        "$".into(),
+    )
+    .is_empty()
 }
 
 fn prepare_dataset(spec: DatasetInput) -> Result<PreparedDataset> {

@@ -6,20 +6,27 @@ rust-version = "1.85.1"
 publish = false
 license = "MIT"
 
+[features]
+default = ["app"]
+app = ["dep:ashare-warehouse", "dep:axum", "dep:duckdb", "dep:tower-http"]
+
 [dependencies]
-ashare-warehouse = { path = "../.." }
+arrow-array = "=58.4.0"
+arrow-schema = "=58.4.0"
+polars = { version = "=0.55.2", default-features = false, features = ["lazy"] }
+ashare-warehouse = { path = "../..", optional = true }
 anyhow = "1.0"
-axum = "0.8"
+axum = { version = "0.8", optional = true }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 clap = { version = "4.5", features = ["derive"] }
-duckdb = { version = "=1.10505.0", features = ["bundled"] }
+duckdb = { version = "=1.10505.0", features = ["bundled"], optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 uuid = { version = "1.11", features = ["v4", "serde"] }
 rayon = "1.10"
 tokio = { version = "1.43", features = ["macros", "rt-multi-thread", "net"] }
-tower-http = { version = "0.6", features = ["cors", "fs"] }
+tower-http = { version = "0.6", features = ["cors", "fs"], optional = true }
 
 [dev-dependencies]
 tempfile = "3.14"

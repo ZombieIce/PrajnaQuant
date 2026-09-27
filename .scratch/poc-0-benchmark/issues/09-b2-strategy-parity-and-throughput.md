@@ -10,3 +10,4 @@
 - [ ] 在共同子集逐项对拍信号、订单、Fill、现金、持仓、成本、每日 NAV 和 PortfolioResult；语义差异单独列明。
 - [ ] 固定规模、预热、重复次数和线程数，报告单 Run 延迟、并行 Runs/s、中位数、p95、峰值 RSS、转换成本和原始样本。
 - [ ] 预先登记收益门槛，给出 `adopt / defer / reject / unresolved` 结论；不可比时不以不同 Sharpe 判断实现优劣。
+- [ ] Fast Event 与 Nautilus 的构建耗时/空间单列工程成本；events/s 和 runs/s 只比较共同 release 配置与已对齐语义，资源门槛阻断的候选保留 `unresolved`。

@@ -1,0 +1,275 @@
+{
+  "schema_version": 1,
+  "started_at_utc": "2026-09-27T02:18:15.422481+00:00",
+  "finished_at_utc": "2026-09-27T02:18:43.328016+00:00",
+  "command": [
+    "cargo",
+    "build",
+    "-p",
+    "quant-research",
+    "--no-default-features",
+    "--locked",
+    "--offline",
+    "--profile",
+    "dev"
+  ],
+  "working_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316",
+  "target_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/target",
+  "cache_state": "warm_existing_workspace_target",
+  "estimated_max_additional_bytes": 1073741824,
+  "minimum_free_bytes": 10737418240,
+  "runtime_stop_free_bytes": 11274289152,
+  "space_samples": [
+    {
+      "observed_at_utc": "2026-09-27T02:18:17.556822+00:00",
+      "volume_free_bytes": 14429638656
+    },
+    {
+      "observed_at_utc": "2026-09-27T02:18:19.562061+00:00",
+      "volume_free_bytes": 14429638656
+    },
+    {
+      "observed_at_utc": "2026-09-27T02:18:21.562597+00:00",
+      "volume_free_bytes": 14430883840
+    },
+    {
+      "observed_at_utc": "2026-09-27T02:18:23.563717+00:00",
+      "volume_free_bytes": 14430838784
+    },
+    {
+      "observed_at_utc": "2026-09-27T02:18:25.568416+00:00",
+      "volume_free_bytes": 14430834688
+    },
+    {
+      "observed_at_utc": "2026-09-27T02:18:27.572868+00:00",
+      "volume_free_bytes": 14339522560
+    },
+    {
+      "observed_at_utc": "2026-09-27T02:18:29.576475+00:00",
+      "volume_free_bytes": 14277099520
+    },
+    {
+      "observed_at_utc": "2026-09-27T02:18:31.581669+00:00",
+      "volume_free_bytes": 14277087232
+    },
+    {
+      "observed_at_utc": "2026-09-27T02:18:33.586816+00:00",
+      "volume_free_bytes": 14231330816
+    },
+    {
+      "observed_at_utc": "2026-09-27T02:18:35.591365+00:00",
+      "volume_free_bytes": 14211067904
+    }
+  ],
+  "git_revision": "d7494050aac1d3d1a9719cf6c88a7a475f268876",
+  "working_tree_dirty": true,
+  "tracked_diff_sha256": "a320cb528705744069d0af8ba92976d158dafe3afac18b307e69bd541dd178ed",
+  "tracked_diff_summary": ".../issues/03-arrow-momentum-rotation.md           |   12 +-\n .../issues/04-polars-momentum-rotation.md          |   12 +-\n .../issues/05-parquet-and-out-of-core.md           |    4 +-\n .../issues/06-b1-sweep-cache-and-conclusion.md     |    1 +\n .../issues/08-nautilus-buy-and-hold-adapter.md     |    3 +-\n .../issues/09-b2-strategy-parity-and-throughput.md |    1 +\n .../issues/10-pyo3-basic-callback-comparison.md    |    3 +-\n .../11-pyo3-strategies-and-parallel-boundary.md    |    1 +\n .../issues/12-poc-zero-synthesis.md                |    3 +-\n .scratch/poc-0-benchmark/spec.md                   |   11 +-\n Cargo.lock                                         | 1128 +++++++++++++++++++-\n HANDOFF.md                                         |   12 +-\n crates/quant-research/Cargo.toml                   |   15 +-\n crates/quant-research/src/lib.rs                   |    6 +\n crates/quant-research/src/main.rs                  |   27 +-\n crates/quant-research/src/poc0_benchmark.rs        |  653 ++++++++++-\n crates/quant-research/tests/poc0_benchmark_cli.rs  |  327 +++++-\n docs/STATUS.md                                     |    8 +-\n docs/poc-0-benchmark-spec.md                       |   14 +-\n poc/poc0-benchmark/README.md                       |   68 ++\n 20 files changed, 2259 insertions(+), 50 deletions(-)",
+  "changed_paths": [
+    "scratch/poc-0-benchmark/issues/03-arrow-momentum-rotation.md",
+    ".scratch/poc-0-benchmark/issues/04-polars-momentum-rotation.md",
+    ".scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md",
+    ".scratch/poc-0-benchmark/issues/06-b1-sweep-cache-and-conclusion.md",
+    ".scratch/poc-0-benchmark/issues/08-nautilus-buy-and-hold-adapter.md",
+    ".scratch/poc-0-benchmark/issues/09-b2-strategy-parity-and-throughput.md",
+    ".scratch/poc-0-benchmark/issues/10-pyo3-basic-callback-comparison.md",
+    ".scratch/poc-0-benchmark/issues/11-pyo3-strategies-and-parallel-boundary.md",
+    ".scratch/poc-0-benchmark/issues/12-poc-zero-synthesis.md",
+    ".scratch/poc-0-benchmark/spec.md",
+    "Cargo.lock",
+    "HANDOFF.md",
+    "crates/quant-research/Cargo.toml",
+    "crates/quant-research/src/lib.rs",
+    "crates/quant-research/src/main.rs",
+    "crates/quant-research/src/poc0_benchmark.rs",
+    "crates/quant-research/tests/poc0_benchmark_cli.rs",
+    "docs/STATUS.md",
+    "docs/poc-0-benchmark-spec.md",
+    "poc/poc0-benchmark/README.md",
+    ".scratch/poc-0-benchmark/issues/13-build-resource-boundary.md",
+    "poc/poc0-benchmark/capture-build-resource.py",
+    "poc/poc0-benchmark/results/b1-polars-2026-09-27.json",
+    "poc/poc0-benchmark/results/build-resource-blocked-2026-09-27.json",
+    "poc/poc0-benchmark/results/build-resource-dev-2026-09-27.json",
+    "poc/poc0-benchmark/results/build-resource-inventory-2026-09-27.json",
+    "poc/poc0-benchmark/results/build-resource-release-2026-09-27.json",
+    "poc/poc0-benchmark/results/build-source-manifest-2026-09-27.json",
+    "poc/poc0-benchmark/results/dependency-tree-app-2026-09-27.txt",
+    "poc/poc0-benchmark/results/dependency-tree-light-2026-09-27.txt",
+    "poc/poc0-benchmark/results/dependency-tree-standalone-b1-2026-09-27.txt"
+  ],
+  "untracked_files": [
+    {
+      "path": ".scratch/poc-0-benchmark/issues/13-build-resource-boundary.md",
+      "sha256": "b14034bc40b9693529d3a4183575f91cc947bed851932deb2d3689620cd0f806"
+    },
+    {
+      "path": "poc/poc0-benchmark/capture-build-resource.py",
+      "sha256": "8543a8a507c30b9fbdf74845d213912bc474eb82e35ed4dbbc7ab4e2d4d89f19"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b1-polars-2026-09-27.json",
+      "sha256": "d6a40ae4d138f387c264f8851d2751280e398593346a3b1f425357b23d4f78ee"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/build-resource-blocked-2026-09-27.json",
+      "sha256": "158864d0c9118c7a9ce7aab6495a84c562f872507837d1a7d831de285b9e9798"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/build-resource-dev-2026-09-27.json",
+      "sha256": "2271004d968a4acbc3265bc0d2868660f23db6e4953c81979d3b3ee93088f58c"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/build-resource-inventory-2026-09-27.json",
+      "sha256": "fec62652558885e70f56fd27b5efbd51d8ec9dbcd04a1374b18e291e88783a54"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/build-resource-release-2026-09-27.json",
+      "sha256": "f1fda145756388c5efc64d0297a56a65720d228882cb5e455e4fdcbd0a29e019"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/build-source-manifest-2026-09-27.json",
+      "sha256": "638533f959ae5cdf51f66d0b1891f3d28095f6486acf931ef92123ba8a97e573"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/dependency-tree-app-2026-09-27.txt",
+      "sha256": "85418724152d1751a9982a84a2e704543c4dc715650e71ac698f186c14fe712d"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/dependency-tree-light-2026-09-27.txt",
+      "sha256": "cddcc405a7c63262aca458ad82a7427141dcb2d59bd16316369b098febad3576"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/dependency-tree-standalone-b1-2026-09-27.txt",
+      "sha256": "d2d5f1dbc07bcb886588f38675c287dfca60a0316f077edf256e036fbe1538ad"
+    }
+  ],
+  "untracked_files_complete": true,
+  "dirty_worktree_sha256": "c287300d2e13ea2ffb9a458f47d8de069a85203025a16d579cd543b9f7024933",
+  "compiled_source_files": [
+    {
+      "path": ".cargo/config.toml",
+      "sha256": "199dda3f76c1eff2551ad1f2cbdce4b7db5846471992960c08914e580a2fe824"
+    },
+    {
+      "path": "Cargo.lock",
+      "sha256": "0a85e66902b4fc5b567eed50253c01b068895dc5e4dfcebf6422b9a17408fdc0"
+    },
+    {
+      "path": "Cargo.toml",
+      "sha256": "76718042334ffc133abb75e258331d9fec41cbf910d1b1cb418b3900e061ff02"
+    },
+    {
+      "path": "crates/quant-research/Cargo.toml",
+      "sha256": "b68269882fc33296ce713b5081197b55d5708cd6b570abf3c1e231769df9b08a"
+    },
+    {
+      "path": "crates/quant-research/src/backtest.rs",
+      "sha256": "b1a67aadc12661ab224655e3e966e4f0432370c751f0dc9d23b6965553259540"
+    },
+    {
+      "path": "crates/quant-research/src/batch.rs",
+      "sha256": "4ef3b794065c1a7f22186d497ea3e34ff0e136604eeb1629e5eeb038e2c78b83"
+    },
+    {
+      "path": "crates/quant-research/src/core.rs",
+      "sha256": "dd50175268505788c677829dd276b253adbb3ec624938b2a9f0019d8720ea1ca"
+    },
+    {
+      "path": "crates/quant-research/src/data.rs",
+      "sha256": "3436ac4670ed283ae82951462d7277fdb623f078ea19803fcd75aa29917b02b7"
+    },
+    {
+      "path": "crates/quant-research/src/experiment.rs",
+      "sha256": "f3984c628f8aac5f5ad4f9ae0c9ae0d7d7eccf77b6e7e15b32ad95c3c34716bf"
+    },
+    {
+      "path": "crates/quant-research/src/factor.rs",
+      "sha256": "b2ca1a783fe90b33c4896bd0963ddfe2111fe910a58d71d278723aea2eb60dcf"
+    },
+    {
+      "path": "crates/quant-research/src/feature.rs",
+      "sha256": "e53464fc974a2cd11b93da092b95684816aed36a48ba0790606aebcdba57ca73"
+    },
+    {
+      "path": "crates/quant-research/src/lib.rs",
+      "sha256": "314ccc51e68478d44333c7eddac6ba5431542dbbc5e0c593013380b40bf2787d"
+    },
+    {
+      "path": "crates/quant-research/src/main.rs",
+      "sha256": "9b8859de3ee19bd45fd8bd4c88c78daa077211639f40a7070e9f1bef52a7c14f"
+    },
+    {
+      "path": "crates/quant-research/src/market_api.rs",
+      "sha256": "49ddf416fbe3018d33a15cbc6204076311514d33dc6bbcb193f6945d4883673e"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark.rs",
+      "sha256": "028b1d6c40a357d0e41571c30179a9049e82992c6ea6eea3044c329afd780290"
+    },
+    {
+      "path": "crates/quant-research/src/run_jobs.rs",
+      "sha256": "410431ffea185fac385b706af4cf67e976d182e5b25d4bcbeef41a61dc5e7111"
+    },
+    {
+      "path": "crates/quant-research/src/runner.rs",
+      "sha256": "f81594e773547272eca6db4fe89079091f3746ccf8555b2a30735fc0863b6485"
+    },
+    {
+      "path": "crates/quant-research/src/server.rs",
+      "sha256": "5839883ee7c52809f841feeecaf9c634afbee7edcdab4cfa497640c736aec890"
+    },
+    {
+      "path": "crates/quant-research/src/signal.rs",
+      "sha256": "b74a8cd5b9f4477cdd01e6542a5a78184fcdb374976be92cff2d5c941d4f3cde"
+    },
+    {
+      "path": "crates/quant-research/src/strategy.rs",
+      "sha256": "c285e2eff10cd24d7c8cadfebce5a54012e139bf54d9003d97739fba50460150"
+    },
+    {
+      "path": "crates/quant-research/src/universe.rs",
+      "sha256": "47568cb94d37570cacfc2c34662686f72e143df557f2d81d65373978024541c4"
+    },
+    {
+      "path": "crates/quant-research/src/universe_api.rs",
+      "sha256": "a7d0e69f62de6c43f238449b5f69c052464bcf45da081ca45832e32326baa59c"
+    }
+  ],
+  "compiled_source_sha256": "3e7e3ecaf032335ad9f3068b683b1eefb4374f92d89789498d4b3a11934e3795",
+  "cargo_lock_observation": {
+    "available": true,
+    "tool": "/usr/sbin/lsof",
+    "exit_code": 1,
+    "output": "",
+    "stderr": ""
+  },
+  "cargo_version": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+  "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "cargo_lock_sha256": "0a85e66902b4fc5b567eed50253c01b068895dc5e4dfcebf6422b9a17408fdc0",
+  "dependency_graph_sha256": "5aa7f1c14c5b318b00e2b61a3122e99c5214ab19ea79d8e4fafe1d879c3ea1c4",
+  "dependency_graph_contains_duckdb": false,
+  "profile": "dev",
+  "features": [
+    "poc0 benchmark path; default app features disabled"
+  ],
+  "build_wall_seconds": 21.175258582999998,
+  "status": "completed",
+  "exit_code": 0,
+  "before": {
+    "volume_free_bytes": 14183989248,
+    "workspace_target_bytes": 82850377952
+  },
+  "after": {
+    "volume_free_bytes": 13957525504,
+    "workspace_target_bytes": 82692420458
+  },
+  "target_delta_bytes": -157957494,
+  "stdout": "",
+  "stderr": "warning: `/Users/yibinzhang/.cargo/config` is deprecated in favor of `config.toml`\n  |\n  = help: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n   Compiling quant-research v0.1.0 (/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/crates/quant-research)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 21.08s\n",
+  "compiler_environment": {
+    "CARGO_TARGET_DIR": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/target",
+    "RUSTFLAGS": null,
+    "CARGO_ENCODED_RUSTFLAGS": null
+  }
+}

@@ -1,0 +1,270 @@
+poc-b1-layout v0.1.0 (/Users/yibinzhang/Documents/ChatGPT/A股量化/poc/b1-layout)
+├── arrow-array v60.0.0
+│   ├── ahash v0.8.12
+│   │   ├── cfg-if v1.0.5
+│   │   ├── getrandom v0.3.4
+│   │   │   ├── cfg-if v1.0.5
+│   │   │   └── libc v0.2.189
+│   │   ├── once_cell v1.21.4
+│   │   └── zerocopy v0.8.59
+│   │       └── zerocopy-derive v0.8.59 (proc-macro)
+│   │           ├── proc-macro2 v1.0.107
+│   │           │   └── unicode-ident v1.0.26
+│   │           ├── quote v1.0.47
+│   │           │   └── proc-macro2 v1.0.107 (*)
+│   │           └── syn v2.0.119
+│   │               ├── proc-macro2 v1.0.107 (*)
+│   │               ├── quote v1.0.47 (*)
+│   │               └── unicode-ident v1.0.26
+│   ├── arrow-buffer v60.0.0
+│   │   ├── bytes v1.12.1
+│   │   ├── half v2.7.1
+│   │   │   ├── bytemuck v1.25.2
+│   │   │   │   └── bytemuck_derive v1.12.1 (proc-macro)
+│   │   │   │       ├── proc-macro2 v1.0.107 (*)
+│   │   │   │       ├── quote v1.0.47 (*)
+│   │   │   │       └── syn v3.0.6
+│   │   │   │           ├── proc-macro2 v1.0.107 (*)
+│   │   │   │           ├── quote v1.0.47 (*)
+│   │   │   │           └── unicode-ident v1.0.26
+│   │   │   ├── cfg-if v1.0.5
+│   │   │   ├── num-traits v0.2.19
+│   │   │   │   └── libm v0.2.16
+│   │   │   └── zerocopy v0.8.59 (*)
+│   │   ├── num-bigint v0.5.1
+│   │   │   ├── num-integer v0.1.47
+│   │   │   │   └── num-traits v0.2.19 (*)
+│   │   │   └── num-traits v0.2.19 (*)
+│   │   └── num-traits v0.2.19 (*)
+│   ├── arrow-data v60.0.0
+│   │   ├── arrow-buffer v60.0.0 (*)
+│   │   ├── arrow-schema v60.0.0
+│   │   ├── half v2.7.1 (*)
+│   │   ├── num-integer v0.1.47 (*)
+│   │   └── num-traits v0.2.19 (*)
+│   ├── arrow-schema v60.0.0
+│   ├── chrono v0.4.45
+│   │   ├── iana-time-zone v0.1.65
+│   │   │   └── core-foundation-sys v0.8.7
+│   │   └── num-traits v0.2.19 (*)
+│   ├── half v2.7.1 (*)
+│   ├── hashbrown v0.17.1
+│   │   ├── allocator-api2 v0.2.21
+│   │   ├── equivalent v1.0.2
+│   │   ├── foldhash v0.2.0
+│   │   ├── rayon v1.12.0
+│   │   │   ├── either v1.18.0
+│   │   │   └── rayon-core v1.13.0
+│   │   │       ├── crossbeam-deque v0.8.8
+│   │   │       │   ├── crossbeam-epoch v0.9.21
+│   │   │       │   │   └── crossbeam-utils v0.8.23
+│   │   │       │   └── crossbeam-utils v0.8.23
+│   │   │       └── crossbeam-utils v0.8.23
+│   │   └── serde_core v1.0.229
+│   ├── num-complex v0.4.6
+│   │   └── num-traits v0.2.19 (*)
+│   ├── num-integer v0.1.47 (*)
+│   └── num-traits v0.2.19 (*)
+├── polars v0.55.2
+│   ├── polars-arrow v0.55.2
+│   │   ├── bitflags v2.13.2
+│   │   ├── bytemuck v1.25.2 (*)
+│   │   ├── bytes v1.12.1
+│   │   ├── chrono v0.4.45 (*)
+│   │   ├── chrono-tz v0.10.4
+│   │   │   ├── chrono v0.4.45 (*)
+│   │   │   └── phf v0.12.1
+│   │   │       └── phf_shared v0.12.1
+│   │   │           └── siphasher v1.0.4
+│   │   ├── dyn-clone v1.0.20
+│   │   ├── either v1.18.0
+│   │   ├── ethnum v1.5.3
+│   │   ├── half v2.7.1 (*)
+│   │   ├── hashbrown v0.17.1 (*)
+│   │   ├── num-traits v0.2.19 (*)
+│   │   ├── polars-buffer v0.55.2
+│   │   │   ├── bytemuck v1.25.2 (*)
+│   │   │   ├── either v1.18.0
+│   │   │   └── polars-utils v0.55.2
+│   │   │       ├── argminmax v0.6.3
+│   │   │       │   ├── half v2.7.1 (*)
+│   │   │       │   └── num-traits v0.2.19 (*)
+│   │   │       ├── bytemuck v1.25.2 (*)
+│   │   │       ├── bytes v1.12.1
+│   │   │       ├── compact_str v0.9.1
+│   │   │       │   ├── castaway v0.2.4
+│   │   │       │   │   └── rustversion v1.0.23 (proc-macro)
+│   │   │       │   ├── cfg-if v1.0.5
+│   │   │       │   ├── itoa v1.0.18
+│   │   │       │   ├── rustversion v1.0.23 (proc-macro)
+│   │   │       │   ├── ryu v1.0.23
+│   │   │       │   ├── serde v1.0.229
+│   │   │       │   │   ├── serde_core v1.0.229
+│   │   │       │   │   └── serde_derive v1.0.229 (proc-macro)
+│   │   │       │   │       ├── proc-macro2 v1.0.107 (*)
+│   │   │       │   │       ├── quote v1.0.47 (*)
+│   │   │       │   │       └── syn v3.0.6 (*)
+│   │   │       │   └── static_assertions v1.1.0
+│   │   │       ├── either v1.18.0
+│   │   │       ├── foldhash v0.2.0
+│   │   │       ├── half v2.7.1 (*)
+│   │   │       ├── hashbrown v0.17.1 (*)
+│   │   │       ├── indexmap v2.14.2
+│   │   │       │   ├── equivalent v1.0.2
+│   │   │       │   ├── hashbrown v0.17.1 (*)
+│   │   │       │   └── serde_core v1.0.229
+│   │   │       ├── libc v0.2.189
+│   │   │       ├── num-derive v0.4.2 (proc-macro)
+│   │   │       │   ├── proc-macro2 v1.0.107 (*)
+│   │   │       │   ├── quote v1.0.47 (*)
+│   │   │       │   └── syn v2.0.119 (*)
+│   │   │       ├── num-traits v0.2.19 (*)
+│   │   │       ├── polars-config v0.55.2
+│   │   │       │   └── polars-error v0.55.2
+│   │   │       │       ├── parking_lot v0.12.5
+│   │   │       │       │   ├── lock_api v0.4.14
+│   │   │       │       │   │   └── scopeguard v1.2.0
+│   │   │       │       │   └── parking_lot_core v0.9.12
+│   │   │       │       │       ├── cfg-if v1.0.5
+│   │   │       │       │       ├── libc v0.2.189
+│   │   │       │       │       └── smallvec v1.16.2
+│   │   │       │       ├── signal-hook v0.4.4
+│   │   │       │       │   ├── libc v0.2.189
+│   │   │       │       │   └── signal-hook-registry v1.4.8
+│   │   │       │       │       ├── errno v0.3.14
+│   │   │       │       │       │   └── libc v0.2.189
+│   │   │       │       │       └── libc v0.2.189
+│   │   │       │       └── simdutf8 v0.1.5
+│   │   │       ├── polars-error v0.55.2 (*)
+│   │   │       ├── rand v0.10.3
+│   │   │       │   ├── chacha20 v0.10.2
+│   │   │       │   │   ├── cfg-if v1.0.5
+│   │   │       │   │   └── rand_core v0.10.1
+│   │   │       │   ├── getrandom v0.4.3
+│   │   │       │   │   ├── cfg-if v1.0.5
+│   │   │       │   │   ├── libc v0.2.189
+│   │   │       │   │   └── rand_core v0.10.1
+│   │   │       │   └── rand_core v0.10.1
+│   │   │       ├── raw-cpuid v11.6.0
+│   │   │       │   └── bitflags v2.13.2
+│   │   │       ├── rayon v1.12.0 (*)
+│   │   │       ├── regex v1.13.1
+│   │   │       │   ├── aho-corasick v1.1.5
+│   │   │       │   │   └── memchr v2.8.3
+│   │   │       │   ├── memchr v2.8.3
+│   │   │       │   ├── regex-automata v0.4.18
+│   │   │       │   │   ├── aho-corasick v1.1.5 (*)
+│   │   │       │   │   ├── memchr v2.8.3
+│   │   │       │   │   └── regex-syntax v0.8.11
+│   │   │       │   └── regex-syntax v0.8.11
+│   │   │       ├── slotmap v1.1.1
+│   │   │       ├── stacker v0.1.25
+│   │   │       │   ├── cfg-if v1.0.5
+│   │   │       │   ├── libc v0.2.189
+│   │   │       │   └── psm v0.1.32
+│   │   │       └── uuid v1.26.1
+│   │   │           └── getrandom v0.4.3 (*)
+│   │   ├── polars-error v0.55.2 (*)
+│   │   ├── polars-schema v0.55.2
+│   │   │   ├── indexmap v2.14.2 (*)
+│   │   │   ├── polars-error v0.55.2 (*)
+│   │   │   └── polars-utils v0.55.2 (*)
+│   │   ├── polars-utils v0.55.2 (*)
+│   │   ├── simdutf8 v0.1.5
+│   │   ├── streaming-iterator v0.1.9
+│   │   └── strum_macros v0.28.0 (proc-macro)
+│   │       ├── heck v0.5.0
+│   │       ├── proc-macro2 v1.0.107 (*)
+│   │       ├── quote v1.0.47 (*)
+│   │       └── syn v2.0.119 (*)
+│   ├── polars-buffer v0.55.2 (*)
+│   ├── polars-compute v0.55.2
+│   │   ├── atoi_simd v0.18.1
+│   │   │   ├── debug_unsafe v0.1.4
+│   │   │   └── rustversion v1.0.23 (proc-macro)
+│   │   ├── bytemuck v1.25.2 (*)
+│   │   ├── chrono v0.4.45 (*)
+│   │   ├── either v1.18.0
+│   │   ├── fast-float2 v0.2.4
+│   │   ├── hashbrown v0.17.1 (*)
+│   │   ├── itoa v1.0.18
+│   │   ├── num-traits v0.2.19 (*)
+│   │   ├── polars-arrow v0.55.2 (*)
+│   │   ├── polars-buffer v0.55.2 (*)
+│   │   ├── polars-error v0.55.2 (*)
+│   │   ├── polars-utils v0.55.2 (*)
+│   │   ├── rand v0.10.3 (*)
+│   │   ├── strength_reduce v0.2.4
+│   │   ├── strum_macros v0.28.0 (proc-macro) (*)
+│   │   └── zmij v1.0.23
+│   ├── polars-core v0.55.2
+│   │   ├── bitflags v2.13.2
+│   │   ├── boxcar v0.2.14
+│   │   ├── bytemuck v1.25.2 (*)
+│   │   ├── either v1.18.0
+│   │   ├── getrandom v0.4.3 (*)
+│   │   ├── hashbrown v0.17.1 (*)
+│   │   ├── indexmap v2.14.2 (*)
+│   │   ├── itoa v1.0.18
+│   │   ├── num-traits v0.2.19 (*)
+│   │   ├── polars-arrow v0.55.2 (*)
+│   │   ├── polars-async v0.55.2
+│   │   │   ├── atomic-waker v1.1.2
+│   │   │   ├── crossbeam-channel v0.5.17
+│   │   │   │   └── crossbeam-utils v0.8.23
+│   │   │   ├── crossbeam-deque v0.8.8 (*)
+│   │   │   ├── crossbeam-utils v0.8.23
+│   │   │   ├── parking_lot v0.12.5 (*)
+│   │   │   ├── pin-project-lite v0.2.17
+│   │   │   ├── polars-config v0.55.2 (*)
+│   │   │   ├── polars-error v0.55.2 (*)
+│   │   │   ├── polars-utils v0.55.2 (*)
+│   │   │   ├── rand v0.10.3 (*)
+│   │   │   ├── slotmap v1.1.1
+│   │   │   └── tokio v1.53.1
+│   │   │       ├── libc v0.2.189
+│   │   │       ├── mio v1.2.3
+│   │   │       │   └── libc v0.2.189
+│   │   │       ├── pin-project-lite v0.2.17
+│   │   │       └── socket2 v0.6.5
+│   │   │           └── libc v0.2.189
+│   │   ├── polars-buffer v0.55.2 (*)
+│   │   ├── polars-compute v0.55.2 (*)
+│   │   ├── polars-config v0.55.2 (*)
+│   │   ├── polars-dtype v0.55.2
+│   │   │   ├── boxcar v0.2.14
+│   │   │   ├── hashbrown v0.17.1 (*)
+│   │   │   ├── polars-arrow v0.55.2 (*)
+│   │   │   ├── polars-error v0.55.2 (*)
+│   │   │   ├── polars-utils v0.55.2 (*)
+│   │   │   └── uuid v1.26.1 (*)
+│   │   ├── polars-error v0.55.2 (*)
+│   │   ├── polars-row v0.55.2
+│   │   │   ├── bitflags v2.13.2
+│   │   │   ├── bytemuck v1.25.2 (*)
+│   │   │   ├── polars-arrow v0.55.2 (*)
+│   │   │   ├── polars-buffer v0.55.2 (*)
+│   │   │   ├── polars-compute v0.55.2 (*)
+│   │   │   ├── polars-dtype v0.55.2 (*)
+│   │   │   ├── polars-error v0.55.2 (*)
+│   │   │   └── polars-utils v0.55.2 (*)
+│   │   ├── polars-schema v0.55.2 (*)
+│   │   ├── polars-utils v0.55.2 (*)
+│   │   ├── rayon v1.12.0 (*)
+│   │   ├── strum_macros v0.28.0 (proc-macro) (*)
+│   │   ├── tokio v1.53.1 (*)
+│   │   ├── uuid v1.26.1 (*)
+│   │   └── xxhash-rust v0.8.18
+│   ├── polars-error v0.55.2 (*)
+│   └── polars-utils v0.55.2 (*)
+└── sha2 v0.10.9
+    ├── cfg-if v1.0.5
+    ├── cpufeatures v0.2.17
+    │   └── libc v0.2.189
+    └── digest v0.10.7
+        ├── block-buffer v0.10.4
+        │   └── generic-array v0.14.7
+        │       └── typenum v1.20.1
+        └── crypto-common v0.1.7
+            ├── generic-array v0.14.7 (*)
+            └── typenum v1.20.1

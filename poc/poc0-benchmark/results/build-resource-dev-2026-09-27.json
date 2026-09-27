@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "started_at_utc": "2026-09-27T02:00:19.491156+00:00",
+  "finished_at_utc": "2026-09-27T02:01:05.872706+00:00",
+  "command": [
+    "cargo",
+    "build",
+    "-p",
+    "quant-research",
+    "--no-default-features",
+    "--locked",
+    "--offline",
+    "--profile",
+    "dev"
+  ],
+  "working_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316",
+  "target_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/target",
+  "cache_state": "warm_existing_workspace_target",
+  "estimated_max_additional_bytes": 2147483648,
+  "minimum_free_bytes": 10737418240,
+  "git_revision": "d7494050aac1d3d1a9719cf6c88a7a475f268876",
+  "working_tree_dirty": true,
+  "cargo_version": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+  "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "cargo_lock_sha256": "0a85e66902b4fc5b567eed50253c01b068895dc5e4dfcebf6422b9a17408fdc0",
+  "dependency_graph_sha256": "5aa7f1c14c5b318b00e2b61a3122e99c5214ab19ea79d8e4fafe1d879c3ea1c4",
+  "dependency_graph_contains_duckdb": false,
+  "profile": "dev",
+  "features": [
+    "poc0 benchmark path; default app features disabled"
+  ],
+  "build_wall_seconds": 39.644896083,
+  "status": "completed",
+  "exit_code": 0,
+  "before": {
+    "volume_free_bytes": 14064726016,
+    "workspace_target_bytes": 79566968989
+  },
+  "after": {
+    "volume_free_bytes": 13253484544,
+    "workspace_target_bytes": 80078058581
+  },
+  "target_delta_bytes": 511089592,
+  "stdout": "",
+  "stderr": "warning: `/Users/yibinzhang/.cargo/config` is deprecated in favor of `config.toml`\n  |\n  = help: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n   Compiling polars-expr v0.55.2\n   Compiling polars-mem-engine v0.55.2\n   Compiling polars-lazy v0.55.2\n   Compiling polars v0.55.2\n   Compiling quant-research v0.1.0 (/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/crates/quant-research)\nwarning: unused import: `Context`\n --> crates/quant-research/src/main.rs:1:14\n  |\n1 | use anyhow::{Context, Result};\n  |              ^^^^^^^\n  |\n  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default\n\nwarning: `quant-research` (bin \"quant-research\") generated 1 warning (run `cargo fix --bin \"quant-research\" -p quant-research` to apply 1 suggestion)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 39.56s\n",
+  "compiled_source_manifest": "build-source-manifest-2026-09-27.json",
+  "compiled_source_manifest_sha256": "3e7e3ecaf032335ad9f3068b683b1eefb4374f92d89789498d4b3a11934e3795",
+  "compiled_source_identity_exact": true
+}

@@ -1,12 +1,19 @@
-use anyhow::{Context, Result};
+#[cfg(feature = "app")]
+use anyhow::Context;
+use anyhow::Result;
 use clap::{Parser, Subcommand};
+use quant_research::poc0_benchmark;
+#[cfg(feature = "app")]
 use quant_research::{
     batch::{self, BatchConfig},
     core::{ExperimentConfig, ForwardReturnMethod},
     data, runner, server,
     signal::{self, SignalResearchRequest},
 };
-use std::{fs, path::PathBuf};
+#[cfg(feature = "app")]
+use std::fs;
+use std::path::PathBuf;
+#[cfg(feature = "app")]
 use uuid::Uuid;
 
 #[derive(Parser)]
@@ -18,6 +25,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Create an immutable ETF research snapshot from the warehouse.
+    #[cfg(feature = "app")]
     Snapshot {
         #[arg(long, default_value = "data-core/market.duckdb")]
         warehouse: PathBuf,
@@ -25,6 +33,7 @@ enum Command {
         output: PathBuf,
     },
     /// Run factor research and a next-open momentum backtest.
+    #[cfg(feature = "app")]
     Run {
         #[arg(long, default_value = "data-core/market.duckdb")]
         warehouse: PathBuf,
@@ -34,6 +43,7 @@ enum Command {
         config: PathBuf,
     },
     /// Run a Cartesian grid of ETF strategy parameters in parallel from one snapshot.
+    #[cfg(feature = "app")]
     RunGrid {
         #[arg(long, default_value = "data-core/market.duckdb")]
         warehouse: PathBuf,
@@ -43,6 +53,7 @@ enum Command {
         config: PathBuf,
     },
     /// Evaluate one registered ETF signal independently from a strategy backtest.
+    #[cfg(feature = "app")]
     SignalResearch {
         #[arg(long, default_value = "data-core/market.duckdb")]
         warehouse: PathBuf,
@@ -72,10 +83,11 @@ enum Command {
         expected: PathBuf,
         #[arg(long, default_value = "target/poc-0/benchmark-report.json")]
         output: PathBuf,
-        #[arg(long, value_parser = ["reference", "soa"], default_value = "reference")]
+        #[arg(long, value_parser = ["reference", "soa", "arrow", "polars"], default_value = "reference")]
         candidate: String,
     },
     /// Serve the local visualization workbench.
+    #[cfg(feature = "app")]
     Serve {
         #[arg(long, default_value = "research-output")]
         output: PathBuf,
@@ -92,10 +104,12 @@ enum Command {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        #[cfg(feature = "app")]
         Command::Snapshot { warehouse, output } => println!(
             "{}",
             serde_json::to_string_pretty(&data::create_etf_snapshot(&warehouse, &output)?)?
         ),
+        #[cfg(feature = "app")]
         Command::Run {
             warehouse,
             output,
@@ -123,6 +137,7 @@ async fn main() -> Result<()> {
                 )?
             );
         }
+        #[cfg(feature = "app")]
         Command::RunGrid {
             warehouse,
             output,
@@ -148,6 +163,7 @@ async fn main() -> Result<()> {
                 )?
             );
         }
+        #[cfg(feature = "app")]
         Command::SignalResearch {
             warehouse,
             output,
@@ -240,8 +256,8 @@ async fn main() -> Result<()> {
             output,
             candidate,
         } => {
-            let report = quant_research::poc0_benchmark::run(&dataset, &expected, &candidate)?;
-            let passed = quant_research::poc0_benchmark::write_and_exit_status(&report, &output)?;
+            let report = poc0_benchmark::run(&dataset, &expected, &candidate)?;
+            let passed = poc0_benchmark::write_and_exit_status(&report, &output)?;
             println!(
                 "POC-0 correctness {}: {}",
                 report.correctness_status(),
@@ -251,6 +267,7 @@ async fn main() -> Result<()> {
                 std::process::exit(2);
             }
         }
+        #[cfg(feature = "app")]
         Command::Serve {
             output,
             market_data_dir,

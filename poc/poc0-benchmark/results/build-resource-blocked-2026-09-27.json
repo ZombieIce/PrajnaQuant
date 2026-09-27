@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "status": "blocked_by_space_gate",
+  "command": [
+    "cargo",
+    "build",
+    "-p",
+    "quant-research",
+    "--no-default-features",
+    "--locked",
+    "--offline",
+    "--profile",
+    "release"
+  ],
+  "working_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316",
+  "target_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/target",
+  "estimated_max_additional_bytes": 3221225472,
+  "minimum_free_bytes": 10737418240,
+  "before": {
+    "volume_free_bytes": 10964553728,
+    "workspace_target_bytes": 82850377952
+  },
+  "reason": "estimated completion would leave less than 10 GiB free",
+  "finished_at_utc": "2026-09-27T02:15:13.160906+00:00"
+}

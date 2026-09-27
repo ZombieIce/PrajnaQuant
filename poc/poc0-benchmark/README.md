@@ -15,6 +15,68 @@ cargo run -p quant-research --release --locked --offline -- benchmark-poc0 \
   --output target/poc-0/custom-report.json
 ```
 
+## Shared lightweight POC build path
+
+The normal application keeps the default `app` feature, including its warehouse and bundled
+DuckDB dependencies. To compile only the POC harness, disable default features. This uses the
+workspace `target/` cache, so B1, B2, and B3 do not create per-candidate build directories:
+
+```bash
+CARGO_TARGET_DIR=target cargo run -p quant-research --no-default-features --release \
+  --locked --offline -- benchmark-poc0 --candidate polars
+```
+
+The no-default-features dependency graph is the build boundary check:
+
+```bash
+cargo tree -p quant-research --no-default-features --locked --offline -e normal
+```
+
+It must not contain `ashare-warehouse`, `duckdb`, or `libduckdb-sys`. Before measuring a build,
+capture a filesystem-space and target-size baseline; proceed only if the volume has at least 10 GiB
+free and the conservative completion estimate leaves at least 10 GiB. The recorder applies that
+gate and stores raw command output, wall time, target delta, free space, revision, lockfile hash,
+and dependency-graph hash:
+
+```bash
+python3 poc/poc0-benchmark/capture-build-resource.py --profile dev \
+  --output poc/poc0-benchmark/results/build-resource-dev.json
+python3 poc/poc0-benchmark/capture-build-resource.py --profile release \
+  --output poc/poc0-benchmark/results/build-resource-release.json
+```
+
+The recorder defaults to a 2 GiB maximum additional-size estimate and refuses either build if
+the 10 GiB reserve would be crossed. These are warm-cache measurements; they do not represent a
+cold build. Do not run `cargo clean` to manufacture one. The 2026-09-27 initial warm-cache dev and
+release records are [`dev`](results/build-resource-dev-2026-09-27.json) and
+[`release`](results/build-resource-release-2026-09-27.json). Both succeeded using the shared
+workspace target; their dependency graph hash is identical and excludes DuckDB. Final monitored
+reruns with source identity and runtime space samples are [`dev`](results/build-resource-dev-final-2026-09-27.json)
+and [`release`](results/build-resource-release-final-2026-09-27.json). The budget refusal example
+is [`blocked`](results/build-resource-blocked-2026-09-27.json). The source manifest is
+[`here`](results/build-source-manifest-2026-09-27.json); dependency graph snapshots and host
+inventory are also preserved under `results/`.
+
+| Profile | Wall time | `target/` delta | Free space after |
+| --- | ---: | ---: | ---: |
+| Dev | 39.6 s | +487 MiB | 12.3 GiB |
+| Release | 264.2 s | +440 MiB | 11.9 GiB |
+
+These are single warm-cache observations, not stable duration estimates. There is no cold-build
+sample. The isolated historical `poc/b1-layout` package uses its own lockfile and target by
+default; new B1/B2/B3 work should use the shared no-default-features command above. Its Arrow
+60.0.0 pin differs from the main harness's Arrow 58.4.0 and therefore is not part of this shared
+cache claim. A later warm-cache rerun after source identity capture took 21.2 s (dev) and 3.0 s
+(release); these are verification reruns, not substitutes for the initial measurements. The
+recorder polls free space every two seconds and stops at the 10 GiB floor plus a safety margin.
+The final reruns completed without approaching that runtime stop threshold.
+
+The initial inventory's `du -sh target` was about 59G of allocated filesystem blocks. The raw
+JSON's `workspace_target_bytes` is a recursive sum of file `st_size` values (logical file bytes),
+so its larger value is a different measurement and should not be compared directly. The inventory
+also records the exact default-app, no-default POC, and standalone B1 dependency graphs, lockfile
+hashes, target locations, and `lsof` observations.
+
 The input fixture records its seed identity, ten-session calendar, three instruments, generated OHLCV rules, one missing bar, per-session execution status and availability time, strategy parameters, costs, and time model. Its expanded content hash is pinned by the independent expected file. The expected projection separately lists each score/rank and target, the UNKNOWN and HALTED order rejections, fills, cash/holdings/NAV by date, and aggregate costs. Float comparisons use a fixed absolute tolerance of `1e-8`; discrete fields compare exactly.
 
 The default `--candidate reference` runs the existing Rust ETF backtest as the measured candidate. Select `--candidate soa` to measure the Custom SoA Momentum Rotation instead. Both candidates are checked against the independent event-ledger projection and account identity first; only the selected candidate is timed. The selected path records one warmup and five raw timing samples. Reference timings cover the backtest call only; fixture parsing and report projection are outside that timer. Peak RSS is currently reported as unknown. Machine, CPU, memory, Rust version, lockfile hash, Git revision, tracked diff hash/summary, changed paths, and dirty-worktree completeness are recorded when available. An untracked worktree is explicitly marked incomplete because untracked file contents are not included in the Git diff hash.
@@ -36,6 +98,26 @@ without a bar on the signal date are excluded. For the selected SoA candidate, t
 Its checksum covers the complete vector projection. This weight-return projection has no cash,
 fees, orders, fills, or event-account NAV and must not be compared directly with the ledger NAV.
 Performance remains unresolved: the fixture is intentionally small and this is one machine/load.
+
+## B1 Polars Momentum Rotation
+
+Select `--candidate polars` to run the same fixed S2 workload through Polars lazy expressions.
+The report stores the full projection, checksum, one warmup, five raw elapsed samples, phase
+samples for Polars factor expressions, expression/sort/TopK/weight work and return projection,
+plus the candidate's DataFrame construction time. Factor availability uses the same
+observed-close window boundaries as SoA, including skipped missing bars; score ties sort by
+symbol. Correctness is checked against the SoA projection and independent fixture golden before
+timing. Returns are next-calendar-session close-to-close evaluation labels, not executed NAV.
+
+```bash
+cargo run -p quant-research --release --locked --offline -- benchmark-poc0 --candidate polars
+```
+
+The 3 × 10 fixture validates matching semantics only; it cannot support a layout decision or a
+general performance claim. The release-mode raw report projection is archived at
+[`results/b1-polars-2026-09-27.json`](results/b1-polars-2026-09-27.json), including provenance,
+the fixed input identity, correctness status, all five raw samples, phase samples, conversion
+samples, and checksum.
 
 ## B2 Fast Event Buy & Hold prototype
 

@@ -17,6 +17,18 @@
 - 小、中、大三种数据规模在可用机器的内存预算内逐级提高；大样本必须验证分块/流式路径，不允许靠整库装入 RAM 冒充 out-of-core。规模、预算和任何 OOM 记录在原始结果中。
 - 先过正确性门槛，再比较速度。基准代码、输入生成器、原始测量 JSON/CSV 和一条可复跑命令入库；大数据产物只记录 manifest/hash 与获取方法。
 
+## 构建时间与磁盘预算
+
+2026-09-27 的只读清点显示：根 `target/` 约 58 GB（debug 约 56 GB），独立 `poc/b1-layout/target/` 约 1 GB，数据卷可用约 14 GiB；根 `target/debug/build/` 有多份大型 `libduckdb-sys` 产物。它们说明当前机器的余量很小，不能把另一个独立 target 或全量冷构建当成免费前提。这是当时的现场快照，执行前须重新测量，不把它当长期机器规格。
+
+- **开工闸门：**会新增构建产物的命令执行前记录可用空间，至少保留 10 GiB；根据此前产物增量或依赖图估算，若完成后预计低于 10 GiB，则不启动。无法可靠估算时先做不编译的依赖清点，分阶段测量；运行中接近下限则停止新增构建。保存时间、命令、空间快照、估算依据和失败/中止原因，相关候选记 `unresolved`，其他候选继续。
+- **轻量边界：**先清点根 workspace、POC 独立 crate、锁定依赖及 profile。以实测在独立 POC crate 与可选 feature 间选择开发路径；验收标准是计算候选不触发 bundled DuckDB 构建、B1/B2/B3 可复用同一构建缓存、输入和输出契约保持不变。避免每个候选新建一份 target。不同 Rust/Arrow/Polars 版本造成的重复编译须在报告中显式列出。
+- **构建记录：**每条候选路径分别保存命令、Git/lockfile 身份、feature/profile、target 路径、已有缓存下的增量构建 wall time、正式 release 构建 wall time、构建前后可用空间与 target 字节增量。冷构建仅在资源充足且不影响既有缓存时执行；没有冷构建数据就标 Unknown。先建立本机基线和变化，不预设绝对秒数。
+- **产物处理：**先按目录/依赖归因并确认没有活跃构建或复用者，只处理确认不再使用的局部产物。票据不得自动运行全量 `cargo clean`、删除整个 target、覆盖用户正在使用的缓存，或用清理造成的冷缓存耗时冒充增量构建。需保存释放前后的空间与被移除对象清单。
+- **比较口径：**编译时间和磁盘占用作为独立工程成本列；运行时基准仍在可比的 release profile、锁定依赖、输入、线程和缓存条件下比较，不能将编译时间混入 events/s 或 runs/s。应用冷启动与 Cargo 冷构建分别命名和报告。
+
+该构建边界由 [票据 13](../.scratch/poc-0-benchmark/issues/13-build-resource-boundary.md) 实施。基准 CLI 的 `--no-default-features` 路径已实测排除仓库 DuckDB 依赖，并使用共享 workspace `target/`。2026-09-27 warm-cache dev/release 构建分别耗时 39.645/264.239 秒，target 增量分别为 511,089,592/461,279,366 字节；原始空间和身份记录见 [POC README](../poc/poc0-benchmark/README.md#shared-lightweight-poc-build-path)。冷构建未测，不清理缓存制造冷样本。旧 `poc/b1-layout` crate 的 Arrow 60.0.0 与主 POC 的 Arrow 58.4.0 版本差异保留为单独依赖边界。已开展的 03/04 保留当前实现与验收状态，只追补构建元数据。
+
 ## B1：Polars / Arrow / Custom SoA
 
 **问题：** Rust 热路径是否值得维护自定义列数组；磁盘/研究处理是否仍按目标技术分工。
@@ -43,6 +55,6 @@
 
 ## 产出与决策门槛
 
-每项交付：`README` 复跑命令、锁定输入与金标准、原始测量、汇总图表、正确性/语义差异、环境信息、结论 `adopt / defer / reject / unresolved` 及理由。先完成 B1 最小可运行纵切，再执行 B2/B3；任何单项依赖或版本无法安装时保留可复跑输入与 harness，标记 `unresolved`，不填造性能数字。
+每项交付：`README` 复跑命令、锁定输入与金标准、原始测量、汇总图表、正确性/语义差异、环境信息、构建时间与空间成本列、结论 `adopt / defer / reject / unresolved` 及理由。先完成 B1 最小可运行纵切，再执行 B2/B3；任何单项依赖或版本无法安装时保留可复跑输入与 harness，标记 `unresolved`，不填造性能数字。
 
 POC-0 结束时仅决定测量能支持的技术选择。真实 ETF Rotation 的历史 Universe、分红和执行状态 P0 问题仍按 [`docs/priorities.md`](priorities.md) 单独验收。官方候选接口资料：[Nautilus 回测](https://nautilustrader.io/docs/latest/concepts/backtesting/)、[Nautilus Rust](https://nautilustrader.io/docs/latest/concepts/rust/)、[Arrow 格式](https://arrow.apache.org/docs/format/Columnar.html)、[Parquet](https://parquet.apache.org/)。

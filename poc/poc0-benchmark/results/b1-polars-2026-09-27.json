@@ -1,0 +1,692 @@
+{
+  "schema_version": "poc0.report.v1",
+  "candidate": "polars-expression-momentum-rotation",
+  "strategy": {
+    "name": "Momentum Rotation",
+    "version": "poc0-golden-v1",
+    "initial_cash": 100000.0,
+    "lot_size": 100,
+    "strategy": {
+      "lookback_days": 1,
+      "top_n": 1,
+      "rebalance_every": 1,
+      "momentum_short_days": 1,
+      "momentum_long_days": 1,
+      "volatility_window": 2,
+      "trend_window": null,
+      "use_trend_filter": false,
+      "short_momentum_weight": 1.0,
+      "long_momentum_weight": 1.0,
+      "volatility_weight": 0.0
+    },
+    "costs": {
+      "commission_rate": 0.001,
+      "minimum_commission": 100.0,
+      "buy_tax_rate": 0.0,
+      "sell_tax_rate": 0.0,
+      "buy_slippage_bps": 10.0,
+      "sell_slippage_bps": 10.0
+    },
+    "future_returns_used_for_decisions": false
+  },
+  "dataset": {
+    "version": "poc0.synthetic.etf-daily.v1",
+    "seed": 20260926,
+    "seed_semantics": "stable fixture identity; the deliberately small price path is hand-authored, not randomly sampled",
+    "source_identity": "poc0-hand-authored-golden-v1",
+    "calendar_basis": "fixed_synthetic_weekday_sessions",
+    "timezone": "Asia/Shanghai",
+    "calendar": [
+      "2026-01-05",
+      "2026-01-06",
+      "2026-01-07",
+      "2026-01-08",
+      "2026-01-09",
+      "2026-01-12",
+      "2026-01-13",
+      "2026-01-14",
+      "2026-01-15",
+      "2026-01-16"
+    ],
+    "bar_defaults": {
+      "open": 100.0,
+      "volume": 1000000.0,
+      "amount": 100000000.0,
+      "high_rule": "max(open, close)",
+      "low_rule": "min(open, close)",
+      "open_available_at": "09:30:00+08:00",
+      "close_available_at": "15:00:00+08:00"
+    },
+    "instrument_count": 3,
+    "instruments": [
+      {
+        "symbol": "A",
+        "currency": "CNY",
+        "price_precision": 2,
+        "quantity_precision": 0
+      },
+      {
+        "symbol": "B",
+        "currency": "CNY",
+        "price_precision": 2,
+        "quantity_precision": 0
+      },
+      {
+        "symbol": "C",
+        "currency": "CNY",
+        "price_precision": 2,
+        "quantity_precision": 0
+      }
+    ],
+    "bar_count": 29,
+    "missing_bars": [
+      {
+        "symbol": "B",
+        "date": "2026-01-16",
+        "reason": "deliberate_missing_bar"
+      }
+    ],
+    "status_override_count": 2,
+    "execution_statuses": [
+      {
+        "symbol": "A",
+        "date": "2026-01-05",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-05T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-05",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-05T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-05",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-05T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-06",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-06T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-06",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-06T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-06",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-06T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-07",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-07T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-07",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-07T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-07",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-07T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-08",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-08T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-08",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-08T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-08",
+        "trade_status": "UNKNOWN",
+        "is_tradable": false,
+        "sources": "poc0-fixture-override",
+        "available_at": "2026-01-08T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-09",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-09T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-09",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-09T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-09",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-09T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-12",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-12T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-12",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-12T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-12",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-12T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-13",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-13T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-13",
+        "trade_status": "HALTED",
+        "is_tradable": false,
+        "sources": "poc0-fixture-override",
+        "available_at": "2026-01-13T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-13",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-13T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-14",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-14T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-14",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-14T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-14",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-14T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-15",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-15T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-15",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-15T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-15",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-15T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-16",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-16T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-16",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-16T08:50:00+08:00"
+      }
+    ],
+    "input_path": "poc/poc0-benchmark/fixtures/dataset-v1.json",
+    "raw_input_sha256": "9b9009b1586a6f271cd301042f97f2adf84146c870d72802682799d60352ed85",
+    "content_sha256": "8c16742a2031cab19e08456dbbe009769b02f0331276618831cefdb6827b5a6f",
+    "time_model": {
+      "signal": "after session close using that session close and earlier closes only",
+      "execution": "pending target executes at the next available session open",
+      "execution_status": "available before the session open",
+      "final_session": "target remains pending because no future execution session exists"
+    },
+    "result_model_boundary": "This fixture is an event ledger with explicit fills, cash, holdings, costs and NAV. A Vector candidate uses a separately declared target-weight × return model and is compared only under shared assumptions; the Vector result is not asserted to be this account ledger."
+  },
+  "provenance": {
+    "git_revision": "d7494050aac1d3d1a9719cf6c88a7a475f268876",
+    "working_tree_dirty": true,
+    "working_tree_complete": false,
+    "tracked_diff_sha256": "fa987d9dccede7a90b8bb26318ddccfb757c2bf85bb49854d54de8d9ded85ba8",
+    "tracked_diff_summary": ".../issues/03-arrow-momentum-rotation.md           |   12 +-\n .../issues/04-polars-momentum-rotation.md          |   12 +-\n .../issues/05-parquet-and-out-of-core.md           |    4 +-\n .../issues/06-b1-sweep-cache-and-conclusion.md     |    1 +\n .../issues/08-nautilus-buy-and-hold-adapter.md     |    3 +-\n .../issues/09-b2-strategy-parity-and-throughput.md |    1 +\n .../issues/10-pyo3-basic-callback-comparison.md    |    3 +-\n .../11-pyo3-strategies-and-parallel-boundary.md    |    1 +\n .../issues/12-poc-zero-synthesis.md                |    3 +-\n .scratch/poc-0-benchmark/spec.md                   |   11 +-\n Cargo.lock                                         | 1128 +++++++++++++++++++-\n HANDOFF.md                                         |   10 +-\n crates/quant-research/Cargo.toml                   |    3 +\n crates/quant-research/src/main.rs                  |    2 +-\n crates/quant-research/src/poc0_benchmark.rs        |  653 ++++++++++-\n crates/quant-research/tests/poc0_benchmark_cli.rs  |  327 +++++-\n docs/STATUS.md                                     |    6 +-\n docs/poc-0-benchmark-spec.md                       |   14 +-\n poc/poc0-benchmark/README.md                       |   20 +\n 19 files changed, 2173 insertions(+), 41 deletions(-)",
+    "changed_paths": [
+      "scratch/poc-0-benchmark/issues/03-arrow-momentum-rotation.md",
+      ".scratch/poc-0-benchmark/issues/04-polars-momentum-rotation.md",
+      ".scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md",
+      ".scratch/poc-0-benchmark/issues/06-b1-sweep-cache-and-conclusion.md",
+      ".scratch/poc-0-benchmark/issues/08-nautilus-buy-and-hold-adapter.md",
+      ".scratch/poc-0-benchmark/issues/09-b2-strategy-parity-and-throughput.md",
+      ".scratch/poc-0-benchmark/issues/10-pyo3-basic-callback-comparison.md",
+      ".scratch/poc-0-benchmark/issues/11-pyo3-strategies-and-parallel-boundary.md",
+      ".scratch/poc-0-benchmark/issues/12-poc-zero-synthesis.md",
+      ".scratch/poc-0-benchmark/spec.md",
+      "Cargo.lock",
+      "HANDOFF.md",
+      "crates/quant-research/Cargo.toml",
+      "crates/quant-research/src/main.rs",
+      "crates/quant-research/src/poc0_benchmark.rs",
+      "crates/quant-research/tests/poc0_benchmark_cli.rs",
+      "docs/STATUS.md",
+      "docs/poc-0-benchmark-spec.md",
+      "poc/poc0-benchmark/README.md",
+      ".scratch/poc-0-benchmark/issues/13-build-resource-boundary.md",
+      "poc/poc0-benchmark/results/b1-polars-2026-09-27.json"
+    ],
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "build_profile": "release",
+    "operating_system": "macos",
+    "architecture": "aarch64",
+    "logical_cpu_count": 8,
+    "cpu_model": "Apple M1",
+    "cargo_lock_sha256": "0a85e66902b4fc5b567eed50253c01b068895dc5e4dfcebf6422b9a17408fdc0",
+    "physical_memory_bytes": 17179869184
+  },
+  "correctness": {
+    "status": "passed",
+    "tolerance": 1e-08,
+    "differences": [],
+    "accounting_checks": [],
+    "time_checks": []
+  },
+  "b1_polars": {
+    "correctness_status": "passed",
+    "checksum_sha256": "9d355cb1a9daf1698318699141ea4ddab8a64495b7ec53ac4502310614e0179c",
+    "projection": {
+      "rankings": [
+        {
+          "date": "2026-01-07",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "A",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "B",
+              "score": -0.02020202020202011
+            }
+          ]
+        },
+        {
+          "date": "2026-01-08",
+          "candidates": [
+            {
+              "symbol": "B",
+              "score": 0.020408163265305923
+            },
+            {
+              "symbol": "A",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "C",
+              "score": -0.01980198019801982
+            }
+          ]
+        },
+        {
+          "date": "2026-01-09",
+          "candidates": [
+            {
+              "symbol": "B",
+              "score": 0.06060606060606055
+            },
+            {
+              "symbol": "C",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "A",
+              "score": -0.07766990291262132
+            }
+          ]
+        },
+        {
+          "date": "2026-01-12",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "B",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "A",
+              "score": -0.02020202020202011
+            }
+          ]
+        },
+        {
+          "date": "2026-01-13",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.04081632653061229
+            },
+            {
+              "symbol": "C",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "B",
+              "score": -0.03883495145631066
+            }
+          ]
+        },
+        {
+          "date": "2026-01-14",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "C",
+              "score": 0.01941747572815533
+            },
+            {
+              "symbol": "B",
+              "score": -0.01980198019801982
+            }
+          ]
+        },
+        {
+          "date": "2026-01-15",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "C",
+              "score": -0.019230769230769162
+            },
+            {
+              "symbol": "B",
+              "score": -0.020000000000000018
+            }
+          ]
+        },
+        {
+          "date": "2026-01-16",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.03883495145631066
+            },
+            {
+              "symbol": "A",
+              "score": 0.019607843137254832
+            }
+          ]
+        }
+      ],
+      "targets": [
+        {
+          "date": "2026-01-07",
+          "target_symbols": [
+            "C"
+          ]
+        },
+        {
+          "date": "2026-01-08",
+          "target_symbols": [
+            "B"
+          ]
+        },
+        {
+          "date": "2026-01-09",
+          "target_symbols": [
+            "B"
+          ]
+        },
+        {
+          "date": "2026-01-12",
+          "target_symbols": [
+            "C"
+          ]
+        },
+        {
+          "date": "2026-01-13",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-14",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-15",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-16",
+          "target_symbols": [
+            "C"
+          ]
+        }
+      ],
+      "target_weights": [
+        {
+          "date": "2026-01-07",
+          "symbol": "C",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-08",
+          "symbol": "B",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-09",
+          "symbol": "B",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-12",
+          "symbol": "C",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-13",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-14",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-15",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-16",
+          "symbol": "C",
+          "weight": 1.0
+        }
+      ],
+      "portfolio_returns": [
+        {
+          "from": "2026-01-07",
+          "to": "2026-01-08",
+          "return_pct": -0.00990099009900991
+        },
+        {
+          "from": "2026-01-08",
+          "to": "2026-01-09",
+          "return_pct": 0.030303030303030276
+        },
+        {
+          "from": "2026-01-09",
+          "to": "2026-01-12",
+          "return_pct": 0.009803921568627416
+        },
+        {
+          "from": "2026-01-12",
+          "to": "2026-01-13",
+          "return_pct": 0.009803921568627416
+        },
+        {
+          "from": "2026-01-13",
+          "to": "2026-01-14",
+          "return_pct": 0.010000000000000009
+        },
+        {
+          "from": "2026-01-14",
+          "to": "2026-01-15",
+          "return_pct": 0.00990099009900991
+        },
+        {
+          "from": "2026-01-15",
+          "to": "2026-01-16",
+          "return_pct": 0.009803921568627416
+        }
+      ]
+    },
+    "warmup_runs": 1,
+    "raw_samples_ns": [
+      3168750,
+      2973417,
+      2746250,
+      2663375,
+      2590125
+    ],
+    "median_ns": 2746250,
+    "p95_ns": 3168750,
+    "phase_samples_ns": {
+      "factor_ns": [
+        1765209,
+        1809833,
+        1523083,
+        1499458,
+        1541792
+      ],
+      "ranking_topk_weights_ns": [
+        798833,
+        627706,
+        659542,
+        530795,
+        579166
+      ],
+      "return_projection_ns": [
+        586292,
+        521125,
+        550083,
+        618917,
+        455542
+      ]
+    },
+    "conversion_samples_ns": [
+      24584,
+      21504,
+      20208,
+      21000,
+      19585
+    ],
+    "measurement_scope": "Polars lazy expressions for factor score, ordered rank/TopK, equal weights, and next-session return projection; excludes fixture parsing",
+    "model_boundary": "same simplified equal-weight next-session close-to-close return labels as SoA; no cash, fees, fills, or event-account NAV"
+  },
+  "conclusion": "unresolved: one fixture validates the harness and reference path; no architecture performance choice is supported"
+}

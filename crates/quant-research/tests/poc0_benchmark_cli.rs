@@ -18,12 +18,21 @@ fn run_benchmark_for_dataset(
     expected: &std::path::Path,
     output: &std::path::Path,
 ) -> std::process::Output {
+    run_candidate_for_dataset("soa", dataset, expected, output)
+}
+
+fn run_candidate_for_dataset(
+    candidate: &str,
+    dataset: &std::path::Path,
+    expected: &std::path::Path,
+    output: &std::path::Path,
+) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_quant-research"))
         .current_dir(repo_root())
         .args([
             "benchmark-poc0",
             "--candidate",
-            "soa",
+            candidate,
             "--dataset",
             dataset.to_str().unwrap(),
             "--expected",
@@ -179,6 +188,19 @@ fn benchmark_cli_emits_reproducible_report_after_golden_passes() {
     );
     assert!(report["dataset"]["content_sha256"].as_str().unwrap().len() == 64);
     assert_eq!(report["b1_soa"]["correctness_status"], "passed");
+    assert_eq!(report["b1_arrow"]["correctness_status"], "passed");
+    assert_eq!(
+        report["b1_arrow"]["checksum_sha256"],
+        report["b1_soa"]["checksum_sha256"]
+    );
+    let first_ranking = report["b1_arrow"]["projection"]["rankings"][0]["candidates"]
+        .as_array()
+        .unwrap();
+    assert_eq!(first_ranking[0]["symbol"], "C");
+    assert!((first_ranking[0]["score"].as_f64().unwrap() - 0.02).abs() < 1e-12);
+    assert_eq!(first_ranking[1]["symbol"], "A");
+    assert!((first_ranking[1]["score"].as_f64().unwrap() - 0.01980198019801982).abs() < 1e-12);
+    assert_eq!(first_ranking[2]["symbol"], "B");
     assert_eq!(report["b1_soa"]["warmup_runs"], 1);
     assert_eq!(
         report["b1_soa"]["raw_samples_ns"].as_array().unwrap().len(),
@@ -237,6 +259,309 @@ fn benchmark_cli_emits_reproducible_report_after_golden_passes() {
             .as_str()
             .unwrap()
             .contains("no cash, fees, fills")
+    );
+}
+
+#[test]
+fn benchmark_arrow_candidate_matches_independent_return_examples_and_records_conversion() {
+    let output_dir = tempfile::tempdir().unwrap();
+    let report_path = output_dir.path().join("arrow-report.json");
+    let result = run_candidate_for_dataset(
+        "arrow",
+        &fixture("dataset-v1.json"),
+        &fixture("expected-v1.json"),
+        &report_path,
+    );
+    assert!(
+        result.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report: Value = serde_json::from_slice(&fs::read(report_path).unwrap()).unwrap();
+    assert_eq!(
+        report["candidate"],
+        "apache-arrow-column-batch-momentum-rotation"
+    );
+    assert_eq!(report["b1_arrow"]["correctness_status"], "passed");
+    assert_eq!(report["b1_arrow"]["warmup_runs"], 1);
+    assert_eq!(
+        report["b1_arrow"]["raw_samples_ns"]
+            .as_array()
+            .unwrap()
+            .len(),
+        5
+    );
+    assert_eq!(
+        report["b1_arrow"]["conversion_samples_ns"]
+            .as_array()
+            .unwrap()
+            .len(),
+        5
+    );
+    assert_eq!(
+        report["b1_arrow"]["checksum_sha256"],
+        report["b1_soa"]["checksum_sha256"]
+    );
+    // Independent hand calculation: selected C moves 101 -> 100 on the first interval.
+    let first_return = report["b1_arrow"]["projection"]["portfolio_returns"][0]["return_pct"]
+        .as_f64()
+        .unwrap();
+    assert!((first_return - (100.0 / 101.0 - 1.0)).abs() < 1e-12);
+    let expected_returns = [
+        102.0 / 99.0 - 1.0,
+        103.0 / 102.0 - 1.0,
+        103.0 / 102.0 - 1.0,
+        101.0 / 100.0 - 1.0,
+        102.0 / 101.0 - 1.0,
+        103.0 / 102.0 - 1.0,
+    ];
+    let actual_returns = report["b1_arrow"]["projection"]["portfolio_returns"]
+        .as_array()
+        .unwrap();
+    assert_eq!(actual_returns.len(), expected_returns.len() + 1);
+    for (row, expected) in actual_returns[1..].iter().zip(expected_returns) {
+        assert!((row["return_pct"].as_f64().unwrap() - expected).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn benchmark_polars_candidate_matches_soa_and_records_expression_samples() {
+    let output_dir = tempfile::tempdir().unwrap();
+    let report_path = output_dir.path().join("polars-report.json");
+    let result = run_candidate_for_dataset(
+        "polars",
+        &fixture("dataset-v1.json"),
+        &fixture("expected-v1.json"),
+        &report_path,
+    );
+    assert!(
+        result.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report: Value = serde_json::from_slice(&fs::read(report_path).unwrap()).unwrap();
+    assert_eq!(report["candidate"], "polars-expression-momentum-rotation");
+    assert_eq!(report["correctness"]["status"], "passed");
+    assert_eq!(report["b1_polars"]["correctness_status"], "passed");
+    assert_eq!(report["b1_polars"]["warmup_runs"], 1);
+    assert_eq!(
+        report["b1_polars"]["raw_samples_ns"]
+            .as_array()
+            .unwrap()
+            .len(),
+        5
+    );
+    assert_eq!(
+        report["b1_polars"]["conversion_samples_ns"]
+            .as_array()
+            .unwrap()
+            .len(),
+        5
+    );
+    assert_eq!(
+        report["b1_polars"]["checksum_sha256"],
+        report["b1_soa"]["checksum_sha256"]
+    );
+    let polars_returns = report["b1_polars"]["projection"]["portfolio_returns"]
+        .as_array()
+        .unwrap();
+    let soa_returns = report["b1_soa"]["projection"]["portfolio_returns"]
+        .as_array()
+        .unwrap();
+    assert_eq!(polars_returns.len(), soa_returns.len());
+    // Hand-check the selected-symbol returns independently of either candidate projection.
+    let first_return = polars_returns[0]["return_pct"].as_f64().unwrap();
+    assert!((first_return - (100.0 / 101.0 - 1.0)).abs() < 1e-12);
+    let expected_later_returns = [
+        102.0 / 99.0 - 1.0,
+        103.0 / 102.0 - 1.0,
+        103.0 / 102.0 - 1.0,
+        101.0 / 100.0 - 1.0,
+        102.0 / 101.0 - 1.0,
+        103.0 / 102.0 - 1.0,
+    ];
+    assert_eq!(polars_returns.len(), expected_later_returns.len() + 1);
+    for (row, expected) in polars_returns[1..].iter().zip(expected_later_returns) {
+        assert!((row["return_pct"].as_f64().unwrap() - expected).abs() < 1e-12);
+    }
+    for (polars, soa) in polars_returns.iter().zip(soa_returns) {
+        assert_eq!(polars["from"], soa["from"]);
+        assert_eq!(polars["to"], soa["to"]);
+        match (polars["return_pct"].as_f64(), soa["return_pct"].as_f64()) {
+            (Some(left), Some(right)) => assert!((left - right).abs() < 1e-12),
+            (None, None) => {}
+            mismatch => panic!("return availability differs: {mismatch:?}"),
+        }
+    }
+}
+
+#[test]
+fn benchmark_polars_breaks_score_ties_by_symbol() {
+    let output_dir = tempfile::tempdir().unwrap();
+    let dataset_path = output_dir.path().join("tied-dataset.json");
+    let mut dataset: Value =
+        serde_json::from_slice(&fs::read(fixture("dataset-v1.json")).unwrap()).unwrap();
+    dataset["strategy"]["short_momentum_weight"] = Value::from(0.0);
+    dataset["strategy"]["long_momentum_weight"] = Value::from(0.0);
+    dataset["strategy"]["volatility_weight"] = Value::from(0.0);
+    fs::write(&dataset_path, serde_json::to_vec_pretty(&dataset).unwrap()).unwrap();
+    let report_path = output_dir.path().join("tied-report.json");
+    let result = run_candidate_for_dataset(
+        "polars",
+        &dataset_path,
+        &fixture("expected-v1.json"),
+        &report_path,
+    );
+    assert!(
+        !result.status.success(),
+        "the changed dataset must not reuse the old golden"
+    );
+    let report: Value = serde_json::from_slice(&fs::read(report_path).unwrap()).unwrap();
+    assert_eq!(report["b1_polars"]["correctness_status"], "passed");
+    assert!(
+        report["b1_polars"]["raw_samples_ns"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let rankings = report["b1_polars"]["projection"]["rankings"]
+        .as_array()
+        .unwrap();
+    assert!(!rankings.is_empty());
+    for ranking in rankings {
+        let candidates = ranking["candidates"].as_array().unwrap();
+        for candidate in candidates {
+            assert_eq!(candidate["score"], 0.0);
+        }
+        let soa_candidates = report["b1_soa"]["projection"]["rankings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|soa_ranking| soa_ranking["date"] == ranking["date"])
+            .unwrap()["candidates"]
+            .as_array()
+            .unwrap();
+        assert_eq!(candidates, soa_candidates);
+    }
+}
+
+#[test]
+fn benchmark_polars_checks_window_boundary_and_missing_next_bar() {
+    let output_dir = tempfile::tempdir().unwrap();
+    let window_dataset_path = output_dir.path().join("window-dataset.json");
+    let mut window_dataset: Value =
+        serde_json::from_slice(&fs::read(fixture("dataset-v1.json")).unwrap()).unwrap();
+    window_dataset["strategy"]["momentum_short_days"] = Value::from(4);
+    window_dataset["strategy"]["momentum_long_days"] = Value::from(4);
+    window_dataset["strategy"]["short_momentum_weight"] = Value::from(1.0);
+    window_dataset["strategy"]["long_momentum_weight"] = Value::from(0.0);
+    fs::write(
+        &window_dataset_path,
+        serde_json::to_vec_pretty(&window_dataset).unwrap(),
+    )
+    .unwrap();
+    let window_report_path = output_dir.path().join("window-report.json");
+    let window_result = run_candidate_for_dataset(
+        "polars",
+        &window_dataset_path,
+        &fixture("expected-v1.json"),
+        &window_report_path,
+    );
+    assert!(
+        !window_result.status.success(),
+        "the changed strategy needs its own golden"
+    );
+    let window_report: Value =
+        serde_json::from_slice(&fs::read(window_report_path).unwrap()).unwrap();
+    assert_eq!(window_report["b1_polars"]["correctness_status"], "passed");
+    assert!(
+        window_report["b1_polars"]["raw_samples_ns"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let first_valid = &window_report["b1_polars"]["projection"]["rankings"][0];
+    assert_eq!(first_valid["date"], "2026-01-09");
+    assert_eq!(first_valid["candidates"][0]["symbol"], "B");
+    assert!((first_valid["candidates"][0]["score"].as_f64().unwrap() - 0.02).abs() < 1e-12);
+
+    let missing_dataset_path = output_dir.path().join("missing-next-bar-dataset.json");
+    let mut missing_dataset: Value =
+        serde_json::from_slice(&fs::read(fixture("dataset-v1.json")).unwrap()).unwrap();
+    missing_dataset["missing_bars"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "symbol": "A",
+            "date": "2026-01-16",
+            "reason": "missing_next_calendar_bar"
+        }));
+    fs::write(
+        &missing_dataset_path,
+        serde_json::to_vec_pretty(&missing_dataset).unwrap(),
+    )
+    .unwrap();
+    let missing_report_path = output_dir.path().join("missing-next-bar-report.json");
+    let missing_result = run_candidate_for_dataset(
+        "polars",
+        &missing_dataset_path,
+        &fixture("expected-v1.json"),
+        &missing_report_path,
+    );
+    assert!(
+        !missing_result.status.success(),
+        "the changed input needs its own golden"
+    );
+    let missing_report: Value =
+        serde_json::from_slice(&fs::read(missing_report_path).unwrap()).unwrap();
+    assert_eq!(missing_report["b1_polars"]["correctness_status"], "passed");
+    let missing_return = missing_report["b1_polars"]["projection"]["portfolio_returns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["from"] == "2026-01-15")
+        .unwrap();
+    assert_eq!(missing_return["to"], "2026-01-16");
+    assert!(missing_return["return_pct"].is_null());
+}
+
+#[test]
+fn benchmark_polars_equal_weights_use_actual_selected_count() {
+    let output_dir = tempfile::tempdir().unwrap();
+    let dataset_path = output_dir.path().join("few-candidates-dataset.json");
+    let mut dataset: Value =
+        serde_json::from_slice(&fs::read(fixture("dataset-v1.json")).unwrap()).unwrap();
+    dataset["strategy"]["top_n"] = Value::from(10);
+    fs::write(&dataset_path, serde_json::to_vec_pretty(&dataset).unwrap()).unwrap();
+
+    let report_path = output_dir.path().join("few-candidates-report.json");
+    let result = run_candidate_for_dataset(
+        "polars",
+        &dataset_path,
+        &fixture("expected-v1.json"),
+        &report_path,
+    );
+    assert!(
+        !result.status.success(),
+        "changed input needs its own golden"
+    );
+    let report: Value = serde_json::from_slice(&fs::read(report_path).unwrap()).unwrap();
+    assert_eq!(report["b1_polars"]["correctness_status"], "passed");
+    let target_weights = report["b1_polars"]["projection"]["target_weights"]
+        .as_array()
+        .unwrap();
+    let first_date = target_weights[0]["date"].as_str().unwrap();
+    let selected = target_weights
+        .iter()
+        .filter(|target| target["date"] == first_date)
+        .collect::<Vec<_>>();
+    assert_eq!(selected.len(), 3);
+    assert!(
+        selected
+            .iter()
+            .all(|target| target["weight"] == (1.0 / 3.0))
     );
 }
 

@@ -2,7 +2,7 @@
 
 **What to build:** 研究者可以在统一入口选择固定版本的 Nautilus Backend，通过平台语义的 Adapter 运行同一 S1 场景，并逐项比较账本与成本。
 
-**Blocked by:** 07 B2 Fast Event 跑通 Buy & Hold。
+**Blocked by:** 07 B2 Fast Event 跑通 Buy & Hold；13 POC-0 构建资源基线与轻量边界。
 
 **Status:** ready-for-agent
 
@@ -10,3 +10,4 @@
 - [ ] 逐项报告订单、Fill、现金、持仓、交易成本与每日 NAV 的一致性；无法对齐的时序或撮合规则给出具体差异。
 - [ ] 转换、初始化、事件处理及端到端耗时分开记录，保留原始样本和依赖版本。
 - [ ] 依赖或语义确实无法运行时保存错误、复跑条件及 `unresolved`，不填造对比数字。
+- [ ] 安装/构建固定版本前检查至少 10 GiB 当前及预计剩余空间；Nautilus 依赖与 Adapter 构建记录增量/release 耗时、target 增量和缓存身份。资源不足时停止新增构建并保留 `unresolved` 证据，不自动清空其他候选缓存。

@@ -4,11 +4,17 @@
 
 ## 当前交接（2026-09-27）
 
+2026-09-27 构建资源决策：用户确认先优化 POC-0 spec/票据，再由新 [票据 13](.scratch/poc-0-benchmark/issues/13-build-resource-boundary.md) 实施轻量构建边界。现场只读清点：根 `target/` 约 58 GB、独立 B1 target 约 1 GB、卷可用约 14 GiB，重复的 bundled DuckDB 构建产物是主要占用。新增构建须开工及预计结束均保留至少 10 GiB；记录增量/release 构建耗时与产物增量，冷构建仅在预算允许时测。票据 03/04 均已由用户确认验收。不得自动清空整个 target。本轮仅同步验收状态和文档，未清理文件。**唯一建议下一步：**先完成票据 13 的只读依赖/产物基线与轻量路径实测，再启动 05/08/10 的资源密集构建。
+
+2026-09-27 票据 04 已由用户确认验收并标记 `resolved`：`benchmark-poc0 --candidate polars` 使用 Polars lazy expressions 从压缩的 observed-close 序列计算短/长动量与样本波动率、复合分数、确定性排序、TopK/等权目标和简化组合收益；权重分母按实际入选数量计算。独立 CLI 用例覆盖 4 观察期首个有效日及手算分数、符号零平局、固定 fixture 手算收益、缺少次日 bar 返回 null、少于 top_n 时实际入选数量均分，以及错误/变体输入跳过计时。release 原始报告保存在 [`Polars results`](poc/poc0-benchmark/results/b1-polars-2026-09-27.json)。此前复验：`cargo test --workspace --locked --offline`（89 passed、1 ignored）、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings`、`cargo fmt --all -- --check` 均通过。第一次 release 构建因磁盘空间不足中断；只清理了当时创建的临时 Cargo target 后，release 构建和运行成功。当前工作树还含 Arrow 未提交改动；两票代码尚未提交。固定 3×10 样本不支持布局/性能决策。票据 03 此后亦由用户确认验收；下一步按资源边界票据 13 推进受控测量。
+
 提交已按领域拆分：旧 A 股状态取证 `e8764e1`、日更与身份导入 `8e8bff9`、诊断作业与页面 `c7906ab`；Agent 工具配置 `d8fab3a`；新平台架构与旧路线归档 `15cc6d5`；POC-0 计划 `20eb209`、B1 标量 smoke `e8c3bd8`、01 已验收 harness `6401651`、07 最小事件原型 `a907212`、02 SoA 候选 `d78df42`。各提交仅含所属批次文件，未推送远端。
 
-当前 POC 状态：01、02 均已由用户验收并标记 `resolved`；07 是可复核的最小原型，尚不能支持 Fast Event 架构选型。完整 Arrow/Polars/Parquet 比较、Nautilus、PyO3 和真实 ETF 历史可信度门槛均未完成。02 验收复跑通过：全工作区 83 项通过、1 项按条件忽略，格式和 Clippy 检查通过，release `--candidate soa` 与 `--candidate reference` 均返回 correctness passed。固定小样本不构成 B1 布局决策依据。
+当前 POC 状态：01–04 已验收；03 Arrow 为用户确认的实现验收，release 性能样本仍缺。Parquet 扫描、内存与 out-of-core 对比尚缺，B1 布局仍 Unresolved；07 是最小事件原型，不能支持 Fast Event 选型。Nautilus、PyO3 和真实 ETF 历史可信度门槛均未完成。所有已记录结果均来自固定 3×10 合成样本，不构成性能/架构决策证据。
 
-**唯一建议下一步：**并行推进已解锁的 [票据 03 Arrow](.scratch/poc-0-benchmark/issues/03-arrow-momentum-rotation.md) 与 [票据 04 Polars](.scratch/poc-0-benchmark/issues/04-polars-momentum-rotation.md) 完整 S2 候选。
+**唯一建议下一步：**按资源边界票据 13 要求推进后续受控测量，再启动 [票据 05 Parquet 与超内存数据路径](.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md)。
+
+2026-09-27 票据 03 Arrow：用户已确认实现验收并标记 `resolved`。`benchmark-poc0 --candidate arrow` 使用 Arrow `RecordBatch` 完成 S2 因子、排序、TopK、权重和下一会话 close-to-close 收益；独立用例覆盖首个有效日、排名分数、符号升序平局、末日缺 bar 排除、所选目标下一日缺 bar 返回 `None` 和手算收益。报告含五次 raw 样本、分阶段耗时、checksum 和单独转换耗时。`cargo check -p quant-research --locked`、全工作区测试（89 passed、1 ignored）、Arrow 定向测试、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings`、`cargo fmt --all -- --check` 与 `git diff --check` 通过。没有生成 Arrow release 性能样本，架构性能比较仍 Unresolved；验收不表示采用 Arrow 布局。
 
 ## 历史进展记录
 
@@ -56,3 +62,5 @@ cargo run -p quant-research --release --locked -- serve --output research-output
 **唯一最优先下一步：**取得并归档覆盖固定五 ETF 窗口的两市官方逐日执行状态文件与完整性说明，核验每证券/日期的原文 hash 和历史可用时刻，经 B 单写者冻结真实状态，在同一发布 Universe 版本上复跑；证据不足时保持 UNKNOWN/P0-3 开放。
 
 2026-09-27 更新：POC-0 票据 02 已由用户验收并标记 `resolved`。统一 `benchmark-poc0 --candidate soa` 报告覆盖 SoA 动量/样本波动率、截面排名、TopK、等权目标和次日 close-to-close 权重收益；对照独立事件账本金标准校验排名与目标，错误时跳过性能测量。报告提供因子、排序/权重、收益三阶段耗时样本，并按 `rebalance_every` 生成目标。独立手算用例覆盖内部缺 bar 和不足窗口。该权重收益模型不含现金、费用、订单、成交或事件 NAV；固定 3×10 fixture 的性能数据不支持布局决策，完整 Polars/Arrow/Parquet 比较仍未完成。最终验证：83 项通过、1 项按条件忽略；格式、Clippy、两个 release 候选 CLI 均通过。
+
+2026-09-27 更新：POC-0 票据 13 已实现 `app` 可选 feature 构建边界。正常应用默认功能不变；POC 命令以 `--no-default-features` 构建，依赖树不含 `ashare-warehouse`、DuckDB 或 `libduckdb-sys`，B1/B2/B3 共用根 `target/`。构建资源原始记录与命令见 `poc/poc0-benchmark/README.md` 和 `poc/poc0-benchmark/results/`。初始 warm-cache dev 39.645 秒、target 逻辑字节增量 511,089,592；release 264.239 秒、增量 461,279,366 字节。带 dirty/source identity 与运行时空间监控的复跑 dev 21.175 秒、release 3.017 秒；均未触及 10 GiB 停止线。预算拒绝样例记录了 3 GiB 估算时的 10,964,553,728 bytes 可用空间。冷构建没有测量，未清理任何 target。旧 `du -sh` 是分配块估算，资源 JSON 记录文件逻辑大小，不能直接对比。最终验证：`cargo fmt --all -- --check`、`cargo test --workspace --locked --offline`（89 passed、1 ignored）、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings`，以及轻量 release Polars CLI correctness 均通过。后续重依赖/大数据任务仍应在各自构建前估算并保留 10 GiB。
