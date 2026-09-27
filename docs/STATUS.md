@@ -6,9 +6,9 @@
 
 2026-09-27 POC 构建资源边界已实现：默认应用仍启用 `app` feature；使用 `--no-default-features` 的 benchmark 依赖图排除 DuckDB 和仓库数据库 crate，并复用 workspace `target/`。warm-cache dev/release 构建及空间增量见 [原始记录](../poc/poc0-benchmark/README.md#shared-lightweight-poc-build-path)；cold build 未测，未清理缓存。测量时按 10 GiB 保留线执行闸门。
 
-用户已确定新主路线为 Rust-first、多市场、三级回测引擎与未来实盘的平台；现阶段先做 [`POC-0`](poc-0-benchmark-spec.md)。完整目标见根目录 [`ARCHITECTURE.md`](../ARCHITECTURE.md)，新交付顺序见 [`product-roadmap.md`](product-roadmap.md)。目前没有 Vector / Fast Event / Accurate 三级生产实现、生产 Nautilus Adapter、持久 Factor Cache、跨市场账户、Python/PyO3 策略入口或 Live Runtime。POC-0 票据 08 已在固定合成 fixture 上运行 Nautilus 2.0.0rc5 Adapter，Fill/现金/持仓/成本/NAV 对拍通过；HALTED rejection-vs-pending-order 生命周期不同，票据保留 `unresolved`。现有 React 页面是已实现资产，新平台 MVP 不以 Web 为验收项。以下扫描记录描述旧 A 股纵向场景的代码与数据证据，不能升级为新目标能力。
+用户已确定新主路线为 Rust-first、多市场、三级回测引擎与未来实盘的平台；现阶段先做 [`POC-0`](poc-0-benchmark-spec.md)。完整目标见根目录 [`ARCHITECTURE.md`](../ARCHITECTURE.md)，新交付顺序见 [`product-roadmap.md`](product-roadmap.md)。目前没有 Vector / Fast Event / Accurate 三级生产实现、生产 Nautilus Adapter、持久 Factor Cache、跨市场账户、Python/PyO3 策略入口或 Live Runtime。POC-0 票据 08 的固定合成 fixture 已通过 Nautilus 2.0.0rc5 Adapter 六项订单、Fill、账户与成本对拍；HALTED 拒单由项目 Adapter 的状态门槛执行，不是 Nautilus 撮合引擎原生拒单。现有 React 页面是已实现资产，新平台 MVP 不以 Web 为验收项。以下扫描记录描述旧 A 股纵向场景的代码与数据证据，不能升级为新目标能力。
 
-POC-0 工作范围与验收已发布为本地 [`ready-for-agent` spec](../.scratch/poc-0-benchmark/spec.md)。独立 [`poc/b1-layout`](../poc/b1-layout/README.md) 标量读取 smoke 只对拍三种布局的动量；票据 02 的 SoA、票据 03 的 Arrow 完整 S2 候选和票据 04 的 Polars 候选已验收。票据 05 的版本化 Parquet 写入/复读、列/row group 裁剪与三候选对拍已由用户验收：10,000,029 行、404,509,661 字节的源文件在本机 Linux VM 以 Docker 256 MiB cgroup 限制成功复读，子进程 RSS 58,933,248 字节，容器峰值触及 256 MiB、无 OOM。macOS `RLIMIT_AS` 失败记录仍保留。票据 06 已完成确定性 64 × 252 合成面板的 S2 参数扫描与冷热因子缓存对比，正确性和 checksum 通过；Custom SoA 结论为 `defer`，miss/hit 两线程吞吐相对最佳替代分别 +8.99%/+0.32%，未达到 20% 采纳门槛。报告中的全进程 RSS 为 107,905,024 字节；不代表真实市场/PIT。B2 只有票据 07 的最小原型，B3 未启动。
+POC-0 工作范围与验收已发布为本地 [`ready-for-agent` spec](../.scratch/poc-0-benchmark/spec.md)。独立 [`poc/b1-layout`](../poc/b1-layout/README.md) 标量读取 smoke 只对拍三种布局的动量；票据 02 的 SoA、票据 03 的 Arrow 完整 S2 候选和票据 04 的 Polars 候选已验收。票据 05 的版本化 Parquet 写入/复读、列/row group 裁剪与三候选对拍已由用户验收：10,000,029 行、404,509,661 字节的源文件在本机 Linux VM 以 Docker 256 MiB cgroup 限制成功复读，子进程 RSS 58,933,248 字节，容器峰值触及 256 MiB、无 OOM。macOS `RLIMIT_AS` 失败记录仍保留。票据 06 已完成确定性 64 × 252 合成面板的 S2 参数扫描与冷热因子缓存对比，正确性和 checksum 通过；Custom SoA 结论为 `defer`，miss/hit 两线程吞吐相对最佳替代分别 +8.99%/+0.32%，未达到 20% 采纳门槛。报告中的全进程 RSS 为 107,905,024 字节；不代表真实市场/PIT。自研 Fast Event 仍只有票据 07 的最小原型；Nautilus Adapter 的固定 S1 对拍见票据 08，B3 未启动。
 
 2026-09-27 票据 05 最初在依赖解析阶段受阻；现以最小本地 `polars-io` vendor 补齐离线 Parquet 路径。实现、资源实测、macOS 受限内存启动失败与随后 Linux cgroup 复读通过的证据见 [票据 05](../.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md)。
 
@@ -18,7 +18,7 @@ POC-0 票据 01 已验收：新增固定 3 ETF × 10 个交易日的版本化 fi
 
 POC-0 B2 票据 07 已于 2026-09-27 复核验收并标记 `resolved`：最小 Fast Event S1 Buy & Hold 原型通过固定输入与变体 fixture 检查停牌拒单/重试、缺 bar 沿用估值、末日未执行目标、逐日 NAV 恒等式、重复账本 checksum 和固定成本（包括非零买入税）；报告分列初始化、事件处理和端到端五次耗时。独立手算金标准逐日现金/持仓/NAV 与非零买入税变体均与报告数值一致。它仍不是完整 Fast Event Engine，也只有微型合成样本，因此不能支持性能选型。
 
-POC-0 已按获确认的拆分发布为 [13 张本地执行票据](../.scratch/poc-0-benchmark/issues/01-fixed-dataset-and-benchmark-entry.md)。01–07 为 `resolved`；03 的验收限于 Arrow 候选实现与正确性，release 结论由票据 06 的同条件 sweep 补齐。06 对本轮合成目标负载得出 `defer`，不是平台级布局裁决。07 是独立验收过的最小原型，不是完整 Fast Event。08 已用固定 Nautilus 2.0.0rc5 运行，Fill 与逐日账户投影对拍通过；状态仍为 `unresolved`，因为 HALTED rejection 与 pending-order 生命周期不等价。测量、差异和构建证据见 [POC harness](../poc/poc0-benchmark/README.md#b2-nautilus-adapter-attempt-ticket-08)。
+POC-0 已按获确认的拆分发布为 [13 张本地执行票据](../.scratch/poc-0-benchmark/issues/01-fixed-dataset-and-benchmark-entry.md)。01–08 为 `resolved`；03 的验收限于 Arrow 候选实现与正确性，release 结论由票据 06 的同条件 sweep 补齐。06 对本轮合成目标负载得出 `defer`，不是平台级布局裁决。07 是独立验收过的最小原型，不是完整 Fast Event。08 的 Nautilus 2.0.0rc5 固定场景六项对拍通过，状态门槛在 Adapter 拒单后于次日新建订单；结果限于此 fixture。原失败记录、修复后结果和构建证据见 [POC harness](../poc/poc0-benchmark/README.md#b2-nautilus-adapter-comparison-ticket-08)。
 
 完整的问题排序、解决路径及验收判据见 [`priorities.md`](priorities.md)。这里保留按领域归类的事实状态。
 

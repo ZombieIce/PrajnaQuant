@@ -1,0 +1,2683 @@
+{
+  "schema_version": "poc0.report.v1",
+  "run_id": "fb427b61b251f7332756188fe6c645a0333204c102c7b3ff976ffa0526182a25",
+  "candidate": "existing-rust-etf-backtest-reference",
+  "strategy": {
+    "name": "Momentum Rotation",
+    "version": "poc0-golden-v1",
+    "initial_cash": 100000.0,
+    "lot_size": 100,
+    "strategy": {
+      "lookback_days": 1,
+      "top_n": 1,
+      "rebalance_every": 1,
+      "momentum_short_days": 1,
+      "momentum_long_days": 1,
+      "volatility_window": 2,
+      "trend_window": null,
+      "use_trend_filter": false,
+      "short_momentum_weight": 1.0,
+      "long_momentum_weight": 1.0,
+      "volatility_weight": 0.0
+    },
+    "costs": {
+      "commission_rate": 0.001,
+      "minimum_commission": 100.0,
+      "buy_tax_rate": 0.0,
+      "sell_tax_rate": 0.0,
+      "buy_slippage_bps": 10.0,
+      "sell_slippage_bps": 10.0
+    },
+    "future_returns_used_for_decisions": false
+  },
+  "dataset": {
+    "version": "poc0.synthetic.etf-daily.v1",
+    "seed": 20260926,
+    "seed_semantics": "stable fixture identity; the deliberately small price path is hand-authored, not randomly sampled",
+    "source_identity": "poc0-hand-authored-golden-v1",
+    "calendar_basis": "fixed_synthetic_weekday_sessions",
+    "timezone": "Asia/Shanghai",
+    "calendar": [
+      "2026-01-05",
+      "2026-01-06",
+      "2026-01-07",
+      "2026-01-08",
+      "2026-01-09",
+      "2026-01-12",
+      "2026-01-13",
+      "2026-01-14",
+      "2026-01-15",
+      "2026-01-16"
+    ],
+    "bar_defaults": {
+      "open": 100.0,
+      "volume": 1000000.0,
+      "amount": 100000000.0,
+      "high_rule": "max(open, close)",
+      "low_rule": "min(open, close)",
+      "open_available_at": "09:30:00+08:00",
+      "close_available_at": "15:00:00+08:00"
+    },
+    "instrument_count": 3,
+    "instruments": [
+      {
+        "symbol": "A",
+        "currency": "CNY",
+        "price_precision": 2,
+        "quantity_precision": 0
+      },
+      {
+        "symbol": "B",
+        "currency": "CNY",
+        "price_precision": 2,
+        "quantity_precision": 0
+      },
+      {
+        "symbol": "C",
+        "currency": "CNY",
+        "price_precision": 2,
+        "quantity_precision": 0
+      }
+    ],
+    "bar_count": 29,
+    "missing_bars": [
+      {
+        "symbol": "B",
+        "date": "2026-01-16",
+        "reason": "deliberate_missing_bar"
+      }
+    ],
+    "status_override_count": 2,
+    "execution_statuses": [
+      {
+        "symbol": "A",
+        "date": "2026-01-05",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-05T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-05",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-05T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-05",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-05T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-06",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-06T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-06",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-06T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-06",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-06T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-07",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-07T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-07",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-07T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-07",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-07T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-08",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-08T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-08",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-08T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-08",
+        "trade_status": "UNKNOWN",
+        "is_tradable": false,
+        "sources": "poc0-fixture-override",
+        "available_at": "2026-01-08T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-09",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-09T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-09",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-09T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-09",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-09T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-12",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-12T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-12",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-12T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-12",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-12T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-13",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-13T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-13",
+        "trade_status": "HALTED",
+        "is_tradable": false,
+        "sources": "poc0-fixture-override",
+        "available_at": "2026-01-13T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-13",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-13T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-14",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-14T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-14",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-14T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-14",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-14T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-15",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-15T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-15",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-15T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-15",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-15T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-16",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-16T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-16",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-16T08:50:00+08:00"
+      }
+    ],
+    "input_path": "poc/poc0-benchmark/fixtures/dataset-v1.json",
+    "raw_input_sha256": "9b9009b1586a6f271cd301042f97f2adf84146c870d72802682799d60352ed85",
+    "content_sha256": "8c16742a2031cab19e08456dbbe009769b02f0331276618831cefdb6827b5a6f",
+    "time_model": {
+      "signal": "after session close using that session close and earlier closes only",
+      "execution": "pending target executes at the next available session open",
+      "execution_status": "available before the session open",
+      "final_session": "target remains pending because no future execution session exists"
+    },
+    "result_model_boundary": "This fixture is an event ledger with explicit fills, cash, holdings, costs and NAV. A Vector candidate uses a separately declared target-weight × return model and is compared only under shared assumptions; the Vector result is not asserted to be this account ledger."
+  },
+  "expected_input": "poc/poc0-benchmark/fixtures/expected-v1.json",
+  "expected_input_sha256": "97d9eb463c7999b5504a1624216b189f8308367039e07fbfd1a68ea923f5c72a",
+  "provenance": {
+    "git_revision": "629d0dbfee8e4df4d63f9e8205be7404a3b36741",
+    "working_tree_dirty": true,
+    "working_tree_complete": false,
+    "tracked_diff_sha256": "31d58686b363a49638d1754976dee62596a241eb322b8e68107ded015853ab88",
+    "tracked_diff_summary": ".../issues/08-nautilus-buy-and-hold-adapter.md     |  4 +-\n HANDOFF.md                                         |  6 +--\n docs/STATUS.md                                     |  6 +--\n poc/poc0-benchmark/README.md                       | 21 ++++----\n poc/poc0-benchmark/nautilus_adapter.py             | 57 +++++++++++++--------\n poc/poc0-benchmark/test_nautilus_adapter.py        | 58 ++++++++++++++++++++++\n 6 files changed, 114 insertions(+), 38 deletions(-)",
+    "changed_paths": [
+      "scratch/poc-0-benchmark/issues/08-nautilus-buy-and-hold-adapter.md",
+      "HANDOFF.md",
+      "docs/STATUS.md",
+      "poc/poc0-benchmark/README.md",
+      "poc/poc0-benchmark/nautilus_adapter.py",
+      "poc/poc0-benchmark/test_nautilus_adapter.py",
+      ".vscode/settings.json",
+      "poc/poc0-benchmark/results/nautilus-adapter-comparison-status-gated-2026-09-27.json",
+      "poc/vendor/polars-io/.cargo-ok",
+      "poc/vendor/polars-io/.cargo_vcs_info.json",
+      "poc/vendor/polars-io/Cargo.lock",
+      "poc/vendor/polars-io/Cargo.toml.orig"
+    ],
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "build_profile": "release",
+    "operating_system": "macos",
+    "architecture": "aarch64",
+    "logical_cpu_count": 8,
+    "cpu_model": null,
+    "cargo_lock_sha256": "24b9123ee06436f427f944a2171c47187561330b96bdf096fc1502f263a5e47f",
+    "physical_memory_bytes": null
+  },
+  "correctness": {
+    "status": "passed",
+    "tolerance": 1e-08,
+    "differences": [],
+    "accounting_checks": [],
+    "time_checks": []
+  },
+  "measurements": {
+    "status": "measured",
+    "warmup_runs": 1,
+    "requested_runs": 5,
+    "raw_samples_ns": [
+      28584,
+      26125,
+      24000,
+      23292,
+      24500
+    ],
+    "median_ns": 24500,
+    "p95_ns": 28584,
+    "peak_rss_bytes": null,
+    "resource_measurement_status": "not_measured_in_ticket_01",
+    "measurement_scope": "reference backtest call; excludes fixture parsing and report projection"
+  },
+  "result": {
+    "checksum_sha256": "ddbbd29994dbb6a373dae42e8614f2032ee15191aff9a7be7c7bfb256d624472",
+    "projection": {
+      "rankings": [
+        {
+          "date": "2026-01-07",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "A",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "B",
+              "score": -0.02020202020202011
+            }
+          ]
+        },
+        {
+          "date": "2026-01-08",
+          "candidates": [
+            {
+              "symbol": "B",
+              "score": 0.020408163265305923
+            },
+            {
+              "symbol": "A",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "C",
+              "score": -0.01980198019801982
+            }
+          ]
+        },
+        {
+          "date": "2026-01-09",
+          "candidates": [
+            {
+              "symbol": "B",
+              "score": 0.06060606060606055
+            },
+            {
+              "symbol": "C",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "A",
+              "score": -0.07766990291262132
+            }
+          ]
+        },
+        {
+          "date": "2026-01-12",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "B",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "A",
+              "score": -0.02020202020202011
+            }
+          ]
+        },
+        {
+          "date": "2026-01-13",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.04081632653061229
+            },
+            {
+              "symbol": "C",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "B",
+              "score": -0.03883495145631066
+            }
+          ]
+        },
+        {
+          "date": "2026-01-14",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "C",
+              "score": 0.01941747572815533
+            },
+            {
+              "symbol": "B",
+              "score": -0.01980198019801982
+            }
+          ]
+        },
+        {
+          "date": "2026-01-15",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "C",
+              "score": -0.019230769230769162
+            },
+            {
+              "symbol": "B",
+              "score": -0.020000000000000018
+            }
+          ]
+        },
+        {
+          "date": "2026-01-16",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.03883495145631066
+            },
+            {
+              "symbol": "A",
+              "score": 0.019607843137254832
+            }
+          ]
+        }
+      ],
+      "signals": [
+        {
+          "date": "2026-01-07",
+          "target_symbols": [
+            "C"
+          ]
+        },
+        {
+          "date": "2026-01-08",
+          "target_symbols": [
+            "B"
+          ]
+        },
+        {
+          "date": "2026-01-09",
+          "target_symbols": [
+            "B"
+          ]
+        },
+        {
+          "date": "2026-01-12",
+          "target_symbols": [
+            "C"
+          ]
+        },
+        {
+          "date": "2026-01-13",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-14",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-15",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-16",
+          "target_symbols": [
+            "C"
+          ]
+        }
+      ],
+      "fills": [
+        {
+          "date": "2026-01-09",
+          "symbol": "B",
+          "side": "BUY",
+          "quantity": 900,
+          "reference_price": 100.0,
+          "fill_price": 100.1,
+          "gross_value": 90090.0,
+          "commission": 100.0,
+          "tax": 0.0,
+          "slippage_cost": 89.99999999999488
+        },
+        {
+          "date": "2026-01-14",
+          "symbol": "B",
+          "side": "SELL",
+          "quantity": 900,
+          "reference_price": 100.0,
+          "fill_price": 99.9,
+          "gross_value": 89910.0,
+          "commission": 100.0,
+          "tax": 0.0,
+          "slippage_cost": 89.99999999999488
+        },
+        {
+          "date": "2026-01-14",
+          "symbol": "A",
+          "side": "BUY",
+          "quantity": 900,
+          "reference_price": 100.0,
+          "fill_price": 100.1,
+          "gross_value": 90090.0,
+          "commission": 100.0,
+          "tax": 0.0,
+          "slippage_cost": 89.99999999999488
+        }
+      ],
+      "unexecuted_orders": [
+        {
+          "decision_date": "2026-01-07",
+          "attempt_date": "2026-01-08",
+          "symbol": "C",
+          "side": "BUY",
+          "desired_quantity": 1000,
+          "trade_status": "UNKNOWN",
+          "status_sources": "poc0-fixture-override",
+          "reason": "unknown_status"
+        },
+        {
+          "decision_date": "2026-01-12",
+          "attempt_date": "2026-01-13",
+          "symbol": "B",
+          "side": "SELL",
+          "desired_quantity": 900,
+          "trade_status": "HALTED",
+          "status_sources": "poc0-fixture-override",
+          "reason": "halted"
+        },
+        {
+          "decision_date": "2026-01-16",
+          "attempt_date": "2026-01-16",
+          "symbol": "C",
+          "side": "TARGET",
+          "desired_quantity": null,
+          "trade_status": "TRADABLE",
+          "status_sources": "poc0-fixture-default",
+          "reason": "no_future_execution_session"
+        }
+      ],
+      "ledger": [
+        {
+          "date": "2026-01-05",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-06",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-07",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-08",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-09",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "B",
+              "quantity": 900,
+              "mark_price": 102.0
+            }
+          ],
+          "nav": 101610.0
+        },
+        {
+          "date": "2026-01-12",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "B",
+              "quantity": 900,
+              "mark_price": 103.0
+            }
+          ],
+          "nav": 102510.0
+        },
+        {
+          "date": "2026-01-13",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "B",
+              "quantity": 900,
+              "mark_price": 101.0
+            }
+          ],
+          "nav": 100710.0
+        },
+        {
+          "date": "2026-01-14",
+          "cash": 9430.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 101.0
+            }
+          ],
+          "nav": 100330.0
+        },
+        {
+          "date": "2026-01-15",
+          "cash": 9430.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 102.0
+            }
+          ],
+          "nav": 101230.0
+        },
+        {
+          "date": "2026-01-16",
+          "cash": 9430.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 103.0
+            }
+          ],
+          "nav": 102130.0
+        }
+      ],
+      "summary": {
+        "initial_cash": 100000.0,
+        "final_equity": 102130.0,
+        "final_positions": {
+          "A": 900
+        },
+        "trade_count": 3,
+        "commission": 300.0,
+        "tax": 0.0,
+        "slippage_cost": 269.99999999998465,
+        "total_cost": 569.9999999999847
+      }
+    }
+  },
+  "b1_soa": {
+    "correctness_status": "passed",
+    "checksum_sha256": "9d355cb1a9daf1698318699141ea4ddab8a64495b7ec53ac4502310614e0179c",
+    "projection": {
+      "rankings": [
+        {
+          "date": "2026-01-07",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "A",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "B",
+              "score": -0.02020202020202011
+            }
+          ]
+        },
+        {
+          "date": "2026-01-08",
+          "candidates": [
+            {
+              "symbol": "B",
+              "score": 0.020408163265305923
+            },
+            {
+              "symbol": "A",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "C",
+              "score": -0.01980198019801982
+            }
+          ]
+        },
+        {
+          "date": "2026-01-09",
+          "candidates": [
+            {
+              "symbol": "B",
+              "score": 0.06060606060606055
+            },
+            {
+              "symbol": "C",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "A",
+              "score": -0.07766990291262132
+            }
+          ]
+        },
+        {
+          "date": "2026-01-12",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "B",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "A",
+              "score": -0.02020202020202011
+            }
+          ]
+        },
+        {
+          "date": "2026-01-13",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.04081632653061229
+            },
+            {
+              "symbol": "C",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "B",
+              "score": -0.03883495145631066
+            }
+          ]
+        },
+        {
+          "date": "2026-01-14",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "C",
+              "score": 0.01941747572815533
+            },
+            {
+              "symbol": "B",
+              "score": -0.01980198019801982
+            }
+          ]
+        },
+        {
+          "date": "2026-01-15",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "C",
+              "score": -0.019230769230769162
+            },
+            {
+              "symbol": "B",
+              "score": -0.020000000000000018
+            }
+          ]
+        },
+        {
+          "date": "2026-01-16",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.03883495145631066
+            },
+            {
+              "symbol": "A",
+              "score": 0.019607843137254832
+            }
+          ]
+        }
+      ],
+      "targets": [
+        {
+          "date": "2026-01-07",
+          "target_symbols": [
+            "C"
+          ]
+        },
+        {
+          "date": "2026-01-08",
+          "target_symbols": [
+            "B"
+          ]
+        },
+        {
+          "date": "2026-01-09",
+          "target_symbols": [
+            "B"
+          ]
+        },
+        {
+          "date": "2026-01-12",
+          "target_symbols": [
+            "C"
+          ]
+        },
+        {
+          "date": "2026-01-13",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-14",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-15",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-16",
+          "target_symbols": [
+            "C"
+          ]
+        }
+      ],
+      "target_weights": [
+        {
+          "date": "2026-01-07",
+          "symbol": "C",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-08",
+          "symbol": "B",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-09",
+          "symbol": "B",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-12",
+          "symbol": "C",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-13",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-14",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-15",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-16",
+          "symbol": "C",
+          "weight": 1.0
+        }
+      ],
+      "portfolio_returns": [
+        {
+          "from": "2026-01-07",
+          "to": "2026-01-08",
+          "return_pct": -0.00990099009900991
+        },
+        {
+          "from": "2026-01-08",
+          "to": "2026-01-09",
+          "return_pct": 0.030303030303030276
+        },
+        {
+          "from": "2026-01-09",
+          "to": "2026-01-12",
+          "return_pct": 0.009803921568627416
+        },
+        {
+          "from": "2026-01-12",
+          "to": "2026-01-13",
+          "return_pct": 0.009803921568627416
+        },
+        {
+          "from": "2026-01-13",
+          "to": "2026-01-14",
+          "return_pct": 0.010000000000000009
+        },
+        {
+          "from": "2026-01-14",
+          "to": "2026-01-15",
+          "return_pct": 0.00990099009900991
+        },
+        {
+          "from": "2026-01-15",
+          "to": "2026-01-16",
+          "return_pct": 0.009803921568627416
+        }
+      ]
+    },
+    "warmup_runs": 0,
+    "raw_samples_ns": [],
+    "median_ns": null,
+    "p95_ns": null,
+    "phase_samples_ns": {
+      "factor_ns": [],
+      "ranking_topk_weights_ns": [],
+      "return_projection_ns": []
+    },
+    "measurement_scope": "symbol-major SoA factor windows, cross-sectional rank/top-k, equal weights, and next-session return projection; excludes parsing and fixture construction",
+    "model_boundary": "equal-weight target-weight × next-session close-to-close return; missing selected bar makes that interval unavailable; no cash, fees, fills, or event-account NAV"
+  },
+  "b1_arrow": {
+    "correctness_status": "passed",
+    "checksum_sha256": "9d355cb1a9daf1698318699141ea4ddab8a64495b7ec53ac4502310614e0179c",
+    "projection": {
+      "rankings": [
+        {
+          "date": "2026-01-07",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "A",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "B",
+              "score": -0.02020202020202011
+            }
+          ]
+        },
+        {
+          "date": "2026-01-08",
+          "candidates": [
+            {
+              "symbol": "B",
+              "score": 0.020408163265305923
+            },
+            {
+              "symbol": "A",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "C",
+              "score": -0.01980198019801982
+            }
+          ]
+        },
+        {
+          "date": "2026-01-09",
+          "candidates": [
+            {
+              "symbol": "B",
+              "score": 0.06060606060606055
+            },
+            {
+              "symbol": "C",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "A",
+              "score": -0.07766990291262132
+            }
+          ]
+        },
+        {
+          "date": "2026-01-12",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "B",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "A",
+              "score": -0.02020202020202011
+            }
+          ]
+        },
+        {
+          "date": "2026-01-13",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.04081632653061229
+            },
+            {
+              "symbol": "C",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "B",
+              "score": -0.03883495145631066
+            }
+          ]
+        },
+        {
+          "date": "2026-01-14",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "C",
+              "score": 0.01941747572815533
+            },
+            {
+              "symbol": "B",
+              "score": -0.01980198019801982
+            }
+          ]
+        },
+        {
+          "date": "2026-01-15",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "C",
+              "score": -0.019230769230769162
+            },
+            {
+              "symbol": "B",
+              "score": -0.020000000000000018
+            }
+          ]
+        },
+        {
+          "date": "2026-01-16",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.03883495145631066
+            },
+            {
+              "symbol": "A",
+              "score": 0.019607843137254832
+            }
+          ]
+        }
+      ],
+      "targets": [
+        {
+          "date": "2026-01-07",
+          "target_symbols": [
+            "C"
+          ]
+        },
+        {
+          "date": "2026-01-08",
+          "target_symbols": [
+            "B"
+          ]
+        },
+        {
+          "date": "2026-01-09",
+          "target_symbols": [
+            "B"
+          ]
+        },
+        {
+          "date": "2026-01-12",
+          "target_symbols": [
+            "C"
+          ]
+        },
+        {
+          "date": "2026-01-13",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-14",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-15",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-16",
+          "target_symbols": [
+            "C"
+          ]
+        }
+      ],
+      "target_weights": [
+        {
+          "date": "2026-01-07",
+          "symbol": "C",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-08",
+          "symbol": "B",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-09",
+          "symbol": "B",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-12",
+          "symbol": "C",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-13",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-14",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-15",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-16",
+          "symbol": "C",
+          "weight": 1.0
+        }
+      ],
+      "portfolio_returns": [
+        {
+          "from": "2026-01-07",
+          "to": "2026-01-08",
+          "return_pct": -0.00990099009900991
+        },
+        {
+          "from": "2026-01-08",
+          "to": "2026-01-09",
+          "return_pct": 0.030303030303030276
+        },
+        {
+          "from": "2026-01-09",
+          "to": "2026-01-12",
+          "return_pct": 0.009803921568627416
+        },
+        {
+          "from": "2026-01-12",
+          "to": "2026-01-13",
+          "return_pct": 0.009803921568627416
+        },
+        {
+          "from": "2026-01-13",
+          "to": "2026-01-14",
+          "return_pct": 0.010000000000000009
+        },
+        {
+          "from": "2026-01-14",
+          "to": "2026-01-15",
+          "return_pct": 0.00990099009900991
+        },
+        {
+          "from": "2026-01-15",
+          "to": "2026-01-16",
+          "return_pct": 0.009803921568627416
+        }
+      ]
+    },
+    "warmup_runs": 0,
+    "raw_samples_ns": [],
+    "median_ns": null,
+    "p95_ns": null,
+    "phase_samples_ns": {
+      "factor_ns": [],
+      "ranking_topk_weights_ns": [],
+      "return_projection_ns": []
+    },
+    "conversion_samples_ns": [],
+    "measurement_scope": "Arrow RecordBatch construction and symbol-column S2 factor windows, cross-sectional rank/top-k, equal weights, and next-session return projection; excludes fixture parsing and JSON serialization",
+    "model_boundary": "equal-weight target-weight × next-session close-to-close return; missing selected bar makes that interval unavailable; no cash, fees, fills, or event-account NAV"
+  },
+  "b1_polars": {
+    "correctness_status": "passed",
+    "checksum_sha256": "9d355cb1a9daf1698318699141ea4ddab8a64495b7ec53ac4502310614e0179c",
+    "projection": {
+      "rankings": [
+        {
+          "date": "2026-01-07",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "A",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "B",
+              "score": -0.02020202020202011
+            }
+          ]
+        },
+        {
+          "date": "2026-01-08",
+          "candidates": [
+            {
+              "symbol": "B",
+              "score": 0.020408163265305923
+            },
+            {
+              "symbol": "A",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "C",
+              "score": -0.01980198019801982
+            }
+          ]
+        },
+        {
+          "date": "2026-01-09",
+          "candidates": [
+            {
+              "symbol": "B",
+              "score": 0.06060606060606055
+            },
+            {
+              "symbol": "C",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "A",
+              "score": -0.07766990291262132
+            }
+          ]
+        },
+        {
+          "date": "2026-01-12",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "B",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "A",
+              "score": -0.02020202020202011
+            }
+          ]
+        },
+        {
+          "date": "2026-01-13",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.04081632653061229
+            },
+            {
+              "symbol": "C",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "B",
+              "score": -0.03883495145631066
+            }
+          ]
+        },
+        {
+          "date": "2026-01-14",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "C",
+              "score": 0.01941747572815533
+            },
+            {
+              "symbol": "B",
+              "score": -0.01980198019801982
+            }
+          ]
+        },
+        {
+          "date": "2026-01-15",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "C",
+              "score": -0.019230769230769162
+            },
+            {
+              "symbol": "B",
+              "score": -0.020000000000000018
+            }
+          ]
+        },
+        {
+          "date": "2026-01-16",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.03883495145631066
+            },
+            {
+              "symbol": "A",
+              "score": 0.019607843137254832
+            }
+          ]
+        }
+      ],
+      "targets": [
+        {
+          "date": "2026-01-07",
+          "target_symbols": [
+            "C"
+          ]
+        },
+        {
+          "date": "2026-01-08",
+          "target_symbols": [
+            "B"
+          ]
+        },
+        {
+          "date": "2026-01-09",
+          "target_symbols": [
+            "B"
+          ]
+        },
+        {
+          "date": "2026-01-12",
+          "target_symbols": [
+            "C"
+          ]
+        },
+        {
+          "date": "2026-01-13",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-14",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-15",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-16",
+          "target_symbols": [
+            "C"
+          ]
+        }
+      ],
+      "target_weights": [
+        {
+          "date": "2026-01-07",
+          "symbol": "C",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-08",
+          "symbol": "B",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-09",
+          "symbol": "B",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-12",
+          "symbol": "C",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-13",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-14",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-15",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-16",
+          "symbol": "C",
+          "weight": 1.0
+        }
+      ],
+      "portfolio_returns": [
+        {
+          "from": "2026-01-07",
+          "to": "2026-01-08",
+          "return_pct": -0.00990099009900991
+        },
+        {
+          "from": "2026-01-08",
+          "to": "2026-01-09",
+          "return_pct": 0.030303030303030276
+        },
+        {
+          "from": "2026-01-09",
+          "to": "2026-01-12",
+          "return_pct": 0.009803921568627416
+        },
+        {
+          "from": "2026-01-12",
+          "to": "2026-01-13",
+          "return_pct": 0.009803921568627416
+        },
+        {
+          "from": "2026-01-13",
+          "to": "2026-01-14",
+          "return_pct": 0.010000000000000009
+        },
+        {
+          "from": "2026-01-14",
+          "to": "2026-01-15",
+          "return_pct": 0.00990099009900991
+        },
+        {
+          "from": "2026-01-15",
+          "to": "2026-01-16",
+          "return_pct": 0.009803921568627416
+        }
+      ]
+    },
+    "warmup_runs": 0,
+    "raw_samples_ns": [],
+    "median_ns": null,
+    "p95_ns": null,
+    "phase_samples_ns": {
+      "factor_ns": [],
+      "ranking_topk_weights_ns": [],
+      "return_projection_ns": []
+    },
+    "conversion_samples_ns": [],
+    "measurement_scope": "Polars lazy expressions for factor score, ordered rank/TopK, equal weights, and next-session return projection; excludes fixture parsing",
+    "model_boundary": "same simplified equal-weight next-session close-to-close return labels as SoA; no cash, fees, fills, or event-account NAV"
+  },
+  "b2_fast_event_buy_hold": {
+    "status": "correctness_passed_and_measured",
+    "correctness_checks": [],
+    "engine": "poc0-fast-event",
+    "version": "0.1",
+    "semantics": "single venue; long only; market orders; L1 next-session open fills; fixed commission, tax, and slippage; buy-and-hold equal weight; stale last close marks missing bars; not a production engine",
+    "checksum_sha256": "f2ffcc44a2e94c778ad33e0731632bed69da98d05696f8934222f7e94f557928",
+    "projection": {
+      "orders": [
+        {
+          "decision_date": "2026-01-12",
+          "attempt_date": "2026-01-13",
+          "symbol": "A",
+          "side": "BUY",
+          "quantity": 300,
+          "reason": null
+        },
+        {
+          "decision_date": "2026-01-12",
+          "attempt_date": "2026-01-13",
+          "symbol": "B",
+          "side": "BUY",
+          "quantity": 0,
+          "reason": "HALTED"
+        },
+        {
+          "decision_date": "2026-01-12",
+          "attempt_date": "2026-01-13",
+          "symbol": "C",
+          "side": "BUY",
+          "quantity": 300,
+          "reason": null
+        },
+        {
+          "decision_date": "2026-01-12",
+          "attempt_date": "2026-01-14",
+          "symbol": "B",
+          "side": "BUY",
+          "quantity": 300,
+          "reason": null
+        }
+      ],
+      "fills": [
+        {
+          "date": "2026-01-13",
+          "symbol": "A",
+          "side": "BUY",
+          "quantity": 300,
+          "reference_price": 100.0,
+          "fill_price": 100.1,
+          "gross_value": 30030.0,
+          "commission": 100.0,
+          "tax": 0.0,
+          "slippage_cost": 29.999999999998295
+        },
+        {
+          "date": "2026-01-13",
+          "symbol": "C",
+          "side": "BUY",
+          "quantity": 300,
+          "reference_price": 100.0,
+          "fill_price": 100.1,
+          "gross_value": 30030.0,
+          "commission": 100.0,
+          "tax": 0.0,
+          "slippage_cost": 29.999999999998295
+        },
+        {
+          "date": "2026-01-14",
+          "symbol": "B",
+          "side": "BUY",
+          "quantity": 300,
+          "reference_price": 100.0,
+          "fill_price": 100.1,
+          "gross_value": 30030.0,
+          "commission": 100.0,
+          "tax": 0.0,
+          "slippage_cost": 29.999999999998295
+        }
+      ],
+      "ledger": [
+        {
+          "date": "2026-01-05",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-06",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-07",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-08",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-09",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-12",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-13",
+          "cash": 39740.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 300,
+              "mark_price": 100.0
+            },
+            {
+              "symbol": "C",
+              "quantity": 300,
+              "mark_price": 103.0
+            }
+          ],
+          "nav": 100640.0
+        },
+        {
+          "date": "2026-01-14",
+          "cash": 9610.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 300,
+              "mark_price": 101.0
+            },
+            {
+              "symbol": "B",
+              "quantity": 300,
+              "mark_price": 100.0
+            },
+            {
+              "symbol": "C",
+              "quantity": 300,
+              "mark_price": 104.0
+            }
+          ],
+          "nav": 101110.0
+        },
+        {
+          "date": "2026-01-15",
+          "cash": 9610.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 300,
+              "mark_price": 102.0
+            },
+            {
+              "symbol": "B",
+              "quantity": 300,
+              "mark_price": 99.0
+            },
+            {
+              "symbol": "C",
+              "quantity": 300,
+              "mark_price": 103.0
+            }
+          ],
+          "nav": 100810.0
+        },
+        {
+          "date": "2026-01-16",
+          "cash": 9610.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 300,
+              "mark_price": 103.0
+            },
+            {
+              "symbol": "B",
+              "quantity": 300,
+              "mark_price": 99.0
+            },
+            {
+              "symbol": "C",
+              "quantity": 300,
+              "mark_price": 105.0
+            }
+          ],
+          "nav": 101710.0
+        }
+      ],
+      "unexecuted_targets": [],
+      "summary": {
+        "initial_cash": 100000.0,
+        "final_equity": 101710.0,
+        "final_positions": {
+          "A": 300,
+          "B": 300,
+          "C": 300
+        },
+        "commission": 300.0,
+        "tax": 0.0,
+        "slippage_cost": 89.99999999999488,
+        "total_cost": 389.9999999999949
+      }
+    },
+    "warmup_runs": 1,
+    "raw_samples_ns": [
+      5166,
+      5166,
+      5333,
+      4875,
+      5041
+    ],
+    "median_ns": 5166,
+    "p95_ns": 5333,
+    "initialization_samples_ns": [
+      916,
+      833,
+      792,
+      792,
+      834
+    ],
+    "event_processing_samples_ns": [
+      4042,
+      4125,
+      4334,
+      3875,
+      3959
+    ],
+    "end_to_end_samples_ns": [
+      5166,
+      5166,
+      5333,
+      4875,
+      5041
+    ],
+    "measurement_scope": "initialization (day index construction), event processing (orders, fills, marks and ledger), and end-to-end (both phases plus summary); excludes dataset parsing and JSON report serialization"
+  },
+  "conclusion": "unresolved: one fixture validates the harness and reference path; no architecture performance choice is supported",
+  "nautilus_adapter": {
+    "schema_version": "poc0.nautilus-adapter.v1",
+    "status": "passed_with_documented_semantic_differences",
+    "backend": "nautilus",
+    "strategy": "S1 Buy & Hold",
+    "dataset": {
+      "version": "poc0.synthetic.etf-daily.v1",
+      "content_sha256": "9b9009b1586a6f271cd301042f97f2adf84146c870d72802682799d60352ed85",
+      "instrument_count": 3,
+      "calendar_sessions": 10
+    },
+    "versions": {
+      "nautilus_required": "2.0.0rc5",
+      "nautilus_observed": "2.0.0rc5",
+      "python": "3.12.2",
+      "platform": "macOS-26.2-arm64-arm-64bit"
+    },
+    "project_contract": {
+      "reference_engine": "rust-b2-fast-event-buy-hold",
+      "reference_checksum_sha256": "f2ffcc44a2e94c778ad33e0731632bed69da98d05696f8934222f7e94f557928",
+      "reference_projection": {
+        "orders": [
+          {
+            "decision_date": "2026-01-12",
+            "attempt_date": "2026-01-13",
+            "symbol": "A",
+            "side": "BUY",
+            "quantity": 300,
+            "reason": null
+          },
+          {
+            "decision_date": "2026-01-12",
+            "attempt_date": "2026-01-13",
+            "symbol": "B",
+            "side": "BUY",
+            "quantity": 0,
+            "reason": "HALTED"
+          },
+          {
+            "decision_date": "2026-01-12",
+            "attempt_date": "2026-01-13",
+            "symbol": "C",
+            "side": "BUY",
+            "quantity": 300,
+            "reason": null
+          },
+          {
+            "decision_date": "2026-01-12",
+            "attempt_date": "2026-01-14",
+            "symbol": "B",
+            "side": "BUY",
+            "quantity": 300,
+            "reason": null
+          }
+        ],
+        "fills": [
+          {
+            "date": "2026-01-13",
+            "symbol": "A",
+            "side": "BUY",
+            "quantity": 300,
+            "reference_price": 100.0,
+            "fill_price": 100.1,
+            "gross_value": 30030.0,
+            "commission": 100.0,
+            "tax": 0.0,
+            "slippage_cost": 29.999999999998295
+          },
+          {
+            "date": "2026-01-13",
+            "symbol": "C",
+            "side": "BUY",
+            "quantity": 300,
+            "reference_price": 100.0,
+            "fill_price": 100.1,
+            "gross_value": 30030.0,
+            "commission": 100.0,
+            "tax": 0.0,
+            "slippage_cost": 29.999999999998295
+          },
+          {
+            "date": "2026-01-14",
+            "symbol": "B",
+            "side": "BUY",
+            "quantity": 300,
+            "reference_price": 100.0,
+            "fill_price": 100.1,
+            "gross_value": 30030.0,
+            "commission": 100.0,
+            "tax": 0.0,
+            "slippage_cost": 29.999999999998295
+          }
+        ],
+        "ledger": [
+          {
+            "date": "2026-01-05",
+            "cash": 100000.0,
+            "holdings": [],
+            "nav": 100000.0
+          },
+          {
+            "date": "2026-01-06",
+            "cash": 100000.0,
+            "holdings": [],
+            "nav": 100000.0
+          },
+          {
+            "date": "2026-01-07",
+            "cash": 100000.0,
+            "holdings": [],
+            "nav": 100000.0
+          },
+          {
+            "date": "2026-01-08",
+            "cash": 100000.0,
+            "holdings": [],
+            "nav": 100000.0
+          },
+          {
+            "date": "2026-01-09",
+            "cash": 100000.0,
+            "holdings": [],
+            "nav": 100000.0
+          },
+          {
+            "date": "2026-01-12",
+            "cash": 100000.0,
+            "holdings": [],
+            "nav": 100000.0
+          },
+          {
+            "date": "2026-01-13",
+            "cash": 39740.0,
+            "holdings": [
+              {
+                "symbol": "A",
+                "quantity": 300,
+                "mark_price": 100.0
+              },
+              {
+                "symbol": "C",
+                "quantity": 300,
+                "mark_price": 103.0
+              }
+            ],
+            "nav": 100640.0
+          },
+          {
+            "date": "2026-01-14",
+            "cash": 9610.0,
+            "holdings": [
+              {
+                "symbol": "A",
+                "quantity": 300,
+                "mark_price": 101.0
+              },
+              {
+                "symbol": "B",
+                "quantity": 300,
+                "mark_price": 100.0
+              },
+              {
+                "symbol": "C",
+                "quantity": 300,
+                "mark_price": 104.0
+              }
+            ],
+            "nav": 101110.0
+          },
+          {
+            "date": "2026-01-15",
+            "cash": 9610.0,
+            "holdings": [
+              {
+                "symbol": "A",
+                "quantity": 300,
+                "mark_price": 102.0
+              },
+              {
+                "symbol": "B",
+                "quantity": 300,
+                "mark_price": 99.0
+              },
+              {
+                "symbol": "C",
+                "quantity": 300,
+                "mark_price": 103.0
+              }
+            ],
+            "nav": 100810.0
+          },
+          {
+            "date": "2026-01-16",
+            "cash": 9610.0,
+            "holdings": [
+              {
+                "symbol": "A",
+                "quantity": 300,
+                "mark_price": 103.0
+              },
+              {
+                "symbol": "B",
+                "quantity": 300,
+                "mark_price": 99.0
+              },
+              {
+                "symbol": "C",
+                "quantity": 300,
+                "mark_price": 105.0
+              }
+            ],
+            "nav": 101710.0
+          }
+        ],
+        "unexecuted_targets": [],
+        "summary": {
+          "initial_cash": 100000.0,
+          "final_equity": 101710.0,
+          "final_positions": {
+            "A": 300,
+            "B": 300,
+            "C": 300
+          },
+          "commission": 300.0,
+          "tax": 0.0,
+          "slippage_cost": 89.99999999999488,
+          "total_cost": 389.9999999999949
+        }
+      },
+      "adapter_boundary": "Instrument, Order, Fill, account, costs, holdings and NAV are serialized using the project report contract. Nautilus types remain inside this Python process boundary."
+    },
+    "semantic_comparison": {
+      "status": "passed_with_documented_semantic_differences",
+      "checks": [
+        {
+          "field": "orders.lifecycle_and_attempts",
+          "passed": true,
+          "expected_order_events": 4,
+          "actual_adapter_order_events": 4,
+          "project_order_fields": [
+            "decision_date",
+            "attempt_date",
+            "symbol",
+            "side",
+            "quantity",
+            "reason"
+          ]
+        },
+        {
+          "field": "fills.quantity_price_commission",
+          "passed": true,
+          "expected_fill_count": 3,
+          "actual_fill_count": 3
+        },
+        {
+          "field": "daily.cash_nav",
+          "passed": true,
+          "session_count": 10
+        },
+        {
+          "field": "daily.holdings",
+          "passed": true,
+          "session_count": 10
+        },
+        {
+          "field": "nautilus.account_cash_positions",
+          "passed": true,
+          "snapshot_count": 10
+        },
+        {
+          "field": "summary.costs",
+          "passed": true
+        }
+      ],
+      "differences": [],
+      "orders": [
+        {
+          "decision_date": "2026-01-12",
+          "attempt_date": "2026-01-13",
+          "symbol": "A",
+          "side": "BUY",
+          "quantity": 300,
+          "reason": null,
+          "decision_ts": 1768201200000000000,
+          "submission_ts": 1768267800000000000,
+          "origin": "nautilus_order"
+        },
+        {
+          "decision_date": "2026-01-12",
+          "attempt_date": "2026-01-13",
+          "symbol": "B",
+          "side": "BUY",
+          "quantity": 0,
+          "reason": "HALTED",
+          "decision_ts": 1768201200000000000,
+          "submission_ts": null,
+          "origin": "adapter_status_gate"
+        },
+        {
+          "decision_date": "2026-01-12",
+          "attempt_date": "2026-01-13",
+          "symbol": "C",
+          "side": "BUY",
+          "quantity": 300,
+          "reason": null,
+          "decision_ts": 1768201200000000000,
+          "submission_ts": 1768267800000000000,
+          "origin": "nautilus_order"
+        },
+        {
+          "decision_date": "2026-01-12",
+          "attempt_date": "2026-01-14",
+          "symbol": "B",
+          "side": "BUY",
+          "quantity": 300,
+          "reason": null,
+          "decision_ts": 1768201200000000000,
+          "submission_ts": 1768354200000000000,
+          "origin": "nautilus_order"
+        }
+      ],
+      "fills": [
+        {
+          "symbol": "A",
+          "side": "BUY",
+          "quantity": 300,
+          "fill_price": 100.1,
+          "commission": 100.0,
+          "ts_event": 1768267800000000000,
+          "date": "2026-01-13",
+          "gross_value": 30030.0
+        },
+        {
+          "symbol": "C",
+          "side": "BUY",
+          "quantity": 300,
+          "fill_price": 100.1,
+          "commission": 100.0,
+          "ts_event": 1768267800000000000,
+          "date": "2026-01-13",
+          "gross_value": 30030.0
+        },
+        {
+          "symbol": "B",
+          "side": "BUY",
+          "quantity": 300,
+          "fill_price": 100.1,
+          "commission": 100.0,
+          "ts_event": 1768354200000000000,
+          "date": "2026-01-14",
+          "gross_value": 30030.0
+        }
+      ],
+      "cash": [
+        100000.0,
+        100000.0,
+        100000.0,
+        100000.0,
+        100000.0,
+        100000.0,
+        39740.0,
+        9610.0,
+        9610.0,
+        9610.0
+      ],
+      "holdings": [
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [
+          {
+            "symbol": "A",
+            "quantity": 300,
+            "mark_price": 100.0
+          },
+          {
+            "symbol": "C",
+            "quantity": 300,
+            "mark_price": 103.0
+          }
+        ],
+        [
+          {
+            "symbol": "A",
+            "quantity": 300,
+            "mark_price": 101.0
+          },
+          {
+            "symbol": "B",
+            "quantity": 300,
+            "mark_price": 100.0
+          },
+          {
+            "symbol": "C",
+            "quantity": 300,
+            "mark_price": 104.0
+          }
+        ],
+        [
+          {
+            "symbol": "A",
+            "quantity": 300,
+            "mark_price": 102.0
+          },
+          {
+            "symbol": "B",
+            "quantity": 300,
+            "mark_price": 99.0
+          },
+          {
+            "symbol": "C",
+            "quantity": 300,
+            "mark_price": 103.0
+          }
+        ],
+        [
+          {
+            "symbol": "A",
+            "quantity": 300,
+            "mark_price": 103.0
+          },
+          {
+            "symbol": "B",
+            "quantity": 300,
+            "mark_price": 99.0
+          },
+          {
+            "symbol": "C",
+            "quantity": 300,
+            "mark_price": 105.0
+          }
+        ]
+      ],
+      "costs": {
+        "initial_cash": 100000.0,
+        "final_equity": 101710.0,
+        "final_positions": {
+          "A": 300,
+          "C": 300,
+          "B": 300
+        },
+        "commission": 300.0,
+        "tax": 0.0,
+        "slippage_cost": 89.99999999999488,
+        "total_cost": 389.9999999999949
+      },
+      "daily_nav": [
+        100000.0,
+        100000.0,
+        100000.0,
+        100000.0,
+        100000.0,
+        100000.0,
+        100640.0,
+        101110.0,
+        100810.0,
+        101710.0
+      ],
+      "adapter_projection": {
+        "orders": [
+          {
+            "decision_date": "2026-01-12",
+            "attempt_date": "2026-01-13",
+            "symbol": "A",
+            "side": "BUY",
+            "quantity": 300,
+            "reason": null,
+            "decision_ts": 1768201200000000000,
+            "submission_ts": 1768267800000000000,
+            "origin": "nautilus_order"
+          },
+          {
+            "decision_date": "2026-01-12",
+            "attempt_date": "2026-01-13",
+            "symbol": "B",
+            "side": "BUY",
+            "quantity": 0,
+            "reason": "HALTED",
+            "decision_ts": 1768201200000000000,
+            "submission_ts": null,
+            "origin": "adapter_status_gate"
+          },
+          {
+            "decision_date": "2026-01-12",
+            "attempt_date": "2026-01-13",
+            "symbol": "C",
+            "side": "BUY",
+            "quantity": 300,
+            "reason": null,
+            "decision_ts": 1768201200000000000,
+            "submission_ts": 1768267800000000000,
+            "origin": "nautilus_order"
+          },
+          {
+            "decision_date": "2026-01-12",
+            "attempt_date": "2026-01-14",
+            "symbol": "B",
+            "side": "BUY",
+            "quantity": 300,
+            "reason": null,
+            "decision_ts": 1768201200000000000,
+            "submission_ts": 1768354200000000000,
+            "origin": "nautilus_order"
+          }
+        ],
+        "fills": [
+          {
+            "symbol": "A",
+            "side": "BUY",
+            "quantity": 300,
+            "fill_price": 100.1,
+            "commission": 100.0,
+            "ts_event": 1768267800000000000,
+            "date": "2026-01-13",
+            "gross_value": 30030.0
+          },
+          {
+            "symbol": "C",
+            "side": "BUY",
+            "quantity": 300,
+            "fill_price": 100.1,
+            "commission": 100.0,
+            "ts_event": 1768267800000000000,
+            "date": "2026-01-13",
+            "gross_value": 30030.0
+          },
+          {
+            "symbol": "B",
+            "side": "BUY",
+            "quantity": 300,
+            "fill_price": 100.1,
+            "commission": 100.0,
+            "ts_event": 1768354200000000000,
+            "date": "2026-01-14",
+            "gross_value": 30030.0
+          }
+        ],
+        "ledger": [
+          {
+            "date": "2026-01-05",
+            "cash": 100000.0,
+            "holdings": [],
+            "nav": 100000.0
+          },
+          {
+            "date": "2026-01-06",
+            "cash": 100000.0,
+            "holdings": [],
+            "nav": 100000.0
+          },
+          {
+            "date": "2026-01-07",
+            "cash": 100000.0,
+            "holdings": [],
+            "nav": 100000.0
+          },
+          {
+            "date": "2026-01-08",
+            "cash": 100000.0,
+            "holdings": [],
+            "nav": 100000.0
+          },
+          {
+            "date": "2026-01-09",
+            "cash": 100000.0,
+            "holdings": [],
+            "nav": 100000.0
+          },
+          {
+            "date": "2026-01-12",
+            "cash": 100000.0,
+            "holdings": [],
+            "nav": 100000.0
+          },
+          {
+            "date": "2026-01-13",
+            "cash": 39740.0,
+            "holdings": [
+              {
+                "symbol": "A",
+                "quantity": 300,
+                "mark_price": 100.0
+              },
+              {
+                "symbol": "C",
+                "quantity": 300,
+                "mark_price": 103.0
+              }
+            ],
+            "nav": 100640.0
+          },
+          {
+            "date": "2026-01-14",
+            "cash": 9610.0,
+            "holdings": [
+              {
+                "symbol": "A",
+                "quantity": 300,
+                "mark_price": 101.0
+              },
+              {
+                "symbol": "B",
+                "quantity": 300,
+                "mark_price": 100.0
+              },
+              {
+                "symbol": "C",
+                "quantity": 300,
+                "mark_price": 104.0
+              }
+            ],
+            "nav": 101110.0
+          },
+          {
+            "date": "2026-01-15",
+            "cash": 9610.0,
+            "holdings": [
+              {
+                "symbol": "A",
+                "quantity": 300,
+                "mark_price": 102.0
+              },
+              {
+                "symbol": "B",
+                "quantity": 300,
+                "mark_price": 99.0
+              },
+              {
+                "symbol": "C",
+                "quantity": 300,
+                "mark_price": 103.0
+              }
+            ],
+            "nav": 100810.0
+          },
+          {
+            "date": "2026-01-16",
+            "cash": 9610.0,
+            "holdings": [
+              {
+                "symbol": "A",
+                "quantity": 300,
+                "mark_price": 103.0
+              },
+              {
+                "symbol": "B",
+                "quantity": 300,
+                "mark_price": 99.0
+              },
+              {
+                "symbol": "C",
+                "quantity": 300,
+                "mark_price": 105.0
+              }
+            ],
+            "nav": 101710.0
+          }
+        ],
+        "nautilus_account_snapshots": {
+          "2026-01-05": {
+            "cash": 100000.0,
+            "positions": {}
+          },
+          "2026-01-06": {
+            "cash": 100000.0,
+            "positions": {}
+          },
+          "2026-01-07": {
+            "cash": 100000.0,
+            "positions": {}
+          },
+          "2026-01-08": {
+            "cash": 100000.0,
+            "positions": {}
+          },
+          "2026-01-09": {
+            "cash": 100000.0,
+            "positions": {}
+          },
+          "2026-01-12": {
+            "cash": 100000.0,
+            "positions": {}
+          },
+          "2026-01-13": {
+            "cash": 39740.0,
+            "positions": {
+              "A": 300,
+              "C": 300
+            }
+          },
+          "2026-01-14": {
+            "cash": 9610.0,
+            "positions": {
+              "A": 300,
+              "B": 300,
+              "C": 300
+            }
+          },
+          "2026-01-15": {
+            "cash": 9610.0,
+            "positions": {
+              "A": 300,
+              "B": 300,
+              "C": 300
+            }
+          },
+          "2026-01-16": {
+            "cash": 9610.0,
+            "positions": {
+              "A": 300,
+              "B": 300,
+              "C": 300
+            }
+          }
+        },
+        "targets": {
+          "A": 300,
+          "B": 300,
+          "C": 300
+        },
+        "summary": {
+          "initial_cash": 100000.0,
+          "final_equity": 101710.0,
+          "final_positions": {
+            "A": 300,
+            "C": 300,
+            "B": 300
+          },
+          "commission": 300.0,
+          "tax": 0.0,
+          "slippage_cost": 89.99999999999488,
+          "total_cost": 389.9999999999949
+        }
+      },
+      "known_semantic_differences": [
+        "The adapter applies the project's 08:50 execution status gate at the open: HALTED creates a project rejection without submitting a Nautilus order, and a later tradable open creates a new order. This does not claim a native Nautilus matching-engine rejection.",
+        "Daily bars are converted to synthetic open and close L1 QuoteTicks; the strategy arms at close and submits at the next available open quote because Nautilus documents no native next-bar-open mode for bar-only data.",
+        "The fixture's 10 bp buy slippage is represented by a synthetic bid/ask around the open; Rust stores it as fill price plus explicit slippage cost.",
+        "The fixture's 100 CNY minimum commission is represented by FixedFeeModel(100 CNY) per fill; this fixture's one fill per instrument makes totals numerically comparable, while the general fee schedules are not equivalent."
+      ]
+    },
+    "timings": {
+      "status": "single_run_probe",
+      "conversion_samples_ns": [
+        1015792
+      ],
+      "initialization_samples_ns": [
+        1455416
+      ],
+      "event_processing_samples_ns": [
+        901125
+      ],
+      "end_to_end_samples_ns": [
+        41049792
+      ]
+    },
+    "build_resources": {
+      "status": "prebuilt_wheel_installed_no_native_build",
+      "install_evidence": {
+        "schema_version": "poc0.nautilus-install-attempt.v1",
+        "observed_at_local": "2026-09-27 Asia/Shanghai",
+        "required_package": "nautilus_trader==2.0.0rc5",
+        "python": "3.12.2",
+        "platform": "macOS ARM64",
+        "attempts": [
+          {
+            "command": ".venv/bin/python -m pip install --disable-pip-version-check nautilus_trader==2.0.0rc5",
+            "sandbox_result": "blocked by DNS/network access",
+            "return_code": 1,
+            "detail": "Name resolution failed for /simple/nautilus-trader/."
+          },
+          {
+            "command": ".venv/bin/python -m pip install --disable-pip-version-check nautilus_trader==2.0.0rc5",
+            "result": "installed",
+            "return_code": 0,
+            "wheel_bytes": 60000000,
+            "official_wheel_sha256": "c3feca068a507b1651ed8e9d0ee81d10a3520a2e3b37eccbe88cba3487b4e652",
+            "sha256_source": "PyPI artifact metadata; pip cache was disabled so the downloaded wheel was not retained for a local file rehash."
+          }
+        ],
+        "installed_package": {
+          "name": "nautilus-trader",
+          "version": "2.0.0rc5",
+          "installed_files": 158,
+          "installed_file_bytes": 144823815
+        },
+        "space_gate": {
+          "minimum_free_bytes": 10737418240,
+          "preflight_free_human_readable": "49 GiB",
+          "conservative_completion_estimate_bytes": 1073741824,
+          "free_bytes_after_install_and_adapter_builds": 51936387072,
+          "free_human_readable_after": "about 48 GiB",
+          "gate": "passed",
+          "target_directory": "/Users/yibinzhang/Documents/ChatGPT/A股量化/target",
+          "target_bytes_after_adapter_builds": 21751616387,
+          "cache_cleaned": false
+        },
+        "adapter_builds": {
+          "engine_wheel_build": "not applicable; official prebuilt binary wheel installed",
+          "dev": {
+            "record": "build-resource-dev-2026-09-27.json",
+            "wall_seconds": 0.19193562499999994,
+            "target_delta_bytes": 0,
+            "dependency_graph_sha256": "7028b35b9d19c5564cc9082632a5a0995864ddf4394f05763aa85478b238c563",
+            "cache_state": "warm_existing_workspace_target"
+          },
+          "release": {
+            "record": "build-resource-release-2026-09-27.json",
+            "wall_seconds": 10.163408541999999,
+            "target_delta_bytes": 89966,
+            "dependency_graph_sha256": "7028b35b9d19c5564cc9082632a5a0995864ddf4394f05763aa85478b238c563",
+            "cache_state": "warm_existing_workspace_target"
+          }
+        },
+        "status": "completed",
+        "replay_condition": "Use the exact pinned wheel in a Python 3.12 environment; build the benchmark CLI through the shared root target without clearing caches."
+      },
+      "target_path": "/Users/yibinzhang/Documents/ChatGPT/A股量化/target",
+      "target_delta_bytes": {
+        "dev": 0,
+        "release": 89966
+      },
+      "incremental_build_ns": 191935624,
+      "release_build_ns": 10163408542,
+      "cache_identity": "7028b35b9d19c5564cc9082632a5a0995864ddf4394f05763aa85478b238c563"
+    },
+    "unresolved_reasons": []
+  }
+}

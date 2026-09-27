@@ -72,9 +72,11 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
             ids: list[Any],
             quantities: dict[str, int],
             signal_ts: int,
+            decision_date: str,
             open_timestamps: set[int],
             open_dates: dict[int, str],
             close_dates: dict[int, str],
+            blocked_statuses: dict[tuple[str, str], str],
             venue: Any,
             currency: Any,
         ) -> None:
@@ -82,9 +84,11 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
             self.ids = ids
             self.quantities = quantities
             self.signal_ts = signal_ts
+            self.decision_date = decision_date
             self.open_timestamps = open_timestamps
             self.open_dates = open_dates
             self.close_dates = close_dates
+            self.blocked_statuses = blocked_statuses
             self.venue = venue
             self.currency = currency
 
@@ -110,21 +114,27 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
                 and tick.ts_event in self.config.open_timestamps
                 and symbol not in self.submitted
             ):
-                self.submitted.add(symbol)
-                order = self.order_factory.market(
-                    instrument_id=tick.instrument_id,
-                    order_side=OrderSide.BUY,
-                    quantity=Quantity.from_int(self.config.quantities[symbol]),
-                )
-                self.submit_order(order)
+                attempt_date = self.config.open_dates[int(tick.ts_event)]
+                reason = self.config.blocked_statuses.get((symbol, attempt_date))
+                if reason is None:
+                    self.submitted.add(symbol)
+                    order = self.order_factory.market(
+                        instrument_id=tick.instrument_id,
+                        order_side=OrderSide.BUY,
+                        quantity=Quantity.from_int(self.config.quantities[symbol]),
+                    )
+                    self.submit_order(order)
                 self.order_events.append(
                     {
+                        "decision_date": self.config.decision_date,
+                        "attempt_date": attempt_date,
                         "symbol": symbol,
                         "side": "BUY",
-                        "quantity": self.config.quantities[symbol],
+                        "quantity": 0 if reason else self.config.quantities[symbol],
+                        "reason": reason,
                         "decision_ts": self.config.signal_ts,
-                        "submission_ts": int(tick.ts_event),
-                        "attempt_date": self.config.open_dates[int(tick.ts_event)],
+                        "submission_ts": None if reason else int(tick.ts_event),
+                        "origin": "adapter_status_gate" if reason else "nautilus_order",
                     }
                 )
             date = self.config.close_dates.get(int(tick.ts_event))
@@ -172,10 +182,10 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
     precision_quantum = Decimal("0.01")
     bars_by_date = {d: {} for d in dataset["calendar"]}
     missing = {(x["symbol"], x["date"]) for x in dataset.get("missing_bars", [])}
-    blocked = {
-        (x["symbol"], x["date"])
+    blocked_statuses = {
+        (x["symbol"], x["date"]): x.get("trade_status") or "missing_status"
         for x in dataset.get("execution_status_overrides", [])
-        if not x["is_tradable"]
+        if not x["is_tradable"] or x.get("trade_status") != "TRADABLE" or not x.get("sources")
     }
     signal_date = dataset["calendar"][len(dataset["calendar"]) - 5]
     open_time = ZoneInfo(dataset.get("timezone", "Asia/Shanghai"))
@@ -207,9 +217,7 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
         targets[symbol] = quantity
         rows = []
         for date, close in zip(dataset["calendar"], item["closes"], strict=True):
-            if (symbol, date) in missing or (symbol, date) in blocked:
-                # Nautilus execution currently consumes market-data events; the halt is
-                # modeled as an unavailable session and retained as a reported semantic gap.
+            if (symbol, date) in missing:
                 continue
             close_price = Decimal(str(close)).quantize(precision_quantum, rounding=ROUND_HALF_UP)
             close_stamp = int(datetime.fromisoformat(f"{date}T15:00:00+08:00").timestamp() * 1_000_000_000)
@@ -268,9 +276,11 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
             ids=ids,
             quantities=targets,
             signal_ts=signal_ts,
+            decision_date=signal_date,
             open_timestamps=open_timestamps,
             open_dates=open_dates,
             close_dates=close_dates,
+            blocked_statuses=blocked_statuses,
             venue=venue,
             currency=currency,
         )
@@ -308,7 +318,7 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
     engine.dispose()
     return {
         "projection": {
-            "orders": strategy.order_events,
+            "orders": sorted(strategy.order_events, key=lambda x: (x.get("attempt_date", ""), x["symbol"])),
             "fills": fills,
             "ledger": ledger,
             "nautilus_account_snapshots": strategy.account_snapshots,
@@ -413,7 +423,7 @@ def build_report(dataset_path: Path, reference_path: Path) -> dict[str, Any]:
             "daily_nav": None if adapter_result is None else [x["nav"] for x in adapter_result["projection"]["ledger"]],
             "adapter_projection": None if adapter_result is None else adapter_result["projection"],
             "known_semantic_differences": [] if adapter_result is None else [
-                "HALTED on B/2026-01-13 is represented by omitting that session's QuoteTicks; Nautilus keeps one pending market order instead of Rust's reject-then-retry order lifecycle.",
+                "The adapter applies the project's 08:50 execution status gate at the open: HALTED creates a project rejection without submitting a Nautilus order, and a later tradable open creates a new order. This does not claim a native Nautilus matching-engine rejection.",
                 "Daily bars are converted to synthetic open and close L1 QuoteTicks; the strategy arms at close and submits at the next available open quote because Nautilus documents no native next-bar-open mode for bar-only data.",
                 "The fixture's 10 bp buy slippage is represented by a synthetic bid/ask around the open; Rust stores it as fill price plus explicit slippage cost.",
                 "The fixture's 100 CNY minimum commission is represented by FixedFeeModel(100 CNY) per fill; this fixture's one fill per instrument makes totals numerically comparable, while the general fee schedules are not equivalent.",
@@ -447,7 +457,9 @@ def build_report(dataset_path: Path, reference_path: Path) -> dict[str, Any]:
         report["semantic_comparison"]["status"] = (
             "passed_with_documented_semantic_differences" if all_checks_passed else "mismatch"
         )
-        if not all_checks_passed:
+        if all_checks_passed:
+            report["status"] = "passed_with_documented_semantic_differences"
+        else:
             report["status"] = "unresolved"
             report["unresolved_reasons"].append(
                 {
@@ -461,6 +473,9 @@ def build_report(dataset_path: Path, reference_path: Path) -> dict[str, Any]:
 
 def _compare(actual: dict[str, Any], expected: dict[str, Any]) -> list[dict[str, Any]]:
     tolerance = 1e-8
+    order_fields = ("decision_date", "attempt_date", "symbol", "side", "quantity", "reason")
+    expected_orders = [tuple(order.get(field) for field in order_fields) for order in expected.get("orders", [])]
+    actual_orders = [tuple(order.get(field) for field in order_fields) for order in actual.get("orders", [])]
     expected_fills = expected.get("fills", [])
     actual_fills = actual.get("fills", [])
     expected_by_key = {(x["date"], x["symbol"], x["side"]): x for x in expected_fills}
@@ -502,10 +517,10 @@ def _compare(actual: dict[str, Any], expected: dict[str, Any]) -> list[dict[str,
     return [
         {
             "field": "orders.lifecycle_and_attempts",
-            "passed": len(expected.get("orders", [])) == len(actual.get("orders", []))
-            and all(x.get("reason") is None for x in actual.get("orders", [])),
+            "passed": actual_orders == expected_orders,
             "expected_order_events": len(expected.get("orders", [])),
             "actual_adapter_order_events": len(actual.get("orders", [])),
+            "project_order_fields": list(order_fields),
         },
         {"field": "fills.quantity_price_commission", "passed": fill_fields_equal, "expected_fill_count": len(expected_fills), "actual_fill_count": len(actual_fills)},
         {"field": "daily.cash_nav", "passed": cash_nav_equal, "session_count": len(expected_ledger)},

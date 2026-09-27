@@ -300,7 +300,7 @@ The report also emits `b2_fast_event_buy_hold`, an independent, deliberately sma
 
 This is a prototype and a correctness smoke on one tiny fixture. It does not establish production Fast Event semantics, broad benchmark performance, or an architecture decision; Nautilus comparison remains a separate ticket.
 
-## B2 Nautilus adapter attempt (ticket 08)
+## B2 Nautilus adapter comparison (ticket 08)
 
 The Nautilus candidate is selected through the same correctness-first command. The default
 Python executable is the repository `.venv/bin/python`; install the pinned wheel first:
@@ -322,15 +322,16 @@ account snapshot is checked separately from the project ledger reconstructed fro
 Python process owns all Nautilus types and engine lifecycle.
 
 Nautilus 2.x has no native next-bar-open mode for bar-only data, so the QuoteTick adapter is
-the measured timing seam. Five of six fixed-fixture checks pass for fill quantity/price/
-commission, direct account cash/positions, daily cash/holdings/NAV, and total cost. It remains
-`unresolved` because the B HALTED session
-is represented by an omitted QuoteTick: Nautilus keeps a pending order and fills next day,
-while the Rust reference records a rejection and a separate retry. This is an order lifecycle
-difference even though the fill and account projections match. The sample recorded conversion,
-initialization, event processing, and end-to-end once; it is a correctness probe, not throughput
-evidence. Full projection and raw samples are in
-[`Nautilus comparison`](results/nautilus-adapter-comparison-2026-09-27.json).
+the measured timing seam. All six fixed-fixture checks pass: exact project order attempts and
+reasons, fill quantity/price/commission, direct account cash/positions, daily cash/holdings/NAV,
+and total cost. The Adapter reads the fixture's 08:50 status at the 09:30 open. B's Jan 13
+`HALTED` status produces a project rejection with zero quantity; no B order is submitted to
+Nautilus that day. The next tradable open creates a new Nautilus order and fills on Jan 14.
+This is an Adapter status gate, not a native Nautilus matching-engine rejection. Synthetic
+quotes, spread-based slippage and fixed per-fill commission remain documented comparison
+boundaries. One conversion/initialization/event/end-to-end timing sample is a correctness
+probe, not throughput evidence. See the [status-gated comparison](results/nautilus-adapter-comparison-status-gated-2026-09-27.json)
+and the preserved [initial lifecycle mismatch](results/nautilus-adapter-comparison-2026-09-27.json).
 
 The first restricted pip attempt failed DNS; the fixed wheel was then installed successfully
 with the available approved network path. The space gate remained above 10 GiB. Install and

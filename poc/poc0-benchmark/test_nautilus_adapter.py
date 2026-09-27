@@ -8,6 +8,45 @@ import nautilus_adapter
 
 
 class NautilusAdapterReportTests(unittest.TestCase):
+    @unittest.skipUnless(
+        nautilus_adapter._version_probe()[1] is None,
+        "requires the pinned Nautilus runtime",
+    )
+    def test_halted_order_is_rejected_at_open_then_retried(self):
+        dataset = json.loads(
+            (nautilus_adapter.ROOT / "poc/poc0-benchmark/fixtures/dataset-v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        projection = nautilus_adapter._run_nautilus(dataset)["projection"]
+
+        self.assertEqual(
+            [
+                (order["attempt_date"], order["symbol"], order["quantity"], order["reason"])
+                for order in projection["orders"]
+            ],
+            [
+                ("2026-01-13", "A", 300, None),
+                ("2026-01-13", "B", 0, "HALTED"),
+                ("2026-01-13", "C", 300, None),
+                ("2026-01-14", "B", 300, None),
+            ],
+        )
+        self.assertEqual(
+            [(fill["date"], fill["symbol"]) for fill in projection["fills"]],
+            [
+                ("2026-01-13", "A"),
+                ("2026-01-13", "C"),
+                ("2026-01-14", "B"),
+            ],
+        )
+        rejected = projection["orders"][1]
+        retried = projection["orders"][3]
+        self.assertEqual(rejected["origin"], "adapter_status_gate")
+        self.assertIsNone(rejected["submission_ts"])
+        self.assertEqual(retried["origin"], "nautilus_order")
+        self.assertGreater(retried["submission_ts"], rejected["decision_ts"])
+
     def test_unavailable_or_unverified_runtime_keeps_measurements_unknown(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -83,6 +122,25 @@ class NautilusAdapterReportTests(unittest.TestCase):
 
         self.assertFalse(checks[0]["passed"])
         self.assertTrue(all(check["passed"] for check in checks[1:]))
+
+    def test_order_comparison_checks_rejection_reason_and_attempt_date(self):
+        expected = {
+            "orders": [
+                {
+                    "decision_date": "2026-01-12",
+                    "attempt_date": "2026-01-13",
+                    "symbol": "B",
+                    "side": "BUY",
+                    "quantity": 0,
+                    "reason": "HALTED",
+                }
+            ]
+        }
+        actual = {"orders": [dict(expected["orders"][0])]}
+        self.assertTrue(nautilus_adapter._compare(actual, expected)[0]["passed"])
+
+        actual["orders"][0]["attempt_date"] = "2026-01-14"
+        self.assertFalse(nautilus_adapter._compare(actual, expected)[0]["passed"])
 
 
 if __name__ == "__main__":
