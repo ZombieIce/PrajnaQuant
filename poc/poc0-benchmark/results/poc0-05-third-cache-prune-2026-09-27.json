@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-09-27T06:28:20.097766+00:00",
+  "reason": "restore 10 GiB reserve after guarded workspace test link exceeded estimate",
+  "path": "target/debug/build/libduckdb-sys-d06812f0ba44c95a",
+  "cache_mtime": "2026-09-23 20:39:08",
+  "logical_bytes": 3512421208,
+  "free_before_bytes": 9934049280,
+  "free_after_bytes": 13457661952,
+  "lsof_stdout": "",
+  "lsof_exit_code": 1
+}

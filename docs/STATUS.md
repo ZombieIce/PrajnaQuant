@@ -8,9 +8,9 @@
 
 用户已确定新主路线为 Rust-first、多市场、三级回测引擎与未来实盘的平台；现阶段先做 [`POC-0`](poc-0-benchmark-spec.md)。完整目标见根目录 [`ARCHITECTURE.md`](../ARCHITECTURE.md)，新交付顺序见 [`product-roadmap.md`](product-roadmap.md)。目前没有 Vector / Fast Event / Accurate 三级实现、Nautilus Adapter、持久 Factor Cache、跨市场账户、Python/PyO3 策略入口或 Live Runtime。现有 React 页面是已实现资产，新平台 MVP 不以 Web 为验收项。以下扫描记录描述旧 A 股纵向场景的代码与数据证据，不能升级为新目标能力。
 
-POC-0 工作范围与验收已发布为本地 [`ready-for-agent` spec](../.scratch/poc-0-benchmark/spec.md)。独立 [`poc/b1-layout`](../poc/b1-layout/README.md) 标量读取 smoke 只对拍三种布局的动量；票据 02 的 SoA、票据 03 的 Arrow 完整 S2 候选和票据 04 的 Polars 候选已验收。Arrow 与 Polars 定向 CLI 用例及全工作区测试通过（89 passed、1 ignored）；Clippy 与格式检查通过。Arrow release 计时尚未生成，因此性能比较与 B1 布局决策仍为 **Unresolved**。Parquet 扫描、峰值内存和 out-of-core 测量仍缺。B2 只有票据 07 的最小原型，B3 未启动。
+POC-0 工作范围与验收已发布为本地 [`ready-for-agent` spec](../.scratch/poc-0-benchmark/spec.md)。独立 [`poc/b1-layout`](../poc/b1-layout/README.md) 标量读取 smoke 只对拍三种布局的动量；票据 02 的 SoA、票据 03 的 Arrow 完整 S2 候选和票据 04 的 Polars 候选已验收。票据 05 现有版本化 Parquet 写入/复读、列/row group 裁剪与三候选对拍；10,000,029 行源文件为 404,509,661 字节，改用解码前跳过零重叠组的读取策略后，独立复读进程峰值 RSS 57,573,376 字节。受限内存启动被本机 `setrlimit` 拒绝，故该验收仍 **Unresolved**；Arrow release 计时和 B1 布局决策也未完成。B2 只有票据 07 的最小原型，B3 未启动。
 
-2026-09-27 票据 05 实施尝试在依赖解析阶段受阻，未改代码或启动构建：离线 Cargo 索引缺少 Polars Parquet feature 依赖的 `brotli`/`polars-sql` 元数据，联网解析也无法连接配置的 mirror。详细命令和复跑条件记在 [票据 05](../.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md)；Parquet/out-of-core/RSS 仍 Unresolved。
+2026-09-27 票据 05 最初在依赖解析阶段受阻；现以最小本地 `polars-io` vendor 补齐离线 Parquet 路径。实现、资源实测和受限内存未通过的证据见 [票据 05](../.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md)。
 
 2026-09-27 实现与验收：票据 04 Polars 已由用户确认并标记 `resolved`。`--candidate polars` 通过 Polars lazy expressions 计算加权因子评分、排序、TopK、按实际入选数量均分的目标权重及下一交易日组合收益；正确性通过后才测量。报告保留五个原始样本、阶段计时、DataFrame 构造时间和投影 checksum。固定 3 ETF × 10 日 fixture 仅验证语义与 CLI，不支持布局决策。当前工作树也包含此前已有的 Arrow 候选改动，最终提交须保留其独立归属；验证状态以本轮 HANDOFF 为准。
 

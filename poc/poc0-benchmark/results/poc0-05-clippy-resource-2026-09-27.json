@@ -1,0 +1,19 @@
+{
+  "command": [
+    "cargo",
+    "clippy",
+    "--workspace",
+    "--all-targets",
+    "--locked",
+    "--offline",
+    "--",
+    "-D",
+    "warnings"
+  ],
+  "free_before_bytes": 13462941696,
+  "free_low_bytes": 13307273216,
+  "free_after_bytes": 13300944896,
+  "exit_code": 101,
+  "stopped_by_space_guard": false,
+  "log": "/tmp/poc05-clippy.log"
+}

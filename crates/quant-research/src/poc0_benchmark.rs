@@ -22,6 +22,9 @@ use std::{
     time::Instant,
 };
 
+mod parquet;
+pub use parquet::{ParquetOptions, run_parquet};
+
 const WARMUP_RUNS: usize = 1;
 const MEASUREMENT_RUNS: usize = 5;
 const FLOAT_TOLERANCE: f64 = 1e-8;
@@ -203,13 +206,13 @@ struct CandidateConfig {
     future_returns_used_for_decisions: bool,
 }
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 struct RankingCandidate {
     symbol: String,
     score: f64,
 }
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 struct RankingProjection {
     date: NaiveDate,
     candidates: Vec<RankingCandidate>,
@@ -520,14 +523,14 @@ struct B1SoaProjection {
     portfolio_returns: Vec<PortfolioReturn>,
 }
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 struct WeightedTarget {
     date: NaiveDate,
     symbol: String,
     weight: f64,
 }
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 struct PortfolioReturn {
     from: NaiveDate,
     to: NaiveDate,

@@ -1,5 +1,52 @@
 # POC-0 benchmark entry
 
+## Parquet B1 path (ticket 05)
+
+From the repository root, use the shared lightweight build and generate a versioned Parquet
+fixture with a manifest. `--reuse` reads the existing file and verifies its size, SHA-256 and
+fixture content identity before timing. The file has 7 columns; each candidate receives only
+`date`, `symbol`, and `close` from the same selected row groups:
+
+```bash
+cargo run -p quant-research --no-default-features --locked --offline -- \
+  benchmark-poc0-parquet --parquet target/poc-0/dataset-v1.parquet \
+  --output target/poc-0/parquet-report.json
+target/debug/quant-research benchmark-poc0-parquet --reuse \
+  --parquet target/poc-0/dataset-v1.parquet --symbol A \
+  --start 2026-01-06 --end 2026-01-07
+```
+
+The CLI preserves all earlier dates needed by rolling factors and the next date needed by
+return evaluation, then filters the reported projection to the requested interval. It checks the
+fixed independent golden first, and the Parquet bars against the source fixture. The report
+separates generation, scan/decode, scan conversion, three candidate compute paths, layout
+conversion, serialization, and total time. Cache state is explicitly uncontrolled; these
+numbers are single observations, not a layout selection. The B1 return is an evaluation label,
+not an event-account NAV.
+The reader uses Polars' row-group strategy to skip non-overlapping groups before column decoding;
+the single-threaded strategy still entered the column path for skipped groups in the pinned Polars
+version. A repeat 10M-row filtered scan and peak RSS record are in
+[`results/parquet-large-10m-rowgroups-2026-09-27.json`](results/parquet-large-10m-rowgroups-2026-09-27.json)
+and its `.rss.json` companion. Cache state was not controlled between runs.
+
+`--filler-rows N` writes deterministic extra rows in 4,096-row batches for a larger source. It
+requires an explicit fixture `--symbol` filter when reading; filler rows are excluded from S2.
+Before writing, the CLI checks free space against a conservative `160 × N + 4 MiB` output
+estimate and a 10 GiB reserve. A failed gate writes an `unresolved` report and exits 2.
+Measure runtime RSS separately after building:
+
+```bash
+python3 poc/poc0-benchmark/measure-parquet-rss.py \
+  --parquet target/poc-0/large-10m.parquet \
+  --output target/poc-0/large-rss-report.json \
+  --symbol A --start 2026-01-06 --end 2026-01-07
+```
+
+Add `--limit-mib 256` only on a host where `RLIMIT_AS` is supported. On the current macOS host,
+`setrlimit` failed before launching the child, so the constrained-memory acceptance remains
+unresolved. The unrestricted 10-million-row run and failure evidence are recorded in
+[`ticket 05`](../../.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md).
+
 Run the fixed three-ETF, ten-session fixture from the repository root:
 
 ```bash

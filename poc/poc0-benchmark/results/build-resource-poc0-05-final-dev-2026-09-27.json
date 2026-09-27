@@ -1,0 +1,748 @@
+{
+  "schema_version": 1,
+  "started_at_utc": "2026-09-27T06:19:42.880473+00:00",
+  "finished_at_utc": "2026-09-27T06:19:53.466471+00:00",
+  "command": [
+    "cargo",
+    "build",
+    "-p",
+    "quant-research",
+    "--no-default-features",
+    "--locked",
+    "--offline",
+    "--profile",
+    "dev"
+  ],
+  "working_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316",
+  "target_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/target",
+  "cache_state": "warm_existing_workspace_target",
+  "estimated_max_additional_bytes": 2147483648,
+  "minimum_free_bytes": 10737418240,
+  "runtime_stop_free_bytes": 11274289152,
+  "space_samples": [
+    {
+      "observed_at_utc": "2026-09-27T06:19:44.992126+00:00",
+      "volume_free_bytes": 13999423488
+    },
+    {
+      "observed_at_utc": "2026-09-27T06:19:46.993967+00:00",
+      "volume_free_bytes": 13890547712
+    },
+    {
+      "observed_at_utc": "2026-09-27T06:19:48.997920+00:00",
+      "volume_free_bytes": 13883858944
+    }
+  ],
+  "git_revision": "cacee86a63bb915582c647325fd4b187c78a2cce",
+  "working_tree_dirty": true,
+  "tracked_diff_sha256": "ef69594ab9c4e298489b646d9c334ec6110bdc070911bed56d6e3ec44ea474c5",
+  "tracked_diff_summary": "AGENTS.md                                         |  9 ++-\n Cargo.lock                                        |  4 +-\n Cargo.toml                                        |  3 +\n crates/quant-research/Cargo.toml                  |  2 +\n crates/quant-research/src/main.rs                 | 56 ++++++++++++++++\n crates/quant-research/src/poc0_benchmark.rs       | 11 +--\n crates/quant-research/tests/poc0_benchmark_cli.rs | 81 +++++++++++++++++++++++\n 7 files changed, 158 insertions(+), 8 deletions(-)",
+  "changed_paths": [
+    "GENTS.md",
+    "Cargo.lock",
+    "Cargo.toml",
+    "crates/quant-research/Cargo.toml",
+    "crates/quant-research/src/main.rs",
+    "crates/quant-research/src/poc0_benchmark.rs",
+    "crates/quant-research/tests/poc0_benchmark_cli.rs",
+    "crates/quant-research/src/poc0_benchmark/parquet.rs",
+    "poc/poc0-benchmark/measure-parquet-rss.py",
+    "poc/poc0-benchmark/results/build-resource-poc0-05-dev-2026-09-27.json",
+    "poc/poc0-benchmark/results/build-resource-poc0-05-space-blocked-2026-09-27.json",
+    "poc/poc0-benchmark/results/poc0-05-cache-prune-2026-09-27.json",
+    "poc/vendor/polars-io/.cargo-ok",
+    "poc/vendor/polars-io/.cargo_vcs_info.json",
+    "poc/vendor/polars-io/Cargo.lock",
+    "poc/vendor/polars-io/Cargo.toml",
+    "poc/vendor/polars-io/Cargo.toml.orig",
+    "poc/vendor/polars-io/LICENSE",
+    "poc/vendor/polars-io/README.md",
+    "poc/vendor/polars-io/src/avro/mod.rs",
+    "poc/vendor/polars-io/src/avro/read.rs",
+    "poc/vendor/polars-io/src/avro/write.rs",
+    "poc/vendor/polars-io/src/catalog/mod.rs",
+    "poc/vendor/polars-io/src/catalog/unity/client.rs",
+    "poc/vendor/polars-io/src/catalog/unity/mod.rs",
+    "poc/vendor/polars-io/src/catalog/unity/models.rs",
+    "poc/vendor/polars-io/src/catalog/unity/schema.rs",
+    "poc/vendor/polars-io/src/catalog/unity/utils.rs",
+    "poc/vendor/polars-io/src/cloud/cloud_writer/bufferer.rs",
+    "poc/vendor/polars-io/src/cloud/cloud_writer/internal_writer.rs",
+    "poc/vendor/polars-io/src/cloud/cloud_writer/io_trait_wrap.rs",
+    "poc/vendor/polars-io/src/cloud/cloud_writer/mod.rs",
+    "poc/vendor/polars-io/src/cloud/cloud_writer/multipart_upload.rs",
+    "poc/vendor/polars-io/src/cloud/cloud_writer/writer.rs",
+    "poc/vendor/polars-io/src/cloud/concurrency/admission.rs",
+    "poc/vendor/polars-io/src/cloud/concurrency/mod.rs",
+    "poc/vendor/polars-io/src/cloud/concurrency/model.rs",
+    "poc/vendor/polars-io/src/cloud/concurrency/regime.rs",
+    "poc/vendor/polars-io/src/cloud/concurrency_config.rs",
+    "poc/vendor/polars-io/src/cloud/credential_provider.rs",
+    "poc/vendor/polars-io/src/cloud/dns.rs",
+    "poc/vendor/polars-io/src/cloud/glob.rs",
+    "poc/vendor/polars-io/src/cloud/mod.rs",
+    "poc/vendor/polars-io/src/cloud/object_store_setup.rs",
+    "poc/vendor/polars-io/src/cloud/options.rs",
+    "poc/vendor/polars-io/src/cloud/polars_object_store.rs",
+    "poc/vendor/polars-io/src/configs.rs",
+    "poc/vendor/polars-io/src/csv/mod.rs",
+    "poc/vendor/polars-io/src/csv/read/builder.rs",
+    "poc/vendor/polars-io/src/csv/read/mod.rs",
+    "poc/vendor/polars-io/src/csv/read/options.rs",
+    "poc/vendor/polars-io/src/csv/read/parser.rs",
+    "poc/vendor/polars-io/src/csv/read/read_impl.rs",
+    "poc/vendor/polars-io/src/csv/read/reader.rs",
+    "poc/vendor/polars-io/src/csv/read/schema_inference.rs",
+    "poc/vendor/polars-io/src/csv/read/splitfields.rs",
+    "poc/vendor/polars-io/src/csv/read/streaming.rs",
+    "poc/vendor/polars-io/src/csv/read/utils.rs",
+    "poc/vendor/polars-io/src/csv/write/mod.rs",
+    "poc/vendor/polars-io/src/csv/write/options.rs",
+    "poc/vendor/polars-io/src/csv/write/write_impl.rs",
+    "poc/vendor/polars-io/src/csv/write/write_impl/serializer.rs",
+    "poc/vendor/polars-io/src/csv/write/writer.rs",
+    "poc/vendor/polars-io/src/file_cache/cache.rs",
+    "poc/vendor/polars-io/src/file_cache/cache_lock.rs",
+    "poc/vendor/polars-io/src/file_cache/entry.rs",
+    "poc/vendor/polars-io/src/file_cache/eviction.rs",
+    "poc/vendor/polars-io/src/file_cache/file_fetcher.rs",
+    "poc/vendor/polars-io/src/file_cache/file_lock.rs",
+    "poc/vendor/polars-io/src/file_cache/metadata.rs",
+    "poc/vendor/polars-io/src/file_cache/mod.rs",
+    "poc/vendor/polars-io/src/file_cache/utils.rs",
+    "poc/vendor/polars-io/src/hive.rs",
+    "poc/vendor/polars-io/src/ipc/ipc_file.rs",
+    "poc/vendor/polars-io/src/ipc/ipc_reader_async.rs",
+    "poc/vendor/polars-io/src/ipc/ipc_stream.rs",
+    "poc/vendor/polars-io/src/ipc/mmap.rs",
+    "poc/vendor/polars-io/src/ipc/mod.rs",
+    "poc/vendor/polars-io/src/ipc/pl_ipc_metadata.rs",
+    "poc/vendor/polars-io/src/ipc/write.rs",
+    "poc/vendor/polars-io/src/json/infer.rs",
+    "poc/vendor/polars-io/src/json/mod.rs",
+    "poc/vendor/polars-io/src/lib.rs",
+    "poc/vendor/polars-io/src/metrics.rs",
+    "poc/vendor/polars-io/src/mmap.rs",
+    "poc/vendor/polars-io/src/ndjson/buffer.rs",
+    "poc/vendor/polars-io/src/ndjson/core.rs",
+    "poc/vendor/polars-io/src/ndjson/mod.rs",
+    "poc/vendor/polars-io/src/options.rs",
+    "poc/vendor/polars-io/src/parquet/metadata.rs",
+    "poc/vendor/polars-io/src/parquet/mod.rs",
+    "poc/vendor/polars-io/src/parquet/read/async_impl.rs",
+    "poc/vendor/polars-io/src/parquet/read/mmap.rs",
+    "poc/vendor/polars-io/src/parquet/read/mod.rs",
+    "poc/vendor/polars-io/src/parquet/read/options.rs",
+    "poc/vendor/polars-io/src/parquet/read/read_impl.rs",
+    "poc/vendor/polars-io/src/parquet/read/reader.rs",
+    "poc/vendor/polars-io/src/parquet/read/utils.rs",
+    "poc/vendor/polars-io/src/parquet/write/batched_writer.rs",
+    "poc/vendor/polars-io/src/parquet/write/key_value_metadata.rs",
+    "poc/vendor/polars-io/src/parquet/write/mod.rs",
+    "poc/vendor/polars-io/src/parquet/write/options.rs",
+    "poc/vendor/polars-io/src/parquet/write/writer.rs",
+    "poc/vendor/polars-io/src/path_utils/hugging_face.rs",
+    "poc/vendor/polars-io/src/path_utils/mod.rs",
+    "poc/vendor/polars-io/src/pl_async.rs",
+    "poc/vendor/polars-io/src/predicates.rs",
+    "poc/vendor/polars-io/src/prelude.rs",
+    "poc/vendor/polars-io/src/scan_lines.rs",
+    "poc/vendor/polars-io/src/shared.rs",
+    "poc/vendor/polars-io/src/utils/byte_source.rs",
+    "poc/vendor/polars-io/src/utils/bytes_bufferer.rs",
+    "poc/vendor/polars-io/src/utils/compression.rs",
+    "poc/vendor/polars-io/src/utils/file.rs",
+    "poc/vendor/polars-io/src/utils/mkdir.rs",
+    "poc/vendor/polars-io/src/utils/mod.rs",
+    "poc/vendor/polars-io/src/utils/other.rs",
+    "poc/vendor/polars-io/src/utils/slice.rs",
+    "poc/vendor/polars-io/src/utils/stream_buf_reader.rs",
+    "poc/vendor/polars-io/src/utils/sync_on_close.rs"
+  ],
+  "untracked_files": [
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/parquet.rs",
+      "sha256": "b28ed836ec77cba53a9a8bb47a1732233aaec7b12a0608166b4bfba9efa8beb7"
+    },
+    {
+      "path": "poc/poc0-benchmark/measure-parquet-rss.py",
+      "sha256": "2d394f9dd5c42aff5eeb4512e6ba74991d448541961090a58248afcf7be3af04"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/build-resource-poc0-05-dev-2026-09-27.json",
+      "sha256": "77d99d682637b6347da5fd523d2da882803ee8b13b59bb52780abad0f6ce60b4"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/build-resource-poc0-05-space-blocked-2026-09-27.json",
+      "sha256": "12ea2b1573865bd1787d7f242590e8bb82a0f90163da8f48662525e6e3ad6444"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/poc0-05-cache-prune-2026-09-27.json",
+      "sha256": "567b427871b9dffa2046d1001e412ae207d7f17640afdc07ba1014131051023f"
+    },
+    {
+      "path": "poc/vendor/polars-io/.cargo-ok",
+      "sha256": "afbf9d0f3560b0fd7795e81c42a0a79ee6b6fc67e064f77826aee642cad28d91"
+    },
+    {
+      "path": "poc/vendor/polars-io/.cargo_vcs_info.json",
+      "sha256": "ca661de9662a617b4b4b5625d1321ea2fbe7228d84978e7329faefacf66a85dc"
+    },
+    {
+      "path": "poc/vendor/polars-io/Cargo.lock",
+      "sha256": "01a1c65965ee2c92f590f1b9dd70ff826cc008945fc2141da2667f1ea76f02ef"
+    },
+    {
+      "path": "poc/vendor/polars-io/Cargo.toml",
+      "sha256": "e96bbca07cd6c7f8900e2e5d02e10f026fb64784495bf23ed563929c97b81874"
+    },
+    {
+      "path": "poc/vendor/polars-io/Cargo.toml.orig",
+      "sha256": "2ce6efc2ab6a60c9d40f18c270c3f19b5be108a1ec38b020499c3e163d363673"
+    },
+    {
+      "path": "poc/vendor/polars-io/LICENSE",
+      "sha256": "8296022372dc83cc8ef234b3d4889ef8f8b1779754a78bebf13d2c5178a6b4c4"
+    },
+    {
+      "path": "poc/vendor/polars-io/README.md",
+      "sha256": "c2de27b29448eb6342437d37d748a97f4c7d6e4b9fe47eb10ef22a77afafce47"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/avro/mod.rs",
+      "sha256": "9f493b4b08d781b053fcde331189f9f4bfc6a365062667d3b759471efc5365f0"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/avro/read.rs",
+      "sha256": "37fcf0fa9d446a9d81fa5730888edb96eb89c7d01c8847a080b184be9a47dfb3"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/avro/write.rs",
+      "sha256": "dc45a110af0bdc45827896d56277725daf81020b94649bd89e0c61097e182eb2"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/catalog/mod.rs",
+      "sha256": "2ace63b69c035ddd55c5fb7e9ea87552227b575d85c58119811332851e33113f"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/catalog/unity/client.rs",
+      "sha256": "812fb9e2989148242aa2f25498a94483da7471b8cb1428292382eeaaac2cd915"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/catalog/unity/mod.rs",
+      "sha256": "42d10e7720440d5bebe5c59e227205a913fbf8f35eb4e7790941413570120a5a"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/catalog/unity/models.rs",
+      "sha256": "bed6af9de343d870941c1a621d61de80f665ae83e827763343f0220bf4b2ca6d"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/catalog/unity/schema.rs",
+      "sha256": "076569bd8872caae8f90e5c192bf5da99d1a9764d7639eabb2ad8ae26fc91676"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/catalog/unity/utils.rs",
+      "sha256": "7c46d6e17b8a4bc32fdaafd6e5660ec851add1bbfb7ed36a5039bab662404b10"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/cloud/cloud_writer/bufferer.rs",
+      "sha256": "b09e005196575a5b85cc0297ee35dd2d979836c23e3ce8000bdab189f99db75d"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/cloud/cloud_writer/internal_writer.rs",
+      "sha256": "729fa8499fe8afe0d7f3b8949b6b2e5fd40b88e2317a4027d36852f7082a8fe0"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/cloud/cloud_writer/io_trait_wrap.rs",
+      "sha256": "5685319470a2acc3c6be11a06822c3f1625b7f0355cb064eec03b5feef331a59"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/cloud/cloud_writer/mod.rs",
+      "sha256": "130797f5ae13f425201488242e948f8a6e16816116e588bbe981bc5f69fe4432"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/cloud/cloud_writer/multipart_upload.rs",
+      "sha256": "931b1281ff02f3885ea63a92170f1462013f9f62be942b910ae30048426efa93"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/cloud/cloud_writer/writer.rs",
+      "sha256": "c80d52b055f3d12d905b74b467e14f805c111f321b67729b3a3fba2fb4796a34"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/cloud/concurrency/admission.rs",
+      "sha256": "10d1883d501424dc32262a9eaa5ec6fba89320f565c62bb00bea14f4b04f8d1f"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/cloud/concurrency/mod.rs",
+      "sha256": "6ee3f70dc5c7cec2d7b345a18921083535738768f868f7c39823ff45e8184344"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/cloud/concurrency/model.rs",
+      "sha256": "c726c8e59534aa6749a5c3e610b50a655a7d1f5a050518903e27d331db6d9902"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/cloud/concurrency/regime.rs",
+      "sha256": "66cda91555443556068b89c792f9432766f986765710d64639fad3ea9e367c9c"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/cloud/concurrency_config.rs",
+      "sha256": "df359ee3672aed2cce2f859b1c8b71a6ca71b6af6e529adec2ba1a939e63b8d5"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/cloud/credential_provider.rs",
+      "sha256": "02d48e8c9d7e560e3935e45fc768fcf51aa6a6f00bf9b05f214f0e51e720a9e1"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/cloud/dns.rs",
+      "sha256": "c51762411e21696b30eb0f37d89c06cbd045bc19b0827673e57338c2bca99552"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/cloud/glob.rs",
+      "sha256": "e1b3dec48ac64306848a8d3228e63ae1a3c66307db21ec619c6a8f8a049b2238"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/cloud/mod.rs",
+      "sha256": "ec5932aabcaced1a33a4ca9e036621e1ff0ee6fc4315cdf2fd40cc3d328de51f"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/cloud/object_store_setup.rs",
+      "sha256": "571ab64dfa674b0a4d00d2c0634ca8aef493e2bf06799d1a99ab8e4b505f9a0a"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/cloud/options.rs",
+      "sha256": "4652b53f75d264373fe03913c8c80201a9e5165a1d4f175d972d99155b1ca3a7"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/cloud/polars_object_store.rs",
+      "sha256": "a5e42e47c4e21bc690b43c53816950fdacd7ac57a821c053850f7b2161aabb51"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/configs.rs",
+      "sha256": "94a7e7584efe76c534fa0226b8f00318b19ce428d73f6306c57aedc2109e682f"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/csv/mod.rs",
+      "sha256": "5b42f56db630f65a3df43f2b8d4e92de8aabe7d19e8a2de232097ebee4916ef2"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/csv/read/builder.rs",
+      "sha256": "73a641be94f430018445cc2092bbdae4b40ee924f658561970f0f77bf8ba8853"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/csv/read/mod.rs",
+      "sha256": "a260c61d9a46617521394699d3fd935c75b4dcc168aa55fd0b6330539971c74b"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/csv/read/options.rs",
+      "sha256": "ebedfeb2ed5642117db308916bb8f7b01da62a7f6ca8285b41fd42d9035423ae"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/csv/read/parser.rs",
+      "sha256": "48a6805af93bbd77e504ea4fd1d41f8b2506f19b9dcdbb94b6f2f3e22256ef31"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/csv/read/read_impl.rs",
+      "sha256": "fb8dc71c652a35b0be91c62fa20d358e957cda714fc7222cc8ce5bc51782bb59"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/csv/read/reader.rs",
+      "sha256": "28079f87c369785da2d2267bc6052cf60a7272e7aa4180aa7c291626d1721809"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/csv/read/schema_inference.rs",
+      "sha256": "08c77c0825ae0b2b6b3a169ca978738d12239de7adb0f6bc772c6af8c342d46d"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/csv/read/splitfields.rs",
+      "sha256": "221911d5f5837ba98b604012106cac660d1c06663f8f3d17c574f27b21185ff9"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/csv/read/streaming.rs",
+      "sha256": "4f01dd7336ecfda2f6ddbc588aea0a490a3a598a06ee579b5d56a186539967bb"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/csv/read/utils.rs",
+      "sha256": "f41e8464fe68ae2d5cccbde883b13d09d90076557f788c693d513c13a64fbbc7"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/csv/write/mod.rs",
+      "sha256": "c661a8fcc2f47cefc1ac4acd06ea43a261673ee3e40f739cda70ce193dd93a09"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/csv/write/options.rs",
+      "sha256": "eed0493b43fa12f33000a3f00b66da6167710707002a5cf29f311832e378376c"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/csv/write/write_impl.rs",
+      "sha256": "0bbdb7f4ade5426ea484de2c2024c59c1845b614fa0851283a2fda5105be4485"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/csv/write/write_impl/serializer.rs",
+      "sha256": "d8ff921018e213b8eaa06ede2c2e59c6291fda844ad17cf9359f8cf277a5c8bf"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/csv/write/writer.rs",
+      "sha256": "cd1ea69e848cff2ceb6cfada9c581b6f3c8ebcb020c03685585a0e9d5fa95c80"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/file_cache/cache.rs",
+      "sha256": "18a017c78f3d470177b4eafbb44d083b489ee42f6a5e4db3abc910ca3141ffb4"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/file_cache/cache_lock.rs",
+      "sha256": "cb8445bca1861d9390be2d10fb4044524ea240911fc4da7c1f0ef53c77b62b05"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/file_cache/entry.rs",
+      "sha256": "3dd31dd0515623d377cd17190060c049442b2c652d4ebe69f7016c1b754d0f73"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/file_cache/eviction.rs",
+      "sha256": "42169444e6202bd69e66e049413084b957f380a5bc1a1d455385fbdb3d1b1826"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/file_cache/file_fetcher.rs",
+      "sha256": "0a4257c1f291c6ea69306b49842101b22668c6284ae0e3a57eed6a9e83f22ef2"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/file_cache/file_lock.rs",
+      "sha256": "484d5ad0410f1580c2ed76a9ec008139d120967ee2c2ecf847898b030e0a89fe"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/file_cache/metadata.rs",
+      "sha256": "25d64f85d89ec275de45168457e9dd766d02bc9527031803cff8b32a1098a27e"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/file_cache/mod.rs",
+      "sha256": "ce309d6bbc85f4deb902a692ab809c6561c5957a9c0091601fb563ec94c859c0"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/file_cache/utils.rs",
+      "sha256": "0ffc83b016c77ce60e27dca109ddc176722a71f39abbd6938f64163e3c68eff2"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/hive.rs",
+      "sha256": "56afefdc26355336c824dc07192e5b03217a1589026f35b84f422ef3ea3d17cb"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/ipc/ipc_file.rs",
+      "sha256": "c568c152c432531d63887a6e9cdeb64bb960efcfe74d927b5625466464568978"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/ipc/ipc_reader_async.rs",
+      "sha256": "c33d5f95b3b94383d74942090a6e3a78ae42f7b05cbf63f08b5a4733b1b58384"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/ipc/ipc_stream.rs",
+      "sha256": "012e80153ddf9eadfcce62aa7dc9e7acb2888719fc9d62f04b512089309f6a63"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/ipc/mmap.rs",
+      "sha256": "9fd70fd9655abfb89886d67d37af2ff123d2d5f2f57bba792921d115939247aa"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/ipc/mod.rs",
+      "sha256": "7be93ca5bb669bf04fe5e4a5f314e6e741663e98fa4e9ad00827a3cf107fd5fe"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/ipc/pl_ipc_metadata.rs",
+      "sha256": "1c25c7fddd2b3e7f5d40245092108ada292a823d5e6d3ba27a63e7d185e78e0e"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/ipc/write.rs",
+      "sha256": "d55994b3ca42ca04a270db64e252667e452bbd297abc5710cd3b2b10e298f5d3"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/json/infer.rs",
+      "sha256": "08d1e7595a869463e8f7be849d54709db8f086dc0087ba75afefbd3e6b05e6e7"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/json/mod.rs",
+      "sha256": "5bb717fc33b66532843900628ad20add2185e2758e1063cc580c5b4da3e86476"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/lib.rs",
+      "sha256": "b547b183090c62359b33ac7d7cf4f118420eab2002acace50b8ae1f4ea21f950"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/metrics.rs",
+      "sha256": "65c98438ef5f416f14e697f88cab5392e52353a2649df4779457ce2008e3a9e8"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/mmap.rs",
+      "sha256": "b2912d1f0a4c8070c7aa69d6ea412539f610b799240fd7ea422792ad4cfaf1ef"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/ndjson/buffer.rs",
+      "sha256": "e323ce2bfc0b68030c0abaf4b5cf9f4a6fcbb418afd9a27aaeacf975cdafecb8"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/ndjson/core.rs",
+      "sha256": "03e5e108709e1f48e1cd5913e9974d65412c8bddddeea183ac8c69e66ff74076"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/ndjson/mod.rs",
+      "sha256": "9777bef4fea32bfd4166638799abcc79fd56a8e61d6957d2042f7a42c4488f94"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/options.rs",
+      "sha256": "b285951038a0e468c74998f4b7e55a62e86bfcb00b2a5e9c5484cc976631594e"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/parquet/metadata.rs",
+      "sha256": "0aeebab6c82b225c347d3c5ae94d44e4e83d68209fdea0d3a768fb050e05e078"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/parquet/mod.rs",
+      "sha256": "9e56008f85bbcb4bb7ff254f13290d4590eea96aff919831ff826f8fa6618253"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/parquet/read/async_impl.rs",
+      "sha256": "a7080afaed50a28522418afd60ce6aa51c51da820529d362f95158351c4b4629"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/parquet/read/mmap.rs",
+      "sha256": "be4ec968603174ffb93f223df006ce84b0f4b7b6b1af5ceec11fcce81a839d24"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/parquet/read/mod.rs",
+      "sha256": "bf0d60d70e3b94efdd1c1afe02a26a4ac78c14a01d2ff9590df6a84620781144"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/parquet/read/options.rs",
+      "sha256": "f2f6565c7402bfc349685c7334a08174c13a40f564ced1dcad3caef0bb9e9801"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/parquet/read/read_impl.rs",
+      "sha256": "991ea18c3646e3bd6ad70954e08671df1c919921c25600ac5884ad401af638ba"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/parquet/read/reader.rs",
+      "sha256": "ee082476a217281eb5cf01a8c072f636ea7e9d5cdc18a87e83ba23d915eace5e"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/parquet/read/utils.rs",
+      "sha256": "0b815db26f9968f3060d784acc2f6d170296e59876dc236f0dd276472faf9cbf"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/parquet/write/batched_writer.rs",
+      "sha256": "5734dc5660b9f078c84eb6f3c29187b513bb26003151ba98bd30806be38a07f1"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/parquet/write/key_value_metadata.rs",
+      "sha256": "585f6b12ed7faf54d8e23828b7fc51a042bac14d3d6026b3c65e46216af358c8"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/parquet/write/mod.rs",
+      "sha256": "4d6d771a3a42227472a176ca362d52aac63b336e975efdc4022a5dc2409c6900"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/parquet/write/options.rs",
+      "sha256": "7cb6dba36a83038821b8952994e3b76bff726200349f5af33281fe165947c550"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/parquet/write/writer.rs",
+      "sha256": "67048006c55ac26f296f1dd3d3bec8ee5718ccd33bab48c91cc79efb2ae580f6"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/path_utils/hugging_face.rs",
+      "sha256": "177146eec9f478a95cf323219899907058ba4919ccc7c9382dc09dd67c356276"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/path_utils/mod.rs",
+      "sha256": "d1f3b5157165ff3e66600685331c7137f817ee4b9d6cf253fc8525253d425291"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/pl_async.rs",
+      "sha256": "b4307493bc443961a2992942d8d5a407a3ca39dd767f57ab6cf92b2ffb97e7e3"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/predicates.rs",
+      "sha256": "3ce9f848c627caefd0aa7834e92f81c8bd61ec0be8b34cab41213a26f82c234a"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/prelude.rs",
+      "sha256": "c83f25190089ff29c15f0df819802039906490717b4cd4185dbba7c1832e42d8"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/scan_lines.rs",
+      "sha256": "2b71a30726a0596ef309e69f1838cfbca3ad65c4a4cf35b31eb6e4f851b3e1d0"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/shared.rs",
+      "sha256": "e0b1efd53a326d4fb9bc14c5c9410b76b181f131dc8df3719a50a89f139b8f4c"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/utils/byte_source.rs",
+      "sha256": "aabe350a40f280dfcf1b7f7708fd753fe4f6e355ec575096a34cfd459e39584b"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/utils/bytes_bufferer.rs",
+      "sha256": "9ae5da5d746c3709530350ea05ab6321792ba7644f81266bc1128915c234c738"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/utils/compression.rs",
+      "sha256": "036b9ca0c645b6e8068e8bec158d25d9890b8edf8f790c96e05ebe580057bb83"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/utils/file.rs",
+      "sha256": "7b1e060deafe1afaf6195052d1e728231a49db5f4c14c66d93b539e9fc09f38c"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/utils/mkdir.rs",
+      "sha256": "e2380e375ec4ebe270de8e0ddbf9726967a1e5e35965955ebdde04bc1f1e21bd"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/utils/mod.rs",
+      "sha256": "7703c22d75470aebe5b134203bdec1f625507c3ffbbcd58e9e1dc7e353574943"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/utils/other.rs",
+      "sha256": "b8e717d4e07e536e8e46da9f5d886f3df4e581fc30732e48bc9daeebe0bed793"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/utils/slice.rs",
+      "sha256": "dc383cd42e9639cc0686aee7df21f3681e5adc3cb9c523a2c5772238a3a042a2"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/utils/stream_buf_reader.rs",
+      "sha256": "afafa76240d53dc9735c789c7cbc1126568a43418fa9d59fb7c4033a6495c623"
+    },
+    {
+      "path": "poc/vendor/polars-io/src/utils/sync_on_close.rs",
+      "sha256": "4a7f2ba7b29535eb1f75c217bbdedbe83962df4c66746f6c50af7187a5508c58"
+    }
+  ],
+  "untracked_files_complete": true,
+  "dirty_worktree_sha256": "8850ede245e076736e6156114a46ba13907458ac718182b4440fae9d8f538732",
+  "compiled_source_files": [
+    {
+      "path": ".cargo/config.toml",
+      "sha256": "199dda3f76c1eff2551ad1f2cbdce4b7db5846471992960c08914e580a2fe824"
+    },
+    {
+      "path": "Cargo.lock",
+      "sha256": "24b9123ee06436f427f944a2171c47187561330b96bdf096fc1502f263a5e47f"
+    },
+    {
+      "path": "Cargo.toml",
+      "sha256": "39723f0debb5572e3dab2650ce8eaa8348e04e0b9e3518b2f030851098e633e1"
+    },
+    {
+      "path": "crates/quant-research/Cargo.toml",
+      "sha256": "06b3c30a6d50cdb6009bc59fa437cdcc189b221409aecb2cdb8e95aa381b955b"
+    },
+    {
+      "path": "crates/quant-research/src/backtest.rs",
+      "sha256": "b1a67aadc12661ab224655e3e966e4f0432370c751f0dc9d23b6965553259540"
+    },
+    {
+      "path": "crates/quant-research/src/batch.rs",
+      "sha256": "4ef3b794065c1a7f22186d497ea3e34ff0e136604eeb1629e5eeb038e2c78b83"
+    },
+    {
+      "path": "crates/quant-research/src/core.rs",
+      "sha256": "dd50175268505788c677829dd276b253adbb3ec624938b2a9f0019d8720ea1ca"
+    },
+    {
+      "path": "crates/quant-research/src/data.rs",
+      "sha256": "3436ac4670ed283ae82951462d7277fdb623f078ea19803fcd75aa29917b02b7"
+    },
+    {
+      "path": "crates/quant-research/src/experiment.rs",
+      "sha256": "f3984c628f8aac5f5ad4f9ae0c9ae0d7d7eccf77b6e7e15b32ad95c3c34716bf"
+    },
+    {
+      "path": "crates/quant-research/src/factor.rs",
+      "sha256": "b2ca1a783fe90b33c4896bd0963ddfe2111fe910a58d71d278723aea2eb60dcf"
+    },
+    {
+      "path": "crates/quant-research/src/feature.rs",
+      "sha256": "e53464fc974a2cd11b93da092b95684816aed36a48ba0790606aebcdba57ca73"
+    },
+    {
+      "path": "crates/quant-research/src/lib.rs",
+      "sha256": "314ccc51e68478d44333c7eddac6ba5431542dbbc5e0c593013380b40bf2787d"
+    },
+    {
+      "path": "crates/quant-research/src/main.rs",
+      "sha256": "63bbd806b1ce286c3d3933e8532b7eae0291b8e862a6b2cfb09d0b67a1ba4b8c"
+    },
+    {
+      "path": "crates/quant-research/src/market_api.rs",
+      "sha256": "49ddf416fbe3018d33a15cbc6204076311514d33dc6bbcb193f6945d4883673e"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/parquet.rs",
+      "sha256": "b28ed836ec77cba53a9a8bb47a1732233aaec7b12a0608166b4bfba9efa8beb7"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark.rs",
+      "sha256": "eb7d26985a7a19d8a5be5d3d4228962284a58dae2861b31fb9416f76caffe9de"
+    },
+    {
+      "path": "crates/quant-research/src/run_jobs.rs",
+      "sha256": "410431ffea185fac385b706af4cf67e976d182e5b25d4bcbeef41a61dc5e7111"
+    },
+    {
+      "path": "crates/quant-research/src/runner.rs",
+      "sha256": "f81594e773547272eca6db4fe89079091f3746ccf8555b2a30735fc0863b6485"
+    },
+    {
+      "path": "crates/quant-research/src/server.rs",
+      "sha256": "5839883ee7c52809f841feeecaf9c634afbee7edcdab4cfa497640c736aec890"
+    },
+    {
+      "path": "crates/quant-research/src/signal.rs",
+      "sha256": "b74a8cd5b9f4477cdd01e6542a5a78184fcdb374976be92cff2d5c941d4f3cde"
+    },
+    {
+      "path": "crates/quant-research/src/strategy.rs",
+      "sha256": "c285e2eff10cd24d7c8cadfebce5a54012e139bf54d9003d97739fba50460150"
+    },
+    {
+      "path": "crates/quant-research/src/universe.rs",
+      "sha256": "47568cb94d37570cacfc2c34662686f72e143df557f2d81d65373978024541c4"
+    },
+    {
+      "path": "crates/quant-research/src/universe_api.rs",
+      "sha256": "a7d0e69f62de6c43f238449b5f69c052464bcf45da081ca45832e32326baa59c"
+    }
+  ],
+  "compiled_source_sha256": "83cbbf4d899953949aa59e23d0daff5b66f0fabbabf79d62a05e391e5cac63b3",
+  "cargo_lock_observation": {
+    "available": true,
+    "tool": "/usr/sbin/lsof",
+    "exit_code": 1,
+    "output": "",
+    "stderr": ""
+  },
+  "cargo_version": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+  "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "compiler_environment": {
+    "CARGO_TARGET_DIR": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/target",
+    "RUSTFLAGS": null,
+    "CARGO_ENCODED_RUSTFLAGS": null
+  },
+  "cargo_lock_sha256": "24b9123ee06436f427f944a2171c47187561330b96bdf096fc1502f263a5e47f",
+  "dependency_graph_sha256": "7028b35b9d19c5564cc9082632a5a0995864ddf4394f05763aa85478b238c563",
+  "dependency_graph_contains_duckdb": false,
+  "profile": "dev",
+  "features": [
+    "poc0 benchmark path; default app features disabled"
+  ],
+  "build_wall_seconds": 6.3215576250000005,
+  "status": "completed",
+  "exit_code": 0,
+  "before": {
+    "volume_free_bytes": 14024417280,
+    "workspace_target_bytes": 84175724757
+  },
+  "after": {
+    "volume_free_bytes": 13605449728,
+    "workspace_target_bytes": 84639034219
+  },
+  "target_delta_bytes": 463309462,
+  "stdout": "",
+  "stderr": "warning: `/Users/yibinzhang/.cargo/config` is deprecated in favor of `config.toml`\n  |\n  = help: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\nwarning: unused import: `PlRefPath`\n  --> poc/vendor/polars-io/src/cloud/options.rs:27:42\n   |\n27 | use polars_utils::pl_path::{CloudScheme, PlRefPath};\n   |                                          ^^^^^^^^^\n   |\n   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default\n\nwarning: unused import: `super::parser::next_line_position`\n --> poc/vendor/polars-io/src/csv/read/utils.rs:6:5\n  |\n6 | use super::parser::next_line_position;\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `super::splitfields::SplitFields`\n --> poc/vendor/polars-io/src/csv/read/utils.rs:9:5\n  |\n9 | use super::splitfields::SplitFields;\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `CloudScheme`\n --> poc/vendor/polars-io/src/path_utils/mod.rs:9:29\n  |\n9 | use polars_utils::pl_path::{CloudScheme, PlRefPath};\n  |                             ^^^^^^^^^^^\n\nwarning: unused import: `std::sync::Arc`\n --> poc/vendor/polars-io/src/shared.rs:2:5\n  |\n2 | use std::sync::Arc;\n  |     ^^^^^^^^^^^^^^\n\nwarning: unused import: `crate::options::RowIndex`\n --> poc/vendor/polars-io/src/shared.rs:7:5\n  |\n7 | use crate::options::RowIndex;\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `to_compute_err`\n --> poc/vendor/polars-io/src/utils/compression.rs:6:35\n  |\n6 | use polars_error::{feature_gated, to_compute_err};\n  |                                   ^^^^^^^^^^^^^^\n\nwarning: unused import: `crate::utils::sync_on_close::SyncOnCloseType`\n  --> poc/vendor/polars-io/src/utils/compression.rs:10:5\n   |\n10 | use crate::utils::sync_on_close::SyncOnCloseType;\n   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `polars_err`\n --> poc/vendor/polars-io/src/utils/file.rs:8:49\n  |\n8 | use polars_error::{PolarsResult, feature_gated, polars_err};\n  |                                                 ^^^^^^^^^^\n\nwarning: unused import: `polars_utils::mmap::ensure_not_mapped`\n  --> poc/vendor/polars-io/src/utils/file.rs:11:5\n   |\n11 | use polars_utils::mmap::ensure_not_mapped;\n   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `format_file_uri`\n  --> poc/vendor/polars-io/src/utils/file.rs:12:40\n   |\n12 | use polars_utils::pl_path::{PlRefPath, format_file_uri};\n   |                                        ^^^^^^^^^^^^^^^\n\nwarning: unused variable: `separator`\n   --> poc/vendor/polars-io/src/csv/read/read_impl.rs:157:13\n    |\n157 |         let separator = parse_options.separator;\n    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_separator`\n    |\n    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default\n\nwarning: unused variable: `algo`\n  --> poc/vendor/polars-io/src/utils/compression.rs:49:14\n   |\n49 |     let Some(algo) = SupportedCompression::check(bytes) else {\n   |              ^^^^ help: if this is intentional, prefix it with an underscore: `_algo`\n\nwarning: unused variable: `new_slice_from_read`\n   --> poc/vendor/polars-io/src/utils/compression.rs:192:13\n    |\n192 |         let new_slice_from_read =\n    |             ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_new_slice_from_read`\n\nwarning: unused variable: `writer`\n   --> poc/vendor/polars-io/src/utils/compression.rs:400:17\n    |\n400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {\n    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`\n\nwarning: unused variable: `level`\n   --> poc/vendor/polars-io/src/utils/compression.rs:400:35\n    |\n400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {\n    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`\n\nwarning: unused variable: `writer`\n   --> poc/vendor/polars-io/src/utils/compression.rs:409:17\n    |\n409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {\n    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`\n\nwarning: unused variable: `level`\n   --> poc/vendor/polars-io/src/utils/compression.rs:409:35\n    |\n409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {\n    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`\n\nwarning: unused variable: `buf`\n   --> poc/vendor/polars-io/src/utils/compression.rs:419:25\n    |\n419 |     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {\n    |                         ^^^ help: if this is intentional, prefix it with an underscore: `_buf`\n\nwarning: unused variable: `io_metrics`\n   --> poc/vendor/polars-io/src/utils/byte_source.rs:245:9\n    |\n245 |         io_metrics: Option<Arc<IOMetrics>>,\n    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`\n\nwarning: unused variable: `fetch_config`\n   --> poc/vendor/polars-io/src/utils/byte_source.rs:253:31\n    |\n253 |             Self::ObjectStore(fetch_config) => feature_gated!(\"cloud\", {\n    |                               ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_fetch_config`\n\nwarning: unused variable: `io_metrics`\n  --> poc/vendor/polars-io/src/utils/file.rs:50:9\n   |\n50 |         io_metrics: Option<Arc<IOMetrics>>,\n   |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`\n\nwarning: function `nonzero_usize_max` is never used\n  --> poc/vendor/polars-io/src/csv/read/options.rs:53:10\n   |\n53 | const fn nonzero_usize_max() -> NonZeroUsize {\n   |          ^^^^^^^^^^^^^^^^^\n   |\n   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default\n\nwarning: function `next_line_position` is never used\n   --> poc/vendor/polars-io/src/csv/read/parser.rs:269:15\n    |\n269 | pub(super) fn next_line_position(\n    |               ^^^^^^^^^^^^^^^^^^\n\nwarning: methods `extend` and `extend_from_slice` are never used\n   --> poc/vendor/polars-io/src/path_utils/mod.rs:615:12\n    |\n600 | /     impl<F> OutPaths<'_, F>\n601 | |     where\n602 | |         F: Fn(&PlRefPath) -> bool,\n    | |__________________________________- methods in this implementation\n...\n615 |           fn extend(&mut self, values: impl IntoIterator<Item = PlRefPath>) {\n    |              ^^^^^^\n...\n628 |           fn extend_from_slice(&mut self, values: &[PlRefPath]) {\n    |              ^^^^^^^^^^^^^^^^^\n\nwarning: constant `ESTIMATED_DEFLATE_RATIO` is never used\n   --> poc/vendor/polars-io/src/utils/compression.rs:138:15\n    |\n138 |         const ESTIMATED_DEFLATE_RATIO: usize = 3;\n    |               ^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: constant `ESTIMATED_ZSTD_RATIO` is never used\n   --> poc/vendor/polars-io/src/utils/compression.rs:139:15\n    |\n139 |         const ESTIMATED_ZSTD_RATIO: usize = 5;\n    |               ^^^^^^^^^^^^^^^^^^^^\n\nwarning: function `cloud_writer_coalesce_run_length` is never used\n  --> poc/vendor/polars-io/src/configs.rs:41:15\n   |\n41 | pub(crate) fn cloud_writer_coalesce_run_length() -> usize {\n   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: function `cloud_writer_copy_buffer_size` is never used\n  --> poc/vendor/polars-io/src/configs.rs:65:15\n   |\n65 | pub(crate) fn cloud_writer_copy_buffer_size() -> NonZeroUsize {\n   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: `polars-io` (lib) generated 29 warnings (run `cargo fix --lib -p polars-io` to apply 22 suggestions)\n   Compiling quant-research v0.1.0 (/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/crates/quant-research)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.23s\n"
+}

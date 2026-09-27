@@ -2239,8 +2239,6 @@ dependencies = [
 [[package]]
 name = "polars-io"
 version = "0.55.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ba705af75665c6c6f6822bdc20a0b162846dd9d23573221096945b45210c2db"
 dependencies = [
  "async-trait",
  "atoi_simd",
@@ -2530,7 +2528,9 @@ dependencies = [
  "chrono",
  "clap",
  "duckdb",
+ "fs2",
  "polars",
+ "polars-io",
  "rayon",
  "serde",
  "serde_json",

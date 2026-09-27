@@ -1,0 +1,15 @@
+{
+  "command": [
+    "cargo",
+    "test",
+    "--workspace",
+    "--locked",
+    "--offline"
+  ],
+  "free_before_bytes": 12839342080,
+  "free_low_bytes": 9933791232,
+  "free_after_bytes": 9933791232,
+  "exit_code": -2,
+  "stopped_by_space_guard": true,
+  "log": "/tmp/poc05-workspace-test-retry.log"
+}

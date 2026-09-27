@@ -86,6 +86,28 @@ enum Command {
         #[arg(long, value_parser = ["reference", "soa", "arrow", "polars"], default_value = "reference")]
         candidate: String,
     },
+    /// Generate a versioned Parquet fixture and benchmark the three B1 paths on one scan.
+    BenchmarkPoc0Parquet {
+        #[arg(long, default_value = "poc/poc0-benchmark/fixtures/dataset-v1.json")]
+        dataset: PathBuf,
+        #[arg(long, default_value = "poc/poc0-benchmark/fixtures/expected-v1.json")]
+        expected: PathBuf,
+        #[arg(long, default_value = "target/poc-0/dataset-v1.parquet")]
+        parquet: PathBuf,
+        #[arg(long, default_value = "target/poc-0/parquet-report.json")]
+        output: PathBuf,
+        #[arg(long)]
+        symbol: Vec<String>,
+        #[arg(long)]
+        start: Option<chrono::NaiveDate>,
+        #[arg(long)]
+        end: Option<chrono::NaiveDate>,
+        #[arg(long, default_value_t = false)]
+        reuse: bool,
+        /// Generate deterministic extra rows in bounded row groups.
+        #[arg(long, default_value_t = 0)]
+        filler_rows: usize,
+    },
     /// Serve the local visualization workbench.
     #[cfg(feature = "app")]
     Serve {
@@ -264,6 +286,42 @@ async fn main() -> Result<()> {
                 output.display()
             );
             if !passed {
+                std::process::exit(2);
+            }
+        }
+        Command::BenchmarkPoc0Parquet {
+            dataset,
+            expected,
+            parquet,
+            output,
+            symbol,
+            start,
+            end,
+            reuse,
+            filler_rows,
+        } => {
+            let report = poc0_benchmark::run_parquet(
+                &dataset,
+                &expected,
+                &parquet,
+                poc0_benchmark::ParquetOptions {
+                    symbols: &symbol,
+                    start,
+                    end,
+                    reuse,
+                    filler_rows,
+                },
+            )?;
+            if let Some(parent) = output.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&output, serde_json::to_vec_pretty(&report)?)?;
+            println!(
+                "POC-0 Parquet correctness {}: {}",
+                report["status"],
+                output.display()
+            );
+            if report["status"] != "passed" {
                 std::process::exit(2);
             }
         }

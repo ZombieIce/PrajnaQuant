@@ -4,7 +4,7 @@
 
 ## 当前交接（2026-09-27）
 
-本轮尝试执行 POC-0 票据 05。未写源码：离线 Cargo 依赖解析启用 Polars Parquet 时分别缺少 `brotli` 与 `polars-sql` 索引元数据；联网 Cargo 无法解析 `mirrors.ustc.edu.cn`。构建资源 recorder 在依赖图阶段退出，未开始编译；当时可用空间约 13 GiB，按 2 GiB 上界满足 10 GiB 保留线。证据与建议复跑条件见 [票据 05](.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md)。**唯一建议下一步：**恢复 Cargo mirror/索引可用后，从票据 05 的依赖图与构建资源记录重试，再进行 Parquet 三候选与受限内存分块验收。
+本轮继续 POC-0 票据 05：本地 `polars-io` vendor 解开离线 Parquet 依赖；新增固定 fixture 的版本化 Parquet/manifest、`--reuse`、列与 row group 裁剪、三候选对拍和分阶段报告。复核时修正了 `ParallelStrategy::None` 对零重叠组仍进入列读取路径的问题。10,000,029 行、404,509,661 字节源文件改用解码前跳过无关组的策略后，2,448 组中选 1 组，独立进程 RSS 57,573,376 字节；原始结果见 [票据 05](.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md)。256 MiB 地址空间限制在本机启动前失败，受限内存验收仍 **Unresolved**。**唯一建议下一步：**在可审计设置 256 MiB 内存上限的主机/容器中复跑既有 Parquet `--reuse` 路径，并保存峰值 RSS 与退出状态。
 
 2026-09-27 构建资源决策（票据 13 完成前的交接记录）：用户确认先优化 POC-0 spec/票据，再由新 [票据 13](.scratch/poc-0-benchmark/issues/13-build-resource-boundary.md) 实施轻量构建边界。现场只读清点：根 `target/` 约 58 GB、独立 B1 target 约 1 GB、卷可用约 14 GiB，重复的 bundled DuckDB 构建产物是主要占用。新增构建须开工及预计结束均保留至少 10 GiB；记录增量/release 构建耗时与产物增量，冷构建仅在预算允许时测。票据 03/04 均已由用户确认验收。不得自动清空整个 target。本轮未清理文件。后续票据 13 已完成，当前票据 05 状态见上方交接。
 

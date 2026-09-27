@@ -45,6 +45,87 @@ fn run_candidate_for_dataset(
 }
 
 #[test]
+fn parquet_cli_round_trips_fixture_and_prunes_groups_and_columns() {
+    let output_dir = tempfile::tempdir().unwrap();
+    for (name, args, expected_groups) in [
+        ("full", vec![], 6),
+        (
+            "filtered",
+            vec![
+                "--symbol",
+                "A",
+                "--start",
+                "2026-01-06",
+                "--end",
+                "2026-01-07",
+            ],
+            1,
+        ),
+        ("filler", vec!["--filler-rows", "8192", "--symbol", "A"], 2),
+    ] {
+        let parquet = output_dir.path().join(format!("{name}.parquet"));
+        let report = output_dir.path().join(format!("{name}.json"));
+        let result = Command::new(env!("CARGO_BIN_EXE_quant-research"))
+            .current_dir(repo_root())
+            .args([
+                "benchmark-poc0-parquet",
+                "--dataset",
+                fixture("dataset-v1.json").to_str().unwrap(),
+                "--expected",
+                fixture("expected-v1.json").to_str().unwrap(),
+                "--parquet",
+                parquet.to_str().unwrap(),
+                "--output",
+                report.to_str().unwrap(),
+            ])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let value: Value = serde_json::from_slice(&fs::read(report).unwrap()).unwrap();
+        assert_eq!(value["status"], "passed");
+        assert_eq!(value["pruning"]["scanned_groups"], expected_groups);
+        assert_eq!(value["pruning"]["decoded_columns"], 3);
+        assert_eq!(value["pruning"]["source_columns"], 7);
+        if name == "filler" {
+            assert!(value["pruning"]["source_rows"].as_u64().unwrap() > 8192);
+            assert!(value["pruning"]["source_groups"].as_u64().unwrap() > 6);
+        }
+        if name == "full" {
+            let replay_path = output_dir.path().join("replay.json");
+            let replay = Command::new(env!("CARGO_BIN_EXE_quant-research"))
+                .current_dir(repo_root())
+                .args([
+                    "benchmark-poc0-parquet",
+                    "--reuse",
+                    "--parquet",
+                    parquet.to_str().unwrap(),
+                    "--output",
+                    replay_path.to_str().unwrap(),
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                replay.status.success(),
+                "{}",
+                String::from_utf8_lossy(&replay.stderr)
+            );
+            let replay_value: Value =
+                serde_json::from_slice(&fs::read(replay_path).unwrap()).unwrap();
+            assert_eq!(
+                replay_value["projection_sha256"],
+                value["projection_sha256"]
+            );
+            assert_eq!(replay_value["timing_ns"]["generation"], 0);
+        }
+    }
+}
+
+#[test]
 fn benchmark_cli_emits_reproducible_report_after_golden_passes() {
     let output_dir = tempfile::tempdir().unwrap();
     let report_path = output_dir.path().join("report.json");

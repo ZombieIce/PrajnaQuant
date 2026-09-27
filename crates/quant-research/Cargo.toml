@@ -14,10 +14,12 @@ app = ["dep:ashare-warehouse", "dep:axum", "dep:duckdb", "dep:tower-http"]
 arrow-array = "=58.4.0"
 arrow-schema = "=58.4.0"
 polars = { version = "=0.55.2", default-features = false, features = ["lazy"] }
+polars-io = { version = "=0.55.2", default-features = false, features = ["parquet"] }
 ashare-warehouse = { path = "../..", optional = true }
 anyhow = "1.0"
 axum = { version = "0.8", optional = true }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+fs2 = "0.4"
 clap = { version = "4.5", features = ["derive"] }
 duckdb = { version = "=1.10505.0", features = ["bundled"], optional = true }
 serde = { version = "1.0", features = ["derive"] }

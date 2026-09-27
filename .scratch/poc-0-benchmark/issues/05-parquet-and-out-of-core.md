@@ -4,14 +4,24 @@
 
 **Blocked by:** 03 B1 Arrow 完整运行同一策略；04 B1 Polars 完整运行同一策略；13 POC-0 构建资源基线与轻量边界。
 
-**Status:** ready-for-agent
+**Status:** ready-for-agent（实现已落地；受限内存验收 unresolved）
 
-- [ ] 三种候选在相同投影、日期和标的过滤条件下输出同一 S2 结果与 Dataset 内容身份。
-- [ ] 报告分开记录数据生成、Parquet 扫描/解码、布局转换、计算、结果序列化及总耗时；冷热缓存条件明确。
+- [x] 三种候选在相同投影、日期和标的过滤条件下输出同一 S2 结果与 Dataset 内容身份。
+- [x] 报告分开记录数据生成、Parquet 扫描/解码、布局转换、计算、结果序列化及总耗时；冷热缓存条件明确。
 - [ ] 用受限内存的大样本证明列/日期裁剪和分块实际生效，记录峰值 RSS；资源不足时保存失败证据并标为 `unresolved`。
-- [ ] 读取路径不改变窗口、缺失、排序及组合收益语义。
-- [ ] 大数据生成/扫描前记录可用空间与预估产物；预计完成后不足 10 GiB 时停止该规模，保存失败依据和复跑条件，将该比较标为 `unresolved`，继续可运行的小规模正确性检查。
-- [ ] 三种候选复用票据 13 的构建缓存；报告分别列出构建时间/产物增量与 Parquet 扫描、计算和运行时 RSS，不将构建耗时计入 rows/s。
+- [x] 读取路径不改变窗口、缺失、排序及组合收益语义。
+- [x] 大数据生成/扫描前记录可用空间与预估产物；预计完成后不足 10 GiB 时停止该规模，保存失败依据和复跑条件，将该比较标为 `unresolved`，继续可运行的小规模正确性检查。
+- [x] 三种候选复用票据 13 的构建缓存；报告分别列出构建时间/产物增量与 Parquet 扫描、计算和运行时 RSS，不将构建耗时计入 rows/s。
+
+## Implementation continuation — 2026-09-27
+
+本地 vendor 的 `polars-io 0.55.2` 仅删除 Parquet feature 对缺失 `brotli` 元数据的可选压缩依赖，writer 明确用 `Uncompressed`；`cargo check --locked --offline` 已通过。新增 `benchmark-poc0-parquet`：固定 fixture 写 Parquet + manifest、`--reuse` 校验 SHA-256 后复跑，列投影仅解码 `date/symbol/close`，按 symbol/date row group 跳过无关块。日期筛选保留起点之前完整历史及终点后一交易日的收益评价数据。三候选对拍同一筛选投影；全量还与原 fixture 逐 bar 和 B1 输出对拍。报告拆分生成、扫描解码、扫描转换、候选计算、布局转换、序列化、总耗时，并明确缓存未受控。该投影仍是评价收益，不是成交账本。
+
+`--filler-rows 10000000 --symbol A --start 2026-01-06 --end 2026-01-07` 生成 10,000,029 行、404,509,661 字节 Parquet；仅扫描 2,448 组中的 1 组，候选校验通过。独立复读进程峰值 RSS 57,638,912 字节，明显小于文件大小；这是分块/裁剪有效的实测证据，但不是受限内存运行成功。256 MiB `RLIMIT_AS` 在本机 `setrlimit`/`preexec_fn` 阶段失败，子进程未启动，因此第三项保持 **unresolved**。原始记录见 `poc/poc0-benchmark/results/parquet-large-10m-2026-09-27.json`、`parquet-large-10m-rss-2026-09-27.rss.json`、`parquet-large-10m-limited-256-2026-09-27.rss.json`。复跑条件：可设置进程地址空间上限的主机或容器，使用 `measure-parquet-rss.py --limit-mib 256` 对同一 Parquet `--reuse` 运行；若地址空间限制与运行时映射不兼容，改用有可审计内存上限的容器。
+
+继续复核发现 `ParallelStrategy::None` 在本地 Polars 的 row-group 循环里对零重叠组仍进入列读取路径；改用 `RowGroups` 后，读取器在解码前跳过零重叠组。相同 10M 文件复读再次通过，2,448 组中命中 1 组、3/7 列，峰值 RSS 57,573,376 字节；原始结果见 `poc/poc0-benchmark/results/parquet-large-10m-rowgroups-2026-09-27.json` 和同名前缀的 `.rss.json`。两次缓存状态未控制，不用其耗时差作性能结论；256 MiB 硬限制仍未验证。
+
+共享 `target/` 的 dev 构建资源记录为 `build-resource-poc0-05-final-dev-2026-09-27.json`：6.32 秒、target 逻辑增量 463,309,462 字节，构建后可用 13,605,449,728 字节。较早的空间拒绝记录、仅删除一个已确认闲置的旧 DuckDB 编译缓存记录分别在 `build-resource-poc0-05-space-blocked-2026-09-27.json`、`poc0-05-cache-prune-2026-09-27.json`。构建成本独立于 Parquet 运行耗时。
 
 ## Implementation attempt — 2026-09-27
 

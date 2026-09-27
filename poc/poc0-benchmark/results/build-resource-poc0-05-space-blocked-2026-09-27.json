@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "status": "blocked_by_space_gate",
+  "command": [
+    "cargo",
+    "build",
+    "-p",
+    "quant-research",
+    "--no-default-features",
+    "--locked",
+    "--offline",
+    "--profile",
+    "dev"
+  ],
+  "working_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316",
+  "target_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/target",
+  "estimated_max_additional_bytes": 2147483648,
+  "minimum_free_bytes": 10737418240,
+  "before": {
+    "volume_free_bytes": 11267440640,
+    "workspace_target_bytes": 85558031681
+  },
+  "cargo_lock_observation": {
+    "available": true,
+    "tool": "/usr/sbin/lsof",
+    "exit_code": 1,
+    "output": "",
+    "stderr": ""
+  },
+  "reason": "estimated completion would leave less than 10 GiB free",
+  "finished_at_utc": "2026-09-27T06:10:14.003785+00:00"
+}

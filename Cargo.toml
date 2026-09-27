@@ -11,6 +11,9 @@ publish = false
 members = ["crates/quant-research"]
 resolver = "2"
 
+[patch.crates-io]
+polars-io = { path = "poc/vendor/polars-io" }
+
 [dependencies]
 anyhow = "1.0"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
