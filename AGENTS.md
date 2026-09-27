@@ -33,7 +33,7 @@
 
 ## Time Model Rules
 
-遵守 `docs/time-model.md`。变更执行时序前先给出事件序列和小型可人工验算用例；`observed_at` 是本地采集时间，不是历史发布时间。
+POC-0 与新平台实现按当前任务的 spec/ADR 确定时间语义；修改或复用现有 A 股/ETF 执行时序时再读 `docs/time-model.md`。变更执行时序前先给出事件序列和小型可人工验算用例；`observed_at` 是本地采集时间，不是历史发布时间。
 
 ## Portfolio Accounting Rules
 
@@ -49,7 +49,12 @@
 
 ## New Agent Startup
 
-按顺序读：1 `AGENTS.md`；2 `README.md`；3 `ARCHITECTURE.md` 与 `CONTEXT.md`；4 `docs/product-roadmap.md`；5 `docs/architecture.md`；6 `docs/time-model.md`；7 `docs/data-model.md`；8 `docs/factor-system.md`；9 `docs/strategy-system.md`；10 `docs/backtest-engine.md`；11 `docs/STATUS.md`（及其引用的 `docs/priorities.md`）；12 `HANDOFF.md`；13 相关 ADR 与 POC 规范；14 任务代码；15 任务测试。然后 `git status`、`git log -5 --oneline`，运行相关验证。
+每次新对话先读 `AGENTS.md`，运行 `git status`、`git log -5 --oneline`，再按任务范围加载资料：
+
+- **POC-0 / 新平台实现：**读当前票据与对应 spec、`ARCHITECTURE.md`、相关 ADR、任务代码和测试；需要阶段顺序时读 `docs/product-roadmap.md`，需要领域词汇时读 `CONTEXT.md`，需要现状或交接时只读 `docs/STATUS.md` 与 `HANDOFF.md` 的当前 POC 段落。构建资源任务另读 `docs/poc-0-benchmark-spec.md` 与票据 13。旧 A 股路线文档不作为这一路径的启动必读项。
+- **旧 A 股实现或明确复用其契约：**按修改范围读取 `README.md`、`docs/architecture.md`、`docs/time-model.md`、`docs/data-model.md`、`docs/factor-system.md`、`docs/strategy-system.md`、`docs/backtest-engine.md`、`docs/STATUS.md`、`docs/priorities.md` 及相关 ADR；只读与任务有关的部分。
+
+完成任务所需的代码与测试阅读后，再进行相关验证；不要为了履行启动清单通读无关历史文档。
 
 ## Agent Completion Checklist
 
