@@ -1,12 +1,24 @@
 # Project Status
 
-扫描日期：2026-09-25。状态含义：Implemented=代码存在；Partially Implemented=只覆盖部分契约；Planned=有明确路线但无实现；Missing=未见实现；Unknown=仓库证据不足。**Implemented 不表示量化正确性已被充分测试或数据已被验收。**代码仓库已关联 GitHub `ZombieIce/PrajnaQuant`；本机被忽略的数据仍不是可交接资产。
+实现扫描日期：2026-09-25；目标路线更新：2026-09-26。状态含义：Implemented=代码存在；Partially Implemented=只覆盖部分契约；Planned=有明确路线但无实现；Missing=未见实现；Unknown=仓库证据不足。**Implemented 不表示量化正确性已被充分测试或数据已被验收。**代码仓库已关联 GitHub `ZombieIce/PrajnaQuant`；本机被忽略的数据仍不是可交接资产。
+
+## Target Architecture Baseline (2026-09-26)
+
+用户已确定新主路线为 Rust-first、多市场、三级回测引擎与未来实盘的平台；现阶段先做 [`POC-0`](poc-0-benchmark-spec.md)。完整目标见根目录 [`ARCHITECTURE.md`](../ARCHITECTURE.md)，新交付顺序见 [`product-roadmap.md`](product-roadmap.md)。目前没有 Vector / Fast Event / Accurate 三级实现、Nautilus Adapter、持久 Factor Cache、跨市场账户、Python/PyO3 策略入口或 Live Runtime。现有 React 页面是已实现资产，新平台 MVP 不以 Web 为验收项。以下扫描记录描述旧 A 股纵向场景的代码与数据证据，不能升级为新目标能力。
+
+POC-0 工作范围与验收已发布为本地 [`ready-for-agent` spec](../.scratch/poc-0-benchmark/spec.md)。独立 [`poc/b1-layout`](../poc/b1-layout/README.md) 标量读取 smoke 只对拍三种布局的动量；票据 02 已实现 SoA 的因子、排名、TopK、权重与简化收益，并加入候选选择及分阶段计时，但尚待验收。Polars 表达式、Arrow 完整策略路径、Parquet/转换、峰值内存和 out-of-core 测量仍缺，布局决策为 **Unresolved**。B2 只有票据 07 的最小原型，B3 未启动。
+
+POC-0 票据 01 已验收：新增固定 3 ETF × 10 个交易日的版本化 fixture、独立排名/信号/事件账本金标准，以及 correctness-first 的 `benchmark-poc0` CLI。金标准通过后会记录 Rust 参考回测的原始耗时；不通过时输出差异报告并跳过计时。机器/代码/数据 provenance 已进入报告；该票据尚未测峰值 RSS，报告将其明确标为未知。这不是 B1 完整布局比较；当前实现位置和复跑方式见 [`POC-0 harness`](../poc/poc0-benchmark/README.md)。2026-09-27 复验：全工作区 83 项通过、1 项按既定条件跳过，格式、Clippy 与 release CLI 均通过。
+
+POC-0 B2 票据 07 有最小 Fast Event S1 Buy & Hold 原型，通过固定输入与变体 fixture 检查停牌拒单/重试、缺 bar 沿用估值、末日未执行目标、逐日 NAV 恒等式、重复账本 checksum 和固定成本（包括非零买入税）；报告分列初始化、事件处理和端到端五次耗时。它仍不是完整 Fast Event Engine，也只有微型合成样本，因此不能支持性能选型。
+
+POC-0 已按获确认的拆分发布为 [12 张本地执行票据](../.scratch/poc-0-benchmark/issues/01-fixed-dataset-and-benchmark-entry.md)。01 为 `resolved`；02 为 `implemented`、待验收；07 的最小原型已提交但未作为完整 Fast Event 验收。其余票据按阻塞关系推进；提交原型不等于完成整个 POC。
 
 完整的问题排序、解决路径及验收判据见 [`priorities.md`](priorities.md)。这里保留按领域归类的事实状态。
 
 ## Current Phase
 
-产品初级目标是本地与可远程部署的 A 股股票/ETF 日频研究回测平台，含 Python 因子研究、自动日更和网页研究/行情展示；交付依赖见 [`product-roadmap.md`](product-roadmap.md)。当前仍是本地 ETF Rotation MVP 加 A 股仓库。Batch 2 已有显式证券增量同步/失败恢复/不可变发布代码，隔离股票+ETF 真实小样本通过；已发布快照的只读证券/日线 API 和 K 线页面在合成目录通过。生产同步/调度、生产股票快照、Python 研究包、运行作业和远程认证部署仍未验。五 ETF 真实状态覆盖不足，旧实验仍 `legacy_bar_only`，新 `status_gated` 占位跑全 UNKNOWN，P0-3 开放；股票回测没有开放。
+此前 A 股股票/ETF 日频 + Web 的初级产品路线已归档到 [`legacy-ashare-roadmap.md`](legacy-ashare-roadmap.md)；当前仍是本地 ETF Rotation MVP 加 A 股仓库。Batch 2 已有显式证券增量同步/失败恢复/不可变发布代码，隔离股票+ETF 真实小样本通过；已发布快照的只读证券/日线 API 和 K 线页面在合成目录通过。Batch 3 的日更身份导入与 ETF 诊断作业已有代码；生产同步/调度、真实状态、可信历史作业、Python 研究包和远程认证部署仍未验。五 ETF 真实状态覆盖不足，旧实验仍 `legacy_bar_only`，新 `status_gated` 占位跑全 UNKNOWN，P0-3 开放；股票回测没有开放。
 
 ## Batch 2 Integration Acceptance (2026-09-25)
 

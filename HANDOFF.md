@@ -1,4 +1,28 @@
-# Agent Handoff — Batch 2 集成后
+# Agent Handoff — 新平台目标基线与 POC-0
+
+日期：2026-09-26。用户确认 Rust-first 多市场平台路线取代此前 A 股日频 + Web 初级产品交付顺序。目标决策见 [`ARCHITECTURE.md`](ARCHITECTURE.md)，新路线见 [`docs/product-roadmap.md`](docs/product-roadmap.md)，领域词汇见 [`CONTEXT.md`](CONTEXT.md)，POC-0 工作范围与验收见 [本地 spec](.scratch/poc-0-benchmark/spec.md)，执行规范见 [`docs/poc-0-benchmark-spec.md`](docs/poc-0-benchmark-spec.md)，目标 ADR 为 0009–0011。旧 A 股路线保存在 [`docs/legacy-ashare-roadmap.md`](docs/legacy-ashare-roadmap.md)。这些是目标/试验文档，**不是三级引擎、Nautilus 或 Python 入口的已实现证据**；现有功能与量化 P0 风险仍以 `docs/STATUS.md` 及下方 Batch 2 交接为准。
+
+## 当前交接（2026-09-27）
+
+提交已按领域拆分：旧 A 股状态取证 `e8764e1`、日更与身份导入 `8e8bff9`、诊断作业与页面 `c7906ab`；Agent 工具配置 `d8fab3a`；新平台架构与旧路线归档 `15cc6d5`；POC-0 计划 `20eb209`、B1 标量 smoke `e8c3bd8`、01 已验收 harness `6401651`、07 最小事件原型 `a907212`、02 SoA 候选 `d78df42`。各提交仅含所属批次文件，未推送远端。
+
+当前 POC 状态：01 已验收；02 的 SoA 候选、CLI 选择与分阶段计时已实现但尚待验收；07 是可复核的最小原型，尚不能支持 Fast Event 架构选型。完整 Arrow/Polars/Parquet 比较、Nautilus、PyO3 和真实 ETF 历史可信度门槛均未完成。本轮提交整理只运行 `cargo fmt --all -- --check`、`cargo check --workspace --all-targets --locked --offline`、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 及 Git 差异检查；没有重跑单元测试或真实数据任务。此前 01 验收时全工作区 82 项通过、1 项按条件跳过；这一结果不自动覆盖后续提交。
+
+**唯一建议下一步：**按 [票据 02](.scratch/poc-0-benchmark/issues/02-soa-momentum-rotation.md) 的完整验收项复核 SoA 候选，验收后再解锁 03 与 04。
+
+## 历史进展记录
+
+2026-09-27 更新：POC-0 票据 01 已按用户要求完成验收并标记 `resolved`。复跑命令为 `cargo run -p quant-research --release --locked --offline -- benchmark-poc0`，输出在 `target/poc-0/benchmark-report.json`。它对拍独立固定输入/金标准、逐日账本与费用，并在正确性通过后保存 5 个 Rust 参考路径耗时样本；RSS 暂为 Unknown，单 fixture timings 不能用于布局决策。本次复验通过：`cargo fmt --all -- --check`、`cargo test --workspace --locked --offline`（82 passed，1 ignored）、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings`，以及 release 基准命令；错误金标准的 CLI 用例退出失败并跳过计时。入口、输入身份、时间规则、报告限制见 [`POC-0 harness`](poc/poc0-benchmark/README.md) 和票据 01。**唯一建议下一步：**完成票据 02 的 SoA 候选选择及分阶段计时。
+
+2026-09-27 更新：POC-0 票据 07 增加 `b2_fast_event_buy_hold` 最小 L1 事件原型，按 Jan 12 收盘目标、次日开盘下单，记录订单/Fill、成本、逐日现金/持仓/NAV；B 在 Jan 13 停牌时拒绝、次日重试，B 在末日缺 bar 时沿用上次估值。固定输入和变体输入独立检查重复账本 checksum、次日执行、NAV 恒等式、末日未执行目标和含非零买入税时现金非负；正确后分别记录初始化、事件处理、端到端五次样本。该结果只证明原型 fixture 行为，不是完整 Fast Event，也不构成性能选型。当前工作树预先含多项其他未提交改动，本轮不应将它们一并提交。详见 [票据 07](.scratch/poc-0-benchmark/issues/07-fast-event-buy-and-hold.md) 和 [benchmark harness](poc/poc0-benchmark/README.md)。
+
+本轮另建立独立的 [`poc/b1-layout`](poc/b1-layout/README.md) 标量读取切片，锁定 Polars 0.55.2、Arrow 60.0.0，自定义 SoA 与两者的动量输出通过独立手算小例和 checksum 对拍。`cargo check --manifest-path poc/b1-layout/Cargo.toml --locked --offline`、`cargo fmt --manifest-path poc/b1-layout/Cargo.toml -- --check`、`cargo clippy --manifest-path poc/b1-layout/Cargo.toml --all-targets --locked --offline -- -D warnings`、release 运行与 `git diff --check` 通过。一次 128 证券 × 4096 日、lookback 20、10 次重复的原始 smoke 结果与输入 hash 保存在 [`poc/b1-layout/results/2026-09-26-local-smoke.json`](poc/b1-layout/results/2026-09-26-local-smoke.json)；SoA / Arrow / Polars 标量访问中位数分别为 931 / 1303 / 3533 微秒，计数和 checksum 相同。CPU 型号无法读取，工作树含现有未提交改动；固定候选顺序且只测标量访问，**不能据此选择布局**。未运行主仓库全量测试，未变更其量化代码。
+
+**唯一建议下一步：**完成 POC-0 B1 的同语义完整工作负载：独立 S2 期望输出、Polars 表达式、Parquet 扫描/转换、排名/TopK/组合收益、内存与 out-of-core 测量；然后接入 B2/B3。真实 ETF 历史结果继续受 PIT、总回报和状态证据门槛约束。
+
+2026-09-26 票据交接：用户确认了 12 张 POC-0 纵向票据，已按依赖顺序发布在 [本地 issues](.scratch/poc-0-benchmark/issues/01-fixed-dataset-and-benchmark-entry.md)。01 是当前唯一无阻塞票据；其余票据仍 `ready-for-agent`，尚未执行。本轮只编辑 Markdown，没有运行代码、格式器或测试；现有工作区未提交改动已保留。**唯一建议下一步：**从 01 的固定数据集、独立金标准和统一基准入口开始，完成后再解锁 02 与 07。
+
+## 历史交接：Batch 2 集成后
 
 日期：2026-09-25。正式矩阵见 [Batch 2 集成验收](docs/handoffs/batch2-integration-acceptance.md)，最小字段与边界见 [公共契约](docs/contracts/batch2-contract.md)。Batch 1 的 [`legacy_bar_only` 结论](docs/handoffs/batch1-integration-acceptance.md)没有被新占位复跑替代。
 
@@ -30,3 +54,5 @@ cargo run -p quant-research --release --locked -- serve --output research-output
 开放风险：官方两市五 ETF 逐日状态原文/覆盖/历史可用时刻缺失；股票身份/分类和生产快照未验；交易所状态中的盘中限制、涨跌停方向、排队/部分成交未入日频引擎；生产同步及调度未启用；远程认证部署、Python 因子研究层仍缺。B 的行情 `complete` 是显式范围结论，不代表状态或全市场完整。
 
 **唯一最优先下一步：**取得并归档覆盖固定五 ETF 窗口的两市官方逐日执行状态文件与完整性说明，核验每证券/日期的原文 hash 和历史可用时刻，经 B 单写者冻结真实状态，在同一发布 Universe 版本上复跑；证据不足时保持 UNKNOWN/P0-3 开放。
+
+2026-09-27 更新：POC-0 票据 02 的 SoA 计算首版已实现于统一 `benchmark-poc0` 报告的 `b1_soa` 段；票据已实现。该段对固定面板运行 symbol-major SoA 动量/样本波动率、截面排名、TopK、等权目标和次日 close-to-close 权重收益；对照 01 的独立事件账本金标准校验排名与目标，错金标准时不记录任何候选性能样本。报告单独标注该权重收益模型不含现金、费用、订单、成交或事件 NAV。复跑命令：`cargo run -p quant-research --release --locked --offline -- benchmark-poc0 --candidate soa`（可选 `reference`）。报告提供因子、排序/权重、收益三阶段耗时样本，并按 `rebalance_every` 生成目标；含内部缺 bar 的窗口与不足窗口行为有独立手算单测。固定 3×10 fixture 的五次 SoA 耗时只验证计时/报告链路，不支持布局决策；B1 的 Polars/Arrow/Parquet 完整比较尚未完成。最终验证：83 项通过、1 项按条件忽略；格式、Clippy、两个 release 候选 CLI 均通过。
