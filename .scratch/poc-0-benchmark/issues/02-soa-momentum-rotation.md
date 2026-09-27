@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 固定数据集与统一基准入口。
 
-**Status:** implemented
+**Status:** resolved
 
 - [x] 固定动量和波动率窗口、因子方向、排名平局、TopK、调仓日、权重及收益口径，输出可复核的中间结果和最终 checksum。
 - [x] 窗口边界、null/NaN、缺日和不足窗口的行为与独立预期一致；T 日信号不读取未来收益。

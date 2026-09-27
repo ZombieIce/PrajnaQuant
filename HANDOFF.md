@@ -6,9 +6,9 @@
 
 提交已按领域拆分：旧 A 股状态取证 `e8764e1`、日更与身份导入 `8e8bff9`、诊断作业与页面 `c7906ab`；Agent 工具配置 `d8fab3a`；新平台架构与旧路线归档 `15cc6d5`；POC-0 计划 `20eb209`、B1 标量 smoke `e8c3bd8`、01 已验收 harness `6401651`、07 最小事件原型 `a907212`、02 SoA 候选 `d78df42`。各提交仅含所属批次文件，未推送远端。
 
-当前 POC 状态：01 已验收；02 的 SoA 候选、CLI 选择与分阶段计时已实现但尚待验收；07 是可复核的最小原型，尚不能支持 Fast Event 架构选型。完整 Arrow/Polars/Parquet 比较、Nautilus、PyO3 和真实 ETF 历史可信度门槛均未完成。本轮提交整理只运行 `cargo fmt --all -- --check`、`cargo check --workspace --all-targets --locked --offline`、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 及 Git 差异检查；没有重跑单元测试或真实数据任务。此前 01 验收时全工作区 82 项通过、1 项按条件跳过；这一结果不自动覆盖后续提交。
+当前 POC 状态：01、02 均已由用户验收并标记 `resolved`；07 是可复核的最小原型，尚不能支持 Fast Event 架构选型。完整 Arrow/Polars/Parquet 比较、Nautilus、PyO3 和真实 ETF 历史可信度门槛均未完成。02 验收复跑通过：全工作区 83 项通过、1 项按条件忽略，格式和 Clippy 检查通过，release `--candidate soa` 与 `--candidate reference` 均返回 correctness passed。固定小样本不构成 B1 布局决策依据。
 
-**唯一建议下一步：**按 [票据 02](.scratch/poc-0-benchmark/issues/02-soa-momentum-rotation.md) 的完整验收项复核 SoA 候选，验收后再解锁 03 与 04。
+**唯一建议下一步：**并行推进已解锁的 [票据 03 Arrow](.scratch/poc-0-benchmark/issues/03-arrow-momentum-rotation.md) 与 [票据 04 Polars](.scratch/poc-0-benchmark/issues/04-polars-momentum-rotation.md) 完整 S2 候选。
 
 ## 历史进展记录
 
@@ -55,4 +55,4 @@ cargo run -p quant-research --release --locked -- serve --output research-output
 
 **唯一最优先下一步：**取得并归档覆盖固定五 ETF 窗口的两市官方逐日执行状态文件与完整性说明，核验每证券/日期的原文 hash 和历史可用时刻，经 B 单写者冻结真实状态，在同一发布 Universe 版本上复跑；证据不足时保持 UNKNOWN/P0-3 开放。
 
-2026-09-27 更新：POC-0 票据 02 的 SoA 计算首版已实现于统一 `benchmark-poc0` 报告的 `b1_soa` 段；票据已实现。该段对固定面板运行 symbol-major SoA 动量/样本波动率、截面排名、TopK、等权目标和次日 close-to-close 权重收益；对照 01 的独立事件账本金标准校验排名与目标，错金标准时不记录任何候选性能样本。报告单独标注该权重收益模型不含现金、费用、订单、成交或事件 NAV。复跑命令：`cargo run -p quant-research --release --locked --offline -- benchmark-poc0 --candidate soa`（可选 `reference`）。报告提供因子、排序/权重、收益三阶段耗时样本，并按 `rebalance_every` 生成目标；含内部缺 bar 的窗口与不足窗口行为有独立手算单测。固定 3×10 fixture 的五次 SoA 耗时只验证计时/报告链路，不支持布局决策；B1 的 Polars/Arrow/Parquet 完整比较尚未完成。最终验证：83 项通过、1 项按条件忽略；格式、Clippy、两个 release 候选 CLI 均通过。
+2026-09-27 更新：POC-0 票据 02 已由用户验收并标记 `resolved`。统一 `benchmark-poc0 --candidate soa` 报告覆盖 SoA 动量/样本波动率、截面排名、TopK、等权目标和次日 close-to-close 权重收益；对照独立事件账本金标准校验排名与目标，错误时跳过性能测量。报告提供因子、排序/权重、收益三阶段耗时样本，并按 `rebalance_every` 生成目标。独立手算用例覆盖内部缺 bar 和不足窗口。该权重收益模型不含现金、费用、订单、成交或事件 NAV；固定 3×10 fixture 的性能数据不支持布局决策，完整 Polars/Arrow/Parquet 比较仍未完成。最终验证：83 项通过、1 项按条件忽略；格式、Clippy、两个 release 候选 CLI 均通过。

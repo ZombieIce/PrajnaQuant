@@ -6,13 +6,13 @@
 
 用户已确定新主路线为 Rust-first、多市场、三级回测引擎与未来实盘的平台；现阶段先做 [`POC-0`](poc-0-benchmark-spec.md)。完整目标见根目录 [`ARCHITECTURE.md`](../ARCHITECTURE.md)，新交付顺序见 [`product-roadmap.md`](product-roadmap.md)。目前没有 Vector / Fast Event / Accurate 三级实现、Nautilus Adapter、持久 Factor Cache、跨市场账户、Python/PyO3 策略入口或 Live Runtime。现有 React 页面是已实现资产，新平台 MVP 不以 Web 为验收项。以下扫描记录描述旧 A 股纵向场景的代码与数据证据，不能升级为新目标能力。
 
-POC-0 工作范围与验收已发布为本地 [`ready-for-agent` spec](../.scratch/poc-0-benchmark/spec.md)。独立 [`poc/b1-layout`](../poc/b1-layout/README.md) 标量读取 smoke 只对拍三种布局的动量；票据 02 已实现 SoA 的因子、排名、TopK、权重与简化收益，并加入候选选择及分阶段计时，但尚待验收。Polars 表达式、Arrow 完整策略路径、Parquet/转换、峰值内存和 out-of-core 测量仍缺，布局决策为 **Unresolved**。B2 只有票据 07 的最小原型，B3 未启动。
+POC-0 工作范围与验收已发布为本地 [`ready-for-agent` spec](../.scratch/poc-0-benchmark/spec.md)。独立 [`poc/b1-layout`](../poc/b1-layout/README.md) 标量读取 smoke 只对拍三种布局的动量；票据 02 的 SoA 因子、排名、TopK、权重、简化收益、候选选择和分阶段计时已由用户验收并标记 `resolved`。Polars 表达式、Arrow 完整策略路径、Parquet/转换、峰值内存和 out-of-core 测量仍缺，布局决策为 **Unresolved**。B2 只有票据 07 的最小原型，B3 未启动。
 
 POC-0 票据 01 已验收：新增固定 3 ETF × 10 个交易日的版本化 fixture、独立排名/信号/事件账本金标准，以及 correctness-first 的 `benchmark-poc0` CLI。金标准通过后会记录 Rust 参考回测的原始耗时；不通过时输出差异报告并跳过计时。机器/代码/数据 provenance 已进入报告；该票据尚未测峰值 RSS，报告将其明确标为未知。这不是 B1 完整布局比较；当前实现位置和复跑方式见 [`POC-0 harness`](../poc/poc0-benchmark/README.md)。2026-09-27 复验：全工作区 83 项通过、1 项按既定条件跳过，格式、Clippy 与 release CLI 均通过。
 
 POC-0 B2 票据 07 有最小 Fast Event S1 Buy & Hold 原型，通过固定输入与变体 fixture 检查停牌拒单/重试、缺 bar 沿用估值、末日未执行目标、逐日 NAV 恒等式、重复账本 checksum 和固定成本（包括非零买入税）；报告分列初始化、事件处理和端到端五次耗时。它仍不是完整 Fast Event Engine，也只有微型合成样本，因此不能支持性能选型。
 
-POC-0 已按获确认的拆分发布为 [12 张本地执行票据](../.scratch/poc-0-benchmark/issues/01-fixed-dataset-and-benchmark-entry.md)。01 为 `resolved`；02 为 `implemented`、待验收；07 的最小原型已提交但未作为完整 Fast Event 验收。其余票据按阻塞关系推进；提交原型不等于完成整个 POC。
+POC-0 已按获确认的拆分发布为 [12 张本地执行票据](../.scratch/poc-0-benchmark/issues/01-fixed-dataset-and-benchmark-entry.md)。01、02 为 `resolved`；07 的最小原型已提交但未作为完整 Fast Event 验收。其余票据按阻塞关系推进；B1 架构选型仍需完成 Arrow、Polars、Parquet 与扫描/内存工作负载。
 
 完整的问题排序、解决路径及验收判据见 [`priorities.md`](priorities.md)。这里保留按领域归类的事实状态。
 
