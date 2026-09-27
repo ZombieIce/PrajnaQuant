@@ -7,6 +7,14 @@ description = "Versioned local A-share research warehouse"
 license = "MIT"
 publish = false
 
+[profile.dev]
+debug = "line-tables-only"
+incremental = true
+
+[profile.test]
+debug = "line-tables-only"
+incremental = true
+
 [workspace]
 members = ["crates/quant-research"]
 resolver = "2"
