@@ -85,6 +85,12 @@ enum Command {
         output: PathBuf,
         #[arg(long, value_parser = ["reference", "soa", "arrow", "polars"], default_value = "reference")]
         candidate: String,
+        /// Select the backtest engine used for the B2 comparison.
+        #[arg(long, value_parser = ["rust", "nautilus"], default_value = "rust")]
+        backend: String,
+        /// Python executable used by the optional Nautilus adapter.
+        #[arg(long, default_value = ".venv/bin/python")]
+        python: PathBuf,
     },
     /// Generate a versioned Parquet fixture and benchmark the three B1 paths on one scan.
     BenchmarkPoc0Parquet {
@@ -290,17 +296,28 @@ async fn main() -> Result<()> {
             expected,
             output,
             candidate,
+            backend,
+            python,
         } => {
             let report = poc0_benchmark::run(&dataset, &expected, &candidate)?;
             let passed = poc0_benchmark::write_and_exit_status(&report, &output)?;
-            println!(
-                "POC-0 correctness {}: {}",
-                report.correctness_status(),
-                output.display()
-            );
             if !passed {
+                println!(
+                    "POC-0 correctness {}: {}",
+                    report.correctness_status(),
+                    output.display()
+                );
                 std::process::exit(2);
             }
+            if backend == "nautilus" {
+                poc0_benchmark::run_nautilus_adapter(&dataset, &output, &python)?;
+            }
+            println!(
+                "POC-0 correctness {}; backend {}: {}",
+                report.correctness_status(),
+                backend,
+                output.display()
+            );
         }
         Command::BenchmarkPoc0Sweep {
             dataset,

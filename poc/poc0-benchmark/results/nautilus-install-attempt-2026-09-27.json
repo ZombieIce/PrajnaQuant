@@ -1,0 +1,59 @@
+{
+  "schema_version": "poc0.nautilus-install-attempt.v1",
+  "observed_at_local": "2026-09-27 Asia/Shanghai",
+  "required_package": "nautilus_trader==2.0.0rc5",
+  "python": "3.12.2",
+  "platform": "macOS ARM64",
+  "attempts": [
+    {
+      "command": ".venv/bin/python -m pip install --disable-pip-version-check nautilus_trader==2.0.0rc5",
+      "sandbox_result": "blocked by DNS/network access",
+      "return_code": 1,
+      "detail": "Name resolution failed for /simple/nautilus-trader/."
+    },
+    {
+      "command": ".venv/bin/python -m pip install --disable-pip-version-check nautilus_trader==2.0.0rc5",
+      "result": "installed",
+      "return_code": 0,
+      "wheel_bytes": 60000000,
+      "official_wheel_sha256": "c3feca068a507b1651ed8e9d0ee81d10a3520a2e3b37eccbe88cba3487b4e652",
+      "sha256_source": "PyPI artifact metadata; pip cache was disabled so the downloaded wheel was not retained for a local file rehash."
+    }
+  ],
+  "installed_package": {
+    "name": "nautilus-trader",
+    "version": "2.0.0rc5",
+    "installed_files": 158,
+    "installed_file_bytes": 144823815
+  },
+  "space_gate": {
+    "minimum_free_bytes": 10737418240,
+    "preflight_free_human_readable": "49 GiB",
+    "conservative_completion_estimate_bytes": 1073741824,
+    "free_bytes_after_install_and_adapter_builds": 51936387072,
+    "free_human_readable_after": "about 48 GiB",
+    "gate": "passed",
+    "target_directory": "/Users/yibinzhang/Documents/ChatGPT/A股量化/target",
+    "target_bytes_after_adapter_builds": 21751616387,
+    "cache_cleaned": false
+  },
+  "adapter_builds": {
+    "engine_wheel_build": "not applicable; official prebuilt binary wheel installed",
+    "dev": {
+      "record": "build-resource-dev-2026-09-27.json",
+      "wall_seconds": 0.19193562499999994,
+      "target_delta_bytes": 0,
+      "dependency_graph_sha256": "7028b35b9d19c5564cc9082632a5a0995864ddf4394f05763aa85478b238c563",
+      "cache_state": "warm_existing_workspace_target"
+    },
+    "release": {
+      "record": "build-resource-release-2026-09-27.json",
+      "wall_seconds": 10.163408541999999,
+      "target_delta_bytes": 89966,
+      "dependency_graph_sha256": "7028b35b9d19c5564cc9082632a5a0995864ddf4394f05763aa85478b238c563",
+      "cache_state": "warm_existing_workspace_target"
+    }
+  },
+  "status": "completed",
+  "replay_condition": "Use the exact pinned wheel in a Python 3.12 environment; build the benchmark CLI through the shared root target without clearing caches."
+}

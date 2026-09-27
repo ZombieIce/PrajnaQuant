@@ -2659,6 +2659,31 @@ pub fn write_and_exit_status(report: &Poc0Report, output: &Path) -> Result<bool>
     Ok(report.correctness.status == "passed")
 }
 
+/// Enrich the canonical Rust B2 report with the fixed-version Nautilus adapter result.
+/// The Python boundary owns all Nautilus objects; the Rust report remains the project contract.
+pub fn run_nautilus_adapter(dataset: &Path, report: &Path, python: &Path) -> Result<()> {
+    let adapter = Path::new("poc/poc0-benchmark/nautilus_adapter.py");
+    let output = Command::new(python)
+        .arg(adapter)
+        .arg("--dataset")
+        .arg(dataset)
+        .arg("--reference-report")
+        .arg(report)
+        .arg("--output")
+        .arg(report)
+        .output()
+        .with_context(|| format!("start Nautilus adapter with {}", python.display()))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "Nautilus adapter failed ({}): {}{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod soa_tests {
     use super::soa_factor_score;

@@ -299,3 +299,42 @@ target/debug/quant-research benchmark-poc0-sweep --instruments 3 --sessions 10 \
 The report also emits `b2_fast_event_buy_hold`, an independent, deliberately small L1 event path. It creates an equal-weight Buy & Hold target from the fixture's Jan 12 close, submits market buys at subsequent opens, rejects the halted B order on Jan 13, and retries it at the next available open. It marks an existing B holding at its last observed close when the Jan 16 B bar is missing. Orders, fills, fixed costs, cash, holdings, daily NAV, and a stable projection checksum are included. The harness checks repeat-run equality, next-session ordering, the NAV identity, the halt rejection, stale marking, and non-zero costs before collecting one warmup and five timing samples. It separately records day-index initialization, event processing, and end-to-end samples. The CLI test also removes A's later bars and enables buy tax to check the final unexecuted target and non-negative cash.
 
 This is a prototype and a correctness smoke on one tiny fixture. It does not establish production Fast Event semantics, broad benchmark performance, or an architecture decision; Nautilus comparison remains a separate ticket.
+
+## B2 Nautilus adapter attempt (ticket 08)
+
+The Nautilus candidate is selected through the same correctness-first command. The default
+Python executable is the repository `.venv/bin/python`; install the pinned wheel first:
+
+```bash
+.venv/bin/python -m pip install -r poc/poc0-benchmark/requirements-nautilus.txt
+cargo run -p quant-research --no-default-features --locked --offline -- \
+  benchmark-poc0 --backend nautilus \
+  --output target/poc-0/nautilus-report.json
+```
+
+`--backend nautilus` first writes the Rust reference report, then adds the adapter projection
+to that same JSON file. The pin is `nautilus_trader==2.0.0rc5`; this run used Python 3.12 on
+macOS ARM64. The Adapter maps each project instrument to a Nautilus `Equity`, converts daily
+bars into separate synthetic open/close `QuoteTick`s, submits a market order only when the
+next open quote arrives, and maps Nautilus fills into the project report fields. At each close,
+the report also reads cash and net positions directly from Nautilus `Portfolio`; this direct
+account snapshot is checked separately from the project ledger reconstructed from fills. The
+Python process owns all Nautilus types and engine lifecycle.
+
+Nautilus 2.x has no native next-bar-open mode for bar-only data, so the QuoteTick adapter is
+the measured timing seam. Five of six fixed-fixture checks pass for fill quantity/price/
+commission, direct account cash/positions, daily cash/holdings/NAV, and total cost. It remains
+`unresolved` because the B HALTED session
+is represented by an omitted QuoteTick: Nautilus keeps a pending order and fills next day,
+while the Rust reference records a rejection and a separate retry. This is an order lifecycle
+difference even though the fill and account projections match. The sample recorded conversion,
+initialization, event processing, and end-to-end once; it is a correctness probe, not throughput
+evidence. Full projection and raw samples are in
+[`Nautilus comparison`](results/nautilus-adapter-comparison-2026-09-27.json).
+
+The first restricted pip attempt failed DNS; the fixed wheel was then installed successfully
+with the available approved network path. The space gate remained above 10 GiB. Install and
+build identity are in [`install/build resources`](results/nautilus-install-attempt-2026-09-27.json),
+with raw shared-target dev and release records in [`dev build`](results/nautilus-adapter-build-dev-2026-09-27.json)
+and [`release build`](results/nautilus-adapter-build-release-2026-09-27.json). No target cache
+was cleaned.

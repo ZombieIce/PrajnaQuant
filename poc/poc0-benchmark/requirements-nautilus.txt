@@ -1,0 +1,3 @@
+# Exact pre-release pinned from the official NautilusTrader 2.x wheel channel.
+# Install this into a Python 3.12 virtual environment; the package API differs from 1.x.
+nautilus_trader==2.0.0rc5
