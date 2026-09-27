@@ -23,7 +23,9 @@ use std::{
 };
 
 mod parquet;
+mod sweep;
 pub use parquet::{ParquetOptions, run_parquet};
+pub use sweep::{SweepOptions, run_sweep};
 
 const WARMUP_RUNS: usize = 1;
 const MEASUREMENT_RUNS: usize = 5;

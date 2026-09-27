@@ -108,6 +108,19 @@ enum Command {
         #[arg(long, default_value_t = 0)]
         filler_rows: usize,
     },
+    /// Run the fixed B1 S2 parameter sweep across layouts and factor-cache states.
+    BenchmarkPoc0Sweep {
+        #[arg(long, default_value = "poc/poc0-benchmark/fixtures/dataset-v1.json")]
+        dataset: PathBuf,
+        #[arg(long, default_value = "poc/poc0-benchmark/fixtures/expected-v1.json")]
+        expected: PathBuf,
+        #[arg(long, default_value = "poc/poc0-benchmark/results/b1-sweep.json")]
+        output: PathBuf,
+        #[arg(long, default_value_t = 64)]
+        instruments: usize,
+        #[arg(long, default_value_t = 252)]
+        sessions: usize,
+    },
     /// Serve the local visualization workbench.
     #[cfg(feature = "app")]
     Serve {
@@ -286,6 +299,30 @@ async fn main() -> Result<()> {
                 output.display()
             );
             if !passed {
+                std::process::exit(2);
+            }
+        }
+        Command::BenchmarkPoc0Sweep {
+            dataset,
+            expected,
+            output,
+            instruments,
+            sessions,
+        } => {
+            let report = poc0_benchmark::run_sweep(
+                &dataset,
+                &expected,
+                poc0_benchmark::SweepOptions {
+                    instruments,
+                    sessions,
+                },
+            )?;
+            if let Some(parent) = output.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&output, serde_json::to_vec_pretty(&report)?)?;
+            println!("POC-0 B1 sweep {}: {}", report["status"], output.display());
+            if report["status"] != "passed" {
                 std::process::exit(2);
             }
         }

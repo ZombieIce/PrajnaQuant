@@ -407,6 +407,81 @@ fn benchmark_arrow_candidate_matches_independent_return_examples_and_records_con
 }
 
 #[test]
+fn benchmark_poc0_sweep_reports_reusable_cache_and_layout_measurements() {
+    let output_dir = tempfile::tempdir().unwrap();
+    let report_path = output_dir.path().join("sweep-report.json");
+    let result = std::process::Command::new(env!("CARGO_BIN_EXE_quant-research"))
+        .args([
+            "benchmark-poc0-sweep",
+            "--dataset",
+            fixture("dataset-v1.json").to_str().unwrap(),
+            "--expected",
+            fixture("expected-v1.json").to_str().unwrap(),
+            "--output",
+            report_path.to_str().unwrap(),
+            "--instruments",
+            "3",
+            "--sessions",
+            "10",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        result.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report: Value = serde_json::from_slice(&fs::read(report_path).unwrap()).unwrap();
+    assert_eq!(report["format"], "poc0-b1-sweep.v1");
+    assert_eq!(report["status"], "passed");
+    assert!(
+        report["target_load"]["kind"]
+            .as_str()
+            .unwrap()
+            .contains("synthetic")
+    );
+    assert_eq!(report["target_load"]["instrument_count"], 3);
+    assert_eq!(report["target_load"]["session_count"], 10);
+    assert!(report["decision_threshold"]["minimum_throughput_gain_pct"].is_number());
+
+    let parameter_runs = report["parameter_runs"].as_array().unwrap();
+    assert!(!parameter_runs.is_empty());
+    for run in parameter_runs {
+        for layout in ["soa", "arrow", "polars"] {
+            assert_eq!(
+                run["checksums"][layout]["cache_miss"], run["checksums"][layout]["cache_hit"],
+                "{layout} cache hit changed the projection for {:?}",
+                run["parameters"]
+            );
+        }
+    }
+
+    for layout in ["soa", "arrow", "polars"] {
+        for condition in ["cache_miss", "cache_hit"] {
+            let measurement = &report["measurements"][layout][condition];
+            assert!(!measurement["raw_samples_ns"].as_array().unwrap().is_empty());
+            assert_eq!(
+                measurement["scan_samples_ns"].as_array().unwrap().len(),
+                report["repetitions"].as_u64().unwrap() as usize
+            );
+            assert!(measurement["median_ns"].is_number());
+            assert!(measurement["p95_ns"].is_number());
+            assert!(measurement["parallel_runs_per_second"].is_number());
+            assert!(measurement.get("peak_rss_bytes").is_some());
+            let per_parameter = measurement["per_parameter_statistics"].as_object().unwrap();
+            assert_eq!(per_parameter.len(), parameter_runs.len());
+            assert!(per_parameter.values().all(|row| {
+                row["raw_sample_count"] == report["repetitions"]
+                    && row["median_ns"].is_number()
+                    && row["p95_ns"].is_number()
+            }));
+        }
+    }
+}
+
+#[test]
 fn benchmark_polars_candidate_matches_soa_and_records_expression_samples() {
     let output_dir = tempfile::tempdir().unwrap();
     let report_path = output_dir.path().join("polars-report.json");

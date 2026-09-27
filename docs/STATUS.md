@@ -8,7 +8,7 @@
 
 用户已确定新主路线为 Rust-first、多市场、三级回测引擎与未来实盘的平台；现阶段先做 [`POC-0`](poc-0-benchmark-spec.md)。完整目标见根目录 [`ARCHITECTURE.md`](../ARCHITECTURE.md)，新交付顺序见 [`product-roadmap.md`](product-roadmap.md)。目前没有 Vector / Fast Event / Accurate 三级实现、Nautilus Adapter、持久 Factor Cache、跨市场账户、Python/PyO3 策略入口或 Live Runtime。现有 React 页面是已实现资产，新平台 MVP 不以 Web 为验收项。以下扫描记录描述旧 A 股纵向场景的代码与数据证据，不能升级为新目标能力。
 
-POC-0 工作范围与验收已发布为本地 [`ready-for-agent` spec](../.scratch/poc-0-benchmark/spec.md)。独立 [`poc/b1-layout`](../poc/b1-layout/README.md) 标量读取 smoke 只对拍三种布局的动量；票据 02 的 SoA、票据 03 的 Arrow 完整 S2 候选和票据 04 的 Polars 候选已验收。票据 05 的版本化 Parquet 写入/复读、列/row group 裁剪与三候选对拍已由用户验收：10,000,029 行、404,509,661 字节的源文件在本机 Linux VM 以 Docker 256 MiB cgroup 限制成功复读，子进程 RSS 58,933,248 字节，容器峰值触及 256 MiB、无 OOM。macOS `RLIMIT_AS` 失败记录仍保留；Arrow release 计时和 B1 布局决策也未完成。B2 只有票据 07 的最小原型，B3 未启动。
+POC-0 工作范围与验收已发布为本地 [`ready-for-agent` spec](../.scratch/poc-0-benchmark/spec.md)。独立 [`poc/b1-layout`](../poc/b1-layout/README.md) 标量读取 smoke 只对拍三种布局的动量；票据 02 的 SoA、票据 03 的 Arrow 完整 S2 候选和票据 04 的 Polars 候选已验收。票据 05 的版本化 Parquet 写入/复读、列/row group 裁剪与三候选对拍已由用户验收：10,000,029 行、404,509,661 字节的源文件在本机 Linux VM 以 Docker 256 MiB cgroup 限制成功复读，子进程 RSS 58,933,248 字节，容器峰值触及 256 MiB、无 OOM。macOS `RLIMIT_AS` 失败记录仍保留。票据 06 已完成确定性 64 × 252 合成面板的 S2 参数扫描与冷热因子缓存对比，正确性和 checksum 通过；Custom SoA 结论为 `defer`，miss/hit 两线程吞吐相对最佳替代分别 +8.99%/+0.32%，未达到 20% 采纳门槛。报告中的全进程 RSS 为 107,905,024 字节；不代表真实市场/PIT。B2 只有票据 07 的最小原型，B3 未启动。
 
 2026-09-27 票据 05 最初在依赖解析阶段受阻；现以最小本地 `polars-io` vendor 补齐离线 Parquet 路径。实现、资源实测、macOS 受限内存启动失败与随后 Linux cgroup 复读通过的证据见 [票据 05](../.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md)。
 
@@ -18,7 +18,7 @@ POC-0 票据 01 已验收：新增固定 3 ETF × 10 个交易日的版本化 fi
 
 POC-0 B2 票据 07 有最小 Fast Event S1 Buy & Hold 原型，通过固定输入与变体 fixture 检查停牌拒单/重试、缺 bar 沿用估值、末日未执行目标、逐日 NAV 恒等式、重复账本 checksum 和固定成本（包括非零买入税）；报告分列初始化、事件处理和端到端五次耗时。它仍不是完整 Fast Event Engine，也只有微型合成样本，因此不能支持性能选型。
 
-POC-0 已按获确认的拆分发布为 [13 张本地执行票据](../.scratch/poc-0-benchmark/issues/01-fixed-dataset-and-benchmark-entry.md)。01–05 为 `resolved`；03 的验收限于 Arrow 候选实现与正确性，release 性能样本仍缺。07 的最小原型已提交但未作为完整 Fast Event 验收。票据 06 已解除 05 阻塞，B1 架构选型仍需代表性规模、参数扫描与缓存对比。
+POC-0 已按获确认的拆分发布为 [13 张本地执行票据](../.scratch/poc-0-benchmark/issues/01-fixed-dataset-and-benchmark-entry.md)。01–06 为 `resolved`；03 的验收限于 Arrow 候选实现与正确性，release 结论由票据 06 的同条件 sweep 补齐。06 对本轮合成目标负载得出 `defer`，不是平台级布局裁决。07 的最小原型仍未作为完整 Fast Event 验收。
 
 完整的问题排序、解决路径及验收判据见 [`priorities.md`](priorities.md)。这里保留按领域归类的事实状态。
 

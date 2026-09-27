@@ -1,0 +1,29 @@
+{
+  "schema_version": "poc0-b1-sweep-rss.v1",
+  "started_at_utc": "2026-09-27T12:18:44.978712+00:00",
+  "finished_at_utc": "2026-09-27T12:19:07.264646+00:00",
+  "status": "passed",
+  "command": [
+    "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/target/release/quant-research",
+    "benchmark-poc0-sweep",
+    "--dataset",
+    "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/poc/poc0-benchmark/fixtures/dataset-v1.json",
+    "--expected",
+    "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/poc/poc0-benchmark/fixtures/expected-v1.json",
+    "--output",
+    "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/poc/poc0-benchmark/results/b1-sweep-64x252-2026-09-27.json",
+    "--instruments",
+    "64",
+    "--sessions",
+    "252"
+  ],
+  "exit_code": 0,
+  "wall_ns": 22268652917,
+  "peak_rss_bytes": 107905024,
+  "peak_rss_scope": "entire benchmark-poc0-sweep child process; not attributed by layout or cache condition",
+  "operating_system": "macOS-26.2-x86_64-i386-64bit",
+  "architecture": "x86_64",
+  "binary_sha256": "7a7604d3f3fa431aca52d0313e798f72ddafd777992cf0e97360a8f77df54504",
+  "stdout": "POC-0 B1 sweep \"passed\": /Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/poc/poc0-benchmark/results/b1-sweep-64x252-2026-09-27.json\n",
+  "stderr": ""
+}

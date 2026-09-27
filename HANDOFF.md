@@ -4,7 +4,13 @@
 
 ## 当前交接（2026-09-27）
 
-票据 05 已由用户于 2026-09-27 确认验收并标记 `resolved`：10,000,029 行、404,509,661 字节的 Parquet 在本机 Colima Linux ARM64 VM 的 cgroup v2 `memory.max=268435456` 下 `--reuse` 退出 0，`oom_kill=0`，只读取 2,448 组中的 1 组、7 列中的 3 列，三候选结果一致。子进程 RSS 58,933,248 字节，容器峰值 268,435,456 字节（含文件缓存及 Python 测量进程），`memory.events.max=646` 表示出现回收压力；不能将子进程 RSS 当作整个容器峰值。原始报告和 cgroup/Docker 配置证据见 [票据 05](.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md) 与 [POC README](poc/poc0-benchmark/README.md#parquet-b1-path-ticket-05)。复跑顺序：构建 Linux 无默认 feature 二进制、在无内存限制下生成大样本、只对复读容器施加 256 MiB 上限；两次复读均退出 0，存档第二次。macOS `RLIMIT_AS` 启动失败是历史记录，不影响这次 cgroup 结论；缓存不受控，仍不能据此选择 B1 布局。**唯一建议下一步：**推进已解除阻塞的票据 06，完成代表性规模的参数扫描与缓存对比。
+票据 05 已由用户于 2026-09-27 确认验收并标记 `resolved`：10,000,029 行、404,509,661 字节的 Parquet 在本机 Colima Linux ARM64 VM 的 cgroup v2 `memory.max=268435456` 下 `--reuse` 退出 0，`oom_kill=0`，只读取 2,448 组中的 1 组、7 列中的 3 列，三候选结果一致。子进程 RSS 58,933,248 字节，容器峰值 268,435,456 字节（含文件缓存及 Python 测量进程），`memory.events.max=646` 表示出现回收压力；不能将子进程 RSS 当作整个容器峰值。原始报告和 cgroup/Docker 配置证据见 [票据 05](.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md) 与 [POC README](poc/poc0-benchmark/README.md#parquet-b1-path-ticket-05)。
+
+票据 06 已实现并标记 `resolved`。64 instruments × 252 synthetic weekday sessions、六个 S2 参数 Run、三布局、六次轮换重复全部通过独立 fixture、跨布局 `1e-8` 对拍和冷热逐 Run checksum。最终结论是 `defer`：SoA 相对最佳替代的两线程吞吐在 cache miss 为 +8.99%，cache hit 为 +0.32%，未达预登记 20% 门槛。顺序与并行计时均排除 checksum 序列化。release sweep 全进程峰值 RSS 107,905,024 字节；暖缓存 shared-harness dev/release 构建分别 5.582/9.675 秒，target 增量 -142,598,341/+53,203 字节（负值为共享缓存变化，非负成本）。报告明确为合成负载，不代表真实市场/PIT；报告的 Git diff 身份因未跟踪文件不完整，但构建记录含编译源码 hash 与未跟踪文件内容身份；每布局单独构建成本及冷构建 Unknown。复跑命令、结果表和限制见 [B1 sweep README](poc/poc0-benchmark/README.md#b1-parameter-sweep-and-factor-cache-ticket-06) 与 [票据 06](.scratch/poc-0-benchmark/issues/06-b1-sweep-cache-and-conclusion.md)。
+
+本轮票据 06 验证：窄 CLI 测试、`cargo fmt --all -- --check`、`cargo test --workspace --locked --offline`（16 + 65 + 10 passed、1 ignored）、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings`、脚本 `py_compile`、受资源闸门保护的 dev/release 构建、release sweep/RSS 与 `git diff --check` 均通过。`.venv/bin/python -m unittest discover -s tests -v` 有 21 项通过、1 个模块导入失败：环境缺少 `duckdb`，与本票无关。vendor `polars-io` 的既有未使用项编译警告保留。开放问题：合成负载不等于真实市场，冷构建和每布局构建成本仍 Unknown；不得据此作平台级布局裁决。
+
+**唯一建议下一步：**先按票据 07 的已实现 B2 Buy & Hold 原型核对其独立验收并关闭该票，再推进已解除构建资源阻塞的 [票据 08 Nautilus Adapter](.scratch/poc-0-benchmark/issues/08-nautilus-buy-and-hold-adapter.md)。
 
 前次交接：本地 `polars-io` vendor 解开离线 Parquet 依赖；新增固定 fixture 的版本化 Parquet/manifest、`--reuse`、列与 row group 裁剪、三候选对拍和分阶段报告。复核时修正了 `ParallelStrategy::None` 对零重叠组仍进入列读取路径的问题。10,000,029 行、404,509,661 字节源文件改用解码前跳过无关组的策略后，2,448 组中选 1 组，独立进程 RSS 57,573,376 字节；原始结果见 [票据 05](.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md)。当时 256 MiB 地址空间限制在 macOS 启动前失败；此缺口现由上方 Linux cgroup 测量补齐。
 
@@ -16,7 +22,7 @@
 
 提交已按领域拆分：旧 A 股状态取证 `e8764e1`、日更与身份导入 `8e8bff9`、诊断作业与页面 `c7906ab`；Agent 工具配置 `d8fab3a`；新平台架构与旧路线归档 `15cc6d5`；POC-0 计划 `20eb209`、B1 标量 smoke `e8c3bd8`、01 已验收 harness `6401651`、07 最小事件原型 `a907212`、02 SoA 候选 `d78df42`。各提交仅含所属批次文件，未推送远端。
 
-当前 POC 状态：01–05 已验收；03 Arrow 为用户确认的实现验收，release 性能样本仍缺。05 大文件裁剪与受限内存复读通过；代表性规模三候选性能比较和 B1 布局选择仍 Unresolved。07 是最小事件原型，不能支持 Fast Event 选型。Nautilus、PyO3 和真实 ETF 历史可信度门槛均未完成。现有大样本只增加了无关 filler 行，不代表三候选在大规模真实信号工作负载上的性能。
+当前 POC 状态：01–06 已验收/关闭；03 Arrow 的候选实现验收与 06 的同条件 release sweep 已完成。06 对 64 × 252 合成负载给出 `defer`，没有采纳 Custom SoA，也不构成真实市场/PIT 结论。07 是最小事件原型，不能支持 Fast Event 选型；08 仍依赖 07 的验收。Nautilus、PyO3 和真实 ETF 历史可信度门槛均未完成。
 
 2026-09-27 票据 03 Arrow：用户已确认实现验收并标记 `resolved`。`benchmark-poc0 --candidate arrow` 使用 Arrow `RecordBatch` 完成 S2 因子、排序、TopK、权重和下一会话 close-to-close 收益；独立用例覆盖首个有效日、排名分数、符号升序平局、末日缺 bar 排除、所选目标下一日缺 bar 返回 `None` 和手算收益。报告含五次 raw 样本、分阶段耗时、checksum 和单独转换耗时。`cargo check -p quant-research --locked`、全工作区测试（89 passed、1 ignored）、Arrow 定向测试、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings`、`cargo fmt --all -- --check` 与 `git diff --check` 通过。没有生成 Arrow release 性能样本，架构性能比较仍 Unresolved；验收不表示采用 Arrow 布局。
 

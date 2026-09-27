@@ -200,6 +200,100 @@ general performance claim. The release-mode raw report projection is archived at
 the fixed input identity, correctness status, all five raw samples, phase samples, conversion
 samples, and checksum.
 
+## B1 parameter sweep and factor cache (ticket 06)
+
+Run the registered target workload after the shared warm-cache dev and release builds. Each build
+record is kept separate from runtime throughput; the release command below uses the same locked
+workspace target and dependency graph:
+
+```bash
+df -h .
+python3 poc/poc0-benchmark/capture-build-resource.py --profile dev \
+  --output poc/poc0-benchmark/results/b1-sweep-build-dev-2026-09-27.json
+python3 poc/poc0-benchmark/capture-build-resource.py --profile release \
+  --output poc/poc0-benchmark/results/b1-sweep-build-release-2026-09-27.json
+python3 poc/poc0-benchmark/measure-b1-sweep-rss.py \
+  --binary target/release/quant-research \
+  --output poc/poc0-benchmark/results/b1-sweep-64x252-2026-09-27.json \
+  --dev-build-record poc/poc0-benchmark/results/b1-sweep-build-dev-2026-09-27.json \
+  --release-build-record poc/poc0-benchmark/results/b1-sweep-build-release-2026-09-27.json
+```
+
+The registered workload is 64 instruments × 252 synthetic weekday sessions, with deterministic
+close generation and deterministic missing bars; it has no exchange holidays or real-market/PIT
+claims. The fixed `expected-v1.json` 3 ETF × 10 session event ledger is checked first. The sweep
+then runs the same S2 factor definition through SoA, Arrow and Polars. Windows are derived from
+session count and clamped to short 2–20, long 4–60; score weights are 1.0 short, 1.0 long and 0.5
+volatility. The six parameter Runs are unique `top_n` values from 1/5/10 (capped at the universe
+size) crossed with `rebalance_every` 1/5.
+
+The factor cache key is the synthetic dataset content hash, layout, factor implementation version,
+momentum and volatility windows, score-weight bit patterns, and trend-filter flag. It stores per-day
+ranked factor candidates; `top_n` and `rebalance_every` are intentionally excluded so those six
+Runs reuse the same factor output. A miss removes the entry, computes and inserts the factors; a
+hit reuses the factors and rebuilds targets/returns. Exact checksums are required between each
+Run's miss and hit result. Cross-layout projections use the fixed `1e-8` numeric tolerance.
+
+One untimed miss/hit warmup run per layout. Six timed repetitions rotate the first layout and
+alternate cache-condition order. Each report keeps raw per-Run samples keyed by parameters,
+single-Run median/p95, sequential scan Runs/s, two-thread parallel Runs/s and repeated scan samples.
+Checksums are verified outside the sequential and parallel scan timers.
+The RSS wrapper measures the whole child process, not per-layout attribution; the exact scope and
+raw `getrusage` record are preserved. Conversion/preparation is included in the end-to-end runtime
+but is not independently isolated here. Custom SoA's extra maintenance burden is qualitative and
+not monetized.
+
+Before measurement, the adoption hurdle is registered at a 20% parallel throughput advantage
+over the best alternative in both cache conditions. The wrapper reports `adopt` only if correctness,
+target-size and RSS gates pass and the hurdle is cleared; `reject` requires a 20% disadvantage in
+both conditions; mixed evidence is `defer`; invalid or undersized evidence is `unresolved`. This
+conclusion is scoped to the recorded synthetic workload. Cold Cargo build is not measured and no
+target cache is cleared. Shared B1 harness dev/release build seconds and `target/` byte deltas stay
+in the separate `build_cost_evidence` section. Per-layout build-cost attribution is Unknown because
+all three implementations compile into the same crate and executable.
+
+### Recorded result (2026-09-27)
+
+The reproducible report, separate process-RSS record, and warm dev/release build records are
+[`sweep JSON`](results/b1-sweep-64x252-2026-09-27.json),
+[`RSS JSON`](results/b1-sweep-64x252-2026-09-27.rss.json),
+[`dev build JSON`](results/b1-sweep-build-dev-2026-09-27.json), and
+[`release build JSON`](results/b1-sweep-build-release-2026-09-27.json). Dataset content SHA-256 is
+`f5e178f3bcbf606dcc84145fd1728c2f504ba942e196eeafa08d818b48c7f132`. The run passed the
+independent fixture, cross-layout `1e-8` projection comparison, and exact per-layout cache-hit/miss
+checksums. It records 36 individual Run samples for each layout/cache state (six per each of six
+parameter combinations) and six complete sequential/parallel sweep repetitions.
+
+| Layout | Cache | Pooled Run median / p95 | Parallel Runs/s |
+| --- | --- | ---: | ---: |
+| SoA | miss | 9.248 / 9.670 ms | 149.63 |
+| Arrow | miss | 10.110 / 10.644 ms | 137.29 |
+| Polars | miss | 280.640 / 294.763 ms | 6.07 |
+| SoA | hit | 0.339 / 0.694 ms | 4264.08 |
+| Arrow | hit | 0.338 / 0.698 ms | 4250.42 |
+| Polars | hit | 0.341 / 0.778 ms | 4198.37 |
+
+Peak RSS was 107,905,024 bytes for the whole release benchmark process. Hardware was Apple M1,
+macOS, 8 logical CPUs and 16 GiB RAM; Rust was 1.98.1 and the locked dependency hash and dirty
+source paths are in the report. Its Git diff identity is incomplete because the working tree has
+untracked files; use the same source to reproduce the results. The 20% threshold was not reached:
+SoA was 8.99% ahead of the best alternative for misses and 0.32% ahead for hits.
+**Conclusion: `defer` Custom SoA adoption**
+for this workload; the extra implementation/maintenance burden is not justified by the measured
+gain. This is not a real-market or PIT result.
+
+Warm shared-harness dev build: 5.582 s and -142,598,341 shared-target bytes (cache change, not
+negative build cost). Warm release build: 9.675 s and +53,203 target bytes. Both kept more than
+10 GiB free. Cold build and per-layout build costs
+remain Unknown; build timings are not included in Runs/s.
+
+Small CLI overrides are intended for tests only:
+
+```bash
+target/debug/quant-research benchmark-poc0-sweep --instruments 3 --sessions 10 \
+  --output target/poc-0/b1-sweep-smoke.json
+```
+
 ## B2 Fast Event Buy & Hold prototype
 
 The report also emits `b2_fast_event_buy_hold`, an independent, deliberately small L1 event path. It creates an equal-weight Buy & Hold target from the fixture's Jan 12 close, submits market buys at subsequent opens, rejects the halted B order on Jan 13, and retries it at the next available open. It marks an existing B holding at its last observed close when the Jan 16 B bar is missing. Orders, fills, fixed costs, cash, holdings, daily NAV, and a stable projection checksum are included. The harness checks repeat-run equality, next-session ordering, the NAV identity, the halt rejection, stale marking, and non-zero costs before collecting one warmup and five timing samples. It separately records day-index initialization, event processing, and end-to-end samples. The CLI test also removes A's later bars and enables buy tax to check the final unexecuted target and non-negative cash.
