@@ -72,6 +72,8 @@ enum Command {
         expected: PathBuf,
         #[arg(long, default_value = "target/poc-0/benchmark-report.json")]
         output: PathBuf,
+        #[arg(long, value_parser = ["reference", "soa"], default_value = "reference")]
+        candidate: String,
     },
     /// Serve the local visualization workbench.
     Serve {
@@ -236,8 +238,9 @@ async fn main() -> Result<()> {
             dataset,
             expected,
             output,
+            candidate,
         } => {
-            let report = quant_research::poc0_benchmark::run(&dataset, &expected)?;
+            let report = quant_research::poc0_benchmark::run(&dataset, &expected, &candidate)?;
             let passed = quant_research::poc0_benchmark::write_and_exit_status(&report, &output)?;
             println!(
                 "POC-0 correctness {}: {}",

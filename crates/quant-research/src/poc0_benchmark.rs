@@ -211,7 +211,7 @@ struct RankingProjection {
     candidates: Vec<RankingCandidate>,
 }
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 struct SignalProjection {
     date: NaiveDate,
     target_symbols: Vec<String>,
@@ -363,6 +363,7 @@ pub struct Poc0Report {
     correctness: CorrectnessReport,
     measurements: MeasurementReport,
     result: ReportResult,
+    b1_soa: B1SoaReport,
     b2_fast_event_buy_hold: FastEventReport,
     conclusion: &'static str,
 }
@@ -454,6 +455,49 @@ struct FastEventSummary {
     total_cost: f64,
 }
 
+#[derive(Debug, Serialize)]
+struct B1SoaReport {
+    correctness_status: &'static str,
+    checksum_sha256: String,
+    projection: B1SoaProjection,
+    warmup_runs: usize,
+    raw_samples_ns: Vec<u128>,
+    median_ns: Option<u128>,
+    p95_ns: Option<u128>,
+    phase_samples_ns: B1PhaseSamples,
+    measurement_scope: &'static str,
+    model_boundary: &'static str,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct B1PhaseSamples {
+    factor_ns: Vec<u128>,
+    ranking_topk_weights_ns: Vec<u128>,
+    return_projection_ns: Vec<u128>,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+struct B1SoaProjection {
+    rankings: Vec<RankingProjection>,
+    targets: Vec<SignalProjection>,
+    target_weights: Vec<WeightedTarget>,
+    portfolio_returns: Vec<PortfolioReturn>,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+struct WeightedTarget {
+    date: NaiveDate,
+    symbol: String,
+    weight: f64,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+struct PortfolioReturn {
+    from: NaiveDate,
+    to: NaiveDate,
+    return_pct: Option<f64>,
+}
+
 impl Poc0Report {
     pub fn correctness_status(&self) -> &'static str {
         self.correctness.status
@@ -468,7 +512,15 @@ struct ReportResult {
 
 /// Load one fixed fixture, run the reference implementation, check an independent golden
 /// projection, then measure only after every correctness and accounting gate passes.
-pub fn run(dataset_path: &Path, expected_path: &Path) -> Result<Poc0Report> {
+pub fn run(
+    dataset_path: &Path,
+    expected_path: &Path,
+    selected_candidate: &str,
+) -> Result<Poc0Report> {
+    ensure!(
+        matches!(selected_candidate, "reference" | "soa"),
+        "unknown POC-0 candidate {selected_candidate}"
+    );
     let dataset_bytes = fs::read(dataset_path)
         .with_context(|| format!("read POC-0 dataset {}", dataset_path.display()))?;
     let expected_bytes = fs::read(expected_path)
@@ -488,6 +540,17 @@ pub fn run(dataset_path: &Path, expected_path: &Path) -> Result<Poc0Report> {
 
     let report = run_candidate(&prepared, &config);
     let projection = project_result(&prepared, &config, &report);
+    let b1_projection = run_soa(&prepared, &config, false).0;
+    let expected_targets = projection
+        .signals
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i % prepared.spec.strategy.rebalance_every.max(1) == 0)
+        .map(|(_, signal)| signal)
+        .cloned()
+        .collect::<Vec<_>>();
+    let b1_correct =
+        b1_projection.rankings == projection.rankings && b1_projection.targets == expected_targets;
     let mut differences = compare_values(
         &expected.projection,
         &serde_json::to_value(&projection)?,
@@ -504,16 +567,24 @@ pub fn run(dataset_path: &Path, expected_path: &Path) -> Result<Poc0Report> {
     }
     let accounting_checks = accounting_checks(&report);
     let time_checks = time_checks(&report, &projection, &prepared.spec.calendar);
-    let correctness_passed =
-        differences.is_empty() && accounting_checks.is_empty() && time_checks.is_empty();
+    let correctness_passed = differences.is_empty()
+        && accounting_checks.is_empty()
+        && time_checks.is_empty()
+        && b1_correct;
     let checksum_sha256 = sha256(&serde_json::to_vec(&projection)?);
 
-    let (measurements, measurement_differences) = if correctness_passed {
+    let (measurements, measurement_differences) = if correctness_passed
+        && selected_candidate == "reference"
+    {
         measure_candidate(&prepared, &config, &expected.projection)?
     } else {
         (
             MeasurementReport {
-                status: "skipped_correctness_failure",
+                status: if correctness_passed {
+                    "not_selected"
+                } else {
+                    "skipped_correctness_failure"
+                },
                 warmup_runs: 0,
                 requested_runs: MEASUREMENT_RUNS,
                 raw_samples_ns: Vec::new(),
@@ -525,6 +596,12 @@ pub fn run(dataset_path: &Path, expected_path: &Path) -> Result<Poc0Report> {
             },
             Vec::new(),
         )
+    };
+    let (b1_ns, b1_phase_samples) = if correctness_passed && selected_candidate == "soa" {
+        let (_, samples, phases) = run_soa(&prepared, &config, true);
+        (samples, phases)
+    } else {
+        (Vec::new(), B1PhaseSamples::default())
     };
     let fast_event_run = run_fast_event(&prepared);
     let fast_event_checksum = sha256(&serde_json::to_vec(&fast_event_run.projection)?);
@@ -553,8 +630,15 @@ pub fn run(dataset_path: &Path, expected_path: &Path) -> Result<Poc0Report> {
         .iter()
         .map(|r| r.end_to_end_ns)
         .collect::<Vec<_>>();
+    let b1_median = sorted_median(&b1_ns);
+    let b1_p95 = sorted_p95(&b1_ns);
     differences.extend(measurement_differences);
-    let correctness_passed = correctness_passed && measurements.status == "measured";
+    let candidate_measurement_passed = if selected_candidate == "reference" {
+        measurements.status == "measured"
+    } else {
+        b1_ns.len() == MEASUREMENT_RUNS
+    };
+    let correctness_passed = correctness_passed && candidate_measurement_passed;
     let provenance = provenance_report();
     let strategy = candidate_config(&prepared.spec, &config);
     let dataset_report = DatasetReport {
@@ -597,7 +681,12 @@ pub fn run(dataset_path: &Path, expected_path: &Path) -> Result<Poc0Report> {
     Ok(Poc0Report {
         schema_version: "poc0.report.v1",
         run_id,
-        candidate: "existing-rust-etf-backtest-reference".into(),
+        candidate: if selected_candidate == "soa" {
+            "custom-soa-momentum-rotation"
+        } else {
+            "existing-rust-etf-backtest-reference"
+        }
+        .into(),
         strategy,
         dataset: dataset_report,
         expected_input: expected_path.display().to_string(),
@@ -618,6 +707,18 @@ pub fn run(dataset_path: &Path, expected_path: &Path) -> Result<Poc0Report> {
         result: ReportResult {
             checksum_sha256,
             projection,
+        },
+        b1_soa: B1SoaReport {
+            correctness_status: if b1_correct { "passed" } else { "failed" },
+            checksum_sha256: sha256(&serde_json::to_vec(&b1_projection)?),
+            projection: b1_projection,
+            warmup_runs: if b1_ns.is_empty() { 0 } else { WARMUP_RUNS },
+            raw_samples_ns: b1_ns,
+            median_ns: b1_median,
+            p95_ns: b1_p95,
+            phase_samples_ns: b1_phase_samples,
+            measurement_scope: "symbol-major SoA factor windows, cross-sectional rank/top-k, equal weights, and next-session return projection; excludes parsing and fixture construction",
+            model_boundary: "equal-weight target-weight × next-session close-to-close return; missing selected bar makes that interval unavailable; no cash, fees, fills, or event-account NAV",
         },
         b2_fast_event_buy_hold: FastEventReport {
             status: if fast_event_correct {
@@ -911,6 +1012,190 @@ fn run_fast_event(dataset: &PreparedDataset) -> FastEventRun {
         event_processing_ns,
         end_to_end_ns: end_to_end_started.elapsed().as_nanos(),
     }
+}
+
+/// Complete small S2 vector path using symbol-major structure-of-arrays storage.
+/// Signal rows use close(T) and prior observed closes only; returns are evaluation labels.
+fn run_soa(
+    dataset: &PreparedDataset,
+    config: &ExperimentConfig,
+    measure: bool,
+) -> (B1SoaProjection, Vec<u128>, B1PhaseSamples) {
+    let mut symbols = dataset
+        .spec
+        .instruments
+        .iter()
+        .map(|i| i.symbol.clone())
+        .collect::<Vec<_>>();
+    symbols.sort();
+    let days = dataset.spec.calendar.len();
+    let mut closes = vec![f64::NAN; symbols.len() * days];
+    for bar in &dataset.bars {
+        let si = symbols.binary_search(&bar.symbol).expect("sorted symbols");
+        let di = dataset
+            .spec
+            .calendar
+            .binary_search(&bar.trade_date)
+            .unwrap();
+        closes[si * days + di] = bar.close;
+    }
+    let calculate = || {
+        let mut rankings = Vec::new();
+        let mut targets = Vec::new();
+        let mut target_weights = Vec::new();
+        let mut phases = B1PhaseSamples::default();
+        let mut eligible_dates = 0usize;
+        for di in 0..days {
+            let factor_started = Instant::now();
+            let mut candidates = Vec::new();
+            for (si, symbol) in symbols.iter().enumerate() {
+                if closes[si * days + di].is_nan() {
+                    continue;
+                }
+                let observed = (0..=di)
+                    .filter(|day| !closes[si * days + day].is_nan())
+                    .collect::<Vec<_>>();
+                if let Some(score) = soa_factor_score(
+                    &closes[si * days..(si + 1) * days],
+                    &observed,
+                    di,
+                    &config.strategy,
+                ) {
+                    candidates.push(RankingCandidate {
+                        symbol: symbol.clone(),
+                        score,
+                    });
+                }
+            }
+            phases.factor_ns.push(factor_started.elapsed().as_nanos());
+            let rank_started = Instant::now();
+            candidates.sort_by(|a, b| {
+                b.score
+                    .total_cmp(&a.score)
+                    .then_with(|| a.symbol.cmp(&b.symbol))
+            });
+            if !candidates.is_empty() {
+                let rebalance = config.strategy.rebalance_every.max(1);
+                let should_rebalance = eligible_dates % rebalance == 0;
+                eligible_dates += 1;
+                let date = dataset.spec.calendar[di];
+                if should_rebalance {
+                    let chosen = candidates
+                        .iter()
+                        .take(config.strategy.top_n)
+                        .map(|c| c.symbol.clone())
+                        .collect::<Vec<_>>();
+                    target_weights.extend(chosen.iter().map(|symbol| WeightedTarget {
+                        date,
+                        symbol: symbol.clone(),
+                        weight: 1.0 / chosen.len() as f64,
+                    }));
+                    targets.push(SignalProjection {
+                        date,
+                        target_symbols: chosen,
+                    });
+                }
+                rankings.push(RankingProjection { date, candidates });
+            }
+            phases
+                .ranking_topk_weights_ns
+                .push(rank_started.elapsed().as_nanos());
+        }
+        let return_started = Instant::now();
+        let mut portfolio_returns = Vec::new();
+        for signal in &targets {
+            let Some(di) = dataset.spec.calendar.iter().position(|d| *d == signal.date) else {
+                continue;
+            };
+            if di + 1 >= days {
+                continue;
+            }
+            let mut values = Vec::new();
+            for sym in &signal.target_symbols {
+                let si = symbols.binary_search(sym).unwrap();
+                let a = closes[si * days + di];
+                let b = closes[si * days + di + 1];
+                if !a.is_nan() && !b.is_nan() {
+                    values.push(b / a - 1.0)
+                }
+            }
+            let return_pct = if values.len() == signal.target_symbols.len() && !values.is_empty() {
+                Some(values.iter().sum::<f64>() / values.len() as f64)
+            } else {
+                None
+            };
+            portfolio_returns.push(PortfolioReturn {
+                from: signal.date,
+                to: dataset.spec.calendar[di + 1],
+                return_pct,
+            });
+        }
+        phases
+            .return_projection_ns
+            .push(return_started.elapsed().as_nanos());
+        (
+            B1SoaProjection {
+                rankings,
+                targets,
+                target_weights,
+                portfolio_returns,
+            },
+            phases,
+        )
+    };
+    let mut samples = Vec::with_capacity(MEASUREMENT_RUNS);
+    let mut phase_samples = B1PhaseSamples::default();
+    let (mut projection, _) = calculate();
+    if measure {
+        let _ = calculate();
+        for _ in 0..MEASUREMENT_RUNS {
+            let now = Instant::now();
+            let (measured_projection, phases) = std::hint::black_box(calculate());
+            projection = measured_projection;
+            samples.push(now.elapsed().as_nanos());
+            phase_samples.factor_ns.push(phases.factor_ns.iter().sum());
+            phase_samples
+                .ranking_topk_weights_ns
+                .push(phases.ranking_topk_weights_ns.iter().sum());
+            phase_samples
+                .return_projection_ns
+                .push(phases.return_projection_ns.iter().sum());
+        }
+    }
+    (projection, samples, phase_samples)
+}
+
+fn soa_factor_score(
+    close: &[f64],
+    observed_days: &[usize],
+    signal_day: usize,
+    strategy: &StrategyConfig,
+) -> Option<f64> {
+    let short = strategy
+        .momentum_short_days
+        .unwrap_or(strategy.lookback_days);
+    let long = strategy
+        .momentum_long_days
+        .unwrap_or(strategy.lookback_days);
+    let volatility = strategy.volatility_window.unwrap_or(short.max(2));
+    let observation = observed_days.len().checked_sub(1)?;
+    let required = short.max(long).max(volatility);
+    if observed_days[observation] != signal_day || observation < required || volatility <= 1 {
+        return None;
+    }
+    let now = close[signal_day];
+    let short_return = now / close[observed_days[observation - short]] - 1.0;
+    let long_return = now / close[observed_days[observation - long]] - 1.0;
+    let returns = (observation - volatility + 1..=observation)
+        .map(|j| close[observed_days[j]] / close[observed_days[j - 1]] - 1.0)
+        .collect::<Vec<_>>();
+    let mean = returns.iter().sum::<f64>() / volatility as f64;
+    let variance =
+        returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (volatility - 1) as f64;
+    let score = strategy.short_momentum_weight * short_return
+        + strategy.long_momentum_weight * long_return
+        - strategy.volatility_weight * variance.sqrt();
+    score.is_finite().then_some(score)
 }
 
 fn prepare_dataset(spec: DatasetInput) -> Result<PreparedDataset> {
@@ -1728,4 +2013,30 @@ fn write_report(report: &Poc0Report, output: &Path) -> Result<()> {
 pub fn write_and_exit_status(report: &Poc0Report, output: &Path) -> Result<bool> {
     write_report(report, output)?;
     Ok(report.correctness.status == "passed")
+}
+
+#[cfg(test)]
+mod soa_tests {
+    use super::soa_factor_score;
+    use crate::core::StrategyConfig;
+
+    #[test]
+    fn gap_uses_prior_observed_bars_and_insufficient_window_is_missing() {
+        let close = [100.0, 110.0, f64::NAN, 121.0, 133.1];
+        let observed = [0, 1, 3, 4];
+        let strategy = StrategyConfig {
+            momentum_short_days: Some(1),
+            momentum_long_days: Some(1),
+            volatility_window: Some(2),
+            short_momentum_weight: 1.0,
+            long_momentum_weight: 1.0,
+            volatility_weight: 1.0,
+            ..StrategyConfig::default()
+        };
+        let score = soa_factor_score(&close, &observed[..3], 3, &strategy)
+            .expect("third observed bar has enough history");
+        assert!((score - 0.2).abs() < 1e-12);
+        assert!(soa_factor_score(&close, &observed[..2], 1, &strategy).is_none());
+        assert!(soa_factor_score(&close, &observed[..2], 2, &strategy).is_none());
+    }
 }
