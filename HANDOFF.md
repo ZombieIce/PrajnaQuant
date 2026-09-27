@@ -10,7 +10,9 @@
 
 本轮票据 06 验证：窄 CLI 测试、`cargo fmt --all -- --check`、`cargo test --workspace --locked --offline`（16 + 65 + 10 passed、1 ignored）、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings`、脚本 `py_compile`、受资源闸门保护的 dev/release 构建、release sweep/RSS 与 `git diff --check` 均通过。`.venv/bin/python -m unittest discover -s tests -v` 有 21 项通过、1 个模块导入失败：环境缺少 `duckdb`，与本票无关。vendor `polars-io` 的既有未使用项编译警告保留。开放问题：合成负载不等于真实市场，冷构建和每布局构建成本仍 Unknown；不得据此作平台级布局裁决。
 
-**唯一建议下一步：**先按票据 07 的已实现 B2 Buy & Hold 原型核对其独立验收并关闭该票，再推进已解除构建资源阻塞的 [票据 08 Nautilus Adapter](.scratch/poc-0-benchmark/issues/08-nautilus-buy-and-hold-adapter.md)。
+2026-09-27 票据 07 审核验收：独立复算金标准 fixture（`poc/poc0-benchmark/fixtures/dataset-v1.json`）的逐日现金/持仓/NAV，手算结果与 `b2_fast_event_buy_hold` 报告完全一致（Jan 13 现金 39740/NAV 100640 … Jan 16 现金 9610/NAV 101710，`total_cost` 390，`final_equity` 101710）；B 在 Jan 13 因 `HALTED` 状态被拒单、Jan 14 重试成交，B 在 Jan 16 缺 bar 时沿用 Jan 15 收盘 99.0 估值。非零买入税变体（移除 A 全部后续 bars、`buy_tax_rate=0.02`）手算 `tax` 1201.2、`final_equity` 99738.8、末日未执行目标 reason `no_successful_open_fill_before_dataset_end`、逐日现金非负，均与代码路径吻合。复跑 `cargo test -p quant-research --no-default-features --locked --offline --test poc0_benchmark_cli`（10 passed）、`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 均通过。票据四条验收项与正确性范围说明均满足，标记 `resolved`；`.scratch/poc-0-benchmark/issues/07-fast-event-buy-and-hold.md` 已同步。
+
+**唯一建议下一步：**推进已解除构建资源阻塞的 [票据 08 Nautilus Adapter](.scratch/poc-0-benchmark/issues/08-nautilus-buy-and-hold-adapter.md)。
 
 前次交接：本地 `polars-io` vendor 解开离线 Parquet 依赖；新增固定 fixture 的版本化 Parquet/manifest、`--reuse`、列与 row group 裁剪、三候选对拍和分阶段报告。复核时修正了 `ParallelStrategy::None` 对零重叠组仍进入列读取路径的问题。10,000,029 行、404,509,661 字节源文件改用解码前跳过无关组的策略后，2,448 组中选 1 组，独立进程 RSS 57,573,376 字节；原始结果见 [票据 05](.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md)。当时 256 MiB 地址空间限制在 macOS 启动前失败；此缺口现由上方 Linux cgroup 测量补齐。
 

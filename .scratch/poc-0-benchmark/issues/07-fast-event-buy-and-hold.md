@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 固定数据集与统一基准入口。
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] T 收盘产生的决策在下一可用 open 执行；缺 bar、不可成交状态和末日未执行目标按独立预期处理。
 - [x] 订单、Fill、数量、成交价、佣金、滑点、现金、持仓及逐日 NAV 可追溯，且 `NAV ≈ cash + Σ(quantity × 估值价)`。
@@ -16,3 +16,5 @@
 ## Comments
 
 2026-09-27：已在统一 `benchmark-poc0` 报告加入 `b2_fast_event_buy_hold`；JSON 包含账本 checksum 和分列计时。全量 workspace 测试与 CLI golden/变体检查通过，具体验证记录见 `HANDOFF.md`。
+
+2026-09-27 验收：独立复算金标准 fixture（`poc/poc0-benchmark/fixtures/dataset-v1.json`）逐日现金/持仓/NAV，手算结果与报告一致（Jan 13 现金 39740/NAV 100640 … Jan 16 现金 9610/NAV 101710，`total_cost` 390，`final_equity` 101710），B 在 Jan 13 HALTED 拒单、Jan 14 重试成交，B 在 Jan 16 缺 bar 沿用 Jan 15 收盘估值 99.0，均与代码路径吻合。非零买入税变体手算 `tax` 1201.2、`final_equity` 99738.8 同样吻合，末日未执行目标 reason 为 `no_successful_open_fill_before_dataset_end`（此为 B2 原型自身的终态原因字符串；上一条评论提到的 `no_future_execution_session` 是既有参考回测引擎的原因字符串，与 B2 无关，纯属评论措辞误引，不影响验收）。复跑 `cargo test -p quant-research --no-default-features --locked --offline --test poc0_benchmark_cli`（10 passed）、`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 均通过。四条验收项与正确性范围说明均满足，标记 `resolved`。
