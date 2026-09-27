@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Note:** 停牌/执行状态导致的 Nautilus 原生订单生命周期一致性已在 [ADR 0012](../../../docs/decisions/0012-poc0-nautilus-status-gate.md)「后续比较边界（供票据 09 及以后引用，无需重新论证）」一节划定为永久排除维度，不计入本票的 `adopt / defer / reject` 判据；触碰停牌的场景沿用票据 08 的"Adapter 项目事件 vs Nautilus 原生提交"分列方式即可，无需重新论证或重新验证该边界。
+
 - [ ] 两种候选接收相同事件和策略参数；S2 的因子、排名、TopK、调仓目标与已固定语义一致，S3 的 MA20/60 窗口和状态转换有独立预期。
 - [ ] 在共同子集逐项对拍信号、订单、Fill、现金、持仓、成本、每日 NAV 和 PortfolioResult；语义差异单独列明。
 - [ ] 固定规模、预热、重复次数和线程数，报告单 Run 延迟、并行 Runs/s、中位数、p95、峰值 RSS、转换成本和原始样本。

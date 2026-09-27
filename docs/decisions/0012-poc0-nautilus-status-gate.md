@@ -16,3 +16,13 @@ POC-0 的 Rust Fast Event 参考路径在有价格 bar 但执行状态为 `HALTE
 ## 比较边界
 
 该拒单由项目 Adapter 状态门槛产生，不是 Nautilus 撮合引擎的原生拒单。固定样本中 Adapter 项目事件为 4 条、Nautilus 实际提交为 3 条、Rust 参考尝试为 4 条。报告必须分别列出项目契约一致性和 Nautilus 原生生命周期差异；不得把 Adapter 合成的拒单计入 Nautilus 原生一致性。Fill、账户、成本与 NAV 可以在固定共同子集对拍；原生订单生命周期及跨引擎吞吐结论保持 `unresolved`。本 ADR 不改变现有 A 股/ETF 执行时序，也不确立生产 Accurate Backend 规则。
+
+## 后续比较边界（供票据 09 及以后引用，无需重新论证）
+
+- Nautilus 2.0.0rc5 是否会在收到 `InstrumentStatus(action=HALT)` 后对期间提交的订单产生撮合引擎原生拒单，本 ADR 尚未做隔离实验验证，状态为 **Unknown**（不是"已证实不支持"）。要证实或证伪这一点，须先写一个独立小样例（单 instrument、一条 `QuoteTick` + 一条 `InstrumentStatus(HALT)`、一次 `submit_order()`），断言是否触发 `on_order_rejected`；不得直接在 S2/S3 全量 fixture 上验证，也不得未经验证就宣称任一结论。
+- 不论上述验证结果如何，从本 ADR 起，B2 的 `adopt / defer / reject` 结论按以下范围一次性划定，票据 09 及以后直接引用，不需要每次重新论证或重新测量同一个问题：
+  - **计入结论的共同子集**：Fill 数量/价格/佣金、现金、持仓、每日 NAV、总成本、events/s、runs/s、单 Run 延迟、峰值 RSS。
+  - **排除在外、只记录不判定的维度**：停牌/执行状态导致的订单事件数量与生命周期一致性（Adapter 项目契约 vs Nautilus 原生提交计数），以及该维度上的跨引擎吞吐差异。
+  - 若某个 fixture 场景本身会触发停牌/执行状态门槛，报告须沿用票据 08 的模式分列"Adapter 项目事件"与"Nautilus 原生提交"两组计数，不得合并计入原生一致性检查，也不得因这一项不一致就把该场景标记为整体 mismatch 从而拖累其余可比字段（Fill/现金/NAV/成本/吞吐）的结论。
+  - 最终 B2 引擎选型结论文档须明确写出："本结论基于上述共同子集成立；停牌场景下的原生订单生命周期语义仍 `unresolved`，不构成本次结论的一部分。"
+- 本节范围划定是一次性登记，不因每次新票据的测量结果而移动判定标准；只有当有人完成上面的隔离实验并给出确定结论时，才更新本 ADR 顶部的 Unknown 状态与本节措辞，其余判定范围保持不变。
