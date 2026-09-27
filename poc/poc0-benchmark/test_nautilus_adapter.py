@@ -12,6 +12,92 @@ class NautilusAdapterReportTests(unittest.TestCase):
         nautilus_adapter._version_probe()[1] is None,
         "requires the pinned Nautilus runtime",
     )
+    def test_rotation_orders_and_account_match_worked_fixture(self):
+        dataset_path = nautilus_adapter.ROOT / "poc/poc0-benchmark/fixtures/dataset-v1.json"
+        dataset = json.loads(dataset_path.read_text(encoding="utf-8"))
+        projection = nautilus_adapter._run_nautilus(dataset, strategy="s2")["projection"]
+
+        self.assertEqual(projection["signals"][0], {"date": "2026-01-07", "target_symbols": ["C"]})
+        self.assertEqual(
+            [(order["attempt_date"], order["symbol"], order["side"], order["quantity"], order["reason"]) for order in projection["orders"]],
+            [
+                ("2026-01-08", "C", "BUY", 0, "UNKNOWN"),
+                ("2026-01-09", "B", "BUY", 900, None),
+                ("2026-01-13", "B", "SELL", 0, "HALTED"),
+                ("2026-01-14", "B", "SELL", 900, None),
+                ("2026-01-14", "A", "BUY", 900, None),
+            ],
+        )
+        self.assertEqual([row["cash"] for row in projection["ledger"]], [100000.0] * 4 + [9810.0] * 3 + [9430.0] * 3)
+        self.assertEqual([row["nav"] for row in projection["ledger"]], [100000.0] * 4 + [101610.0, 102510.0, 100710.0, 100330.0, 101230.0, 102130.0])
+        self.assertAlmostEqual(projection["summary"]["total_cost"], 570.0)
+
+        reference_path = nautilus_adapter.ROOT / "target/poc-0/benchmark-report.json"
+        with tempfile.TemporaryDirectory() as directory:
+            reference_path = Path(directory) / "rust.json"
+            from subprocess import run
+            run([
+                str(nautilus_adapter.ROOT / "target/debug/quant-research"),
+                "benchmark-poc0", "--candidate", "soa", "--output", str(reference_path),
+            ], cwd=nautilus_adapter.ROOT, check=True, capture_output=True)
+            report = nautilus_adapter.build_report(dataset_path, reference_path)
+        rotation = report["strategy_comparisons"]["s2"]
+        self.assertEqual(rotation["status"], "passed_common_subset")
+        self.assertTrue(all(check["passed"] for check in rotation["checks"] if check["field"] != "orders.nautilus_native_lifecycle"))
+        self.assertTrue(next(check["passed"] for check in rotation["checks"] if check["field"] == "signals.factor_rankings"))
+        self.assertFalse(next(check["passed"] for check in rotation["checks"] if check["field"] == "orders.nautilus_native_lifecycle"))
+        self.assertEqual(len(rotation["timings"]["event_processing"]["raw_samples_ns"]), 5)
+
+    @unittest.skipUnless(nautilus_adapter._version_probe()[1] is None, "requires pinned Nautilus")
+    def test_ma20_60_trades_only_after_completed_window_and_cross(self):
+        spec_path = nautilus_adapter.ROOT / "poc/poc0-benchmark/fixtures/b2-ma20-60-v1.json"
+        dataset = nautilus_adapter._ma_dataset(json.loads(spec_path.read_text(encoding="utf-8")))
+        projection = nautilus_adapter._run_nautilus(dataset, strategy="s3")["projection"]
+        calendar = dataset["calendar"]
+        self.assertEqual(projection["signals"], [
+            {"date": calendar[60], "target_symbols": ["A"]},
+            {"date": calendar[85], "target_symbols": []},
+        ])
+        self.assertEqual(
+            [(item["attempt_date"], item["side"], item["quantity"]) for item in projection["orders"]],
+            [(calendar[61], "BUY", 900), (calendar[86], "SELL", 900)],
+        )
+        self.assertAlmostEqual(projection["ledger"][60]["nav"], 100000.0)
+        self.assertAlmostEqual(projection["ledger"][61]["cash"], 9810.0)
+        self.assertAlmostEqual(projection["ledger"][86]["cash"], 99620.0)
+        self.assertAlmostEqual(projection["summary"]["total_cost"], 380.0)
+        with tempfile.TemporaryDirectory() as directory:
+            from subprocess import run
+            reference_path = Path(directory) / "rust.json"
+            run([
+                str(nautilus_adapter.ROOT / "target/debug/quant-research"),
+                "benchmark-poc0", "--candidate", "soa", "--output", str(reference_path),
+            ], cwd=nautilus_adapter.ROOT, check=True, capture_output=True)
+            report = nautilus_adapter.build_report(
+                nautilus_adapter.ROOT / "poc/poc0-benchmark/fixtures/dataset-v1.json", reference_path
+            )
+        comparison = report["strategy_comparisons"]["s3"]
+        self.assertEqual(comparison["status"], "passed_common_subset")
+        self.assertTrue(all(check["passed"] for check in comparison["checks"]))
+        self.assertEqual(len(comparison["timings"]["event_processing"]["raw_samples_ns"]), 5)
+        self.assertEqual(report["ticket09_decision"]["status"], "unresolved")
+        self.assertEqual(report["ticket09_decision"]["minimum_fast_event_gain"], 2.0)
+
+    @unittest.skipUnless(nautilus_adapter._version_probe()[1] is None, "requires pinned Nautilus")
+    def test_parallel_runs_keep_full_projection_and_raw_samples(self):
+        dataset = json.loads((nautilus_adapter.ROOT / "poc/poc0-benchmark/fixtures/dataset-v1.json").read_text(encoding="utf-8"))
+        report = nautilus_adapter.parallel_runs(dataset, "s2", workers=2, runs=4)
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["workers"], 2)
+        self.assertEqual(report["warmup_runs"], 2)
+        self.assertEqual(len(report["raw_samples_ns"]), 4)
+        self.assertGreater(report["parallel_runs_per_second"], 0)
+        self.assertGreater(report["peak_worker_rss_bytes"], 0)
+
+    @unittest.skipUnless(
+        nautilus_adapter._version_probe()[1] is None,
+        "requires the pinned Nautilus runtime",
+    )
     def test_halted_order_is_rejected_at_open_then_retried(self):
         dataset_path = nautilus_adapter.ROOT / "poc/poc0-benchmark/fixtures/dataset-v1.json"
         dataset = json.loads(

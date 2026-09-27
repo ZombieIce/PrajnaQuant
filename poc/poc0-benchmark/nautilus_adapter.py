@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from concurrent.futures import ProcessPoolExecutor
+from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 import importlib.metadata
@@ -47,7 +48,108 @@ def _version_probe() -> tuple[str | None, str | None]:
     return version, None
 
 
-def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
+def _rotation_signals(dataset: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    parameters = dataset["strategy"]
+    missing = {(item["symbol"], item["date"]) for item in dataset.get("missing_bars", [])}
+    observed: dict[str, list[tuple[str, float]]] = {item["symbol"]: [] for item in dataset["instruments"]}
+    signals: dict[str, dict[str, Any]] = {}
+    rankings: list[dict[str, Any]] = []
+    eligible_dates = 0
+    short = parameters["momentum_short_days"]
+    long = parameters["momentum_long_days"]
+    window = parameters["volatility_window"]
+    for index, date in enumerate(dataset["calendar"]):
+        candidates = []
+        for item in dataset["instruments"]:
+            symbol = item["symbol"]
+            if (symbol, date) in missing:
+                continue
+            close = float(item["closes"][index])
+            history = observed[symbol]
+            history.append((date, close))
+            if len(history) <= max(short, long, window) or window <= 1:
+                continue
+            returns = [history[point][1] / history[point - 1][1] - 1 for point in range(len(history) - window, len(history))]
+            mean = sum(returns) / window
+            volatility = (sum((value - mean) ** 2 for value in returns) / (window - 1)) ** 0.5
+            score = (
+                parameters["short_momentum_weight"] * (close / history[-short - 1][1] - 1)
+                + parameters["long_momentum_weight"] * (close / history[-long - 1][1] - 1)
+                - parameters["volatility_weight"] * volatility
+            )
+            if math.isfinite(score):
+                candidates.append((symbol, score))
+        if candidates:
+            candidates.sort(key=lambda item: (-item[1], item[0]))
+            rankings.append({"date": date, "candidates": [
+                {"symbol": symbol, "score": score} for symbol, score in candidates
+            ]})
+            if eligible_dates % max(1, parameters["rebalance_every"]) == 0:
+                signals[date] = {
+                    "date": date,
+                    "target_symbols": [symbol for symbol, _ in candidates[:parameters["top_n"]]],
+                }
+            eligible_dates += 1
+    return signals, rankings
+
+
+def _ma_dataset(spec: dict[str, Any]) -> dict[str, Any]:
+    day = datetime.fromisoformat(spec["start_date"]).date()
+    calendar = []
+    for _ in range(spec["flat_sessions"] + spec["high_sessions"] + spec["low_sessions"]):
+        while day.weekday() >= 5:
+            day += timedelta(days=1)
+        calendar.append(day.isoformat())
+        day += timedelta(days=1)
+    closes = ([spec["flat_close"]] * spec["flat_sessions"]
+              + [spec["high_close"]] * spec["high_sessions"]
+              + [spec["low_close"]] * spec["low_sessions"])
+    return {
+        "dataset_version": spec["version"],
+        "s3_rising_symbol": spec["rising_symbol"],
+        "calendar": calendar,
+        "timezone": "Asia/Shanghai",
+        "bar_defaults": {"open": spec["open"]},
+        "instruments": [
+            {"symbol": symbol, "price_precision": 2,
+             "closes": closes if symbol == spec["rising_symbol"] else [spec["flat_close"]] * len(calendar)}
+            for symbol in spec["symbols"]
+        ],
+        "missing_bars": [],
+        "execution_status_overrides": [],
+        "account": {"initial_cash": spec["initial_cash"], "lot_size": spec["lot_size"]},
+        "costs": {
+            "minimum_commission": spec["minimum_commission"],
+            "commission_rate": spec["commission_rate"],
+            "buy_slippage_bps": spec["slippage_bps"],
+            "sell_slippage_bps": spec["slippage_bps"],
+        },
+    }
+
+
+def _ma_signals(dataset: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    signals = {}
+    held = False
+    previous_gap = None
+    symbol = dataset["s3_rising_symbol"]
+    closes = next(item["closes"] for item in dataset["instruments"] if item["symbol"] == symbol)
+    for index, date in enumerate(dataset["calendar"]):
+        if index < 59:
+            continue
+        fast = sum(closes[index - 19:index + 1]) / 20
+        slow = sum(closes[index - 59:index + 1]) / 60
+        gap = fast - slow
+        if previous_gap is not None and not held and previous_gap <= 0 < gap:
+            held = True
+            signals[date] = {"date": date, "target_symbols": [symbol]}
+        elif previous_gap is not None and held and previous_gap >= 0 > gap:
+            held = False
+            signals[date] = {"date": date, "target_symbols": []}
+        previous_gap = gap
+    return signals
+
+
+def _run_nautilus(dataset: dict[str, Any], strategy: str = "s1") -> dict[str, Any]:
     """Run one isolated B2 scenario through public Nautilus 2.x Python APIs."""
     started = time.perf_counter_ns()
     from nautilus_trader.backtest import BacktestEngine
@@ -143,6 +245,9 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
                         "origin": "adapter_status_gate" if reason else "nautilus_order",
                     }
                 )
+            self._snapshot(tick)
+
+        def _snapshot(self, tick: Any) -> None:
             date = self.config.close_dates.get(int(tick.ts_event))
             if date is not None and date not in self.account_snapshots:
                 account = self.portfolio.account(self.config.venue)
@@ -180,6 +285,99 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
                 }
             )
 
+    class RotationStrategy(BuyHoldStrategy):
+        def __init__(self, config: AdapterConfig) -> None:
+            super().__init__(config)
+            self.pending: dict[str, Any] | None = None
+            self.seen_open: dict[str, set[str]] = {}
+            self.positions: dict[str, int] = {}
+            self.cash = float(dataset["account"]["initial_cash"])
+            self.blocked_exits: set[str] = set()
+
+        def on_quote(self, tick: Any) -> None:
+            date = self.config.close_dates.get(int(tick.ts_event))
+            if date is not None:
+                self._snapshot(tick)
+                if date in rotation_signals:
+                    self.pending = rotation_signals[date]
+                return
+            date = self.config.open_dates.get(int(tick.ts_event))
+            if date is None or self.pending is None:
+                return
+            symbol_at_open = tick.instrument_id.symbol.value
+            self.seen_open.setdefault(date, set()).add(symbol_at_open)
+            signal = self.pending
+            targets = signal["target_symbols"]
+            exits = sorted(symbol for symbol in self.positions if symbol not in targets)
+            if len(self.seen_open[date]) == 1 and any(
+                self._blocked(symbol, date, signal["date"], "SELL") for symbol in exits
+            ):
+                self.blocked_exits.add(date)
+            if date in self.blocked_exits:
+                return
+            if symbol_at_open in exits:
+                self._submit(symbol_at_open, date, signal["date"], "SELL", self.positions[symbol_at_open])
+            if symbol_at_open in targets and symbol_at_open not in self.positions and not any(
+                symbol not in targets for symbol in self.positions
+            ):
+                if self._blocked(symbol_at_open, date, signal["date"], "BUY"):
+                    return
+                buy_ask = float((Decimal(str(dataset["bar_defaults"]["open"])) * (
+                    Decimal(1) + Decimal(str(dataset["costs"]["buy_slippage_bps"])) / 10_000
+                )).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+                lot = int(dataset["account"]["lot_size"])
+                quantity = int(self.cash / max(1, len(targets) - len(self.positions)) / buy_ask / lot) * lot
+                while quantity > 0 and quantity * buy_ask + float(dataset["costs"]["minimum_commission"]) > self.cash:
+                    quantity -= lot
+                if quantity > 0:
+                    self._submit(symbol_at_open, date, signal["date"], "BUY", quantity)
+            if all(symbol in self.positions for symbol in targets) and all(
+                symbol in targets for symbol in self.positions
+            ):
+                self.pending = None
+
+        def _blocked(self, symbol: str, date: str, decision: str, side: str) -> bool:
+            reason = "missing_open" if symbol not in bars_by_date[date] else self.config.blocked_statuses.get((symbol, date))
+            if reason is None:
+                return False
+            self.order_events.append({
+                "decision_date": decision, "attempt_date": date, "symbol": symbol,
+                "side": side, "quantity": 0, "reason": reason,
+                "origin": "adapter_status_gate",
+            })
+            return True
+
+        def _submit(self, symbol: str, date: str, decision: str, side: str, quantity: int) -> None:
+            instrument_id = next(item for item in self.config.ids if item.symbol.value == symbol)
+            order = self.order_factory.market(
+                instrument_id=instrument_id,
+                order_side=OrderSide.BUY if side == "BUY" else OrderSide.SELL,
+                quantity=Quantity.from_int(quantity),
+            )
+            self.submit_order(order)
+            self.order_events.append({
+                "decision_date": decision, "attempt_date": date, "symbol": symbol,
+                "side": side, "quantity": quantity, "reason": None,
+                "origin": "nautilus_order",
+            })
+
+        def on_order_filled(self, event: Any) -> None:
+            super().on_order_filled(event)
+            symbol = event.instrument_id.symbol.value
+            quantity = int(str(event.last_qty))
+            gross = quantity * float(str(event.last_px))
+            fee = float(str(event.commission).split()[0])
+            if event.order_side == OrderSide.BUY:
+                self.cash -= gross + fee
+                self.positions[symbol] = self.positions.get(symbol, 0) + quantity
+            else:
+                self.cash += gross - fee
+                remaining = self.positions[symbol] - quantity
+                if remaining:
+                    self.positions[symbol] = remaining
+                else:
+                    del self.positions[symbol]
+
     conversion_started = time.perf_counter_ns()
     currency = Currency.from_str("CNY")
     venue = Venue("SIM")
@@ -188,6 +386,9 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
     rows_by_symbol: dict[str, list[tuple[str, str, Any]]] = {}
     precision_quantum = Decimal("0.01")
     bars_by_date = {d: {} for d in dataset["calendar"]}
+    rotation_signals, rotation_rankings = _rotation_signals(dataset) if strategy == "s2" else (
+        _ma_signals(dataset) if strategy == "s3" else {}, []
+    )
     missing = {(x["symbol"], x["date"]) for x in dataset.get("missing_bars", [])}
     blocked_statuses = {
         (x["symbol"], x["date"]): x.get("trade_status") or "missing_status"
@@ -197,10 +398,11 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
     signal_date = dataset["calendar"][len(dataset["calendar"]) - 5]
     open_time = ZoneInfo(dataset.get("timezone", "Asia/Shanghai"))
     slippage_rate = Decimal(str(dataset["costs"]["buy_slippage_bps"])) / Decimal(10_000)
+    sell_slippage_rate = Decimal(str(dataset["costs"].get("sell_slippage_bps", dataset["costs"]["buy_slippage_bps"]))) / Decimal(10_000)
     targets: dict[str, int] = {}
     budget = Decimal(str(dataset["account"]["initial_cash"])) / Decimal(len(dataset["instruments"]))
     lot = int(dataset["account"]["lot_size"])
-    for item in dataset["instruments"]:
+    for instrument_index, item in enumerate(dataset["instruments"]):
         symbol = item["symbol"]
         instrument_id = InstrumentId.from_str(f"{symbol}.SIM")
         ids.append(instrument_id)
@@ -229,10 +431,12 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
             close_price = Decimal(str(close)).quantize(precision_quantum, rounding=ROUND_HALF_UP)
             close_stamp = int(datetime.fromisoformat(f"{date}T15:00:00+08:00").timestamp() * 1_000_000_000)
             open_stamp = int(datetime.fromisoformat(f"{date}T09:30:00+08:00").timestamp() * 1_000_000_000)
+            if strategy != "s1":
+                open_stamp += len(dataset["instruments"]) - instrument_index
             buy_ask = (open_price * (Decimal(1) + slippage_rate)).quantize(
                 precision_quantum, rounding=ROUND_HALF_UP
             )
-            buy_bid = (open_price * (Decimal(1) - slippage_rate)).quantize(
+            buy_bid = (open_price * (Decimal(1) - sell_slippage_rate)).quantize(
                 precision_quantum, rounding=ROUND_HALF_UP
             )
             open_tick = QuoteTick(
@@ -248,14 +452,16 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
         rows_by_symbol[symbol] = rows
     signal_ts = int(datetime.fromisoformat(f"{signal_date}T15:00:00+08:00").timestamp() * 1_000_000_000)
     open_timestamps = {
-        int(datetime.fromisoformat(f"{date}T09:30:00+08:00").timestamp() * 1_000_000_000)
+        int(datetime.fromisoformat(f"{date}T09:30:00+08:00").timestamp() * 1_000_000_000) + offset
         for date in dataset["calendar"]
-        if date > signal_date
+        if strategy != "s1" or date > signal_date
+        for offset in (range(1, len(ids) + 1) if strategy != "s1" else (0,))
     }
     open_dates = {
-        int(datetime.fromisoformat(f"{date}T09:30:00+08:00").timestamp() * 1_000_000_000): date
+        int(datetime.fromisoformat(f"{date}T09:30:00+08:00").timestamp() * 1_000_000_000) + offset: date
         for date in dataset["calendar"]
-        if date > signal_date
+        if strategy != "s1" or date > signal_date
+        for offset in (range(1, len(ids) + 1) if strategy != "s1" else (0,))
     }
     close_dates = {
         int(datetime.fromisoformat(f"{date}T15:00:00+08:00").timestamp() * 1_000_000_000): date
@@ -278,7 +484,7 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
     for instrument, item in zip(instruments, dataset["instruments"], strict=True):
         engine.add_instrument(instrument)
         engine.add_data([row[2] for row in rows_by_symbol[item["symbol"]]])
-    strategy = BuyHoldStrategy(
+    strategy_instance = (RotationStrategy if strategy != "s1" else BuyHoldStrategy)(
         AdapterConfig(
             ids=ids,
             quantities=targets,
@@ -292,14 +498,14 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
             currency=currency,
         )
     )
-    engine.add_strategy(strategy)
+    engine.add_strategy(strategy_instance)
     init_ns = time.perf_counter_ns() - init_started
 
     run_started = time.perf_counter_ns()
     engine.run()
     event_ns = time.perf_counter_ns() - run_started
 
-    fills = sorted(strategy.fill_events, key=lambda x: (x["ts_event"], x["symbol"]))
+    fills = sorted(strategy_instance.fill_events, key=lambda x: (x["ts_event"], x["symbol"]))
     cash = float(dataset["account"]["initial_cash"])
     holdings: dict[str, int] = {}
     fill_by_date: dict[str, list[dict[str, Any]]] = {}
@@ -313,8 +519,14 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
     marks: dict[str, float] = {}
     for date in dataset["calendar"]:
         for fill in fill_by_date.get(date, []):
-            cash -= fill["gross_value"] + fill["commission"]
-            holdings[fill["symbol"]] = holdings.get(fill["symbol"], 0) + fill["quantity"]
+            if fill["side"] == "BUY":
+                cash -= fill["gross_value"] + fill["commission"]
+                holdings[fill["symbol"]] = holdings.get(fill["symbol"], 0) + fill["quantity"]
+            else:
+                cash += fill["gross_value"] - fill["commission"]
+                holdings[fill["symbol"]] -= fill["quantity"]
+                if holdings[fill["symbol"]] == 0:
+                    del holdings[fill["symbol"]]
         marks.update(bars_by_date[date])
         marked_holdings = [
             {"symbol": symbol, "quantity": quantity, "mark_price": marks[symbol]}
@@ -325,10 +537,12 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
     engine.dispose()
     return {
         "projection": {
-            "orders": sorted(strategy.order_events, key=lambda x: (x.get("attempt_date", ""), x["symbol"])),
+            "orders": sorted(strategy_instance.order_events, key=lambda x: (x.get("attempt_date", ""), x.get("side") != "SELL", x["symbol"])),
             "fills": fills,
             "ledger": ledger,
-            "nautilus_account_snapshots": strategy.account_snapshots,
+            "nautilus_account_snapshots": strategy_instance.account_snapshots,
+            **({"signals": list(rotation_signals.values())} if strategy != "s1" else {}),
+            **({"rankings": rotation_rankings} if strategy == "s2" else {}),
             "targets": targets,
             "summary": {
                 "initial_cash": float(dataset["account"]["initial_cash"]),
@@ -337,11 +551,11 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
                 "commission": sum(x["commission"] for x in fills),
                 "tax": 0.0,
                 "slippage_cost": sum(
-                    (x["fill_price"] - float(dataset["bar_defaults"]["open"])) * x["quantity"]
+                    abs(x["fill_price"] - float(dataset["bar_defaults"]["open"])) * x["quantity"]
                     for x in fills
                 ),
                 "total_cost": sum(x["commission"] for x in fills)
-                + sum((x["fill_price"] - float(dataset["bar_defaults"]["open"])) * x["quantity"] for x in fills),
+                + sum(abs(x["fill_price"] - float(dataset["bar_defaults"]["open"])) * x["quantity"] for x in fills),
             },
         },
         "timings_ns": {
@@ -350,6 +564,46 @@ def _run_nautilus(dataset: dict[str, Any]) -> dict[str, Any]:
             "event_processing": event_ns,
             "end_to_end": time.perf_counter_ns() - started,
         },
+    }
+
+
+def _parallel_worker(dataset: dict[str, Any], strategy: str) -> dict[str, Any]:
+    started = time.perf_counter_ns()
+    result = _run_nautilus(dataset, strategy=strategy)
+    result["timings_ns"]["worker_run"] = time.perf_counter_ns() - started
+    result["peak_worker_rss_bytes"] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (
+        1024 if sys.platform.startswith("linux") else 1
+    )
+    return result
+
+
+def parallel_runs(dataset: dict[str, Any], strategy: str, *, workers: int = 2, runs: int = 6) -> dict[str, Any]:
+    if workers <= 0 or runs < workers:
+        raise ValueError("runs must be >= positive workers")
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        warmups = [pool.submit(_parallel_worker, dataset, strategy) for _ in range(workers)]
+        expected = [json.dumps(warmup.result()["projection"], sort_keys=True) for warmup in warmups]
+        started = time.perf_counter_ns()
+        futures = [pool.submit(_parallel_worker, dataset, strategy) for _ in range(runs)]
+        measured = [future.result() for future in futures]
+        elapsed = time.perf_counter_ns() - started
+    projections = [json.dumps(item["projection"], sort_keys=True) for item in measured]
+    if len(set(expected + projections)) != 1:
+        return {"status": "unresolved", "reason": "parallel projection mismatch"}
+    samples = [item["timings_ns"]["worker_run"] for item in measured]
+    return {
+        "status": "passed",
+        "workers": workers,
+        "warmup_runs": workers,
+        "runs": runs,
+        "raw_samples_ns": samples,
+        "median_ns": statistics.median(samples),
+        "p95_ns": sorted(samples)[math.ceil(0.95 * len(samples)) - 1],
+        "parallel_wall_ns": elapsed,
+        "parallel_runs_per_second": runs * 1_000_000_000 / elapsed,
+        "peak_worker_rss_bytes": max(item["peak_worker_rss_bytes"] for item in measured),
+        "run_checksum_sha256": hashlib.sha256(projections[0].encode()).hexdigest(),
+        "measurement_scope": "warm Python process pool; independent conversion, initialization and Nautilus replay per Run; excludes pool startup",
     }
 
 
@@ -545,6 +799,112 @@ def build_report(dataset_path: Path, reference_path: Path) -> dict[str, Any]:
                     "detail": f"Project comparison failed for {field}.",
                     "replay_condition": "Inspect the raw field values and rerun the fixed fixture.",
                 })
+    report["strategy_comparisons"] = {}
+    for strategy_name, rust_key in (
+        ("s2", "b2_fast_event_momentum_rotation"),
+        ("s3", "b2_fast_event_ma20_60"),
+    ):
+        rust_rotation = reference.get(rust_key)
+        if rust_rotation is None:
+            continue
+        strategy_dataset = dataset
+        input_hash = _sha256(dataset_path)
+        if strategy_name == "s3":
+            fixture_path = ROOT / "poc/poc0-benchmark/fixtures/b2-ma20-60-v1.json"
+            input_hash = _sha256(fixture_path)
+            strategy_dataset = _ma_dataset(json.loads(fixture_path.read_text(encoding="utf-8")))
+            expected_path = ROOT / "poc/poc0-benchmark/fixtures/b2-ma20-60-expected-v1.json"
+            if rust_rotation.get("expected_sha256") != _sha256(expected_path):
+                report["strategy_comparisons"][strategy_name] = {
+                    "status": "unresolved", "error": "S3 independent golden hash differs from Rust reference",
+                }
+                continue
+        rotation_runs = []
+        rotation_error = None
+        if probe_error is None and rust_rotation.get("status") == "correctness_passed_and_measured":
+            try:
+                _run_nautilus(strategy_dataset, strategy=strategy_name)
+                rotation_runs = [_run_nautilus(strategy_dataset, strategy=strategy_name) for _ in range(5)]
+            except Exception as error:
+                rotation_error = f"{type(error).__name__}: {error}"
+        rotation = rotation_runs[0]["projection"] if rotation_runs else None
+        expected_rotation = rust_rotation["projection"]
+        checks = _compare(rotation, expected_rotation) if rotation is not None else []
+        if rotation is not None:
+            checks.append({
+                "field": "signals.rank_topk_targets",
+                "passed": rotation["signals"] == rust_rotation["signals"],
+            })
+            if strategy_name == "s2":
+                actual_rankings = rotation["rankings"]
+                expected_rankings = rust_rotation["rankings"]
+                rank_equal = len(actual_rankings) == len(expected_rankings) and all(
+                    actual["date"] == expected["date"]
+                    and len(actual["candidates"]) == len(expected["candidates"])
+                    and all(
+                        left["symbol"] == right["symbol"]
+                        and abs(left["score"] - right["score"]) <= 1e-8
+                        for left, right in zip(actual["candidates"], expected["candidates"], strict=True)
+                    ) for actual, expected in zip(actual_rankings, expected_rankings, strict=True)
+                )
+                checks.append({"field": "signals.factor_rankings", "passed": rank_equal})
+        eligible = [check for check in checks if check["field"] != "orders.nautilus_native_lifecycle"]
+        passed = bool(eligible) and all(check["passed"] for check in eligible)
+        parallel = None
+        if passed:
+            try:
+                parallel = parallel_runs(strategy_dataset, strategy_name)
+            except Exception as error:
+                rotation_error = f"parallel {type(error).__name__}: {error}"
+        samples = [item["timings_ns"]["event_processing"] for item in rotation_runs]
+        report["strategy_comparisons"][strategy_name] = {
+            "status": "passed_common_subset" if passed else "unresolved",
+            "checks": checks,
+            "rust_reference_sha256": rust_rotation["checksum_sha256"],
+            "input_sha256": input_hash,
+            "input_version": strategy_dataset["dataset_version"],
+            "adapter_projection": rotation,
+            "nautilus_native_submissions": None if rotation is None else [
+                order for order in rotation["orders"] if order.get("origin") == "nautilus_order"
+            ],
+            "adapter_project_events": None if rotation is None else rotation["orders"],
+            "timings": {
+                "warmup_runs": 1 if rotation_runs else 0,
+                "event_processing": None if not samples else {
+                    "raw_samples_ns": samples,
+                    "median_ns": statistics.median(samples),
+                    "p95_ns": sorted(samples)[math.ceil(0.95 * len(samples)) - 1],
+                },
+                "conversion_samples_ns": [item["timings_ns"]["conversion"] for item in rotation_runs],
+                "initialization_samples_ns": [item["timings_ns"]["initialization"] for item in rotation_runs],
+                "end_to_end_samples_ns": [item["timings_ns"]["end_to_end"] for item in rotation_runs],
+            },
+            "peak_process_rss_bytes": None if not rotation_runs else resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1024 if sys.platform.startswith("linux") else 1),
+            "parallel": parallel,
+            "error": rotation_error or probe_error,
+            "decision_scope": "Fill, cash, holdings, daily NAV, costs and common-subset throughput only; halted native order lifecycle excluded under ADR 0012.",
+        }
+    report["ticket09_decision"] = {
+        "status": "unresolved",
+        "minimum_fast_event_gain": 2.0,
+        "required_conditions": [
+            "Both S2 and S3 must pass Fill, cash, positions, NAV and cost parity.",
+            "Fast Event must reach 2x lower median latency and 2x higher parallel Runs/s for both strategies on a matched release workload.",
+            "Fast Event must have no higher peak RSS on a matched measurement scope.",
+        ],
+        "common_subset_status": {
+            strategy: comparison["status"]
+            for strategy, comparison in report["strategy_comparisons"].items()
+        },
+        "excluded_dimension": "HALTED native order submission and lifecycle; project adapter events and native submissions are reported separately under ADR 0012.",
+        "reason": "Rust workers share prebuilt bars and use threads; Nautilus workers convert quotes, initialize an engine for each Run and use processes. The measured latency, RSS and throughput scopes are not aligned, so no engine-speed ratio or adopt/defer/reject selection is supported.",
+        "rust_build_record": "poc/poc0-benchmark/results/b2-09-release-build-2026-09-27.json",
+        "rust_parallel_records": [
+            "poc/poc0-benchmark/results/b2-09-s2-throughput.json",
+            "poc/poc0-benchmark/results/b2-09-s3-throughput.json",
+        ],
+        "next_step": "Run both engines under matching conversion and account-initialization boundaries with RSS measured on the same worker/process scope.",
+    }
     return report
 
 

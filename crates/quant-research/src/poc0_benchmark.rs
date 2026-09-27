@@ -376,7 +376,37 @@ pub struct Poc0Report {
     b1_arrow: B1ArrowReport,
     b1_polars: B1PolarsReport,
     b2_fast_event_buy_hold: FastEventReport,
+    b2_fast_event_momentum_rotation: RotationEventReport,
+    b2_fast_event_ma20_60: RotationEventReport,
     conclusion: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct RotationEventReport {
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input_sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expected_sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dataset_content_sha256: Option<String>,
+    signals: Vec<SignalProjection>,
+    rankings: Vec<RankingProjection>,
+    projection: FastEventProjection,
+    checksum_sha256: String,
+    correctness_checks: Vec<String>,
+    warmup_runs: usize,
+    raw_samples_ns: Vec<u128>,
+    median_ns: Option<u128>,
+    p95_ns: Option<u128>,
+}
+
+struct RotationEventRun {
+    signals: Vec<SignalProjection>,
+    rankings: Vec<RankingProjection>,
+    projection: FastEventProjection,
 }
 
 #[derive(Debug, Serialize)]
@@ -545,6 +575,101 @@ impl Poc0Report {
     }
 }
 
+pub fn measure_b2_parallel(strategy: &str, threads: usize, runs: usize) -> Result<Value> {
+    ensure!(matches!(strategy, "s2" | "s3"), "unsupported B2 strategy");
+    ensure!(
+        threads > 0 && runs >= threads,
+        "runs must be >= positive threads"
+    );
+    let dataset_path = Path::new("poc/poc0-benchmark/fixtures/dataset-v1.json");
+    let golden_path = Path::new("poc/poc0-benchmark/fixtures/expected-v1.json");
+    let golden_report = run(dataset_path, golden_path, "soa")?;
+    ensure!(
+        golden_report.correctness_status() == "passed",
+        "B2 golden check failed"
+    );
+    let strategy_report = if strategy == "s2" {
+        &golden_report.b2_fast_event_momentum_rotation
+    } else {
+        &golden_report.b2_fast_event_ma20_60
+    };
+    ensure!(
+        strategy_report.status == "correctness_passed_and_measured",
+        "B2 strategy golden check failed"
+    );
+    let prepared = prepare_dataset(serde_json::from_slice(&fs::read(dataset_path)?)?)?;
+    let config = experiment_config(&prepared.spec);
+    let (ma_dataset, ma_hash) = make_ma_dataset(&prepared.spec)?;
+    let expected_hash = strategy_report.checksum_sha256.clone();
+    let run_once = || {
+        if strategy == "s2" {
+            run_rotation_event(&prepared, &config)
+        } else {
+            run_ma_event(&ma_dataset)
+        }
+    };
+    for _ in 0..threads {
+        ensure!(
+            sha256(&serde_json::to_vec(&run_once().projection)?) == expected_hash,
+            "B2 warmup mismatch"
+        );
+    }
+    let started = Instant::now();
+    let raw = std::thread::scope(|scope| {
+        let workers = (0..threads)
+            .map(|worker| {
+                scope.spawn(move || {
+                    let mut samples = Vec::new();
+                    for _ in (worker..runs).step_by(threads) {
+                        let run_started = Instant::now();
+                        let projection = std::hint::black_box(run_once()).projection;
+                        samples.push((
+                            run_started.elapsed().as_nanos(),
+                            sha256(
+                                &serde_json::to_vec(&projection)
+                                    .expect("serializable B2 projection"),
+                            ),
+                        ));
+                    }
+                    samples
+                })
+            })
+            .collect::<Vec<_>>();
+        workers
+            .into_iter()
+            .flat_map(|worker| worker.join().expect("B2 worker panic"))
+            .collect::<Vec<_>>()
+    });
+    let wall_ns = started.elapsed().as_nanos();
+    ensure!(
+        raw.iter().all(|(_, hash)| *hash == expected_hash),
+        "B2 measured projection mismatch"
+    );
+    let samples = raw
+        .into_iter()
+        .map(|(elapsed, _)| elapsed)
+        .collect::<Vec<_>>();
+    Ok(serde_json::json!({
+        "status": "passed",
+        "strategy": strategy,
+        "threads": threads,
+        "warmup_runs": threads,
+        "runs": runs,
+        "raw_samples_ns": samples,
+        "median_ns": sorted_median(&samples),
+        "p95_ns": sorted_p95(&samples),
+        "parallel_wall_ns": wall_ns,
+        "parallel_runs_per_second": runs as f64 * 1e9 / wall_ns as f64,
+        "synthetic_quote_events_per_run": if strategy == "s2" { prepared.bars.len() * 2 } else { ma_dataset.bars.len() * 2 },
+        "run_checksum_sha256": expected_hash,
+        "input_sha256": if strategy == "s2" { sha256(&fs::read(dataset_path)?) } else { ma_hash },
+        "peak_rss_bytes": null,
+        "memory_status": "not measured in isolated Rust workers",
+        "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+        "build_profile": if cfg!(debug_assertions) { "debug" } else { "release" },
+    }))
+}
+
 #[derive(Debug, Serialize)]
 struct ReportResult {
     checksum_sha256: String,
@@ -674,6 +799,174 @@ pub fn run(
     let fast_event_checks =
         fast_event_checks(&prepared, &fast_event_run.projection, &repeated_projection)?;
     let fast_event_correct = fast_event_checks.is_empty();
+    let rotation_run = run_rotation_event(&prepared, &config);
+    let rotation_repeat = run_rotation_event(&prepared, &config);
+    let mut rotation_checks = Vec::new();
+    if rotation_run.projection != rotation_repeat.projection
+        || rotation_run.signals != rotation_repeat.signals
+    {
+        rotation_checks.push("repeated rotation run differs".to_string());
+    }
+    if rotation_run.signals != b1_projection.targets
+        || rotation_run.rankings != b1_projection.rankings
+    {
+        rotation_checks
+            .push("rotation signals differ from the fixed S2 factor workload".to_string());
+    }
+    for row in &rotation_run.projection.ledger {
+        if (row.nav
+            - row.cash
+            - row
+                .holdings
+                .iter()
+                .map(|holding| holding.quantity as f64 * holding.mark_price)
+                .sum::<f64>())
+        .abs()
+            > FLOAT_TOLERANCE
+        {
+            rotation_checks.push(format!("rotation NAV identity failed on {}", row.date));
+        }
+    }
+    if rotation_run
+        .projection
+        .orders
+        .iter()
+        .any(|order| order.attempt_date <= order.decision_date)
+    {
+        rotation_checks.push("rotation executed on signal day".to_string());
+    }
+    let rotation_correct = correctness_passed && rotation_checks.is_empty();
+    let (ma_dataset, ma_input_hash) = make_ma_dataset(&prepared.spec)?;
+    let ma_run = run_ma_event(&ma_dataset);
+    let ma_repeat = run_ma_event(&ma_dataset);
+    let mut ma_checks = Vec::new();
+    if ma_run.signals != ma_repeat.signals || ma_run.projection != ma_repeat.projection {
+        ma_checks.push("MA20/60 repeat differs".into());
+    }
+    let ma_dates = &ma_dataset.spec.calendar;
+    let ma_expected_bytes =
+        include_bytes!("../../../poc/poc0-benchmark/fixtures/b2-ma20-60-expected-v1.json");
+    let ma_expected: Value = serde_json::from_slice(ma_expected_bytes)?;
+    ensure!(
+        ma_expected["input_version"] == ma_dataset.spec.dataset_version,
+        "MA expected input version mismatch"
+    );
+    for (actual, expected) in ma_run.signals.iter().zip(
+        ma_expected["signals"]
+            .as_array()
+            .context("MA expected signals")?,
+    ) {
+        let index = expected["session_index"]
+            .as_u64()
+            .context("MA signal index")? as usize;
+        if actual.date != ma_dates[index]
+            || serde_json::to_value(&actual.target_symbols)? != expected["target_symbols"]
+        {
+            ma_checks.push(format!("MA expected signal differs at session {index}"));
+        }
+    }
+    for (actual, expected) in ma_run.projection.orders.iter().zip(
+        ma_expected["orders"]
+            .as_array()
+            .context("MA expected orders")?,
+    ) {
+        let index = expected["session_index"]
+            .as_u64()
+            .context("MA order index")? as usize;
+        if actual.attempt_date != ma_dates[index]
+            || actual.symbol != expected["symbol"].as_str().unwrap_or_default()
+            || actual.side != expected["side"].as_str().unwrap_or_default()
+            || actual.quantity != expected["quantity"].as_i64().unwrap_or_default()
+        {
+            ma_checks.push(format!("MA expected order differs at session {index}"));
+        }
+    }
+    for expected in ma_expected["ledger_checkpoints"]
+        .as_array()
+        .context("MA expected ledger")?
+    {
+        let index = expected["session_index"]
+            .as_u64()
+            .context("MA ledger index")? as usize;
+        let actual = &ma_run.projection.ledger[index];
+        if (actual.cash - expected["cash"].as_f64().context("MA expected cash")?).abs()
+            > FLOAT_TOLERANCE
+            || (actual.nav - expected["nav"].as_f64().context("MA expected NAV")?).abs()
+                > FLOAT_TOLERANCE
+            || actual
+                .holdings
+                .iter()
+                .map(|holding| holding.quantity)
+                .sum::<i64>()
+                != expected["quantity"]
+                    .as_i64()
+                    .context("MA expected quantity")?
+        {
+            ma_checks.push(format!("MA expected ledger differs at session {index}"));
+        }
+    }
+    if ma_run.signals.len() != 2
+        || ma_run.signals[0].date != ma_dates[60]
+        || ma_run.signals[0].target_symbols != ["A"]
+        || ma_run.signals[1].date != ma_dates[85]
+        || !ma_run.signals[1].target_symbols.is_empty()
+    {
+        ma_checks.push("MA20/60 cross-up or cross-down differs from worked fixture".into());
+    }
+    if ma_run.projection.orders.len() != 2
+        || ma_run.projection.orders[0].attempt_date != ma_dates[61]
+        || ma_run.projection.orders[0].quantity != 900
+        || ma_run.projection.orders[1].attempt_date != ma_dates[86]
+        || ma_run.projection.orders[1].side != "SELL"
+        || (ma_run.projection.ledger[61].cash - 9810.0).abs() > FLOAT_TOLERANCE
+        || (ma_run.projection.ledger[86].cash - 99620.0).abs() > FLOAT_TOLERANCE
+        || (ma_run.projection.summary.total_cost - 380.0).abs() > FLOAT_TOLERANCE
+    {
+        ma_checks.push("MA20/60 next-open orders, cash or costs differ from worked fixture".into());
+    }
+    for row in &ma_run.projection.ledger {
+        if (row.nav
+            - row.cash
+            - row
+                .holdings
+                .iter()
+                .map(|holding| holding.quantity as f64 * holding.mark_price)
+                .sum::<f64>())
+        .abs()
+            > FLOAT_TOLERANCE
+        {
+            ma_checks.push(format!("MA20/60 NAV identity failed on {}", row.date));
+        }
+    }
+    let ma_correct = correctness_passed && ma_checks.is_empty();
+    let mut ma_samples = Vec::new();
+    if ma_correct {
+        for _ in 0..WARMUP_RUNS {
+            let _ = run_ma_event(&ma_dataset);
+        }
+        for _ in 0..MEASUREMENT_RUNS {
+            let started = Instant::now();
+            let run = std::hint::black_box(run_ma_event(&ma_dataset));
+            ma_samples.push(started.elapsed().as_nanos());
+            if run.projection != ma_run.projection {
+                ma_checks.push("MA20/60 timed repeat differs".into());
+            }
+        }
+    }
+    let mut rotation_samples = Vec::new();
+    if rotation_correct {
+        for _ in 0..WARMUP_RUNS {
+            let _ = run_rotation_event(&prepared, &config);
+        }
+        for _ in 0..MEASUREMENT_RUNS {
+            let started = Instant::now();
+            let measured = std::hint::black_box(run_rotation_event(&prepared, &config));
+            rotation_samples.push(started.elapsed().as_nanos());
+            if measured.projection != rotation_run.projection {
+                rotation_checks.push("measured rotation projection differs".to_string());
+            }
+        }
+    }
     let mut fast_event_runs = Vec::new();
     if fast_event_correct {
         for _ in 0..WARMUP_RUNS {
@@ -836,6 +1129,46 @@ pub fn run(
             event_processing_samples_ns,
             end_to_end_samples_ns,
             measurement_scope: "initialization (day index construction), event processing (orders, fills, marks and ledger), and end-to-end (both phases plus summary); excludes dataset parsing and JSON report serialization",
+        },
+        b2_fast_event_momentum_rotation: RotationEventReport {
+            status: if rotation_correct && rotation_checks.is_empty() {
+                "correctness_passed_and_measured"
+            } else {
+                "correctness_failed_timing_skipped"
+            },
+            input_version: None,
+            input_sha256: None,
+            expected_sha256: None,
+            dataset_content_sha256: None,
+            signals: rotation_run.signals,
+            rankings: rotation_run.rankings,
+            checksum_sha256: sha256(&serde_json::to_vec(&rotation_run.projection)?),
+            projection: rotation_run.projection,
+            correctness_checks: rotation_checks,
+            warmup_runs: if rotation_correct { WARMUP_RUNS } else { 0 },
+            median_ns: sorted_median(&rotation_samples),
+            p95_ns: sorted_p95(&rotation_samples),
+            raw_samples_ns: rotation_samples,
+        },
+        b2_fast_event_ma20_60: RotationEventReport {
+            status: if ma_correct && ma_checks.is_empty() {
+                "correctness_passed_and_measured"
+            } else {
+                "correctness_failed_timing_skipped"
+            },
+            input_version: Some(ma_dataset.spec.dataset_version.clone()),
+            input_sha256: Some(ma_input_hash),
+            expected_sha256: Some(sha256(ma_expected_bytes)),
+            dataset_content_sha256: Some(ma_dataset.content_sha256.clone()),
+            signals: ma_run.signals,
+            rankings: ma_run.rankings,
+            checksum_sha256: sha256(&serde_json::to_vec(&ma_run.projection)?),
+            projection: ma_run.projection,
+            correctness_checks: ma_checks,
+            warmup_runs: if ma_correct { WARMUP_RUNS } else { 0 },
+            median_ns: sorted_median(&ma_samples),
+            p95_ns: sorted_p95(&ma_samples),
+            raw_samples_ns: ma_samples,
         },
         conclusion: "unresolved: one fixture validates the harness and reference path; no architecture performance choice is supported",
     })
@@ -1107,6 +1440,394 @@ fn run_fast_event(dataset: &PreparedDataset) -> FastEventRun {
         initialization_ns,
         event_processing_ns,
         end_to_end_ns: end_to_end_started.elapsed().as_nanos(),
+    }
+}
+
+fn run_rotation_event(dataset: &PreparedDataset, config: &ExperimentConfig) -> RotationEventRun {
+    let factor = run_soa(dataset, config, false).0;
+    replay_event_targets(dataset, factor)
+}
+
+fn make_ma_dataset(base: &DatasetInput) -> Result<(PreparedDataset, String)> {
+    let bytes = include_bytes!("../../../poc/poc0-benchmark/fixtures/b2-ma20-60-v1.json");
+    let fixture: Value = serde_json::from_slice(bytes)?;
+    let start = NaiveDate::parse_from_str(
+        fixture["start_date"]
+            .as_str()
+            .context("MA fixture start_date")?,
+        "%Y-%m-%d",
+    )?;
+    let flat = fixture["flat_sessions"]
+        .as_u64()
+        .context("MA flat_sessions")? as usize;
+    let high = fixture["high_sessions"]
+        .as_u64()
+        .context("MA high_sessions")? as usize;
+    let low = fixture["low_sessions"]
+        .as_u64()
+        .context("MA low_sessions")? as usize;
+    let mut calendar = Vec::new();
+    let mut date = start;
+    while calendar.len() < flat + high + low {
+        if date.weekday().number_from_monday() <= 5 {
+            calendar.push(date);
+        }
+        date = date.succ_opt().context("MA fixture calendar overflow")?;
+    }
+    let mut value = serde_json::to_value(base)?;
+    value["dataset_version"] = fixture["version"].clone();
+    value["source_identity"] = fixture["version"].clone();
+    value["calendar"] = serde_json::to_value(&calendar)?;
+    value["missing_bars"] = serde_json::json!([]);
+    value["execution_status_overrides"] = serde_json::json!([]);
+    value["bar_defaults"]["open"] = fixture["open"].clone();
+    value["account"]["initial_cash"] = fixture["initial_cash"].clone();
+    value["account"]["lot_size"] = fixture["lot_size"].clone();
+    value["costs"]["commission_rate"] = fixture["commission_rate"].clone();
+    value["costs"]["minimum_commission"] = fixture["minimum_commission"].clone();
+    value["costs"]["buy_slippage_bps"] = fixture["slippage_bps"].clone();
+    value["costs"]["sell_slippage_bps"] = fixture["slippage_bps"].clone();
+    value["costs"]["buy_tax_rate"] = serde_json::json!(0.0);
+    value["costs"]["sell_tax_rate"] = serde_json::json!(0.0);
+    let symbols = fixture["symbols"].as_array().context("MA symbols")?;
+    let rising_symbol = fixture["rising_symbol"]
+        .as_str()
+        .context("MA rising_symbol")?;
+    let flat_close = fixture["flat_close"].as_f64().context("MA flat_close")?;
+    let high_close = fixture["high_close"].as_f64().context("MA high_close")?;
+    let low_close = fixture["low_close"].as_f64().context("MA low_close")?;
+    value["instruments"] = serde_json::to_value(
+        symbols
+            .iter()
+            .map(|symbol| {
+                let name = symbol.as_str().expect("MA symbol string");
+                let closes = (0..calendar.len())
+                    .map(|index| {
+                        if name != rising_symbol || index < flat {
+                            flat_close
+                        } else if index < flat + high {
+                            high_close
+                        } else {
+                            low_close
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                serde_json::json!({ "symbol": name, "currency": "CNY", "price_precision": 2,
+            "quantity_precision": 0, "closes": closes })
+            })
+            .collect::<Vec<_>>(),
+    )?;
+    Ok((
+        prepare_dataset(serde_json::from_value(value)?)?,
+        sha256(bytes),
+    ))
+}
+
+fn run_ma_event(dataset: &PreparedDataset) -> RotationEventRun {
+    let calendar = &dataset.spec.calendar;
+    let prices = dataset
+        .bars
+        .iter()
+        .filter(|bar| bar.symbol == "A")
+        .map(|bar| (bar.trade_date, bar.close))
+        .collect::<BTreeMap<_, _>>();
+    let closes = calendar
+        .iter()
+        .map(|date| prices.get(date).copied())
+        .collect::<Vec<_>>();
+    let mut targets = Vec::new();
+    let mut held = false;
+    let mut previous_gap = None;
+    for index in 59..calendar.len() {
+        let short = closes[index - 19..=index]
+            .iter()
+            .copied()
+            .collect::<Option<Vec<_>>>();
+        let long = closes[index - 59..=index]
+            .iter()
+            .copied()
+            .collect::<Option<Vec<_>>>();
+        let gap = short.zip(long).map(|(short, long)| {
+            short.iter().sum::<f64>() / 20.0 - long.iter().sum::<f64>() / 60.0
+        });
+        if let (Some(previous), Some(current)) = (previous_gap, gap) {
+            if !held && previous <= 0.0 && current > 0.0 {
+                held = true;
+                targets.push(SignalProjection {
+                    date: calendar[index],
+                    target_symbols: vec!["A".into()],
+                });
+            } else if held && previous >= 0.0 && current < 0.0 {
+                held = false;
+                targets.push(SignalProjection {
+                    date: calendar[index],
+                    target_symbols: Vec::new(),
+                });
+            }
+        }
+        previous_gap = gap;
+    }
+    replay_event_targets(
+        dataset,
+        B1SoaProjection {
+            rankings: Vec::new(),
+            targets,
+            target_weights: Vec::new(),
+            portfolio_returns: Vec::new(),
+        },
+    )
+}
+
+fn replay_event_targets(dataset: &PreparedDataset, factor: B1SoaProjection) -> RotationEventRun {
+    let mut by_day: BTreeMap<NaiveDate, BTreeMap<&str, &Bar>> = BTreeMap::new();
+    for bar in &dataset.bars {
+        by_day
+            .entry(bar.trade_date)
+            .or_default()
+            .insert(&bar.symbol, bar);
+    }
+    let costs = &dataset.spec.costs;
+    let lot = dataset.spec.account.lot_size;
+    let initial_cash = dataset.spec.account.initial_cash;
+    let mut cash = initial_cash;
+    let mut positions: BTreeMap<String, i64> = BTreeMap::new();
+    let mut marks: BTreeMap<String, f64> = BTreeMap::new();
+    let mut orders = Vec::new();
+    let mut fills = Vec::new();
+    let mut ledger = Vec::new();
+    let mut pending: Option<&SignalProjection> = None;
+    let mut commission_total = 0.0;
+    let mut tax_total = 0.0;
+    let mut slippage_total = 0.0;
+    for date in &dataset.spec.calendar {
+        let day_bars = by_day.get(date);
+        if let Some(signal) = pending {
+            let desired = &signal.target_symbols;
+            let exits = positions
+                .keys()
+                .filter(|symbol| !desired.contains(symbol))
+                .cloned()
+                .collect::<Vec<_>>();
+            let mut blocked_exit = false;
+            for symbol in &exits {
+                let status = dataset.statuses.get(&(*date, symbol.clone()));
+                let reason = if day_bars
+                    .and_then(|bars| bars.get(symbol.as_str()))
+                    .is_none()
+                {
+                    Some("missing_open".to_string())
+                } else if status.is_none_or(|s| {
+                    !s.is_tradable
+                        || s.trade_status.as_deref() != Some("TRADABLE")
+                        || s.sources.as_deref().is_none_or(str::is_empty)
+                }) {
+                    Some(
+                        status
+                            .and_then(|s| s.trade_status.clone())
+                            .unwrap_or_else(|| "missing_status".into()),
+                    )
+                } else {
+                    None
+                };
+                if let Some(reason) = reason {
+                    orders.push(FastEventOrder {
+                        decision_date: signal.date,
+                        attempt_date: *date,
+                        symbol: symbol.clone(),
+                        side: "SELL".into(),
+                        quantity: 0,
+                        reason: Some(reason),
+                    });
+                    blocked_exit = true;
+                }
+            }
+            if !blocked_exit {
+                for symbol in exits {
+                    let bar = day_bars.expect("checked exit bar")[symbol.as_str()];
+                    let quantity = positions.remove(&symbol).expect("held exit");
+                    let fill_price = bar.open * (1.0 - costs.sell_slippage_bps / 10_000.0);
+                    let gross = quantity as f64 * fill_price;
+                    let commission = (gross * costs.commission_rate).max(costs.minimum_commission);
+                    let tax = gross * costs.sell_tax_rate;
+                    let slippage_cost = (bar.open - fill_price) * quantity as f64;
+                    cash += gross - commission - tax;
+                    orders.push(FastEventOrder {
+                        decision_date: signal.date,
+                        attempt_date: *date,
+                        symbol: symbol.clone(),
+                        side: "SELL".into(),
+                        quantity,
+                        reason: None,
+                    });
+                    fills.push(FastEventFill {
+                        date: *date,
+                        symbol,
+                        side: "SELL".into(),
+                        quantity,
+                        reference_price: bar.open,
+                        fill_price,
+                        gross_value: gross,
+                        commission,
+                        tax,
+                        slippage_cost,
+                    });
+                    commission_total += commission;
+                    tax_total += tax;
+                    slippage_total += slippage_cost;
+                }
+                let budget = cash
+                    / desired
+                        .iter()
+                        .filter(|symbol| !positions.contains_key(*symbol))
+                        .count()
+                        .max(1) as f64;
+                for symbol in desired {
+                    if positions.contains_key(symbol) {
+                        continue;
+                    }
+                    let status = dataset.statuses.get(&(*date, symbol.clone()));
+                    let reason = if day_bars
+                        .and_then(|bars| bars.get(symbol.as_str()))
+                        .is_none()
+                    {
+                        Some("missing_open".to_string())
+                    } else if status.is_none_or(|s| {
+                        !s.is_tradable
+                            || s.trade_status.as_deref() != Some("TRADABLE")
+                            || s.sources.as_deref().is_none_or(str::is_empty)
+                    }) {
+                        Some(
+                            status
+                                .and_then(|s| s.trade_status.clone())
+                                .unwrap_or_else(|| "missing_status".into()),
+                        )
+                    } else {
+                        None
+                    };
+                    if let Some(reason) = reason {
+                        orders.push(FastEventOrder {
+                            decision_date: signal.date,
+                            attempt_date: *date,
+                            symbol: symbol.clone(),
+                            side: "BUY".into(),
+                            quantity: 0,
+                            reason: Some(reason),
+                        });
+                        continue;
+                    }
+                    let bar = day_bars.expect("checked entry bar")[symbol.as_str()];
+                    let fill_price = bar.open * (1.0 + costs.buy_slippage_bps / 10_000.0);
+                    let mut quantity = ((budget / fill_price) as i64 / lot) * lot;
+                    let commission_for = |qty: i64| {
+                        (fill_price * qty as f64 * costs.commission_rate)
+                            .max(costs.minimum_commission)
+                    };
+                    while quantity > 0
+                        && fill_price * quantity as f64
+                            + commission_for(quantity)
+                            + fill_price * quantity as f64 * costs.buy_tax_rate
+                            > cash
+                    {
+                        quantity -= lot;
+                    }
+                    if quantity > 0 {
+                        let gross = quantity as f64 * fill_price;
+                        let commission = commission_for(quantity);
+                        let tax = gross * costs.buy_tax_rate;
+                        let slippage_cost = (fill_price - bar.open) * quantity as f64;
+                        cash -= gross + commission + tax;
+                        positions.insert(symbol.clone(), quantity);
+                        orders.push(FastEventOrder {
+                            decision_date: signal.date,
+                            attempt_date: *date,
+                            symbol: symbol.clone(),
+                            side: "BUY".into(),
+                            quantity,
+                            reason: None,
+                        });
+                        fills.push(FastEventFill {
+                            date: *date,
+                            symbol: symbol.clone(),
+                            side: "BUY".into(),
+                            quantity,
+                            reference_price: bar.open,
+                            fill_price,
+                            gross_value: gross,
+                            commission,
+                            tax,
+                            slippage_cost,
+                        });
+                        commission_total += commission;
+                        tax_total += tax;
+                        slippage_total += slippage_cost;
+                    }
+                }
+                if desired.iter().all(|symbol| positions.contains_key(symbol)) {
+                    pending = None;
+                }
+            }
+        }
+        if let Some(bars) = day_bars {
+            for (symbol, bar) in bars {
+                marks.insert((*symbol).to_string(), bar.close);
+            }
+        }
+        let holdings = positions
+            .iter()
+            .map(|(symbol, quantity)| FastEventHolding {
+                symbol: symbol.clone(),
+                quantity: *quantity,
+                mark_price: marks[symbol],
+            })
+            .collect::<Vec<_>>();
+        let nav = cash
+            + holdings
+                .iter()
+                .map(|holding| holding.quantity as f64 * holding.mark_price)
+                .sum::<f64>();
+        ledger.push(FastEventLedger {
+            date: *date,
+            cash,
+            holdings,
+            nav,
+        });
+        if let Some(signal) = factor.targets.iter().find(|signal| signal.date == *date) {
+            pending = Some(signal);
+        }
+    }
+    let unexecuted_targets = pending
+        .into_iter()
+        .flat_map(|signal| {
+            signal
+                .target_symbols
+                .iter()
+                .map(move |symbol| FastEventPendingTarget {
+                    decision_date: signal.date,
+                    attempt_date: *dataset.spec.calendar.last().expect("nonempty calendar"),
+                    symbol: symbol.clone(),
+                    reason: "no_future_open_before_dataset_end".into(),
+                })
+        })
+        .collect();
+    let final_equity = ledger.last().map_or(initial_cash, |row| row.nav);
+    RotationEventRun {
+        signals: factor.targets,
+        rankings: factor.rankings,
+        projection: FastEventProjection {
+            orders,
+            fills,
+            ledger,
+            unexecuted_targets,
+            summary: FastEventSummary {
+                initial_cash,
+                final_equity,
+                final_positions: positions,
+                commission: commission_total,
+                tax: tax_total,
+                slippage_cost: slippage_total,
+                total_cost: commission_total + tax_total + slippage_total,
+            },
+        },
     }
 }
 

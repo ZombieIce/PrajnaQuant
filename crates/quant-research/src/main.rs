@@ -92,6 +92,17 @@ enum Command {
         #[arg(long, default_value = ".venv/bin/python")]
         python: PathBuf,
     },
+    /// Measure isolated, correctness-gated B2 strategy Runs with a fixed worker count.
+    BenchmarkPoc0B2 {
+        #[arg(long, value_parser = ["s2", "s3"])]
+        strategy: String,
+        #[arg(long, default_value_t = 2)]
+        threads: usize,
+        #[arg(long, default_value_t = 6)]
+        runs: usize,
+        #[arg(long, default_value = "target/poc-0/b2-throughput.json")]
+        output: PathBuf,
+    },
     /// Generate a versioned Parquet fixture and benchmark the three B1 paths on one scan.
     BenchmarkPoc0Parquet {
         #[arg(long, default_value = "poc/poc0-benchmark/fixtures/dataset-v1.json")]
@@ -326,6 +337,19 @@ async fn main() -> Result<()> {
                     output.display()
                 );
             }
+        }
+        Command::BenchmarkPoc0B2 {
+            strategy,
+            threads,
+            runs,
+            output,
+        } => {
+            let report = poc0_benchmark::measure_b2_parallel(&strategy, threads, runs)?;
+            if let Some(parent) = output.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&output, serde_json::to_vec_pretty(&report)?)?;
+            println!("POC-0 B2 {}: {}", report["status"], output.display());
         }
         Command::BenchmarkPoc0Sweep {
             dataset,

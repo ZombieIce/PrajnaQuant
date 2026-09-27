@@ -139,6 +139,72 @@ fn benchmark_cli_emits_reproducible_report_after_golden_passes() {
     );
     let report: Value = serde_json::from_slice(&fs::read(report_path).unwrap()).unwrap();
     assert_eq!(
+        report["b2_fast_event_momentum_rotation"]["status"],
+        "correctness_passed_and_measured"
+    );
+    assert_eq!(
+        report["b2_fast_event_momentum_rotation"]["signals"][0]["date"],
+        "2026-01-07"
+    );
+    assert_eq!(
+        report["b2_fast_event_momentum_rotation"]["signals"][0]["target_symbols"],
+        serde_json::json!(["C"])
+    );
+    let rotation = &report["b2_fast_event_momentum_rotation"]["projection"];
+    assert_eq!(
+        rotation["orders"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|order| (
+                order["attempt_date"].as_str().unwrap(),
+                order["symbol"].as_str().unwrap(),
+                order["side"].as_str().unwrap(),
+                order["quantity"].as_i64().unwrap(),
+                order["reason"].as_str(),
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            ("2026-01-08", "C", "BUY", 0, Some("UNKNOWN")),
+            ("2026-01-09", "B", "BUY", 900, None),
+            ("2026-01-13", "B", "SELL", 0, Some("HALTED")),
+            ("2026-01-14", "B", "SELL", 900, None),
+            ("2026-01-14", "A", "BUY", 900, None),
+        ]
+    );
+    assert_eq!(
+        rotation["ledger"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| (row["cash"].as_f64().unwrap(), row["nav"].as_f64().unwrap(),))
+            .collect::<Vec<_>>(),
+        vec![
+            (100000.0, 100000.0),
+            (100000.0, 100000.0),
+            (100000.0, 100000.0),
+            (100000.0, 100000.0),
+            (9810.0, 101610.0),
+            (9810.0, 102510.0),
+            (9810.0, 100710.0),
+            (9430.0, 100330.0),
+            (9430.0, 101230.0),
+            (9430.0, 102130.0),
+        ]
+    );
+    assert_eq!(rotation["summary"]["commission"], 300.0);
+    assert!((rotation["summary"]["total_cost"].as_f64().unwrap() - 570.0).abs() < 1e-8);
+    let ma = &report["b2_fast_event_ma20_60"];
+    assert_eq!(ma["status"], "correctness_passed_and_measured");
+    assert_eq!(ma["signals"].as_array().unwrap().len(), 2);
+    assert_eq!(ma["signals"][0]["target_symbols"], serde_json::json!(["A"]));
+    assert_eq!(ma["signals"][1]["target_symbols"], serde_json::json!([]));
+    assert_eq!(ma["projection"]["orders"][0]["quantity"], 900);
+    assert_eq!(ma["projection"]["orders"][1]["side"], "SELL");
+    assert_eq!(ma["projection"]["ledger"][61]["cash"], 9810.0);
+    assert_eq!(ma["projection"]["ledger"][86]["cash"], 99620.0);
+    assert!((ma["projection"]["summary"]["total_cost"].as_f64().unwrap() - 380.0).abs() < 1e-8);
+    assert_eq!(
         report["b2_fast_event_buy_hold"]["status"],
         "correctness_passed_and_measured"
     );
@@ -341,6 +407,39 @@ fn benchmark_cli_emits_reproducible_report_after_golden_passes() {
             .unwrap()
             .contains("no cash, fees, fills")
     );
+}
+
+#[test]
+fn b2_isolated_cli_measures_fixed_parallel_runs_after_correctness_gate() {
+    let output_dir = tempfile::tempdir().unwrap();
+    let output = output_dir.path().join("b2.json");
+    let result = Command::new(env!("CARGO_BIN_EXE_quant-research"))
+        .current_dir(repo_root())
+        .args([
+            "benchmark-poc0-b2",
+            "--strategy",
+            "s3",
+            "--threads",
+            "2",
+            "--runs",
+            "6",
+            "--output",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report: Value = serde_json::from_slice(&fs::read(output).unwrap()).unwrap();
+    assert_eq!(report["status"], "passed");
+    assert_eq!(report["threads"], 2);
+    assert_eq!(report["warmup_runs"], 2);
+    assert_eq!(report["raw_samples_ns"].as_array().unwrap().len(), 6);
+    assert_eq!(report["run_checksum_sha256"].as_str().unwrap().len(), 64);
+    assert!(report["parallel_runs_per_second"].as_f64().unwrap() > 0.0);
 }
 
 #[test]

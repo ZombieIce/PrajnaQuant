@@ -1,0 +1,27 @@
+{
+  "version": "poc0.b2.ma20-60.expected.v1",
+  "input_version": "poc0.b2.ma20-60.v1",
+  "float_tolerance": 1e-8,
+  "signals": [
+    {"session_index": 60, "target_symbols": ["A"]},
+    {"session_index": 85, "target_symbols": []}
+  ],
+  "orders": [
+    {"session_index": 61, "symbol": "A", "side": "BUY", "quantity": 900, "fill_price": 100.1, "commission": 100.0},
+    {"session_index": 86, "symbol": "A", "side": "SELL", "quantity": 900, "fill_price": 99.9, "commission": 100.0}
+  ],
+  "ledger_checkpoints": [
+    {"session_index": 59, "cash": 100000.0, "quantity": 0, "nav": 100000.0},
+    {"session_index": 60, "cash": 100000.0, "quantity": 0, "nav": 100000.0},
+    {"session_index": 61, "cash": 9810.0, "quantity": 900, "nav": 108810.0},
+    {"session_index": 79, "cash": 9810.0, "quantity": 900, "nav": 108810.0},
+    {"session_index": 80, "cash": 9810.0, "quantity": 900, "nav": 81810.0},
+    {"session_index": 85, "cash": 9810.0, "quantity": 900, "nav": 81810.0},
+    {"session_index": 86, "cash": 99620.0, "quantity": 0, "nav": 99620.0},
+    {"session_index": 129, "cash": 99620.0, "quantity": 0, "nav": 99620.0}
+  ],
+  "total_commission": 200.0,
+  "total_slippage": 180.0,
+  "total_cost": 380.0,
+  "final_equity": 99620.0
+}

@@ -1,0 +1,18 @@
+{
+  "version": "poc0.b2.ma20-60.v1",
+  "start_date": "2026-01-05",
+  "flat_sessions": 60,
+  "high_sessions": 20,
+  "low_sessions": 50,
+  "flat_close": 100.0,
+  "high_close": 110.0,
+  "low_close": 80.0,
+  "symbols": ["A", "B", "C"],
+  "rising_symbol": "A",
+  "open": 100.0,
+  "initial_cash": 100000.0,
+  "lot_size": 100,
+  "commission_rate": 0.001,
+  "minimum_commission": 100.0,
+  "slippage_bps": 10.0
+}

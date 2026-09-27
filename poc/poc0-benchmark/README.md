@@ -352,3 +352,66 @@ The earlier wheel installation and first warm-cache dev/release measurements rem
 [`install evidence`](results/nautilus-install-attempt-2026-09-27.json),
 [`dev build`](results/nautilus-adapter-build-dev-2026-09-27.json) and
 [`release build`](results/nautilus-adapter-build-release-2026-09-27.json).
+
+## B2 S2/S3 registered decision protocol (ticket 09)
+
+Registered before release measurements: the comparison subset is Fill quantity, price and
+commission; cash, positions, daily NAV and total cost; single-Run latency, events/s, parallel
+Runs/s and peak RSS. The halted-status native order lifecycle (including the project rejection
+and native submission counts) is recorded separately and excluded under ADR 0012. To **adopt**
+Fast Event on this workload, require at least 2x lower median single-Run latency **and** at
+least 2x higher parallel Runs/s on each of S2 and S3, with no higher peak RSS, while all
+common-subset correctness checks pass. Otherwise **defer** when both release candidates and
+comparable execution scopes were measured; **reject** only on a demonstrated correctness
+failure outside the excluded lifecycle. Without matched release workloads, a resource-gated
+build, or an unavailable parallel/RSS measurement, retain **unresolved**. Build time and
+target-byte delta are engineering costs shown separately, not included in events/s or Runs/s.
+The absolute threshold is deliberately relative to the pinned Nautilus wheel on the same host.
+
+Run the pinned Python comparison after the shared lightweight release build:
+
+```bash
+df -h .
+cargo build -p quant-research --no-default-features --release --locked --offline
+target/release/quant-research benchmark-poc0 --candidate soa --output target/poc-0/b2-rust.json
+.venv/bin/python poc/poc0-benchmark/nautilus_adapter.py \
+  --dataset poc/poc0-benchmark/fixtures/dataset-v1.json \
+  --reference-report target/poc-0/b2-rust.json \
+  --output target/poc-0/b2-comparison.json
+```
+
+S2 uses the fixed 3 ETF x 10 session golden: at Jan 7 close C is selected, its next open
+is UNKNOWN; B is bought Jan 9, its Jan 13 HALTED exit defers the switch, then B sells and
+A buys at Jan 14 open. A newer close target supersedes any older pending target. S3 uses
+the versioned 3 instrument x 130 weekday fixture `fixtures/b2-ma20-60-v1.json`: the
+first valid MA60 is session index 59; the cross-up at index 60 buys A the following
+open, and the cross-down at index 85 sells A the following open. Both paths use
+100,000 CNY initial cash, 100-share lots, 10 bps per-side slippage and 100 CNY minimum
+commission. The synthetic prices and calendar do not establish historical PIT returns.
+The S2 factor/rank/TopK projection is already checked against the existing fixed B1
+workload; the S3 transitions, cash and costs have separately worked fixture assertions.
+
+Rust per-strategy samples exclude dataset preparation, while the Nautilus end-to-end
+samples include quote conversion and engine initialization. These timings are **internal
+repeatability evidence**, not matched-scoped engine speed ratios. Unless a matched release
+parallel and RSS protocol is run, the ticket 09 architecture selection remains unresolved.
+
+For the isolated Rust parallel worker measurement (fixture golden gates run before timing):
+
+```bash
+.venv/bin/python poc/poc0-benchmark/measure-b2-rss.py --strategy s2 \
+  --output poc/poc0-benchmark/results/b2-09-s2-throughput.json
+.venv/bin/python poc/poc0-benchmark/measure-b2-rss.py --strategy s3 \
+  --output poc/poc0-benchmark/results/b2-09-s3-throughput.json
+```
+
+The Nautilus combined report records two warm processes and six raw process-pool samples
+per S2/S3 strategy with per-worker peak RSS. Rust uses two threads sharing prepared bars;
+its isolated throughput samples exclude conversion and account-engine initialization.
+The Rust RSS wrapper records the **whole process** (including its golden preflight), not a
+per-thread peak, so that number cannot be compared to the Nautilus per-worker RSS. The
+S3 input and independent checkpoint expectation are versioned as
+`fixtures/b2-ma20-60-v1.json` and `fixtures/b2-ma20-60-expected-v1.json`.
+These distinct scopes and worker models are
+not comparable as engine-speed ratios; the registered adoption threshold cannot be evaluated
+from them. Neither throughput nor S3's synthetic prices are investment-performance evidence.

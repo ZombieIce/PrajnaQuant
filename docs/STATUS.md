@@ -10,6 +10,8 @@
 
 POC-0 工作范围与验收已发布为本地 [`ready-for-agent` spec](../.scratch/poc-0-benchmark/spec.md)。独立 [`poc/b1-layout`](../poc/b1-layout/README.md) 标量读取 smoke 只对拍三种布局的动量；票据 02 的 SoA、票据 03 的 Arrow 完整 S2 候选和票据 04 的 Polars 候选已验收。票据 05 的版本化 Parquet 写入/复读、列/row group 裁剪与三候选对拍已由用户验收：10,000,029 行、404,509,661 字节的源文件在本机 Linux VM 以 Docker 256 MiB cgroup 限制成功复读，子进程 RSS 58,933,248 字节，容器峰值触及 256 MiB、无 OOM。macOS `RLIMIT_AS` 失败记录仍保留。票据 06 已完成确定性 64 × 252 合成面板的 S2 参数扫描与冷热因子缓存对比，正确性和 checksum 通过；Custom SoA 结论为 `defer`，miss/hit 两线程吞吐相对最佳替代分别 +8.99%/+0.32%，未达到 20% 采纳门槛。报告中的全进程 RSS 为 107,905,024 字节；不代表真实市场/PIT。自研 Fast Event 仍只有票据 07 的最小原型；Nautilus Adapter 的固定 S1 对拍见票据 08，B3 未启动。
 
+2026-09-27 票据 09 的 POC 新增 Fast Event / Nautilus S2 Momentum Rotation 与 S3 MA20/60 固定合成输入对拍；共同子集的信号、Fill、现金、持仓、成本、逐日 NAV 全部通过。S2 的停牌项目拒单与原生提交计数按 ADR 0012 单列，不参与决策。S3 的 130 个交易日合成输入及独立 MA20/60 预期已版本化。两线程 Rust 与两进程 Nautilus 的原始样本、峰值 RSS、warm-cache release 构建资源记录见 [票据 09](../.scratch/poc-0-benchmark/issues/09-b2-strategy-parity-and-throughput.md)；转换和初始化、并行方式及 RSS 范围不同，不能据现有吞吐数字做引擎选型，结论为 `unresolved`。仍非生产 Fast Event / Nautilus Backend 或真实市场业绩验证；B3 未启动。
+
 2026-09-27 票据 05 最初在依赖解析阶段受阻；现以最小本地 `polars-io` vendor 补齐离线 Parquet 路径。实现、资源实测、macOS 受限内存启动失败与随后 Linux cgroup 复读通过的证据见 [票据 05](../.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md)。
 
 2026-09-27 实现与验收：票据 04 Polars 已由用户确认并标记 `resolved`。`--candidate polars` 通过 Polars lazy expressions 计算加权因子评分、排序、TopK、按实际入选数量均分的目标权重及下一交易日组合收益；正确性通过后才测量。报告保留五个原始样本、阶段计时、DataFrame 构造时间和投影 checksum。固定 3 ETF × 10 日 fixture 仅验证语义与 CLI，不支持布局决策。当前工作树也包含此前已有的 Arrow 候选改动，最终提交须保留其独立归属；验证状态以本轮 HANDOFF 为准。

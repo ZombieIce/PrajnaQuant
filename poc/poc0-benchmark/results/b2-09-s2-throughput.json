@@ -1,0 +1,27 @@
+{
+  "build_profile": "release",
+  "input_sha256": "9b9009b1586a6f271cd301042f97f2adf84146c870d72802682799d60352ed85",
+  "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+  "median_ns": 33000,
+  "memory_status": "whole Rust child process peak RSS (includes golden precheck)",
+  "p95_ns": 38625,
+  "parallel_runs_per_second": 22109.626900046063,
+  "parallel_wall_ns": 271375,
+  "peak_rss_bytes": 30179328,
+  "raw_samples_ns": [
+    38542,
+    32500,
+    28458,
+    38625,
+    33000,
+    29250
+  ],
+  "run_checksum_sha256": "f623f54644042256b2186270b0fe5142b36ab65731d6fc797fef5b3f805ddc9f",
+  "runs": 6,
+  "status": "passed",
+  "strategy": "s2",
+  "synthetic_quote_events_per_run": 58,
+  "threads": 2,
+  "warmup_runs": 2,
+  "binary_sha256": "e0d408e1cafbfd5da0ea719ea08d936a131f718d772748e8bef51a25ed18b670"
+}
