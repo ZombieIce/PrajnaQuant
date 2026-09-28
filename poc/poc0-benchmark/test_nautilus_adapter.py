@@ -1,3 +1,4 @@
+import hashlib
 import json
 import tempfile
 import unittest
@@ -8,6 +9,140 @@ import nautilus_adapter
 
 
 class NautilusAdapterReportTests(unittest.TestCase):
+    def test_projection_difference_reports_first_nested_field(self):
+        difference = nautilus_adapter._first_projection_difference(
+            {"fills": [{"price": 10.0, "quantity": 3}], "cash": 70.0},
+            {"fills": [{"price": 11.0, "quantity": 3}], "cash": 70.0},
+        )
+        self.assertEqual(difference, "projection.fills[0].price")
+
+    def test_reset_parity_is_unresolved_without_pinned_runtime(self):
+        workloads = [
+            {"name": f"load-{index}", "strategy": "s2", "dataset": {}}
+            for index in range(4)
+        ]
+        with patch.object(
+            nautilus_adapter,
+            "_version_probe",
+            return_value=(None, "PackageNotFoundError: pinned Nautilus is not installed"),
+        ):
+            report = nautilus_adapter.verify_reset_parity(workloads)
+        self.assertEqual(report["reset_parity"], "unresolved")
+        self.assertIsNone(report["selected_mode"])
+        self.assertIn("pinned Nautilus runtime unavailable", report["reason"])
+
+    def test_reset_parity_selects_reset_only_after_four_loads_match_three_resets_and_goldens(self):
+        workloads = [
+            {
+                "name": name,
+                "strategy": "s2" if name.startswith("s2") else "s3",
+                "dataset": {"id": name},
+                "golden_checksum_sha256": None,
+            }
+            for name in ("s2_decision", "s3_decision", "s2_robustness", "s3_robustness")
+        ]
+        for workload in workloads[:2]:
+            workload["golden_checksum_sha256"] = hashlib.sha256(
+                json.dumps({"name": workload["name"]}, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+        calls = {}
+
+        def fake_run(dataset, strategy, *, engine_mode, capture_engine_state=False):
+            calls[dataset["id"]] = calls.get(dataset["id"], 0) + 1
+            projection = {"name": dataset["id"]}
+            return {
+                "projection": projection,
+                "engine_state": {"cash": dataset["id"]},
+                "engine_reused": engine_mode == "reset" and calls[dataset["id"]] > 2,
+            }
+
+        with patch.object(nautilus_adapter, "_version_probe", return_value=("2.0.0rc5", None)), patch.object(
+            nautilus_adapter, "_run_nautilus", side_effect=fake_run
+        ):
+            report = nautilus_adapter.verify_reset_parity(workloads)
+        self.assertEqual(report["reset_parity"], "passed")
+        self.assertEqual(report["selected_mode"], "reset")
+        self.assertEqual(len(report["loads"]), 4)
+        for load in report["loads"]:
+            self.assertEqual(load["reset_runs"], 3)
+            self.assertEqual(load["reset_runs_engine_reused"], [True, True, True])
+            self.assertEqual(len(set(load["reset_checksums_sha256"])), 1)
+
+    def test_reset_parity_mismatch_selects_uniform_fallback_and_names_first_field(self):
+        workloads = [
+            {"name": name, "strategy": "s2", "dataset": {"id": name}, "golden_required": False}
+            for name in ("one", "two", "three", "four")
+        ]
+        calls = {}
+
+        def fake_run(dataset, strategy, *, engine_mode, capture_engine_state=False):
+            index = calls.get(dataset["id"], 0)
+            calls[dataset["id"]] = index + 1
+            projection = {"cash": 100.0}
+            if dataset["id"] == "four" and engine_mode == "reset" and index >= 2:
+                projection["cash"] = 99.0
+            return {
+                "projection": projection,
+                "engine_state": {"cash": projection["cash"]},
+                "engine_reused": engine_mode == "reset" and index > 0,
+            }
+
+        with patch.object(nautilus_adapter, "_version_probe", return_value=("2.0.0rc5", None)), patch.object(
+            nautilus_adapter, "_run_nautilus", side_effect=fake_run
+        ):
+            report = nautilus_adapter.verify_reset_parity(workloads)
+        self.assertEqual(report["reset_parity"], "failed")
+        self.assertEqual(report["selected_mode"], "cached_conversion_new_engine")
+        self.assertEqual(report["loads"][-1]["first_difference_field"], "projection.cash")
+
+    @unittest.skipUnless(
+        nautilus_adapter._version_probe()[1] is None,
+        "requires the pinned Nautilus runtime; evidence is unresolved when unavailable",
+    )
+    def test_pinned_reset_parity_covers_all_four_registered_loads(self):
+        fixtures = nautilus_adapter.ROOT / "poc/poc0-benchmark/fixtures"
+        goldens = json.loads((fixtures / "b2-nautilus-reset-golden-checksums-v1.json").read_text(encoding="utf-8"))
+        workloads = [
+            {
+                "name": "s2_decision",
+                "strategy": "s2",
+                "dataset": json.loads((fixtures / "dataset-v1.json").read_text(encoding="utf-8")),
+                "golden_checksum_sha256": goldens["s2_decision"],
+            },
+            {
+                "name": "s3_decision",
+                "strategy": "s3",
+                "dataset": nautilus_adapter._ma_dataset(
+                    json.loads((fixtures / "b2-ma20-60-v1.json").read_text(encoding="utf-8"))
+                ),
+                "golden_checksum_sha256": goldens["s3_decision"],
+            },
+            {
+                "name": "s2_robustness",
+                "strategy": "s2",
+                "dataset": json.loads((fixtures / "b2-s2-scale-64x252-v1.json").read_text(encoding="utf-8")),
+                "golden_required": False,
+            },
+            {
+                "name": "s3_robustness",
+                "strategy": "s3",
+                "dataset": json.loads((fixtures / "b2-s3-scale-64x252-v1.json").read_text(encoding="utf-8")),
+                "golden_required": False,
+            },
+        ]
+        report = nautilus_adapter.verify_reset_parity(workloads)
+        self.assertEqual(len(report["loads"]), 4)
+        self.assertEqual(report["nautilus_version"], nautilus_adapter.PINNED_NAUTILUS_VERSION)
+        expected_mode = {
+            "passed": "reset",
+            "failed": "cached_conversion_new_engine",
+        }.get(report["reset_parity"])
+        self.assertEqual(report["selected_mode"], expected_mode)
+        for item in report["loads"]:
+            self.assertEqual(item["reset_runs"], 3)
+            self.assertEqual(item["reset_runs_engine_reused"], [True, True, True])
+        self.assertTrue(all(item["golden_match"] for item in report["loads"][:2]))
+
     @unittest.skipUnless(nautilus_adapter._version_probe()[1] is None, "requires pinned Nautilus")
     def test_rotation_reinvests_exit_proceeds_at_next_open(self):
         dataset_path = nautilus_adapter.ROOT / "poc/poc0-benchmark/fixtures/b2-s2-scale-64x252-v1.json"
