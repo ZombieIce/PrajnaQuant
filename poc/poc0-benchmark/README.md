@@ -568,6 +568,40 @@ report verifies both initialized workers contributed a measured batch.
 The 2026-09-28 S2 report applies the unchanged ticket 09 gates to S2 only and computes `adopt`
 as an exploratory result; it does not decide S3, 64×252 robustness or overall B2. Engine-reset
 parity remains unverified (ticket 07).
+
+### Full S2/S3 decision-load remeasurement (ticket `poc-0-b2-matched-remeasure/03`)
+
+The decision-load coordinator runs independent correctness preflight for S2 3×10 and S3
+3×130, then uses 20 single-worker serial samples and five alternating-order groups of two
+workers × six Runs for each candidate and load. Raw sample files and the combined report keep
+the primary decision boundary separate from per-Run cold end-to-end timings; end-to-end is
+descriptive and is not a decision input. The report includes Nautilus engine mode, per-worker
+RSS and its summed upper bound, Rust startup and Python-after-Nautilus-import RSS baselines,
+host/toolchain identities, a resolved Python dependency closure (not a complete lock), and the
+10 GiB-gated Rust build record.
+
+After a guarded shared release build, run the coordinator through the pinned virtualenv:
+
+```bash
+python3 poc/poc0-benchmark/capture-build-resource.py --profile release \
+  --output poc/poc0-benchmark/results/b2-matched-decision-loads-release-build-2026-09-28.json \
+  --estimated-max-additional-bytes 2147483648
+.venv/bin/python poc/poc0-benchmark/b2_matched.py \
+  --binary target/release/quant-research --python .venv/bin/python \
+  --build-record poc/poc0-benchmark/results/b2-matched-decision-loads-release-build-2026-09-28.json \
+  --run-measurements \
+  --output poc/poc0-benchmark/results/b2-matched-decision-loads-2026-09-28.json
+```
+
+For the 2026-09-28 run, both independent correctness gates passed and each load passed the
+registered numeric latency, throughput and RSS gates. The observed engine mode was
+`cached_conversion_new_engine`; Nautilus reset parity has not yet been established, so both
+per-load preliminary outcomes remain exploratory and the formal combined decision is
+`unresolved`. The preregistered speed/RSS prediction matched. This report does not include the
+64×252 robustness workloads; see ticket 04. Ticket 07 must select the reset/fallback mode before
+ticket 06 can produce a formal remeasurement conclusion. Raw results are in
+[`b2-matched-decision-loads-2026-09-28.json`](results/b2-matched-decision-loads-2026-09-28.json);
+the warm Rust build took 13.746 s and changed shared target logical size by +46,440 bytes.
 The S2 sample medians were 11,042 ns (Rust) vs 842,146 ns (Nautilus) serial latency,
 56,338 vs 1,225 Runs/s across five alternating 2-worker × 6 Run groups, and 11,255,808 vs
 147,046,400 bytes peak RSS (Nautilus worker-sum upper bound). The report embeds every raw

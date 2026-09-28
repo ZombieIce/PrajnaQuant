@@ -21,6 +21,18 @@ def fixed_nautilus_available() -> bool:
         return False
 
 
+class EnvironmentTests(unittest.TestCase):
+    def test_hardware_identity_falls_back_without_leaking_system_profiler_output(self):
+        with patch.object(b2_matched.platform, "system", return_value="Darwin"), patch.object(
+            b2_matched,
+            "_system_value",
+            side_effect=["Hardware Overview:\n    Chip: Apple M1\n    Serial Number: private", None],
+        ), patch.object(b2_matched.os, "sysconf", side_effect=[4, 4096]):
+            cpu, memory = b2_matched._hardware_identity()
+        self.assertEqual(cpu, "Apple M1")
+        self.assertEqual(memory, 16_384)
+
+
 class DecisionTests(unittest.TestCase):
     def decide(self, **overrides):
         inputs = {
@@ -55,10 +67,31 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(self.decide(protocol="unmatched")["status"], "unresolved")
 
     def test_reset_unverified_fallback_is_exploratory_not_registered(self):
-        self.assertEqual(self.decide()["evidence_level"], "registered")
         exploratory = self.decide(protocol="fallback_reset_unverified")
         self.assertEqual(exploratory["status"], "adopt")
         self.assertEqual(exploratory["evidence_level"], "exploratory")
+        with_evidence = self.decide(
+            protocol="fallback_reset_unverified",
+            mode_selection={"reset_parity": "failed", "selected_mode": "cached_conversion_new_engine"},
+        )
+        self.assertEqual(with_evidence["evidence_level"], "exploratory")
+
+    def test_legacy_protocol_labels_without_mode_evidence_stay_exploratory(self):
+        for protocol in ("matched", "matched_fallback"):
+            decision = self.decide(protocol=protocol)
+            self.assertEqual(decision["status"], "adopt")
+            self.assertEqual(decision["evidence_level"], "exploratory")
+
+    def test_registered_only_when_mode_matches_adr_0013_selection(self):
+        reset = {"reset_parity": "passed", "selected_mode": "reset"}
+        fallback = {"reset_parity": "failed", "selected_mode": "cached_conversion_new_engine"}
+        self.assertEqual(self.decide(protocol="matched", mode_selection=reset)["evidence_level"], "registered")
+        self.assertEqual(self.decide(protocol="matched_fallback", mode_selection=fallback)["evidence_level"], "registered")
+        self.assertEqual(self.decide(protocol="matched_fallback", mode_selection=reset)["status"], "unresolved")
+        self.assertEqual(self.decide(protocol="matched", mode_selection=fallback)["status"], "unresolved")
+        inconsistent = {"reset_parity": "passed", "selected_mode": "cached_conversion_new_engine"}
+        self.assertEqual(self.decide(protocol="matched_fallback", mode_selection=inconsistent)["status"], "unresolved")
+        self.assertEqual(self.decide(protocol="matched", mode_selection={})["status"], "unresolved")
 
     def test_maintenance_proxy_changes_never_change_decision(self):
         metrics = b2_matched.maintenance_cost_proxies(Path(sys.executable))
@@ -148,6 +181,22 @@ class DecisionTests(unittest.TestCase):
         self.assertIsNone(snapshot["count"])
         self.assertTrue(any("shared-lib==1.5" in item for item in snapshot["version_mismatches"]))
 
+    def test_inactive_optional_extras_are_excluded_from_installed_closure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            dist_info = root / "nautilus_trader-2.0.0rc5.dist-info"
+            dist_info.mkdir()
+            (dist_info / "METADATA").write_text(
+                "Metadata-Version: 2.1\nName: nautilus_trader\nVersion: 2.0.0rc5\n"
+                "Requires-Dist: optional-viz-lib>=1; extra == 'visualization'\n",
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {"PYTHONPATH": str(root)}):
+                snapshot = b2_matched._resolved_python_transitives(Path(sys.executable))
+        self.assertEqual(snapshot["status"], "known")
+        self.assertEqual(snapshot["count"], 0)
+        self.assertEqual(snapshot["packages"], [])
+
 
 class CoordinatorTests(unittest.TestCase):
     def test_missing_preflight_binary_writes_unresolved_report(self):
@@ -171,9 +220,55 @@ class CoordinatorTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             report = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(report["status"], "unresolved")
-            self.assertIn("FileNotFoundError", report["correctness"]["stderr"])
+            self.assertIn("FileNotFoundError", report["preflight_error"])
+            self.assertEqual(set(report["decision_loads"]), {"s2", "s3"})
+            self.assertIn("primary", report["timing_boundaries"])
+            self.assertIn("secondary", report["timing_boundaries"])
+            self.assertEqual(report["sampling_protocol"]["serial_runs"], 20)
+            self.assertIn("rss_baselines", report)
+            self.assertIn("python_transitive_dependency_snapshot", report["environment"])
             self.assertIn("maintenance_cost_proxies", report)
             self.assertFalse(report["maintenance_cost_proxies"]["decision_inputs"])
+
+    def test_rss_baselines_report_scope_and_platform_units(self):
+        baselines = b2_matched._rss_baselines(Path(b2_matched.ROOT / "target/release/quant-research"), Path(sys.executable))
+        if baselines["rust_empty_binary"]["status"] == "measured":
+            self.assertIn("scope", baselines["rust_empty_binary"])
+        self.assertIn("raw_unit", baselines["python_import_nautilus"])
+        self.assertIn("status", baselines["python_import_nautilus"])
+
+    @unittest.skipUnless(
+        fixed_nautilus_available(), "fixed Nautilus 2.0.0rc5 runtime is unavailable"
+    )
+    def test_coordinator_report_exposes_both_decision_loads_and_required_sections(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "decision-loads.json"
+            binary = b2_matched.ROOT / "target/debug/quant-research"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(b2_matched.ROOT / "poc/poc0-benchmark/b2_matched.py"),
+                    "--binary",
+                    str(binary),
+                    "--python",
+                    sys.executable,
+                    "--output",
+                    str(output),
+                ],
+                cwd=b2_matched.ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(set(report["decision_loads"]), {"s2", "s3"})
+            self.assertIn("primary", report["timing_boundaries"])
+            self.assertIn("secondary", report["timing_boundaries"])
+            self.assertEqual(report["sampling_protocol"]["parallel_groups"], 5)
+            self.assertIn("rss_baselines", report)
+            self.assertIn("rustc_vv", report["environment"])
+            self.assertIn("python_transitive_dependency_snapshot", report["environment"])
 
 
 class NautilusIntegrationTests(unittest.TestCase):
@@ -216,6 +311,10 @@ class NautilusIntegrationTests(unittest.TestCase):
         self.assertEqual(measurement["status"], "passed", measurement)
         self.assertEqual(measurement["warmup_runs_per_worker"], 2)
         self.assertEqual(set(measurement["checksums_sha256"]), {_projection_checksum(actual)})
+        self.assertEqual(measurement["engine_mode"], "cached_conversion_new_engine")
+        self.assertEqual(len(measurement["peak_rss_by_worker_bytes"]), 2)
+        self.assertGreater(measurement["peak_rss_sum_upper_bound_bytes"], 0)
+        self.assertEqual(len(measurement["secondary_boundary_samples_ns"]), 2)
 
 
 if __name__ == "__main__":

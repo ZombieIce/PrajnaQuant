@@ -783,6 +783,11 @@ def parallel_digest_runs(
         batches = [pool.submit(_parallel_worker_digest_batch, indices) for indices in assignments]
         measured_batches = [future.result() for future in batches]
         elapsed = max(item["completed_ns"] for item in measured_batches) - started
+        secondary_futures = [
+            pool.submit(_cold_end_to_end_sample, dataset, strategy, index)
+            for index in range(runs)
+        ]
+        secondary_samples = [future.result() for future in secondary_futures]
     measured_pids = {batch["worker_pid"] for batch in measured_batches}
     if measured_pids != ready_pids:
         raise RuntimeError("each initialized worker must contribute a measured Run")
@@ -793,6 +798,11 @@ def parallel_digest_runs(
             "status": "unresolved",
             "reason": "parallel projection checksum did not match independently checked Nautilus S2 golden",
             "mismatched_checksums_sha256": sorted(checksums - {expected_checksum}),
+        }
+    if {sample["checksum_sha256"] for sample in secondary_samples} != {expected_checksum}:
+        return {
+            "status": "unresolved",
+            "reason": "secondary-boundary projection checksum mismatch",
         }
     per_worker: dict[int, int] = {}
     for batch in measured_batches:
@@ -805,6 +815,9 @@ def parallel_digest_runs(
         "warmup_runs": 2 * workers,
         "warmup_runs_per_worker": 2,
         "raw_samples_ns": samples,
+        "secondary_boundary_samples_ns": secondary_samples,
+        "secondary_boundary_median_ns": statistics.median(item["end_to_end_ns"] for item in secondary_samples),
+        "secondary_boundary_p95_ns": sorted(item["end_to_end_ns"] for item in secondary_samples)[math.ceil(0.95 * len(secondary_samples)) - 1],
         "checksums_sha256": [item["checksum_sha256"] for item in measured],
         "median_ns": statistics.median(samples),
         "p95_ns": sorted(samples)[math.ceil(0.95 * len(samples)) - 1],
@@ -840,6 +853,12 @@ def serial_digest_runs(
         }
     samples = [item["run_ns"] for item in measured]
     ordered = sorted(samples)
+    secondary_samples = [_cold_end_to_end_sample(dataset, strategy, index) for index in range(runs)]
+    if {sample["checksum_sha256"] for sample in secondary_samples} != {expected_checksum}:
+        return {
+            "status": "unresolved",
+            "reason": "secondary-boundary projection checksum mismatch",
+        }
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1024 if sys.platform.startswith("linux") else 1)
     return {
         "status": "passed",
@@ -848,6 +867,9 @@ def serial_digest_runs(
         "warmup_runs_per_worker": 2,
         "runs": runs,
         "raw_samples_ns": samples,
+        "secondary_boundary_samples_ns": secondary_samples,
+        "secondary_boundary_median_ns": statistics.median(item["end_to_end_ns"] for item in secondary_samples),
+        "secondary_boundary_p95_ns": sorted(item["end_to_end_ns"] for item in secondary_samples)[math.ceil(0.95 * len(secondary_samples)) - 1],
         "checksums_sha256": [item["checksum_sha256"] for item in measured],
         "median_ns": statistics.median(samples),
         "p95_ns": ordered[math.ceil(0.95 * len(ordered)) - 1],
@@ -856,6 +878,19 @@ def serial_digest_runs(
         "engine_mode_reason": "reset parity untested (ticket 07); exploratory fallback, not selected by ADR 0013 evidence",
         "conversion_cached_per_worker": True,
         "measurement_scope": "single worker; conversion and two warmups excluded; factor/signal, new engine initialization, replay and projection included",
+    }
+
+
+def _cold_end_to_end_sample(
+    dataset: dict[str, Any], strategy: str, run_index: int
+) -> dict[str, int]:
+    """Measure a fresh canonical-bars conversion, engine setup and one complete Run."""
+    _NAUTILUS_PREPARED_CACHE.clear()
+    result = _run_nautilus(dataset, strategy=strategy)
+    return {
+        "run_index": run_index,
+        "end_to_end_ns": result["timings_ns"]["end_to_end"],
+        "checksum_sha256": _projection_checksum(result["projection"]),
     }
 
 

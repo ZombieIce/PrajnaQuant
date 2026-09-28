@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from nautilus_adapter import (  # noqa: E402
     PINNED_NAUTILUS_VERSION,
     _version_probe,
+    _ma_dataset,
     parallel_digest_runs,
     serial_digest_runs,
 )
@@ -21,7 +22,8 @@ from nautilus_adapter import (  # noqa: E402
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("serial", "parallel"), required=True)
-    parser.add_argument("--dataset", type=Path, default=ROOT / "poc/poc0-benchmark/fixtures/dataset-v1.json")
+    parser.add_argument("--strategy", choices=("s2", "s3"), required=True)
+    parser.add_argument("--dataset", type=Path, required=True, help="canonical fixture path; S3 MA20/60 fixture is normalized by the adapter")
     parser.add_argument("--expected-checksum", required=True, help="checksum of the separately checked Nautilus golden projection")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=2)
@@ -33,13 +35,15 @@ def main() -> int:
     else:
         dataset_path = args.dataset if args.dataset.is_absolute() else ROOT / args.dataset
         dataset = json.loads(dataset_path.read_text(encoding="utf-8"))
+        if args.strategy == "s3":
+            dataset = _ma_dataset(dataset)
         runs = args.runs if args.runs is not None else (20 if args.mode == "serial" else 6)
         if args.mode == "serial":
-            report = serial_digest_runs(dataset, "s2", args.expected_checksum, runs=runs)
+            report = serial_digest_runs(dataset, args.strategy, args.expected_checksum, runs=runs)
         else:
             report = parallel_digest_runs(
                 dataset,
-                "s2",
+                args.strategy,
                 args.expected_checksum,
                 workers=args.workers,
                 runs=runs,

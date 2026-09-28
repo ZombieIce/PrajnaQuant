@@ -479,6 +479,54 @@ fn b2_isolated_cli_measures_fixed_parallel_runs_after_correctness_gate() {
 }
 
 #[test]
+fn b2_s3_cli_accepts_the_canonical_ma20_60_fixture_identity() {
+    let output_dir = tempfile::tempdir().unwrap();
+    let output = output_dir.path().join("b2-s3.json");
+    let fixture = repo_root().join("poc/poc0-benchmark/fixtures/b2-ma20-60-v1.json");
+    let result = Command::new(env!("CARGO_BIN_EXE_quant-research"))
+        .current_dir(repo_root())
+        .args([
+            "benchmark-poc0-b2",
+            "--strategy",
+            "s3",
+            "--dataset",
+            fixture.to_str().unwrap(),
+            "--mode",
+            "serial",
+            "--runs",
+            "1",
+            "--output",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report: Value = serde_json::from_slice(&fs::read(output).unwrap()).unwrap();
+    assert_eq!(report["status"], "passed");
+    assert_eq!(
+        report["input_sha256"],
+        "953218548395293b07148554c57ddc64440f9feb2e7cf8fc37de4dec0c3ee49d"
+    );
+    assert_eq!(
+        report["dataset_content_sha256"],
+        "a605295dd53e2f7e35758622671e2b3b85b35a6a791d42c850aeee55145311ef"
+    );
+    assert_eq!(
+        report["secondary_boundary_samples_ns"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(report["secondary_boundary_median_ns"].as_u64().unwrap() > 0);
+    assert_eq!(report["run_checksum_sha256"].as_str().unwrap().len(), 64);
+}
+
+#[test]
 fn b2_parallel_warmup_mismatch_returns_instead_of_stranding_workers() {
     let temporary = tempfile::tempdir().unwrap();
     let output = temporary.path().join("b2-warmup-mismatch.json");

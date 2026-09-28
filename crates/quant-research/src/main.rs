@@ -96,6 +96,9 @@ enum Command {
     BenchmarkPoc0B2 {
         #[arg(long, value_parser = ["s2", "s3"])]
         strategy: String,
+        /// Optional canonical source fixture identity (S2 bars or S3 MA20/60 parameters).
+        #[arg(long)]
+        dataset: Option<PathBuf>,
         #[arg(long, value_parser = ["serial", "parallel"], default_value = "parallel")]
         mode: String,
         #[arg(long, alias = "threads", default_value_t = 2)]
@@ -364,6 +367,7 @@ async fn main() -> Result<()> {
         }
         Command::BenchmarkPoc0B2 {
             strategy,
+            dataset,
             mode,
             workers,
             runs,
@@ -374,6 +378,7 @@ async fn main() -> Result<()> {
             let workers = if mode == "serial" { 1 } else { workers };
             let report = poc0_benchmark::measure_b2_parallel(
                 &strategy,
+                dataset.as_deref(),
                 workers,
                 runs,
                 skip_golden_preflight,

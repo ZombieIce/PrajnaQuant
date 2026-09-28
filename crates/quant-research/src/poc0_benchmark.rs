@@ -584,6 +584,7 @@ impl Poc0Report {
 
 pub fn measure_b2_parallel(
     strategy: &str,
+    dataset_override: Option<&Path>,
     threads: usize,
     runs: usize,
     skip_golden_preflight: bool,
@@ -607,12 +608,21 @@ pub fn measure_b2_parallel(
             "expected checksum is only accepted when golden preflight is skipped"
         );
     }
-    let dataset_path = Path::new("poc/poc0-benchmark/fixtures/dataset-v1.json");
+    let default_dataset_path = if strategy == "s3" {
+        Path::new("poc/poc0-benchmark/fixtures/b2-ma20-60-v1.json")
+    } else {
+        Path::new("poc/poc0-benchmark/fixtures/dataset-v1.json")
+    };
+    let dataset_path = dataset_override.unwrap_or(default_dataset_path);
     let golden_path = Path::new("poc/poc0-benchmark/fixtures/expected-v1.json");
     let golden_checksum = if let Some(checksum) = expected_checksum {
         checksum.to_owned()
     } else {
-        let golden_report = run(dataset_path, golden_path, "soa")?;
+        let golden_report = run(
+            Path::new("poc/poc0-benchmark/fixtures/dataset-v1.json"),
+            golden_path,
+            "soa",
+        )?;
         ensure!(
             golden_report.correctness_status() == "passed",
             "B2 golden check failed"
@@ -628,9 +638,19 @@ pub fn measure_b2_parallel(
         );
         strategy_report.checksum_sha256.clone()
     };
-    let prepared = prepare_dataset(serde_json::from_slice(&fs::read(dataset_path)?)?)?;
+    let prepared_path = if strategy == "s3" {
+        Path::new("poc/poc0-benchmark/fixtures/dataset-v1.json")
+    } else {
+        dataset_path
+    };
+    let prepared = prepare_dataset(serde_json::from_slice(&fs::read(prepared_path)?)?)?;
     let config = experiment_config(&prepared.spec);
-    let (ma_dataset, ma_hash) = make_ma_dataset(&prepared.spec)?;
+    let ma_fixture_path = if strategy == "s3" {
+        dataset_path
+    } else {
+        Path::new("poc/poc0-benchmark/fixtures/b2-ma20-60-v1.json")
+    };
+    let (ma_dataset, _ma_hash) = make_ma_dataset(&prepared.spec, ma_fixture_path)?;
     let expected_hash = golden_checksum;
     let run_once = || {
         if strategy == "s2" {
@@ -706,6 +726,31 @@ pub fn measure_b2_parallel(
         "B2 measured projection mismatch"
     );
     let samples = raw.iter().map(|(elapsed, _)| *elapsed).collect::<Vec<_>>();
+    let mut secondary_samples = Vec::with_capacity(runs);
+    for _ in 0..runs {
+        let started = Instant::now();
+        let source = if strategy == "s3" {
+            Path::new("poc/poc0-benchmark/fixtures/dataset-v1.json")
+        } else {
+            dataset_path
+        };
+        let end_to_end_prepared = prepare_dataset(serde_json::from_slice(&fs::read(source)?)?)?;
+        let end_to_end_projection = if strategy == "s2" {
+            run_rotation_event(
+                &end_to_end_prepared,
+                &experiment_config(&end_to_end_prepared.spec),
+            )
+            .projection
+        } else {
+            let (ma, _) = make_ma_dataset(&end_to_end_prepared.spec, dataset_path)?;
+            run_ma_event(&ma).projection
+        };
+        ensure!(
+            sha256(&serde_json::to_vec(&end_to_end_projection)?) == expected_hash,
+            "B2 end-to-end projection mismatch"
+        );
+        secondary_samples.push(started.elapsed().as_nanos());
+    }
     Ok(serde_json::json!({
         "status": "passed",
         "strategy": strategy,
@@ -717,6 +762,9 @@ pub fn measure_b2_parallel(
         "warmup_runs_per_worker": 2,
         "runs": runs,
         "raw_samples_ns": samples,
+        "secondary_boundary_samples_ns": secondary_samples,
+        "secondary_boundary_median_ns": sorted_median(&secondary_samples),
+        "secondary_boundary_p95_ns": sorted_p95(&secondary_samples),
         "median_ns": sorted_median(&samples),
         "p95_ns": sorted_p95(&samples),
         "measurement_wall_ns": wall_ns,
@@ -725,7 +773,16 @@ pub fn measure_b2_parallel(
         "parallel_runs_per_second": if threads > 1 { Some(runs as f64 * 1e9 / wall_ns as f64) } else { None },
         "synthetic_quote_events_per_run": if strategy == "s2" { prepared.bars.len() * 2 } else { ma_dataset.bars.len() * 2 },
         "run_checksum_sha256": expected_hash,
-        "input_sha256": if strategy == "s2" { sha256(&fs::read(dataset_path)?) } else { ma_hash },
+        "input_sha256": if strategy == "s2" {
+            sha256(&fs::read(dataset_path)?)
+        } else {
+            _ma_hash
+        },
+        "dataset_content_sha256": if strategy == "s2" {
+            prepared.content_sha256
+        } else {
+            ma_dataset.content_sha256
+        },
         "peak_rss_bytes": null,
         "memory_status": "not measured in isolated Rust workers",
         "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
@@ -899,7 +956,10 @@ pub fn run(
         rotation_checks.push("rotation executed on signal day".to_string());
     }
     let rotation_correct = correctness_passed && rotation_checks.is_empty();
-    let (ma_dataset, ma_input_hash) = make_ma_dataset(&prepared.spec)?;
+    let (ma_dataset, ma_input_hash) = make_ma_dataset(
+        &prepared.spec,
+        Path::new("poc/poc0-benchmark/fixtures/b2-ma20-60-v1.json"),
+    )?;
     let ma_run = run_ma_event(&ma_dataset);
     let ma_repeat = run_ma_event(&ma_dataset);
     let mut ma_checks = Vec::new();
@@ -1527,9 +1587,9 @@ fn run_rotation_event(dataset: &PreparedDataset, config: &ExperimentConfig) -> R
     replay_event_targets(dataset, factor)
 }
 
-fn make_ma_dataset(base: &DatasetInput) -> Result<(PreparedDataset, String)> {
-    let bytes = include_bytes!("../../../poc/poc0-benchmark/fixtures/b2-ma20-60-v1.json");
-    let fixture: Value = serde_json::from_slice(bytes)?;
+fn make_ma_dataset(base: &DatasetInput, fixture_path: &Path) -> Result<(PreparedDataset, String)> {
+    let bytes = fs::read(fixture_path)?;
+    let fixture: Value = serde_json::from_slice(&bytes)?;
     let start = NaiveDate::parse_from_str(
         fixture["start_date"]
             .as_str()
@@ -1598,7 +1658,7 @@ fn make_ma_dataset(base: &DatasetInput) -> Result<(PreparedDataset, String)> {
     )?;
     Ok((
         prepare_dataset(serde_json::from_value(value)?)?,
-        sha256(bytes),
+        sha256(&bytes),
     ))
 }
 
