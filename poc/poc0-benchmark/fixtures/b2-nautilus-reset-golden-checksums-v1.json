@@ -1,0 +1,6 @@
+{
+  "source_report": "../results/b2-matched-decision-loads-2026-09-28.json",
+  "source_note": "These canonical Nautilus projection checksums were recorded after the S2/S3 projections passed the report's field-by-field comparison against the independent Rust golden, excluding only ADR 0012 native order lifecycle.",
+  "s2_decision": "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+  "s3_decision": "ee74058226f1f2c744db19c74943300ffe476027d1caa802e79f755791389cc3"
+}

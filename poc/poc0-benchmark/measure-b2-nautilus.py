@@ -22,6 +22,7 @@ from nautilus_adapter import (  # noqa: E402
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("serial", "parallel"), required=True)
+    parser.add_argument("--engine-mode", choices=("reset", "cached_conversion_new_engine"), default="cached_conversion_new_engine")
     parser.add_argument("--strategy", choices=("s2", "s3"), required=True)
     parser.add_argument("--dataset", type=Path, required=True, help="canonical fixture path; S3 MA20/60 fixture is normalized by the adapter")
     parser.add_argument("--expected-checksum", required=True, help="checksum of the separately checked Nautilus golden projection")
@@ -39,7 +40,10 @@ def main() -> int:
             dataset = _ma_dataset(dataset)
         runs = args.runs if args.runs is not None else (20 if args.mode == "serial" else 6)
         if args.mode == "serial":
-            report = serial_digest_runs(dataset, args.strategy, args.expected_checksum, runs=runs)
+            report = serial_digest_runs(
+                dataset, args.strategy, args.expected_checksum, runs=runs,
+                engine_mode=args.engine_mode,
+            )
         else:
             report = parallel_digest_runs(
                 dataset,
@@ -47,6 +51,7 @@ def main() -> int:
                 args.expected_checksum,
                 workers=args.workers,
                 runs=runs,
+                engine_mode=args.engine_mode,
             )
     output = args.output if args.output.is_absolute() else ROOT / args.output
     output.parent.mkdir(parents=True, exist_ok=True)

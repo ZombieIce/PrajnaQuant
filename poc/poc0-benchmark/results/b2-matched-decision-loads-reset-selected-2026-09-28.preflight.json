@@ -1,0 +1,3275 @@
+{
+  "schema_version": "poc0.report.v1",
+  "run_id": "16c86c5d44913a31319a5fe9eeb6ab74fbcf419cb7925579ef8f7f4c05480b81",
+  "candidate": "custom-soa-momentum-rotation",
+  "strategy": {
+    "name": "Momentum Rotation",
+    "version": "poc0-golden-v1",
+    "initial_cash": 100000.0,
+    "lot_size": 100,
+    "strategy": {
+      "lookback_days": 1,
+      "top_n": 1,
+      "rebalance_every": 1,
+      "momentum_short_days": 1,
+      "momentum_long_days": 1,
+      "volatility_window": 2,
+      "trend_window": null,
+      "use_trend_filter": false,
+      "short_momentum_weight": 1.0,
+      "long_momentum_weight": 1.0,
+      "volatility_weight": 0.0
+    },
+    "costs": {
+      "commission_rate": 0.001,
+      "minimum_commission": 100.0,
+      "buy_tax_rate": 0.0,
+      "sell_tax_rate": 0.0,
+      "buy_slippage_bps": 10.0,
+      "sell_slippage_bps": 10.0
+    },
+    "future_returns_used_for_decisions": false
+  },
+  "dataset": {
+    "version": "poc0.synthetic.etf-daily.v1",
+    "seed": 20260926,
+    "seed_semantics": "stable fixture identity; the deliberately small price path is hand-authored, not randomly sampled",
+    "source_identity": "poc0-hand-authored-golden-v1",
+    "calendar_basis": "fixed_synthetic_weekday_sessions",
+    "timezone": "Asia/Shanghai",
+    "calendar": [
+      "2026-01-05",
+      "2026-01-06",
+      "2026-01-07",
+      "2026-01-08",
+      "2026-01-09",
+      "2026-01-12",
+      "2026-01-13",
+      "2026-01-14",
+      "2026-01-15",
+      "2026-01-16"
+    ],
+    "bar_defaults": {
+      "open": 100.0,
+      "volume": 1000000.0,
+      "amount": 100000000.0,
+      "high_rule": "max(open, close)",
+      "low_rule": "min(open, close)",
+      "open_available_at": "09:30:00+08:00",
+      "close_available_at": "15:00:00+08:00"
+    },
+    "instrument_count": 3,
+    "instruments": [
+      {
+        "symbol": "A",
+        "currency": "CNY",
+        "price_precision": 2,
+        "quantity_precision": 0
+      },
+      {
+        "symbol": "B",
+        "currency": "CNY",
+        "price_precision": 2,
+        "quantity_precision": 0
+      },
+      {
+        "symbol": "C",
+        "currency": "CNY",
+        "price_precision": 2,
+        "quantity_precision": 0
+      }
+    ],
+    "bar_count": 29,
+    "missing_bars": [
+      {
+        "symbol": "B",
+        "date": "2026-01-16",
+        "reason": "deliberate_missing_bar"
+      }
+    ],
+    "status_override_count": 2,
+    "execution_statuses": [
+      {
+        "symbol": "A",
+        "date": "2026-01-05",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-05T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-05",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-05T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-05",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-05T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-06",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-06T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-06",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-06T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-06",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-06T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-07",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-07T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-07",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-07T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-07",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-07T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-08",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-08T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-08",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-08T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-08",
+        "trade_status": "UNKNOWN",
+        "is_tradable": false,
+        "sources": "poc0-fixture-override",
+        "available_at": "2026-01-08T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-09",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-09T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-09",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-09T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-09",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-09T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-12",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-12T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-12",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-12T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-12",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-12T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-13",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-13T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-13",
+        "trade_status": "HALTED",
+        "is_tradable": false,
+        "sources": "poc0-fixture-override",
+        "available_at": "2026-01-13T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-13",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-13T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-14",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-14T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-14",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-14T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-14",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-14T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-15",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-15T08:50:00+08:00"
+      },
+      {
+        "symbol": "B",
+        "date": "2026-01-15",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-15T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-15",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-15T08:50:00+08:00"
+      },
+      {
+        "symbol": "A",
+        "date": "2026-01-16",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-16T08:50:00+08:00"
+      },
+      {
+        "symbol": "C",
+        "date": "2026-01-16",
+        "trade_status": "TRADABLE",
+        "is_tradable": true,
+        "sources": "poc0-fixture-default",
+        "available_at": "2026-01-16T08:50:00+08:00"
+      }
+    ],
+    "input_path": "/Users/yibinzhang/Documents/ChatGPT/A股量化/poc/poc0-benchmark/fixtures/dataset-v1.json",
+    "raw_input_sha256": "9b9009b1586a6f271cd301042f97f2adf84146c870d72802682799d60352ed85",
+    "content_sha256": "8c16742a2031cab19e08456dbbe009769b02f0331276618831cefdb6827b5a6f",
+    "time_model": {
+      "signal": "after session close using that session close and earlier closes only",
+      "execution": "pending target executes at the next available session open",
+      "execution_status": "available before the session open",
+      "final_session": "target remains pending because no future execution session exists"
+    },
+    "result_model_boundary": "This fixture is an event ledger with explicit fills, cash, holdings, costs and NAV. A Vector candidate uses a separately declared target-weight × return model and is compared only under shared assumptions; the Vector result is not asserted to be this account ledger."
+  },
+  "expected_input": "/Users/yibinzhang/Documents/ChatGPT/A股量化/poc/poc0-benchmark/fixtures/expected-v1.json",
+  "expected_input_sha256": "97d9eb463c7999b5504a1624216b189f8308367039e07fbfd1a68ea923f5c72a",
+  "provenance": {
+    "git_revision": "ecf7f94afe1a46ce74d7a106b1c493eb27b82edd",
+    "working_tree_dirty": null,
+    "working_tree_complete": false,
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tracked_diff_summary": null,
+    "changed_paths": [],
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "build_profile": "release",
+    "operating_system": "macos",
+    "architecture": "aarch64",
+    "logical_cpu_count": 8,
+    "cpu_model": null,
+    "cargo_lock_sha256": "250f21792a3ded3c139747c74f96b673b37e57d2b5f550a29e480fea71f60041",
+    "physical_memory_bytes": null
+  },
+  "correctness": {
+    "status": "passed",
+    "tolerance": 1e-8,
+    "differences": [],
+    "accounting_checks": [],
+    "time_checks": []
+  },
+  "measurements": {
+    "status": "not_selected",
+    "warmup_runs": 0,
+    "requested_runs": 5,
+    "raw_samples_ns": [],
+    "median_ns": null,
+    "p95_ns": null,
+    "peak_rss_bytes": null,
+    "resource_measurement_status": "not_measured_in_ticket_01",
+    "measurement_scope": "reference backtest call; excludes fixture parsing and report projection"
+  },
+  "result": {
+    "checksum_sha256": "ddbbd29994dbb6a373dae42e8614f2032ee15191aff9a7be7c7bfb256d624472",
+    "projection": {
+      "rankings": [
+        {
+          "date": "2026-01-07",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "A",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "B",
+              "score": -0.02020202020202011
+            }
+          ]
+        },
+        {
+          "date": "2026-01-08",
+          "candidates": [
+            {
+              "symbol": "B",
+              "score": 0.020408163265305923
+            },
+            {
+              "symbol": "A",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "C",
+              "score": -0.01980198019801982
+            }
+          ]
+        },
+        {
+          "date": "2026-01-09",
+          "candidates": [
+            {
+              "symbol": "B",
+              "score": 0.06060606060606055
+            },
+            {
+              "symbol": "C",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "A",
+              "score": -0.07766990291262132
+            }
+          ]
+        },
+        {
+          "date": "2026-01-12",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "B",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "A",
+              "score": -0.02020202020202011
+            }
+          ]
+        },
+        {
+          "date": "2026-01-13",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.04081632653061229
+            },
+            {
+              "symbol": "C",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "B",
+              "score": -0.03883495145631066
+            }
+          ]
+        },
+        {
+          "date": "2026-01-14",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "C",
+              "score": 0.01941747572815533
+            },
+            {
+              "symbol": "B",
+              "score": -0.01980198019801982
+            }
+          ]
+        },
+        {
+          "date": "2026-01-15",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "C",
+              "score": -0.019230769230769162
+            },
+            {
+              "symbol": "B",
+              "score": -0.020000000000000018
+            }
+          ]
+        },
+        {
+          "date": "2026-01-16",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.03883495145631066
+            },
+            {
+              "symbol": "A",
+              "score": 0.019607843137254832
+            }
+          ]
+        }
+      ],
+      "signals": [
+        {
+          "date": "2026-01-07",
+          "target_symbols": [
+            "C"
+          ]
+        },
+        {
+          "date": "2026-01-08",
+          "target_symbols": [
+            "B"
+          ]
+        },
+        {
+          "date": "2026-01-09",
+          "target_symbols": [
+            "B"
+          ]
+        },
+        {
+          "date": "2026-01-12",
+          "target_symbols": [
+            "C"
+          ]
+        },
+        {
+          "date": "2026-01-13",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-14",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-15",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-16",
+          "target_symbols": [
+            "C"
+          ]
+        }
+      ],
+      "fills": [
+        {
+          "date": "2026-01-09",
+          "symbol": "B",
+          "side": "BUY",
+          "quantity": 900,
+          "reference_price": 100.0,
+          "fill_price": 100.1,
+          "gross_value": 90090.0,
+          "commission": 100.0,
+          "tax": 0.0,
+          "slippage_cost": 89.99999999999488
+        },
+        {
+          "date": "2026-01-14",
+          "symbol": "B",
+          "side": "SELL",
+          "quantity": 900,
+          "reference_price": 100.0,
+          "fill_price": 99.9,
+          "gross_value": 89910.0,
+          "commission": 100.0,
+          "tax": 0.0,
+          "slippage_cost": 89.99999999999488
+        },
+        {
+          "date": "2026-01-14",
+          "symbol": "A",
+          "side": "BUY",
+          "quantity": 900,
+          "reference_price": 100.0,
+          "fill_price": 100.1,
+          "gross_value": 90090.0,
+          "commission": 100.0,
+          "tax": 0.0,
+          "slippage_cost": 89.99999999999488
+        }
+      ],
+      "unexecuted_orders": [
+        {
+          "decision_date": "2026-01-07",
+          "attempt_date": "2026-01-08",
+          "symbol": "C",
+          "side": "BUY",
+          "desired_quantity": 1000,
+          "trade_status": "UNKNOWN",
+          "status_sources": "poc0-fixture-override",
+          "reason": "unknown_status"
+        },
+        {
+          "decision_date": "2026-01-12",
+          "attempt_date": "2026-01-13",
+          "symbol": "B",
+          "side": "SELL",
+          "desired_quantity": 900,
+          "trade_status": "HALTED",
+          "status_sources": "poc0-fixture-override",
+          "reason": "halted"
+        },
+        {
+          "decision_date": "2026-01-16",
+          "attempt_date": "2026-01-16",
+          "symbol": "C",
+          "side": "TARGET",
+          "desired_quantity": null,
+          "trade_status": "TRADABLE",
+          "status_sources": "poc0-fixture-default",
+          "reason": "no_future_execution_session"
+        }
+      ],
+      "ledger": [
+        {
+          "date": "2026-01-05",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-06",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-07",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-08",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-09",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "B",
+              "quantity": 900,
+              "mark_price": 102.0
+            }
+          ],
+          "nav": 101610.0
+        },
+        {
+          "date": "2026-01-12",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "B",
+              "quantity": 900,
+              "mark_price": 103.0
+            }
+          ],
+          "nav": 102510.0
+        },
+        {
+          "date": "2026-01-13",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "B",
+              "quantity": 900,
+              "mark_price": 101.0
+            }
+          ],
+          "nav": 100710.0
+        },
+        {
+          "date": "2026-01-14",
+          "cash": 9430.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 101.0
+            }
+          ],
+          "nav": 100330.0
+        },
+        {
+          "date": "2026-01-15",
+          "cash": 9430.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 102.0
+            }
+          ],
+          "nav": 101230.0
+        },
+        {
+          "date": "2026-01-16",
+          "cash": 9430.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 103.0
+            }
+          ],
+          "nav": 102130.0
+        }
+      ],
+      "summary": {
+        "initial_cash": 100000.0,
+        "final_equity": 102130.0,
+        "final_positions": {
+          "A": 900
+        },
+        "trade_count": 3,
+        "commission": 300.0,
+        "tax": 0.0,
+        "slippage_cost": 269.99999999998465,
+        "total_cost": 569.9999999999847
+      }
+    }
+  },
+  "b1_soa": {
+    "correctness_status": "passed",
+    "checksum_sha256": "9d355cb1a9daf1698318699141ea4ddab8a64495b7ec53ac4502310614e0179c",
+    "projection": {
+      "rankings": [
+        {
+          "date": "2026-01-07",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "A",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "B",
+              "score": -0.02020202020202011
+            }
+          ]
+        },
+        {
+          "date": "2026-01-08",
+          "candidates": [
+            {
+              "symbol": "B",
+              "score": 0.020408163265305923
+            },
+            {
+              "symbol": "A",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "C",
+              "score": -0.01980198019801982
+            }
+          ]
+        },
+        {
+          "date": "2026-01-09",
+          "candidates": [
+            {
+              "symbol": "B",
+              "score": 0.06060606060606055
+            },
+            {
+              "symbol": "C",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "A",
+              "score": -0.07766990291262132
+            }
+          ]
+        },
+        {
+          "date": "2026-01-12",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "B",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "A",
+              "score": -0.02020202020202011
+            }
+          ]
+        },
+        {
+          "date": "2026-01-13",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.04081632653061229
+            },
+            {
+              "symbol": "C",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "B",
+              "score": -0.03883495145631066
+            }
+          ]
+        },
+        {
+          "date": "2026-01-14",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "C",
+              "score": 0.01941747572815533
+            },
+            {
+              "symbol": "B",
+              "score": -0.01980198019801982
+            }
+          ]
+        },
+        {
+          "date": "2026-01-15",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "C",
+              "score": -0.019230769230769162
+            },
+            {
+              "symbol": "B",
+              "score": -0.020000000000000018
+            }
+          ]
+        },
+        {
+          "date": "2026-01-16",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.03883495145631066
+            },
+            {
+              "symbol": "A",
+              "score": 0.019607843137254832
+            }
+          ]
+        }
+      ],
+      "targets": [
+        {
+          "date": "2026-01-07",
+          "target_symbols": [
+            "C"
+          ]
+        },
+        {
+          "date": "2026-01-08",
+          "target_symbols": [
+            "B"
+          ]
+        },
+        {
+          "date": "2026-01-09",
+          "target_symbols": [
+            "B"
+          ]
+        },
+        {
+          "date": "2026-01-12",
+          "target_symbols": [
+            "C"
+          ]
+        },
+        {
+          "date": "2026-01-13",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-14",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-15",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-16",
+          "target_symbols": [
+            "C"
+          ]
+        }
+      ],
+      "target_weights": [
+        {
+          "date": "2026-01-07",
+          "symbol": "C",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-08",
+          "symbol": "B",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-09",
+          "symbol": "B",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-12",
+          "symbol": "C",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-13",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-14",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-15",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-16",
+          "symbol": "C",
+          "weight": 1.0
+        }
+      ],
+      "portfolio_returns": [
+        {
+          "from": "2026-01-07",
+          "to": "2026-01-08",
+          "return_pct": -0.00990099009900991
+        },
+        {
+          "from": "2026-01-08",
+          "to": "2026-01-09",
+          "return_pct": 0.030303030303030276
+        },
+        {
+          "from": "2026-01-09",
+          "to": "2026-01-12",
+          "return_pct": 0.009803921568627416
+        },
+        {
+          "from": "2026-01-12",
+          "to": "2026-01-13",
+          "return_pct": 0.009803921568627416
+        },
+        {
+          "from": "2026-01-13",
+          "to": "2026-01-14",
+          "return_pct": 0.010000000000000009
+        },
+        {
+          "from": "2026-01-14",
+          "to": "2026-01-15",
+          "return_pct": 0.00990099009900991
+        },
+        {
+          "from": "2026-01-15",
+          "to": "2026-01-16",
+          "return_pct": 0.009803921568627416
+        }
+      ]
+    },
+    "warmup_runs": 1,
+    "raw_samples_ns": [
+      6667,
+      6417,
+      6291,
+      6167,
+      6042
+    ],
+    "median_ns": 6291,
+    "p95_ns": 6667,
+    "phase_samples_ns": {
+      "factor_ns": [
+        3624,
+        3542,
+        3541,
+        3458,
+        3543
+      ],
+      "ranking_topk_weights_ns": [
+        833,
+        875,
+        791,
+        833,
+        792
+      ],
+      "return_projection_ns": [
+        500,
+        500,
+        416,
+        416,
+        375
+      ]
+    },
+    "measurement_scope": "symbol-major SoA factor windows, cross-sectional rank/top-k, equal weights, and next-session return projection; excludes parsing and fixture construction",
+    "model_boundary": "equal-weight target-weight × next-session close-to-close return; missing selected bar makes that interval unavailable; no cash, fees, fills, or event-account NAV"
+  },
+  "b1_arrow": {
+    "correctness_status": "passed",
+    "checksum_sha256": "9d355cb1a9daf1698318699141ea4ddab8a64495b7ec53ac4502310614e0179c",
+    "projection": {
+      "rankings": [
+        {
+          "date": "2026-01-07",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "A",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "B",
+              "score": -0.02020202020202011
+            }
+          ]
+        },
+        {
+          "date": "2026-01-08",
+          "candidates": [
+            {
+              "symbol": "B",
+              "score": 0.020408163265305923
+            },
+            {
+              "symbol": "A",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "C",
+              "score": -0.01980198019801982
+            }
+          ]
+        },
+        {
+          "date": "2026-01-09",
+          "candidates": [
+            {
+              "symbol": "B",
+              "score": 0.06060606060606055
+            },
+            {
+              "symbol": "C",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "A",
+              "score": -0.07766990291262132
+            }
+          ]
+        },
+        {
+          "date": "2026-01-12",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "B",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "A",
+              "score": -0.02020202020202011
+            }
+          ]
+        },
+        {
+          "date": "2026-01-13",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.04081632653061229
+            },
+            {
+              "symbol": "C",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "B",
+              "score": -0.03883495145631066
+            }
+          ]
+        },
+        {
+          "date": "2026-01-14",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "C",
+              "score": 0.01941747572815533
+            },
+            {
+              "symbol": "B",
+              "score": -0.01980198019801982
+            }
+          ]
+        },
+        {
+          "date": "2026-01-15",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "C",
+              "score": -0.019230769230769162
+            },
+            {
+              "symbol": "B",
+              "score": -0.020000000000000018
+            }
+          ]
+        },
+        {
+          "date": "2026-01-16",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.03883495145631066
+            },
+            {
+              "symbol": "A",
+              "score": 0.019607843137254832
+            }
+          ]
+        }
+      ],
+      "targets": [
+        {
+          "date": "2026-01-07",
+          "target_symbols": [
+            "C"
+          ]
+        },
+        {
+          "date": "2026-01-08",
+          "target_symbols": [
+            "B"
+          ]
+        },
+        {
+          "date": "2026-01-09",
+          "target_symbols": [
+            "B"
+          ]
+        },
+        {
+          "date": "2026-01-12",
+          "target_symbols": [
+            "C"
+          ]
+        },
+        {
+          "date": "2026-01-13",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-14",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-15",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-16",
+          "target_symbols": [
+            "C"
+          ]
+        }
+      ],
+      "target_weights": [
+        {
+          "date": "2026-01-07",
+          "symbol": "C",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-08",
+          "symbol": "B",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-09",
+          "symbol": "B",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-12",
+          "symbol": "C",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-13",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-14",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-15",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-16",
+          "symbol": "C",
+          "weight": 1.0
+        }
+      ],
+      "portfolio_returns": [
+        {
+          "from": "2026-01-07",
+          "to": "2026-01-08",
+          "return_pct": -0.00990099009900991
+        },
+        {
+          "from": "2026-01-08",
+          "to": "2026-01-09",
+          "return_pct": 0.030303030303030276
+        },
+        {
+          "from": "2026-01-09",
+          "to": "2026-01-12",
+          "return_pct": 0.009803921568627416
+        },
+        {
+          "from": "2026-01-12",
+          "to": "2026-01-13",
+          "return_pct": 0.009803921568627416
+        },
+        {
+          "from": "2026-01-13",
+          "to": "2026-01-14",
+          "return_pct": 0.010000000000000009
+        },
+        {
+          "from": "2026-01-14",
+          "to": "2026-01-15",
+          "return_pct": 0.00990099009900991
+        },
+        {
+          "from": "2026-01-15",
+          "to": "2026-01-16",
+          "return_pct": 0.009803921568627416
+        }
+      ]
+    },
+    "warmup_runs": 0,
+    "raw_samples_ns": [],
+    "median_ns": null,
+    "p95_ns": null,
+    "phase_samples_ns": {
+      "factor_ns": [],
+      "ranking_topk_weights_ns": [],
+      "return_projection_ns": []
+    },
+    "conversion_samples_ns": [],
+    "measurement_scope": "Arrow RecordBatch construction and symbol-column S2 factor windows, cross-sectional rank/top-k, equal weights, and next-session return projection; excludes fixture parsing and JSON serialization",
+    "model_boundary": "equal-weight target-weight × next-session close-to-close return; missing selected bar makes that interval unavailable; no cash, fees, fills, or event-account NAV"
+  },
+  "b1_polars": {
+    "correctness_status": "passed",
+    "checksum_sha256": "9d355cb1a9daf1698318699141ea4ddab8a64495b7ec53ac4502310614e0179c",
+    "projection": {
+      "rankings": [
+        {
+          "date": "2026-01-07",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "A",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "B",
+              "score": -0.02020202020202011
+            }
+          ]
+        },
+        {
+          "date": "2026-01-08",
+          "candidates": [
+            {
+              "symbol": "B",
+              "score": 0.020408163265305923
+            },
+            {
+              "symbol": "A",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "C",
+              "score": -0.01980198019801982
+            }
+          ]
+        },
+        {
+          "date": "2026-01-09",
+          "candidates": [
+            {
+              "symbol": "B",
+              "score": 0.06060606060606055
+            },
+            {
+              "symbol": "C",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "A",
+              "score": -0.07766990291262132
+            }
+          ]
+        },
+        {
+          "date": "2026-01-12",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "B",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "A",
+              "score": -0.02020202020202011
+            }
+          ]
+        },
+        {
+          "date": "2026-01-13",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.04081632653061229
+            },
+            {
+              "symbol": "C",
+              "score": 0.019607843137254832
+            },
+            {
+              "symbol": "B",
+              "score": -0.03883495145631066
+            }
+          ]
+        },
+        {
+          "date": "2026-01-14",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.020000000000000018
+            },
+            {
+              "symbol": "C",
+              "score": 0.01941747572815533
+            },
+            {
+              "symbol": "B",
+              "score": -0.01980198019801982
+            }
+          ]
+        },
+        {
+          "date": "2026-01-15",
+          "candidates": [
+            {
+              "symbol": "A",
+              "score": 0.01980198019801982
+            },
+            {
+              "symbol": "C",
+              "score": -0.019230769230769162
+            },
+            {
+              "symbol": "B",
+              "score": -0.020000000000000018
+            }
+          ]
+        },
+        {
+          "date": "2026-01-16",
+          "candidates": [
+            {
+              "symbol": "C",
+              "score": 0.03883495145631066
+            },
+            {
+              "symbol": "A",
+              "score": 0.019607843137254832
+            }
+          ]
+        }
+      ],
+      "targets": [
+        {
+          "date": "2026-01-07",
+          "target_symbols": [
+            "C"
+          ]
+        },
+        {
+          "date": "2026-01-08",
+          "target_symbols": [
+            "B"
+          ]
+        },
+        {
+          "date": "2026-01-09",
+          "target_symbols": [
+            "B"
+          ]
+        },
+        {
+          "date": "2026-01-12",
+          "target_symbols": [
+            "C"
+          ]
+        },
+        {
+          "date": "2026-01-13",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-14",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-15",
+          "target_symbols": [
+            "A"
+          ]
+        },
+        {
+          "date": "2026-01-16",
+          "target_symbols": [
+            "C"
+          ]
+        }
+      ],
+      "target_weights": [
+        {
+          "date": "2026-01-07",
+          "symbol": "C",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-08",
+          "symbol": "B",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-09",
+          "symbol": "B",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-12",
+          "symbol": "C",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-13",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-14",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-15",
+          "symbol": "A",
+          "weight": 1.0
+        },
+        {
+          "date": "2026-01-16",
+          "symbol": "C",
+          "weight": 1.0
+        }
+      ],
+      "portfolio_returns": [
+        {
+          "from": "2026-01-07",
+          "to": "2026-01-08",
+          "return_pct": -0.00990099009900991
+        },
+        {
+          "from": "2026-01-08",
+          "to": "2026-01-09",
+          "return_pct": 0.030303030303030276
+        },
+        {
+          "from": "2026-01-09",
+          "to": "2026-01-12",
+          "return_pct": 0.009803921568627416
+        },
+        {
+          "from": "2026-01-12",
+          "to": "2026-01-13",
+          "return_pct": 0.009803921568627416
+        },
+        {
+          "from": "2026-01-13",
+          "to": "2026-01-14",
+          "return_pct": 0.010000000000000009
+        },
+        {
+          "from": "2026-01-14",
+          "to": "2026-01-15",
+          "return_pct": 0.00990099009900991
+        },
+        {
+          "from": "2026-01-15",
+          "to": "2026-01-16",
+          "return_pct": 0.009803921568627416
+        }
+      ]
+    },
+    "warmup_runs": 0,
+    "raw_samples_ns": [],
+    "median_ns": null,
+    "p95_ns": null,
+    "phase_samples_ns": {
+      "factor_ns": [],
+      "ranking_topk_weights_ns": [],
+      "return_projection_ns": []
+    },
+    "conversion_samples_ns": [],
+    "measurement_scope": "Polars lazy expressions for factor score, ordered rank/TopK, equal weights, and next-session return projection; excludes fixture parsing",
+    "model_boundary": "same simplified equal-weight next-session close-to-close return labels as SoA; no cash, fees, fills, or event-account NAV"
+  },
+  "b2_fast_event_buy_hold": {
+    "status": "correctness_passed_and_measured",
+    "correctness_checks": [],
+    "engine": "poc0-fast-event",
+    "version": "0.1",
+    "semantics": "single venue; long only; market orders; L1 next-session open fills; fixed commission, tax, and slippage; buy-and-hold equal weight; stale last close marks missing bars; not a production engine",
+    "checksum_sha256": "f2ffcc44a2e94c778ad33e0731632bed69da98d05696f8934222f7e94f557928",
+    "projection": {
+      "orders": [
+        {
+          "decision_date": "2026-01-12",
+          "attempt_date": "2026-01-13",
+          "symbol": "A",
+          "side": "BUY",
+          "quantity": 300,
+          "reason": null
+        },
+        {
+          "decision_date": "2026-01-12",
+          "attempt_date": "2026-01-13",
+          "symbol": "B",
+          "side": "BUY",
+          "quantity": 0,
+          "reason": "HALTED"
+        },
+        {
+          "decision_date": "2026-01-12",
+          "attempt_date": "2026-01-13",
+          "symbol": "C",
+          "side": "BUY",
+          "quantity": 300,
+          "reason": null
+        },
+        {
+          "decision_date": "2026-01-12",
+          "attempt_date": "2026-01-14",
+          "symbol": "B",
+          "side": "BUY",
+          "quantity": 300,
+          "reason": null
+        }
+      ],
+      "fills": [
+        {
+          "date": "2026-01-13",
+          "symbol": "A",
+          "side": "BUY",
+          "quantity": 300,
+          "reference_price": 100.0,
+          "fill_price": 100.1,
+          "gross_value": 30030.0,
+          "commission": 100.0,
+          "tax": 0.0,
+          "slippage_cost": 29.999999999998295
+        },
+        {
+          "date": "2026-01-13",
+          "symbol": "C",
+          "side": "BUY",
+          "quantity": 300,
+          "reference_price": 100.0,
+          "fill_price": 100.1,
+          "gross_value": 30030.0,
+          "commission": 100.0,
+          "tax": 0.0,
+          "slippage_cost": 29.999999999998295
+        },
+        {
+          "date": "2026-01-14",
+          "symbol": "B",
+          "side": "BUY",
+          "quantity": 300,
+          "reference_price": 100.0,
+          "fill_price": 100.1,
+          "gross_value": 30030.0,
+          "commission": 100.0,
+          "tax": 0.0,
+          "slippage_cost": 29.999999999998295
+        }
+      ],
+      "ledger": [
+        {
+          "date": "2026-01-05",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-06",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-07",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-08",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-09",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-12",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-13",
+          "cash": 39740.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 300,
+              "mark_price": 100.0
+            },
+            {
+              "symbol": "C",
+              "quantity": 300,
+              "mark_price": 103.0
+            }
+          ],
+          "nav": 100640.0
+        },
+        {
+          "date": "2026-01-14",
+          "cash": 9610.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 300,
+              "mark_price": 101.0
+            },
+            {
+              "symbol": "B",
+              "quantity": 300,
+              "mark_price": 100.0
+            },
+            {
+              "symbol": "C",
+              "quantity": 300,
+              "mark_price": 104.0
+            }
+          ],
+          "nav": 101110.0
+        },
+        {
+          "date": "2026-01-15",
+          "cash": 9610.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 300,
+              "mark_price": 102.0
+            },
+            {
+              "symbol": "B",
+              "quantity": 300,
+              "mark_price": 99.0
+            },
+            {
+              "symbol": "C",
+              "quantity": 300,
+              "mark_price": 103.0
+            }
+          ],
+          "nav": 100810.0
+        },
+        {
+          "date": "2026-01-16",
+          "cash": 9610.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 300,
+              "mark_price": 103.0
+            },
+            {
+              "symbol": "B",
+              "quantity": 300,
+              "mark_price": 99.0
+            },
+            {
+              "symbol": "C",
+              "quantity": 300,
+              "mark_price": 105.0
+            }
+          ],
+          "nav": 101710.0
+        }
+      ],
+      "unexecuted_targets": [],
+      "summary": {
+        "initial_cash": 100000.0,
+        "final_equity": 101710.0,
+        "final_positions": {
+          "A": 300,
+          "B": 300,
+          "C": 300
+        },
+        "commission": 300.0,
+        "tax": 0.0,
+        "slippage_cost": 89.99999999999488,
+        "total_cost": 389.9999999999949
+      }
+    },
+    "warmup_runs": 1,
+    "raw_samples_ns": [
+      3750,
+      3375,
+      3250,
+      3042,
+      3000
+    ],
+    "median_ns": 3250,
+    "p95_ns": 3750,
+    "initialization_samples_ns": [
+      875,
+      750,
+      666,
+      584,
+      541
+    ],
+    "event_processing_samples_ns": [
+      2792,
+      2583,
+      2500,
+      2458,
+      2417
+    ],
+    "end_to_end_samples_ns": [
+      3750,
+      3375,
+      3250,
+      3042,
+      3000
+    ],
+    "measurement_scope": "initialization (day index construction), event processing (orders, fills, marks and ledger), and end-to-end (both phases plus summary); excludes dataset parsing and JSON report serialization"
+  },
+  "b2_fast_event_momentum_rotation": {
+    "status": "correctness_passed_and_measured",
+    "signals": [
+      {
+        "date": "2026-01-07",
+        "target_symbols": [
+          "C"
+        ]
+      },
+      {
+        "date": "2026-01-08",
+        "target_symbols": [
+          "B"
+        ]
+      },
+      {
+        "date": "2026-01-09",
+        "target_symbols": [
+          "B"
+        ]
+      },
+      {
+        "date": "2026-01-12",
+        "target_symbols": [
+          "C"
+        ]
+      },
+      {
+        "date": "2026-01-13",
+        "target_symbols": [
+          "A"
+        ]
+      },
+      {
+        "date": "2026-01-14",
+        "target_symbols": [
+          "A"
+        ]
+      },
+      {
+        "date": "2026-01-15",
+        "target_symbols": [
+          "A"
+        ]
+      },
+      {
+        "date": "2026-01-16",
+        "target_symbols": [
+          "C"
+        ]
+      }
+    ],
+    "rankings": [
+      {
+        "date": "2026-01-07",
+        "candidates": [
+          {
+            "symbol": "C",
+            "score": 0.020000000000000018
+          },
+          {
+            "symbol": "A",
+            "score": 0.01980198019801982
+          },
+          {
+            "symbol": "B",
+            "score": -0.02020202020202011
+          }
+        ]
+      },
+      {
+        "date": "2026-01-08",
+        "candidates": [
+          {
+            "symbol": "B",
+            "score": 0.020408163265305923
+          },
+          {
+            "symbol": "A",
+            "score": 0.019607843137254832
+          },
+          {
+            "symbol": "C",
+            "score": -0.01980198019801982
+          }
+        ]
+      },
+      {
+        "date": "2026-01-09",
+        "candidates": [
+          {
+            "symbol": "B",
+            "score": 0.06060606060606055
+          },
+          {
+            "symbol": "C",
+            "score": 0.020000000000000018
+          },
+          {
+            "symbol": "A",
+            "score": -0.07766990291262132
+          }
+        ]
+      },
+      {
+        "date": "2026-01-12",
+        "candidates": [
+          {
+            "symbol": "C",
+            "score": 0.01980198019801982
+          },
+          {
+            "symbol": "B",
+            "score": 0.019607843137254832
+          },
+          {
+            "symbol": "A",
+            "score": -0.02020202020202011
+          }
+        ]
+      },
+      {
+        "date": "2026-01-13",
+        "candidates": [
+          {
+            "symbol": "A",
+            "score": 0.04081632653061229
+          },
+          {
+            "symbol": "C",
+            "score": 0.019607843137254832
+          },
+          {
+            "symbol": "B",
+            "score": -0.03883495145631066
+          }
+        ]
+      },
+      {
+        "date": "2026-01-14",
+        "candidates": [
+          {
+            "symbol": "A",
+            "score": 0.020000000000000018
+          },
+          {
+            "symbol": "C",
+            "score": 0.01941747572815533
+          },
+          {
+            "symbol": "B",
+            "score": -0.01980198019801982
+          }
+        ]
+      },
+      {
+        "date": "2026-01-15",
+        "candidates": [
+          {
+            "symbol": "A",
+            "score": 0.01980198019801982
+          },
+          {
+            "symbol": "C",
+            "score": -0.019230769230769162
+          },
+          {
+            "symbol": "B",
+            "score": -0.020000000000000018
+          }
+        ]
+      },
+      {
+        "date": "2026-01-16",
+        "candidates": [
+          {
+            "symbol": "C",
+            "score": 0.03883495145631066
+          },
+          {
+            "symbol": "A",
+            "score": 0.019607843137254832
+          }
+        ]
+      }
+    ],
+    "projection": {
+      "orders": [
+        {
+          "decision_date": "2026-01-07",
+          "attempt_date": "2026-01-08",
+          "symbol": "C",
+          "side": "BUY",
+          "quantity": 0,
+          "reason": "UNKNOWN"
+        },
+        {
+          "decision_date": "2026-01-08",
+          "attempt_date": "2026-01-09",
+          "symbol": "B",
+          "side": "BUY",
+          "quantity": 900,
+          "reason": null
+        },
+        {
+          "decision_date": "2026-01-12",
+          "attempt_date": "2026-01-13",
+          "symbol": "B",
+          "side": "SELL",
+          "quantity": 0,
+          "reason": "HALTED"
+        },
+        {
+          "decision_date": "2026-01-13",
+          "attempt_date": "2026-01-14",
+          "symbol": "B",
+          "side": "SELL",
+          "quantity": 900,
+          "reason": null
+        },
+        {
+          "decision_date": "2026-01-13",
+          "attempt_date": "2026-01-14",
+          "symbol": "A",
+          "side": "BUY",
+          "quantity": 900,
+          "reason": null
+        }
+      ],
+      "fills": [
+        {
+          "date": "2026-01-09",
+          "symbol": "B",
+          "side": "BUY",
+          "quantity": 900,
+          "reference_price": 100.0,
+          "fill_price": 100.1,
+          "gross_value": 90090.0,
+          "commission": 100.0,
+          "tax": 0.0,
+          "slippage_cost": 89.99999999999488
+        },
+        {
+          "date": "2026-01-14",
+          "symbol": "B",
+          "side": "SELL",
+          "quantity": 900,
+          "reference_price": 100.0,
+          "fill_price": 99.9,
+          "gross_value": 89910.0,
+          "commission": 100.0,
+          "tax": 0.0,
+          "slippage_cost": 89.99999999999488
+        },
+        {
+          "date": "2026-01-14",
+          "symbol": "A",
+          "side": "BUY",
+          "quantity": 900,
+          "reference_price": 100.0,
+          "fill_price": 100.1,
+          "gross_value": 90090.0,
+          "commission": 100.0,
+          "tax": 0.0,
+          "slippage_cost": 89.99999999999488
+        }
+      ],
+      "ledger": [
+        {
+          "date": "2026-01-05",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-06",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-07",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-08",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-09",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "B",
+              "quantity": 900,
+              "mark_price": 102.0
+            }
+          ],
+          "nav": 101610.0
+        },
+        {
+          "date": "2026-01-12",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "B",
+              "quantity": 900,
+              "mark_price": 103.0
+            }
+          ],
+          "nav": 102510.0
+        },
+        {
+          "date": "2026-01-13",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "B",
+              "quantity": 900,
+              "mark_price": 101.0
+            }
+          ],
+          "nav": 100710.0
+        },
+        {
+          "date": "2026-01-14",
+          "cash": 9430.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 101.0
+            }
+          ],
+          "nav": 100330.0
+        },
+        {
+          "date": "2026-01-15",
+          "cash": 9430.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 102.0
+            }
+          ],
+          "nav": 101230.0
+        },
+        {
+          "date": "2026-01-16",
+          "cash": 9430.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 103.0
+            }
+          ],
+          "nav": 102130.0
+        }
+      ],
+      "unexecuted_targets": [
+        {
+          "decision_date": "2026-01-16",
+          "attempt_date": "2026-01-16",
+          "symbol": "C",
+          "reason": "no_future_open_before_dataset_end"
+        }
+      ],
+      "summary": {
+        "initial_cash": 100000.0,
+        "final_equity": 102130.0,
+        "final_positions": {
+          "A": 900
+        },
+        "commission": 300.0,
+        "tax": 0.0,
+        "slippage_cost": 269.99999999998465,
+        "total_cost": 569.9999999999847
+      }
+    },
+    "checksum_sha256": "f623f54644042256b2186270b0fe5142b36ab65731d6fc797fef5b3f805ddc9f",
+    "correctness_checks": [],
+    "warmup_runs": 1,
+    "raw_samples_ns": [
+      10541,
+      10125,
+      9584,
+      9500,
+      9417
+    ],
+    "median_ns": 9584,
+    "p95_ns": 10541
+  },
+  "b2_fast_event_ma20_60": {
+    "status": "correctness_passed_and_measured",
+    "input_version": "poc0.b2.ma20-60.v1",
+    "input_sha256": "953218548395293b07148554c57ddc64440f9feb2e7cf8fc37de4dec0c3ee49d",
+    "expected_sha256": "f6449df8b32db9022d61939f53e6bdbee0be2c45245479a2f00b82291e017830",
+    "dataset_content_sha256": "a605295dd53e2f7e35758622671e2b3b85b35a6a791d42c850aeee55145311ef",
+    "signals": [
+      {
+        "date": "2026-03-30",
+        "target_symbols": [
+          "A"
+        ]
+      },
+      {
+        "date": "2026-05-04",
+        "target_symbols": []
+      }
+    ],
+    "rankings": [],
+    "projection": {
+      "orders": [
+        {
+          "decision_date": "2026-03-30",
+          "attempt_date": "2026-03-31",
+          "symbol": "A",
+          "side": "BUY",
+          "quantity": 900,
+          "reason": null
+        },
+        {
+          "decision_date": "2026-05-04",
+          "attempt_date": "2026-05-05",
+          "symbol": "A",
+          "side": "SELL",
+          "quantity": 900,
+          "reason": null
+        }
+      ],
+      "fills": [
+        {
+          "date": "2026-03-31",
+          "symbol": "A",
+          "side": "BUY",
+          "quantity": 900,
+          "reference_price": 100.0,
+          "fill_price": 100.1,
+          "gross_value": 90090.0,
+          "commission": 100.0,
+          "tax": 0.0,
+          "slippage_cost": 89.99999999999488
+        },
+        {
+          "date": "2026-05-05",
+          "symbol": "A",
+          "side": "SELL",
+          "quantity": 900,
+          "reference_price": 100.0,
+          "fill_price": 99.9,
+          "gross_value": 89910.0,
+          "commission": 100.0,
+          "tax": 0.0,
+          "slippage_cost": 89.99999999999488
+        }
+      ],
+      "ledger": [
+        {
+          "date": "2026-01-05",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-06",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-07",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-08",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-09",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-12",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-13",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-14",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-15",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-16",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-19",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-20",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-21",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-22",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-23",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-26",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-27",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-28",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-29",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-01-30",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-02",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-03",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-04",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-05",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-06",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-09",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-10",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-11",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-12",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-13",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-16",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-17",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-18",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-19",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-20",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-23",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-24",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-25",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-26",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-02-27",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-02",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-03",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-04",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-05",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-06",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-09",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-10",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-11",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-12",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-13",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-16",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-17",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-18",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-19",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-20",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-23",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-24",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-25",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-26",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-27",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-30",
+          "cash": 100000.0,
+          "holdings": [],
+          "nav": 100000.0
+        },
+        {
+          "date": "2026-03-31",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-01",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-02",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-03",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-06",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-07",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-08",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-09",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-10",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-13",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-14",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-15",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-16",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-17",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-20",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-21",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-22",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-23",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-24",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 110.0
+            }
+          ],
+          "nav": 108810.0
+        },
+        {
+          "date": "2026-04-27",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 80.0
+            }
+          ],
+          "nav": 81810.0
+        },
+        {
+          "date": "2026-04-28",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 80.0
+            }
+          ],
+          "nav": 81810.0
+        },
+        {
+          "date": "2026-04-29",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 80.0
+            }
+          ],
+          "nav": 81810.0
+        },
+        {
+          "date": "2026-04-30",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 80.0
+            }
+          ],
+          "nav": 81810.0
+        },
+        {
+          "date": "2026-05-01",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 80.0
+            }
+          ],
+          "nav": 81810.0
+        },
+        {
+          "date": "2026-05-04",
+          "cash": 9810.0,
+          "holdings": [
+            {
+              "symbol": "A",
+              "quantity": 900,
+              "mark_price": 80.0
+            }
+          ],
+          "nav": 81810.0
+        },
+        {
+          "date": "2026-05-05",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-05-06",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-05-07",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-05-08",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-05-11",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-05-12",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-05-13",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-05-14",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-05-15",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-05-18",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-05-19",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-05-20",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-05-21",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-05-22",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-05-25",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-05-26",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-05-27",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-05-28",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-05-29",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-01",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-02",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-03",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-04",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-05",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-08",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-09",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-10",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-11",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-12",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-15",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-16",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-17",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-18",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-19",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-22",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-23",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-24",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-25",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-26",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-29",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-06-30",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-07-01",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-07-02",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        },
+        {
+          "date": "2026-07-03",
+          "cash": 99620.0,
+          "holdings": [],
+          "nav": 99620.0
+        }
+      ],
+      "unexecuted_targets": [],
+      "summary": {
+        "initial_cash": 100000.0,
+        "final_equity": 99620.0,
+        "final_positions": {},
+        "commission": 200.0,
+        "tax": 0.0,
+        "slippage_cost": 179.99999999998977,
+        "total_cost": 379.99999999998977
+      }
+    },
+    "checksum_sha256": "6a43d9ec5f98119378bec61c833d481c50974e854a41dd04572da40355760023",
+    "correctness_checks": [],
+    "warmup_runs": 1,
+    "raw_samples_ns": [
+      73584,
+      70459,
+      69833,
+      67750,
+      64333
+    ],
+    "median_ns": 69833,
+    "p95_ns": 73584
+  },
+  "conclusion": "unresolved: one fixture validates the harness and reference path; no architecture performance choice is supported"
+}
