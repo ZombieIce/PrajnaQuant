@@ -4,7 +4,9 @@
 
 **Blocked by:** 无；03/04 已开展工作保持原实现和验收状态。本票是 05、08、10 等后续资源密集构建的前置条件。
 
-**Status:** implemented; cold-build baseline remains unknown
+**Status:** resolved
+
+**Conclusion:** 轻量构建边界已实现；冷构建基线仍为 Unknown。
 
 - [x] 只读清点工作区和独立 crate 的依赖图、lockfile、Cargo 默认 profile、target 路径/大小、可用空间、大型 DuckDB 构建目录；快照见 `build-resource-inventory-2026-09-27.json`，图文件见 `dependency-tree-*.txt`。`lsof` 在最终测量前检查两个 workspace `.cargo-lock` 均无持有者；更早的 pilot 前进程枚举不可用，未改缓存。
 - [x] 选择 `quant-research` 可选 `app` feature 边界：默认构建保持应用依赖；`--no-default-features` 保留 POC CLI/语义契约，依赖图实测不含 `ashare-warehouse`、`duckdb` 或 `libduckdb-sys`。B1/B2/B3 使用仓库根 `target/`。旧 `poc/b1-layout` 独立 lockfile 固定 Arrow 60.0.0，主 POC 固定 Arrow 58.4.0；版本差异已说明。

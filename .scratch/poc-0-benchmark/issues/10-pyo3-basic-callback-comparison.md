@@ -4,7 +4,9 @@
 
 **Blocked by:** 07 B2 Fast Event 跑通 Buy & Hold；13 POC-0 构建资源基线与轻量边界。
 
-**Status:** resolved — user accepted the implementation; the throughput conclusion remains unresolved
+**Status:** resolved
+
+**Conclusion:** 用户已验收实现；吞吐结论 `unresolved`。
 
 - [x] Rust Native 与 PyO3 收到相同的 29 个 present-bar 事件，S1 按日期、symbol 和目标列表逐事件对拍；同一天错误 symbol 上发出的决策会被拒绝。Python 返回的目标通过同一 Rust 账户 runner 后，逐单、逐日账本、成本和 PortfolioResult 与独立固定 fixture 一致。
 - [x] 空回调与实际 S1 回调各记录 1 次预热、5 个原始样本、调用次数、中位数/p95 和端到端耗时；初始化单独记录。

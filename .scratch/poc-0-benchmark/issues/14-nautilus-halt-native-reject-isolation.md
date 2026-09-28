@@ -4,7 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** resolved（2026-09-28 独立 Standards/Spec review 通过，结论：已证实原生拒单，见 [证据报告](../../../poc/poc0-benchmark/results/nautilus-halt-native-probe-2026-09-28.md)）
+**Status:** resolved
+
+**Conclusion:** 已证实原生拒单，见[证据报告](../../../poc/poc0-benchmark/results/nautilus-halt-native-probe-2026-09-28.md)；2026-09-28 独立 Standards/Spec review 通过。
 
 - [x] 样例只含单个 instrument、一条 `QuoteTick`、一条 `InstrumentStatus(HALT)` 和一次 `submit_order()` 市价单，使用固定 Nautilus 2.0.0rc5 的公开 `BacktestEngine` 接口。不复用、也不改动 S1/S2/S3 fixture。
 - [x] 事件顺序固定为：QuoteTick 可观测 → HALT 生效 → 在停牌期间提交订单。每个事件的时间戳在样例里显式写出，Adapter 的项目层状态门槛不参与；订单直接交给 Nautilus。

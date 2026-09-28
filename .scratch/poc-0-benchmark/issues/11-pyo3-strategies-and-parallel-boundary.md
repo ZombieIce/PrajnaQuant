@@ -4,7 +4,9 @@
 
 **Blocked by:** 09 B2 Momentum Rotation、MA20/60 与吞吐结论；10 B3 Rust 与 Python on_bar() 基础对照。
 
-**Status:** resolved — user accepted the implementation and evidence; performance conclusion: reject for the registered target workload
+**Status:** resolved
+
+**Conclusion:** 用户已验收实现与证据；对登记的目标负载性能结论为 `reject`。
 
 2026-09-28 启动说明：用户已验收票据 10 的实现范围；其 S1 微型样本性能结论仍 unresolved，作为票据 11 的基线限制，不外推为规模/GIL 结论。票据 09 的 S2/S3 正确性基线已通过；其 Fast Event/Nautilus 吞吐比较因口径不一致仍 unresolved，不把该跨引擎数字作为本票 Rust/Python 测量输入。本票直接在 Rust Native 与 Python 间使用相同 release、输入、测量边界和并行度建立新对比；保留票据 09 的原状态与判定范围。
 

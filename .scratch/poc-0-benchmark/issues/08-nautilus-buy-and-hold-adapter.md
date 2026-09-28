@@ -4,7 +4,9 @@
 
 **Blocked by:** 07 B2 Fast Event 跑通 Buy & Hold；13 POC-0 构建资源基线与轻量边界。
 
-**Status:** unresolved (Nautilus native HALTED order lifecycle and cross-engine throughput)
+**Status:** resolved
+
+**Conclusion:** S1 共同子集（Fill、现金、持仓、费用、每日 NAV）对拍通过。Nautilus 原生停牌拒单能力已由[票据 14](14-nautilus-halt-native-reject-isolation.md)证实。剩余的订单生命周期差异（Adapter 项目层拦单，Nautilus 实际提交 3 条 vs Rust 4 条）是已知且已解释的差异，按 ADR 0012 排除在 B2 判据之外；是否改用原生状态处理留给 MVP-4 Adapter。跨引擎吞吐不在本票裁决，由 [B2 remeasure 票据 06](../../poc-0-b2-matched-remeasure/issues/06-formal-measurement-and-conclusion.md) 在 S2/S3 上给出。本票不再有待补证据。
 
 - [x] Instrument、Order、Fill、账户和结果仍以项目语义呈现；Nautilus 类型及生命周期限制在 Adapter 内。
 - [x] 逐项报告订单、Fill、现金、持仓、交易成本与每日 NAV 的一致性；无法对齐的时序或撮合规则给出具体差异。
@@ -19,3 +21,5 @@
 2026-09-27 后续修复与复审：Adapter 在 B 的 HALTED 日开盘执行项目状态门槛，记录 `quantity=0, reason=HALTED`，次日提交新 Nautilus 订单。此前把这条 Adapter 自行生成的拒单计入 Nautilus 原生订单一致性，错误地将票据标成 `resolved`；该结论已撤回。当前报告分别列出 Adapter 项目事件 4 条（与 Rust 4 条对齐）及 Nautilus 真实提交 3 条（与 Rust 4 条不一致）。Fill、现金、持仓、费用和每日 NAV 的固定样本对拍通过；原生 HALTED 拒单没有被 Nautilus 撮合引擎验证，跨引擎订单生命周期及吞吐结论仍 `unresolved`。时间边界与手算序列见 ADR 0012。
 
 新增 `nautilus_preflight.py` 在 pip 安装与共享 target release 构建之前检查当前及预计剩余空间；强制过大构建估算的拒绝原始记录和成功预检/构建记录均入库。报告保存 1 次预热后 5 次转换、初始化、事件处理及端到端原始样本、median/p95/range、投影 checksum、依赖身份与冷构建 Unknown。五次重复仅支持 Nautilus 内部稳定性探针，不支持 Fast Event 对 Nautilus 的吞吐裁决。当前复核报告见 `poc/poc0-benchmark/results/nautilus-adapter-review-2026-09-27.json`；原两份报告保留为历史证据。
+
+2026-09-28 重新评估：原 `unresolved` 的两项已各有归属。原生 HALT 拒单能力由票据 14 证实，但 S1 Adapter 仍自行拦单、未送入 `InstrumentStatus`，所以 3 vs 4 的提交数差异保持不变；它已被解释并按 ADR 0012 排除，不再是待证问题，接入原生状态需在 MVP-4 验证状态源可用时刻后决定。跨引擎吞吐已由 B2 remeasure 接管，S1 不在其判定负载内。
