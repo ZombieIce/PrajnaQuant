@@ -5,131 +5,131 @@
   "warmup_runs_per_worker": 2,
   "runs": 20,
   "raw_samples_ns": [
-    53974000,
-    53633584,
-    58075625,
-    54083167,
-    53883375,
-    54228958,
-    53899834,
-    53732334,
-    53763166,
-    55612583,
-    53672250,
-    53867334,
-    54915958,
-    56541041,
-    60684416,
-    57197500,
-    53436500,
-    53369292,
-    54603334,
-    52113125
+    53313959,
+    53759625,
+    54333625,
+    52756292,
+    53933542,
+    53486125,
+    55098583,
+    53448208,
+    53747208,
+    53504750,
+    54557958,
+    53006250,
+    52958250,
+    53014834,
+    54313375,
+    52377500,
+    52389750,
+    52607959,
+    53411542,
+    53111583
   ],
   "secondary_boundary_samples_ns": [
     {
       "run_index": 0,
-      "end_to_end_ns": 138876916,
+      "end_to_end_ns": 139567125,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 1,
-      "end_to_end_ns": 135377292,
+      "end_to_end_ns": 137675333,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 2,
-      "end_to_end_ns": 136084084,
+      "end_to_end_ns": 134359500,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 3,
-      "end_to_end_ns": 135427750,
+      "end_to_end_ns": 135733792,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 4,
-      "end_to_end_ns": 135744875,
+      "end_to_end_ns": 136054000,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 5,
-      "end_to_end_ns": 137833792,
+      "end_to_end_ns": 134535084,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 6,
-      "end_to_end_ns": 137273209,
+      "end_to_end_ns": 137167791,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 7,
-      "end_to_end_ns": 133450209,
+      "end_to_end_ns": 135434750,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 8,
-      "end_to_end_ns": 137107000,
+      "end_to_end_ns": 135020625,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 9,
-      "end_to_end_ns": 133452208,
+      "end_to_end_ns": 134651208,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 10,
-      "end_to_end_ns": 135497333,
+      "end_to_end_ns": 135002167,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 11,
-      "end_to_end_ns": 133546208,
+      "end_to_end_ns": 133934375,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 12,
-      "end_to_end_ns": 133505250,
+      "end_to_end_ns": 134146125,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 13,
-      "end_to_end_ns": 133541667,
+      "end_to_end_ns": 135394042,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 14,
-      "end_to_end_ns": 134440125,
+      "end_to_end_ns": 134903584,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 15,
-      "end_to_end_ns": 136068916,
+      "end_to_end_ns": 137166167,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 16,
-      "end_to_end_ns": 134706708,
+      "end_to_end_ns": 136222917,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 17,
-      "end_to_end_ns": 134678166,
+      "end_to_end_ns": 135929292,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 18,
-      "end_to_end_ns": 134704750,
+      "end_to_end_ns": 135354042,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     },
     {
       "run_index": 19,
-      "end_to_end_ns": 133318750,
+      "end_to_end_ns": 135420042,
       "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
     }
   ],
-  "secondary_boundary_median_ns": 135042000.0,
-  "secondary_boundary_p95_ns": 137833792,
+  "secondary_boundary_median_ns": 135407042.0,
+  "secondary_boundary_p95_ns": 137675333,
   "checksums_sha256": [
     "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
     "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
@@ -152,9 +152,9 @@
     "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
     "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
   ],
-  "median_ns": 53936917.0,
-  "p95_ns": 58075625,
-  "peak_rss_bytes": 137625600,
+  "median_ns": 53429875.0,
+  "p95_ns": 54557958,
+  "peak_rss_bytes": 136167424,
   "engine_mode": "cached_conversion_new_engine",
   "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
   "conversion_cached_per_worker": true,

@@ -329,63 +329,63 @@
             "input_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
             "instrument_count": 64,
             "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
-            "measurement_wall_ns": 225692792,
-            "median_ns": 11260500,
+            "measurement_wall_ns": 225738875,
+            "median_ns": 11285375,
             "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
             "mode": "serial",
-            "p95_ns": 11490083,
+            "p95_ns": 11502041,
             "parallel_runs_per_second": null,
-            "peak_rss_bytes": 178569216,
+            "peak_rss_bytes": 178520064,
             "raw_samples_ns": [
-              11408167,
-              11329583,
-              11157458,
-              11487250,
-              11096250,
-              11228167,
-              11495625,
-              11346333,
-              11199708,
-              11490083,
-              11332750,
-              11242416,
-              11351042,
-              11253791,
-              11175958,
-              11138792,
-              11260500,
-              11158917,
-              11322833,
-              11165208
+              11158375,
+              11301750,
+              11314166,
+              11212708,
+              11092958,
+              11285375,
+              11042667,
+              11130375,
+              11365459,
+              11402292,
+              11502041,
+              11863375,
+              11362250,
+              11146084,
+              11500083,
+              11414208,
+              11098458,
+              11137125,
+              11227875,
+              11129167
             ],
             "run_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
             "runs": 20,
-            "runs_per_second": 88.61603342653495,
-            "secondary_boundary_median_ns": 56447750,
-            "secondary_boundary_p95_ns": 58221750,
+            "runs_per_second": 88.59794308800379,
+            "secondary_boundary_median_ns": 56474000,
+            "secondary_boundary_p95_ns": 59261750,
             "secondary_boundary_samples_ns": [
-              57532375,
-              57243750,
-              56359584,
-              59262958,
-              57959292,
-              56651000,
-              58221750,
-              56341875,
-              56570709,
-              56206167,
-              56219625,
-              56409583,
-              56177167,
-              56447750,
-              56380833,
-              56458625,
-              56352166,
-              56167250,
-              56972333,
-              56190459
+              57695625,
+              56355417,
+              59602708,
+              57508000,
+              59261750,
+              56474000,
+              56383166,
+              56541959,
+              56674000,
+              56947417,
+              56182917,
+              56225584,
+              56300542,
+              56198125,
+              55957625,
+              57020958,
+              56414500,
+              56430084,
+              56403042,
+              57746334
             ],
-            "serial_runs_per_second": 88.61603342653495,
+            "serial_runs_per_second": 88.59794308800379,
             "session_count": 252,
             "status": "passed",
             "strategy": "s2",
@@ -404,131 +404,131 @@
             "warmup_runs_per_worker": 2,
             "runs": 20,
             "raw_samples_ns": [
-              153984042,
-              152363833,
-              160359125,
-              152494500,
-              154518250,
-              151567833,
-              152534083,
-              157110375,
-              163093833,
-              154113417,
-              151415750,
-              158212500,
-              153300208,
-              151846542,
-              152051958,
-              153108375,
-              153699208,
-              151415959,
-              152822208,
-              151660791
+              155308084,
+              153737875,
+              157303208,
+              153170375,
+              151209541,
+              154250959,
+              151824833,
+              154000500,
+              155468500,
+              153268542,
+              154173167,
+              164706666,
+              154343208,
+              157847375,
+              155721833,
+              151676000,
+              153263708,
+              152561667,
+              153872709,
+              152631959
             ],
             "secondary_boundary_samples_ns": [
               {
                 "run_index": 0,
-                "end_to_end_ns": 268195417,
+                "end_to_end_ns": 269656959,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 1,
-                "end_to_end_ns": 267306250,
+                "end_to_end_ns": 269774542,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 2,
-                "end_to_end_ns": 272978625,
+                "end_to_end_ns": 269880667,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 3,
-                "end_to_end_ns": 266169791,
+                "end_to_end_ns": 267310000,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 4,
-                "end_to_end_ns": 274990416,
+                "end_to_end_ns": 275308625,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 5,
-                "end_to_end_ns": 268130625,
+                "end_to_end_ns": 270931958,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 6,
-                "end_to_end_ns": 267071584,
+                "end_to_end_ns": 270419667,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 7,
-                "end_to_end_ns": 269424166,
+                "end_to_end_ns": 269958375,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 8,
-                "end_to_end_ns": 266165042,
+                "end_to_end_ns": 273432458,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 9,
-                "end_to_end_ns": 266562833,
+                "end_to_end_ns": 274304333,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 10,
-                "end_to_end_ns": 275727833,
+                "end_to_end_ns": 268603250,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 11,
-                "end_to_end_ns": 277056459,
+                "end_to_end_ns": 268222250,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 12,
-                "end_to_end_ns": 275292250,
+                "end_to_end_ns": 271491458,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 13,
-                "end_to_end_ns": 271147375,
+                "end_to_end_ns": 271819917,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 14,
-                "end_to_end_ns": 270004959,
+                "end_to_end_ns": 290838042,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 15,
-                "end_to_end_ns": 362375125,
+                "end_to_end_ns": 278922250,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 16,
-                "end_to_end_ns": 273206875,
+                "end_to_end_ns": 270806500,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 17,
-                "end_to_end_ns": 273242500,
+                "end_to_end_ns": 273956417,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 18,
-                "end_to_end_ns": 265708125,
+                "end_to_end_ns": 275519167,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               },
               {
                 "run_index": 19,
-                "end_to_end_ns": 266758459,
+                "end_to_end_ns": 273943917,
                 "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
               }
             ],
-            "secondary_boundary_median_ns": 269714562.5,
-            "secondary_boundary_p95_ns": 277056459,
+            "secondary_boundary_median_ns": 271211708.0,
+            "secondary_boundary_p95_ns": 278922250,
             "checksums_sha256": [
               "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
               "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
@@ -551,9 +551,9 @@
               "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
               "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
             ],
-            "median_ns": 152965291.5,
-            "p95_ns": 160359125,
-            "peak_rss_bytes": 156893184,
+            "median_ns": 153936604.5,
+            "p95_ns": 157847375,
+            "peak_rss_bytes": 155435008,
             "engine_mode": "cached_conversion_new_engine",
             "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
             "conversion_cached_per_worker": true,
@@ -577,33 +577,33 @@
                 "input_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
                 "instrument_count": 64,
                 "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
-                "measurement_wall_ns": 59669333,
-                "median_ns": 19774208,
+                "measurement_wall_ns": 55820791,
+                "median_ns": 18514167,
                 "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
                 "mode": "parallel",
-                "p95_ns": 20073750,
-                "parallel_runs_per_second": 100.55416573870534,
-                "peak_rss_bytes": 88178688,
+                "p95_ns": 18901458,
+                "parallel_runs_per_second": 107.48683228082525,
+                "peak_rss_bytes": 88342528,
                 "raw_samples_ns": [
-                  20073750,
-                  19774208,
-                  19755833,
-                  19935000,
-                  19710667,
-                  19566750
+                  18870542,
+                  18216541,
+                  18513459,
+                  18901458,
+                  18383541,
+                  18514167
                 ],
                 "run_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
                 "runs": 6,
-                "runs_per_second": 100.55416573870534,
-                "secondary_boundary_median_ns": 57323666,
-                "secondary_boundary_p95_ns": 58849208,
+                "runs_per_second": 107.48683228082525,
+                "secondary_boundary_median_ns": 57815709,
+                "secondary_boundary_p95_ns": 59460166,
                 "secondary_boundary_samples_ns": [
-                  57323666,
-                  55933041,
-                  56274625,
-                  58849208,
-                  57699958,
-                  56675334
+                  58504333,
+                  57024625,
+                  57207000,
+                  59460166,
+                  57815709,
+                  57609417
                 ],
                 "serial_runs_per_second": null,
                 "session_count": 252,
@@ -624,47 +624,47 @@
                 "warmup_runs": 4,
                 "warmup_runs_per_worker": 2,
                 "raw_samples_ns": [
-                  163333625,
-                  161127916,
-                  173298459,
-                  162636959,
-                  161863750,
-                  173838666
+                  168336833,
+                  166973917,
+                  167949084,
+                  167277417,
+                  166205125,
+                  169212417
                 ],
                 "secondary_boundary_samples_ns": [
                   {
                     "run_index": 0,
-                    "end_to_end_ns": 284846625,
+                    "end_to_end_ns": 289085833,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 1,
-                    "end_to_end_ns": 285065334,
+                    "end_to_end_ns": 289063167,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 2,
-                    "end_to_end_ns": 300803583,
+                    "end_to_end_ns": 291142417,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 3,
-                    "end_to_end_ns": 299935208,
+                    "end_to_end_ns": 291632209,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 4,
-                    "end_to_end_ns": 286710709,
+                    "end_to_end_ns": 287730292,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 5,
-                    "end_to_end_ns": 286493250,
+                    "end_to_end_ns": 292025958,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   }
                 ],
-                "secondary_boundary_median_ns": 286601979.5,
-                "secondary_boundary_p95_ns": 300803583,
+                "secondary_boundary_median_ns": 290114125.0,
+                "secondary_boundary_p95_ns": 292025958,
                 "checksums_sha256": [
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
@@ -673,15 +673,15 @@
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                 ],
-                "median_ns": 162985292.0,
-                "p95_ns": 173838666,
-                "parallel_wall_ns": 500100750,
-                "parallel_runs_per_second": 11.997582487128843,
+                "median_ns": 167613250.5,
+                "p95_ns": 169212417,
+                "parallel_wall_ns": 505148709,
+                "parallel_runs_per_second": 11.87769045649486,
                 "peak_rss_by_worker_bytes": {
-                  "7472": 148094976,
-                  "7473": 148127744
+                  "15007": 148602880,
+                  "15008": 149651456
                 },
-                "peak_rss_sum_upper_bound_bytes": 296222720,
+                "peak_rss_sum_upper_bound_bytes": 298254336,
                 "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
                 "engine_mode": "cached_conversion_new_engine",
                 "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
@@ -704,47 +704,47 @@
                 "warmup_runs": 4,
                 "warmup_runs_per_worker": 2,
                 "raw_samples_ns": [
-                  162903208,
-                  162024709,
-                  175485666,
-                  162599833,
-                  163538667,
-                  176327250
+                  162701292,
+                  163147417,
+                  160018917,
+                  168638083,
+                  169347500,
+                  167297000
                 ],
                 "secondary_boundary_samples_ns": [
                   {
                     "run_index": 0,
-                    "end_to_end_ns": 287325834,
+                    "end_to_end_ns": 291988625,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 1,
-                    "end_to_end_ns": 286489125,
+                    "end_to_end_ns": 284209292,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 2,
-                    "end_to_end_ns": 284353708,
+                    "end_to_end_ns": 286808084,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 3,
-                    "end_to_end_ns": 284516125,
+                    "end_to_end_ns": 296474708,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 4,
-                    "end_to_end_ns": 283936625,
+                    "end_to_end_ns": 287351625,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 5,
-                    "end_to_end_ns": 282468958,
+                    "end_to_end_ns": 291867542,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   }
                 ],
-                "secondary_boundary_median_ns": 284434916.5,
-                "secondary_boundary_p95_ns": 287325834,
+                "secondary_boundary_median_ns": 289609583.5,
+                "secondary_boundary_p95_ns": 296474708,
                 "checksums_sha256": [
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
@@ -753,15 +753,15 @@
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                 ],
-                "median_ns": 163220937.5,
-                "p95_ns": 176327250,
-                "parallel_wall_ns": 504467208,
-                "parallel_runs_per_second": 11.893736411108806,
+                "median_ns": 165222208.5,
+                "p95_ns": 169347500,
+                "parallel_wall_ns": 507005334,
+                "parallel_runs_per_second": 11.834195022492604,
                 "peak_rss_by_worker_bytes": {
-                  "7506": 149536768,
-                  "7507": 150159360
+                  "15031": 149504000,
+                  "15032": 147652608
                 },
-                "peak_rss_sum_upper_bound_bytes": 299696128,
+                "peak_rss_sum_upper_bound_bytes": 297156608,
                 "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
                 "engine_mode": "cached_conversion_new_engine",
                 "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
@@ -776,33 +776,33 @@
                 "input_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
                 "instrument_count": 64,
                 "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
-                "measurement_wall_ns": 58357041,
-                "median_ns": 19635750,
+                "measurement_wall_ns": 56119709,
+                "median_ns": 19000583,
                 "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
                 "mode": "parallel",
-                "p95_ns": 19965542,
-                "parallel_runs_per_second": 102.8153569335361,
-                "peak_rss_bytes": 92160000,
+                "p95_ns": 19371708,
+                "parallel_runs_per_second": 106.91431062124717,
+                "peak_rss_bytes": 88637440,
                 "raw_samples_ns": [
-                  19959042,
-                  19635750,
-                  18700959,
-                  19965542,
-                  19553750,
-                  18236292
+                  19000583,
+                  19353292,
+                  17684708,
+                  18881375,
+                  19371708,
+                  17801209
                 ],
                 "run_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
                 "runs": 6,
-                "runs_per_second": 102.8153569335361,
-                "secondary_boundary_median_ns": 57039417,
-                "secondary_boundary_p95_ns": 59444792,
+                "runs_per_second": 106.91431062124717,
+                "secondary_boundary_median_ns": 57663041,
+                "secondary_boundary_p95_ns": 58502166,
                 "secondary_boundary_samples_ns": [
-                  59444792,
-                  57039417,
-                  56653417,
-                  56836666,
-                  56665083,
-                  57237292
+                  58502166,
+                  57615000,
+                  57175167,
+                  57970458,
+                  57590458,
+                  57663041
                 ],
                 "serial_runs_per_second": null,
                 "session_count": 252,
@@ -833,33 +833,33 @@
                 "input_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
                 "instrument_count": 64,
                 "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
-                "measurement_wall_ns": 56223084,
-                "median_ns": 18216583,
+                "measurement_wall_ns": 53354875,
+                "median_ns": 17703417,
                 "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
                 "mode": "parallel",
-                "p95_ns": 20261375,
-                "parallel_runs_per_second": 106.71773181279063,
-                "peak_rss_bytes": 90914816,
+                "p95_ns": 18688833,
+                "parallel_runs_per_second": 112.45457889274411,
+                "peak_rss_bytes": 88670208,
                 "raw_samples_ns": [
-                  20261375,
-                  18196000,
-                  17650958,
-                  20238459,
-                  18216583,
-                  17732208
+                  18529916,
+                  17544125,
+                  17017292,
+                  18688833,
+                  17703417,
+                  16927250
                 ],
                 "run_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
                 "runs": 6,
-                "runs_per_second": 106.71773181279063,
-                "secondary_boundary_median_ns": 58117542,
-                "secondary_boundary_p95_ns": 62218917,
+                "runs_per_second": 112.45457889274411,
+                "secondary_boundary_median_ns": 58130792,
+                "secondary_boundary_p95_ns": 58838042,
                 "secondary_boundary_samples_ns": [
-                  58010250,
-                  56993041,
-                  57264500,
-                  58117542,
-                  62218917,
-                  58207208
+                  58501959,
+                  57414875,
+                  57211583,
+                  58130792,
+                  57481667,
+                  58838042
                 ],
                 "serial_runs_per_second": null,
                 "session_count": 252,
@@ -880,47 +880,47 @@
                 "warmup_runs": 4,
                 "warmup_runs_per_worker": 2,
                 "raw_samples_ns": [
-                  162519959,
-                  178622000,
-                  174408334,
-                  162626292,
-                  178273500,
-                  172822958
+                  162128833,
+                  162401917,
+                  159470750,
+                  169636334,
+                  168173708,
+                  165221292
                 ],
                 "secondary_boundary_samples_ns": [
                   {
                     "run_index": 0,
-                    "end_to_end_ns": 285457875,
+                    "end_to_end_ns": 289852000,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 1,
-                    "end_to_end_ns": 284622958,
+                    "end_to_end_ns": 283721250,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 2,
-                    "end_to_end_ns": 285639708,
+                    "end_to_end_ns": 282518958,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 3,
-                    "end_to_end_ns": 284281166,
+                    "end_to_end_ns": 289369292,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 4,
-                    "end_to_end_ns": 286733792,
+                    "end_to_end_ns": 288630250,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 5,
-                    "end_to_end_ns": 287913125,
+                    "end_to_end_ns": 294526833,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   }
                 ],
-                "secondary_boundary_median_ns": 285548791.5,
-                "secondary_boundary_p95_ns": 287913125,
+                "secondary_boundary_median_ns": 288999771.0,
+                "secondary_boundary_p95_ns": 294526833,
                 "checksums_sha256": [
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
@@ -929,15 +929,15 @@
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                 ],
-                "median_ns": 173615646.0,
-                "p95_ns": 178622000,
-                "parallel_wall_ns": 517395958,
-                "parallel_runs_per_second": 11.59653435096994,
+                "median_ns": 163811604.5,
+                "p95_ns": 169636334,
+                "parallel_wall_ns": 504783458,
+                "parallel_runs_per_second": 11.886284910707197,
                 "peak_rss_by_worker_bytes": {
-                  "7560": 149798912,
-                  "7561": 148979712
+                  "15056": 149897216,
+                  "15057": 148701184
                 },
-                "peak_rss_sum_upper_bound_bytes": 298778624,
+                "peak_rss_sum_upper_bound_bytes": 298598400,
                 "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
                 "engine_mode": "cached_conversion_new_engine",
                 "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
@@ -960,47 +960,47 @@
                 "warmup_runs": 4,
                 "warmup_runs_per_worker": 2,
                 "raw_samples_ns": [
-                  163198167,
-                  163958625,
-                  176121083,
-                  163048000,
-                  164171500,
-                  172536041
+                  168205833,
+                  170008750,
+                  165692208,
+                  167144584,
+                  171834000,
+                  165782875
                 ],
                 "secondary_boundary_samples_ns": [
                   {
                     "run_index": 0,
-                    "end_to_end_ns": 283178291,
+                    "end_to_end_ns": 289511208,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 1,
-                    "end_to_end_ns": 281971000,
+                    "end_to_end_ns": 291295833,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 2,
-                    "end_to_end_ns": 287930208,
+                    "end_to_end_ns": 295289667,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 3,
-                    "end_to_end_ns": 291212375,
+                    "end_to_end_ns": 293424333,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 4,
-                    "end_to_end_ns": 287490458,
+                    "end_to_end_ns": 290253166,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 5,
-                    "end_to_end_ns": 288982208,
+                    "end_to_end_ns": 293544667,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   }
                 ],
-                "secondary_boundary_median_ns": 287710333.0,
-                "secondary_boundary_p95_ns": 291212375,
+                "secondary_boundary_median_ns": 292360083.0,
+                "secondary_boundary_p95_ns": 295289667,
                 "checksums_sha256": [
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
@@ -1009,15 +1009,15 @@
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                 ],
-                "median_ns": 164065062.5,
-                "p95_ns": 176121083,
-                "parallel_wall_ns": 505108750,
-                "parallel_runs_per_second": 11.878630096984065,
+                "median_ns": 167675208.5,
+                "p95_ns": 171834000,
+                "parallel_wall_ns": 506498792,
+                "parallel_runs_per_second": 11.846030227057284,
                 "peak_rss_by_worker_bytes": {
-                  "7599": 148160512,
-                  "7600": 149569536
+                  "15072": 148553728,
+                  "15073": 149700608
                 },
-                "peak_rss_sum_upper_bound_bytes": 297730048,
+                "peak_rss_sum_upper_bound_bytes": 298254336,
                 "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
                 "engine_mode": "cached_conversion_new_engine",
                 "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
@@ -1032,33 +1032,33 @@
                 "input_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
                 "instrument_count": 64,
                 "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
-                "measurement_wall_ns": 56707500,
-                "median_ns": 19213833,
+                "measurement_wall_ns": 56740958,
+                "median_ns": 18988583,
                 "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
                 "mode": "parallel",
-                "p95_ns": 19553292,
-                "parallel_runs_per_second": 105.80611030287,
-                "peak_rss_bytes": 88686592,
+                "p95_ns": 19634500,
+                "parallel_runs_per_second": 105.74372043559787,
+                "peak_rss_bytes": 88539136,
                 "raw_samples_ns": [
-                  19210709,
-                  19537000,
-                  17868541,
-                  19213833,
-                  19553292,
-                  17922875
+                  19634500,
+                  18988583,
+                  18064416,
+                  19622208,
+                  18982666,
+                  18072750
                 ],
                 "run_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
                 "runs": 6,
-                "runs_per_second": 105.80611030287,
-                "secondary_boundary_median_ns": 57181375,
-                "secondary_boundary_p95_ns": 58389250,
+                "runs_per_second": 105.74372043559787,
+                "secondary_boundary_median_ns": 57685708,
+                "secondary_boundary_p95_ns": 58974333,
                 "secondary_boundary_samples_ns": [
-                  58389250,
-                  57181375,
-                  57206375,
-                  56627291,
-                  56996541,
-                  57058375
+                  58974333,
+                  57678625,
+                  58542458,
+                  57685708,
+                  57530333,
+                  57401250
                 ],
                 "serial_runs_per_second": null,
                 "session_count": 252,
@@ -1089,33 +1089,33 @@
                 "input_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
                 "instrument_count": 64,
                 "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
-                "measurement_wall_ns": 67089792,
-                "median_ns": 21152875,
+                "measurement_wall_ns": 59625083,
+                "median_ns": 19218333,
                 "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
                 "mode": "parallel",
-                "p95_ns": 26158292,
-                "parallel_runs_per_second": 89.43238339448123,
-                "peak_rss_bytes": 90865664,
+                "p95_ns": 21214375,
+                "parallel_runs_per_second": 100.62879073895796,
+                "peak_rss_bytes": 88326144,
                 "raw_samples_ns": [
-                  26158292,
-                  21107625,
-                  19434125,
-                  25563166,
-                  21152875,
-                  20286792
+                  21214375,
+                  19136042,
+                  19066875,
+                  21199958,
+                  19169042,
+                  19218333
                 ],
                 "run_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
                 "runs": 6,
-                "runs_per_second": 89.43238339448123,
-                "secondary_boundary_median_ns": 66143250,
-                "secondary_boundary_p95_ns": 69894875,
+                "runs_per_second": 100.62879073895796,
+                "secondary_boundary_median_ns": 58277333,
+                "secondary_boundary_p95_ns": 58414459,
                 "secondary_boundary_samples_ns": [
-                  69894875,
-                  66143250,
-                  62472917,
-                  63619625,
-                  63361166,
-                  66397250
+                  58414459,
+                  57887833,
+                  57660542,
+                  58027709,
+                  58277333,
+                  58322542
                 ],
                 "serial_runs_per_second": null,
                 "session_count": 252,
@@ -1136,47 +1136,47 @@
                 "warmup_runs": 4,
                 "warmup_runs_per_worker": 2,
                 "raw_samples_ns": [
-                  184837333,
-                  425834834,
-                  189865375,
-                  187166167,
-                  413890208,
-                  199421583
+                  171812625,
+                  170363750,
+                  171730167,
+                  166569000,
+                  165123542,
+                  164778292
                 ],
                 "secondary_boundary_samples_ns": [
                   {
                     "run_index": 0,
-                    "end_to_end_ns": 291298334,
+                    "end_to_end_ns": 299941333,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 1,
-                    "end_to_end_ns": 291722542,
+                    "end_to_end_ns": 311112084,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 2,
-                    "end_to_end_ns": 291054417,
+                    "end_to_end_ns": 290541875,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 3,
-                    "end_to_end_ns": 290991625,
+                    "end_to_end_ns": 294143458,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 4,
-                    "end_to_end_ns": 293341000,
+                    "end_to_end_ns": 285234042,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   },
                   {
                     "run_index": 5,
-                    "end_to_end_ns": 291945500,
+                    "end_to_end_ns": 290967292,
                     "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                   }
                 ],
-                "secondary_boundary_median_ns": 291510438.0,
-                "secondary_boundary_p95_ns": 293341000,
+                "secondary_boundary_median_ns": 292555375.0,
+                "secondary_boundary_p95_ns": 311112084,
                 "checksums_sha256": [
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
@@ -1185,15 +1185,15 @@
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
                   "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
                 ],
-                "median_ns": 194643479.0,
-                "p95_ns": 425834834,
-                "parallel_wall_ns": 802944250,
-                "parallel_runs_per_second": 7.472498869006161,
+                "median_ns": 168466375.0,
+                "p95_ns": 171812625,
+                "parallel_wall_ns": 515686750,
+                "parallel_runs_per_second": 11.634970260531224,
                 "peak_rss_by_worker_bytes": {
-                  "7657": 150437888,
-                  "7658": 150749184
+                  "15106": 150093824,
+                  "15107": 148242432
                 },
-                "peak_rss_sum_upper_bound_bytes": 301187072,
+                "peak_rss_sum_upper_bound_bytes": 298336256,
                 "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
                 "engine_mode": "cached_conversion_new_engine",
                 "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
@@ -1203,23 +1203,23 @@
             }
           }
         ],
-        "rust_parallel_runs_per_second_median": 102.8153569335361,
-        "nautilus_parallel_runs_per_second_median": 11.878630096984065,
+        "rust_parallel_runs_per_second_median": 106.91431062124717,
+        "nautilus_parallel_runs_per_second_median": 11.846030227057284,
         "rss": {
-          "rust_process_peak_bytes": 92160000,
+          "rust_process_peak_bytes": 88670208,
           "nautilus_worker_peak_bytes": [
-            148094976,
-            148127744,
-            149536768,
-            150159360,
-            149798912,
-            148979712,
-            148160512,
-            149569536,
-            150437888,
-            150749184
+            148602880,
+            149651456,
+            149504000,
+            147652608,
+            149897216,
+            148701184,
+            148553728,
+            149700608,
+            150093824,
+            148242432
           ],
-          "nautilus_peak_rss_sum_upper_bound_bytes": 301187072
+          "nautilus_peak_rss_sum_upper_bound_bytes": 298598400
         },
         "decision": {
           "status": "adopt",
@@ -1516,63 +1516,63 @@
             "input_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
             "instrument_count": 64,
             "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
-            "measurement_wall_ns": 50597500,
-            "median_ns": 2524208,
+            "measurement_wall_ns": 51224000,
+            "median_ns": 2514584,
             "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
             "mode": "serial",
-            "p95_ns": 2666833,
+            "p95_ns": 2656708,
             "parallel_runs_per_second": null,
-            "peak_rss_bytes": 178388992,
+            "peak_rss_bytes": 174096384,
             "raw_samples_ns": [
-              2462375,
-              2546125,
-              2544125,
-              2666833,
-              2559625,
-              2727375,
-              2487584,
-              2489875,
-              2426250,
-              2457125,
-              2539000,
-              2585042,
-              2458291,
-              2419792,
-              2512334,
-              2508834,
-              2473958,
-              2547291,
-              2592083,
-              2524208
+              3063875,
+              2497667,
+              2487959,
+              2492209,
+              2482333,
+              2558500,
+              2601208,
+              2497458,
+              2533417,
+              2476000,
+              2489292,
+              2510500,
+              2631917,
+              2621750,
+              2494834,
+              2514584,
+              2486709,
+              2530292,
+              2530292,
+              2656708
             ],
             "run_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
             "runs": 20,
-            "runs_per_second": 395.2764464647463,
-            "secondary_boundary_median_ns": 47974791,
-            "secondary_boundary_p95_ns": 56060375,
+            "runs_per_second": 390.4419803217242,
+            "secondary_boundary_median_ns": 47290000,
+            "secondary_boundary_p95_ns": 48305542,
             "secondary_boundary_samples_ns": [
-              48601708,
-              60073833,
-              49289834,
-              49313084,
-              48911917,
-              47309500,
-              48061500,
-              46956542,
-              47335542,
-              47117666,
-              47974791,
-              48369625,
-              48979417,
-              56060375,
-              47107208,
-              47329500,
-              47081458,
-              47404000,
-              47378750,
-              47261625
+              48405583,
+              46999959,
+              47093417,
+              47726708,
+              47098208,
+              47123083,
+              47262541,
+              47143333,
+              47731750,
+              47715958,
+              48305542,
+              47433166,
+              47290000,
+              47256291,
+              47592458,
+              47458584,
+              47511542,
+              47214333,
+              47136208,
+              47182167
             ],
-            "serial_runs_per_second": 395.2764464647463,
+            "serial_runs_per_second": 390.4419803217242,
             "session_count": 252,
             "status": "passed",
             "strategy": "s3",
@@ -1591,131 +1591,131 @@
             "warmup_runs_per_worker": 2,
             "runs": 20,
             "raw_samples_ns": [
-              53974000,
-              53633584,
-              58075625,
-              54083167,
-              53883375,
-              54228958,
-              53899834,
-              53732334,
-              53763166,
-              55612583,
-              53672250,
-              53867334,
-              54915958,
-              56541041,
-              60684416,
-              57197500,
-              53436500,
-              53369292,
-              54603334,
-              52113125
+              53313959,
+              53759625,
+              54333625,
+              52756292,
+              53933542,
+              53486125,
+              55098583,
+              53448208,
+              53747208,
+              53504750,
+              54557958,
+              53006250,
+              52958250,
+              53014834,
+              54313375,
+              52377500,
+              52389750,
+              52607959,
+              53411542,
+              53111583
             ],
             "secondary_boundary_samples_ns": [
               {
                 "run_index": 0,
-                "end_to_end_ns": 138876916,
+                "end_to_end_ns": 139567125,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 1,
-                "end_to_end_ns": 135377292,
+                "end_to_end_ns": 137675333,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 2,
-                "end_to_end_ns": 136084084,
+                "end_to_end_ns": 134359500,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 3,
-                "end_to_end_ns": 135427750,
+                "end_to_end_ns": 135733792,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 4,
-                "end_to_end_ns": 135744875,
+                "end_to_end_ns": 136054000,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 5,
-                "end_to_end_ns": 137833792,
+                "end_to_end_ns": 134535084,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 6,
-                "end_to_end_ns": 137273209,
+                "end_to_end_ns": 137167791,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 7,
-                "end_to_end_ns": 133450209,
+                "end_to_end_ns": 135434750,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 8,
-                "end_to_end_ns": 137107000,
+                "end_to_end_ns": 135020625,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 9,
-                "end_to_end_ns": 133452208,
+                "end_to_end_ns": 134651208,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 10,
-                "end_to_end_ns": 135497333,
+                "end_to_end_ns": 135002167,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 11,
-                "end_to_end_ns": 133546208,
+                "end_to_end_ns": 133934375,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 12,
-                "end_to_end_ns": 133505250,
+                "end_to_end_ns": 134146125,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 13,
-                "end_to_end_ns": 133541667,
+                "end_to_end_ns": 135394042,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 14,
-                "end_to_end_ns": 134440125,
+                "end_to_end_ns": 134903584,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 15,
-                "end_to_end_ns": 136068916,
+                "end_to_end_ns": 137166167,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 16,
-                "end_to_end_ns": 134706708,
+                "end_to_end_ns": 136222917,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 17,
-                "end_to_end_ns": 134678166,
+                "end_to_end_ns": 135929292,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 18,
-                "end_to_end_ns": 134704750,
+                "end_to_end_ns": 135354042,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               },
               {
                 "run_index": 19,
-                "end_to_end_ns": 133318750,
+                "end_to_end_ns": 135420042,
                 "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
               }
             ],
-            "secondary_boundary_median_ns": 135042000.0,
-            "secondary_boundary_p95_ns": 137833792,
+            "secondary_boundary_median_ns": 135407042.0,
+            "secondary_boundary_p95_ns": 137675333,
             "checksums_sha256": [
               "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
               "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
@@ -1738,9 +1738,9 @@
               "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
               "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
             ],
-            "median_ns": 53936917.0,
-            "p95_ns": 58075625,
-            "peak_rss_bytes": 137625600,
+            "median_ns": 53429875.0,
+            "p95_ns": 54557958,
+            "peak_rss_bytes": 136167424,
             "engine_mode": "cached_conversion_new_engine",
             "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
             "conversion_cached_per_worker": true,
@@ -1764,33 +1764,33 @@
                 "input_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
                 "instrument_count": 64,
                 "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
-                "measurement_wall_ns": 11084375,
-                "median_ns": 3692042,
+                "measurement_wall_ns": 12084917,
+                "median_ns": 3611000,
                 "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
                 "mode": "parallel",
-                "p95_ns": 3701500,
-                "parallel_runs_per_second": 541.3025091626727,
-                "peak_rss_bytes": 86212608,
+                "p95_ns": 4838042,
+                "parallel_runs_per_second": 496.4866535699004,
+                "peak_rss_bytes": 86245376,
                 "raw_samples_ns": [
-                  3701500,
-                  3661875,
-                  3632917,
-                  3699083,
-                  3692042,
-                  3671666
+                  3604750,
+                  3509917,
+                  4838042,
+                  3611000,
+                  3572250,
+                  4772084
                 ],
                 "run_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
                 "runs": 6,
-                "runs_per_second": 541.3025091626727,
-                "secondary_boundary_median_ns": 46403916,
-                "secondary_boundary_p95_ns": 47407625,
+                "runs_per_second": 496.4866535699004,
+                "secondary_boundary_median_ns": 47817292,
+                "secondary_boundary_p95_ns": 49757875,
                 "secondary_boundary_samples_ns": [
-                  47407625,
-                  46455958,
-                  46403916,
-                  46273125,
-                  46306417,
-                  46216291
+                  49757875,
+                  46819041,
+                  47415166,
+                  48030708,
+                  47375708,
+                  47817292
                 ],
                 "serial_runs_per_second": null,
                 "session_count": 252,
@@ -1811,47 +1811,47 @@
                 "warmup_runs": 4,
                 "warmup_runs_per_worker": 2,
                 "raw_samples_ns": [
-                  59060250,
-                  58779792,
-                  58728375,
-                  59001708,
-                  59532541,
-                  58459083
+                  59507833,
+                  58327208,
+                  59024167,
+                  63101000,
+                  64947000,
+                  61000167
                 ],
                 "secondary_boundary_samples_ns": [
                   {
                     "run_index": 0,
-                    "end_to_end_ns": 157482500,
+                    "end_to_end_ns": 151781500,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 1,
-                    "end_to_end_ns": 160422791,
+                    "end_to_end_ns": 147356000,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 2,
-                    "end_to_end_ns": 149089042,
+                    "end_to_end_ns": 142156916,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 3,
-                    "end_to_end_ns": 146870625,
+                    "end_to_end_ns": 147015875,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 4,
-                    "end_to_end_ns": 141993250,
+                    "end_to_end_ns": 140389875,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 5,
-                    "end_to_end_ns": 143623625,
+                    "end_to_end_ns": 146388416,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   }
                 ],
-                "secondary_boundary_median_ns": 147979833.5,
-                "secondary_boundary_p95_ns": 160422791,
+                "secondary_boundary_median_ns": 146702145.5,
+                "secondary_boundary_p95_ns": 151781500,
                 "checksums_sha256": [
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
@@ -1860,15 +1860,15 @@
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                 ],
-                "median_ns": 58890750.0,
-                "p95_ns": 59532541,
-                "parallel_wall_ns": 178579500,
-                "parallel_runs_per_second": 33.59848134864304,
+                "median_ns": 60254000.0,
+                "p95_ns": 64947000,
+                "parallel_wall_ns": 190681542,
+                "parallel_runs_per_second": 31.466076564453207,
                 "peak_rss_by_worker_bytes": {
-                  "7800": 116932608,
-                  "7801": 116768768
+                  "15172": 117161984,
+                  "15173": 116719616
                 },
-                "peak_rss_sum_upper_bound_bytes": 233701376,
+                "peak_rss_sum_upper_bound_bytes": 233881600,
                 "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
                 "engine_mode": "cached_conversion_new_engine",
                 "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
@@ -1891,47 +1891,47 @@
                 "warmup_runs": 4,
                 "warmup_runs_per_worker": 2,
                 "raw_samples_ns": [
-                  63591875,
-                  62628916,
-                  61361542,
-                  64504875,
-                  63384834,
-                  61505500
+                  58195166,
+                  58508334,
+                  57245250,
+                  54887125,
+                  55023666,
+                  55180042
                 ],
                 "secondary_boundary_samples_ns": [
                   {
                     "run_index": 0,
-                    "end_to_end_ns": 156802500,
+                    "end_to_end_ns": 149825125,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 1,
-                    "end_to_end_ns": 154341625,
+                    "end_to_end_ns": 146679250,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 2,
-                    "end_to_end_ns": 153471083,
+                    "end_to_end_ns": 330424417,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 3,
-                    "end_to_end_ns": 153702083,
+                    "end_to_end_ns": 338766292,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 4,
-                    "end_to_end_ns": 167353958,
+                    "end_to_end_ns": 146180666,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 5,
-                    "end_to_end_ns": 177877666,
+                    "end_to_end_ns": 147401541,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   }
                 ],
-                "secondary_boundary_median_ns": 155572062.5,
-                "secondary_boundary_p95_ns": 177877666,
+                "secondary_boundary_median_ns": 148613333.0,
+                "secondary_boundary_p95_ns": 338766292,
                 "checksums_sha256": [
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
@@ -1940,15 +1940,15 @@
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                 ],
-                "median_ns": 63006875.0,
-                "p95_ns": 64504875,
-                "parallel_wall_ns": 191025041,
-                "parallel_runs_per_second": 31.409494632695825,
+                "median_ns": 56212646.0,
+                "p95_ns": 58508334,
+                "parallel_wall_ns": 175566458,
+                "parallel_runs_per_second": 34.17509283008945,
                 "peak_rss_by_worker_bytes": {
-                  "7834": 116883456,
-                  "7835": 116703232
+                  "15188": 117473280,
+                  "15189": 116686848
                 },
-                "peak_rss_sum_upper_bound_bytes": 233586688,
+                "peak_rss_sum_upper_bound_bytes": 234160128,
                 "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
                 "engine_mode": "cached_conversion_new_engine",
                 "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
@@ -1963,33 +1963,33 @@
                 "input_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
                 "instrument_count": 64,
                 "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
-                "measurement_wall_ns": 11456834,
-                "median_ns": 3792959,
+                "measurement_wall_ns": 11636792,
+                "median_ns": 3778875,
                 "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
                 "mode": "parallel",
-                "p95_ns": 4076958,
-                "parallel_runs_per_second": 523.704890897433,
-                "peak_rss_bytes": 90046464,
+                "p95_ns": 4110125,
+                "parallel_runs_per_second": 515.6060192534162,
+                "peak_rss_bytes": 86245376,
                 "raw_samples_ns": [
-                  3792959,
-                  3950625,
-                  3624625,
-                  3728459,
-                  4076958,
-                  3612709
+                  3695042,
+                  3778875,
+                  4110125,
+                  3685750,
+                  3772417,
+                  4076083
                 ],
                 "run_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
                 "runs": 6,
-                "runs_per_second": 523.704890897433,
-                "secondary_boundary_median_ns": 104050459,
-                "secondary_boundary_p95_ns": 174594833,
+                "runs_per_second": 515.6060192534162,
+                "secondary_boundary_median_ns": 47784083,
+                "secondary_boundary_p95_ns": 48413625,
                 "secondary_boundary_samples_ns": [
-                  52746875,
-                  131263708,
-                  49191583,
-                  49304750,
-                  174594833,
-                  104050459
+                  48397084,
+                  47666084,
+                  47522000,
+                  47784083,
+                  48413625,
+                  47645000
                 ],
                 "serial_runs_per_second": null,
                 "session_count": 252,
@@ -2020,33 +2020,33 @@
                 "input_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
                 "instrument_count": 64,
                 "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
-                "measurement_wall_ns": 11144500,
-                "median_ns": 3692959,
+                "measurement_wall_ns": 11286250,
+                "median_ns": 3756625,
                 "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
                 "mode": "parallel",
-                "p95_ns": 3730041,
-                "parallel_runs_per_second": 538.3821616043789,
-                "peak_rss_bytes": 86491136,
+                "p95_ns": 3880167,
+                "parallel_runs_per_second": 531.6203344777938,
+                "peak_rss_bytes": 86278144,
                 "raw_samples_ns": [
-                  3692959,
-                  3656417,
-                  3634250,
-                  3722208,
-                  3619500,
-                  3730041
+                  3645667,
+                  3880167,
+                  3715916,
+                  3610833,
+                  3867417,
+                  3756625
                 ],
                 "run_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
                 "runs": 6,
-                "runs_per_second": 538.3821616043789,
-                "secondary_boundary_median_ns": 49111958,
-                "secondary_boundary_p95_ns": 56978833,
+                "runs_per_second": 531.6203344777938,
+                "secondary_boundary_median_ns": 47681000,
+                "secondary_boundary_p95_ns": 49587625,
                 "secondary_boundary_samples_ns": [
-                  48529916,
-                  48542792,
-                  49752792,
-                  47973791,
-                  49111958,
-                  56978833
+                  49587625,
+                  47302875,
+                  47532333,
+                  47940875,
+                  47440459,
+                  47681000
                 ],
                 "serial_runs_per_second": null,
                 "session_count": 252,
@@ -2067,47 +2067,47 @@
                 "warmup_runs": 4,
                 "warmup_runs_per_worker": 2,
                 "raw_samples_ns": [
-                  60725166,
-                  58956208,
-                  59831959,
-                  61585333,
-                  59590875,
-                  60375500
+                  60266500,
+                  61388500,
+                  60883875,
+                  61073333,
+                  63627833,
+                  61056334
                 ],
                 "secondary_boundary_samples_ns": [
                   {
                     "run_index": 0,
-                    "end_to_end_ns": 152814791,
+                    "end_to_end_ns": 151944417,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 1,
-                    "end_to_end_ns": 152109583,
+                    "end_to_end_ns": 150421125,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 2,
-                    "end_to_end_ns": 147742709,
+                    "end_to_end_ns": 145804292,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 3,
-                    "end_to_end_ns": 147853084,
+                    "end_to_end_ns": 146685291,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 4,
-                    "end_to_end_ns": 161764041,
+                    "end_to_end_ns": 147309834,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 5,
-                    "end_to_end_ns": 161308459,
+                    "end_to_end_ns": 144231708,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   }
                 ],
-                "secondary_boundary_median_ns": 152462187.0,
-                "secondary_boundary_p95_ns": 161764041,
+                "secondary_boundary_median_ns": 146997562.5,
+                "secondary_boundary_p95_ns": 151944417,
                 "checksums_sha256": [
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
@@ -2116,15 +2116,15 @@
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                 ],
-                "median_ns": 60103729.5,
-                "p95_ns": 61585333,
-                "parallel_wall_ns": 183206666,
-                "parallel_runs_per_second": 32.749900050034206,
+                "median_ns": 61064833.5,
+                "p95_ns": 63627833,
+                "parallel_wall_ns": 187421083,
+                "parallel_runs_per_second": 32.013474172486774,
                 "peak_rss_by_worker_bytes": {
-                  "7921": 117243904,
-                  "7922": 126402560
+                  "15211": 116424704,
+                  "15213": 116932608
                 },
-                "peak_rss_sum_upper_bound_bytes": 243646464,
+                "peak_rss_sum_upper_bound_bytes": 233357312,
                 "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
                 "engine_mode": "cached_conversion_new_engine",
                 "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
@@ -2147,47 +2147,47 @@
                 "warmup_runs": 4,
                 "warmup_runs_per_worker": 2,
                 "raw_samples_ns": [
-                  58513625,
-                  57489959,
-                  57896417,
-                  54649042,
-                  53825833,
-                  54169125
+                  57181583,
+                  54624208,
+                  54756166,
+                  61204167,
+                  58490834,
+                  59216625
                 ],
                 "secondary_boundary_samples_ns": [
                   {
                     "run_index": 0,
-                    "end_to_end_ns": 149840167,
+                    "end_to_end_ns": 151614916,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 1,
-                    "end_to_end_ns": 145654792,
+                    "end_to_end_ns": 146981792,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 2,
-                    "end_to_end_ns": 142389042,
+                    "end_to_end_ns": 143428125,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 3,
-                    "end_to_end_ns": 142980792,
+                    "end_to_end_ns": 145121125,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 4,
-                    "end_to_end_ns": 145281167,
+                    "end_to_end_ns": 143711000,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 5,
-                    "end_to_end_ns": 149958583,
+                    "end_to_end_ns": 147855375,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   }
                 ],
-                "secondary_boundary_median_ns": 145467979.5,
-                "secondary_boundary_p95_ns": 149958583,
+                "secondary_boundary_median_ns": 146051458.5,
+                "secondary_boundary_p95_ns": 151614916,
                 "checksums_sha256": [
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
@@ -2196,15 +2196,15 @@
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                 ],
-                "median_ns": 56069500.5,
-                "p95_ns": 58513625,
-                "parallel_wall_ns": 175568125,
-                "parallel_runs_per_second": 34.17476834134898,
+                "median_ns": 57836208.5,
+                "p95_ns": 61204167,
+                "parallel_wall_ns": 180513542,
+                "parallel_runs_per_second": 33.23850351349263,
                 "peak_rss_by_worker_bytes": {
-                  "7955": 116719616,
-                  "7956": 116621312
+                  "15227": 126173184,
+                  "15228": 117538816
                 },
-                "peak_rss_sum_upper_bound_bytes": 233340928,
+                "peak_rss_sum_upper_bound_bytes": 243712000,
                 "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
                 "engine_mode": "cached_conversion_new_engine",
                 "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
@@ -2219,33 +2219,33 @@
                 "input_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
                 "instrument_count": 64,
                 "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
-                "measurement_wall_ns": 11040750,
-                "median_ns": 3673584,
+                "measurement_wall_ns": 12208458,
+                "median_ns": 3957792,
                 "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
                 "mode": "parallel",
-                "p95_ns": 3725833,
-                "parallel_runs_per_second": 543.4413423001155,
-                "peak_rss_bytes": 86294528,
+                "p95_ns": 4271083,
+                "parallel_runs_per_second": 491.46255817073705,
+                "peak_rss_bytes": 86228992,
                 "raw_samples_ns": [
-                  3725833,
-                  3673584,
-                  3608084,
-                  3689625,
-                  3669583,
-                  3581708
+                  4232084,
+                  3918041,
+                  3884875,
+                  4271083,
+                  3957792,
+                  3934417
                 ],
                 "run_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
                 "runs": 6,
-                "runs_per_second": 543.4413423001155,
-                "secondary_boundary_median_ns": 47637709,
-                "secondary_boundary_p95_ns": 47974583,
+                "runs_per_second": 491.46255817073705,
+                "secondary_boundary_median_ns": 47843625,
+                "secondary_boundary_p95_ns": 48081084,
                 "secondary_boundary_samples_ns": [
-                  47637709,
-                  47671458,
-                  47974583,
-                  47078417,
-                  47066417,
-                  46686250
+                  48015625,
+                  47353167,
+                  47423750,
+                  48081084,
+                  47843625,
+                  47756500
                 ],
                 "serial_runs_per_second": null,
                 "session_count": 252,
@@ -2276,33 +2276,33 @@
                 "input_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
                 "instrument_count": 64,
                 "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
-                "measurement_wall_ns": 11324084,
-                "median_ns": 3731333,
+                "measurement_wall_ns": 11410542,
+                "median_ns": 3685375,
                 "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
                 "mode": "parallel",
-                "p95_ns": 3861375,
-                "parallel_runs_per_second": 529.844179891283,
-                "peak_rss_bytes": 86261760,
+                "p95_ns": 4062292,
+                "parallel_runs_per_second": 525.829535529513,
+                "peak_rss_bytes": 86278144,
                 "raw_samples_ns": [
-                  3693709,
-                  3731333,
-                  3861375,
-                  3661333,
-                  3715917,
-                  3853625
+                  3654333,
+                  4062292,
+                  3658083,
+                  3657333,
+                  3990833,
+                  3685375
                 ],
                 "run_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
                 "runs": 6,
-                "runs_per_second": 529.844179891283,
-                "secondary_boundary_median_ns": 48409084,
-                "secondary_boundary_p95_ns": 51272792,
+                "runs_per_second": 525.829535529513,
+                "secondary_boundary_median_ns": 47927708,
+                "secondary_boundary_p95_ns": 48807000,
                 "secondary_boundary_samples_ns": [
-                  51272792,
-                  48696042,
-                  48409084,
-                  47073042,
-                  47606417,
-                  47302792
+                  48807000,
+                  47927708,
+                  47629209,
+                  47482125,
+                  47979208,
+                  47691042
                 ],
                 "serial_runs_per_second": null,
                 "session_count": 252,
@@ -2323,47 +2323,47 @@
                 "warmup_runs": 4,
                 "warmup_runs_per_worker": 2,
                 "raw_samples_ns": [
-                  60478625,
-                  57790250,
-                  58338709,
-                  60281333,
-                  58138417,
-                  58264917
+                  59690083,
+                  58258917,
+                  58362083,
+                  56614459,
+                  55008333,
+                  55300833
                 ],
                 "secondary_boundary_samples_ns": [
                   {
                     "run_index": 0,
-                    "end_to_end_ns": 150225042,
+                    "end_to_end_ns": 147127750,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 1,
-                    "end_to_end_ns": 149805166,
+                    "end_to_end_ns": 151470292,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 2,
-                    "end_to_end_ns": 145246917,
+                    "end_to_end_ns": 144058750,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 3,
-                    "end_to_end_ns": 142394875,
+                    "end_to_end_ns": 149719625,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 4,
-                    "end_to_end_ns": 143920875,
+                    "end_to_end_ns": 144434292,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   },
                   {
                     "run_index": 5,
-                    "end_to_end_ns": 145027667,
+                    "end_to_end_ns": 150059541,
                     "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                   }
                 ],
-                "secondary_boundary_median_ns": 145137292.0,
-                "secondary_boundary_p95_ns": 150225042,
+                "secondary_boundary_median_ns": 148423687.5,
+                "secondary_boundary_p95_ns": 151470292,
                 "checksums_sha256": [
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
@@ -2372,15 +2372,15 @@
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
                   "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
                 ],
-                "median_ns": 58301813.0,
-                "p95_ns": 60478625,
-                "parallel_wall_ns": 178315959,
-                "parallel_runs_per_second": 33.6481380222395,
+                "median_ns": 57436688.0,
+                "p95_ns": 59690083,
+                "parallel_wall_ns": 177968875,
+                "parallel_runs_per_second": 33.71376034152039,
                 "peak_rss_by_worker_bytes": {
-                  "8018": 126238720,
-                  "8019": 116916224
+                  "15247": 117932032,
+                  "15250": 116604928
                 },
-                "peak_rss_sum_upper_bound_bytes": 243154944,
+                "peak_rss_sum_upper_bound_bytes": 234536960,
                 "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
                 "engine_mode": "cached_conversion_new_engine",
                 "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
@@ -2390,23 +2390,23 @@
             }
           }
         ],
-        "rust_parallel_runs_per_second_median": 538.3821616043789,
-        "nautilus_parallel_runs_per_second_median": 33.59848134864304,
+        "rust_parallel_runs_per_second_median": 515.6060192534162,
+        "nautilus_parallel_runs_per_second_median": 33.23850351349263,
         "rss": {
-          "rust_process_peak_bytes": 90046464,
+          "rust_process_peak_bytes": 86278144,
           "nautilus_worker_peak_bytes": [
-            116932608,
-            116768768,
-            116883456,
-            116703232,
-            117243904,
-            126402560,
+            117161984,
             116719616,
-            116621312,
-            126238720,
-            116916224
+            117473280,
+            116686848,
+            116424704,
+            116932608,
+            126173184,
+            117538816,
+            117932032,
+            116604928
           ],
-          "nautilus_peak_rss_sum_upper_bound_bytes": 243646464
+          "nautilus_peak_rss_sum_upper_bound_bytes": 243712000
         },
         "decision": {
           "status": "adopt",
@@ -3959,7 +3959,7 @@
     },
     "cargo_lock_sha256": "250f21792a3ded3c139747c74f96b673b37e57d2b5f550a29e480fea71f60041",
     "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
-    "git_revision": "dca129ed5cb7d1888e90649460eb673765a9307e",
+    "git_revision": "96a2ca62b4055147ce29ea28619d6eae84c99ea6",
     "dirty_worktree": false,
     "dirty_paths": [],
     "python_transitive_dependency_snapshot": {
@@ -4192,9 +4192,9 @@
     },
     "python_import_nautilus": {
       "status": "measured",
-      "peak_rss_raw": 50921472,
+      "peak_rss_raw": 50757632,
       "raw_unit": "bytes",
-      "peak_rss_bytes": 50921472,
+      "peak_rss_bytes": 50757632,
       "imported_nautilus_version": "2.0.0rc5",
       "scope": "Python process after importing Nautilus"
     }
@@ -4246,6 +4246,24 @@
           "evidence_level": "registered"
         }
       }
+    }
+  },
+  "preregistered_prediction": {
+    "source": "docs/decisions/0013-poc0-b2-matched-remeasure.md",
+    "predicted_speed_gates_pass_on_s2_and_s3": true,
+    "predicted_rust_rss_lower_than_nautilus": true,
+    "decision_input": false
+  },
+  "decision_sensitivity": {
+    "registered_workload_scale": {
+      "decision_loads_status": "adopt",
+      "robustness_loads_status": "adopt",
+      "assessment": "no verdict change across the registered 3x10/3x130 and 64x252 workloads"
+    },
+    "selected_nautilus_mode": "cached_conversion_new_engine",
+    "alternative_mode_and_timing_boundaries": {
+      "assessment": "unresolved; not measured as comparable registered alternatives",
+      "reason": "Nautilus reset emitted native READY -> INITIALIZE errors and ADR 0013 selected cached_conversion_new_engine uniformly; the verdict applies only to the selected mode and registered timing/RSS boundaries"
     }
   }
 }
