@@ -1016,10 +1016,7 @@ pub fn run(
         rotation_checks.push("rotation executed on signal day".to_string());
     }
     let rotation_correct = correctness_passed && rotation_checks.is_empty();
-    let (ma_dataset, ma_input_hash) = make_ma_dataset(
-        &prepared.spec,
-        Path::new("poc/poc0-benchmark/fixtures/b2-ma20-60-v1.json"),
-    )?;
+    let (ma_dataset, ma_input_hash) = make_ma_dataset(&prepared.spec, Path::new(MA_FIXTURE_PATH))?;
     let ma_run = run_ma_event(&ma_dataset);
     let ma_repeat = run_ma_event(&ma_dataset);
     let mut ma_checks = Vec::new();
@@ -1646,6 +1643,12 @@ fn run_rotation_event(dataset: &PreparedDataset, config: &ExperimentConfig) -> R
     let factor = run_soa(dataset, config, false).0;
     replay_event_targets(dataset, factor)
 }
+
+// The fixed S3 golden fixture that make_ma_dataset used to embed; resolved from the crate, not the cwd.
+const MA_FIXTURE_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../poc/poc0-benchmark/fixtures/b2-ma20-60-v1.json"
+);
 
 fn make_ma_dataset(base: &DatasetInput, fixture_path: &Path) -> Result<(PreparedDataset, String)> {
     let bytes = fs::read(fixture_path)?;
