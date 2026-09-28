@@ -1,12 +1,20 @@
 # Agent Handoff — 新平台目标基线与 POC-0
 
+## 当前交接（2026-09-28，B2 票据 08 归因）
+
+固定 S2 64×252 首差已按 [ADR 0014](docs/decisions/0014-b2-correctness-failure-attribution.md) 归因为 Nautilus Adapter 逐证券开盘 Quote 的先买后卖问题，而非 Fast Event 错误。[诊断票据](.scratch/poc-0-b2-matched-remeasure/issues/08-s2-64x252-parity-diagnosis.md)给出裁剪自固定输入的 10 ETF / 68 session 手算用例：2025-04-07 close 信号、04-08 08:50 可用的 TRADABLE 状态、09:30 先卖五只再买五只，现金 48350、NAV 99560；Rust 与修正后 Adapter 测试通过。04-07/08/09 ETF038 均有 bar，无阻断状态。原 S2 351/348（Rust-only 133、Nautilus-only 130）在修复后变为两边 351 订单/Fill 且所有共同子集字段通过。旧报告保持归档，不改写。
+
+[完整重测](poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.json)按原协议先做两次正确性对拍，再进行 20 次串行和五组 2-worker × 6 Run；S2 中位 Rust/Nautilus 19,105,375 / 260,615,500.5 ns、并行 61.89 / 6.70 Runs/s、RSS 90,685,440 / 302,743,552 bytes 上界，S3 也达到数值门槛。由于 Nautilus reset parity 尚未验证，fallback 测量只为 exploratory，combined B2 仍 `unresolved`；ADR 0012 原生停牌订单生命周期仍排除。验证与独立 review 结果见本节后续更新。**唯一建议下一步：**票据 07 验证 Nautilus reset parity，再由票据 06 用所选模式完成正式复测。
+
+**验证与复核：**`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings`（退出 0；vendor `polars-io` 既有告警）、POC Python 34/34、Rust 缩减用例及双负载独立对拍通过。`cargo test --workspace --locked --offline` 新用例通过，但既有 B1 sweep CLI 缺文件失败；根 Python 21 项通过，`test_warehouse` 缺 `duckdb` 无法导入。独立 Standards/Spec review 发现重测 JSON 根 `status` 错标为 exploratory `adopt`，已改为 combined `unresolved` 并重测；review 的 ADR 0014 事后修订和 reset parity 未验是已披露边界，不作本票 Fast Event 错误。其他意见涉及证据呈现，手算值、133/130 双向差异统计及回归入口在票据 08，原始样本和 correctness 在重测报告。当前交接的唯一下一步仍为票据 07，再由票据 06 完成正式选型。
+
 ## 票据 14 交接（2026-09-28）
 
 固定 Nautilus 2.0.0rc5 / Python 3.12.2 的[独立 HALT 隔离实验](poc/poc0-benchmark/results/nautilus-halt-native-probe-2026-09-28.md)表明：单 instrument QuoteTick 可观测后 HALT 生效，两组在相同后续时刻直接提交市价单，原生 `on_order_rejected` 报 `Market PROBE.SIM is CLOSED`，引擎缓存状态 `REJECTED`；去掉 HALT 的对照在同一 QuoteTick 上成交，状态 `FILLED`。[ADR 0012](docs/decisions/0012-poc0-nautilus-status-gate.md)已将原生能力 Unknown 更新为已证实，B2 已登记比较范围不变。MVP-4 可考虑让 Nautilus 原生处理停牌；实际集成时仍须验证状态源可用时刻与订单生命周期，再决定是否移除项目层门槛。目前 Adapter 项目门槛未改，旧 A 股/ETF 时序不变；B2 64×252 S2 对拍差异仍按下方当前交接处理。
 
 票据 14 验证：隔离脚本复跑通过（无 HALT `FILLED` / HALT `REJECTED`），模拟版本不匹配返回 `Unknown`；POC Python 31/31、`cargo fmt --all -- --check` 通过。`cargo test --workspace --locked --offline` 中 16 + 65 项单元测试及 14/15 个 B2 CLI 用例通过，已有 B1 sweep CLI 因缺文件失败，1 项 ignored；`cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 退出 0，既有 vendor `polars-io` 告警仍存在。根 Python 21 项通过、`test_warehouse` 因环境缺 `duckdb` 导入失败（本票不新增依赖）。独立 Standards/Spec review 的同时间对照、异常结果归类与重复交接建议均已修正；复核确认 Spec 无剩余发现，Standards 提出的票据 05 历史交接措辞属于既有内容，未改。开放问题：MVP-4 实际 Adapter 的状态源时间语义与原生生命周期尚未集成验证。
 
-## 当前交接（2026-09-28，B2 票据 04 稳健性完成）
+## 历史交接（2026-09-28，B2 票据 04 修正前稳健性）
 
 POC-0 B2 64×252 robustness 报告：[报告](poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.json)、[release build record](poc/poc0-benchmark/results/b2-robustness-release-build-final-2026-09-28.json)。Rust S2/S3 Dataset Content SHA 与 B3 注册值一致，Rust account checksum 也分别通过。S2 两次独立 Nautilus common-subset parity 得到相同投影 checksum 和相同六个非排除失败字段（Rust 351 个订单/Fill，Nautilus 348）；紧凑首差样例显示 ETF038 下单/成交从 Rust 2025-04-08 错到 Nautilus 2025-04-09，并记录日账本差异。HALT 日期/证券在双方均无项目订单或 Fill；ADR 0012 的 native lifecycle 仍单独排除。S2 性能采集按正确性门跳过。S3 parity 通过并完成测量，数值门槛通过；中位串行延迟 Rust/Nautilus 2,455,667 / 53,476,979.5 ns、五组 2-worker Runs/s 535.84 / 34.21、RSS 90,996,736 / 234,848,256 bytes（两 worker 峰值和上界）。当前 B2 robustness 和 combined mapping 在归档报告中为 `reject`；该负载没有独立金标准，差异无法归因到哪一方，按 [ADR 0014](docs/decisions/0014-b2-correctness-failure-attribution.md) 改为 `unresolved`（`attribution_required`），POC-0 票据 09 同步恢复为 `unresolved`。
 

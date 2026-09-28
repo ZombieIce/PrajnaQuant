@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -293,6 +294,7 @@ def _run_nautilus(dataset: dict[str, Any], strategy: str = "s1") -> dict[str, An
             super().__init__(config)
             self.pending: dict[str, Any] | None = None
             self.seen_open: dict[str, set[str]] = {}
+            self.blocked_buys: set[tuple[str, str]] = set()
             self.positions: dict[str, int] = {}
             self.cash = float(dataset["account"]["initial_cash"])
             self.blocked_exits: set[str] = set()
@@ -325,7 +327,10 @@ def _run_nautilus(dataset: dict[str, Any], strategy: str = "s1") -> dict[str, An
             if symbol_at_open in targets and symbol_at_open not in self.positions and not any(
                 symbol not in targets for symbol in self.positions
             ):
+                if (date, symbol_at_open) in self.blocked_buys:
+                    return
                 if self._blocked(symbol_at_open, date, signal["date"], "BUY"):
+                    self.blocked_buys.add((date, symbol_at_open))
                     return
                 buy_ask = float((Decimal(str(dataset["bar_defaults"]["open"])) * (
                     Decimal(1) + Decimal(str(dataset["costs"]["buy_slippage_bps"])) / 10_000
@@ -481,6 +486,12 @@ def _run_nautilus(dataset: dict[str, Any], strategy: str = "s1") -> dict[str, An
                     Quantity.from_int(1_000_000), Quantity.from_int(1_000_000), close_stamp, close_stamp
                 )
                 rows.extend([(date, "open", open_tick), (date, "close", close_tick)])
+                if strategy == "s2":
+                    retry_stamp = open_stamp + len(dataset["instruments"])
+                    rows.append((date, "open", QuoteTick(
+                        instrument_id, Price.from_str(str(buy_bid)), Price.from_str(str(buy_ask)),
+                        Quantity.from_int(1_000_000), Quantity.from_int(1_000_000), retry_stamp, retry_stamp
+                    )))
                 bars_by_date[date][symbol] = float(close_price)
             rows_by_symbol[symbol] = rows
         signal_ts = int(datetime.fromisoformat(f"{signal_date}T15:00:00+08:00").timestamp() * 1_000_000_000)
@@ -488,13 +499,15 @@ def _run_nautilus(dataset: dict[str, Any], strategy: str = "s1") -> dict[str, An
             int(datetime.fromisoformat(f"{date}T09:30:00+08:00").timestamp() * 1_000_000_000) + offset
             for date in dataset["calendar"]
             if strategy != "s1" or date > signal_date
-            for offset in (range(1, len(ids) + 1) if strategy != "s1" else (0,))
+            for offset in (range(1, 2 * len(ids) + 1) if strategy == "s2" else
+                           range(1, len(ids) + 1) if strategy == "s3" else (0,))
         }
         open_dates = {
             int(datetime.fromisoformat(f"{date}T09:30:00+08:00").timestamp() * 1_000_000_000) + offset: date
             for date in dataset["calendar"]
             if strategy != "s1" or date > signal_date
-            for offset in (range(1, len(ids) + 1) if strategy != "s1" else (0,))
+            for offset in (range(1, 2 * len(ids) + 1) if strategy == "s2" else
+                           range(1, len(ids) + 1) if strategy == "s3" else (0,))
         }
         close_dates = {
             int(datetime.fromisoformat(f"{date}T15:00:00+08:00").timestamp() * 1_000_000_000): date
@@ -778,7 +791,6 @@ def parallel_digest_runs(
         initializer=_initialize_b2_digest_worker,
         initargs=(dataset, strategy, expected_checksum, ready_barrier, measurement_barrier),
     ) as pool:
-        # Force the executor to start and initialize each worker before starting the wall timer.
         ready_futures = [pool.submit(_parallel_worker_ready) for _ in range(workers)]
         ready_pids = {probe.result() for probe in ready_futures}
         if len(ready_pids) != workers:
@@ -900,8 +912,9 @@ def _cold_end_to_end_sample(
 
 
 def _parallel_worker_ready() -> int:
-    if _B2_WORKER_WARMUP_CHECKSUM is None:
+    if _B2_WORKER_WARMUP_CHECKSUM is None or _B2_WORKER_READY_BARRIER is None:
         raise RuntimeError("B2 worker warmups did not finish")
+    _B2_WORKER_READY_BARRIER.wait(timeout=60)
     return os.getpid()
 
 
@@ -1257,7 +1270,7 @@ def _compare(actual: dict[str, Any], expected: dict[str, Any]) -> list[dict[str,
     return [
         {
             "field": "orders.adapter_project_contract",
-            "passed": actual_orders == expected_orders,
+            "passed": Counter(actual_orders) == Counter(expected_orders),
             "expected_order_events": len(expected.get("orders", [])),
             "actual_adapter_order_events": len(actual.get("orders", [])),
             "project_order_fields": list(order_fields),

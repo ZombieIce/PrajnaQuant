@@ -1,0 +1,2578 @@
+{
+  "schema_version": "poc0.b2-robustness-64x252.v1",
+  "status": "unresolved",
+  "scope": "64 instruments x 252 synthetic sessions; no independent hand-calculated golden",
+  "sampling_protocol": {
+    "warmup_runs_per_worker": 2,
+    "serial_runs": 20,
+    "parallel_workers": 2,
+    "parallel_runs_per_group": 6,
+    "parallel_groups": 5,
+    "candidate_order_alternates": true
+  },
+  "loads": {
+    "s2": {
+      "dataset_version": "poc0.b3.s2-scale-64x252.v1",
+      "dataset_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
+      "dataset_content_sha256": "2ae75e889e3d65a28974f3f467794532621b34c6b58c31c6f37bc75392358dff",
+      "dimensions": {
+        "instruments": 64,
+        "sessions": 252
+      },
+      "strategy_parameters": "Momentum 20/60, volatility 20, Top-5, rebalance every 5 eligible sessions",
+      "registered_b3_stress_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+      "correctness": {
+        "status": "passed",
+        "basis": "two independent Nautilus projection comparisons against Rust; pass requires matching checksums, failure requires identical checksums and failure fields",
+        "rust_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+        "nautilus_checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+        "nautilus_serialization_checksum_note": "informational only; Python canonical JSON and Rust struct-field serialization differ",
+        "repeatability": {
+          "attempt_count": 2,
+          "status": "passed",
+          "checksums_identical": true
+        },
+        "attempts": [
+          {
+            "attempt": 1,
+            "status": "passed",
+            "nautilus_checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+            "failure_fields": [],
+            "checks": [
+              {
+                "field": "orders.adapter_project_contract",
+                "passed": true,
+                "expected_order_events": 351,
+                "actual_adapter_order_events": 351,
+                "project_order_fields": [
+                  "decision_date",
+                  "attempt_date",
+                  "symbol",
+                  "side",
+                  "quantity",
+                  "reason"
+                ]
+              },
+              {
+                "field": "orders.nautilus_native_lifecycle",
+                "passed": true,
+                "expected_rust_attempts": 351,
+                "actual_nautilus_submissions": 351,
+                "adapter_rejections_excluded": 0
+              },
+              {
+                "field": "fills.quantity_price_commission",
+                "passed": true,
+                "expected_fill_count": 351,
+                "actual_fill_count": 351
+              },
+              {
+                "field": "daily.cash_nav",
+                "passed": true,
+                "session_count": 252
+              },
+              {
+                "field": "daily.holdings",
+                "passed": true,
+                "session_count": 252
+              },
+              {
+                "field": "nautilus.account_cash_positions",
+                "passed": true,
+                "snapshot_count": 252
+              },
+              {
+                "field": "summary.costs",
+                "passed": true
+              },
+              {
+                "field": "rust_b3_registered_stress_checksum",
+                "passed": true,
+                "expected": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+                "actual": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342"
+              }
+            ],
+            "mismatch_diagnostics": {
+              "orders": {
+                "expected_only_count": 0,
+                "actual_only_count": 0,
+                "expected_only_examples": [],
+                "actual_only_examples": []
+              },
+              "fills": {
+                "expected_only_count": 0,
+                "actual_only_count": 0,
+                "expected_only_examples": [],
+                "actual_only_examples": []
+              },
+              "daily_ledger_first_mismatches": [],
+              "daily_ledger_mismatch_count": 0,
+              "summary_costs": {
+                "commission": {
+                  "expected": 35100.0,
+                  "actual": 35100.0,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "tax": {
+                  "expected": 0.0,
+                  "actual": 0.0,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "slippage_cost": {
+                  "expected": 3589.999999999825,
+                  "actual": 3589.999999999796,
+                  "delta_actual_minus_expected": -2.9103830456733704e-11
+                },
+                "total_cost": {
+                  "expected": 38689.999999999825,
+                  "actual": 38689.999999999796,
+                  "delta_actual_minus_expected": -2.9103830456733704e-11
+                }
+              },
+              "halt_attribution": [
+                {
+                  "date": "2025-07-02",
+                  "symbol": "ETF002",
+                  "trade_status": "HALTED",
+                  "adr_0012_scope": "ADR 0012 excludes native Nautilus order lifecycle only; all project attempts, fills and account fields remain compared",
+                  "rust_attempt_count": 0,
+                  "nautilus_project_order_count": 0,
+                  "rust_fill_count": 0,
+                  "nautilus_fill_count": 0,
+                  "rust_attempts": [],
+                  "nautilus_project_orders": [],
+                  "rust_fills": [],
+                  "nautilus_fills": []
+                }
+              ]
+            }
+          },
+          {
+            "attempt": 2,
+            "status": "passed",
+            "nautilus_checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+            "failure_fields": [],
+            "checks": [
+              {
+                "field": "orders.adapter_project_contract",
+                "passed": true,
+                "expected_order_events": 351,
+                "actual_adapter_order_events": 351,
+                "project_order_fields": [
+                  "decision_date",
+                  "attempt_date",
+                  "symbol",
+                  "side",
+                  "quantity",
+                  "reason"
+                ]
+              },
+              {
+                "field": "orders.nautilus_native_lifecycle",
+                "passed": true,
+                "expected_rust_attempts": 351,
+                "actual_nautilus_submissions": 351,
+                "adapter_rejections_excluded": 0
+              },
+              {
+                "field": "fills.quantity_price_commission",
+                "passed": true,
+                "expected_fill_count": 351,
+                "actual_fill_count": 351
+              },
+              {
+                "field": "daily.cash_nav",
+                "passed": true,
+                "session_count": 252
+              },
+              {
+                "field": "daily.holdings",
+                "passed": true,
+                "session_count": 252
+              },
+              {
+                "field": "nautilus.account_cash_positions",
+                "passed": true,
+                "snapshot_count": 252
+              },
+              {
+                "field": "summary.costs",
+                "passed": true
+              },
+              {
+                "field": "rust_b3_registered_stress_checksum",
+                "passed": true,
+                "expected": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+                "actual": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342"
+              }
+            ],
+            "mismatch_diagnostics": {
+              "orders": {
+                "expected_only_count": 0,
+                "actual_only_count": 0,
+                "expected_only_examples": [],
+                "actual_only_examples": []
+              },
+              "fills": {
+                "expected_only_count": 0,
+                "actual_only_count": 0,
+                "expected_only_examples": [],
+                "actual_only_examples": []
+              },
+              "daily_ledger_first_mismatches": [],
+              "daily_ledger_mismatch_count": 0,
+              "summary_costs": {
+                "commission": {
+                  "expected": 35100.0,
+                  "actual": 35100.0,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "tax": {
+                  "expected": 0.0,
+                  "actual": 0.0,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "slippage_cost": {
+                  "expected": 3589.999999999825,
+                  "actual": 3589.999999999796,
+                  "delta_actual_minus_expected": -2.9103830456733704e-11
+                },
+                "total_cost": {
+                  "expected": 38689.999999999825,
+                  "actual": 38689.999999999796,
+                  "delta_actual_minus_expected": -2.9103830456733704e-11
+                }
+              },
+              "halt_attribution": [
+                {
+                  "date": "2025-07-02",
+                  "symbol": "ETF002",
+                  "trade_status": "HALTED",
+                  "adr_0012_scope": "ADR 0012 excludes native Nautilus order lifecycle only; all project attempts, fills and account fields remain compared",
+                  "rust_attempt_count": 0,
+                  "nautilus_project_order_count": 0,
+                  "rust_fill_count": 0,
+                  "nautilus_fill_count": 0,
+                  "rust_attempts": [],
+                  "nautilus_project_orders": [],
+                  "rust_fills": [],
+                  "nautilus_fills": []
+                }
+              ]
+            }
+          }
+        ],
+        "checks": [
+          {
+            "field": "orders.adapter_project_contract",
+            "passed": true,
+            "expected_order_events": 351,
+            "actual_adapter_order_events": 351,
+            "project_order_fields": [
+              "decision_date",
+              "attempt_date",
+              "symbol",
+              "side",
+              "quantity",
+              "reason"
+            ]
+          },
+          {
+            "field": "orders.nautilus_native_lifecycle",
+            "passed": true,
+            "expected_rust_attempts": 351,
+            "actual_nautilus_submissions": 351,
+            "adapter_rejections_excluded": 0
+          },
+          {
+            "field": "fills.quantity_price_commission",
+            "passed": true,
+            "expected_fill_count": 351,
+            "actual_fill_count": 351
+          },
+          {
+            "field": "daily.cash_nav",
+            "passed": true,
+            "session_count": 252
+          },
+          {
+            "field": "daily.holdings",
+            "passed": true,
+            "session_count": 252
+          },
+          {
+            "field": "nautilus.account_cash_positions",
+            "passed": true,
+            "snapshot_count": 252
+          },
+          {
+            "field": "summary.costs",
+            "passed": true
+          },
+          {
+            "field": "rust_b3_registered_stress_checksum",
+            "passed": true,
+            "expected": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+            "actual": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342"
+          }
+        ]
+      },
+      "measurements": {
+        "status": "passed",
+        "serial": {
+          "rust": {
+            "build_profile": "release",
+            "dataset_content_sha256": "2ae75e889e3d65a28974f3f467794532621b34c6b58c31c6f37bc75392358dff",
+            "dataset_version": "poc0.b3.s2-scale-64x252.v1",
+            "golden_preflight": "external_passed",
+            "input_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
+            "instrument_count": 64,
+            "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+            "measurement_wall_ns": 381085417,
+            "median_ns": 19105375,
+            "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+            "mode": "serial",
+            "p95_ns": 19483875,
+            "parallel_runs_per_second": null,
+            "peak_rss_bytes": 178733056,
+            "raw_samples_ns": [
+              18814417,
+              18788250,
+              19243292,
+              19118792,
+              19483875,
+              19336917,
+              18933833,
+              18584792,
+              19407416,
+              19900417,
+              19390959,
+              19048250,
+              19105375,
+              18490500,
+              19048333,
+              19261666,
+              19275959,
+              18661375,
+              18460792,
+              18647208
+            ],
+            "run_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+            "runs": 20,
+            "runs_per_second": 52.481672370055556,
+            "secondary_boundary_median_ns": 91881500,
+            "secondary_boundary_p95_ns": 93514792,
+            "secondary_boundary_samples_ns": [
+              93443625,
+              91881500,
+              91707792,
+              91984292,
+              91737833,
+              91726541,
+              91748583,
+              91777250,
+              92187209,
+              91404875,
+              91675000,
+              92401958,
+              95068333,
+              91735875,
+              93514792,
+              92643000,
+              92159917,
+              91526916,
+              91852875,
+              92447875
+            ],
+            "serial_runs_per_second": 52.481672370055556,
+            "session_count": 252,
+            "status": "passed",
+            "strategy": "s2",
+            "synthetic_quote_events_per_run": 32254,
+            "threads": 1,
+            "warmup_runs": 2,
+            "warmup_runs_per_worker": 2,
+            "workers": 1,
+            "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+            "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.rust.serial.0.json"
+          },
+          "nautilus": {
+            "status": "passed",
+            "workers": 1,
+            "warmup_runs": 2,
+            "warmup_runs_per_worker": 2,
+            "runs": 20,
+            "raw_samples_ns": [
+              261921917,
+              260124292,
+              257131583,
+              256506666,
+              257745875,
+              257499208,
+              258821208,
+              256819542,
+              256406750,
+              258032750,
+              257169958,
+              286308125,
+              563068625,
+              261670417,
+              262963042,
+              264454375,
+              262193917,
+              261106709,
+              265253666,
+              261665750
+            ],
+            "secondary_boundary_samples_ns": [
+              {
+                "run_index": 0,
+                "end_to_end_ns": 448472250,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 1,
+                "end_to_end_ns": 451515833,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 2,
+                "end_to_end_ns": 451935000,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 3,
+                "end_to_end_ns": 456001000,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 4,
+                "end_to_end_ns": 463281791,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 5,
+                "end_to_end_ns": 450450167,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 6,
+                "end_to_end_ns": 450647500,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 7,
+                "end_to_end_ns": 454792167,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 8,
+                "end_to_end_ns": 450499584,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 9,
+                "end_to_end_ns": 465419875,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 10,
+                "end_to_end_ns": 463130083,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 11,
+                "end_to_end_ns": 462365375,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 12,
+                "end_to_end_ns": 454813750,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 13,
+                "end_to_end_ns": 452041083,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 14,
+                "end_to_end_ns": 454953000,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 15,
+                "end_to_end_ns": 484363584,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 16,
+                "end_to_end_ns": 455934208,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 17,
+                "end_to_end_ns": 455215792,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 18,
+                "end_to_end_ns": 455552208,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 19,
+                "end_to_end_ns": 459836833,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              }
+            ],
+            "secondary_boundary_median_ns": 455084396.0,
+            "secondary_boundary_p95_ns": 465419875,
+            "checksums_sha256": [
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+            ],
+            "median_ns": 260615500.5,
+            "p95_ns": 286308125,
+            "peak_rss_bytes": 158007296,
+            "engine_mode": "cached_conversion_new_engine",
+            "engine_mode_reason": "reset parity untested (ticket 07); exploratory fallback, not selected by ADR 0013 evidence",
+            "conversion_cached_per_worker": true,
+            "measurement_scope": "single worker; conversion and two warmups excluded; factor/signal, new engine initialization, replay and projection included",
+            "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.nautilus.serial.0.json"
+          }
+        },
+        "parallel_groups": [
+          {
+            "group": 1,
+            "order": [
+              "rust",
+              "nautilus"
+            ],
+            "runs": {
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "2ae75e889e3d65a28974f3f467794532621b34c6b58c31c6f37bc75392358dff",
+                "dataset_version": "poc0.b3.s2-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 96949542,
+                "median_ns": 32396917,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 32871375,
+                "parallel_runs_per_second": 61.887863276342244,
+                "peak_rss_bytes": 90685440,
+                "raw_samples_ns": [
+                  32871208,
+                  31627958,
+                  32396917,
+                  32871375,
+                  31695583,
+                  32296541
+                ],
+                "run_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+                "runs": 6,
+                "runs_per_second": 61.887863276342244,
+                "secondary_boundary_median_ns": 97074000,
+                "secondary_boundary_p95_ns": 98989167,
+                "secondary_boundary_samples_ns": [
+                  96821500,
+                  95902875,
+                  98129416,
+                  97074000,
+                  98989167,
+                  96197583
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s2",
+                "synthetic_quote_events_per_run": 32254,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.rust.parallel.1.json"
+              },
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  280572542,
+                  272940792,
+                  258550208,
+                  275904875,
+                  270732166,
+                  261040708
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 451615250,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 453277834,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 480821125,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 483168000,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 514248458,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 514899541,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  }
+                ],
+                "secondary_boundary_median_ns": 481994562.5,
+                "secondary_boundary_p95_ns": 514899541,
+                "checksums_sha256": [
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                ],
+                "median_ns": 271836479.0,
+                "p95_ns": 280572542,
+                "parallel_wall_ns": 814477417,
+                "parallel_runs_per_second": 7.366686754925705,
+                "peak_rss_by_worker_bytes": {
+                  "98736": 148209664,
+                  "98741": 148209664
+                },
+                "peak_rss_sum_upper_bound_bytes": 296419328,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "reset parity untested (ticket 07); exploratory fallback, not selected by ADR 0013 evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.nautilus.parallel.1.json"
+              }
+            }
+          },
+          {
+            "group": 2,
+            "order": [
+              "nautilus",
+              "rust"
+            ],
+            "runs": {
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  258092625,
+                  260080000,
+                  408753709,
+                  258108875,
+                  261567458,
+                  408671542
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 556879042,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 559447000,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 526325084,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 521847958,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 565201166,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 564864459,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  }
+                ],
+                "secondary_boundary_median_ns": 558163021.0,
+                "secondary_boundary_p95_ns": 565201166,
+                "checksums_sha256": [
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                ],
+                "median_ns": 260823729.0,
+                "p95_ns": 408753709,
+                "parallel_wall_ns": 930316542,
+                "parallel_runs_per_second": 6.449417729476425,
+                "peak_rss_by_worker_bytes": {
+                  "98770": 150372352,
+                  "98771": 152371200
+                },
+                "peak_rss_sum_upper_bound_bytes": 302743552,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "reset parity untested (ticket 07); exploratory fallback, not selected by ADR 0013 evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.nautilus.parallel.2.json"
+              },
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "2ae75e889e3d65a28974f3f467794532621b34c6b58c31c6f37bc75392358dff",
+                "dataset_version": "poc0.b3.s2-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 96617000,
+                "median_ns": 32159792,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 32663541,
+                "parallel_runs_per_second": 62.100872517258864,
+                "peak_rss_bytes": 89554944,
+                "raw_samples_ns": [
+                  31721583,
+                  32663541,
+                  32159792,
+                  31747250,
+                  32622084,
+                  32143167
+                ],
+                "run_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+                "runs": 6,
+                "runs_per_second": 62.100872517258864,
+                "secondary_boundary_median_ns": 96465416,
+                "secondary_boundary_p95_ns": 97580416,
+                "secondary_boundary_samples_ns": [
+                  95733417,
+                  96263625,
+                  96465416,
+                  96134208,
+                  97580416,
+                  97293333
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s2",
+                "synthetic_quote_events_per_run": 32254,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.rust.parallel.2.json"
+              }
+            }
+          },
+          {
+            "group": 3,
+            "order": [
+              "rust",
+              "nautilus"
+            ],
+            "runs": {
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "2ae75e889e3d65a28974f3f467794532621b34c6b58c31c6f37bc75392358dff",
+                "dataset_version": "poc0.b3.s2-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 97037625,
+                "median_ns": 32470541,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 33039625,
+                "parallel_runs_per_second": 61.83168642060232,
+                "peak_rss_bytes": 88768512,
+                "raw_samples_ns": [
+                  33039625,
+                  32357708,
+                  31526292,
+                  32914416,
+                  32470541,
+                  31603625
+                ],
+                "run_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+                "runs": 6,
+                "runs_per_second": 61.83168642060232,
+                "secondary_boundary_median_ns": 95654959,
+                "secondary_boundary_p95_ns": 97706667,
+                "secondary_boundary_samples_ns": [
+                  97013042,
+                  94739250,
+                  94441209,
+                  95351958,
+                  97706667,
+                  95654959
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s2",
+                "synthetic_quote_events_per_run": 32254,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.rust.parallel.3.json"
+              },
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  309756208,
+                  347530917,
+                  290458208,
+                  309315875,
+                  347294750,
+                  290885000
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 495174375,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 495507958,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 515895208,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 515292750,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 511261042,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 512924500,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  }
+                ],
+                "secondary_boundary_median_ns": 512092771.0,
+                "secondary_boundary_p95_ns": 515895208,
+                "checksums_sha256": [
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                ],
+                "median_ns": 309536041.5,
+                "p95_ns": 347530917,
+                "parallel_wall_ns": 949670250,
+                "parallel_runs_per_second": 6.317982478655091,
+                "peak_rss_by_worker_bytes": {
+                  "98835": 148111360,
+                  "98838": 148897792
+                },
+                "peak_rss_sum_upper_bound_bytes": 297009152,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "reset parity untested (ticket 07); exploratory fallback, not selected by ADR 0013 evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.nautilus.parallel.3.json"
+              }
+            }
+          },
+          {
+            "group": 4,
+            "order": [
+              "nautilus",
+              "rust"
+            ],
+            "runs": {
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  338216416,
+                  290624541,
+                  264172959,
+                  338446875,
+                  289705625,
+                  263734000
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 649494917,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 645576250,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 511384625,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 513082125,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 507492584,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 505738500,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  }
+                ],
+                "secondary_boundary_median_ns": 512233375.0,
+                "secondary_boundary_p95_ns": 649494917,
+                "checksums_sha256": [
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                ],
+                "median_ns": 290165083.0,
+                "p95_ns": 338446875,
+                "parallel_wall_ns": 894919209,
+                "parallel_runs_per_second": 6.704515826299578,
+                "peak_rss_by_worker_bytes": {
+                  "98872": 152240128,
+                  "98873": 147734528
+                },
+                "peak_rss_sum_upper_bound_bytes": 299974656,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "reset parity untested (ticket 07); exploratory fallback, not selected by ADR 0013 evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.nautilus.parallel.4.json"
+              },
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "2ae75e889e3d65a28974f3f467794532621b34c6b58c31c6f37bc75392358dff",
+                "dataset_version": "poc0.b3.s2-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 88800166,
+                "median_ns": 29502167,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 30422084,
+                "parallel_runs_per_second": 67.5674412590625,
+                "peak_rss_bytes": 89718784,
+                "raw_samples_ns": [
+                  30422084,
+                  28901583,
+                  29405125,
+                  30402542,
+                  28846334,
+                  29502167
+                ],
+                "run_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+                "runs": 6,
+                "runs_per_second": 67.5674412590625,
+                "secondary_boundary_median_ns": 94495417,
+                "secondary_boundary_p95_ns": 95949083,
+                "secondary_boundary_samples_ns": [
+                  95949083,
+                  94495417,
+                  93678750,
+                  94036625,
+                  94197458,
+                  94654209
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s2",
+                "synthetic_quote_events_per_run": 32254,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.rust.parallel.4.json"
+              }
+            }
+          },
+          {
+            "group": 5,
+            "order": [
+              "rust",
+              "nautilus"
+            ],
+            "runs": {
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "2ae75e889e3d65a28974f3f467794532621b34c6b58c31c6f37bc75392358dff",
+                "dataset_version": "poc0.b3.s2-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 100352459,
+                "median_ns": 33007292,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 33884084,
+                "parallel_runs_per_second": 59.78926734620424,
+                "peak_rss_bytes": 88473600,
+                "raw_samples_ns": [
+                  33884084,
+                  32749250,
+                  33593542,
+                  32945292,
+                  33007292,
+                  32964083
+                ],
+                "run_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+                "runs": 6,
+                "runs_per_second": 59.78926734620424,
+                "secondary_boundary_median_ns": 94180000,
+                "secondary_boundary_p95_ns": 95923083,
+                "secondary_boundary_samples_ns": [
+                  95923083,
+                  94759541,
+                  93799917,
+                  93620625,
+                  94033291,
+                  94180000
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s2",
+                "synthetic_quote_events_per_run": 32254,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.rust.parallel.5.json"
+              },
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  267609042,
+                  264211708,
+                  285498625,
+                  267639792,
+                  263935917,
+                  283001584
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 607782916,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 606899333,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 534679584,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 538909208,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 742617250,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 738523083,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  }
+                ],
+                "secondary_boundary_median_ns": 607341124.5,
+                "secondary_boundary_p95_ns": 742617250,
+                "checksums_sha256": [
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                ],
+                "median_ns": 267624417.0,
+                "p95_ns": 285498625,
+                "parallel_wall_ns": 819297667,
+                "parallel_runs_per_second": 7.323345643067722,
+                "peak_rss_by_worker_bytes": {
+                  "98932": 151666688,
+                  "98929": 149012480
+                },
+                "peak_rss_sum_upper_bound_bytes": 300679168,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "reset parity untested (ticket 07); exploratory fallback, not selected by ADR 0013 evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.nautilus.parallel.5.json"
+              }
+            }
+          }
+        ],
+        "rust_parallel_runs_per_second_median": 61.887863276342244,
+        "nautilus_parallel_runs_per_second_median": 6.704515826299578,
+        "rss": {
+          "rust_process_peak_bytes": 90685440,
+          "nautilus_worker_peak_bytes": [
+            148209664,
+            148209664,
+            150372352,
+            152371200,
+            148111360,
+            148897792,
+            152240128,
+            147734528,
+            151666688,
+            149012480
+          ],
+          "nautilus_peak_rss_sum_upper_bound_bytes": 302743552
+        },
+        "decision": {
+          "status": "adopt",
+          "reason": "all registered speed and RSS gates passed",
+          "evidence_level": "exploratory"
+        }
+      }
+    },
+    "s3": {
+      "dataset_version": "poc0.b3.s3-scale-64x252.v1",
+      "dataset_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
+      "dataset_content_sha256": "d5384e1e27162713df2cd020dcdd655d5838f1d417d3848ac0eaca8f0a002e5a",
+      "dimensions": {
+        "instruments": 64,
+        "sessions": 252
+      },
+      "strategy_parameters": "MA20/60, fixed rising-symbol fixture",
+      "registered_b3_stress_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+      "correctness": {
+        "status": "passed",
+        "basis": "two independent Nautilus projection comparisons against Rust; pass requires matching checksums, failure requires identical checksums and failure fields",
+        "rust_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+        "nautilus_checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+        "nautilus_serialization_checksum_note": "informational only; Python canonical JSON and Rust struct-field serialization differ",
+        "repeatability": {
+          "attempt_count": 2,
+          "status": "passed",
+          "checksums_identical": true
+        },
+        "attempts": [
+          {
+            "attempt": 1,
+            "status": "passed",
+            "nautilus_checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+            "failure_fields": [],
+            "checks": [
+              {
+                "field": "orders.adapter_project_contract",
+                "passed": true,
+                "expected_order_events": 2,
+                "actual_adapter_order_events": 2,
+                "project_order_fields": [
+                  "decision_date",
+                  "attempt_date",
+                  "symbol",
+                  "side",
+                  "quantity",
+                  "reason"
+                ]
+              },
+              {
+                "field": "orders.nautilus_native_lifecycle",
+                "passed": true,
+                "expected_rust_attempts": 2,
+                "actual_nautilus_submissions": 2,
+                "adapter_rejections_excluded": 0
+              },
+              {
+                "field": "fills.quantity_price_commission",
+                "passed": true,
+                "expected_fill_count": 2,
+                "actual_fill_count": 2
+              },
+              {
+                "field": "daily.cash_nav",
+                "passed": true,
+                "session_count": 252
+              },
+              {
+                "field": "daily.holdings",
+                "passed": true,
+                "session_count": 252
+              },
+              {
+                "field": "nautilus.account_cash_positions",
+                "passed": true,
+                "snapshot_count": 252
+              },
+              {
+                "field": "summary.costs",
+                "passed": true
+              },
+              {
+                "field": "rust_b3_registered_stress_checksum",
+                "passed": true,
+                "expected": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+                "actual": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70"
+              }
+            ],
+            "mismatch_diagnostics": {
+              "orders": {
+                "expected_only_count": 0,
+                "actual_only_count": 0,
+                "expected_only_examples": [],
+                "actual_only_examples": []
+              },
+              "fills": {
+                "expected_only_count": 0,
+                "actual_only_count": 0,
+                "expected_only_examples": [],
+                "actual_only_examples": []
+              },
+              "daily_ledger_first_mismatches": [],
+              "daily_ledger_mismatch_count": 0,
+              "summary_costs": {
+                "commission": {
+                  "expected": 200.0,
+                  "actual": 200.0,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "tax": {
+                  "expected": 0.0,
+                  "actual": 0.0,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "slippage_cost": {
+                  "expected": 179.99999999998977,
+                  "actual": 179.99999999998977,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "total_cost": {
+                  "expected": 379.99999999998977,
+                  "actual": 379.99999999998977,
+                  "delta_actual_minus_expected": 0.0
+                }
+              },
+              "halt_attribution": []
+            }
+          },
+          {
+            "attempt": 2,
+            "status": "passed",
+            "nautilus_checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+            "failure_fields": [],
+            "checks": [
+              {
+                "field": "orders.adapter_project_contract",
+                "passed": true,
+                "expected_order_events": 2,
+                "actual_adapter_order_events": 2,
+                "project_order_fields": [
+                  "decision_date",
+                  "attempt_date",
+                  "symbol",
+                  "side",
+                  "quantity",
+                  "reason"
+                ]
+              },
+              {
+                "field": "orders.nautilus_native_lifecycle",
+                "passed": true,
+                "expected_rust_attempts": 2,
+                "actual_nautilus_submissions": 2,
+                "adapter_rejections_excluded": 0
+              },
+              {
+                "field": "fills.quantity_price_commission",
+                "passed": true,
+                "expected_fill_count": 2,
+                "actual_fill_count": 2
+              },
+              {
+                "field": "daily.cash_nav",
+                "passed": true,
+                "session_count": 252
+              },
+              {
+                "field": "daily.holdings",
+                "passed": true,
+                "session_count": 252
+              },
+              {
+                "field": "nautilus.account_cash_positions",
+                "passed": true,
+                "snapshot_count": 252
+              },
+              {
+                "field": "summary.costs",
+                "passed": true
+              },
+              {
+                "field": "rust_b3_registered_stress_checksum",
+                "passed": true,
+                "expected": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+                "actual": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70"
+              }
+            ],
+            "mismatch_diagnostics": {
+              "orders": {
+                "expected_only_count": 0,
+                "actual_only_count": 0,
+                "expected_only_examples": [],
+                "actual_only_examples": []
+              },
+              "fills": {
+                "expected_only_count": 0,
+                "actual_only_count": 0,
+                "expected_only_examples": [],
+                "actual_only_examples": []
+              },
+              "daily_ledger_first_mismatches": [],
+              "daily_ledger_mismatch_count": 0,
+              "summary_costs": {
+                "commission": {
+                  "expected": 200.0,
+                  "actual": 200.0,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "tax": {
+                  "expected": 0.0,
+                  "actual": 0.0,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "slippage_cost": {
+                  "expected": 179.99999999998977,
+                  "actual": 179.99999999998977,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "total_cost": {
+                  "expected": 379.99999999998977,
+                  "actual": 379.99999999998977,
+                  "delta_actual_minus_expected": 0.0
+                }
+              },
+              "halt_attribution": []
+            }
+          }
+        ],
+        "checks": [
+          {
+            "field": "orders.adapter_project_contract",
+            "passed": true,
+            "expected_order_events": 2,
+            "actual_adapter_order_events": 2,
+            "project_order_fields": [
+              "decision_date",
+              "attempt_date",
+              "symbol",
+              "side",
+              "quantity",
+              "reason"
+            ]
+          },
+          {
+            "field": "orders.nautilus_native_lifecycle",
+            "passed": true,
+            "expected_rust_attempts": 2,
+            "actual_nautilus_submissions": 2,
+            "adapter_rejections_excluded": 0
+          },
+          {
+            "field": "fills.quantity_price_commission",
+            "passed": true,
+            "expected_fill_count": 2,
+            "actual_fill_count": 2
+          },
+          {
+            "field": "daily.cash_nav",
+            "passed": true,
+            "session_count": 252
+          },
+          {
+            "field": "daily.holdings",
+            "passed": true,
+            "session_count": 252
+          },
+          {
+            "field": "nautilus.account_cash_positions",
+            "passed": true,
+            "snapshot_count": 252
+          },
+          {
+            "field": "summary.costs",
+            "passed": true
+          },
+          {
+            "field": "rust_b3_registered_stress_checksum",
+            "passed": true,
+            "expected": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+            "actual": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70"
+          }
+        ]
+      },
+      "measurements": {
+        "status": "passed",
+        "serial": {
+          "rust": {
+            "build_profile": "release",
+            "dataset_content_sha256": "d5384e1e27162713df2cd020dcdd655d5838f1d417d3848ac0eaca8f0a002e5a",
+            "dataset_version": "poc0.b3.s3-scale-64x252.v1",
+            "golden_preflight": "external_passed",
+            "input_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
+            "instrument_count": 64,
+            "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+            "measurement_wall_ns": 80264167,
+            "median_ns": 4008541,
+            "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+            "mode": "serial",
+            "p95_ns": 4053042,
+            "parallel_runs_per_second": null,
+            "peak_rss_bytes": 174080000,
+            "raw_samples_ns": [
+              3932167,
+              4051042,
+              3962500,
+              4008541,
+              3958167,
+              4032084,
+              3956042,
+              4021541,
+              3985167,
+              4018333,
+              3994667,
+              4026584,
+              3980459,
+              4031667,
+              3976459,
+              4053042,
+              3970500,
+              4047250,
+              4190875,
+              4000458
+            ],
+            "run_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+            "runs": 20,
+            "runs_per_second": 249.17719509877926,
+            "secondary_boundary_median_ns": 75806666,
+            "secondary_boundary_p95_ns": 78398250,
+            "secondary_boundary_samples_ns": [
+              79534667,
+              75611208,
+              74961084,
+              75550834,
+              77330125,
+              78398250,
+              77132375,
+              75379917,
+              75467208,
+              76221750,
+              75806666,
+              76023292,
+              75274709,
+              75369542,
+              75768625,
+              75696459,
+              75830750,
+              75158250,
+              76256958,
+              78029958
+            ],
+            "serial_runs_per_second": 249.17719509877926,
+            "session_count": 252,
+            "status": "passed",
+            "strategy": "s3",
+            "synthetic_quote_events_per_run": 32256,
+            "threads": 1,
+            "warmup_runs": 2,
+            "warmup_runs_per_worker": 2,
+            "workers": 1,
+            "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+            "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.rust.serial.0.json"
+          },
+          "nautilus": {
+            "status": "passed",
+            "workers": 1,
+            "warmup_runs": 2,
+            "warmup_runs_per_worker": 2,
+            "runs": 20,
+            "raw_samples_ns": [
+              90141083,
+              98024208,
+              90943750,
+              92209958,
+              90079584,
+              90751458,
+              88816583,
+              89976458,
+              97996041,
+              98100500,
+              92160292,
+              91143959,
+              92070917,
+              92669583,
+              95817875,
+              92741792,
+              92262709,
+              93867208,
+              95125833,
+              97525250
+            ],
+            "secondary_boundary_samples_ns": [
+              {
+                "run_index": 0,
+                "end_to_end_ns": 234956875,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 1,
+                "end_to_end_ns": 227313333,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 2,
+                "end_to_end_ns": 224114375,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 3,
+                "end_to_end_ns": 222375000,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 4,
+                "end_to_end_ns": 225963875,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 5,
+                "end_to_end_ns": 230035834,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 6,
+                "end_to_end_ns": 230753125,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 7,
+                "end_to_end_ns": 224395792,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 8,
+                "end_to_end_ns": 230831833,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 9,
+                "end_to_end_ns": 225010500,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 10,
+                "end_to_end_ns": 226106417,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 11,
+                "end_to_end_ns": 494871333,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 12,
+                "end_to_end_ns": 245174125,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 13,
+                "end_to_end_ns": 222142083,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 14,
+                "end_to_end_ns": 220113916,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 15,
+                "end_to_end_ns": 220515875,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 16,
+                "end_to_end_ns": 225202125,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 17,
+                "end_to_end_ns": 223426583,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 18,
+                "end_to_end_ns": 225266542,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 19,
+                "end_to_end_ns": 225760833,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              }
+            ],
+            "secondary_boundary_median_ns": 225513687.5,
+            "secondary_boundary_p95_ns": 245174125,
+            "checksums_sha256": [
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+            ],
+            "median_ns": 92236333.5,
+            "p95_ns": 98024208,
+            "peak_rss_bytes": 136790016,
+            "engine_mode": "cached_conversion_new_engine",
+            "engine_mode_reason": "reset parity untested (ticket 07); exploratory fallback, not selected by ADR 0013 evidence",
+            "conversion_cached_per_worker": true,
+            "measurement_scope": "single worker; conversion and two warmups excluded; factor/signal, new engine initialization, replay and projection included",
+            "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.nautilus.serial.0.json"
+          }
+        },
+        "parallel_groups": [
+          {
+            "group": 1,
+            "order": [
+              "rust",
+              "nautilus"
+            ],
+            "runs": {
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "d5384e1e27162713df2cd020dcdd655d5838f1d417d3848ac0eaca8f0a002e5a",
+                "dataset_version": "poc0.b3.s3-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 17812125,
+                "median_ns": 5942167,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 5992042,
+                "parallel_runs_per_second": 336.8491968251963,
+                "peak_rss_bytes": 86196224,
+                "raw_samples_ns": [
+                  5983792,
+                  5939875,
+                  5788375,
+                  5942167,
+                  5992042,
+                  5839625
+                ],
+                "run_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+                "runs": 6,
+                "runs_per_second": 336.8491968251963,
+                "secondary_boundary_median_ns": 75965500,
+                "secondary_boundary_p95_ns": 76725583,
+                "secondary_boundary_samples_ns": [
+                  76276667,
+                  75469708,
+                  75965500,
+                  75940667,
+                  75522500,
+                  76725583
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s3",
+                "synthetic_quote_events_per_run": 32256,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.rust.parallel.1.json"
+              },
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  95371375,
+                  84215250,
+                  89943917,
+                  95244833,
+                  84798250,
+                  88764625
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 232732833,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 234217459,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 219086208,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 219222792,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 219523708,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 219076625,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  }
+                ],
+                "secondary_boundary_median_ns": 219373250.0,
+                "secondary_boundary_p95_ns": 234217459,
+                "checksums_sha256": [
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                ],
+                "median_ns": 89354271.0,
+                "p95_ns": 95371375,
+                "parallel_wall_ns": 271359959,
+                "parallel_runs_per_second": 22.110852397350193,
+                "peak_rss_by_worker_bytes": {
+                  "99044": 116490240,
+                  "99045": 116670464
+                },
+                "peak_rss_sum_upper_bound_bytes": 233160704,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "reset parity untested (ticket 07); exploratory fallback, not selected by ADR 0013 evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.nautilus.parallel.1.json"
+              }
+            }
+          },
+          {
+            "group": 2,
+            "order": [
+              "nautilus",
+              "rust"
+            ],
+            "runs": {
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  95052500,
+                  87613000,
+                  85275791,
+                  89961417,
+                  88270916,
+                  84672416
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 251531084,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 250508334,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 304874167,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 303218250,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 252520542,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 252801750,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  }
+                ],
+                "secondary_boundary_median_ns": 252661146.0,
+                "secondary_boundary_p95_ns": 304874167,
+                "checksums_sha256": [
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                ],
+                "median_ns": 87941958.0,
+                "p95_ns": 95052500,
+                "parallel_wall_ns": 269681292,
+                "parallel_runs_per_second": 22.24848433312905,
+                "peak_rss_by_worker_bytes": {
+                  "99067": 116752384,
+                  "99072": 116899840
+                },
+                "peak_rss_sum_upper_bound_bytes": 233652224,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "reset parity untested (ticket 07); exploratory fallback, not selected by ADR 0013 evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.nautilus.parallel.2.json"
+              },
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "d5384e1e27162713df2cd020dcdd655d5838f1d417d3848ac0eaca8f0a002e5a",
+                "dataset_version": "poc0.b3.s3-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 17301583,
+                "median_ns": 5747583,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 5790125,
+                "parallel_runs_per_second": 346.78907704572464,
+                "peak_rss_bytes": 86196224,
+                "raw_samples_ns": [
+                  5790125,
+                  5700709,
+                  5747583,
+                  5761083,
+                  5709208,
+                  5725291
+                ],
+                "run_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+                "runs": 6,
+                "runs_per_second": 346.78907704572464,
+                "secondary_boundary_median_ns": 76308500,
+                "secondary_boundary_p95_ns": 81814875,
+                "secondary_boundary_samples_ns": [
+                  76466250,
+                  75230500,
+                  75869917,
+                  81814875,
+                  75424833,
+                  76308500
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s3",
+                "synthetic_quote_events_per_run": 32256,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.rust.parallel.2.json"
+              }
+            }
+          },
+          {
+            "group": 3,
+            "order": [
+              "rust",
+              "nautilus"
+            ],
+            "runs": {
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "d5384e1e27162713df2cd020dcdd655d5838f1d417d3848ac0eaca8f0a002e5a",
+                "dataset_version": "poc0.b3.s3-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 18747709,
+                "median_ns": 6029667,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 6947708,
+                "parallel_runs_per_second": 320.03910451138324,
+                "peak_rss_bytes": 86228992,
+                "raw_samples_ns": [
+                  5972667,
+                  6947708,
+                  5769417,
+                  6029667,
+                  6865083,
+                  5689666
+                ],
+                "run_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+                "runs": 6,
+                "runs_per_second": 320.03910451138324,
+                "secondary_boundary_median_ns": 79623167,
+                "secondary_boundary_p95_ns": 158601041,
+                "secondary_boundary_samples_ns": [
+                  77846625,
+                  75289333,
+                  75144750,
+                  79623167,
+                  158601041,
+                  100264791
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s3",
+                "synthetic_quote_events_per_run": 32256,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.rust.parallel.3.json"
+              },
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  89415750,
+                  97039750,
+                  109618000,
+                  89416958,
+                  98438125,
+                  107775125
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 387475084,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 386615083,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 284348750,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 287388875,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 287501292,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 297290125,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  }
+                ],
+                "secondary_boundary_median_ns": 292395708.5,
+                "secondary_boundary_p95_ns": 387475084,
+                "checksums_sha256": [
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                ],
+                "median_ns": 97738937.5,
+                "p95_ns": 109618000,
+                "parallel_wall_ns": 297935167,
+                "parallel_runs_per_second": 20.138609551923086,
+                "peak_rss_by_worker_bytes": {
+                  "99116": 127975424,
+                  "99122": 116604928
+                },
+                "peak_rss_sum_upper_bound_bytes": 244580352,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "reset parity untested (ticket 07); exploratory fallback, not selected by ADR 0013 evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.nautilus.parallel.3.json"
+              }
+            }
+          },
+          {
+            "group": 4,
+            "order": [
+              "nautilus",
+              "rust"
+            ],
+            "runs": {
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  99053125,
+                  95023750,
+                  99662750,
+                  99778375,
+                  97699500,
+                  101649750
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 497212375,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 497206917,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 268577542,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 268132625,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 254190375,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 256383750,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  }
+                ],
+                "secondary_boundary_median_ns": 268355083.5,
+                "secondary_boundary_p95_ns": 497212375,
+                "checksums_sha256": [
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                ],
+                "median_ns": 99357937.5,
+                "p95_ns": 101649750,
+                "parallel_wall_ns": 300866666,
+                "parallel_runs_per_second": 19.94238869918544,
+                "peak_rss_by_worker_bytes": {
+                  "99144": 116899840,
+                  "99145": 126304256
+                },
+                "peak_rss_sum_upper_bound_bytes": 243204096,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "reset parity untested (ticket 07); exploratory fallback, not selected by ADR 0013 evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.nautilus.parallel.4.json"
+              },
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "d5384e1e27162713df2cd020dcdd655d5838f1d417d3848ac0eaca8f0a002e5a",
+                "dataset_version": "poc0.b3.s3-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 18024166,
+                "median_ns": 6105916,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 6156000,
+                "parallel_runs_per_second": 332.8864148277374,
+                "peak_rss_bytes": 88850432,
+                "raw_samples_ns": [
+                  6105916,
+                  6109292,
+                  5726250,
+                  6097667,
+                  6156000,
+                  5741458
+                ],
+                "run_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+                "runs": 6,
+                "runs_per_second": 332.8864148277374,
+                "secondary_boundary_median_ns": 80145333,
+                "secondary_boundary_p95_ns": 84077125,
+                "secondary_boundary_samples_ns": [
+                  80145333,
+                  79376709,
+                  81675917,
+                  84077125,
+                  79139500,
+                  76839750
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s3",
+                "synthetic_quote_events_per_run": 32256,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.rust.parallel.4.json"
+              }
+            }
+          },
+          {
+            "group": 5,
+            "order": [
+              "rust",
+              "nautilus"
+            ],
+            "runs": {
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "d5384e1e27162713df2cd020dcdd655d5838f1d417d3848ac0eaca8f0a002e5a",
+                "dataset_version": "poc0.b3.s3-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 17569292,
+                "median_ns": 5836958,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 6183917,
+                "parallel_runs_per_second": 341.5049394136087,
+                "peak_rss_bytes": 86441984,
+                "raw_samples_ns": [
+                  6183917,
+                  5628833,
+                  5564792,
+                  6080375,
+                  5836958,
+                  5608084
+                ],
+                "run_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+                "runs": 6,
+                "runs_per_second": 341.5049394136087,
+                "secondary_boundary_median_ns": 78128125,
+                "secondary_boundary_p95_ns": 85487792,
+                "secondary_boundary_samples_ns": [
+                  78128125,
+                  77862208,
+                  77528416,
+                  80860917,
+                  85487792,
+                  78060458
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s3",
+                "synthetic_quote_events_per_run": 32256,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.rust.parallel.5.json"
+              },
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  86246709,
+                  89020416,
+                  94088959,
+                  87398584,
+                  90688125,
+                  95046625
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 240992333,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 244708125,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 259528875,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 265075917,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 369031000,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 373458250,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  }
+                ],
+                "secondary_boundary_median_ns": 262302396.0,
+                "secondary_boundary_p95_ns": 373458250,
+                "checksums_sha256": [
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                ],
+                "median_ns": 89854270.5,
+                "p95_ns": 95046625,
+                "parallel_wall_ns": 274836541,
+                "parallel_runs_per_second": 21.831158179217514,
+                "peak_rss_by_worker_bytes": {
+                  "99189": 117997568,
+                  "99190": 116752384
+                },
+                "peak_rss_sum_upper_bound_bytes": 234749952,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "reset parity untested (ticket 07); exploratory fallback, not selected by ADR 0013 evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.nautilus.parallel.5.json"
+              }
+            }
+          }
+        ],
+        "rust_parallel_runs_per_second_median": 336.8491968251963,
+        "nautilus_parallel_runs_per_second_median": 21.831158179217514,
+        "rss": {
+          "rust_process_peak_bytes": 88850432,
+          "nautilus_worker_peak_bytes": [
+            116490240,
+            116670464,
+            116752384,
+            116899840,
+            127975424,
+            116604928,
+            116899840,
+            126304256,
+            117997568,
+            116752384
+          ],
+          "nautilus_peak_rss_sum_upper_bound_bytes": 244580352
+        },
+        "decision": {
+          "status": "adopt",
+          "reason": "all registered speed and RSS gates passed",
+          "evidence_level": "exploratory"
+        }
+      }
+    }
+  },
+  "decision": {
+    "status": "adopt",
+    "reason": "both 64x252 workloads applied registered latency, throughput, and RSS gates",
+    "per_load": {
+      "s2": {
+        "status": "adopt",
+        "reason": "all registered speed and RSS gates passed",
+        "evidence_level": "exploratory"
+      },
+      "s3": {
+        "status": "adopt",
+        "reason": "all registered speed and RSS gates passed",
+        "evidence_level": "exploratory"
+      }
+    }
+  },
+  "environment": {
+    "cpu": "Apple M1",
+    "logical_cpu_count": 8,
+    "memory_bytes": 17179869184,
+    "os": "macOS-26.2-arm64-arm-64bit",
+    "rustc_vv": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: aarch64-apple-darwin\nrelease: 1.98.1\nLLVM version: 22.1.8",
+    "python": "Python 3.12.2",
+    "nautilus_version": {
+      "version": "2.0.0rc5",
+      "error": null
+    },
+    "cargo_lock_sha256": "250f21792a3ded3c139747c74f96b673b37e57d2b5f550a29e480fea71f60041",
+    "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+    "git_revision": "b4263b6819a83ce40556457292c8f07efbdd41e1",
+    "dirty_worktree": true,
+    "dirty_paths": [
+      ".scratch/poc-0-b2-matched-remeasure/issues/04-robustness-64x252.md",
+      ".scratch/poc-0-b2-matched-remeasure/issues/08-s2-64x252-parity-diagnosis.md",
+      ".scratch/poc-0-benchmark/issues/09-b2-strategy-parity-and-throughput.md",
+      "HANDOFF.md",
+      "crates/quant-research/src/poc0_benchmark.rs",
+      "docs/STATUS.md",
+      "poc/poc0-benchmark/POC-0-SYNTHESIS.md",
+      "poc/poc0-benchmark/b2_robustness.py",
+      "poc/poc0-benchmark/nautilus_adapter.py",
+      "poc/poc0-benchmark/test_nautilus_adapter.py",
+      ".vscode/",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.nautilus.parallel.1.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.nautilus.parallel.2.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.nautilus.parallel.3.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.nautilus.parallel.4.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.nautilus.parallel.5.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.nautilus.serial.0.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.rust-preflight.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.rust.parallel.1.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.rust.parallel.2.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.rust.parallel.3.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.rust.parallel.4.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.rust.parallel.5.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s2.rust.serial.0.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.nautilus.parallel.1.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.nautilus.parallel.2.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.nautilus.parallel.3.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.nautilus.parallel.4.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.nautilus.parallel.5.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.nautilus.serial.0.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.rust-preflight.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.rust.parallel.1.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.rust.parallel.2.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.rust.parallel.3.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.rust.parallel.4.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.rust.parallel.5.json",
+      "poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.s3.rust.serial.0.json",
+      "poc/vendor/polars-io/.cargo-ok",
+      "poc/vendor/polars-io/.cargo_vcs_info.json",
+      "poc/vendor/polars-io/Cargo.lock",
+      "poc/vendor/polars-io/Cargo.toml.orig"
+    ],
+    "python_transitive_dependency_snapshot": {
+      "status": "known",
+      "count": 0,
+      "packages": [],
+      "method": "transitive distribution closure from nautilus_trader metadata; active environment markers applied"
+    },
+    "build": {
+      "record_path": "poc/poc0-benchmark/results/b2-robustness-release-build-2026-09-28.json",
+      "record_sha256": null,
+      "record": null,
+      "build_time_seconds": null,
+      "record_interval_seconds": null,
+      "target_increment_bytes": null,
+      "gate_minimum_free_bytes": 10737418240
+    }
+  },
+  "rss_baselines": {
+    "rust_empty_binary": {
+      "status": "measured",
+      "peak_rss_raw": 8699904,
+      "raw_unit": "bytes",
+      "peak_rss_bytes": 8699904,
+      "scope": "Rust binary --help startup only"
+    },
+    "python_import_nautilus": {
+      "status": "measured",
+      "peak_rss_raw": 50987008,
+      "raw_unit": "bytes",
+      "peak_rss_bytes": 50987008,
+      "imported_nautilus_version": "2.0.0rc5",
+      "scope": "Python process after importing Nautilus"
+    }
+  },
+  "decision_load_decision": {
+    "status": "unresolved",
+    "reason": "both S2 and S3 have exploratory fallback measurements; formal adoption remains unresolved until Nautilus reset parity is established",
+    "per_load": {
+      "s2": {
+        "status": "unresolved",
+        "reason": "fallback mode is exploratory because Nautilus reset parity has not been verified",
+        "evidence_level": "exploratory",
+        "preliminary_status": "adopt"
+      },
+      "s3": {
+        "status": "unresolved",
+        "reason": "fallback mode is exploratory because Nautilus reset parity has not been verified",
+        "evidence_level": "exploratory",
+        "preliminary_status": "adopt"
+      }
+    }
+  },
+  "combined_decision_mapping": {
+    "status": "unresolved",
+    "reason": "both S2 and S3 have exploratory fallback measurements; formal adoption remains unresolved until Nautilus reset parity is established",
+    "per_load": {
+      "s2": {
+        "status": "unresolved",
+        "reason": "fallback mode is exploratory because Nautilus reset parity has not been verified",
+        "evidence_level": "exploratory",
+        "preliminary_status": "adopt"
+      },
+      "s3": {
+        "status": "unresolved",
+        "reason": "fallback mode is exploratory because Nautilus reset parity has not been verified",
+        "evidence_level": "exploratory",
+        "preliminary_status": "adopt"
+      }
+    },
+    "robustness_status": "passed",
+    "robustness_decision": {
+      "status": "adopt",
+      "reason": "both 64x252 workloads applied registered latency, throughput, and RSS gates",
+      "per_load": {
+        "s2": {
+          "status": "adopt",
+          "reason": "all registered speed and RSS gates passed",
+          "evidence_level": "exploratory"
+        },
+        "s3": {
+          "status": "adopt",
+          "reason": "all registered speed and RSS gates passed",
+          "evidence_level": "exploratory"
+        }
+      }
+    }
+  }
+}

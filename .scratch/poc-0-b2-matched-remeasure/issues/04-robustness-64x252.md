@@ -6,6 +6,8 @@
 
 **Status:** resolved
 
+**票据 08 归因与重测（2026-09-28）：**首差是 Adapter 逐证券开盘 Quote 的顺序造成的同日卖出后无法买入；[手算缩减用例与证据](08-s2-64x252-parity-diagnosis.md)将其归因于 Adapter，按 ADR 0014 不构成 Fast Event `reject`。修正后两个固定负载 correctness 均通过，S2 订单/Fill 为 351/351，原 133/130 条双向差异全部消失。按原协议收集的[新报告](../../../poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.json)显示 S2/S3 数值门槛通过，但 reset parity 尚未验证，fallback 测量只属 exploratory；combined decision 保持 `unresolved`。下方描述及旧报告为修正前归档证据，不作为当前结论。
+
 **ADR 0014 修订（2026-09-28）：**本票按 ADR 0013 原映射把 S2 对拍失败判为 `reject`。该负载没有独立金标准，无法归因到哪一方；按 [ADR 0014](../../../docs/decisions/0014-b2-correctness-failure-attribution.md) 改为 `unresolved`（`attribution_required`），归因由 [票据 08](08-s2-64x252-parity-diagnosis.md) 给出。归档报告文件仍记 `reject`，不改写。
 
 - [x] Rust B2 CLI 按 Dataset Version 选择两份 64×252 stress fixture；Rust 账户投影 checksum 与 B3 已登记值、Dataset Content SHA-256 均一致。

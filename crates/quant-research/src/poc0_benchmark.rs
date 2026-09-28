@@ -3611,7 +3611,9 @@ pub fn run_nautilus_adapter(dataset: &Path, report: &Path, python: &Path) -> Res
 
 #[cfg(test)]
 mod soa_tests {
-    use super::soa_factor_score;
+    use super::{
+        DatasetInput, experiment_config, prepare_dataset, run_rotation_event, soa_factor_score,
+    };
     use crate::core::StrategyConfig;
 
     #[test]
@@ -3632,5 +3634,84 @@ mod soa_tests {
         assert!((score - 0.2).abs() < 1e-12);
         assert!(soa_factor_score(&close, &observed[..2], 1, &strategy).is_none());
         assert!(soa_factor_score(&close, &observed[..2], 2, &strategy).is_none());
+    }
+
+    #[test]
+    fn rotation_reinvests_exits_on_april_eighth_open() {
+        let mut fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../poc/poc0-benchmark/fixtures/b2-s2-scale-64x252-v1.json"
+        ))
+        .unwrap();
+        let symbols = [
+            "ETF003", "ETF007", "ETF012", "ETF025", "ETF054", "ETF038", "ETF041", "ETF046",
+            "ETF051", "ETF055",
+        ];
+        let last_session = fixture["calendar"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .position(|date| date == "2025-04-09")
+            .unwrap()
+            + 1;
+        fixture["calendar"]
+            .as_array_mut()
+            .unwrap()
+            .truncate(last_session);
+        fixture["instruments"]
+            .as_array_mut()
+            .unwrap()
+            .retain_mut(|item| {
+                if !symbols.contains(&item["symbol"].as_str().unwrap()) {
+                    return false;
+                }
+                item["closes"]
+                    .as_array_mut()
+                    .unwrap()
+                    .truncate(last_session);
+                true
+            });
+        for field in ["missing_bars", "execution_status_overrides"] {
+            fixture[field].as_array_mut().unwrap().retain(|item| {
+                symbols.contains(&item["symbol"].as_str().unwrap())
+                    && item["date"].as_str().unwrap() <= "2025-04-09"
+            });
+        }
+        let prepared =
+            prepare_dataset(serde_json::from_value::<DatasetInput>(fixture).unwrap()).unwrap();
+        let config = experiment_config(&prepared.spec);
+        let run = run_rotation_event(&prepared, &config);
+        let orders = &run.projection.orders;
+        assert_eq!(orders.len(), 15);
+        assert!(orders.iter().any(|row| {
+            row.decision_date.to_string() == "2025-04-07"
+                && row.attempt_date.to_string() == "2025-04-08"
+                && row.symbol == "ETF038"
+                && row.side == "BUY"
+                && row.quantity == 100
+        }));
+        let ledger = run
+            .projection
+            .ledger
+            .iter()
+            .find(|row| row.date.to_string() == "2025-04-08")
+            .unwrap();
+        assert_eq!(ledger.cash, 48_350.0);
+        assert_eq!(ledger.nav, 99_560.0);
+        assert_eq!(ledger.holdings.len(), 5);
+        let fill = run
+            .projection
+            .fills
+            .iter()
+            .find(|row| row.date.to_string() == "2025-04-08" && row.symbol == "ETF038")
+            .unwrap();
+        assert_eq!(
+            (
+                fill.side.as_str(),
+                fill.quantity,
+                fill.fill_price,
+                fill.commission
+            ),
+            ("BUY", 100, 100.1, 100.0)
+        );
     }
 }

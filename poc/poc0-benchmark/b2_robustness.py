@@ -380,10 +380,11 @@ def main() -> int:
     report["combined_decision_mapping"] = combine_robustness(
         decision_load_decision, robustness_state, report.get("decision") if robustness_state == "passed" else None
     )
+    report["status"] = report["combined_decision_mapping"]["status"]
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps({"status": report["status"], "output": str(output)}))
-    concluded = report["status"] in {"correctness_passed", "adopt", "defer", "reject", "unverified"}
+    concluded = report["status"] in {"correctness_passed", "adopt", "defer", "reject", "unverified", "unresolved"}
     return 0 if concluded or report["decision"].get("attribution_required") else 2
 
 

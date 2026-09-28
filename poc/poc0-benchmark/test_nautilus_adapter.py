@@ -8,6 +8,54 @@ import nautilus_adapter
 
 
 class NautilusAdapterReportTests(unittest.TestCase):
+    @unittest.skipUnless(nautilus_adapter._version_probe()[1] is None, "requires pinned Nautilus")
+    def test_rotation_reinvests_exit_proceeds_at_next_open(self):
+        dataset_path = nautilus_adapter.ROOT / "poc/poc0-benchmark/fixtures/b2-s2-scale-64x252-v1.json"
+        dataset = json.loads(dataset_path.read_text(encoding="utf-8"))
+        symbols = {"ETF003", "ETF007", "ETF012", "ETF025", "ETF054",
+                   "ETF038", "ETF041", "ETF046", "ETF051", "ETF055"}
+        last_session = dataset["calendar"].index("2025-04-09") + 1
+        dataset["calendar"] = dataset["calendar"][:last_session]
+        dataset["instruments"] = [
+            {**item, "closes": item["closes"][:last_session]}
+            for item in dataset["instruments"] if item["symbol"] in symbols
+        ]
+        dataset["missing_bars"] = [
+            row for row in dataset["missing_bars"]
+            if row["symbol"] in symbols and row["date"] <= "2025-04-09"
+        ]
+        dataset["execution_status_overrides"] = [
+            row for row in dataset["execution_status_overrides"]
+            if row["symbol"] in symbols and row["date"] <= "2025-04-09"
+        ]
+        projection = nautilus_adapter._run_nautilus(dataset, strategy="s2")["projection"]
+
+        self.assertEqual(len(dataset["instruments"]), 10)
+        self.assertEqual(projection["signals"][-1]["date"], "2025-04-07")
+        self.assertEqual(set(projection["signals"][-1]["target_symbols"]),
+                         {"ETF038", "ETF041", "ETF046", "ETF051", "ETF055"})
+        self.assertIn(
+            ("2025-04-07", "2025-04-08", "ETF038", "BUY", 100),
+            [(row["decision_date"], row["attempt_date"], row["symbol"], row["side"], row["quantity"])
+             for row in projection["orders"]],
+        )
+        self.assertEqual(
+            next(row for row in projection["ledger"] if row["date"] == "2025-04-08")["cash"],
+            48350.0,
+        )
+        self.assertEqual(
+            next(row for row in projection["ledger"] if row["date"] == "2025-04-08")["nav"],
+            99560.0,
+        )
+        self.assertEqual(len(projection["fills"]), 15)
+        entry = next(row for row in projection["fills"] if row["date"] == "2025-04-08"
+                 and row["symbol"] == "ETF038")
+        self.assertEqual((entry["side"], entry["quantity"], entry["fill_price"], entry["commission"]),
+                 ("BUY", 100, 100.1, 100.0))
+        holdings = next(row for row in projection["ledger"] if row["date"] == "2025-04-08")["holdings"]
+        self.assertEqual({row["symbol"]: row["quantity"] for row in holdings},
+                 {symbol: 100 for symbol in {"ETF038", "ETF041", "ETF046", "ETF051", "ETF055"}})
+
     @unittest.skipUnless(
         nautilus_adapter._version_probe()[1] is None,
         "requires the pinned Nautilus runtime",
@@ -245,6 +293,14 @@ class NautilusAdapterReportTests(unittest.TestCase):
 
         actual["orders"][0]["attempt_date"] = "2026-01-14"
         self.assertFalse(nautilus_adapter._compare(actual, expected)[0]["passed"])
+
+    def test_order_comparison_ignores_cross_instrument_arrival_order(self):
+        orders = [
+            {"decision_date": "2025-04-07", "attempt_date": "2025-04-08", "symbol": symbol,
+             "side": "BUY", "quantity": 100, "reason": None}
+            for symbol in ("ETF038", "ETF041")
+        ]
+        self.assertTrue(nautilus_adapter._compare({"orders": orders[::-1]}, {"orders": orders})[0]["passed"])
 
 
 if __name__ == "__main__":
