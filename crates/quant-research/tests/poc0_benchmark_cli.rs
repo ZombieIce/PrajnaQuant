@@ -722,6 +722,7 @@ fn benchmark_poc0_sweep_reports_reusable_cache_and_layout_measurements() {
     let output_dir = tempfile::tempdir().unwrap();
     let report_path = output_dir.path().join("sweep-report.json");
     let result = std::process::Command::new(env!("CARGO_BIN_EXE_quant-research"))
+        .current_dir(repo_root())
         .args([
             "benchmark-poc0-sweep",
             "--dataset",

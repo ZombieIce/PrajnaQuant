@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lightweight:
+    name: lightweight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: lightweight
+
+      - name: Guard - lightweight path must not pull in bundled DuckDB
+        run: |
+          set -euo pipefail
+          tree=$(cargo tree -p quant-research --no-default-features -e normal,build,dev --prefix none --locked)
+          if grep -E '^(libduckdb-sys|duckdb|ashare-warehouse) ' <<<"$tree"; then
+            echo "::error::DuckDB or ashare-warehouse is in the lightweight dependency graph"
+            exit 1
+          fi
+
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy -p quant-research --no-default-features --all-targets --locked -- -D warnings
+      - run: cargo test -p quant-research --no-default-features --locked
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Nautilus-dependent tests skip here by design; the Full workflow runs them and fails on skips.
+      - name: POC Python tests (Nautilus not installed)
+        run: python -m unittest discover -s poc/poc0-benchmark -p 'test*.py' -v

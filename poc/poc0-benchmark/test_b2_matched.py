@@ -332,8 +332,9 @@ class CoordinatorTests(unittest.TestCase):
         baselines = b2_matched._rss_baselines(Path(b2_matched.ROOT / "target/release/quant-research"), Path(sys.executable))
         if baselines["rust_empty_binary"]["status"] == "measured":
             self.assertIn("scope", baselines["rust_empty_binary"])
-        self.assertIn("raw_unit", baselines["python_import_nautilus"])
         self.assertIn("status", baselines["python_import_nautilus"])
+        if baselines["python_import_nautilus"]["status"] == "measured":
+            self.assertIn("raw_unit", baselines["python_import_nautilus"])
 
     @unittest.skipUnless(
         fixed_nautilus_available(), "fixed Nautilus 2.0.0rc5 runtime is unavailable"
