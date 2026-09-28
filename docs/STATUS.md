@@ -10,7 +10,7 @@
 
 2026-09-28 B2 matched remeasure 票据 02（探索性 S2 tracer）已完成。较早 S2 结果保留作历史证据；应以票据 03 两策略统一报告作为当前判定负载证据。旧报告和范围见 [票据 02](../.scratch/poc-0-b2-matched-remeasure/issues/02-s2-golden-matched-tracer.md)。
 
-2026-09-28 B2 matched remeasure 票据 05 已实现维护成本代理字段：比较报告生成时记录 Fast Event POC / Nautilus Adapter 源行数、测试数、增量直接依赖、Nautilus 安装依赖闭包及 ADR 0012 语义差异引用；代理指标不参与纯判定函数。当前源文件范围计数为 3,793 / 1,188 非空非注释行、4 / 17 个对应测试，Rust 新增 crate 为 0，Python 直接依赖为 1（`nautilus_trader==2.0.0rc5`）。03 环境按 active marker 解析到 0 个传递发行包；四个 `visualization` extra 未启用，报告记录解析方法并注明它不是完整 lock。版本不满足声明或必需依赖元数据无法解析时标 `Unknown`。统计范围和方法见 [POC README](../poc/poc0-benchmark/README.md) 与 [票据 05](../.scratch/poc-0-b2-matched-remeasure/issues/05-maintenance-proxy-metrics.md)；代理值不参与判定。
+2026-09-28 B2 matched remeasure 票据 05 已验收并标记 `resolved`：比较报告生成时记录 Fast Event POC / Nautilus Adapter 源行数、测试数、增量直接依赖、Nautilus 安装依赖闭包及 ADR 0012 语义差异引用；代理指标不参与纯判定函数。03 归档报告中的源文件范围计数为 3,857 / 1,221 非空非注释行、4 / 24 个对应测试，Rust 新增 crate 为 0，Python 直接依赖为 1（`nautilus_trader==2.0.0rc5`）。03 环境按 active marker 解析到 0 个传递发行包；四个 `visualization` extra 未启用，报告记录解析方法并注明它不是完整 lock。版本不满足声明或必需依赖元数据无法解析时标 `Unknown`。统计范围、验收验证及限制见 [票据 05](../.scratch/poc-0-b2-matched-remeasure/issues/05-maintenance-proxy-metrics.md) 与 [POC README](../poc/poc0-benchmark/README.md)；代理值不参与判定。
 
 2026-09-28 POC-0 票据 10 已实现 B3 基础对照：共享 fixture 的 29 个 bar event 按日期/symbol 顺序投递给 Rust Native 与 PyO3 Python `on_bar()`；逐事件比较决策日期、symbol 和目标列表，同日错误 bar 不会通过。Python S1 targets 进入同一个 Rust Fast Event 账户路径后，与独立预期对拍逐单/逐日现金持仓、成本、NAV 和 PortfolioResult。Python 3.12.2 / PyO3 0.29.0 的 release 五样本已记录，复跑命令、provenance 和构建资源见 [B3 ticket 10](../.scratch/poc-0-benchmark/issues/10-pyo3-basic-callback-comparison.md)。该 3 ETF × 10 session 样本太小，吞吐/规模边界结论仍 `unresolved`；不是 Python 研究包或生产策略接口。
 
