@@ -568,3 +568,19 @@ The S2 sample medians were 11,042 ns (Rust) vs 842,146 ns (Nautilus) serial late
 56,338 vs 1,225 Runs/s across five alternating 2-worker × 6 Run groups, and 11,255,808 vs
 147,046,400 bytes peak RSS (Nautilus worker-sum upper bound). The report embeds every raw
 sample and links its preflight, build record, and standalone measurement JSON files.
+
+The report's `maintenance_cost_proxies` section records descriptive implementation and test
+counts, incremental direct dependencies, the installed transitive dependency closure reachable
+from the pinned Nautilus distribution, and known semantic differences with citations. Rust LOC
+excludes inline `#[cfg(test)]` modules; Python LOC excludes blank and comment-only lines. The
+Rust count covers the shared POC benchmark module and CLI, so it includes neighboring candidate
+code in that shared module. The Nautilus count covers `nautilus_adapter.py` and excludes the
+coordinator and measurement wrappers. Test counts cover four named Rust B2 CLI cases and all
+test methods in the listed B2/Nautilus Python test modules. The current Nautilus adapter adds no
+Cargo crate; its direct Python requirement is `nautilus_trader==2.0.0rc5`. The dependency
+closure is read from the measurement Python environment's installed metadata with active
+environment markers, and the report saves each resolved package version. The snapshot is not a
+complete Python lock because only the direct Nautilus requirement is pinned. If that pinned
+environment, an active declared dependency, or a version satisfying its requirement is
+unavailable—or requirement metadata cannot be parsed—its count is `Unknown`, never zero. These
+proxies are recorded only; the decision function does not read them.

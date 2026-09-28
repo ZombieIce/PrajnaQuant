@@ -4,6 +4,10 @@
 
 POC-0 B2 同口径重测票据 02（S2 fallback tracer 范围）已完成：[入口与验收记录](.scratch/poc-0-b2-matched-remeasure/issues/02-s2-golden-matched-tracer.md)。S2 3×10 golden correctness gate 通过，release matched fallback 测量判定该负载 `adopt`；Nautilus 每 worker 缓存 QuoteTicks、每 Run 新建引擎，Rust/Nautilus 20 个串行样本和五组 2-worker × 6 Run 吞吐、隔离 RSS 均按登记边界记录。重测中位延迟为 11,042 / 842,146 ns，并行吞吐为 56,338 / 1,225 Runs/s，RSS 为 11,255,808 / 147,046,400 bytes。详见 [S2 matched report](poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.json)。这不构成整体 B2 选型：S3、64×252 稳健性和引擎 reset parity 仍开放。预登记规则和预测在 revision `9c487f3` 已保存。**唯一建议下一步：**实现 S2 worker 内引擎 reset 并与 cached-conversion/new-engine fallback 对拍，若有差异保留 fallback，再扩展 S3/稳健性负载。
 
+B2 matched remeasure 票据 05 的维护代理已加入比较报告生成入口，并同步统计口径至 [POC README](poc/poc0-benchmark/README.md) 与 [STATUS](docs/STATUS.md)。当前源范围计数为 Fast Event POC 3,793 行 / 4 个测试，Nautilus Adapter 1,188 行 / 17 个测试；新增直接依赖为 0 个 Cargo crate、1 个 Python 包。当前环境缺少 Nautilus，传递依赖闭包为 `Unknown`；可解析时报告包名/版本并说明快照不是完整 lock，版本不满足 requirement 或元数据不可解析也会标 `Unknown`。代理节是只记录项，纯判定函数不读取它。双轴独立 review 的发现已修复，测试结果见本轮交接末尾。
+
+本票验证：workspace Python Runtime 下 `python3 -m unittest discover -s poc/poc0-benchmark -p 'test*.py' -v` 为 18 项运行、13 通过、5 项因固定 Nautilus 2.0.0rc5 不可用而跳过；`py_compile` 与 `git diff --check` 通过。根 `tests/` Python suite 为 22 项中 21 通过，`test_warehouse` 因运行环境缺少 `duckdb` 无法导入。Standards 与 Spec 双轴独立 review 均无剩余发现。传递依赖仍 `Unknown`，直到固定 Nautilus 测量环境可用；唯一建议下一步仍为上文 S2 reset parity，再扩展 S3/64×252。
+
 票据 12 综合报告已完成：[POC-0-SYNTHESIS.md](poc/poc0-benchmark/POC-0-SYNTHESIS.md)。结论为 B1 Custom SoA 在登记 64×252 负载 `defer`，Parquet 受限读取功能通过但布局性能 unresolved；B2 Fast Event/Nautilus 的共同正确性子集通过，速度/RSS 边界不匹配所以选型 unresolved；B3 Python per-bar 和 batch 对登记负载 `reject`，不外推通用 Python/GIL 边界。构建工程成本与运行时吞吐分开，cold build 仍 Unknown。报告保留固定数据、hash、参数、门槛、版本、原始样本/checksum 和复跑入口；不证明生产 Engine、真实 ETF PIT/总回报或实盘能力。
 
 票据 12 文档链接检查通过。独立 review 的 Parquet/B2 RSS 信息缺口已补齐；`/code-review` Spec 轴指出的 Parquet 实测条件与性能门槛区分、B3 Python 转换/维护成本边界也已明确并通过定向复核，Standards 轴无发现。**唯一建议下一步：**如需裁决 B2，引擎双方按一致的数据准备、初始化、并行与 RSS 边界重测后再应用已登记门槛。
