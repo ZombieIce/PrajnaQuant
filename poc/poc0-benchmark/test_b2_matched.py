@@ -54,6 +54,12 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(self.decide(rust_peak_rss_bytes=None)["status"], "unresolved")
         self.assertEqual(self.decide(protocol="unmatched")["status"], "unresolved")
 
+    def test_reset_unverified_fallback_is_exploratory_not_registered(self):
+        self.assertEqual(self.decide()["evidence_level"], "registered")
+        exploratory = self.decide(protocol="fallback_reset_unverified")
+        self.assertEqual(exploratory["status"], "adopt")
+        self.assertEqual(exploratory["evidence_level"], "exploratory")
+
     def test_maintenance_proxy_changes_never_change_decision(self):
         metrics = b2_matched.maintenance_cost_proxies(Path(sys.executable))
         original = self.decide()

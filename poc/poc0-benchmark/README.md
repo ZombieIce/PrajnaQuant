@@ -554,7 +554,10 @@ python3 poc/poc0-benchmark/capture-build-resource.py --profile release \
 ```
 
 Use `--run-measurements` only after the registered ADR/prediction revision. The recorded S2
-run used the registered safe fallback: each Nautilus worker converts and caches QuoteTicks
+run used a fallback chosen before reset parity was tested, so its protocol is
+`fallback_reset_unverified` and its decision is `evidence_level: exploratory` (the archived
+report predates this label and says `matched_fallback`). Ticket 07 selects the ADR 0013 mode.
+Each Nautilus worker converts and caches QuoteTicks
 once, then constructs a fresh engine and strategy per Run. Rust workers start and warm before
 their timer; both paths exclude process/thread startup, warmups, serialization and checksum.
 The Nautilus worker result contains only run identity, elapsed time, checksum and RSS; every
@@ -562,8 +565,9 @@ checksum must match the independently checked Nautilus projection before samples
 Nautilus parallel workers each process three of the six measured Runs; their completion timestamp
 is captured before projection serialization/checksum and before result IPC is collected. The
 report verifies both initialized workers contributed a measured batch.
-The 2026-09-28 S2 report applies the unchanged ticket 09 gates to S2 only and records `adopt`;
-it does not decide S3, 64×252 robustness or overall B2. Engine-reset parity remains unverified.
+The 2026-09-28 S2 report applies the unchanged ticket 09 gates to S2 only and computes `adopt`
+as an exploratory result; it does not decide S3, 64×252 robustness or overall B2. Engine-reset
+parity remains unverified (ticket 07).
 The S2 sample medians were 11,042 ns (Rust) vs 842,146 ns (Nautilus) serial latency,
 56,338 vs 1,225 Runs/s across five alternating 2-worker × 6 Run groups, and 11,255,808 vs
 147,046,400 bytes peak RSS (Nautilus worker-sum upper bound). The report embeds every raw

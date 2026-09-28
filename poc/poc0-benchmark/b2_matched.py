@@ -19,6 +19,9 @@ ROOT = Path(__file__).resolve().parents[2]
 DATASET = ROOT / "poc/poc0-benchmark/fixtures/dataset-v1.json"
 EXPECTED = ROOT / "poc/poc0-benchmark/fixtures/expected-v1.json"
 ADR_EXCLUDED = "orders.nautilus_native_lifecycle"
+REGISTERED_PROTOCOLS = {"matched", "matched_fallback"}
+# Fallback chosen before ticket 07 tested reset parity; ADR 0013's trigger is unevaluated.
+EXPLORATORY_PROTOCOLS = {"fallback_reset_unverified"}
 NAUTILUS_DIRECT_REQUIREMENT = "nautilus_trader==2.0.0rc5"
 
 
@@ -258,8 +261,9 @@ def decide(
         return {"status": "reject", "reason": "reproducible correctness failure: " + ", ".join(failures)}
     if correctness != "passed":
         return {"status": "unresolved", "reason": "common-subset correctness gate did not pass"}
-    if protocol not in {"matched", "matched_fallback"}:
+    if protocol not in REGISTERED_PROTOCOLS | EXPLORATORY_PROTOCOLS:
         return {"status": "unresolved", "reason": "measurement boundaries or Nautilus reuse mode are not matched"}
+    evidence_level = "registered" if protocol in REGISTERED_PROTOCOLS else "exploratory"
     metrics = (
         rust_serial_median_ns,
         nautilus_serial_median_ns,
@@ -281,6 +285,7 @@ def decide(
     return {
         "status": "adopt" if passes else "defer",
         "reason": "all registered speed and RSS gates passed" if passes else "one or more registered speed or RSS gates missed",
+        "evidence_level": evidence_level,
     }
 
 
@@ -393,7 +398,7 @@ def main() -> int:
             rust_peak = max(group["runs"]["rust"]["peak_rss_bytes"] for group in parallel_groups)
             nautilus_peak = max(group["runs"]["nautilus"]["peak_rss_sum_upper_bound_bytes"] for group in parallel_groups)
             protocol = (
-                "matched_fallback"
+                "fallback_reset_unverified"
                 if nautilus_serial.get("engine_mode") == "cached_conversion_new_engine"
                 and all(group["runs"]["nautilus"].get("engine_mode") == "cached_conversion_new_engine" for group in parallel_groups)
                 else "unmatched"
@@ -421,7 +426,10 @@ def main() -> int:
                 rust_peak_rss_bytes=rust_peak,
                 nautilus_peak_rss_sum_upper_bound_bytes=nautilus_peak,
             )
-            report["decision"]["scope"] = "S2 3x10 matched fallback only; not a full B2 selection"
+            report["decision"]["scope"] = (
+                "S2 3x10 exploratory fallback only; reset parity untested (ticket 07); "
+                "not a registered or full B2 selection"
+            )
     except Exception as error:
         report["execution_error"] = f"{type(error).__name__}: {error}"
         report["decision"] = {"status": "unresolved", "reason": "Nautilus runtime or measurement failed"}

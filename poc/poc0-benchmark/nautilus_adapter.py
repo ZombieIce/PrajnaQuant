@@ -814,7 +814,7 @@ def parallel_digest_runs(
         "peak_rss_sum_upper_bound_bytes": sum(per_worker.values()),
         "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
         "engine_mode": "cached_conversion_new_engine",
-        "engine_mode_reason": "engine reset parity is not established; use the specified safe fallback",
+        "engine_mode_reason": "reset parity untested (ticket 07); exploratory fallback, not selected by ADR 0013 evidence",
         "conversion_cached_per_worker": True,
     }
 
@@ -853,7 +853,7 @@ def serial_digest_runs(
         "p95_ns": ordered[math.ceil(0.95 * len(ordered)) - 1],
         "peak_rss_bytes": peak,
         "engine_mode": "cached_conversion_new_engine",
-        "engine_mode_reason": "engine reset parity is not established; use the specified safe fallback",
+        "engine_mode_reason": "reset parity untested (ticket 07); exploratory fallback, not selected by ADR 0013 evidence",
         "conversion_cached_per_worker": True,
         "measurement_scope": "single worker; conversion and two warmups excluded; factor/signal, new engine initialization, replay and projection included",
     }
