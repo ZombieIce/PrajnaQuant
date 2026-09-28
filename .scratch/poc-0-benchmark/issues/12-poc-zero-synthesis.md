@@ -19,3 +19,5 @@ POC-0 综合报告已完成：[POC-0-SYNTHESIS.md](../../../poc/poc0-benchmark/P
 该综合结论不批准生产 Engine 选型，不证明真实市场 PIT、ETF 总回报或可实盘性。唯一建议下一步：为 B2 统一输入准备、初始化、计时和并行/RSS 口径后复测，再判断是否达到预登记门槛。
 
 独立 review 起初提出两项 P2 证据呈现缺口：综合报告应直接列出 Parquet 子进程/cgroup RSS，以及 B2 双方 RSS 数值并澄清 Adapter 维护成本未量化。已补入相应数值、测量范围与 `Unknown` 标记；review 未发现其余数值或链接问题。
+
+`/code-review` Spec 轴补充指出两项需限定的结论：Parquet 的 10M 行/256 MiB 是实测条件，不是预登记性能门槛；功能验收要求是对超内存大样本验证受限读取/裁剪，且未登记速度收益门槛。B3 Python 字段封送与维护成本未单独量化。报告已把 Parquet 性能状态明确为 unresolved，并将 B3 两项成本标成 `Unknown`。修复后的定向复核通过，Standards 轴无发现。

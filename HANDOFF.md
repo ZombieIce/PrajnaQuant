@@ -4,7 +4,7 @@
 
 票据 12 综合报告已完成：[POC-0-SYNTHESIS.md](poc/poc0-benchmark/POC-0-SYNTHESIS.md)。结论为 B1 Custom SoA 在登记 64×252 负载 `defer`，Parquet 受限读取功能通过但布局性能 unresolved；B2 Fast Event/Nautilus 的共同正确性子集通过，速度/RSS 边界不匹配所以选型 unresolved；B3 Python per-bar 和 batch 对登记负载 `reject`，不外推通用 Python/GIL 边界。构建工程成本与运行时吞吐分开，cold build 仍 Unknown。报告保留固定数据、hash、参数、门槛、版本、原始样本/checksum 和复跑入口；不证明生产 Engine、真实 ETF PIT/总回报或实盘能力。
 
-票据 12 文档链接检查通过，独立 review 提出的两项 P2 证据呈现问题已补入 Parquet 和 B2 RSS/维护成本说明并复核。**唯一建议下一步：**如需裁决 B2，引擎双方按一致的数据准备、初始化、并行与 RSS 边界重测后再应用已登记门槛。
+票据 12 文档链接检查通过。独立 review 的 Parquet/B2 RSS 信息缺口已补齐；`/code-review` Spec 轴指出的 Parquet 实测条件与性能门槛区分、B3 Python 转换/维护成本边界也已明确并通过定向复核，Standards 轴无发现。**唯一建议下一步：**如需裁决 B2，引擎双方按一致的数据准备、初始化、并行与 RSS 边界重测后再应用已登记门槛。
 
 日期：2026-09-26。用户确认 Rust-first 多市场平台路线取代此前 A 股日频 + Web 初级产品交付顺序。目标决策见 [`ARCHITECTURE.md`](ARCHITECTURE.md)，新路线见 [`docs/product-roadmap.md`](docs/product-roadmap.md)，领域词汇见 [`CONTEXT.md`](CONTEXT.md)，POC-0 工作范围与验收见 [本地 spec](.scratch/poc-0-benchmark/spec.md)，执行规范见 [`docs/poc-0-benchmark-spec.md`](docs/poc-0-benchmark-spec.md)，目标 ADR 为 0009–0011。旧 A 股路线保存在 [`docs/legacy-ashare-roadmap.md`](docs/legacy-ashare-roadmap.md)。这些是目标/试验文档，**不是三级引擎、Nautilus 或 Python 入口的已实现证据**；现有功能与量化 P0 风险仍以 `docs/STATUS.md` 及下方 Batch 2 交接为准。
 
