@@ -742,7 +742,11 @@ parallel median 102.82 / 11.88 Runs/s, and RSS 92,160,000 / 301,187,072 bytes. S
 2,524,208 / 53,936,917 ns, 538.38 / 33.60 Runs/s, and 90,046,464 / 243,646,464 bytes. The
 Nautilus RSS value sums both worker peaks and is an upper bound. Together with the registered
 3×10 S2 and 3×130 S3 decision loads, the final B2 result is `adopt`; the preregistered speed and
-Rust-lower-RSS prediction held. This only applies to the four synthetic loads, this host, the
-saved source/dependency identities, and Nautilus 2.0.0rc5. It is not a production-engine choice
-or validation of real ETF returns. The complete combined report and every raw sample are in
+Rust-lower-RSS prediction held. There was no verdict change across the registered small and
+64×252 workloads. Sensitivity to other timing boundaries or Nautilus modes remains unresolved:
+reset emitted native engine errors, and ADR 0013 selected one fallback mode for all loads, so the
+unselected mode is not a valid comparison. The conclusion applies only to the selected mode, the
+four synthetic loads, this host, the saved source/dependency identities, and Nautilus 2.0.0rc5.
+It is not a production-engine choice or validation of real ETF returns. The complete combined
+report and every raw sample are in
 [`b2-formal-robustness-reset-selected-2026-09-28.json`](results/b2-formal-robustness-reset-selected-2026-09-28.json).

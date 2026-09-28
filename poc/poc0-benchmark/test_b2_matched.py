@@ -269,6 +269,18 @@ class DecisionTests(unittest.TestCase):
 
 
 class RobustnessDecisionTests(unittest.TestCase):
+    def test_decision_sensitivity_distinguishes_scale_stability_from_unmeasured_modes(self):
+        result = b2_robustness.decision_sensitivity(
+            {"status": "adopt"}, {"status": "adopt"},
+            {"selected_mode": "cached_conversion_new_engine"},
+        )
+        self.assertIn("no verdict change", result["registered_workload_scale"]["assessment"])
+        self.assertEqual(result["selected_nautilus_mode"], "cached_conversion_new_engine")
+        self.assertEqual(
+            result["alternative_mode_and_timing_boundaries"]["assessment"],
+            "unresolved; not measured as comparable registered alternatives",
+        )
+
     def test_robustness_measurement_uses_evidence_selected_engine_mode(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "robustness.json"

@@ -4,7 +4,7 @@
 
 POC-0 B2 按预登记协议的正式结论为 **`adopt`**，限定于 Nautilus 2.0.0rc5、当前保存的代码/依赖身份、Apple M1 本机及四个固定合成负载。3×10 S2、3×130 S3 与 64×252 S2/S3 的共同字段 correctness 均通过；两种策略在判定负载和稳健性负载上的中位延迟、2-worker Runs/s 和 RSS 上界均满足原门槛，书面速度/RSS 预测成立。完整原始证据在[正式报告](poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.json)、[release build record](poc/poc0-benchmark/results/b2-formal-release-build-2026-09-28.json)与[复跑说明](poc/poc0-benchmark/README.md#formal-b2-robustness-and-conclusion-github-issue-3)。
 
-四负载 reset projection/state snapshots 与新建引擎相等，但 Nautilus 每次 reset 都记录 `Invalid state trigger READY -> INITIALIZE`，所以 ADR 0013 按统一规则选择 `cached_conversion_new_engine`；正式 benchmark 只使用该模式，reset 耗时未用于判定。Nautilus 两 worker RSS 峰值之和按上界报告。ADR 0012 的原生停牌生命周期仍排除。该结论不是生产 Engine 选型或真实 ETF 业绩验证；MVP-3 开工前由项目负责人审阅结论与范围。
+四负载 reset projection/state snapshots 与新建引擎相等，但 Nautilus 每次 reset 都记录 `Invalid state trigger READY -> INITIALIZE`，所以 ADR 0013 按统一规则选择 `cached_conversion_new_engine`；正式 benchmark 只使用该模式，reset 耗时未用于判定。Nautilus 两 worker RSS 峰值之和按上界报告。四个登记负载规模均为 `adopt`，未观察到跨负载结论翻转；其他计时边界/未选模式没有有效对照样本，敏感性仍 unresolved。ADR 0012 的原生停牌生命周期仍排除。该结论不是生产 Engine 选型或真实 ETF 业绩验证；MVP-3 开工前由项目负责人审阅结论与范围。
 
 **验证：**`.venv/bin/python -m unittest discover -s poc/poc0-benchmark -p 'test_b2_matched.py' -v` 26/26 passed；`py_compile`、release CLI 的四负载 correctness-first 正式重测通过。release build 经 10 GiB 空间闸门，warm build 12.420 秒，target 逻辑变化 -1,071 bytes。独立双轴 review 尚待完成。
 

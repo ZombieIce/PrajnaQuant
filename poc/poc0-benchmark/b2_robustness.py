@@ -67,6 +67,36 @@ def combine_robustness(
     return result
 
 
+def decision_sensitivity(
+    decision_load_decision: dict[str, Any],
+    robustness_decision: dict[str, Any],
+    mode_selection: dict[str, Any],
+) -> dict[str, Any]:
+    """Describe which measured workload and timing-mode comparisons support the verdict."""
+    decision_status = decision_load_decision.get("status", "unresolved")
+    robustness_status = robustness_decision.get("status", "unresolved")
+    return {
+        "registered_workload_scale": {
+            "decision_loads_status": decision_status,
+            "robustness_loads_status": robustness_status,
+            "assessment": (
+                "no verdict change across the registered 3x10/3x130 and 64x252 workloads"
+                if decision_status == robustness_status == "adopt"
+                else "verdict differs or remains unresolved across the registered workload sets"
+            ),
+        },
+        "selected_nautilus_mode": mode_selection.get("selected_mode"),
+        "alternative_mode_and_timing_boundaries": {
+            "assessment": "unresolved; not measured as comparable registered alternatives",
+            "reason": (
+                "Nautilus reset emitted native READY -> INITIALIZE errors and ADR 0013 selected "
+                "cached_conversion_new_engine uniformly; the verdict applies only to the selected "
+                "mode and registered timing/RSS boundaries"
+            ),
+        },
+    }
+
+
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
 
@@ -408,9 +438,11 @@ def main() -> int:
     report["environment"] = environment
     report["rss_baselines"] = b2_matched._rss_baselines(binary, python)
     decision_load_report = args.decision_load_report if args.decision_load_report.is_absolute() else ROOT / args.decision_load_report
+    decision_load_report_data: dict[str, Any] = {}
     decision_load_decision = {"status": "unresolved", "reason": "decision-load report unavailable"}
     if decision_load_report.exists():
-        decision_load_decision = json.loads(decision_load_report.read_text(encoding="utf-8")).get("decision", decision_load_decision)
+        decision_load_report_data = json.loads(decision_load_report.read_text(encoding="utf-8"))
+        decision_load_decision = decision_load_report_data.get("decision", decision_load_decision)
     if any(value["correctness"].get("status") == "failed" for value in report["loads"].values()):
         robustness_state = "correctness_failed"
     elif any(value["correctness"].get("status") != "passed" for value in report["loads"].values()):
@@ -424,6 +456,12 @@ def main() -> int:
     report["decision_load_decision"] = decision_load_decision
     report["combined_decision_mapping"] = combine_robustness(
         decision_load_decision, robustness_state, report.get("decision") if robustness_state == "passed" else None
+    )
+    report["preregistered_prediction"] = decision_load_report_data.get("preregistered_prediction")
+    report["decision_sensitivity"] = decision_sensitivity(
+        decision_load_decision,
+        report.get("decision", {}),
+        report.get("nautilus_mode_selection", {}),
     )
     report["status"] = report["combined_decision_mapping"]["status"]
     output.parent.mkdir(parents=True, exist_ok=True)
