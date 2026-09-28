@@ -712,3 +712,37 @@ Nautilus two-worker peak-sum upper bound). The report keeps both correctness att
 mismatch examples, full raw samples, per-worker RSS, build record and environment identity. This
 result applies only to the fixed synthetic workloads, current implementation, host, and Nautilus
 2.0.0rc5; it is not production-engine or investment-performance evidence.
+
+### Formal B2 robustness and conclusion (GitHub Issue #3)
+
+The registered final run consumes ticket 07's reset-mode evidence and the formal S2/S3 decision
+load report. It validates that all four reset workloads are covered and that the selected mode
+follows ADR 0013 before collecting performance. The selected mode is
+`cached_conversion_new_engine`: every reset run emitted Nautilus's native
+`READY -> INITIALIZE` error despite matching projections, so reset timing is not used. The
+correctness-first coordinator then compares each 64×252 Nautilus projection twice with Rust and
+collects timing only for loads that pass both comparisons.
+
+```bash
+python3 poc/poc0-benchmark/capture-build-resource.py --profile release --scope poc --action build \
+  --estimated-max-additional-bytes 2147483648 \
+  --output poc/poc0-benchmark/results/b2-formal-release-build-2026-09-28.json
+.venv/bin/python poc/poc0-benchmark/b2_robustness.py \
+  --binary target/release/quant-research --python .venv/bin/python \
+  --build-record poc/poc0-benchmark/results/b2-formal-release-build-2026-09-28.json \
+  --reset-parity-evidence poc/poc0-benchmark/results/b2-nautilus-reset-parity-2026-09-28.json \
+  --decision-load-report poc/poc0-benchmark/results/b2-matched-decision-loads-reset-selected-2026-09-28.json \
+  --output poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.json \
+  --run-measurements
+```
+
+Both 64×252 loads passed projection parity, the registered serial latency, 2-worker throughput,
+and RSS upper-bound gates. S2 Rust/Nautilus serial median was 11,260,500 / 152,965,291.5 ns,
+parallel median 102.82 / 11.88 Runs/s, and RSS 92,160,000 / 301,187,072 bytes. S3 was
+2,524,208 / 53,936,917 ns, 538.38 / 33.60 Runs/s, and 90,046,464 / 243,646,464 bytes. The
+Nautilus RSS value sums both worker peaks and is an upper bound. Together with the registered
+3×10 S2 and 3×130 S3 decision loads, the final B2 result is `adopt`; the preregistered speed and
+Rust-lower-RSS prediction held. This only applies to the four synthetic loads, this host, the
+saved source/dependency identities, and Nautilus 2.0.0rc5. It is not a production-engine choice
+or validation of real ETF returns. The complete combined report and every raw sample are in
+[`b2-formal-robustness-reset-selected-2026-09-28.json`](results/b2-formal-robustness-reset-selected-2026-09-28.json).

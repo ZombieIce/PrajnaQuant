@@ -1,12 +1,14 @@
 # Agent Handoff — 新平台目标基线与 POC-0
 
-## 当前交接（2026-09-28，B2 票据 08 归因）
+## 当前交接（2026-09-28，POC-0 B2 Issue #3 完成）
 
-固定 S2 64×252 首差已按 [ADR 0014](docs/decisions/0014-b2-correctness-failure-attribution.md) 归因为 Nautilus Adapter 逐证券开盘 Quote 的先买后卖问题，而非 Fast Event 错误。[诊断票据](.scratch/poc-0-b2-matched-remeasure/issues/08-s2-64x252-parity-diagnosis.md)给出裁剪自固定输入的 10 ETF / 68 session 手算用例：2025-04-07 close 信号、04-08 08:50 可用的 TRADABLE 状态、09:30 先卖五只再买五只，现金 48350、NAV 99560；Rust 与修正后 Adapter 测试通过。04-07/08/09 ETF038 均有 bar，无阻断状态。原 S2 351/348（Rust-only 133、Nautilus-only 130）在修复后变为两边 351 订单/Fill 且所有共同子集字段通过。旧报告保持归档，不改写。
+POC-0 B2 按预登记协议的正式结论为 **`adopt`**，限定于 Nautilus 2.0.0rc5、当前保存的代码/依赖身份、Apple M1 本机及四个固定合成负载。3×10 S2、3×130 S3 与 64×252 S2/S3 的共同字段 correctness 均通过；两种策略在判定负载和稳健性负载上的中位延迟、2-worker Runs/s 和 RSS 上界均满足原门槛，书面速度/RSS 预测成立。完整原始证据在[正式报告](poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.json)、[release build record](poc/poc0-benchmark/results/b2-formal-release-build-2026-09-28.json)与[复跑说明](poc/poc0-benchmark/README.md#formal-b2-robustness-and-conclusion-github-issue-3)。
 
-[完整重测](poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.json)按原协议先做两次正确性对拍，再进行 20 次串行和五组 2-worker × 6 Run；S2 中位 Rust/Nautilus 19,105,375 / 260,615,500.5 ns、并行 61.89 / 6.70 Runs/s、RSS 90,685,440 / 302,743,552 bytes 上界，S3 也达到数值门槛。**2026-09-28 B2 票据 #2 reset parity 已完成并选择 fallback：**Nautilus 2.0.0rc5 下，S2/S3 判定 fixture 与两套 64×252 fixture 均完成至少三次同 worker reset Run；projection checksum、现金、订单/持仓和 pending 计数、迭代/回放边界、strategy/instrument/quote cache 状态均与新建引擎一致，判定负载 checksum 也与此前通过独立 Rust golden 字段对拍的投影 checksum 一致。但每次 reset Run 都打印 Nautilus 原生错误 `Invalid state trigger READY -> INITIALIZE`，因此报告把 `engine_log.error` 作为首个差异并统一选择 `cached_conversion_new_engine`，不忽略该错误。版本、revision、输入 hash、checksum 列表和 state snapshots 见 [reset parity evidence](poc/poc0-benchmark/results/b2-nautilus-reset-parity-2026-09-28.json)。将模式证据传给 coordinator 后，S2/S3 decision loads 都完成 registered `adopt`，报告与原始样本见 [registered decision-load report](poc/poc0-benchmark/results/b2-matched-decision-loads-reset-selected-2026-09-28.json)。B2 overall 仍 `unresolved`，因为 64×252 robustness 尚未用所选模式证据 registered 复核。ADR 0012 原生停牌订单生命周期仍排除。2026-09-28 起票据在 GitHub Issues 跟踪，`.scratch/` 为只读归档。
+四负载 reset projection/state snapshots 与新建引擎相等，但 Nautilus 每次 reset 都记录 `Invalid state trigger READY -> INITIALIZE`，所以 ADR 0013 按统一规则选择 `cached_conversion_new_engine`；正式 benchmark 只使用该模式，reset 耗时未用于判定。Nautilus 两 worker RSS 峰值之和按上界报告。ADR 0012 的原生停牌生命周期仍排除。该结论不是生产 Engine 选型或真实 ETF 业绩验证；MVP-3 开工前由项目负责人审阅结论与范围。
 
-**验证与复核：**票据 #2 的 reset 单元测试和 `2.0.0rc5` 四负载实际复跑见上方 evidence；reset 模式因 native error log 未选用，统一 fallback 已选定。decision-load coordinator 已消费该证据，S2/S3 均是 registered `adopt`。当前唯一建议下一步：由票据 #3 将同一证据接入 64×252 robustness 复核并形成 B2 正式结论；在此之前整体 B2 仍 `unresolved`。
+**验证：**`.venv/bin/python -m unittest discover -s poc/poc0-benchmark -p 'test_b2_matched.py' -v` 26/26 passed；`py_compile`、release CLI 的四负载 correctness-first 正式重测通过。release build 经 10 GiB 空间闸门，warm build 12.420 秒，target 逻辑变化 -1,071 bytes。独立双轴 review 尚待完成。
+
+**唯一建议下一步：**项目负责人审阅 B2 `adopt` 的范围限制，再决定是否启动 MVP-3。
 
 ## 票据 14 交接（2026-09-28）
 

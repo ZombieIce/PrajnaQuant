@@ -1,0 +1,4251 @@
+{
+  "schema_version": "poc0.b2-robustness-64x252.v1",
+  "status": "adopt",
+  "scope": "64 instruments x 252 synthetic sessions; no independent hand-calculated golden",
+  "sampling_protocol": {
+    "warmup_runs_per_worker": 2,
+    "serial_runs": 20,
+    "parallel_workers": 2,
+    "parallel_runs_per_group": 6,
+    "parallel_groups": 5,
+    "candidate_order_alternates": true
+  },
+  "loads": {
+    "s2": {
+      "dataset_version": "poc0.b3.s2-scale-64x252.v1",
+      "dataset_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
+      "dataset_content_sha256": "2ae75e889e3d65a28974f3f467794532621b34c6b58c31c6f37bc75392358dff",
+      "dimensions": {
+        "instruments": 64,
+        "sessions": 252
+      },
+      "strategy_parameters": "Momentum 20/60, volatility 20, Top-5, rebalance every 5 eligible sessions",
+      "registered_b3_stress_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+      "correctness": {
+        "status": "passed",
+        "basis": "two independent Nautilus projection comparisons against Rust; pass requires matching checksums, failure requires identical checksums and failure fields",
+        "rust_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+        "nautilus_checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+        "nautilus_serialization_checksum_note": "informational only; Python canonical JSON and Rust struct-field serialization differ",
+        "repeatability": {
+          "attempt_count": 2,
+          "status": "passed",
+          "checksums_identical": true
+        },
+        "attempts": [
+          {
+            "attempt": 1,
+            "status": "passed",
+            "nautilus_checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+            "failure_fields": [],
+            "checks": [
+              {
+                "field": "orders.adapter_project_contract",
+                "passed": true,
+                "expected_order_events": 351,
+                "actual_adapter_order_events": 351,
+                "project_order_fields": [
+                  "decision_date",
+                  "attempt_date",
+                  "symbol",
+                  "side",
+                  "quantity",
+                  "reason"
+                ]
+              },
+              {
+                "field": "orders.nautilus_native_lifecycle",
+                "passed": true,
+                "expected_rust_attempts": 351,
+                "actual_nautilus_submissions": 351,
+                "adapter_rejections_excluded": 0
+              },
+              {
+                "field": "fills.quantity_price_commission",
+                "passed": true,
+                "expected_fill_count": 351,
+                "actual_fill_count": 351
+              },
+              {
+                "field": "daily.cash_nav",
+                "passed": true,
+                "session_count": 252
+              },
+              {
+                "field": "daily.holdings",
+                "passed": true,
+                "session_count": 252
+              },
+              {
+                "field": "nautilus.account_cash_positions",
+                "passed": true,
+                "snapshot_count": 252
+              },
+              {
+                "field": "summary.costs",
+                "passed": true
+              },
+              {
+                "field": "rust_b3_registered_stress_checksum",
+                "passed": true,
+                "expected": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+                "actual": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342"
+              }
+            ],
+            "mismatch_diagnostics": {
+              "orders": {
+                "expected_only_count": 0,
+                "actual_only_count": 0,
+                "expected_only_examples": [],
+                "actual_only_examples": []
+              },
+              "fills": {
+                "expected_only_count": 0,
+                "actual_only_count": 0,
+                "expected_only_examples": [],
+                "actual_only_examples": []
+              },
+              "daily_ledger_first_mismatches": [],
+              "daily_ledger_mismatch_count": 0,
+              "summary_costs": {
+                "commission": {
+                  "expected": 35100.0,
+                  "actual": 35100.0,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "tax": {
+                  "expected": 0.0,
+                  "actual": 0.0,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "slippage_cost": {
+                  "expected": 3589.999999999825,
+                  "actual": 3589.999999999796,
+                  "delta_actual_minus_expected": -2.9103830456733704e-11
+                },
+                "total_cost": {
+                  "expected": 38689.999999999825,
+                  "actual": 38689.999999999796,
+                  "delta_actual_minus_expected": -2.9103830456733704e-11
+                }
+              },
+              "halt_attribution": [
+                {
+                  "date": "2025-07-02",
+                  "symbol": "ETF002",
+                  "trade_status": "HALTED",
+                  "adr_0012_scope": "ADR 0012 excludes native Nautilus order lifecycle only; all project attempts, fills and account fields remain compared",
+                  "rust_attempt_count": 0,
+                  "nautilus_project_order_count": 0,
+                  "rust_fill_count": 0,
+                  "nautilus_fill_count": 0,
+                  "rust_attempts": [],
+                  "nautilus_project_orders": [],
+                  "rust_fills": [],
+                  "nautilus_fills": []
+                }
+              ]
+            }
+          },
+          {
+            "attempt": 2,
+            "status": "passed",
+            "nautilus_checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+            "failure_fields": [],
+            "checks": [
+              {
+                "field": "orders.adapter_project_contract",
+                "passed": true,
+                "expected_order_events": 351,
+                "actual_adapter_order_events": 351,
+                "project_order_fields": [
+                  "decision_date",
+                  "attempt_date",
+                  "symbol",
+                  "side",
+                  "quantity",
+                  "reason"
+                ]
+              },
+              {
+                "field": "orders.nautilus_native_lifecycle",
+                "passed": true,
+                "expected_rust_attempts": 351,
+                "actual_nautilus_submissions": 351,
+                "adapter_rejections_excluded": 0
+              },
+              {
+                "field": "fills.quantity_price_commission",
+                "passed": true,
+                "expected_fill_count": 351,
+                "actual_fill_count": 351
+              },
+              {
+                "field": "daily.cash_nav",
+                "passed": true,
+                "session_count": 252
+              },
+              {
+                "field": "daily.holdings",
+                "passed": true,
+                "session_count": 252
+              },
+              {
+                "field": "nautilus.account_cash_positions",
+                "passed": true,
+                "snapshot_count": 252
+              },
+              {
+                "field": "summary.costs",
+                "passed": true
+              },
+              {
+                "field": "rust_b3_registered_stress_checksum",
+                "passed": true,
+                "expected": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+                "actual": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342"
+              }
+            ],
+            "mismatch_diagnostics": {
+              "orders": {
+                "expected_only_count": 0,
+                "actual_only_count": 0,
+                "expected_only_examples": [],
+                "actual_only_examples": []
+              },
+              "fills": {
+                "expected_only_count": 0,
+                "actual_only_count": 0,
+                "expected_only_examples": [],
+                "actual_only_examples": []
+              },
+              "daily_ledger_first_mismatches": [],
+              "daily_ledger_mismatch_count": 0,
+              "summary_costs": {
+                "commission": {
+                  "expected": 35100.0,
+                  "actual": 35100.0,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "tax": {
+                  "expected": 0.0,
+                  "actual": 0.0,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "slippage_cost": {
+                  "expected": 3589.999999999825,
+                  "actual": 3589.999999999796,
+                  "delta_actual_minus_expected": -2.9103830456733704e-11
+                },
+                "total_cost": {
+                  "expected": 38689.999999999825,
+                  "actual": 38689.999999999796,
+                  "delta_actual_minus_expected": -2.9103830456733704e-11
+                }
+              },
+              "halt_attribution": [
+                {
+                  "date": "2025-07-02",
+                  "symbol": "ETF002",
+                  "trade_status": "HALTED",
+                  "adr_0012_scope": "ADR 0012 excludes native Nautilus order lifecycle only; all project attempts, fills and account fields remain compared",
+                  "rust_attempt_count": 0,
+                  "nautilus_project_order_count": 0,
+                  "rust_fill_count": 0,
+                  "nautilus_fill_count": 0,
+                  "rust_attempts": [],
+                  "nautilus_project_orders": [],
+                  "rust_fills": [],
+                  "nautilus_fills": []
+                }
+              ]
+            }
+          }
+        ],
+        "checks": [
+          {
+            "field": "orders.adapter_project_contract",
+            "passed": true,
+            "expected_order_events": 351,
+            "actual_adapter_order_events": 351,
+            "project_order_fields": [
+              "decision_date",
+              "attempt_date",
+              "symbol",
+              "side",
+              "quantity",
+              "reason"
+            ]
+          },
+          {
+            "field": "orders.nautilus_native_lifecycle",
+            "passed": true,
+            "expected_rust_attempts": 351,
+            "actual_nautilus_submissions": 351,
+            "adapter_rejections_excluded": 0
+          },
+          {
+            "field": "fills.quantity_price_commission",
+            "passed": true,
+            "expected_fill_count": 351,
+            "actual_fill_count": 351
+          },
+          {
+            "field": "daily.cash_nav",
+            "passed": true,
+            "session_count": 252
+          },
+          {
+            "field": "daily.holdings",
+            "passed": true,
+            "session_count": 252
+          },
+          {
+            "field": "nautilus.account_cash_positions",
+            "passed": true,
+            "snapshot_count": 252
+          },
+          {
+            "field": "summary.costs",
+            "passed": true
+          },
+          {
+            "field": "rust_b3_registered_stress_checksum",
+            "passed": true,
+            "expected": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+            "actual": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342"
+          }
+        ]
+      },
+      "measurements": {
+        "nautilus_engine_mode": "cached_conversion_new_engine",
+        "status": "passed",
+        "serial": {
+          "rust": {
+            "build_profile": "release",
+            "dataset_content_sha256": "2ae75e889e3d65a28974f3f467794532621b34c6b58c31c6f37bc75392358dff",
+            "dataset_version": "poc0.b3.s2-scale-64x252.v1",
+            "golden_preflight": "external_passed",
+            "input_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
+            "instrument_count": 64,
+            "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+            "measurement_wall_ns": 225692792,
+            "median_ns": 11260500,
+            "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+            "mode": "serial",
+            "p95_ns": 11490083,
+            "parallel_runs_per_second": null,
+            "peak_rss_bytes": 178569216,
+            "raw_samples_ns": [
+              11408167,
+              11329583,
+              11157458,
+              11487250,
+              11096250,
+              11228167,
+              11495625,
+              11346333,
+              11199708,
+              11490083,
+              11332750,
+              11242416,
+              11351042,
+              11253791,
+              11175958,
+              11138792,
+              11260500,
+              11158917,
+              11322833,
+              11165208
+            ],
+            "run_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+            "runs": 20,
+            "runs_per_second": 88.61603342653495,
+            "secondary_boundary_median_ns": 56447750,
+            "secondary_boundary_p95_ns": 58221750,
+            "secondary_boundary_samples_ns": [
+              57532375,
+              57243750,
+              56359584,
+              59262958,
+              57959292,
+              56651000,
+              58221750,
+              56341875,
+              56570709,
+              56206167,
+              56219625,
+              56409583,
+              56177167,
+              56447750,
+              56380833,
+              56458625,
+              56352166,
+              56167250,
+              56972333,
+              56190459
+            ],
+            "serial_runs_per_second": 88.61603342653495,
+            "session_count": 252,
+            "status": "passed",
+            "strategy": "s2",
+            "synthetic_quote_events_per_run": 32254,
+            "threads": 1,
+            "warmup_runs": 2,
+            "warmup_runs_per_worker": 2,
+            "workers": 1,
+            "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+            "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s2.rust.serial.0.json"
+          },
+          "nautilus": {
+            "status": "passed",
+            "workers": 1,
+            "warmup_runs": 2,
+            "warmup_runs_per_worker": 2,
+            "runs": 20,
+            "raw_samples_ns": [
+              153984042,
+              152363833,
+              160359125,
+              152494500,
+              154518250,
+              151567833,
+              152534083,
+              157110375,
+              163093833,
+              154113417,
+              151415750,
+              158212500,
+              153300208,
+              151846542,
+              152051958,
+              153108375,
+              153699208,
+              151415959,
+              152822208,
+              151660791
+            ],
+            "secondary_boundary_samples_ns": [
+              {
+                "run_index": 0,
+                "end_to_end_ns": 268195417,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 1,
+                "end_to_end_ns": 267306250,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 2,
+                "end_to_end_ns": 272978625,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 3,
+                "end_to_end_ns": 266169791,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 4,
+                "end_to_end_ns": 274990416,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 5,
+                "end_to_end_ns": 268130625,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 6,
+                "end_to_end_ns": 267071584,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 7,
+                "end_to_end_ns": 269424166,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 8,
+                "end_to_end_ns": 266165042,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 9,
+                "end_to_end_ns": 266562833,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 10,
+                "end_to_end_ns": 275727833,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 11,
+                "end_to_end_ns": 277056459,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 12,
+                "end_to_end_ns": 275292250,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 13,
+                "end_to_end_ns": 271147375,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 14,
+                "end_to_end_ns": 270004959,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 15,
+                "end_to_end_ns": 362375125,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 16,
+                "end_to_end_ns": 273206875,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 17,
+                "end_to_end_ns": 273242500,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 18,
+                "end_to_end_ns": 265708125,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              },
+              {
+                "run_index": 19,
+                "end_to_end_ns": 266758459,
+                "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+              }
+            ],
+            "secondary_boundary_median_ns": 269714562.5,
+            "secondary_boundary_p95_ns": 277056459,
+            "checksums_sha256": [
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+              "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+            ],
+            "median_ns": 152965291.5,
+            "p95_ns": 160359125,
+            "peak_rss_bytes": 156893184,
+            "engine_mode": "cached_conversion_new_engine",
+            "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
+            "conversion_cached_per_worker": true,
+            "measurement_scope": "single worker; conversion and two warmups excluded; factor/signal, new engine initialization, replay and projection included",
+            "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s2.nautilus.serial.0.json"
+          }
+        },
+        "parallel_groups": [
+          {
+            "group": 1,
+            "order": [
+              "rust",
+              "nautilus"
+            ],
+            "runs": {
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "2ae75e889e3d65a28974f3f467794532621b34c6b58c31c6f37bc75392358dff",
+                "dataset_version": "poc0.b3.s2-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 59669333,
+                "median_ns": 19774208,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 20073750,
+                "parallel_runs_per_second": 100.55416573870534,
+                "peak_rss_bytes": 88178688,
+                "raw_samples_ns": [
+                  20073750,
+                  19774208,
+                  19755833,
+                  19935000,
+                  19710667,
+                  19566750
+                ],
+                "run_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+                "runs": 6,
+                "runs_per_second": 100.55416573870534,
+                "secondary_boundary_median_ns": 57323666,
+                "secondary_boundary_p95_ns": 58849208,
+                "secondary_boundary_samples_ns": [
+                  57323666,
+                  55933041,
+                  56274625,
+                  58849208,
+                  57699958,
+                  56675334
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s2",
+                "synthetic_quote_events_per_run": 32254,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s2.rust.parallel.1.json"
+              },
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  163333625,
+                  161127916,
+                  173298459,
+                  162636959,
+                  161863750,
+                  173838666
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 284846625,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 285065334,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 300803583,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 299935208,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 286710709,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 286493250,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  }
+                ],
+                "secondary_boundary_median_ns": 286601979.5,
+                "secondary_boundary_p95_ns": 300803583,
+                "checksums_sha256": [
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                ],
+                "median_ns": 162985292.0,
+                "p95_ns": 173838666,
+                "parallel_wall_ns": 500100750,
+                "parallel_runs_per_second": 11.997582487128843,
+                "peak_rss_by_worker_bytes": {
+                  "7472": 148094976,
+                  "7473": 148127744
+                },
+                "peak_rss_sum_upper_bound_bytes": 296222720,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s2.nautilus.parallel.1.json"
+              }
+            }
+          },
+          {
+            "group": 2,
+            "order": [
+              "nautilus",
+              "rust"
+            ],
+            "runs": {
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  162903208,
+                  162024709,
+                  175485666,
+                  162599833,
+                  163538667,
+                  176327250
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 287325834,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 286489125,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 284353708,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 284516125,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 283936625,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 282468958,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  }
+                ],
+                "secondary_boundary_median_ns": 284434916.5,
+                "secondary_boundary_p95_ns": 287325834,
+                "checksums_sha256": [
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                ],
+                "median_ns": 163220937.5,
+                "p95_ns": 176327250,
+                "parallel_wall_ns": 504467208,
+                "parallel_runs_per_second": 11.893736411108806,
+                "peak_rss_by_worker_bytes": {
+                  "7506": 149536768,
+                  "7507": 150159360
+                },
+                "peak_rss_sum_upper_bound_bytes": 299696128,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s2.nautilus.parallel.2.json"
+              },
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "2ae75e889e3d65a28974f3f467794532621b34c6b58c31c6f37bc75392358dff",
+                "dataset_version": "poc0.b3.s2-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 58357041,
+                "median_ns": 19635750,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 19965542,
+                "parallel_runs_per_second": 102.8153569335361,
+                "peak_rss_bytes": 92160000,
+                "raw_samples_ns": [
+                  19959042,
+                  19635750,
+                  18700959,
+                  19965542,
+                  19553750,
+                  18236292
+                ],
+                "run_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+                "runs": 6,
+                "runs_per_second": 102.8153569335361,
+                "secondary_boundary_median_ns": 57039417,
+                "secondary_boundary_p95_ns": 59444792,
+                "secondary_boundary_samples_ns": [
+                  59444792,
+                  57039417,
+                  56653417,
+                  56836666,
+                  56665083,
+                  57237292
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s2",
+                "synthetic_quote_events_per_run": 32254,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s2.rust.parallel.2.json"
+              }
+            }
+          },
+          {
+            "group": 3,
+            "order": [
+              "rust",
+              "nautilus"
+            ],
+            "runs": {
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "2ae75e889e3d65a28974f3f467794532621b34c6b58c31c6f37bc75392358dff",
+                "dataset_version": "poc0.b3.s2-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 56223084,
+                "median_ns": 18216583,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 20261375,
+                "parallel_runs_per_second": 106.71773181279063,
+                "peak_rss_bytes": 90914816,
+                "raw_samples_ns": [
+                  20261375,
+                  18196000,
+                  17650958,
+                  20238459,
+                  18216583,
+                  17732208
+                ],
+                "run_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+                "runs": 6,
+                "runs_per_second": 106.71773181279063,
+                "secondary_boundary_median_ns": 58117542,
+                "secondary_boundary_p95_ns": 62218917,
+                "secondary_boundary_samples_ns": [
+                  58010250,
+                  56993041,
+                  57264500,
+                  58117542,
+                  62218917,
+                  58207208
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s2",
+                "synthetic_quote_events_per_run": 32254,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s2.rust.parallel.3.json"
+              },
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  162519959,
+                  178622000,
+                  174408334,
+                  162626292,
+                  178273500,
+                  172822958
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 285457875,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 284622958,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 285639708,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 284281166,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 286733792,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 287913125,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  }
+                ],
+                "secondary_boundary_median_ns": 285548791.5,
+                "secondary_boundary_p95_ns": 287913125,
+                "checksums_sha256": [
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                ],
+                "median_ns": 173615646.0,
+                "p95_ns": 178622000,
+                "parallel_wall_ns": 517395958,
+                "parallel_runs_per_second": 11.59653435096994,
+                "peak_rss_by_worker_bytes": {
+                  "7560": 149798912,
+                  "7561": 148979712
+                },
+                "peak_rss_sum_upper_bound_bytes": 298778624,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s2.nautilus.parallel.3.json"
+              }
+            }
+          },
+          {
+            "group": 4,
+            "order": [
+              "nautilus",
+              "rust"
+            ],
+            "runs": {
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  163198167,
+                  163958625,
+                  176121083,
+                  163048000,
+                  164171500,
+                  172536041
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 283178291,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 281971000,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 287930208,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 291212375,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 287490458,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 288982208,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  }
+                ],
+                "secondary_boundary_median_ns": 287710333.0,
+                "secondary_boundary_p95_ns": 291212375,
+                "checksums_sha256": [
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                ],
+                "median_ns": 164065062.5,
+                "p95_ns": 176121083,
+                "parallel_wall_ns": 505108750,
+                "parallel_runs_per_second": 11.878630096984065,
+                "peak_rss_by_worker_bytes": {
+                  "7599": 148160512,
+                  "7600": 149569536
+                },
+                "peak_rss_sum_upper_bound_bytes": 297730048,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s2.nautilus.parallel.4.json"
+              },
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "2ae75e889e3d65a28974f3f467794532621b34c6b58c31c6f37bc75392358dff",
+                "dataset_version": "poc0.b3.s2-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 56707500,
+                "median_ns": 19213833,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 19553292,
+                "parallel_runs_per_second": 105.80611030287,
+                "peak_rss_bytes": 88686592,
+                "raw_samples_ns": [
+                  19210709,
+                  19537000,
+                  17868541,
+                  19213833,
+                  19553292,
+                  17922875
+                ],
+                "run_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+                "runs": 6,
+                "runs_per_second": 105.80611030287,
+                "secondary_boundary_median_ns": 57181375,
+                "secondary_boundary_p95_ns": 58389250,
+                "secondary_boundary_samples_ns": [
+                  58389250,
+                  57181375,
+                  57206375,
+                  56627291,
+                  56996541,
+                  57058375
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s2",
+                "synthetic_quote_events_per_run": 32254,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s2.rust.parallel.4.json"
+              }
+            }
+          },
+          {
+            "group": 5,
+            "order": [
+              "rust",
+              "nautilus"
+            ],
+            "runs": {
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "2ae75e889e3d65a28974f3f467794532621b34c6b58c31c6f37bc75392358dff",
+                "dataset_version": "poc0.b3.s2-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 67089792,
+                "median_ns": 21152875,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 26158292,
+                "parallel_runs_per_second": 89.43238339448123,
+                "peak_rss_bytes": 90865664,
+                "raw_samples_ns": [
+                  26158292,
+                  21107625,
+                  19434125,
+                  25563166,
+                  21152875,
+                  20286792
+                ],
+                "run_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+                "runs": 6,
+                "runs_per_second": 89.43238339448123,
+                "secondary_boundary_median_ns": 66143250,
+                "secondary_boundary_p95_ns": 69894875,
+                "secondary_boundary_samples_ns": [
+                  69894875,
+                  66143250,
+                  62472917,
+                  63619625,
+                  63361166,
+                  66397250
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s2",
+                "synthetic_quote_events_per_run": 32254,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s2.rust.parallel.5.json"
+              },
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  184837333,
+                  425834834,
+                  189865375,
+                  187166167,
+                  413890208,
+                  199421583
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 291298334,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 291722542,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 291054417,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 290991625,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 293341000,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 291945500,
+                    "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                  }
+                ],
+                "secondary_boundary_median_ns": 291510438.0,
+                "secondary_boundary_p95_ns": 293341000,
+                "checksums_sha256": [
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+                  "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+                ],
+                "median_ns": 194643479.0,
+                "p95_ns": 425834834,
+                "parallel_wall_ns": 802944250,
+                "parallel_runs_per_second": 7.472498869006161,
+                "peak_rss_by_worker_bytes": {
+                  "7657": 150437888,
+                  "7658": 150749184
+                },
+                "peak_rss_sum_upper_bound_bytes": 301187072,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s2.nautilus.parallel.5.json"
+              }
+            }
+          }
+        ],
+        "rust_parallel_runs_per_second_median": 102.8153569335361,
+        "nautilus_parallel_runs_per_second_median": 11.878630096984065,
+        "rss": {
+          "rust_process_peak_bytes": 92160000,
+          "nautilus_worker_peak_bytes": [
+            148094976,
+            148127744,
+            149536768,
+            150159360,
+            149798912,
+            148979712,
+            148160512,
+            149569536,
+            150437888,
+            150749184
+          ],
+          "nautilus_peak_rss_sum_upper_bound_bytes": 301187072
+        },
+        "decision": {
+          "status": "adopt",
+          "reason": "all registered speed and RSS gates passed",
+          "evidence_level": "registered"
+        }
+      }
+    },
+    "s3": {
+      "dataset_version": "poc0.b3.s3-scale-64x252.v1",
+      "dataset_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
+      "dataset_content_sha256": "d5384e1e27162713df2cd020dcdd655d5838f1d417d3848ac0eaca8f0a002e5a",
+      "dimensions": {
+        "instruments": 64,
+        "sessions": 252
+      },
+      "strategy_parameters": "MA20/60, fixed rising-symbol fixture",
+      "registered_b3_stress_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+      "correctness": {
+        "status": "passed",
+        "basis": "two independent Nautilus projection comparisons against Rust; pass requires matching checksums, failure requires identical checksums and failure fields",
+        "rust_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+        "nautilus_checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+        "nautilus_serialization_checksum_note": "informational only; Python canonical JSON and Rust struct-field serialization differ",
+        "repeatability": {
+          "attempt_count": 2,
+          "status": "passed",
+          "checksums_identical": true
+        },
+        "attempts": [
+          {
+            "attempt": 1,
+            "status": "passed",
+            "nautilus_checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+            "failure_fields": [],
+            "checks": [
+              {
+                "field": "orders.adapter_project_contract",
+                "passed": true,
+                "expected_order_events": 2,
+                "actual_adapter_order_events": 2,
+                "project_order_fields": [
+                  "decision_date",
+                  "attempt_date",
+                  "symbol",
+                  "side",
+                  "quantity",
+                  "reason"
+                ]
+              },
+              {
+                "field": "orders.nautilus_native_lifecycle",
+                "passed": true,
+                "expected_rust_attempts": 2,
+                "actual_nautilus_submissions": 2,
+                "adapter_rejections_excluded": 0
+              },
+              {
+                "field": "fills.quantity_price_commission",
+                "passed": true,
+                "expected_fill_count": 2,
+                "actual_fill_count": 2
+              },
+              {
+                "field": "daily.cash_nav",
+                "passed": true,
+                "session_count": 252
+              },
+              {
+                "field": "daily.holdings",
+                "passed": true,
+                "session_count": 252
+              },
+              {
+                "field": "nautilus.account_cash_positions",
+                "passed": true,
+                "snapshot_count": 252
+              },
+              {
+                "field": "summary.costs",
+                "passed": true
+              },
+              {
+                "field": "rust_b3_registered_stress_checksum",
+                "passed": true,
+                "expected": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+                "actual": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70"
+              }
+            ],
+            "mismatch_diagnostics": {
+              "orders": {
+                "expected_only_count": 0,
+                "actual_only_count": 0,
+                "expected_only_examples": [],
+                "actual_only_examples": []
+              },
+              "fills": {
+                "expected_only_count": 0,
+                "actual_only_count": 0,
+                "expected_only_examples": [],
+                "actual_only_examples": []
+              },
+              "daily_ledger_first_mismatches": [],
+              "daily_ledger_mismatch_count": 0,
+              "summary_costs": {
+                "commission": {
+                  "expected": 200.0,
+                  "actual": 200.0,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "tax": {
+                  "expected": 0.0,
+                  "actual": 0.0,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "slippage_cost": {
+                  "expected": 179.99999999998977,
+                  "actual": 179.99999999998977,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "total_cost": {
+                  "expected": 379.99999999998977,
+                  "actual": 379.99999999998977,
+                  "delta_actual_minus_expected": 0.0
+                }
+              },
+              "halt_attribution": []
+            }
+          },
+          {
+            "attempt": 2,
+            "status": "passed",
+            "nautilus_checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+            "failure_fields": [],
+            "checks": [
+              {
+                "field": "orders.adapter_project_contract",
+                "passed": true,
+                "expected_order_events": 2,
+                "actual_adapter_order_events": 2,
+                "project_order_fields": [
+                  "decision_date",
+                  "attempt_date",
+                  "symbol",
+                  "side",
+                  "quantity",
+                  "reason"
+                ]
+              },
+              {
+                "field": "orders.nautilus_native_lifecycle",
+                "passed": true,
+                "expected_rust_attempts": 2,
+                "actual_nautilus_submissions": 2,
+                "adapter_rejections_excluded": 0
+              },
+              {
+                "field": "fills.quantity_price_commission",
+                "passed": true,
+                "expected_fill_count": 2,
+                "actual_fill_count": 2
+              },
+              {
+                "field": "daily.cash_nav",
+                "passed": true,
+                "session_count": 252
+              },
+              {
+                "field": "daily.holdings",
+                "passed": true,
+                "session_count": 252
+              },
+              {
+                "field": "nautilus.account_cash_positions",
+                "passed": true,
+                "snapshot_count": 252
+              },
+              {
+                "field": "summary.costs",
+                "passed": true
+              },
+              {
+                "field": "rust_b3_registered_stress_checksum",
+                "passed": true,
+                "expected": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+                "actual": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70"
+              }
+            ],
+            "mismatch_diagnostics": {
+              "orders": {
+                "expected_only_count": 0,
+                "actual_only_count": 0,
+                "expected_only_examples": [],
+                "actual_only_examples": []
+              },
+              "fills": {
+                "expected_only_count": 0,
+                "actual_only_count": 0,
+                "expected_only_examples": [],
+                "actual_only_examples": []
+              },
+              "daily_ledger_first_mismatches": [],
+              "daily_ledger_mismatch_count": 0,
+              "summary_costs": {
+                "commission": {
+                  "expected": 200.0,
+                  "actual": 200.0,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "tax": {
+                  "expected": 0.0,
+                  "actual": 0.0,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "slippage_cost": {
+                  "expected": 179.99999999998977,
+                  "actual": 179.99999999998977,
+                  "delta_actual_minus_expected": 0.0
+                },
+                "total_cost": {
+                  "expected": 379.99999999998977,
+                  "actual": 379.99999999998977,
+                  "delta_actual_minus_expected": 0.0
+                }
+              },
+              "halt_attribution": []
+            }
+          }
+        ],
+        "checks": [
+          {
+            "field": "orders.adapter_project_contract",
+            "passed": true,
+            "expected_order_events": 2,
+            "actual_adapter_order_events": 2,
+            "project_order_fields": [
+              "decision_date",
+              "attempt_date",
+              "symbol",
+              "side",
+              "quantity",
+              "reason"
+            ]
+          },
+          {
+            "field": "orders.nautilus_native_lifecycle",
+            "passed": true,
+            "expected_rust_attempts": 2,
+            "actual_nautilus_submissions": 2,
+            "adapter_rejections_excluded": 0
+          },
+          {
+            "field": "fills.quantity_price_commission",
+            "passed": true,
+            "expected_fill_count": 2,
+            "actual_fill_count": 2
+          },
+          {
+            "field": "daily.cash_nav",
+            "passed": true,
+            "session_count": 252
+          },
+          {
+            "field": "daily.holdings",
+            "passed": true,
+            "session_count": 252
+          },
+          {
+            "field": "nautilus.account_cash_positions",
+            "passed": true,
+            "snapshot_count": 252
+          },
+          {
+            "field": "summary.costs",
+            "passed": true
+          },
+          {
+            "field": "rust_b3_registered_stress_checksum",
+            "passed": true,
+            "expected": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+            "actual": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70"
+          }
+        ]
+      },
+      "measurements": {
+        "nautilus_engine_mode": "cached_conversion_new_engine",
+        "status": "passed",
+        "serial": {
+          "rust": {
+            "build_profile": "release",
+            "dataset_content_sha256": "d5384e1e27162713df2cd020dcdd655d5838f1d417d3848ac0eaca8f0a002e5a",
+            "dataset_version": "poc0.b3.s3-scale-64x252.v1",
+            "golden_preflight": "external_passed",
+            "input_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
+            "instrument_count": 64,
+            "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+            "measurement_wall_ns": 50597500,
+            "median_ns": 2524208,
+            "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+            "mode": "serial",
+            "p95_ns": 2666833,
+            "parallel_runs_per_second": null,
+            "peak_rss_bytes": 178388992,
+            "raw_samples_ns": [
+              2462375,
+              2546125,
+              2544125,
+              2666833,
+              2559625,
+              2727375,
+              2487584,
+              2489875,
+              2426250,
+              2457125,
+              2539000,
+              2585042,
+              2458291,
+              2419792,
+              2512334,
+              2508834,
+              2473958,
+              2547291,
+              2592083,
+              2524208
+            ],
+            "run_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+            "runs": 20,
+            "runs_per_second": 395.2764464647463,
+            "secondary_boundary_median_ns": 47974791,
+            "secondary_boundary_p95_ns": 56060375,
+            "secondary_boundary_samples_ns": [
+              48601708,
+              60073833,
+              49289834,
+              49313084,
+              48911917,
+              47309500,
+              48061500,
+              46956542,
+              47335542,
+              47117666,
+              47974791,
+              48369625,
+              48979417,
+              56060375,
+              47107208,
+              47329500,
+              47081458,
+              47404000,
+              47378750,
+              47261625
+            ],
+            "serial_runs_per_second": 395.2764464647463,
+            "session_count": 252,
+            "status": "passed",
+            "strategy": "s3",
+            "synthetic_quote_events_per_run": 32256,
+            "threads": 1,
+            "warmup_runs": 2,
+            "warmup_runs_per_worker": 2,
+            "workers": 1,
+            "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+            "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s3.rust.serial.0.json"
+          },
+          "nautilus": {
+            "status": "passed",
+            "workers": 1,
+            "warmup_runs": 2,
+            "warmup_runs_per_worker": 2,
+            "runs": 20,
+            "raw_samples_ns": [
+              53974000,
+              53633584,
+              58075625,
+              54083167,
+              53883375,
+              54228958,
+              53899834,
+              53732334,
+              53763166,
+              55612583,
+              53672250,
+              53867334,
+              54915958,
+              56541041,
+              60684416,
+              57197500,
+              53436500,
+              53369292,
+              54603334,
+              52113125
+            ],
+            "secondary_boundary_samples_ns": [
+              {
+                "run_index": 0,
+                "end_to_end_ns": 138876916,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 1,
+                "end_to_end_ns": 135377292,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 2,
+                "end_to_end_ns": 136084084,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 3,
+                "end_to_end_ns": 135427750,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 4,
+                "end_to_end_ns": 135744875,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 5,
+                "end_to_end_ns": 137833792,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 6,
+                "end_to_end_ns": 137273209,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 7,
+                "end_to_end_ns": 133450209,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 8,
+                "end_to_end_ns": 137107000,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 9,
+                "end_to_end_ns": 133452208,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 10,
+                "end_to_end_ns": 135497333,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 11,
+                "end_to_end_ns": 133546208,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 12,
+                "end_to_end_ns": 133505250,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 13,
+                "end_to_end_ns": 133541667,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 14,
+                "end_to_end_ns": 134440125,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 15,
+                "end_to_end_ns": 136068916,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 16,
+                "end_to_end_ns": 134706708,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 17,
+                "end_to_end_ns": 134678166,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 18,
+                "end_to_end_ns": 134704750,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              },
+              {
+                "run_index": 19,
+                "end_to_end_ns": 133318750,
+                "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+              }
+            ],
+            "secondary_boundary_median_ns": 135042000.0,
+            "secondary_boundary_p95_ns": 137833792,
+            "checksums_sha256": [
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+              "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+            ],
+            "median_ns": 53936917.0,
+            "p95_ns": 58075625,
+            "peak_rss_bytes": 137625600,
+            "engine_mode": "cached_conversion_new_engine",
+            "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
+            "conversion_cached_per_worker": true,
+            "measurement_scope": "single worker; conversion and two warmups excluded; factor/signal, new engine initialization, replay and projection included",
+            "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s3.nautilus.serial.0.json"
+          }
+        },
+        "parallel_groups": [
+          {
+            "group": 1,
+            "order": [
+              "rust",
+              "nautilus"
+            ],
+            "runs": {
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "d5384e1e27162713df2cd020dcdd655d5838f1d417d3848ac0eaca8f0a002e5a",
+                "dataset_version": "poc0.b3.s3-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 11084375,
+                "median_ns": 3692042,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 3701500,
+                "parallel_runs_per_second": 541.3025091626727,
+                "peak_rss_bytes": 86212608,
+                "raw_samples_ns": [
+                  3701500,
+                  3661875,
+                  3632917,
+                  3699083,
+                  3692042,
+                  3671666
+                ],
+                "run_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+                "runs": 6,
+                "runs_per_second": 541.3025091626727,
+                "secondary_boundary_median_ns": 46403916,
+                "secondary_boundary_p95_ns": 47407625,
+                "secondary_boundary_samples_ns": [
+                  47407625,
+                  46455958,
+                  46403916,
+                  46273125,
+                  46306417,
+                  46216291
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s3",
+                "synthetic_quote_events_per_run": 32256,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s3.rust.parallel.1.json"
+              },
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  59060250,
+                  58779792,
+                  58728375,
+                  59001708,
+                  59532541,
+                  58459083
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 157482500,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 160422791,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 149089042,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 146870625,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 141993250,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 143623625,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  }
+                ],
+                "secondary_boundary_median_ns": 147979833.5,
+                "secondary_boundary_p95_ns": 160422791,
+                "checksums_sha256": [
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                ],
+                "median_ns": 58890750.0,
+                "p95_ns": 59532541,
+                "parallel_wall_ns": 178579500,
+                "parallel_runs_per_second": 33.59848134864304,
+                "peak_rss_by_worker_bytes": {
+                  "7800": 116932608,
+                  "7801": 116768768
+                },
+                "peak_rss_sum_upper_bound_bytes": 233701376,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s3.nautilus.parallel.1.json"
+              }
+            }
+          },
+          {
+            "group": 2,
+            "order": [
+              "nautilus",
+              "rust"
+            ],
+            "runs": {
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  63591875,
+                  62628916,
+                  61361542,
+                  64504875,
+                  63384834,
+                  61505500
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 156802500,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 154341625,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 153471083,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 153702083,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 167353958,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 177877666,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  }
+                ],
+                "secondary_boundary_median_ns": 155572062.5,
+                "secondary_boundary_p95_ns": 177877666,
+                "checksums_sha256": [
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                ],
+                "median_ns": 63006875.0,
+                "p95_ns": 64504875,
+                "parallel_wall_ns": 191025041,
+                "parallel_runs_per_second": 31.409494632695825,
+                "peak_rss_by_worker_bytes": {
+                  "7834": 116883456,
+                  "7835": 116703232
+                },
+                "peak_rss_sum_upper_bound_bytes": 233586688,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s3.nautilus.parallel.2.json"
+              },
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "d5384e1e27162713df2cd020dcdd655d5838f1d417d3848ac0eaca8f0a002e5a",
+                "dataset_version": "poc0.b3.s3-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 11456834,
+                "median_ns": 3792959,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 4076958,
+                "parallel_runs_per_second": 523.704890897433,
+                "peak_rss_bytes": 90046464,
+                "raw_samples_ns": [
+                  3792959,
+                  3950625,
+                  3624625,
+                  3728459,
+                  4076958,
+                  3612709
+                ],
+                "run_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+                "runs": 6,
+                "runs_per_second": 523.704890897433,
+                "secondary_boundary_median_ns": 104050459,
+                "secondary_boundary_p95_ns": 174594833,
+                "secondary_boundary_samples_ns": [
+                  52746875,
+                  131263708,
+                  49191583,
+                  49304750,
+                  174594833,
+                  104050459
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s3",
+                "synthetic_quote_events_per_run": 32256,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s3.rust.parallel.2.json"
+              }
+            }
+          },
+          {
+            "group": 3,
+            "order": [
+              "rust",
+              "nautilus"
+            ],
+            "runs": {
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "d5384e1e27162713df2cd020dcdd655d5838f1d417d3848ac0eaca8f0a002e5a",
+                "dataset_version": "poc0.b3.s3-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 11144500,
+                "median_ns": 3692959,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 3730041,
+                "parallel_runs_per_second": 538.3821616043789,
+                "peak_rss_bytes": 86491136,
+                "raw_samples_ns": [
+                  3692959,
+                  3656417,
+                  3634250,
+                  3722208,
+                  3619500,
+                  3730041
+                ],
+                "run_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+                "runs": 6,
+                "runs_per_second": 538.3821616043789,
+                "secondary_boundary_median_ns": 49111958,
+                "secondary_boundary_p95_ns": 56978833,
+                "secondary_boundary_samples_ns": [
+                  48529916,
+                  48542792,
+                  49752792,
+                  47973791,
+                  49111958,
+                  56978833
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s3",
+                "synthetic_quote_events_per_run": 32256,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s3.rust.parallel.3.json"
+              },
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  60725166,
+                  58956208,
+                  59831959,
+                  61585333,
+                  59590875,
+                  60375500
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 152814791,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 152109583,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 147742709,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 147853084,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 161764041,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 161308459,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  }
+                ],
+                "secondary_boundary_median_ns": 152462187.0,
+                "secondary_boundary_p95_ns": 161764041,
+                "checksums_sha256": [
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                ],
+                "median_ns": 60103729.5,
+                "p95_ns": 61585333,
+                "parallel_wall_ns": 183206666,
+                "parallel_runs_per_second": 32.749900050034206,
+                "peak_rss_by_worker_bytes": {
+                  "7921": 117243904,
+                  "7922": 126402560
+                },
+                "peak_rss_sum_upper_bound_bytes": 243646464,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s3.nautilus.parallel.3.json"
+              }
+            }
+          },
+          {
+            "group": 4,
+            "order": [
+              "nautilus",
+              "rust"
+            ],
+            "runs": {
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  58513625,
+                  57489959,
+                  57896417,
+                  54649042,
+                  53825833,
+                  54169125
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 149840167,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 145654792,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 142389042,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 142980792,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 145281167,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 149958583,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  }
+                ],
+                "secondary_boundary_median_ns": 145467979.5,
+                "secondary_boundary_p95_ns": 149958583,
+                "checksums_sha256": [
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                ],
+                "median_ns": 56069500.5,
+                "p95_ns": 58513625,
+                "parallel_wall_ns": 175568125,
+                "parallel_runs_per_second": 34.17476834134898,
+                "peak_rss_by_worker_bytes": {
+                  "7955": 116719616,
+                  "7956": 116621312
+                },
+                "peak_rss_sum_upper_bound_bytes": 233340928,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s3.nautilus.parallel.4.json"
+              },
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "d5384e1e27162713df2cd020dcdd655d5838f1d417d3848ac0eaca8f0a002e5a",
+                "dataset_version": "poc0.b3.s3-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 11040750,
+                "median_ns": 3673584,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 3725833,
+                "parallel_runs_per_second": 543.4413423001155,
+                "peak_rss_bytes": 86294528,
+                "raw_samples_ns": [
+                  3725833,
+                  3673584,
+                  3608084,
+                  3689625,
+                  3669583,
+                  3581708
+                ],
+                "run_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+                "runs": 6,
+                "runs_per_second": 543.4413423001155,
+                "secondary_boundary_median_ns": 47637709,
+                "secondary_boundary_p95_ns": 47974583,
+                "secondary_boundary_samples_ns": [
+                  47637709,
+                  47671458,
+                  47974583,
+                  47078417,
+                  47066417,
+                  46686250
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s3",
+                "synthetic_quote_events_per_run": 32256,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s3.rust.parallel.4.json"
+              }
+            }
+          },
+          {
+            "group": 5,
+            "order": [
+              "rust",
+              "nautilus"
+            ],
+            "runs": {
+              "rust": {
+                "build_profile": "release",
+                "dataset_content_sha256": "d5384e1e27162713df2cd020dcdd655d5838f1d417d3848ac0eaca8f0a002e5a",
+                "dataset_version": "poc0.b3.s3-scale-64x252.v1",
+                "golden_preflight": "external_passed",
+                "input_sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747",
+                "instrument_count": 64,
+                "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+                "measurement_wall_ns": 11324084,
+                "median_ns": 3731333,
+                "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+                "mode": "parallel",
+                "p95_ns": 3861375,
+                "parallel_runs_per_second": 529.844179891283,
+                "peak_rss_bytes": 86261760,
+                "raw_samples_ns": [
+                  3693709,
+                  3731333,
+                  3861375,
+                  3661333,
+                  3715917,
+                  3853625
+                ],
+                "run_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+                "runs": 6,
+                "runs_per_second": 529.844179891283,
+                "secondary_boundary_median_ns": 48409084,
+                "secondary_boundary_p95_ns": 51272792,
+                "secondary_boundary_samples_ns": [
+                  51272792,
+                  48696042,
+                  48409084,
+                  47073042,
+                  47606417,
+                  47302792
+                ],
+                "serial_runs_per_second": null,
+                "session_count": 252,
+                "status": "passed",
+                "strategy": "s3",
+                "synthetic_quote_events_per_run": 32256,
+                "threads": 2,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "workers": 2,
+                "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s3.rust.parallel.5.json"
+              },
+              "nautilus": {
+                "status": "passed",
+                "workers": 2,
+                "runs": 6,
+                "warmup_runs": 4,
+                "warmup_runs_per_worker": 2,
+                "raw_samples_ns": [
+                  60478625,
+                  57790250,
+                  58338709,
+                  60281333,
+                  58138417,
+                  58264917
+                ],
+                "secondary_boundary_samples_ns": [
+                  {
+                    "run_index": 0,
+                    "end_to_end_ns": 150225042,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 1,
+                    "end_to_end_ns": 149805166,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 2,
+                    "end_to_end_ns": 145246917,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 3,
+                    "end_to_end_ns": 142394875,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 4,
+                    "end_to_end_ns": 143920875,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  },
+                  {
+                    "run_index": 5,
+                    "end_to_end_ns": 145027667,
+                    "checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                  }
+                ],
+                "secondary_boundary_median_ns": 145137292.0,
+                "secondary_boundary_p95_ns": 150225042,
+                "checksums_sha256": [
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+                  "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+                ],
+                "median_ns": 58301813.0,
+                "p95_ns": 60478625,
+                "parallel_wall_ns": 178315959,
+                "parallel_runs_per_second": 33.6481380222395,
+                "peak_rss_by_worker_bytes": {
+                  "8018": 126238720,
+                  "8019": 116916224
+                },
+                "peak_rss_sum_upper_bound_bytes": 243154944,
+                "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+                "engine_mode": "cached_conversion_new_engine",
+                "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
+                "conversion_cached_per_worker": true,
+                "artifact_path": "poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.s3.nautilus.parallel.5.json"
+              }
+            }
+          }
+        ],
+        "rust_parallel_runs_per_second_median": 538.3821616043789,
+        "nautilus_parallel_runs_per_second_median": 33.59848134864304,
+        "rss": {
+          "rust_process_peak_bytes": 90046464,
+          "nautilus_worker_peak_bytes": [
+            116932608,
+            116768768,
+            116883456,
+            116703232,
+            117243904,
+            126402560,
+            116719616,
+            116621312,
+            126238720,
+            116916224
+          ],
+          "nautilus_peak_rss_sum_upper_bound_bytes": 243646464
+        },
+        "decision": {
+          "status": "adopt",
+          "reason": "all registered speed and RSS gates passed",
+          "evidence_level": "registered"
+        }
+      }
+    }
+  },
+  "decision": {
+    "status": "adopt",
+    "reason": "both 64x252 workloads applied registered latency, throughput, and RSS gates",
+    "per_load": {
+      "s2": {
+        "status": "adopt",
+        "reason": "all registered speed and RSS gates passed",
+        "evidence_level": "registered"
+      },
+      "s3": {
+        "status": "adopt",
+        "reason": "all registered speed and RSS gates passed",
+        "evidence_level": "registered"
+      }
+    }
+  },
+  "nautilus_mode_selection": {
+    "schema_version": "poc0.b2-nautilus-reset-parity.v1",
+    "nautilus_version": "2.0.0rc5",
+    "revision": "3eef9800fa9f2d74d987dba833d47096e2c61228",
+    "reset_parity": "failed",
+    "selected_mode": "cached_conversion_new_engine",
+    "loads": [
+      {
+        "name": "s2_decision",
+        "strategy": "s2",
+        "dataset_sha256": "89e0eb2855fd9b18f533e4a554156aaef8ee28b7ac13d815443a80350d5e927b",
+        "fresh_engine_checksum_sha256": "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "golden_checksum_sha256": "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "golden_match": true,
+        "reset_checksums_sha256": [
+          "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+          "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+          "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203"
+        ],
+        "fresh_engine_state": {
+          "account_balances": {
+            "CNY": "9430.00 CNY"
+          },
+          "order_count": 3,
+          "open_order_count": 0,
+          "position_count": 2,
+          "open_position_count": 1,
+          "iteration_count": 87,
+          "backtest_start": 1767576600000000001,
+          "backtest_end": 1768546800000000000,
+          "strategy_ids": [
+            "RotationStrategy-000"
+          ],
+          "instrument_ids": [
+            "A.SIM",
+            "B.SIM",
+            "C.SIM"
+          ],
+          "quote_counts_by_instrument": {
+            "A.SIM": 30,
+            "B.SIM": 27,
+            "C.SIM": 30
+          }
+        },
+        "reset_engine_states": [
+          {
+            "account_balances": {
+              "CNY": "9430.00 CNY"
+            },
+            "order_count": 3,
+            "open_order_count": 0,
+            "position_count": 2,
+            "open_position_count": 1,
+            "iteration_count": 87,
+            "backtest_start": 1767576600000000001,
+            "backtest_end": 1768546800000000000,
+            "strategy_ids": [
+              "RotationStrategy-000"
+            ],
+            "instrument_ids": [
+              "A.SIM",
+              "B.SIM",
+              "C.SIM"
+            ],
+            "quote_counts_by_instrument": {
+              "A.SIM": 30,
+              "B.SIM": 27,
+              "C.SIM": 30
+            }
+          },
+          {
+            "account_balances": {
+              "CNY": "9430.00 CNY"
+            },
+            "order_count": 3,
+            "open_order_count": 0,
+            "position_count": 2,
+            "open_position_count": 1,
+            "iteration_count": 87,
+            "backtest_start": 1767576600000000001,
+            "backtest_end": 1768546800000000000,
+            "strategy_ids": [
+              "RotationStrategy-000"
+            ],
+            "instrument_ids": [
+              "A.SIM",
+              "B.SIM",
+              "C.SIM"
+            ],
+            "quote_counts_by_instrument": {
+              "A.SIM": 30,
+              "B.SIM": 27,
+              "C.SIM": 30
+            }
+          },
+          {
+            "account_balances": {
+              "CNY": "9430.00 CNY"
+            },
+            "order_count": 3,
+            "open_order_count": 0,
+            "position_count": 2,
+            "open_position_count": 1,
+            "iteration_count": 87,
+            "backtest_start": 1767576600000000001,
+            "backtest_end": 1768546800000000000,
+            "strategy_ids": [
+              "RotationStrategy-000"
+            ],
+            "instrument_ids": [
+              "A.SIM",
+              "B.SIM",
+              "C.SIM"
+            ],
+            "quote_counts_by_instrument": {
+              "A.SIM": 30,
+              "B.SIM": 27,
+              "C.SIM": 30
+            }
+          }
+        ],
+        "reset_runs": 3,
+        "reset_runs_engine_reused": [
+          true,
+          true,
+          true
+        ],
+        "reset_error_logs": [
+          "2026-01-05T01:30:00.000000001Z [ERROR] TRADER-001.nautilus_system::kernel: Error initializing trader: Invalid state trigger READY -> INITIALIZE",
+          "2026-01-05T01:30:00.000000001Z [ERROR] TRADER-001.nautilus_system::kernel: Error initializing trader: Invalid state trigger READY -> INITIALIZE",
+          "2026-01-05T01:30:00.000000001Z [ERROR] TRADER-001.nautilus_system::kernel: Error initializing trader: Invalid state trigger READY -> INITIALIZE"
+        ],
+        "parity": "failed",
+        "first_difference_field": "engine_log.error",
+        "prime_checksum_sha256": "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203"
+      },
+      {
+        "name": "s3_decision",
+        "strategy": "s3",
+        "dataset_sha256": "89e77ae58f992de2422384ca5fbd6e4cb8b920af38160f025a9561e190ff2e76",
+        "fresh_engine_checksum_sha256": "ee74058226f1f2c744db19c74943300ffe476027d1caa802e79f755791389cc3",
+        "golden_checksum_sha256": "ee74058226f1f2c744db19c74943300ffe476027d1caa802e79f755791389cc3",
+        "golden_match": true,
+        "reset_checksums_sha256": [
+          "ee74058226f1f2c744db19c74943300ffe476027d1caa802e79f755791389cc3",
+          "ee74058226f1f2c744db19c74943300ffe476027d1caa802e79f755791389cc3",
+          "ee74058226f1f2c744db19c74943300ffe476027d1caa802e79f755791389cc3"
+        ],
+        "fresh_engine_state": {
+          "account_balances": {
+            "CNY": "99620.00 CNY"
+          },
+          "order_count": 2,
+          "open_order_count": 0,
+          "position_count": 1,
+          "open_position_count": 0,
+          "iteration_count": 780,
+          "backtest_start": 1767576600000000001,
+          "backtest_end": 1783062000000000000,
+          "strategy_ids": [
+            "RotationStrategy-000"
+          ],
+          "instrument_ids": [
+            "A.SIM",
+            "B.SIM",
+            "C.SIM"
+          ],
+          "quote_counts_by_instrument": {
+            "A.SIM": 260,
+            "B.SIM": 260,
+            "C.SIM": 260
+          }
+        },
+        "reset_engine_states": [
+          {
+            "account_balances": {
+              "CNY": "99620.00 CNY"
+            },
+            "order_count": 2,
+            "open_order_count": 0,
+            "position_count": 1,
+            "open_position_count": 0,
+            "iteration_count": 780,
+            "backtest_start": 1767576600000000001,
+            "backtest_end": 1783062000000000000,
+            "strategy_ids": [
+              "RotationStrategy-000"
+            ],
+            "instrument_ids": [
+              "A.SIM",
+              "B.SIM",
+              "C.SIM"
+            ],
+            "quote_counts_by_instrument": {
+              "A.SIM": 260,
+              "B.SIM": 260,
+              "C.SIM": 260
+            }
+          },
+          {
+            "account_balances": {
+              "CNY": "99620.00 CNY"
+            },
+            "order_count": 2,
+            "open_order_count": 0,
+            "position_count": 1,
+            "open_position_count": 0,
+            "iteration_count": 780,
+            "backtest_start": 1767576600000000001,
+            "backtest_end": 1783062000000000000,
+            "strategy_ids": [
+              "RotationStrategy-000"
+            ],
+            "instrument_ids": [
+              "A.SIM",
+              "B.SIM",
+              "C.SIM"
+            ],
+            "quote_counts_by_instrument": {
+              "A.SIM": 260,
+              "B.SIM": 260,
+              "C.SIM": 260
+            }
+          },
+          {
+            "account_balances": {
+              "CNY": "99620.00 CNY"
+            },
+            "order_count": 2,
+            "open_order_count": 0,
+            "position_count": 1,
+            "open_position_count": 0,
+            "iteration_count": 780,
+            "backtest_start": 1767576600000000001,
+            "backtest_end": 1783062000000000000,
+            "strategy_ids": [
+              "RotationStrategy-000"
+            ],
+            "instrument_ids": [
+              "A.SIM",
+              "B.SIM",
+              "C.SIM"
+            ],
+            "quote_counts_by_instrument": {
+              "A.SIM": 260,
+              "B.SIM": 260,
+              "C.SIM": 260
+            }
+          }
+        ],
+        "reset_runs": 3,
+        "reset_runs_engine_reused": [
+          true,
+          true,
+          true
+        ],
+        "reset_error_logs": [
+          "2026-01-05T01:30:00.000000001Z [ERROR] TRADER-001.nautilus_system::kernel: Error initializing trader: Invalid state trigger READY -> INITIALIZE",
+          "2026-01-05T01:30:00.000000001Z [ERROR] TRADER-001.nautilus_system::kernel: Error initializing trader: Invalid state trigger READY -> INITIALIZE",
+          "2026-01-05T01:30:00.000000001Z [ERROR] TRADER-001.nautilus_system::kernel: Error initializing trader: Invalid state trigger READY -> INITIALIZE"
+        ],
+        "parity": "failed",
+        "first_difference_field": "engine_log.error",
+        "prime_checksum_sha256": "ee74058226f1f2c744db19c74943300ffe476027d1caa802e79f755791389cc3"
+      },
+      {
+        "name": "s2_robustness",
+        "strategy": "s2",
+        "dataset_sha256": "9fab41b57a1cbc6ba08ac45065a371058e9b7d4e56a06d4b17748b055cb2cd6e",
+        "fresh_engine_checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+        "golden_checksum_sha256": null,
+        "golden_match": null,
+        "reset_checksums_sha256": [
+          "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+          "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+          "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+        ],
+        "fresh_engine_state": {
+          "account_balances": {
+            "CNY": "11310.00 CNY"
+          },
+          "order_count": 351,
+          "open_order_count": 0,
+          "position_count": 30,
+          "open_position_count": 5,
+          "iteration_count": 48381,
+          "backtest_start": 1736127000000000001,
+          "backtest_end": 1766473200000000000,
+          "strategy_ids": [
+            "RotationStrategy-000"
+          ],
+          "instrument_ids": [
+            "ETF000.SIM",
+            "ETF001.SIM",
+            "ETF002.SIM",
+            "ETF003.SIM",
+            "ETF004.SIM",
+            "ETF005.SIM",
+            "ETF006.SIM",
+            "ETF007.SIM",
+            "ETF008.SIM",
+            "ETF009.SIM",
+            "ETF010.SIM",
+            "ETF011.SIM",
+            "ETF012.SIM",
+            "ETF013.SIM",
+            "ETF014.SIM",
+            "ETF015.SIM",
+            "ETF016.SIM",
+            "ETF017.SIM",
+            "ETF018.SIM",
+            "ETF019.SIM",
+            "ETF020.SIM",
+            "ETF021.SIM",
+            "ETF022.SIM",
+            "ETF023.SIM",
+            "ETF024.SIM",
+            "ETF025.SIM",
+            "ETF026.SIM",
+            "ETF027.SIM",
+            "ETF028.SIM",
+            "ETF029.SIM",
+            "ETF030.SIM",
+            "ETF031.SIM",
+            "ETF032.SIM",
+            "ETF033.SIM",
+            "ETF034.SIM",
+            "ETF035.SIM",
+            "ETF036.SIM",
+            "ETF037.SIM",
+            "ETF038.SIM",
+            "ETF039.SIM",
+            "ETF040.SIM",
+            "ETF041.SIM",
+            "ETF042.SIM",
+            "ETF043.SIM",
+            "ETF044.SIM",
+            "ETF045.SIM",
+            "ETF046.SIM",
+            "ETF047.SIM",
+            "ETF048.SIM",
+            "ETF049.SIM",
+            "ETF050.SIM",
+            "ETF051.SIM",
+            "ETF052.SIM",
+            "ETF053.SIM",
+            "ETF054.SIM",
+            "ETF055.SIM",
+            "ETF056.SIM",
+            "ETF057.SIM",
+            "ETF058.SIM",
+            "ETF059.SIM",
+            "ETF060.SIM",
+            "ETF061.SIM",
+            "ETF062.SIM",
+            "ETF063.SIM"
+          ],
+          "quote_counts_by_instrument": {
+            "ETF000.SIM": 756,
+            "ETF001.SIM": 753,
+            "ETF002.SIM": 756,
+            "ETF003.SIM": 756,
+            "ETF004.SIM": 756,
+            "ETF005.SIM": 756,
+            "ETF006.SIM": 756,
+            "ETF007.SIM": 756,
+            "ETF008.SIM": 756,
+            "ETF009.SIM": 756,
+            "ETF010.SIM": 756,
+            "ETF011.SIM": 756,
+            "ETF012.SIM": 756,
+            "ETF013.SIM": 756,
+            "ETF014.SIM": 756,
+            "ETF015.SIM": 756,
+            "ETF016.SIM": 756,
+            "ETF017.SIM": 756,
+            "ETF018.SIM": 756,
+            "ETF019.SIM": 756,
+            "ETF020.SIM": 756,
+            "ETF021.SIM": 756,
+            "ETF022.SIM": 756,
+            "ETF023.SIM": 756,
+            "ETF024.SIM": 756,
+            "ETF025.SIM": 756,
+            "ETF026.SIM": 756,
+            "ETF027.SIM": 756,
+            "ETF028.SIM": 756,
+            "ETF029.SIM": 756,
+            "ETF030.SIM": 756,
+            "ETF031.SIM": 756,
+            "ETF032.SIM": 756,
+            "ETF033.SIM": 756,
+            "ETF034.SIM": 756,
+            "ETF035.SIM": 756,
+            "ETF036.SIM": 756,
+            "ETF037.SIM": 756,
+            "ETF038.SIM": 756,
+            "ETF039.SIM": 756,
+            "ETF040.SIM": 756,
+            "ETF041.SIM": 756,
+            "ETF042.SIM": 756,
+            "ETF043.SIM": 756,
+            "ETF044.SIM": 756,
+            "ETF045.SIM": 756,
+            "ETF046.SIM": 756,
+            "ETF047.SIM": 756,
+            "ETF048.SIM": 756,
+            "ETF049.SIM": 756,
+            "ETF050.SIM": 756,
+            "ETF051.SIM": 756,
+            "ETF052.SIM": 756,
+            "ETF053.SIM": 756,
+            "ETF054.SIM": 756,
+            "ETF055.SIM": 756,
+            "ETF056.SIM": 756,
+            "ETF057.SIM": 756,
+            "ETF058.SIM": 756,
+            "ETF059.SIM": 756,
+            "ETF060.SIM": 756,
+            "ETF061.SIM": 756,
+            "ETF062.SIM": 756,
+            "ETF063.SIM": 756
+          }
+        },
+        "reset_engine_states": [
+          {
+            "account_balances": {
+              "CNY": "11310.00 CNY"
+            },
+            "order_count": 351,
+            "open_order_count": 0,
+            "position_count": 30,
+            "open_position_count": 5,
+            "iteration_count": 48381,
+            "backtest_start": 1736127000000000001,
+            "backtest_end": 1766473200000000000,
+            "strategy_ids": [
+              "RotationStrategy-000"
+            ],
+            "instrument_ids": [
+              "ETF000.SIM",
+              "ETF001.SIM",
+              "ETF002.SIM",
+              "ETF003.SIM",
+              "ETF004.SIM",
+              "ETF005.SIM",
+              "ETF006.SIM",
+              "ETF007.SIM",
+              "ETF008.SIM",
+              "ETF009.SIM",
+              "ETF010.SIM",
+              "ETF011.SIM",
+              "ETF012.SIM",
+              "ETF013.SIM",
+              "ETF014.SIM",
+              "ETF015.SIM",
+              "ETF016.SIM",
+              "ETF017.SIM",
+              "ETF018.SIM",
+              "ETF019.SIM",
+              "ETF020.SIM",
+              "ETF021.SIM",
+              "ETF022.SIM",
+              "ETF023.SIM",
+              "ETF024.SIM",
+              "ETF025.SIM",
+              "ETF026.SIM",
+              "ETF027.SIM",
+              "ETF028.SIM",
+              "ETF029.SIM",
+              "ETF030.SIM",
+              "ETF031.SIM",
+              "ETF032.SIM",
+              "ETF033.SIM",
+              "ETF034.SIM",
+              "ETF035.SIM",
+              "ETF036.SIM",
+              "ETF037.SIM",
+              "ETF038.SIM",
+              "ETF039.SIM",
+              "ETF040.SIM",
+              "ETF041.SIM",
+              "ETF042.SIM",
+              "ETF043.SIM",
+              "ETF044.SIM",
+              "ETF045.SIM",
+              "ETF046.SIM",
+              "ETF047.SIM",
+              "ETF048.SIM",
+              "ETF049.SIM",
+              "ETF050.SIM",
+              "ETF051.SIM",
+              "ETF052.SIM",
+              "ETF053.SIM",
+              "ETF054.SIM",
+              "ETF055.SIM",
+              "ETF056.SIM",
+              "ETF057.SIM",
+              "ETF058.SIM",
+              "ETF059.SIM",
+              "ETF060.SIM",
+              "ETF061.SIM",
+              "ETF062.SIM",
+              "ETF063.SIM"
+            ],
+            "quote_counts_by_instrument": {
+              "ETF000.SIM": 756,
+              "ETF001.SIM": 753,
+              "ETF002.SIM": 756,
+              "ETF003.SIM": 756,
+              "ETF004.SIM": 756,
+              "ETF005.SIM": 756,
+              "ETF006.SIM": 756,
+              "ETF007.SIM": 756,
+              "ETF008.SIM": 756,
+              "ETF009.SIM": 756,
+              "ETF010.SIM": 756,
+              "ETF011.SIM": 756,
+              "ETF012.SIM": 756,
+              "ETF013.SIM": 756,
+              "ETF014.SIM": 756,
+              "ETF015.SIM": 756,
+              "ETF016.SIM": 756,
+              "ETF017.SIM": 756,
+              "ETF018.SIM": 756,
+              "ETF019.SIM": 756,
+              "ETF020.SIM": 756,
+              "ETF021.SIM": 756,
+              "ETF022.SIM": 756,
+              "ETF023.SIM": 756,
+              "ETF024.SIM": 756,
+              "ETF025.SIM": 756,
+              "ETF026.SIM": 756,
+              "ETF027.SIM": 756,
+              "ETF028.SIM": 756,
+              "ETF029.SIM": 756,
+              "ETF030.SIM": 756,
+              "ETF031.SIM": 756,
+              "ETF032.SIM": 756,
+              "ETF033.SIM": 756,
+              "ETF034.SIM": 756,
+              "ETF035.SIM": 756,
+              "ETF036.SIM": 756,
+              "ETF037.SIM": 756,
+              "ETF038.SIM": 756,
+              "ETF039.SIM": 756,
+              "ETF040.SIM": 756,
+              "ETF041.SIM": 756,
+              "ETF042.SIM": 756,
+              "ETF043.SIM": 756,
+              "ETF044.SIM": 756,
+              "ETF045.SIM": 756,
+              "ETF046.SIM": 756,
+              "ETF047.SIM": 756,
+              "ETF048.SIM": 756,
+              "ETF049.SIM": 756,
+              "ETF050.SIM": 756,
+              "ETF051.SIM": 756,
+              "ETF052.SIM": 756,
+              "ETF053.SIM": 756,
+              "ETF054.SIM": 756,
+              "ETF055.SIM": 756,
+              "ETF056.SIM": 756,
+              "ETF057.SIM": 756,
+              "ETF058.SIM": 756,
+              "ETF059.SIM": 756,
+              "ETF060.SIM": 756,
+              "ETF061.SIM": 756,
+              "ETF062.SIM": 756,
+              "ETF063.SIM": 756
+            }
+          },
+          {
+            "account_balances": {
+              "CNY": "11310.00 CNY"
+            },
+            "order_count": 351,
+            "open_order_count": 0,
+            "position_count": 30,
+            "open_position_count": 5,
+            "iteration_count": 48381,
+            "backtest_start": 1736127000000000001,
+            "backtest_end": 1766473200000000000,
+            "strategy_ids": [
+              "RotationStrategy-000"
+            ],
+            "instrument_ids": [
+              "ETF000.SIM",
+              "ETF001.SIM",
+              "ETF002.SIM",
+              "ETF003.SIM",
+              "ETF004.SIM",
+              "ETF005.SIM",
+              "ETF006.SIM",
+              "ETF007.SIM",
+              "ETF008.SIM",
+              "ETF009.SIM",
+              "ETF010.SIM",
+              "ETF011.SIM",
+              "ETF012.SIM",
+              "ETF013.SIM",
+              "ETF014.SIM",
+              "ETF015.SIM",
+              "ETF016.SIM",
+              "ETF017.SIM",
+              "ETF018.SIM",
+              "ETF019.SIM",
+              "ETF020.SIM",
+              "ETF021.SIM",
+              "ETF022.SIM",
+              "ETF023.SIM",
+              "ETF024.SIM",
+              "ETF025.SIM",
+              "ETF026.SIM",
+              "ETF027.SIM",
+              "ETF028.SIM",
+              "ETF029.SIM",
+              "ETF030.SIM",
+              "ETF031.SIM",
+              "ETF032.SIM",
+              "ETF033.SIM",
+              "ETF034.SIM",
+              "ETF035.SIM",
+              "ETF036.SIM",
+              "ETF037.SIM",
+              "ETF038.SIM",
+              "ETF039.SIM",
+              "ETF040.SIM",
+              "ETF041.SIM",
+              "ETF042.SIM",
+              "ETF043.SIM",
+              "ETF044.SIM",
+              "ETF045.SIM",
+              "ETF046.SIM",
+              "ETF047.SIM",
+              "ETF048.SIM",
+              "ETF049.SIM",
+              "ETF050.SIM",
+              "ETF051.SIM",
+              "ETF052.SIM",
+              "ETF053.SIM",
+              "ETF054.SIM",
+              "ETF055.SIM",
+              "ETF056.SIM",
+              "ETF057.SIM",
+              "ETF058.SIM",
+              "ETF059.SIM",
+              "ETF060.SIM",
+              "ETF061.SIM",
+              "ETF062.SIM",
+              "ETF063.SIM"
+            ],
+            "quote_counts_by_instrument": {
+              "ETF000.SIM": 756,
+              "ETF001.SIM": 753,
+              "ETF002.SIM": 756,
+              "ETF003.SIM": 756,
+              "ETF004.SIM": 756,
+              "ETF005.SIM": 756,
+              "ETF006.SIM": 756,
+              "ETF007.SIM": 756,
+              "ETF008.SIM": 756,
+              "ETF009.SIM": 756,
+              "ETF010.SIM": 756,
+              "ETF011.SIM": 756,
+              "ETF012.SIM": 756,
+              "ETF013.SIM": 756,
+              "ETF014.SIM": 756,
+              "ETF015.SIM": 756,
+              "ETF016.SIM": 756,
+              "ETF017.SIM": 756,
+              "ETF018.SIM": 756,
+              "ETF019.SIM": 756,
+              "ETF020.SIM": 756,
+              "ETF021.SIM": 756,
+              "ETF022.SIM": 756,
+              "ETF023.SIM": 756,
+              "ETF024.SIM": 756,
+              "ETF025.SIM": 756,
+              "ETF026.SIM": 756,
+              "ETF027.SIM": 756,
+              "ETF028.SIM": 756,
+              "ETF029.SIM": 756,
+              "ETF030.SIM": 756,
+              "ETF031.SIM": 756,
+              "ETF032.SIM": 756,
+              "ETF033.SIM": 756,
+              "ETF034.SIM": 756,
+              "ETF035.SIM": 756,
+              "ETF036.SIM": 756,
+              "ETF037.SIM": 756,
+              "ETF038.SIM": 756,
+              "ETF039.SIM": 756,
+              "ETF040.SIM": 756,
+              "ETF041.SIM": 756,
+              "ETF042.SIM": 756,
+              "ETF043.SIM": 756,
+              "ETF044.SIM": 756,
+              "ETF045.SIM": 756,
+              "ETF046.SIM": 756,
+              "ETF047.SIM": 756,
+              "ETF048.SIM": 756,
+              "ETF049.SIM": 756,
+              "ETF050.SIM": 756,
+              "ETF051.SIM": 756,
+              "ETF052.SIM": 756,
+              "ETF053.SIM": 756,
+              "ETF054.SIM": 756,
+              "ETF055.SIM": 756,
+              "ETF056.SIM": 756,
+              "ETF057.SIM": 756,
+              "ETF058.SIM": 756,
+              "ETF059.SIM": 756,
+              "ETF060.SIM": 756,
+              "ETF061.SIM": 756,
+              "ETF062.SIM": 756,
+              "ETF063.SIM": 756
+            }
+          },
+          {
+            "account_balances": {
+              "CNY": "11310.00 CNY"
+            },
+            "order_count": 351,
+            "open_order_count": 0,
+            "position_count": 30,
+            "open_position_count": 5,
+            "iteration_count": 48381,
+            "backtest_start": 1736127000000000001,
+            "backtest_end": 1766473200000000000,
+            "strategy_ids": [
+              "RotationStrategy-000"
+            ],
+            "instrument_ids": [
+              "ETF000.SIM",
+              "ETF001.SIM",
+              "ETF002.SIM",
+              "ETF003.SIM",
+              "ETF004.SIM",
+              "ETF005.SIM",
+              "ETF006.SIM",
+              "ETF007.SIM",
+              "ETF008.SIM",
+              "ETF009.SIM",
+              "ETF010.SIM",
+              "ETF011.SIM",
+              "ETF012.SIM",
+              "ETF013.SIM",
+              "ETF014.SIM",
+              "ETF015.SIM",
+              "ETF016.SIM",
+              "ETF017.SIM",
+              "ETF018.SIM",
+              "ETF019.SIM",
+              "ETF020.SIM",
+              "ETF021.SIM",
+              "ETF022.SIM",
+              "ETF023.SIM",
+              "ETF024.SIM",
+              "ETF025.SIM",
+              "ETF026.SIM",
+              "ETF027.SIM",
+              "ETF028.SIM",
+              "ETF029.SIM",
+              "ETF030.SIM",
+              "ETF031.SIM",
+              "ETF032.SIM",
+              "ETF033.SIM",
+              "ETF034.SIM",
+              "ETF035.SIM",
+              "ETF036.SIM",
+              "ETF037.SIM",
+              "ETF038.SIM",
+              "ETF039.SIM",
+              "ETF040.SIM",
+              "ETF041.SIM",
+              "ETF042.SIM",
+              "ETF043.SIM",
+              "ETF044.SIM",
+              "ETF045.SIM",
+              "ETF046.SIM",
+              "ETF047.SIM",
+              "ETF048.SIM",
+              "ETF049.SIM",
+              "ETF050.SIM",
+              "ETF051.SIM",
+              "ETF052.SIM",
+              "ETF053.SIM",
+              "ETF054.SIM",
+              "ETF055.SIM",
+              "ETF056.SIM",
+              "ETF057.SIM",
+              "ETF058.SIM",
+              "ETF059.SIM",
+              "ETF060.SIM",
+              "ETF061.SIM",
+              "ETF062.SIM",
+              "ETF063.SIM"
+            ],
+            "quote_counts_by_instrument": {
+              "ETF000.SIM": 756,
+              "ETF001.SIM": 753,
+              "ETF002.SIM": 756,
+              "ETF003.SIM": 756,
+              "ETF004.SIM": 756,
+              "ETF005.SIM": 756,
+              "ETF006.SIM": 756,
+              "ETF007.SIM": 756,
+              "ETF008.SIM": 756,
+              "ETF009.SIM": 756,
+              "ETF010.SIM": 756,
+              "ETF011.SIM": 756,
+              "ETF012.SIM": 756,
+              "ETF013.SIM": 756,
+              "ETF014.SIM": 756,
+              "ETF015.SIM": 756,
+              "ETF016.SIM": 756,
+              "ETF017.SIM": 756,
+              "ETF018.SIM": 756,
+              "ETF019.SIM": 756,
+              "ETF020.SIM": 756,
+              "ETF021.SIM": 756,
+              "ETF022.SIM": 756,
+              "ETF023.SIM": 756,
+              "ETF024.SIM": 756,
+              "ETF025.SIM": 756,
+              "ETF026.SIM": 756,
+              "ETF027.SIM": 756,
+              "ETF028.SIM": 756,
+              "ETF029.SIM": 756,
+              "ETF030.SIM": 756,
+              "ETF031.SIM": 756,
+              "ETF032.SIM": 756,
+              "ETF033.SIM": 756,
+              "ETF034.SIM": 756,
+              "ETF035.SIM": 756,
+              "ETF036.SIM": 756,
+              "ETF037.SIM": 756,
+              "ETF038.SIM": 756,
+              "ETF039.SIM": 756,
+              "ETF040.SIM": 756,
+              "ETF041.SIM": 756,
+              "ETF042.SIM": 756,
+              "ETF043.SIM": 756,
+              "ETF044.SIM": 756,
+              "ETF045.SIM": 756,
+              "ETF046.SIM": 756,
+              "ETF047.SIM": 756,
+              "ETF048.SIM": 756,
+              "ETF049.SIM": 756,
+              "ETF050.SIM": 756,
+              "ETF051.SIM": 756,
+              "ETF052.SIM": 756,
+              "ETF053.SIM": 756,
+              "ETF054.SIM": 756,
+              "ETF055.SIM": 756,
+              "ETF056.SIM": 756,
+              "ETF057.SIM": 756,
+              "ETF058.SIM": 756,
+              "ETF059.SIM": 756,
+              "ETF060.SIM": 756,
+              "ETF061.SIM": 756,
+              "ETF062.SIM": 756,
+              "ETF063.SIM": 756
+            }
+          }
+        ],
+        "reset_runs": 3,
+        "reset_runs_engine_reused": [
+          true,
+          true,
+          true
+        ],
+        "reset_error_logs": [
+          "2025-01-06T01:30:00.000000001Z [ERROR] TRADER-001.nautilus_system::kernel: Error initializing trader: Invalid state trigger READY -> INITIALIZE",
+          "2025-01-06T01:30:00.000000001Z [ERROR] TRADER-001.nautilus_system::kernel: Error initializing trader: Invalid state trigger READY -> INITIALIZE",
+          "2025-01-06T01:30:00.000000001Z [ERROR] TRADER-001.nautilus_system::kernel: Error initializing trader: Invalid state trigger READY -> INITIALIZE"
+        ],
+        "parity": "failed",
+        "first_difference_field": "engine_log.error",
+        "prime_checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+      },
+      {
+        "name": "s3_robustness",
+        "strategy": "s3",
+        "dataset_sha256": "7a1546e2f01b08332bae401679c894c3bb9404ba2e1a9d94ae97580f9cd167c4",
+        "fresh_engine_checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+        "golden_checksum_sha256": null,
+        "golden_match": null,
+        "reset_checksums_sha256": [
+          "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+          "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f",
+          "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+        ],
+        "fresh_engine_state": {
+          "account_balances": {
+            "CNY": "99620.00 CNY"
+          },
+          "order_count": 2,
+          "open_order_count": 0,
+          "position_count": 1,
+          "open_position_count": 0,
+          "iteration_count": 32256,
+          "backtest_start": 1767576600000000001,
+          "backtest_end": 1797922800000000000,
+          "strategy_ids": [
+            "RotationStrategy-000"
+          ],
+          "instrument_ids": [
+            "A.SIM",
+            "ETF001.SIM",
+            "ETF002.SIM",
+            "ETF003.SIM",
+            "ETF004.SIM",
+            "ETF005.SIM",
+            "ETF006.SIM",
+            "ETF007.SIM",
+            "ETF008.SIM",
+            "ETF009.SIM",
+            "ETF010.SIM",
+            "ETF011.SIM",
+            "ETF012.SIM",
+            "ETF013.SIM",
+            "ETF014.SIM",
+            "ETF015.SIM",
+            "ETF016.SIM",
+            "ETF017.SIM",
+            "ETF018.SIM",
+            "ETF019.SIM",
+            "ETF020.SIM",
+            "ETF021.SIM",
+            "ETF022.SIM",
+            "ETF023.SIM",
+            "ETF024.SIM",
+            "ETF025.SIM",
+            "ETF026.SIM",
+            "ETF027.SIM",
+            "ETF028.SIM",
+            "ETF029.SIM",
+            "ETF030.SIM",
+            "ETF031.SIM",
+            "ETF032.SIM",
+            "ETF033.SIM",
+            "ETF034.SIM",
+            "ETF035.SIM",
+            "ETF036.SIM",
+            "ETF037.SIM",
+            "ETF038.SIM",
+            "ETF039.SIM",
+            "ETF040.SIM",
+            "ETF041.SIM",
+            "ETF042.SIM",
+            "ETF043.SIM",
+            "ETF044.SIM",
+            "ETF045.SIM",
+            "ETF046.SIM",
+            "ETF047.SIM",
+            "ETF048.SIM",
+            "ETF049.SIM",
+            "ETF050.SIM",
+            "ETF051.SIM",
+            "ETF052.SIM",
+            "ETF053.SIM",
+            "ETF054.SIM",
+            "ETF055.SIM",
+            "ETF056.SIM",
+            "ETF057.SIM",
+            "ETF058.SIM",
+            "ETF059.SIM",
+            "ETF060.SIM",
+            "ETF061.SIM",
+            "ETF062.SIM",
+            "ETF063.SIM"
+          ],
+          "quote_counts_by_instrument": {
+            "A.SIM": 504,
+            "ETF001.SIM": 504,
+            "ETF002.SIM": 504,
+            "ETF003.SIM": 504,
+            "ETF004.SIM": 504,
+            "ETF005.SIM": 504,
+            "ETF006.SIM": 504,
+            "ETF007.SIM": 504,
+            "ETF008.SIM": 504,
+            "ETF009.SIM": 504,
+            "ETF010.SIM": 504,
+            "ETF011.SIM": 504,
+            "ETF012.SIM": 504,
+            "ETF013.SIM": 504,
+            "ETF014.SIM": 504,
+            "ETF015.SIM": 504,
+            "ETF016.SIM": 504,
+            "ETF017.SIM": 504,
+            "ETF018.SIM": 504,
+            "ETF019.SIM": 504,
+            "ETF020.SIM": 504,
+            "ETF021.SIM": 504,
+            "ETF022.SIM": 504,
+            "ETF023.SIM": 504,
+            "ETF024.SIM": 504,
+            "ETF025.SIM": 504,
+            "ETF026.SIM": 504,
+            "ETF027.SIM": 504,
+            "ETF028.SIM": 504,
+            "ETF029.SIM": 504,
+            "ETF030.SIM": 504,
+            "ETF031.SIM": 504,
+            "ETF032.SIM": 504,
+            "ETF033.SIM": 504,
+            "ETF034.SIM": 504,
+            "ETF035.SIM": 504,
+            "ETF036.SIM": 504,
+            "ETF037.SIM": 504,
+            "ETF038.SIM": 504,
+            "ETF039.SIM": 504,
+            "ETF040.SIM": 504,
+            "ETF041.SIM": 504,
+            "ETF042.SIM": 504,
+            "ETF043.SIM": 504,
+            "ETF044.SIM": 504,
+            "ETF045.SIM": 504,
+            "ETF046.SIM": 504,
+            "ETF047.SIM": 504,
+            "ETF048.SIM": 504,
+            "ETF049.SIM": 504,
+            "ETF050.SIM": 504,
+            "ETF051.SIM": 504,
+            "ETF052.SIM": 504,
+            "ETF053.SIM": 504,
+            "ETF054.SIM": 504,
+            "ETF055.SIM": 504,
+            "ETF056.SIM": 504,
+            "ETF057.SIM": 504,
+            "ETF058.SIM": 504,
+            "ETF059.SIM": 504,
+            "ETF060.SIM": 504,
+            "ETF061.SIM": 504,
+            "ETF062.SIM": 504,
+            "ETF063.SIM": 504
+          }
+        },
+        "reset_engine_states": [
+          {
+            "account_balances": {
+              "CNY": "99620.00 CNY"
+            },
+            "order_count": 2,
+            "open_order_count": 0,
+            "position_count": 1,
+            "open_position_count": 0,
+            "iteration_count": 32256,
+            "backtest_start": 1767576600000000001,
+            "backtest_end": 1797922800000000000,
+            "strategy_ids": [
+              "RotationStrategy-000"
+            ],
+            "instrument_ids": [
+              "A.SIM",
+              "ETF001.SIM",
+              "ETF002.SIM",
+              "ETF003.SIM",
+              "ETF004.SIM",
+              "ETF005.SIM",
+              "ETF006.SIM",
+              "ETF007.SIM",
+              "ETF008.SIM",
+              "ETF009.SIM",
+              "ETF010.SIM",
+              "ETF011.SIM",
+              "ETF012.SIM",
+              "ETF013.SIM",
+              "ETF014.SIM",
+              "ETF015.SIM",
+              "ETF016.SIM",
+              "ETF017.SIM",
+              "ETF018.SIM",
+              "ETF019.SIM",
+              "ETF020.SIM",
+              "ETF021.SIM",
+              "ETF022.SIM",
+              "ETF023.SIM",
+              "ETF024.SIM",
+              "ETF025.SIM",
+              "ETF026.SIM",
+              "ETF027.SIM",
+              "ETF028.SIM",
+              "ETF029.SIM",
+              "ETF030.SIM",
+              "ETF031.SIM",
+              "ETF032.SIM",
+              "ETF033.SIM",
+              "ETF034.SIM",
+              "ETF035.SIM",
+              "ETF036.SIM",
+              "ETF037.SIM",
+              "ETF038.SIM",
+              "ETF039.SIM",
+              "ETF040.SIM",
+              "ETF041.SIM",
+              "ETF042.SIM",
+              "ETF043.SIM",
+              "ETF044.SIM",
+              "ETF045.SIM",
+              "ETF046.SIM",
+              "ETF047.SIM",
+              "ETF048.SIM",
+              "ETF049.SIM",
+              "ETF050.SIM",
+              "ETF051.SIM",
+              "ETF052.SIM",
+              "ETF053.SIM",
+              "ETF054.SIM",
+              "ETF055.SIM",
+              "ETF056.SIM",
+              "ETF057.SIM",
+              "ETF058.SIM",
+              "ETF059.SIM",
+              "ETF060.SIM",
+              "ETF061.SIM",
+              "ETF062.SIM",
+              "ETF063.SIM"
+            ],
+            "quote_counts_by_instrument": {
+              "A.SIM": 504,
+              "ETF001.SIM": 504,
+              "ETF002.SIM": 504,
+              "ETF003.SIM": 504,
+              "ETF004.SIM": 504,
+              "ETF005.SIM": 504,
+              "ETF006.SIM": 504,
+              "ETF007.SIM": 504,
+              "ETF008.SIM": 504,
+              "ETF009.SIM": 504,
+              "ETF010.SIM": 504,
+              "ETF011.SIM": 504,
+              "ETF012.SIM": 504,
+              "ETF013.SIM": 504,
+              "ETF014.SIM": 504,
+              "ETF015.SIM": 504,
+              "ETF016.SIM": 504,
+              "ETF017.SIM": 504,
+              "ETF018.SIM": 504,
+              "ETF019.SIM": 504,
+              "ETF020.SIM": 504,
+              "ETF021.SIM": 504,
+              "ETF022.SIM": 504,
+              "ETF023.SIM": 504,
+              "ETF024.SIM": 504,
+              "ETF025.SIM": 504,
+              "ETF026.SIM": 504,
+              "ETF027.SIM": 504,
+              "ETF028.SIM": 504,
+              "ETF029.SIM": 504,
+              "ETF030.SIM": 504,
+              "ETF031.SIM": 504,
+              "ETF032.SIM": 504,
+              "ETF033.SIM": 504,
+              "ETF034.SIM": 504,
+              "ETF035.SIM": 504,
+              "ETF036.SIM": 504,
+              "ETF037.SIM": 504,
+              "ETF038.SIM": 504,
+              "ETF039.SIM": 504,
+              "ETF040.SIM": 504,
+              "ETF041.SIM": 504,
+              "ETF042.SIM": 504,
+              "ETF043.SIM": 504,
+              "ETF044.SIM": 504,
+              "ETF045.SIM": 504,
+              "ETF046.SIM": 504,
+              "ETF047.SIM": 504,
+              "ETF048.SIM": 504,
+              "ETF049.SIM": 504,
+              "ETF050.SIM": 504,
+              "ETF051.SIM": 504,
+              "ETF052.SIM": 504,
+              "ETF053.SIM": 504,
+              "ETF054.SIM": 504,
+              "ETF055.SIM": 504,
+              "ETF056.SIM": 504,
+              "ETF057.SIM": 504,
+              "ETF058.SIM": 504,
+              "ETF059.SIM": 504,
+              "ETF060.SIM": 504,
+              "ETF061.SIM": 504,
+              "ETF062.SIM": 504,
+              "ETF063.SIM": 504
+            }
+          },
+          {
+            "account_balances": {
+              "CNY": "99620.00 CNY"
+            },
+            "order_count": 2,
+            "open_order_count": 0,
+            "position_count": 1,
+            "open_position_count": 0,
+            "iteration_count": 32256,
+            "backtest_start": 1767576600000000001,
+            "backtest_end": 1797922800000000000,
+            "strategy_ids": [
+              "RotationStrategy-000"
+            ],
+            "instrument_ids": [
+              "A.SIM",
+              "ETF001.SIM",
+              "ETF002.SIM",
+              "ETF003.SIM",
+              "ETF004.SIM",
+              "ETF005.SIM",
+              "ETF006.SIM",
+              "ETF007.SIM",
+              "ETF008.SIM",
+              "ETF009.SIM",
+              "ETF010.SIM",
+              "ETF011.SIM",
+              "ETF012.SIM",
+              "ETF013.SIM",
+              "ETF014.SIM",
+              "ETF015.SIM",
+              "ETF016.SIM",
+              "ETF017.SIM",
+              "ETF018.SIM",
+              "ETF019.SIM",
+              "ETF020.SIM",
+              "ETF021.SIM",
+              "ETF022.SIM",
+              "ETF023.SIM",
+              "ETF024.SIM",
+              "ETF025.SIM",
+              "ETF026.SIM",
+              "ETF027.SIM",
+              "ETF028.SIM",
+              "ETF029.SIM",
+              "ETF030.SIM",
+              "ETF031.SIM",
+              "ETF032.SIM",
+              "ETF033.SIM",
+              "ETF034.SIM",
+              "ETF035.SIM",
+              "ETF036.SIM",
+              "ETF037.SIM",
+              "ETF038.SIM",
+              "ETF039.SIM",
+              "ETF040.SIM",
+              "ETF041.SIM",
+              "ETF042.SIM",
+              "ETF043.SIM",
+              "ETF044.SIM",
+              "ETF045.SIM",
+              "ETF046.SIM",
+              "ETF047.SIM",
+              "ETF048.SIM",
+              "ETF049.SIM",
+              "ETF050.SIM",
+              "ETF051.SIM",
+              "ETF052.SIM",
+              "ETF053.SIM",
+              "ETF054.SIM",
+              "ETF055.SIM",
+              "ETF056.SIM",
+              "ETF057.SIM",
+              "ETF058.SIM",
+              "ETF059.SIM",
+              "ETF060.SIM",
+              "ETF061.SIM",
+              "ETF062.SIM",
+              "ETF063.SIM"
+            ],
+            "quote_counts_by_instrument": {
+              "A.SIM": 504,
+              "ETF001.SIM": 504,
+              "ETF002.SIM": 504,
+              "ETF003.SIM": 504,
+              "ETF004.SIM": 504,
+              "ETF005.SIM": 504,
+              "ETF006.SIM": 504,
+              "ETF007.SIM": 504,
+              "ETF008.SIM": 504,
+              "ETF009.SIM": 504,
+              "ETF010.SIM": 504,
+              "ETF011.SIM": 504,
+              "ETF012.SIM": 504,
+              "ETF013.SIM": 504,
+              "ETF014.SIM": 504,
+              "ETF015.SIM": 504,
+              "ETF016.SIM": 504,
+              "ETF017.SIM": 504,
+              "ETF018.SIM": 504,
+              "ETF019.SIM": 504,
+              "ETF020.SIM": 504,
+              "ETF021.SIM": 504,
+              "ETF022.SIM": 504,
+              "ETF023.SIM": 504,
+              "ETF024.SIM": 504,
+              "ETF025.SIM": 504,
+              "ETF026.SIM": 504,
+              "ETF027.SIM": 504,
+              "ETF028.SIM": 504,
+              "ETF029.SIM": 504,
+              "ETF030.SIM": 504,
+              "ETF031.SIM": 504,
+              "ETF032.SIM": 504,
+              "ETF033.SIM": 504,
+              "ETF034.SIM": 504,
+              "ETF035.SIM": 504,
+              "ETF036.SIM": 504,
+              "ETF037.SIM": 504,
+              "ETF038.SIM": 504,
+              "ETF039.SIM": 504,
+              "ETF040.SIM": 504,
+              "ETF041.SIM": 504,
+              "ETF042.SIM": 504,
+              "ETF043.SIM": 504,
+              "ETF044.SIM": 504,
+              "ETF045.SIM": 504,
+              "ETF046.SIM": 504,
+              "ETF047.SIM": 504,
+              "ETF048.SIM": 504,
+              "ETF049.SIM": 504,
+              "ETF050.SIM": 504,
+              "ETF051.SIM": 504,
+              "ETF052.SIM": 504,
+              "ETF053.SIM": 504,
+              "ETF054.SIM": 504,
+              "ETF055.SIM": 504,
+              "ETF056.SIM": 504,
+              "ETF057.SIM": 504,
+              "ETF058.SIM": 504,
+              "ETF059.SIM": 504,
+              "ETF060.SIM": 504,
+              "ETF061.SIM": 504,
+              "ETF062.SIM": 504,
+              "ETF063.SIM": 504
+            }
+          },
+          {
+            "account_balances": {
+              "CNY": "99620.00 CNY"
+            },
+            "order_count": 2,
+            "open_order_count": 0,
+            "position_count": 1,
+            "open_position_count": 0,
+            "iteration_count": 32256,
+            "backtest_start": 1767576600000000001,
+            "backtest_end": 1797922800000000000,
+            "strategy_ids": [
+              "RotationStrategy-000"
+            ],
+            "instrument_ids": [
+              "A.SIM",
+              "ETF001.SIM",
+              "ETF002.SIM",
+              "ETF003.SIM",
+              "ETF004.SIM",
+              "ETF005.SIM",
+              "ETF006.SIM",
+              "ETF007.SIM",
+              "ETF008.SIM",
+              "ETF009.SIM",
+              "ETF010.SIM",
+              "ETF011.SIM",
+              "ETF012.SIM",
+              "ETF013.SIM",
+              "ETF014.SIM",
+              "ETF015.SIM",
+              "ETF016.SIM",
+              "ETF017.SIM",
+              "ETF018.SIM",
+              "ETF019.SIM",
+              "ETF020.SIM",
+              "ETF021.SIM",
+              "ETF022.SIM",
+              "ETF023.SIM",
+              "ETF024.SIM",
+              "ETF025.SIM",
+              "ETF026.SIM",
+              "ETF027.SIM",
+              "ETF028.SIM",
+              "ETF029.SIM",
+              "ETF030.SIM",
+              "ETF031.SIM",
+              "ETF032.SIM",
+              "ETF033.SIM",
+              "ETF034.SIM",
+              "ETF035.SIM",
+              "ETF036.SIM",
+              "ETF037.SIM",
+              "ETF038.SIM",
+              "ETF039.SIM",
+              "ETF040.SIM",
+              "ETF041.SIM",
+              "ETF042.SIM",
+              "ETF043.SIM",
+              "ETF044.SIM",
+              "ETF045.SIM",
+              "ETF046.SIM",
+              "ETF047.SIM",
+              "ETF048.SIM",
+              "ETF049.SIM",
+              "ETF050.SIM",
+              "ETF051.SIM",
+              "ETF052.SIM",
+              "ETF053.SIM",
+              "ETF054.SIM",
+              "ETF055.SIM",
+              "ETF056.SIM",
+              "ETF057.SIM",
+              "ETF058.SIM",
+              "ETF059.SIM",
+              "ETF060.SIM",
+              "ETF061.SIM",
+              "ETF062.SIM",
+              "ETF063.SIM"
+            ],
+            "quote_counts_by_instrument": {
+              "A.SIM": 504,
+              "ETF001.SIM": 504,
+              "ETF002.SIM": 504,
+              "ETF003.SIM": 504,
+              "ETF004.SIM": 504,
+              "ETF005.SIM": 504,
+              "ETF006.SIM": 504,
+              "ETF007.SIM": 504,
+              "ETF008.SIM": 504,
+              "ETF009.SIM": 504,
+              "ETF010.SIM": 504,
+              "ETF011.SIM": 504,
+              "ETF012.SIM": 504,
+              "ETF013.SIM": 504,
+              "ETF014.SIM": 504,
+              "ETF015.SIM": 504,
+              "ETF016.SIM": 504,
+              "ETF017.SIM": 504,
+              "ETF018.SIM": 504,
+              "ETF019.SIM": 504,
+              "ETF020.SIM": 504,
+              "ETF021.SIM": 504,
+              "ETF022.SIM": 504,
+              "ETF023.SIM": 504,
+              "ETF024.SIM": 504,
+              "ETF025.SIM": 504,
+              "ETF026.SIM": 504,
+              "ETF027.SIM": 504,
+              "ETF028.SIM": 504,
+              "ETF029.SIM": 504,
+              "ETF030.SIM": 504,
+              "ETF031.SIM": 504,
+              "ETF032.SIM": 504,
+              "ETF033.SIM": 504,
+              "ETF034.SIM": 504,
+              "ETF035.SIM": 504,
+              "ETF036.SIM": 504,
+              "ETF037.SIM": 504,
+              "ETF038.SIM": 504,
+              "ETF039.SIM": 504,
+              "ETF040.SIM": 504,
+              "ETF041.SIM": 504,
+              "ETF042.SIM": 504,
+              "ETF043.SIM": 504,
+              "ETF044.SIM": 504,
+              "ETF045.SIM": 504,
+              "ETF046.SIM": 504,
+              "ETF047.SIM": 504,
+              "ETF048.SIM": 504,
+              "ETF049.SIM": 504,
+              "ETF050.SIM": 504,
+              "ETF051.SIM": 504,
+              "ETF052.SIM": 504,
+              "ETF053.SIM": 504,
+              "ETF054.SIM": 504,
+              "ETF055.SIM": 504,
+              "ETF056.SIM": 504,
+              "ETF057.SIM": 504,
+              "ETF058.SIM": 504,
+              "ETF059.SIM": 504,
+              "ETF060.SIM": 504,
+              "ETF061.SIM": 504,
+              "ETF062.SIM": 504,
+              "ETF063.SIM": 504
+            }
+          }
+        ],
+        "reset_runs": 3,
+        "reset_runs_engine_reused": [
+          true,
+          true,
+          true
+        ],
+        "reset_error_logs": [
+          "2026-01-05T01:30:00.000000001Z [ERROR] TRADER-001.nautilus_system::kernel: Error initializing trader: Invalid state trigger READY -> INITIALIZE",
+          "2026-01-05T01:30:00.000000001Z [ERROR] TRADER-001.nautilus_system::kernel: Error initializing trader: Invalid state trigger READY -> INITIALIZE",
+          "2026-01-05T01:30:00.000000001Z [ERROR] TRADER-001.nautilus_system::kernel: Error initializing trader: Invalid state trigger READY -> INITIALIZE"
+        ],
+        "parity": "failed",
+        "first_difference_field": "engine_log.error",
+        "prime_checksum_sha256": "4bbfd275fda6db683bf5a93b1bcc8e3b9f77e37fd0814cd763edca733341de4f"
+      }
+    ],
+    "dirty_worktree": false,
+    "dirty_paths": [],
+    "reason": "one or more reset Runs differed from a fresh engine or emitted native engine error logs",
+    "failed_loads": [
+      "s2_decision",
+      "s3_decision",
+      "s2_robustness",
+      "s3_robustness"
+    ],
+    "golden_checksum_source": "poc/poc0-benchmark/fixtures/b2-nautilus-reset-golden-checksums-v1.json",
+    "evidence_path": "poc/poc0-benchmark/results/b2-nautilus-reset-parity-2026-09-28.json",
+    "validation": "passed",
+    "validation_error": null
+  },
+  "environment": {
+    "cpu": "Apple M1",
+    "logical_cpu_count": 8,
+    "memory_bytes": 17179869184,
+    "os": "macOS-26.2-arm64-arm-64bit",
+    "rustc_vv": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: aarch64-apple-darwin\nrelease: 1.98.1\nLLVM version: 22.1.8",
+    "python": "Python 3.12.2",
+    "nautilus_version": {
+      "version": "2.0.0rc5",
+      "error": null
+    },
+    "cargo_lock_sha256": "250f21792a3ded3c139747c74f96b673b37e57d2b5f550a29e480fea71f60041",
+    "binary_sha256": "14eddf82ec01fec3ba40c3dccdaf0f8606ca747444a128074e99b1419073f270",
+    "git_revision": "dca129ed5cb7d1888e90649460eb673765a9307e",
+    "dirty_worktree": false,
+    "dirty_paths": [],
+    "python_transitive_dependency_snapshot": {
+      "status": "known",
+      "count": 0,
+      "packages": [],
+      "method": "transitive distribution closure from nautilus_trader metadata; active environment markers applied"
+    },
+    "build": {
+      "record_path": "poc/poc0-benchmark/results/b2-formal-release-build-2026-09-28.json",
+      "record_sha256": "5bc2b265a46adf4d96a776e49fbac76d41b864c82804350a07c11ae4be42a594",
+      "record": {
+        "schema_version": 1,
+        "started_at_utc": "2026-09-28T15:11:02.605218+00:00",
+        "finished_at_utc": "2026-09-28T15:11:16.685801+00:00",
+        "command": [
+          "cargo",
+          "build",
+          "-p",
+          "quant-research",
+          "--no-default-features",
+          "--locked",
+          "--offline",
+          "--profile",
+          "release"
+        ],
+        "working_directory": "/Users/yibinzhang/Documents/ChatGPT/A股量化",
+        "target_directory": "/Users/yibinzhang/Documents/ChatGPT/A股量化/target",
+        "cache_state": "warm_existing_workspace_target",
+        "estimated_max_additional_bytes": 2147483648,
+        "minimum_free_bytes": 10737418240,
+        "runtime_stop_free_bytes": 11274289152,
+        "space_samples": [
+          {
+            "observed_at_utc": "2026-09-28T15:11:04.689891+00:00",
+            "volume_free_bytes": 41055518720
+          },
+          {
+            "observed_at_utc": "2026-09-28T15:11:06.694218+00:00",
+            "volume_free_bytes": 41054875648
+          },
+          {
+            "observed_at_utc": "2026-09-28T15:11:08.696420+00:00",
+            "volume_free_bytes": 41054871552
+          },
+          {
+            "observed_at_utc": "2026-09-28T15:11:10.713186+00:00",
+            "volume_free_bytes": 41055166464
+          },
+          {
+            "observed_at_utc": "2026-09-28T15:11:12.717949+00:00",
+            "volume_free_bytes": 41056575488
+          },
+          {
+            "observed_at_utc": "2026-09-28T15:11:14.723095+00:00",
+            "volume_free_bytes": 41001283584
+          }
+        ],
+        "git_revision": "deafd76031d9d40319ec6c843f8b6ce49191df84",
+        "working_tree_dirty": false,
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked_diff_summary": "",
+        "changed_paths": [],
+        "untracked_files": [],
+        "untracked_files_complete": true,
+        "dirty_worktree_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "compiled_source_files": [
+          {
+            "path": ".cargo/config.toml",
+            "sha256": "199dda3f76c1eff2551ad1f2cbdce4b7db5846471992960c08914e580a2fe824"
+          },
+          {
+            "path": "Cargo.lock",
+            "sha256": "250f21792a3ded3c139747c74f96b673b37e57d2b5f550a29e480fea71f60041"
+          },
+          {
+            "path": "Cargo.toml",
+            "sha256": "f7e15b5fe6f8919d9e31e32d99a320db88bf36c7c6f401c329b8172193891b20"
+          },
+          {
+            "path": "crates/quant-research/Cargo.toml",
+            "sha256": "f8c7f6400a19ea5f3dd9dc13b4b8a12ca5cbb78fae4659eb1bacc117ae140438"
+          },
+          {
+            "path": "crates/quant-research/src/backtest.rs",
+            "sha256": "b1a67aadc12661ab224655e3e966e4f0432370c751f0dc9d23b6965553259540"
+          },
+          {
+            "path": "crates/quant-research/src/batch.rs",
+            "sha256": "4ef3b794065c1a7f22186d497ea3e34ff0e136604eeb1629e5eeb038e2c78b83"
+          },
+          {
+            "path": "crates/quant-research/src/core.rs",
+            "sha256": "dd50175268505788c677829dd276b253adbb3ec624938b2a9f0019d8720ea1ca"
+          },
+          {
+            "path": "crates/quant-research/src/data.rs",
+            "sha256": "3436ac4670ed283ae82951462d7277fdb623f078ea19803fcd75aa29917b02b7"
+          },
+          {
+            "path": "crates/quant-research/src/experiment.rs",
+            "sha256": "f3984c628f8aac5f5ad4f9ae0c9ae0d7d7eccf77b6e7e15b32ad95c3c34716bf"
+          },
+          {
+            "path": "crates/quant-research/src/factor.rs",
+            "sha256": "b2ca1a783fe90b33c4896bd0963ddfe2111fe910a58d71d278723aea2eb60dcf"
+          },
+          {
+            "path": "crates/quant-research/src/feature.rs",
+            "sha256": "e53464fc974a2cd11b93da092b95684816aed36a48ba0790606aebcdba57ca73"
+          },
+          {
+            "path": "crates/quant-research/src/lib.rs",
+            "sha256": "314ccc51e68478d44333c7eddac6ba5431542dbbc5e0c593013380b40bf2787d"
+          },
+          {
+            "path": "crates/quant-research/src/main.rs",
+            "sha256": "761e860a7838938956ef0f953e7e88a985b5a3c27822646fd82ed263d956d228"
+          },
+          {
+            "path": "crates/quant-research/src/market_api.rs",
+            "sha256": "49ddf416fbe3018d33a15cbc6204076311514d33dc6bbcb193f6945d4883673e"
+          },
+          {
+            "path": "crates/quant-research/src/poc0_benchmark/b3.rs",
+            "sha256": "ccad8c8c72e6cee5ea298a5a26f6f829999ce4391e1d3f3857966d923cdbec6f"
+          },
+          {
+            "path": "crates/quant-research/src/poc0_benchmark/b3_strategies.rs",
+            "sha256": "d45f855b5e1143e6fea587318b8e7ffef74b33f13eadcff26306695bed791245"
+          },
+          {
+            "path": "crates/quant-research/src/poc0_benchmark/parquet.rs",
+            "sha256": "07ef62849d9fed6d021e8b58dc8d3331f1e23a277e69fbe4554a957fe6a529d1"
+          },
+          {
+            "path": "crates/quant-research/src/poc0_benchmark/sweep.rs",
+            "sha256": "5df3dcd35378687dc148ae57d03207d903bef5ecb5aaf8eccc28dd2404b5e49e"
+          },
+          {
+            "path": "crates/quant-research/src/poc0_benchmark.rs",
+            "sha256": "45cbfba18485d7270125427bad5ad8b60debafb45561e4f7f4f4d6f48bf483fa"
+          },
+          {
+            "path": "crates/quant-research/src/run_jobs.rs",
+            "sha256": "410431ffea185fac385b706af4cf67e976d182e5b25d4bcbeef41a61dc5e7111"
+          },
+          {
+            "path": "crates/quant-research/src/runner.rs",
+            "sha256": "f81594e773547272eca6db4fe89079091f3746ccf8555b2a30735fc0863b6485"
+          },
+          {
+            "path": "crates/quant-research/src/server.rs",
+            "sha256": "5839883ee7c52809f841feeecaf9c634afbee7edcdab4cfa497640c736aec890"
+          },
+          {
+            "path": "crates/quant-research/src/signal.rs",
+            "sha256": "b74a8cd5b9f4477cdd01e6542a5a78184fcdb374976be92cff2d5c941d4f3cde"
+          },
+          {
+            "path": "crates/quant-research/src/strategy.rs",
+            "sha256": "c285e2eff10cd24d7c8cadfebce5a54012e139bf54d9003d97739fba50460150"
+          },
+          {
+            "path": "crates/quant-research/src/universe.rs",
+            "sha256": "47568cb94d37570cacfc2c34662686f72e143df557f2d81d65373978024541c4"
+          },
+          {
+            "path": "crates/quant-research/src/universe_api.rs",
+            "sha256": "a7d0e69f62de6c43f238449b5f69c052464bcf45da081ca45832e32326baa59c"
+          }
+        ],
+        "compiled_source_sha256": "fc97eb36f6f2e2065c4d2882e2a4839bc12ca449ae05c48560b9a5b4c077d14e",
+        "cargo_lock_observation": {
+          "available": true,
+          "tool": "/usr/sbin/lsof",
+          "exit_code": 1,
+          "output": "",
+          "stderr": ""
+        },
+        "python_environment": {
+          "status": "not_configured",
+          "occupancy_bytes": null
+        },
+        "cargo_version": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "compiler_environment": {
+          "CARGO_TARGET_DIR": "/Users/yibinzhang/Documents/ChatGPT/A股量化/target",
+          "PYO3_PYTHON": null,
+          "RUSTFLAGS": null,
+          "CARGO_ENCODED_RUSTFLAGS": null
+        },
+        "cargo_lock_sha256": "250f21792a3ded3c139747c74f96b673b37e57d2b5f550a29e480fea71f60041",
+        "dependency_graph_sha256": "7028b35b9d19c5564cc9082632a5a0995864ddf4394f05763aa85478b238c563",
+        "dependency_graph_contains_duckdb": false,
+        "profile": "release",
+        "action": "build",
+        "scope": "poc",
+        "features": [
+          "poc0 benchmark path; default app features disabled"
+        ],
+        "build_wall_seconds": 12.4200995,
+        "status": "completed",
+        "exit_code": 0,
+        "before": {
+          "volume_free_bytes": 41042501632,
+          "workspace_target_bytes": 28987191309
+        },
+        "after": {
+          "volume_free_bytes": 41056526336,
+          "workspace_target_bytes": 28987190238
+        },
+        "target_delta_bytes": -1071,
+        "stdout": "",
+        "stderr": "warning: `/Users/yibinzhang/.cargo/config` is deprecated in favor of `config.toml`\n  |\n  = help: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\nwarning: unused import: `PlRefPath`\n  --> poc/vendor/polars-io/src/cloud/options.rs:27:42\n   |\n27 | use polars_utils::pl_path::{CloudScheme, PlRefPath};\n   |                                          ^^^^^^^^^\n   |\n   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default\n\nwarning: unused import: `super::parser::next_line_position`\n --> poc/vendor/polars-io/src/csv/read/utils.rs:6:5\n  |\n6 | use super::parser::next_line_position;\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `super::splitfields::SplitFields`\n --> poc/vendor/polars-io/src/csv/read/utils.rs:9:5\n  |\n9 | use super::splitfields::SplitFields;\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `CloudScheme`\n --> poc/vendor/polars-io/src/path_utils/mod.rs:9:29\n  |\n9 | use polars_utils::pl_path::{CloudScheme, PlRefPath};\n  |                             ^^^^^^^^^^^\n\nwarning: unused import: `std::sync::Arc`\n --> poc/vendor/polars-io/src/shared.rs:2:5\n  |\n2 | use std::sync::Arc;\n  |     ^^^^^^^^^^^^^^\n\nwarning: unused import: `crate::options::RowIndex`\n --> poc/vendor/polars-io/src/shared.rs:7:5\n  |\n7 | use crate::options::RowIndex;\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `to_compute_err`\n --> poc/vendor/polars-io/src/utils/compression.rs:6:35\n  |\n6 | use polars_error::{feature_gated, to_compute_err};\n  |                                   ^^^^^^^^^^^^^^\n\nwarning: unused import: `crate::utils::sync_on_close::SyncOnCloseType`\n  --> poc/vendor/polars-io/src/utils/compression.rs:10:5\n   |\n10 | use crate::utils::sync_on_close::SyncOnCloseType;\n   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `polars_err`\n --> poc/vendor/polars-io/src/utils/file.rs:8:49\n  |\n8 | use polars_error::{PolarsResult, feature_gated, polars_err};\n  |                                                 ^^^^^^^^^^\n\nwarning: unused import: `polars_utils::mmap::ensure_not_mapped`\n  --> poc/vendor/polars-io/src/utils/file.rs:11:5\n   |\n11 | use polars_utils::mmap::ensure_not_mapped;\n   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `format_file_uri`\n  --> poc/vendor/polars-io/src/utils/file.rs:12:40\n   |\n12 | use polars_utils::pl_path::{PlRefPath, format_file_uri};\n   |                                        ^^^^^^^^^^^^^^^\n\nwarning: unused variable: `separator`\n   --> poc/vendor/polars-io/src/csv/read/read_impl.rs:157:13\n    |\n157 |         let separator = parse_options.separator;\n    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_separator`\n    |\n    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default\n\nwarning: unused variable: `algo`\n  --> poc/vendor/polars-io/src/utils/compression.rs:49:14\n   |\n49 |     let Some(algo) = SupportedCompression::check(bytes) else {\n   |              ^^^^ help: if this is intentional, prefix it with an underscore: `_algo`\n\nwarning: unused variable: `new_slice_from_read`\n   --> poc/vendor/polars-io/src/utils/compression.rs:192:13\n    |\n192 |         let new_slice_from_read =\n    |             ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_new_slice_from_read`\n\nwarning: unused variable: `writer`\n   --> poc/vendor/polars-io/src/utils/compression.rs:400:17\n    |\n400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {\n    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`\n\nwarning: unused variable: `level`\n   --> poc/vendor/polars-io/src/utils/compression.rs:400:35\n    |\n400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {\n    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`\n\nwarning: unused variable: `writer`\n   --> poc/vendor/polars-io/src/utils/compression.rs:409:17\n    |\n409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {\n    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`\n\nwarning: unused variable: `level`\n   --> poc/vendor/polars-io/src/utils/compression.rs:409:35\n    |\n409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {\n    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`\n\nwarning: unused variable: `buf`\n   --> poc/vendor/polars-io/src/utils/compression.rs:419:25\n    |\n419 |     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {\n    |                         ^^^ help: if this is intentional, prefix it with an underscore: `_buf`\n\nwarning: unused variable: `io_metrics`\n   --> poc/vendor/polars-io/src/utils/byte_source.rs:245:9\n    |\n245 |         io_metrics: Option<Arc<IOMetrics>>,\n    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`\n\nwarning: unused variable: `fetch_config`\n   --> poc/vendor/polars-io/src/utils/byte_source.rs:253:31\n    |\n253 |             Self::ObjectStore(fetch_config) => feature_gated!(\"cloud\", {\n    |                               ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_fetch_config`\n\nwarning: unused variable: `io_metrics`\n  --> poc/vendor/polars-io/src/utils/file.rs:50:9\n   |\n50 |         io_metrics: Option<Arc<IOMetrics>>,\n   |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`\n\nwarning: function `nonzero_usize_max` is never used\n  --> poc/vendor/polars-io/src/csv/read/options.rs:53:10\n   |\n53 | const fn nonzero_usize_max() -> NonZeroUsize {\n   |          ^^^^^^^^^^^^^^^^^\n   |\n   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default\n\nwarning: function `next_line_position` is never used\n   --> poc/vendor/polars-io/src/csv/read/parser.rs:269:15\n    |\n269 | pub(super) fn next_line_position(\n    |               ^^^^^^^^^^^^^^^^^^\n\nwarning: methods `extend` and `extend_from_slice` are never used\n   --> poc/vendor/polars-io/src/path_utils/mod.rs:615:12\n    |\n600 | /     impl<F> OutPaths<'_, F>\n601 | |     where\n602 | |         F: Fn(&PlRefPath) -> bool,\n    | |__________________________________- methods in this implementation\n...\n615 |           fn extend(&mut self, values: impl IntoIterator<Item = PlRefPath>) {\n    |              ^^^^^^\n...\n628 |           fn extend_from_slice(&mut self, values: &[PlRefPath]) {\n    |              ^^^^^^^^^^^^^^^^^\n\nwarning: constant `ESTIMATED_DEFLATE_RATIO` is never used\n   --> poc/vendor/polars-io/src/utils/compression.rs:138:15\n    |\n138 |         const ESTIMATED_DEFLATE_RATIO: usize = 3;\n    |               ^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: constant `ESTIMATED_ZSTD_RATIO` is never used\n   --> poc/vendor/polars-io/src/utils/compression.rs:139:15\n    |\n139 |         const ESTIMATED_ZSTD_RATIO: usize = 5;\n    |               ^^^^^^^^^^^^^^^^^^^^\n\nwarning: function `cloud_writer_coalesce_run_length` is never used\n  --> poc/vendor/polars-io/src/configs.rs:41:15\n   |\n41 | pub(crate) fn cloud_writer_coalesce_run_length() -> usize {\n   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: function `cloud_writer_copy_buffer_size` is never used\n  --> poc/vendor/polars-io/src/configs.rs:65:15\n   |\n65 | pub(crate) fn cloud_writer_copy_buffer_size() -> NonZeroUsize {\n   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: `polars-io` (lib) generated 29 warnings (run `cargo fix --lib -p polars-io` to apply 22 suggestions)\n   Compiling quant-research v0.1.0 (/Users/yibinzhang/Documents/ChatGPT/A股量化/crates/quant-research)\n    Finished `release` profile [optimized] target(s) in 12.35s\n"
+      },
+      "build_time_seconds": 12.4200995,
+      "record_interval_seconds": 14.080583,
+      "target_increment_bytes": -1071,
+      "gate_minimum_free_bytes": 10737418240
+    }
+  },
+  "rss_baselines": {
+    "rust_empty_binary": {
+      "status": "measured",
+      "peak_rss_raw": 8699904,
+      "raw_unit": "bytes",
+      "peak_rss_bytes": 8699904,
+      "scope": "Rust binary --help startup only"
+    },
+    "python_import_nautilus": {
+      "status": "measured",
+      "peak_rss_raw": 50921472,
+      "raw_unit": "bytes",
+      "peak_rss_bytes": 50921472,
+      "imported_nautilus_version": "2.0.0rc5",
+      "scope": "Python process after importing Nautilus"
+    }
+  },
+  "decision_load_decision": {
+    "status": "adopt",
+    "reason": "registered Nautilus mode selected by ticket 07 evidence",
+    "per_load": {
+      "s2": {
+        "status": "adopt",
+        "reason": "all registered speed and RSS gates passed",
+        "evidence_level": "registered"
+      },
+      "s3": {
+        "status": "adopt",
+        "reason": "all registered speed and RSS gates passed",
+        "evidence_level": "registered"
+      }
+    }
+  },
+  "combined_decision_mapping": {
+    "status": "adopt",
+    "reason": "registered Nautilus mode selected by ticket 07 evidence",
+    "per_load": {
+      "s2": {
+        "status": "adopt",
+        "reason": "all registered speed and RSS gates passed",
+        "evidence_level": "registered"
+      },
+      "s3": {
+        "status": "adopt",
+        "reason": "all registered speed and RSS gates passed",
+        "evidence_level": "registered"
+      }
+    },
+    "robustness_status": "passed",
+    "robustness_decision": {
+      "status": "adopt",
+      "reason": "both 64x252 workloads applied registered latency, throughput, and RSS gates",
+      "per_load": {
+        "s2": {
+          "status": "adopt",
+          "reason": "all registered speed and RSS gates passed",
+          "evidence_level": "registered"
+        },
+        "s3": {
+          "status": "adopt",
+          "reason": "all registered speed and RSS gates passed",
+          "evidence_level": "registered"
+        }
+      }
+    }
+  }
+}
