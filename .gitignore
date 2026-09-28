@@ -8,3 +8,9 @@ research-output/
 apps/web/node_modules/
 apps/web/dist/
 apps/web/tsconfig.tsbuildinfo
+.vscode/
+# cargo package/vendor metadata for the patched polars-io
+poc/vendor/polars-io/.cargo-ok
+poc/vendor/polars-io/.cargo_vcs_info.json
+poc/vendor/polars-io/Cargo.lock
+poc/vendor/polars-io/Cargo.toml.orig
