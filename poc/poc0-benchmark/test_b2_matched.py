@@ -269,6 +269,27 @@ class DecisionTests(unittest.TestCase):
 
 
 class RobustnessDecisionTests(unittest.TestCase):
+    def test_robustness_measurement_uses_evidence_selected_engine_mode(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "robustness.json"
+
+            def create_output(command: list[str]) -> subprocess.CompletedProcess[str]:
+                artifact = Path(command[command.index("--output") + 1])
+                artifact.write_text(json.dumps({"status": "passed"}), encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            with patch.object(b2_robustness, "_run", side_effect=create_output) as mocked_run:
+                b2_robustness._measurement(
+                    python=Path(sys.executable), binary=Path("quant-research"),
+                    dataset=Path("fixture.json"), strategy="s2", checksum="rust",
+                    nautilus_checksum="nautilus", version="fixture-v1", backend="nautilus",
+                    mode="serial", group=0, output=output,
+                    engine_mode="cached_conversion_new_engine",
+                )
+
+            command = mocked_run.call_args.args[0]
+            self.assertEqual(command[command.index("--engine-mode") + 1], "cached_conversion_new_engine")
+
     def test_repeatability_requires_two_identical_passes_or_failures(self):
         passed = [
             {"status": "passed", "nautilus_checksum_sha256": "same"},

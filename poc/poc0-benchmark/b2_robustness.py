@@ -171,6 +171,7 @@ def _repeatability_status(attempts: list[dict[str, Any]]) -> str:
 def _measurement(
     *, python: Path, binary: Path, dataset: Path, strategy: str, checksum: str,
     nautilus_checksum: str, version: str, backend: str, mode: str, group: int, output: Path,
+    engine_mode: str,
 ) -> dict[str, Any]:
     wrapper = ROOT / "poc/poc0-benchmark" / (
         "measure-b2-rss.py" if backend == "rust" else "measure-b2-nautilus.py"
@@ -184,16 +185,25 @@ def _measurement(
         command.extend(["--binary", str(binary), "--dataset-version", version,
                         "--expected-checksum", checksum])
     else:
-        command.extend(["--expected-checksum", nautilus_checksum])
+        command.extend(["--expected-checksum", nautilus_checksum, "--engine-mode", engine_mode])
     completed = _run(command)
     if completed.returncode:
         raise RuntimeError(f"{backend} {strategy} {mode} failed: {completed.stderr[-3000:]}")
     record = json.loads(artifact.read_text(encoding="utf-8"))
-    record["artifact_path"] = artifact.relative_to(ROOT).as_posix()
+    record["artifact_path"] = (
+        artifact.relative_to(ROOT).as_posix() if artifact.is_relative_to(ROOT) else str(artifact)
+    )
     return record
 
 
-def run(binary: Path, python: Path, output: Path, collect: bool) -> dict[str, Any]:
+def run(
+    binary: Path,
+    python: Path,
+    output: Path,
+    collect: bool,
+    mode_evidence: dict[str, Any] | None = None,
+    mode_evidence_path: Path | None = None,
+) -> dict[str, Any]:
     from nautilus_adapter import _compare, _projection_checksum, _run_nautilus
 
     report: dict[str, Any] = {
@@ -205,6 +215,22 @@ def run(binary: Path, python: Path, output: Path, collect: bool) -> dict[str, An
                                "parallel_groups": 5, "candidate_order_alternates": True},
         "loads": {},
         "decision": {"status": "unresolved", "reason": "both robustness workloads are required"},
+        "nautilus_mode_selection": None,
+    }
+    mode_error = (
+        b2_matched._mode_evidence_error(mode_evidence)
+        if mode_evidence is not None
+        else "reset parity evidence is required for registered robustness measurement"
+    )
+    report["nautilus_mode_selection"] = {
+        **(mode_evidence or {}),
+        "evidence_path": (
+            mode_evidence_path.relative_to(ROOT).as_posix()
+            if mode_evidence_path is not None and mode_evidence_path.is_relative_to(ROOT)
+            else str(mode_evidence_path) if mode_evidence_path is not None else None
+        ),
+        "validation": "passed" if mode_error is None else "failed" if mode_evidence is not None else "missing",
+        "validation_error": mode_error,
     }
     all_passed = True
     correctness_failed = False
@@ -283,12 +309,20 @@ def run(binary: Path, python: Path, output: Path, collect: bool) -> dict[str, An
 
         if not collect:
             continue
+        if mode_error is not None:
+            load["measurements"] = {
+                "status": "unverified",
+                "reason": f"registered measurement blocked: {mode_error}",
+            }
+            continue
         try:
+            engine_mode = mode_evidence["selected_mode"]
             serial = {backend: _measurement(
                 python=python, binary=binary, dataset=fixture["dataset"], strategy=strategy,
                 checksum=fixture["checksum"], nautilus_checksum=load["correctness"]["nautilus_checksum_sha256"],
                 version=fixture["version"], backend=backend,
                 mode="serial", group=0, output=output,
+                engine_mode=engine_mode,
             ) for backend in ("rust", "nautilus")}
             groups = []
             for group in range(5):
@@ -299,6 +333,7 @@ def run(binary: Path, python: Path, output: Path, collect: bool) -> dict[str, An
                         checksum=fixture["checksum"], nautilus_checksum=load["correctness"]["nautilus_checksum_sha256"],
                         version=fixture["version"], backend=backend,
                         mode="parallel", group=group + 1, output=output,
+                        engine_mode=engine_mode,
                     ) for backend in order
                 }})
             rust_rates = [group["runs"]["rust"]["parallel_runs_per_second"] for group in groups]
@@ -306,7 +341,9 @@ def run(binary: Path, python: Path, output: Path, collect: bool) -> dict[str, An
             rust_peak = max(group["runs"]["rust"]["peak_rss_bytes"] for group in groups)
             nautilus_peak = max(group["runs"]["nautilus"]["peak_rss_sum_upper_bound_bytes"] for group in groups)
             decision = b2_matched.decide(
-                correctness="passed", protocol="fallback_reset_unverified",
+                correctness="passed",
+                protocol="matched" if engine_mode == "reset" else "matched_fallback",
+                mode_selection=mode_evidence,
                 rust_serial_median_ns=serial["rust"]["median_ns"],
                 nautilus_serial_median_ns=serial["nautilus"]["median_ns"],
                 rust_parallel_runs_per_second=statistics.median(rust_rates),
@@ -315,6 +352,7 @@ def run(binary: Path, python: Path, output: Path, collect: bool) -> dict[str, An
                 nautilus_peak_rss_sum_upper_bound_bytes=nautilus_peak,
             )
             load["measurements"] = {
+                "nautilus_engine_mode": engine_mode,
                 "status": "passed", "serial": serial, "parallel_groups": groups,
                 "rust_parallel_runs_per_second_median": statistics.median(rust_rates),
                 "nautilus_parallel_runs_per_second_median": statistics.median(nautilus_rates),
@@ -352,15 +390,22 @@ def main() -> int:
     parser.add_argument("--python", type=Path, default=ROOT / ".venv/bin/python")
     parser.add_argument("--output", type=Path, default=ROOT / "poc/poc0-benchmark/results/b2-robustness-64x252.json")
     parser.add_argument("--build-record", type=Path, default=ROOT / "poc/poc0-benchmark/results/b2-robustness-release-build-2026-09-28.json")
-    parser.add_argument("--decision-load-report", type=Path, default=ROOT / "poc/poc0-benchmark/results/b2-matched-decision-loads-2026-09-28.json")
+    parser.add_argument("--decision-load-report", type=Path, default=ROOT / "poc/poc0-benchmark/results/b2-matched-decision-loads-reset-selected-2026-09-28.json")
+    parser.add_argument("--reset-parity-evidence", type=Path, default=ROOT / "poc/poc0-benchmark/results/b2-nautilus-reset-parity-2026-09-28.json")
     parser.add_argument("--run-measurements", action="store_true")
     args = parser.parse_args()
     binary = args.binary if args.binary.is_absolute() else ROOT / args.binary
     python = args.python if args.python.is_absolute() else ROOT / args.python
     output = args.output if args.output.is_absolute() else ROOT / args.output
     build_record = args.build_record if args.build_record.is_absolute() else ROOT / args.build_record
-    report = run(binary, python, output, args.run_measurements)
-    report["environment"] = b2_matched._environment(binary, python, build_record)
+    reset_evidence_path = args.reset_parity_evidence if args.reset_parity_evidence.is_absolute() else ROOT / args.reset_parity_evidence
+    environment = b2_matched._environment(binary, python, build_record)
+    try:
+        mode_evidence = json.loads(reset_evidence_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        mode_evidence = None
+    report = run(binary, python, output, args.run_measurements, mode_evidence, reset_evidence_path)
+    report["environment"] = environment
     report["rss_baselines"] = b2_matched._rss_baselines(binary, python)
     decision_load_report = args.decision_load_report if args.decision_load_report.is_absolute() else ROOT / args.decision_load_report
     decision_load_decision = {"status": "unresolved", "reason": "decision-load report unavailable"}
