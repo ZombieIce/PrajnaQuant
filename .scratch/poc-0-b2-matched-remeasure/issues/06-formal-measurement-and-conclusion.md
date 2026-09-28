@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Migrated:** 2026-09-28 迁移到 [GitHub #3](https://github.com/ZombieIce/PrajnaQuant/issues/3)，进度与状态以 GitHub 为准；本文件不再更新。
+
 - [ ] 确认票据 01 的 ADR 与预测保存早于本次测量，并记录两者的 revision。
 - [ ] Nautilus 计时模式采用票据 07 选定的模式，并在报告中引用其证据。
 - [ ] 在 `--no-default-features` release 构建上运行判定负载与稳健性负载；原始比较报告归档到 POC-0 结果目录。

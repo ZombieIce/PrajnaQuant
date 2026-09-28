@@ -43,7 +43,7 @@ POC-0 与新平台实现按当前任务的 spec/ADR 确定时间语义；修改�
 
 本轮文档记录的是现状，不构成开发许可。改动前读相关代码和测试，先 `git status`，保留用户的未提交文件。接口、数据 schema 或量化口径变更时同步文档与必要 ADR。
 
-单个 implementation 完成后先保留未提交差异，交给未参与该实现的 agent 对照票据/spec 和仓库规范独立 review。实现 agent 处理审查发现并交付复核结果；若仍有问题，明确记录而不宣称验收通过。不要因实现完成就自动 `git commit`。用户明确要求提交时，在 review 后按票据或独立变更分批提交；已授予的提交授权按其范围执行。
+一张票据对应一个 GitHub Issue、一个从最新 `main` 拉出的分支 `<issue>-<slug>` 和一个 PR，PR 描述写 `Closes #<issue>`。Agent 可以在自己的分支上提交和推送，不得直接推 `main`、不得 force push 共享分支、不得自行合并。实现完成后，由未参与实现的 agent 对照 Issue/spec 和仓库规范在 PR 上独立 review；实现 agent 处理发现并把复核结果写成 PR 评论。仍有问题时如实记录，不宣称验收通过。合并由项目负责人执行。一个工作区同一时间只承载一个分支，并行任务使用独立的 `git worktree`。不得改写验收条目去迎合实现，也不得修改其他票据的状态或结论；确需调整时在对应 Issue 评论中提出。
 
 ## Testing Rules
 
@@ -53,7 +53,7 @@ POC-0 与新平台实现按当前任务的 spec/ADR 确定时间语义；修改�
 
 每次新对话先读 `AGENTS.md`，运行 `git status`、`git log -5 --oneline`，再按任务范围加载资料：
 
-- **POC-0 / 新平台实现：**读当前票据与对应 spec、`ARCHITECTURE.md`、相关 ADR、任务代码和测试；需要阶段顺序时读 `docs/product-roadmap.md`，需要领域词汇时读 `CONTEXT.md`，需要现状或交接时只读 `docs/STATUS.md` 与 `HANDOFF.md` 的当前 POC 段落。构建资源任务另读 `docs/poc-0-benchmark-spec.md` 与票据 13。旧 A 股路线文档不作为这一路径的启动必读项。
+- **POC-0 / 新平台实现：**读当前 GitHub Issue（`gh issue view <N> --comments`）与对应 spec、`ARCHITECTURE.md`、相关 ADR、任务代码和测试；需要阶段顺序时读 `docs/product-roadmap.md`，需要领域词汇时读 `CONTEXT.md`，需要现状或交接时只读 `docs/STATUS.md` 与 `HANDOFF.md` 的当前 POC 段落。构建资源任务另读 `docs/poc-0-benchmark-spec.md` 与票据 13。旧 A 股路线文档不作为这一路径的启动必读项。
 - **旧 A 股实现或明确复用其契约：**按修改范围读取 `README.md`、`docs/architecture.md`、`docs/time-model.md`、`docs/data-model.md`、`docs/factor-system.md`、`docs/strategy-system.md`、`docs/backtest-engine.md`、`docs/STATUS.md`、`docs/priorities.md` 及相关 ADR；只读与任务有关的部分。
 
 完成任务所需的代码与测试阅读后，再进行相关验证；不要为了履行启动清单通读无关历史文档。
@@ -66,7 +66,7 @@ POC-0 与新平台实现按当前任务的 spec/ADR 确定时间语义；修改�
 
 ### Issue tracker
 
-Issues live as Markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+Issues, specs and PRs live on GitHub (`ZombieIce/PrajnaQuant`); `.scratch/` is a read-only archive of the earlier local tracker. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

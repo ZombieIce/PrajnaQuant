@@ -1,31 +1,39 @@
-# Issue tracker: Local Markdown
+# Issue tracker: GitHub Issues
 
-Issues and specs for this repo live as markdown files in `.scratch/`.
+Issues, specs and PRs for this repo live on GitHub at `ZombieIce/PrajnaQuant`. Use the `gh` CLI; always pass `-R ZombieIce/PrajnaQuant` when outside the repo root.
+
+`.scratch/` is a **read-only archive** of the local-Markdown tracker used until 2026-09-28. Do not add or edit tickets there. A file with a `**Migrated:**` line is tracked by the linked GitHub issue.
 
 ## Conventions
 
-- One feature per directory: `.scratch/<feature-slug>/`
-- The spec is `.scratch/<feature-slug>/spec.md`
-- Implementation issues are one file per ticket at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`, never a single combined tickets file
-- Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
-- The `Status:` line holds only one canonical value: a triage label, `claimed`, or `resolved`. Put verdicts (`adopt / defer / reject / unresolved`), acceptance notes and caveats on a separate `**Conclusion:**` line, never in `Status:`
-- Comments and conversation history append to the bottom of the file under a `## Comments` heading
+- **Spec:** one issue labelled `spec`, titled with the feature name. Its body uses the spec template.
+- **Ticket:** one issue per ticket, never a combined checklist issue. The body starts with `Parent: #<spec>` when there is a spec, then `What to build`, acceptance criteria as task-list checkboxes, and `Blocked by: #N, #N` (or `None`).
+- **Triage state:** exactly one triage label from `triage-labels.md`. A ticket that has been claimed has an assignee.
+- **Milestone:** the roadmap stage the work belongs to (`POC-0`, `MVP-0` … `MVP-6`). Repo infrastructure that isn't tied to a stage has no milestone.
+- **Conclusion:** verdicts (`adopt / defer / reject / unresolved`), acceptance notes and caveats go on a `**Conclusion:**` line in the issue body or in the closing comment, never in the title or labels.
+- **Comments:** discussion, review results and hand-off notes are issue or PR comments.
+
+## Branches and PRs
+
+- One ticket → one branch `<issue>-<slug>` from the latest `main` → one PR whose description contains `Closes #<issue>`.
+- Agents may commit and push to their own branch. They must not push to `main`, force-push a shared branch, or merge.
+- Independent review happens on the PR, by an agent that did not write the change. Findings and their resolution are recorded as PR comments.
+- The project owner merges. Merging closes the issue.
+- One working tree carries one branch. Run parallel tasks in separate `git worktree` checkouts.
 
 ## When a skill says "publish to the issue tracker"
 
-Create a new file under `.scratch/<feature-slug>/` (creating the directory if needed).
+Create the issue with `gh issue create --title ... --body-file ... --label <triage> [--milestone <stage>]`. Publish blockers first, so each `Blocked by` line can use real issue numbers.
 
 ## When a skill says "fetch the relevant ticket"
 
-Read the file at the referenced path. The user will normally pass the path or the issue number directly.
+`gh issue view <N> --comments`. The user normally passes the issue number or URL.
 
 ## Wayfinding operations
 
-Used by `/wayfinder`. The **map** is a file with one **child** file per ticket.
-
-- **Map**: `.scratch/<effort>/map.md` (the Notes / Decisions-so-far / Fog body).
-- **Child ticket**: `.scratch/<effort>/issues/NN-<slug>.md`, numbered from `01`, with the question in the body. A `Type:` line records the ticket type (`research`/`prototype`/`grilling`/`task`); a `Status:` line records `claimed`/`resolved`.
-- **Blocking**: a `Blocked by: NN, NN` line near the top. A ticket is unblocked when every file it lists is `resolved`.
-- **Frontier**: scan `.scratch/<effort>/issues/` for files that are open, unblocked, and unclaimed; first by number wins.
-- **Claim**: set `Status: claimed` and save before any work.
-- **Resolve**: append the answer under an `## Answer` heading, set `Status: resolved`, then append a context pointer (gist + link) to the map's Decisions-so-far in `map.md`.
+- **Map:** an issue labelled `spec` (or the effort's parent issue). Its body holds Notes / Decisions-so-far / Fog.
+- **Child ticket:** an issue whose body has `Parent: #<map>`.
+- **Blocking:** a `Blocked by: #N, #N` line. A ticket is unblocked when every listed issue is closed as completed.
+- **Frontier:** `gh issue list --state open --label ready-for-agent`. Keep issues with no assignee whose blockers are all closed; the lowest number wins.
+- **Claim:** `gh issue edit <N> --add-assignee @me` and a comment saying the work has started, before any work.
+- **Resolve:** merge the PR that says `Closes #N` (owner), or for non-code tickets add the answer as a comment and `gh issue close <N>`. Then append a gist and a link to the map issue's Decisions-so-far.

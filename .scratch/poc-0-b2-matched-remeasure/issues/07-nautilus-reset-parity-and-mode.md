@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Migrated:** 2026-09-28 迁移到 [GitHub #2](https://github.com/ZombieIce/PrajnaQuant/issues/2)，进度与状态以 GitHub 为准；本文件不再更新。
+
 - [ ] 在固定 Nautilus 版本的公开 `BacktestEngine` 接口下，实现 reset 模式：worker 内一次性加入 venue/instrument/数据；每 Run 重置引擎并加入新的策略实例；不改变策略参数、成本或 T 收盘信号 → 下一可用 open 的执行时序。
 - [ ] 对 S2 3×10、S3 3×130、S2/S3 64×252 四个负载，在同一 worker 内连续运行至少 3 次 reset Run，每次投影 checksum 须同时等于新建引擎投影；两个判定负载还须等于独立 golden。
 - [ ] 一致性检查覆盖 ADR 0012 以外的共同子集字段：订单/Fill、现金、持仓、成本、每日 NAV、PortfolioResult；用例能发现跨 Run 的状态残留（账户、仓位、挂单、时钟、缓存）。
