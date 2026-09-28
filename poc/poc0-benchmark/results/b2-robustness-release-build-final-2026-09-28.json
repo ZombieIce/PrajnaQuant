@@ -1,0 +1,365 @@
+{
+  "schema_version": 1,
+  "started_at_utc": "2026-09-28T10:34:18.171928+00:00",
+  "finished_at_utc": "2026-09-28T10:34:31.878110+00:00",
+  "command": [
+    "cargo",
+    "build",
+    "-p",
+    "quant-research",
+    "--no-default-features",
+    "--locked",
+    "--offline",
+    "--profile",
+    "release"
+  ],
+  "working_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316",
+  "target_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/target",
+  "cache_state": "warm_existing_workspace_target",
+  "estimated_max_additional_bytes": 2147483648,
+  "minimum_free_bytes": 10737418240,
+  "runtime_stop_free_bytes": 11274289152,
+  "space_samples": [
+    {
+      "observed_at_utc": "2026-09-28T10:34:20.286671+00:00",
+      "volume_free_bytes": 37691039744
+    },
+    {
+      "observed_at_utc": "2026-09-28T10:34:22.291748+00:00",
+      "volume_free_bytes": 37691068416
+    },
+    {
+      "observed_at_utc": "2026-09-28T10:34:24.298389+00:00",
+      "volume_free_bytes": 37691060224
+    },
+    {
+      "observed_at_utc": "2026-09-28T10:34:26.306897+00:00",
+      "volume_free_bytes": 37689823232
+    },
+    {
+      "observed_at_utc": "2026-09-28T10:34:28.308185+00:00",
+      "volume_free_bytes": 37695500288
+    },
+    {
+      "observed_at_utc": "2026-09-28T10:34:30.313372+00:00",
+      "volume_free_bytes": 37640179712
+    }
+  ],
+  "git_revision": "e89d65de1fc62afae919438fb2c0fd9c12e9f75d",
+  "working_tree_dirty": true,
+  "tracked_diff_sha256": "68d99f23bb825aed4bc96f69517cd6a3cf9fb1bd26460f4b8546f2bf75b431b7",
+  "tracked_diff_summary": ".../issues/04-robustness-64x252.md                 |  16 +--\n .../issues/09-b2-strategy-parity-and-throughput.md |   4 +-\n HANDOFF.md                                         |   8 +-\n crates/quant-research/src/main.rs                  |  22 +++--\n crates/quant-research/src/poc0_benchmark.rs        | 110 ++++++++++++++++-----\n crates/quant-research/tests/poc0_benchmark_cli.rs  |  98 ++++++++++++++++++\n docs/STATUS.md                                     |   4 +-\n poc/poc0-benchmark/POC-0-SYNTHESIS.md              |   7 +-\n poc/poc0-benchmark/README.md                       |  30 ++++++\n poc/poc0-benchmark/measure-b2-nautilus.py          |   2 +-\n poc/poc0-benchmark/measure-b2-rss.py               |   3 +\n poc/poc0-benchmark/nautilus_adapter.py             |   7 +-\n poc/poc0-benchmark/test_b2_matched.py              |  38 +++++++\n 13 files changed, 303 insertions(+), 46 deletions(-)",
+  "changed_paths": [
+    "scratch/poc-0-b2-matched-remeasure/issues/04-robustness-64x252.md",
+    ".scratch/poc-0-benchmark/issues/09-b2-strategy-parity-and-throughput.md",
+    "HANDOFF.md",
+    "crates/quant-research/src/main.rs",
+    "crates/quant-research/src/poc0_benchmark.rs",
+    "crates/quant-research/tests/poc0_benchmark_cli.rs",
+    "docs/STATUS.md",
+    "poc/poc0-benchmark/POC-0-SYNTHESIS.md",
+    "poc/poc0-benchmark/README.md",
+    "poc/poc0-benchmark/measure-b2-nautilus.py",
+    "poc/poc0-benchmark/measure-b2-rss.py",
+    "poc/poc0-benchmark/nautilus_adapter.py",
+    "poc/poc0-benchmark/test_b2_matched.py",
+    ".scratch/poc-0-benchmark/issues/14-nautilus-halt-native-reject-isolation.md",
+    ".vscode/settings.json",
+    "poc/poc0-benchmark/b2_robustness.py",
+    "poc/poc0-benchmark/fixtures/b2-s2-scale-64x252-v1.json",
+    "poc/poc0-benchmark/fixtures/b2-s3-scale-64x252-v1.json",
+    "poc/poc0-benchmark/generate-b2-stress-fixtures.py",
+    "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.json",
+    "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s2.rust-preflight.json",
+    "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.nautilus.parallel.1.json",
+    "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.nautilus.parallel.2.json",
+    "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.nautilus.parallel.3.json",
+    "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.nautilus.parallel.4.json",
+    "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.nautilus.parallel.5.json",
+    "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.nautilus.serial.0.json",
+    "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.rust-preflight.json",
+    "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.rust.parallel.1.json",
+    "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.rust.parallel.2.json",
+    "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.rust.parallel.3.json",
+    "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.rust.parallel.4.json",
+    "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.rust.parallel.5.json",
+    "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.rust.serial.0.json",
+    "poc/poc0-benchmark/results/b2-robustness-64x252-preflight.json",
+    "poc/poc0-benchmark/results/b2-robustness-64x252-preflight.s2.rust-preflight.json",
+    "poc/poc0-benchmark/results/b2-robustness-64x252-preflight.s3.rust-preflight.json",
+    "poc/poc0-benchmark/results/b2-robustness-release-build-2026-09-28.json",
+    "poc/vendor/polars-io/.cargo-ok",
+    "poc/vendor/polars-io/.cargo_vcs_info.json",
+    "poc/vendor/polars-io/Cargo.lock",
+    "poc/vendor/polars-io/Cargo.toml.orig"
+  ],
+  "untracked_files": [
+    {
+      "path": ".scratch/poc-0-benchmark/issues/14-nautilus-halt-native-reject-isolation.md",
+      "sha256": "4acbee16f7b7665827cb5f0c0845f3da5c753cfc5136a530d172d4e4073b2d05"
+    },
+    {
+      "path": ".vscode/settings.json",
+      "sha256": "9f8b5c878dfe2dba4691ad64b5a9047cc2522f209b0d79e1a1518c7106d67a91"
+    },
+    {
+      "path": "poc/poc0-benchmark/b2_robustness.py",
+      "sha256": "76067d47fb68d68397ee1b25fd05660679ddb92d9a05f51d6a404b734c25fb5b"
+    },
+    {
+      "path": "poc/poc0-benchmark/fixtures/b2-s2-scale-64x252-v1.json",
+      "sha256": "5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593"
+    },
+    {
+      "path": "poc/poc0-benchmark/fixtures/b2-s3-scale-64x252-v1.json",
+      "sha256": "1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747"
+    },
+    {
+      "path": "poc/poc0-benchmark/generate-b2-stress-fixtures.py",
+      "sha256": "4fe6fb2388fc2e532b789a27f09c76362047b73f0163313d43ba7e3c77bc94d9"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.json",
+      "sha256": "6bfb2483239e81f4233205bd3d8643a9010b22b55f9042d132f03fed56f4a9d6"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s2.rust-preflight.json",
+      "sha256": "bd363514761932b693299af74488c8be82f5ad78ac62fe1b2fd446d90d293285"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.nautilus.parallel.1.json",
+      "sha256": "6d72d85beebc50e6dab449f683983fe8a01b17399ce1660cfa79aaa40bebbae7"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.nautilus.parallel.2.json",
+      "sha256": "23e180593a3003bafd293d193ceaf0fecbed0f79dd7f7235e5df1884887e0166"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.nautilus.parallel.3.json",
+      "sha256": "ec3e64449860fef563ab08f5fe9dc9c8f7bbb41c717cec1f39ed1e6952d08e0a"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.nautilus.parallel.4.json",
+      "sha256": "2f9c65628eac9aa5938191a0de19122410d4fe7ff824489f59f626e77648a143"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.nautilus.parallel.5.json",
+      "sha256": "12cb67dd6f9887b604eeeec5818db7ec20bc411e001d11d3fca8abbfe9d7bb84"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.nautilus.serial.0.json",
+      "sha256": "13f496ae7f810c8b1cb2605617300c081f13634233cb3396a84fd0889c7ac4e2"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.rust-preflight.json",
+      "sha256": "e83c13488b6a721eb42c8275cdd9afe435bdd023b2382e3b2493257a7ed7c7ab"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.rust.parallel.1.json",
+      "sha256": "605520c0f2fe276e9410d36bac78bf8dad586ae9edb3b248e3f619eadb3baa37"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.rust.parallel.2.json",
+      "sha256": "7d3c38b9c9b36675e53cf1114d2b66b243ce101526c8633afcfece5930c4469f"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.rust.parallel.3.json",
+      "sha256": "08bb46d3da253169f417fb7417fcd4eb47ebea33a61497b3f0ea98254f5b461e"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.rust.parallel.4.json",
+      "sha256": "61cad5a8bd0cf28f35b8b6c499ec53d0ec271b7b551c85d4db05b65d2339cf5f"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.rust.parallel.5.json",
+      "sha256": "29c3d3ab6b1d04c140b27b9c5e80949bf49b776edd3f1af01a5f157c8bfa30a8"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.s3.rust.serial.0.json",
+      "sha256": "4280fe3c4619716bbbba68e5b09137c3b16e82536caa440754f6a60901a77b67"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-64x252-preflight.json",
+      "sha256": "1328aa9c3b28db0933f311b307ea8e6d2fa92d7f768628dfa488e1ead97d1a27"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-64x252-preflight.s2.rust-preflight.json",
+      "sha256": "5312f8ad45d6a9881534c72e7fc8545032828a908a28828c297dd6b1fde45f16"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-64x252-preflight.s3.rust-preflight.json",
+      "sha256": "90b57586ae23fa62ecbc58f472b78171adcf5e9ebc235a3a682ac75318847b75"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b2-robustness-release-build-2026-09-28.json",
+      "sha256": "6137a69e99bf52bb1d3cdad5231fe074b6ab49af5f66360fdc34b4c65f9802f3"
+    },
+    {
+      "path": "poc/vendor/polars-io/.cargo-ok",
+      "sha256": "afbf9d0f3560b0fd7795e81c42a0a79ee6b6fc67e064f77826aee642cad28d91"
+    },
+    {
+      "path": "poc/vendor/polars-io/.cargo_vcs_info.json",
+      "sha256": "ca661de9662a617b4b4b5625d1321ea2fbe7228d84978e7329faefacf66a85dc"
+    },
+    {
+      "path": "poc/vendor/polars-io/Cargo.lock",
+      "sha256": "01a1c65965ee2c92f590f1b9dd70ff826cc008945fc2141da2667f1ea76f02ef"
+    },
+    {
+      "path": "poc/vendor/polars-io/Cargo.toml.orig",
+      "sha256": "2ce6efc2ab6a60c9d40f18c270c3f19b5be108a1ec38b020499c3e163d363673"
+    }
+  ],
+  "untracked_files_complete": true,
+  "dirty_worktree_sha256": "3db653860d72f66ac791c835f4a53d7e7eff8e000df7cb41d651907b6d307ad6",
+  "compiled_source_files": [
+    {
+      "path": ".cargo/config.toml",
+      "sha256": "199dda3f76c1eff2551ad1f2cbdce4b7db5846471992960c08914e580a2fe824"
+    },
+    {
+      "path": "Cargo.lock",
+      "sha256": "250f21792a3ded3c139747c74f96b673b37e57d2b5f550a29e480fea71f60041"
+    },
+    {
+      "path": "Cargo.toml",
+      "sha256": "f7e15b5fe6f8919d9e31e32d99a320db88bf36c7c6f401c329b8172193891b20"
+    },
+    {
+      "path": "crates/quant-research/Cargo.toml",
+      "sha256": "650de46940effb97e67682a865e03a030b638221adc6eb74b5b3cfbcc1b4dd45"
+    },
+    {
+      "path": "crates/quant-research/src/backtest.rs",
+      "sha256": "b1a67aadc12661ab224655e3e966e4f0432370c751f0dc9d23b6965553259540"
+    },
+    {
+      "path": "crates/quant-research/src/batch.rs",
+      "sha256": "4ef3b794065c1a7f22186d497ea3e34ff0e136604eeb1629e5eeb038e2c78b83"
+    },
+    {
+      "path": "crates/quant-research/src/core.rs",
+      "sha256": "dd50175268505788c677829dd276b253adbb3ec624938b2a9f0019d8720ea1ca"
+    },
+    {
+      "path": "crates/quant-research/src/data.rs",
+      "sha256": "3436ac4670ed283ae82951462d7277fdb623f078ea19803fcd75aa29917b02b7"
+    },
+    {
+      "path": "crates/quant-research/src/experiment.rs",
+      "sha256": "f3984c628f8aac5f5ad4f9ae0c9ae0d7d7eccf77b6e7e15b32ad95c3c34716bf"
+    },
+    {
+      "path": "crates/quant-research/src/factor.rs",
+      "sha256": "b2ca1a783fe90b33c4896bd0963ddfe2111fe910a58d71d278723aea2eb60dcf"
+    },
+    {
+      "path": "crates/quant-research/src/feature.rs",
+      "sha256": "e53464fc974a2cd11b93da092b95684816aed36a48ba0790606aebcdba57ca73"
+    },
+    {
+      "path": "crates/quant-research/src/lib.rs",
+      "sha256": "314ccc51e68478d44333c7eddac6ba5431542dbbc5e0c593013380b40bf2787d"
+    },
+    {
+      "path": "crates/quant-research/src/main.rs",
+      "sha256": "761e860a7838938956ef0f953e7e88a985b5a3c27822646fd82ed263d956d228"
+    },
+    {
+      "path": "crates/quant-research/src/market_api.rs",
+      "sha256": "49ddf416fbe3018d33a15cbc6204076311514d33dc6bbcb193f6945d4883673e"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/b3.rs",
+      "sha256": "ccad8c8c72e6cee5ea298a5a26f6f829999ce4391e1d3f3857966d923cdbec6f"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/b3_strategies.rs",
+      "sha256": "d45f855b5e1143e6fea587318b8e7ffef74b33f13eadcff26306695bed791245"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/parquet.rs",
+      "sha256": "07ef62849d9fed6d021e8b58dc8d3331f1e23a277e69fbe4554a957fe6a529d1"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/sweep.rs",
+      "sha256": "5df3dcd35378687dc148ae57d03207d903bef5ecb5aaf8eccc28dd2404b5e49e"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark.rs",
+      "sha256": "7b0fb238158c72511ac8272a625ded9d59035c8d036508d5ece6216bfdd76465"
+    },
+    {
+      "path": "crates/quant-research/src/run_jobs.rs",
+      "sha256": "410431ffea185fac385b706af4cf67e976d182e5b25d4bcbeef41a61dc5e7111"
+    },
+    {
+      "path": "crates/quant-research/src/runner.rs",
+      "sha256": "f81594e773547272eca6db4fe89079091f3746ccf8555b2a30735fc0863b6485"
+    },
+    {
+      "path": "crates/quant-research/src/server.rs",
+      "sha256": "5839883ee7c52809f841feeecaf9c634afbee7edcdab4cfa497640c736aec890"
+    },
+    {
+      "path": "crates/quant-research/src/signal.rs",
+      "sha256": "b74a8cd5b9f4477cdd01e6542a5a78184fcdb374976be92cff2d5c941d4f3cde"
+    },
+    {
+      "path": "crates/quant-research/src/strategy.rs",
+      "sha256": "c285e2eff10cd24d7c8cadfebce5a54012e139bf54d9003d97739fba50460150"
+    },
+    {
+      "path": "crates/quant-research/src/universe.rs",
+      "sha256": "47568cb94d37570cacfc2c34662686f72e143df557f2d81d65373978024541c4"
+    },
+    {
+      "path": "crates/quant-research/src/universe_api.rs",
+      "sha256": "a7d0e69f62de6c43f238449b5f69c052464bcf45da081ca45832e32326baa59c"
+    }
+  ],
+  "compiled_source_sha256": "8feea98ae45599e94ce2fbdc6a9523f2c53b1a2cf0ba726fb1a977d3519141ac",
+  "cargo_lock_observation": {
+    "available": true,
+    "tool": "/usr/sbin/lsof",
+    "exit_code": 1,
+    "output": "",
+    "stderr": ""
+  },
+  "python_environment": {
+    "status": "not_configured",
+    "occupancy_bytes": null
+  },
+  "cargo_version": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+  "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "compiler_environment": {
+    "CARGO_TARGET_DIR": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/target",
+    "PYO3_PYTHON": null,
+    "RUSTFLAGS": null,
+    "CARGO_ENCODED_RUSTFLAGS": null
+  },
+  "cargo_lock_sha256": "250f21792a3ded3c139747c74f96b673b37e57d2b5f550a29e480fea71f60041",
+  "dependency_graph_sha256": "7028b35b9d19c5564cc9082632a5a0995864ddf4394f05763aa85478b238c563",
+  "dependency_graph_contains_duckdb": false,
+  "profile": "release",
+  "action": "build",
+  "scope": "poc",
+  "features": [
+    "poc0 benchmark path; default app features disabled"
+  ],
+  "build_wall_seconds": 12.172188875,
+  "status": "completed",
+  "exit_code": 0,
+  "before": {
+    "volume_free_bytes": 37692592128,
+    "workspace_target_bytes": 28085126385
+  },
+  "after": {
+    "volume_free_bytes": 37695397888,
+    "workspace_target_bytes": 28085131161
+  },
+  "target_delta_bytes": 4776,
+  "stdout": "",
+  "stderr": "warning: `/Users/yibinzhang/.cargo/config` is deprecated in favor of `config.toml`\n  |\n  = help: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\nwarning: unused import: `PlRefPath`\n  --> poc/vendor/polars-io/src/cloud/options.rs:27:42\n   |\n27 | use polars_utils::pl_path::{CloudScheme, PlRefPath};\n   |                                          ^^^^^^^^^\n   |\n   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default\n\nwarning: unused import: `super::parser::next_line_position`\n --> poc/vendor/polars-io/src/csv/read/utils.rs:6:5\n  |\n6 | use super::parser::next_line_position;\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `super::splitfields::SplitFields`\n --> poc/vendor/polars-io/src/csv/read/utils.rs:9:5\n  |\n9 | use super::splitfields::SplitFields;\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `CloudScheme`\n --> poc/vendor/polars-io/src/path_utils/mod.rs:9:29\n  |\n9 | use polars_utils::pl_path::{CloudScheme, PlRefPath};\n  |                             ^^^^^^^^^^^\n\nwarning: unused import: `std::sync::Arc`\n --> poc/vendor/polars-io/src/shared.rs:2:5\n  |\n2 | use std::sync::Arc;\n  |     ^^^^^^^^^^^^^^\n\nwarning: unused import: `crate::options::RowIndex`\n --> poc/vendor/polars-io/src/shared.rs:7:5\n  |\n7 | use crate::options::RowIndex;\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `to_compute_err`\n --> poc/vendor/polars-io/src/utils/compression.rs:6:35\n  |\n6 | use polars_error::{feature_gated, to_compute_err};\n  |                                   ^^^^^^^^^^^^^^\n\nwarning: unused import: `crate::utils::sync_on_close::SyncOnCloseType`\n  --> poc/vendor/polars-io/src/utils/compression.rs:10:5\n   |\n10 | use crate::utils::sync_on_close::SyncOnCloseType;\n   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `polars_err`\n --> poc/vendor/polars-io/src/utils/file.rs:8:49\n  |\n8 | use polars_error::{PolarsResult, feature_gated, polars_err};\n  |                                                 ^^^^^^^^^^\n\nwarning: unused import: `polars_utils::mmap::ensure_not_mapped`\n  --> poc/vendor/polars-io/src/utils/file.rs:11:5\n   |\n11 | use polars_utils::mmap::ensure_not_mapped;\n   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `format_file_uri`\n  --> poc/vendor/polars-io/src/utils/file.rs:12:40\n   |\n12 | use polars_utils::pl_path::{PlRefPath, format_file_uri};\n   |                                        ^^^^^^^^^^^^^^^\n\nwarning: unused variable: `separator`\n   --> poc/vendor/polars-io/src/csv/read/read_impl.rs:157:13\n    |\n157 |         let separator = parse_options.separator;\n    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_separator`\n    |\n    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default\n\nwarning: unused variable: `algo`\n  --> poc/vendor/polars-io/src/utils/compression.rs:49:14\n   |\n49 |     let Some(algo) = SupportedCompression::check(bytes) else {\n   |              ^^^^ help: if this is intentional, prefix it with an underscore: `_algo`\n\nwarning: unused variable: `new_slice_from_read`\n   --> poc/vendor/polars-io/src/utils/compression.rs:192:13\n    |\n192 |         let new_slice_from_read =\n    |             ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_new_slice_from_read`\n\nwarning: unused variable: `writer`\n   --> poc/vendor/polars-io/src/utils/compression.rs:400:17\n    |\n400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {\n    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`\n\nwarning: unused variable: `level`\n   --> poc/vendor/polars-io/src/utils/compression.rs:400:35\n    |\n400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {\n    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`\n\nwarning: unused variable: `writer`\n   --> poc/vendor/polars-io/src/utils/compression.rs:409:17\n    |\n409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {\n    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`\n\nwarning: unused variable: `level`\n   --> poc/vendor/polars-io/src/utils/compression.rs:409:35\n    |\n409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {\n    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`\n\nwarning: unused variable: `buf`\n   --> poc/vendor/polars-io/src/utils/compression.rs:419:25\n    |\n419 |     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {\n    |                         ^^^ help: if this is intentional, prefix it with an underscore: `_buf`\n\nwarning: unused variable: `io_metrics`\n   --> poc/vendor/polars-io/src/utils/byte_source.rs:245:9\n    |\n245 |         io_metrics: Option<Arc<IOMetrics>>,\n    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`\n\nwarning: unused variable: `fetch_config`\n   --> poc/vendor/polars-io/src/utils/byte_source.rs:253:31\n    |\n253 |             Self::ObjectStore(fetch_config) => feature_gated!(\"cloud\", {\n    |                               ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_fetch_config`\n\nwarning: unused variable: `io_metrics`\n  --> poc/vendor/polars-io/src/utils/file.rs:50:9\n   |\n50 |         io_metrics: Option<Arc<IOMetrics>>,\n   |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`\n\nwarning: function `nonzero_usize_max` is never used\n  --> poc/vendor/polars-io/src/csv/read/options.rs:53:10\n   |\n53 | const fn nonzero_usize_max() -> NonZeroUsize {\n   |          ^^^^^^^^^^^^^^^^^\n   |\n   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default\n\nwarning: function `next_line_position` is never used\n   --> poc/vendor/polars-io/src/csv/read/parser.rs:269:15\n    |\n269 | pub(super) fn next_line_position(\n    |               ^^^^^^^^^^^^^^^^^^\n\nwarning: methods `extend` and `extend_from_slice` are never used\n   --> poc/vendor/polars-io/src/path_utils/mod.rs:615:12\n    |\n600 | /     impl<F> OutPaths<'_, F>\n601 | |     where\n602 | |         F: Fn(&PlRefPath) -> bool,\n    | |__________________________________- methods in this implementation\n...\n615 |           fn extend(&mut self, values: impl IntoIterator<Item = PlRefPath>) {\n    |              ^^^^^^\n...\n628 |           fn extend_from_slice(&mut self, values: &[PlRefPath]) {\n    |              ^^^^^^^^^^^^^^^^^\n\nwarning: constant `ESTIMATED_DEFLATE_RATIO` is never used\n   --> poc/vendor/polars-io/src/utils/compression.rs:138:15\n    |\n138 |         const ESTIMATED_DEFLATE_RATIO: usize = 3;\n    |               ^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: constant `ESTIMATED_ZSTD_RATIO` is never used\n   --> poc/vendor/polars-io/src/utils/compression.rs:139:15\n    |\n139 |         const ESTIMATED_ZSTD_RATIO: usize = 5;\n    |               ^^^^^^^^^^^^^^^^^^^^\n\nwarning: function `cloud_writer_coalesce_run_length` is never used\n  --> poc/vendor/polars-io/src/configs.rs:41:15\n   |\n41 | pub(crate) fn cloud_writer_coalesce_run_length() -> usize {\n   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: function `cloud_writer_copy_buffer_size` is never used\n  --> poc/vendor/polars-io/src/configs.rs:65:15\n   |\n65 | pub(crate) fn cloud_writer_copy_buffer_size() -> NonZeroUsize {\n   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: `polars-io` (lib) generated 29 warnings (run `cargo fix --lib -p polars-io` to apply 22 suggestions)\n   Compiling quant-research v0.1.0 (/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/crates/quant-research)\n    Finished `release` profile [optimized] target(s) in 12.08s\n"
+}

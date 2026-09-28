@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import b2_matched
+import b2_robustness
 
 
 def fixed_nautilus_available() -> bool:
@@ -196,6 +197,100 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(snapshot["status"], "known")
         self.assertEqual(snapshot["count"], 0)
         self.assertEqual(snapshot["packages"], [])
+
+
+class RobustnessDecisionTests(unittest.TestCase):
+    def test_repeatability_requires_two_identical_passes_or_failures(self):
+        passed = [
+            {"status": "passed", "nautilus_checksum_sha256": "same"},
+            {"status": "passed", "nautilus_checksum_sha256": "same"},
+        ]
+        failed = [
+            {"status": "failed", "nautilus_checksum_sha256": "same", "failure_fields": ["fills"]},
+            {"status": "failed", "nautilus_checksum_sha256": "same", "failure_fields": ["fills"]},
+        ]
+        self.assertEqual(b2_robustness._repeatability_status(passed), "passed")
+        self.assertEqual(b2_robustness._repeatability_status(failed), "failed")
+        self.assertEqual(b2_robustness._repeatability_status(failed[:1]), "unresolved")
+        self.assertEqual(
+            b2_robustness._repeatability_status([
+                failed[0], {**failed[1], "nautilus_checksum_sha256": "different"}
+            ]),
+            "unresolved",
+        )
+        self.assertEqual(
+            b2_robustness._repeatability_status([
+                failed[0], {**failed[1], "failure_fields": ["daily.cash_nav"]}
+            ]),
+            "unresolved",
+        )
+
+    def test_mismatch_diagnostics_keep_date_shift_ledger_and_halt_boundary_visible(self):
+        expected = {
+            "orders": [{"decision_date": "2025-04-07", "attempt_date": "2025-04-08",
+                        "symbol": "ETF038", "side": "BUY", "quantity": 100, "reason": None}],
+            "fills": [{"date": "2025-04-08", "symbol": "ETF038", "side": "BUY",
+                       "quantity": 100, "fill_price": 100.1, "commission": 100.0}],
+            "ledger": [{"date": "2025-04-08", "cash": 48_350.0, "nav": 99_560.0,
+                        "holdings": [{"symbol": "ETF038", "quantity": 100}]}],
+            "summary": {"commission": 100.0, "tax": 0.0, "slippage_cost": 10.0, "total_cost": 110.0},
+        }
+        actual = {
+            "orders": [{"decision_date": "2025-04-07", "attempt_date": "2025-04-09",
+                        "symbol": "ETF038", "side": "BUY", "quantity": 100, "reason": None}],
+            "fills": [{"date": "2025-04-09", "symbol": "ETF038", "side": "BUY",
+                       "quantity": 100, "fill_price": 100.1, "commission": 100.0}],
+            "ledger": [{"date": "2025-04-08", "cash": 98_900.0, "nav": 98_900.0,
+                        "holdings": []}],
+            "summary": {"commission": 100.0, "tax": 0.0, "slippage_cost": 10.0, "total_cost": 110.0},
+        }
+        dataset = {"execution_status_overrides": [{
+            "date": "2025-07-02", "symbol": "ETF002", "trade_status": "HALTED"
+        }]}
+        diagnostics = b2_robustness._mismatch_diagnostics(actual, expected, dataset)
+        self.assertEqual(diagnostics["orders"]["expected_only_examples"][0]["attempt_date"], "2025-04-08")
+        self.assertEqual(diagnostics["orders"]["actual_only_examples"][0]["attempt_date"], "2025-04-09")
+        self.assertEqual(diagnostics["fills"]["expected_only_examples"][0]["date"], "2025-04-08")
+        self.assertEqual(diagnostics["fills"]["actual_only_examples"][0]["date"], "2025-04-09")
+        self.assertEqual(diagnostics["daily_ledger_first_mismatches"][0]["cash_delta_actual_minus_expected"], 50_550.0)
+        self.assertEqual(diagnostics["halt_attribution"][0]["rust_attempt_count"], 0)
+        self.assertEqual(diagnostics["halt_attribution"][0]["nautilus_fill_count"], 0)
+        self.assertIn("ADR 0012", diagnostics["halt_attribution"][0]["adr_0012_scope"])
+
+    def test_robustness_miss_defers_an_adopted_decision_load(self):
+        result = b2_robustness.combine_robustness(
+            {"status": "adopt", "reason": "decision loads passed"},
+            "passed",
+            {"status": "defer", "reason": "latency gate missed"},
+        )
+        self.assertEqual(result["status"], "defer")
+        self.assertEqual(result["robustness_status"], "passed")
+
+    def test_unverified_robustness_retains_the_decision_load_conclusion(self):
+        result = b2_robustness.combine_robustness(
+            {"status": "adopt", "reason": "decision loads passed"}, "unverified"
+        )
+        self.assertEqual(result["status"], "adopt")
+        self.assertEqual(result["robustness_status"], "unverified")
+
+    def test_robustness_correctness_failure_rejects(self):
+        result = b2_robustness.combine_robustness(
+            {"status": "adopt"}, "correctness_failed"
+        )
+        self.assertEqual(result["status"], "reject")
+
+    def test_unresolved_decision_load_stays_unresolved_when_robustness_passes(self):
+        result = b2_robustness.combine_robustness(
+            {"status": "unresolved"}, "passed", {"status": "adopt"}
+        )
+        self.assertEqual(result["status"], "unresolved")
+
+    def test_registered_fixture_versions_and_dimensions(self):
+        for fixture in b2_robustness.REGISTERED.values():
+            dataset = json.loads(fixture["dataset"].read_text(encoding="utf-8"))
+            self.assertEqual(dataset["dataset_version"], fixture["version"])
+            self.assertEqual(len(dataset["instruments"]), 64)
+            self.assertEqual(len(dataset["calendar"]), 252)
 
 
 class CoordinatorTests(unittest.TestCase):

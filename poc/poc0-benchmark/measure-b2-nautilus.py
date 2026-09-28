@@ -35,7 +35,7 @@ def main() -> int:
     else:
         dataset_path = args.dataset if args.dataset.is_absolute() else ROOT / args.dataset
         dataset = json.loads(dataset_path.read_text(encoding="utf-8"))
-        if args.strategy == "s3":
+        if args.strategy == "s3" and "s3_rising_symbol" not in dataset:
             dataset = _ma_dataset(dataset)
         runs = args.runs if args.runs is not None else (20 if args.mode == "serial" else 6)
         if args.mode == "serial":

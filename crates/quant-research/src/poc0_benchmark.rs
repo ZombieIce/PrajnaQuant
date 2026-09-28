@@ -582,14 +582,28 @@ impl Poc0Report {
     }
 }
 
-pub fn measure_b2_parallel(
-    strategy: &str,
-    dataset_override: Option<&Path>,
-    threads: usize,
-    runs: usize,
-    skip_golden_preflight: bool,
-    expected_checksum: Option<&str>,
-) -> Result<Value> {
+pub struct B2MeasureOptions<'a> {
+    pub strategy: &'a str,
+    pub dataset_override: Option<&'a Path>,
+    pub dataset_version: Option<&'a str>,
+    pub threads: usize,
+    pub runs: usize,
+    pub skip_golden_preflight: bool,
+    pub expected_checksum: Option<&'a str>,
+    pub include_projection: bool,
+}
+
+pub fn measure_b2_parallel(options: B2MeasureOptions<'_>) -> Result<Value> {
+    let B2MeasureOptions {
+        strategy,
+        dataset_override,
+        dataset_version,
+        threads,
+        runs,
+        skip_golden_preflight,
+        expected_checksum,
+        include_projection,
+    } = options;
     ensure!(matches!(strategy, "s2" | "s3"), "unsupported B2 strategy");
     ensure!(
         threads > 0 && runs >= threads,
@@ -614,6 +628,32 @@ pub fn measure_b2_parallel(
         Path::new("poc/poc0-benchmark/fixtures/dataset-v1.json")
     };
     let dataset_path = dataset_override.unwrap_or(default_dataset_path);
+    let stress_version = match strategy {
+        "s2" => "poc0.b3.s2-scale-64x252.v1",
+        _ => "poc0.b3.s3-scale-64x252.v1",
+    };
+    let is_stress = dataset_version == Some(stress_version);
+    if let Some(version) = dataset_version {
+        ensure!(
+            matches!(
+                version,
+                "poc0.b3.s2-scale-64x252.v1" | "poc0.b3.s3-scale-64x252.v1"
+            ),
+            "unsupported B2 dataset version {version}"
+        );
+        ensure!(
+            (strategy == "s2" && version == "poc0.b3.s2-scale-64x252.v1")
+                || (strategy == "s3" && version == "poc0.b3.s3-scale-64x252.v1"),
+            "B2 strategy does not match dataset version {version}"
+        );
+        ensure!(is_stress, "unexpected B2 dataset version");
+    }
+    if is_stress {
+        ensure!(
+            skip_golden_preflight,
+            "registered 64x252 B2 workloads require the independent B3 stress checksum"
+        );
+    }
     let golden_path = Path::new("poc/poc0-benchmark/fixtures/expected-v1.json");
     let golden_checksum = if let Some(checksum) = expected_checksum {
         checksum.to_owned()
@@ -638,25 +678,44 @@ pub fn measure_b2_parallel(
         );
         strategy_report.checksum_sha256.clone()
     };
-    let prepared_path = if strategy == "s3" {
+    let prepared_path = if strategy == "s3" && !is_stress {
         Path::new("poc/poc0-benchmark/fixtures/dataset-v1.json")
     } else {
         dataset_path
     };
     let prepared = prepare_dataset(serde_json::from_slice(&fs::read(prepared_path)?)?)?;
+    if let Some(version) = dataset_version {
+        ensure!(
+            prepared.spec.dataset_version == version,
+            "B2 dataset version mismatch"
+        );
+        ensure!(
+            prepared.spec.calendar.len() == 252,
+            "B2 stress dataset must have 252 sessions"
+        );
+        ensure!(
+            prepared.spec.instruments.len() == 64,
+            "B2 stress dataset must have 64 instruments"
+        );
+    }
     let config = experiment_config(&prepared.spec);
     let ma_fixture_path = if strategy == "s3" {
         dataset_path
     } else {
         Path::new("poc/poc0-benchmark/fixtures/b2-ma20-60-v1.json")
     };
-    let (ma_dataset, _ma_hash) = make_ma_dataset(&prepared.spec, ma_fixture_path)?;
+    let ma_dataset = if strategy == "s3" && !is_stress {
+        Some(make_ma_dataset(&prepared.spec, ma_fixture_path)?.0)
+    } else {
+        None
+    };
+    let effective_dataset = ma_dataset.as_ref().unwrap_or(&prepared);
     let expected_hash = golden_checksum;
     let run_once = || {
         if strategy == "s2" {
             run_rotation_event(&prepared, &config)
         } else {
-            run_ma_event(&ma_dataset)
+            run_ma_event(ma_dataset.as_ref().unwrap_or(&prepared))
         }
     };
     let warmup_runs = 2 * threads;
@@ -729,7 +788,7 @@ pub fn measure_b2_parallel(
     let mut secondary_samples = Vec::with_capacity(runs);
     for _ in 0..runs {
         let started = Instant::now();
-        let source = if strategy == "s3" {
+        let source = if strategy == "s3" && !is_stress {
             Path::new("poc/poc0-benchmark/fixtures/dataset-v1.json")
         } else {
             dataset_path
@@ -741,6 +800,8 @@ pub fn measure_b2_parallel(
                 &experiment_config(&end_to_end_prepared.spec),
             )
             .projection
+        } else if is_stress {
+            run_ma_event(&end_to_end_prepared).projection
         } else {
             let (ma, _) = make_ma_dataset(&end_to_end_prepared.spec, dataset_path)?;
             run_ma_event(&ma).projection
@@ -751,9 +812,12 @@ pub fn measure_b2_parallel(
         );
         secondary_samples.push(started.elapsed().as_nanos());
     }
-    Ok(serde_json::json!({
+    let mut report = serde_json::json!({
         "status": "passed",
         "strategy": strategy,
+        "dataset_version": effective_dataset.spec.dataset_version,
+        "instrument_count": effective_dataset.spec.instruments.len(),
+        "session_count": effective_dataset.spec.calendar.len(),
         "threads": threads,
         "workers": threads,
         "mode": if threads == 1 { "serial" } else { "parallel" },
@@ -771,23 +835,19 @@ pub fn measure_b2_parallel(
         "runs_per_second": runs as f64 * 1e9 / wall_ns as f64,
         "serial_runs_per_second": if threads == 1 { Some(runs as f64 * 1e9 / wall_ns as f64) } else { None },
         "parallel_runs_per_second": if threads > 1 { Some(runs as f64 * 1e9 / wall_ns as f64) } else { None },
-        "synthetic_quote_events_per_run": if strategy == "s2" { prepared.bars.len() * 2 } else { ma_dataset.bars.len() * 2 },
+        "synthetic_quote_events_per_run": effective_dataset.bars.len() * 2,
         "run_checksum_sha256": expected_hash,
-        "input_sha256": if strategy == "s2" {
-            sha256(&fs::read(dataset_path)?)
-        } else {
-            _ma_hash
-        },
-        "dataset_content_sha256": if strategy == "s2" {
-            prepared.content_sha256
-        } else {
-            ma_dataset.content_sha256
-        },
+        "input_sha256": sha256(&fs::read(dataset_path)?),
+        "dataset_content_sha256": effective_dataset.content_sha256,
         "peak_rss_bytes": null,
         "memory_status": "not measured in isolated Rust workers",
         "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
         "build_profile": if cfg!(debug_assertions) { "debug" } else { "release" },
-    }))
+    });
+    if include_projection {
+        report["projection"] = serde_json::to_value(&raw[0].1)?;
+    }
+    Ok(report)
 }
 
 #[derive(Debug, Serialize)]

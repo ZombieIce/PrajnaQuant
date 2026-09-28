@@ -296,6 +296,7 @@ def _run_nautilus(dataset: dict[str, Any], strategy: str = "s1") -> dict[str, An
             self.positions: dict[str, int] = {}
             self.cash = float(dataset["account"]["initial_cash"])
             self.blocked_exits: set[str] = set()
+            self.pending_budget: float | None = None
 
         def on_quote(self, tick: Any) -> None:
             date = self.config.close_dates.get(int(tick.ts_event))
@@ -303,6 +304,7 @@ def _run_nautilus(dataset: dict[str, Any], strategy: str = "s1") -> dict[str, An
                 self._snapshot(tick)
                 if date in rotation_signals:
                     self.pending = rotation_signals[date]
+                    self.pending_budget = None
                 return
             date = self.config.open_dates.get(int(tick.ts_event))
             if date is None or self.pending is None:
@@ -329,7 +331,10 @@ def _run_nautilus(dataset: dict[str, Any], strategy: str = "s1") -> dict[str, An
                     Decimal(1) + Decimal(str(dataset["costs"]["buy_slippage_bps"])) / 10_000
                 )).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
                 lot = int(dataset["account"]["lot_size"])
-                quantity = int(self.cash / max(1, len(targets) - len(self.positions)) / buy_ask / lot) * lot
+                if self.pending_budget is None:
+                    remaining_targets = max(1, len(targets) - len(self.positions))
+                    self.pending_budget = self.cash / remaining_targets
+                quantity = int(self.pending_budget / buy_ask / lot) * lot
                 while quantity > 0 and quantity * buy_ask + float(dataset["costs"]["minimum_commission"]) > self.cash:
                     quantity -= lot
                 if quantity > 0:

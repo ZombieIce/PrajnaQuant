@@ -99,6 +99,9 @@ enum Command {
         /// Optional canonical source fixture identity (S2 bars or S3 MA20/60 parameters).
         #[arg(long)]
         dataset: Option<PathBuf>,
+        /// Registered workload identity for reports and fail-closed fixture validation.
+        #[arg(long)]
+        dataset_version: Option<String>,
         #[arg(long, value_parser = ["serial", "parallel"], default_value = "parallel")]
         mode: String,
         #[arg(long, alias = "threads", default_value_t = 2)]
@@ -111,6 +114,9 @@ enum Command {
         /// Expected projection checksum emitted by the separate golden preflight.
         #[arg(long, requires = "skip_golden_preflight")]
         expected_checksum: Option<String>,
+        /// Include the verified ledger projection in this preflight report.
+        #[arg(long)]
+        include_projection: bool,
         #[arg(long, default_value = "target/poc-0/b2-throughput.json")]
         output: PathBuf,
     },
@@ -368,22 +374,26 @@ async fn main() -> Result<()> {
         Command::BenchmarkPoc0B2 {
             strategy,
             dataset,
+            dataset_version,
             mode,
             workers,
             runs,
             skip_golden_preflight,
             expected_checksum,
+            include_projection,
             output,
         } => {
             let workers = if mode == "serial" { 1 } else { workers };
-            let report = poc0_benchmark::measure_b2_parallel(
-                &strategy,
-                dataset.as_deref(),
-                workers,
+            let report = poc0_benchmark::measure_b2_parallel(poc0_benchmark::B2MeasureOptions {
+                strategy: &strategy,
+                dataset_override: dataset.as_deref(),
+                dataset_version: dataset_version.as_deref(),
+                threads: workers,
                 runs,
                 skip_golden_preflight,
-                expected_checksum.as_deref(),
-            )?;
+                expected_checksum: expected_checksum.as_deref(),
+                include_projection,
+            })?;
             if let Some(parent) = output.parent() {
                 std::fs::create_dir_all(parent)?;
             }

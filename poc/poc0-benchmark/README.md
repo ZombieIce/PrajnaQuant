@@ -417,6 +417,19 @@ changed. Raw samples and environment identity are in the [B3 strategy report](re
 [workspace tests](results/b3-strategies-workspace-test-2026-09-28.json), and
 [workspace Clippy](results/b3-strategies-workspace-clippy-2026-09-28.json).
 
+## Native HALT isolation (ticket 14)
+
+With the existing `.venv` pinned to `nautilus_trader==2.0.0rc5`, from the repository root:
+
+```bash
+.venv/bin/python poc/poc0-benchmark/nautilus_halt_probe.py
+```
+
+The command prints the order callback streams, final cached states, environment and revision;
+it asserts that the no-HALT control fills on the same quote. When the fixed wheel is unavailable,
+it prints `Unknown` and skips the experiment. The [isolated evidence](results/nautilus-halt-native-probe-2026-09-28.md)
+confirms a native HALT rejection; it does not alter the existing Adapter or B2 comparison scope.
+
 ## B2 Nautilus adapter comparison (ticket 08)
 
 Use the guarded entry point for the pinned wheel, shared-target release build, and
@@ -622,3 +635,37 @@ complete Python lock because only the direct Nautilus requirement is pinned. If 
 environment, an active declared dependency, or a version satisfying its requirement is
 unavailable—or requirement metadata cannot be parsed—its count is `Unknown`, never zero. These
 proxies are recorded only; the decision function does not read them.
+
+### 64×252 robustness remeasurement (ticket `poc-0-b2-matched-remeasure/04`)
+
+Regenerate the fixed B3 S2/S3 stress fixtures, then run the 10 GiB-gated release build and
+correctness-first coordinator. The B2 CLI validates the supplied Dataset Version, 64 instruments,
+252 sessions, and the B3 registered Rust account-projection checksum. The coordinator compares
+Nautilus against the Rust projection field by field; serialization checksums across Rust/Python
+are recorded as informational because their JSON key ordering differs. A failing load has no
+performance samples; an independent passing load can still be measured.
+
+```bash
+python3 poc/poc0-benchmark/generate-b2-stress-fixtures.py
+python3 poc/poc0-benchmark/capture-build-resource.py --profile release --scope poc --action build \
+  --estimated-max-additional-bytes 2147483648 \
+  --output poc/poc0-benchmark/results/b2-robustness-release-build-final-2026-09-28.json
+.venv/bin/python poc/poc0-benchmark/b2_robustness.py \
+  --binary target/release/quant-research --python .venv/bin/python \
+  --build-record poc/poc0-benchmark/results/b2-robustness-release-build-final-2026-09-28.json \
+  --output poc/poc0-benchmark/results/b2-robustness-64x252-2026-09-28.json \
+  --run-measurements
+```
+
+The 2026-09-28 report records two independent S2 projection comparisons with identical Nautilus
+checksums and the same six non-excluded failed fields (Rust 351 orders/Fills; Nautilus 348), so it
+skipped S2 performance collection and mapped robustness to `reject`. The compact diagnostics show
+the first order/fill shifted from Rust 2025-04-08 to Nautilus 2025-04-09, with associated cash,
+holdings and NAV differences. On the fixture's HALT date/symbol, both project sides have zero
+attempts and fills; the ADR 0012 native lifecycle field remains separately excluded. S3 passed
+projection parity and numerical gates: Rust/Nautilus serial median 2,455,667 / 53,476,979.5 ns,
+parallel median 535.84 / 34.21 Runs/s, and process RSS 90,996,736 / 234,848,256 bytes (the
+Nautilus two-worker peak-sum upper bound). The report keeps both correctness attempts, compact
+mismatch examples, full raw samples, per-worker RSS, build record and environment identity. This
+result applies only to the fixed synthetic workloads, current implementation, host, and Nautilus
+2.0.0rc5; it is not production-engine or investment-performance evidence.

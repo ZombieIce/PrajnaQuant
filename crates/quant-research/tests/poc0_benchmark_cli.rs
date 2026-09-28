@@ -527,6 +527,104 @@ fn b2_s3_cli_accepts_the_canonical_ma20_60_fixture_identity() {
 }
 
 #[test]
+fn b2_cli_matches_registered_s2_stress_account_projection() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = directory.path().join("b2-s2-stress.json");
+    let fixture = repo_root().join("poc/poc0-benchmark/fixtures/b2-s2-scale-64x252-v1.json");
+    let checksum = "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342";
+    let result = Command::new(env!("CARGO_BIN_EXE_quant-research"))
+        .current_dir(repo_root())
+        .args([
+            "benchmark-poc0-b2",
+            "--strategy",
+            "s2",
+            "--dataset",
+            fixture.to_str().unwrap(),
+            "--dataset-version",
+            "poc0.b3.s2-scale-64x252.v1",
+            "--mode",
+            "serial",
+            "--runs",
+            "1",
+            "--skip-golden-preflight",
+            "--expected-checksum",
+            checksum,
+            "--include-projection",
+            "--output",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report: Value = serde_json::from_slice(&fs::read(output).unwrap()).unwrap();
+    assert_eq!(report["dataset_version"], "poc0.b3.s2-scale-64x252.v1");
+    assert_eq!(report["instrument_count"], 64);
+    assert_eq!(report["session_count"], 252);
+    assert_eq!(report["run_checksum_sha256"], checksum);
+    assert_eq!(
+        report["dataset_content_sha256"],
+        "2ae75e889e3d65a28974f3f467794532621b34c6b58c31c6f37bc75392358dff"
+    );
+    assert_eq!(
+        report["projection"]["ledger"].as_array().unwrap().len(),
+        252
+    );
+}
+
+#[test]
+fn b2_cli_matches_registered_s3_stress_account_projection() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = directory.path().join("b2-s3-stress.json");
+    let fixture = repo_root().join("poc/poc0-benchmark/fixtures/b2-s3-scale-64x252-v1.json");
+    let checksum = "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70";
+    let result = Command::new(env!("CARGO_BIN_EXE_quant-research"))
+        .current_dir(repo_root())
+        .args([
+            "benchmark-poc0-b2",
+            "--strategy",
+            "s3",
+            "--dataset",
+            fixture.to_str().unwrap(),
+            "--dataset-version",
+            "poc0.b3.s3-scale-64x252.v1",
+            "--mode",
+            "serial",
+            "--runs",
+            "1",
+            "--skip-golden-preflight",
+            "--expected-checksum",
+            checksum,
+            "--include-projection",
+            "--output",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report: Value = serde_json::from_slice(&fs::read(output).unwrap()).unwrap();
+    assert_eq!(report["dataset_version"], "poc0.b3.s3-scale-64x252.v1");
+    assert_eq!(report["instrument_count"], 64);
+    assert_eq!(report["session_count"], 252);
+    assert_eq!(report["run_checksum_sha256"], checksum);
+    assert_eq!(
+        report["dataset_content_sha256"],
+        "d5384e1e27162713df2cd020dcdd655d5838f1d417d3848ac0eaca8f0a002e5a"
+    );
+    assert_eq!(
+        report["projection"]["ledger"].as_array().unwrap().len(),
+        252
+    );
+}
+
+#[test]
 fn b2_parallel_warmup_mismatch_returns_instead_of_stranding_workers() {
     let temporary = tempfile::tempdir().unwrap();
     let output = temporary.path().join("b2-warmup-mismatch.json");

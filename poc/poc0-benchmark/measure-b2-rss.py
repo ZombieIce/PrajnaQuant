@@ -19,6 +19,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--strategy", choices=("s2", "s3"), required=True)
     parser.add_argument("--dataset", type=Path, help="canonical fixture path; Rust selects the embedded S3 fixture when omitted")
+    parser.add_argument("--dataset-version", help="registered Dataset Version used for stress fixture validation")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--mode", choices=("serial", "parallel"), default="parallel")
     parser.add_argument("--workers", type=int, default=2)
@@ -33,6 +34,8 @@ def main() -> int:
                "--runs", str(args.runs), "--output", str(output)]
     if args.dataset is not None:
         command.extend(["--dataset", str(args.dataset)])
+    if args.dataset_version:
+        command.extend(["--dataset-version", args.dataset_version])
     if args.expected_checksum:
         command.extend(["--skip-golden-preflight", "--expected-checksum", args.expected_checksum])
     completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
