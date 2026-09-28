@@ -48,6 +48,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Feature-only code (b3-pyo3) must still type-check when shared signatures change.
+      - run: cargo check -p quant-research --no-default-features --features b3-pyo3 --all-targets --locked
+
       # Nautilus-dependent tests skip here by design; the Full workflow runs them and fails on skips.
       - name: POC Python tests (Nautilus not installed)
         run: python -m unittest discover -s poc/poc0-benchmark -p 'test*.py' -v
