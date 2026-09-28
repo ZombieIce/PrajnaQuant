@@ -1,6 +1,6 @@
 # ADR 0013：POC-0 B2 Fast Event / Nautilus 同口径重测
 
-- 状态：Proposed，预登记草稿于 2026-09-28；待 Git 保存 revision 后接受。正式同口径重测尚未开始
+- 状态：Accepted，预登记保存于 2026-09-28，revision `9c487f3ee60e2f8bbfc38b543b3b3cfd6b00bf2d`；正式同口径重测尚未开始
 - 关联： [B2 matched remeasure spec](../../.scratch/poc-0-b2-matched-remeasure/spec.md)、[票据 01](../../.scratch/poc-0-b2-matched-remeasure/issues/01-preregister-matched-boundary-and-prediction.md)、[票据 09](../../.scratch/poc-0-benchmark/issues/09-b2-strategy-parity-and-throughput.md)、[ADR 0012](0012-poc0-nautilus-status-gate.md)
 
 ## 背景
@@ -49,7 +49,7 @@
 
 ## 测量前保存规则
 
-本 ADR 与票据 01 的预测必须先保存到 Git，再进行首次正式 release 测量。票据 01 记录包含 ADR 和预测的预登记提交 revision。此处协议不得依据正式重测结果追溯修改；若需变更，另立新 ADR 并将受影响结论标为未按原预登记协议测量。
+本 ADR 与票据 01 的预测已在 revision `9c487f3ee60e2f8bbfc38b543b3b3cfd6b00bf2d` 保存，早于首次正式 release 测量。此处协议不得依据正式重测结果追溯修改；若需变更，另立新 ADR 并将受影响结论标为未按原预登记协议测量。
 
 ## 适用范围
 
