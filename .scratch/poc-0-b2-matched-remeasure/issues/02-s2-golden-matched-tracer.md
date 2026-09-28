@@ -4,12 +4,14 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** completed (S2 matched fallback scope)
 
-- [ ] 编排入口以独立子进程完成 golden 预检；预检失败时不采集该负载的性能，报告标 `unresolved` 或 `reject` 并附原因。
-- [ ] Rust B2 CLI 新增串行/并行模式、worker 与 Run 数、跳过进程内预检等输入；3×10 checksum 与现有 golden 一致。
-- [ ] Nautilus 在 worker 内一次性完成转换并把数据加入引擎，每 Run 先重置再加入新策略实例；同一 worker 内连续 Run 的投影 checksum 与新建引擎一致，否则自动改用"缓存转换、每 Run 新建引擎"，并在报告中记录所用模式与原因。
-- [ ] 双方计时区间符合主边界，每 Run 只回传序号、耗时和 checksum；单 Run 延迟取单 worker 串行样本，并行 Runs/s 取 2 worker 墙钟。
-- [ ] 测量进程的 RSS 分离采集：Rust 为单进程峰值，Nautilus 为 2 个 worker 峰值之和（不含编排进程）；报告同时列出每 worker 值，并把合计标为上界。
-- [ ] 判定纯函数的单元测试覆盖：`adopt`、速度或 RSS 未达门槛的 `defer`、正确性失败的 `reject`、测量缺失的 `unresolved`、恰好 2× 与 RSS 相等两个边界，以及 ADR 0012 排除维度不一致但其余字段通过的情形。
-- [ ] 缺少固定 Nautilus 版本时，集成测试跳过且报告标 `unresolved`；不断言绝对耗时。
+- [x] 编排入口以独立子进程完成 golden 预检；预检失败时不采集该负载的性能，报告标 `unresolved` 并附原因。
+- [x] Rust B2 CLI 新增串行/并行模式、worker 与 Run 数、跳过进程内预检等输入；S2 3×10 checksum 与独立 golden 一致。
+- [x] Nautilus 不复用尚未验证 reset parity 的引擎；采用预登记 fallback：每 worker 一次转换并缓存 QuoteTicks，每 Run 新建引擎/策略。两次预热和每 Run projection checksum 均对照独立通过的 Nautilus golden。reset→new-engine parity 仍是后续范围，不影响本票据的 fallback 对照。
+- [x] 双方计时符合 fallback 主边界，包含每 Run 策略/因子/信号、账户推进、引擎初始化和 projection；转换、warmup、序列化/checksum 与进程/线程池初始化排除。采集 20 个串行样本和 5 组交替顺序的 2-worker × 6 Run 并行墙钟样本。
+- [x] RSS 分离采集报告 Rust 单测量进程峰值、Nautilus 每 worker 峰值和标注为上界的合计；golden preflight 与测量进程分离。
+- [x] 判定纯函数测试覆盖 `adopt`、速度/RSS 未达标 `defer`、正确性失败 `reject`、缺测/协议不匹配 `unresolved`、恰好 2×、RSS 相等，以及 ADR 0012 排除维度失败但其他字段通过。
+- [x] 固定 Nautilus 版本不可用时不采集性能，测试按环境跳过，报告保留 unresolved 状态；不断言绝对耗时。
+
+实现现状：Rust 与 Nautilus S2 golden correctness gate 通过（ADR 0012 的 native lifecycle 项排除）；S2 fallback matched release 报告见 [结果](../../../poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.json)。串行 20 样本中位数为 Rust 11,042 ns / Nautilus 842,146 ns；五组 2-worker × 6 Run 并行吞吐中位数为 56,338 / 1,225 Runs/s；测量 RSS 为 11,255,808 / 147,046,400 bytes（Nautilus worker 峰值和，上界）。S2 本负载的登记门槛判定为 `adopt`，这不是 S3/64×252 或整体 B2 架构裁决。引擎 reset parity 尚未验证，作为后续范围。

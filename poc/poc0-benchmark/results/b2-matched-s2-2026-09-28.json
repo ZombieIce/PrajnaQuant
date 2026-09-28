@@ -1,0 +1,640 @@
+{
+  "schema_version": "poc0.b2-matched-s2.v1",
+  "status": "adopt",
+  "strategy": "S2 Momentum Rotation",
+  "dataset_version": "poc0.synthetic.etf-daily.v1",
+  "input_sha256": "9b9009b1586a6f271cd301042f97f2adf84146c870d72802682799d60352ed85",
+  "correctness": {
+    "status": "passed",
+    "preflight_process": "/Users/yibinzhang/Documents/ChatGPT/A股量化/poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.preflight.json",
+    "rust_s2_checksum_sha256": "f623f54644042256b2186270b0fe5142b36ab65731d6fc797fef5b3f805ddc9f",
+    "nautilus_checks": [
+      {
+        "field": "orders.adapter_project_contract",
+        "passed": true,
+        "expected_order_events": 5,
+        "actual_adapter_order_events": 5,
+        "project_order_fields": [
+          "decision_date",
+          "attempt_date",
+          "symbol",
+          "side",
+          "quantity",
+          "reason"
+        ]
+      },
+      {
+        "field": "orders.nautilus_native_lifecycle",
+        "passed": false,
+        "expected_rust_attempts": 5,
+        "actual_nautilus_submissions": 3,
+        "adapter_rejections_excluded": 2
+      },
+      {
+        "field": "fills.quantity_price_commission",
+        "passed": true,
+        "expected_fill_count": 3,
+        "actual_fill_count": 3
+      },
+      {
+        "field": "daily.cash_nav",
+        "passed": true,
+        "session_count": 10
+      },
+      {
+        "field": "daily.holdings",
+        "passed": true,
+        "session_count": 10
+      },
+      {
+        "field": "nautilus.account_cash_positions",
+        "passed": true,
+        "snapshot_count": 10
+      },
+      {
+        "field": "summary.costs",
+        "passed": true
+      }
+    ],
+    "nautilus_checked_projection_checksum_sha256": "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+    "non_excluded_failures": [],
+    "adr_0012_excluded_failure": true
+  },
+  "measurements": {
+    "rust_serial": {
+      "build_profile": "release",
+      "golden_preflight": "external_passed",
+      "input_sha256": "9b9009b1586a6f271cd301042f97f2adf84146c870d72802682799d60352ed85",
+      "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+      "measurement_wall_ns": 271209,
+      "median_ns": 11042,
+      "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+      "mode": "serial",
+      "p95_ns": 15750,
+      "parallel_runs_per_second": null,
+      "peak_rss_bytes": 11321344,
+      "raw_samples_ns": [
+        15125,
+        15750,
+        17792,
+        12917,
+        10291,
+        10250,
+        14208,
+        11041,
+        11459,
+        11042,
+        11250,
+        9875,
+        9666,
+        11209,
+        12583,
+        9791,
+        9875,
+        9917,
+        9875,
+        9667
+      ],
+      "run_checksum_sha256": "f623f54644042256b2186270b0fe5142b36ab65731d6fc797fef5b3f805ddc9f",
+      "runs": 20,
+      "runs_per_second": 73743.86543219436,
+      "serial_runs_per_second": 73743.86543219436,
+      "status": "passed",
+      "strategy": "s2",
+      "synthetic_quote_events_per_run": 58,
+      "threads": 1,
+      "warmup_runs": 2,
+      "warmup_runs_per_worker": 2,
+      "workers": 1,
+      "binary_sha256": "e32984fc22f25582f1206a39045f47ab43b3b4de0da6ee353dba55d933a1f821",
+      "artifact_path": "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.rust.serial.0.json"
+    },
+    "nautilus_serial": {
+      "status": "passed",
+      "workers": 1,
+      "warmup_runs": 2,
+      "warmup_runs_per_worker": 2,
+      "runs": 20,
+      "raw_samples_ns": [
+        908250,
+        885834,
+        859417,
+        978208,
+        881125,
+        858958,
+        853708,
+        842750,
+        835250,
+        836625,
+        826625,
+        832333,
+        827459,
+        837209,
+        843083,
+        831625,
+        917250,
+        841541,
+        825708,
+        834209
+      ],
+      "checksums_sha256": [
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+        "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203"
+      ],
+      "median_ns": 842145.5,
+      "p95_ns": 917250,
+      "peak_rss_bytes": 74711040,
+      "engine_mode": "cached_conversion_new_engine",
+      "engine_mode_reason": "engine reset parity is not established; use the specified safe fallback",
+      "conversion_cached_per_worker": true,
+      "measurement_scope": "single worker; conversion and two warmups excluded; factor/signal, new engine initialization, replay and projection included",
+      "artifact_path": "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.nautilus.serial.0.json"
+    },
+    "parallel_groups": [
+      {
+        "order": [
+          "rust",
+          "nautilus"
+        ],
+        "runs": {
+          "rust": {
+            "build_profile": "release",
+            "golden_preflight": "external_passed",
+            "input_sha256": "9b9009b1586a6f271cd301042f97f2adf84146c870d72802682799d60352ed85",
+            "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+            "measurement_wall_ns": 101959,
+            "median_ns": 19375,
+            "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+            "mode": "parallel",
+            "p95_ns": 28083,
+            "parallel_runs_per_second": 58847.1836718681,
+            "peak_rss_bytes": 11223040,
+            "raw_samples_ns": [
+              19625,
+              19375,
+              18833,
+              28083,
+              17583,
+              16542
+            ],
+            "run_checksum_sha256": "f623f54644042256b2186270b0fe5142b36ab65731d6fc797fef5b3f805ddc9f",
+            "runs": 6,
+            "runs_per_second": 58847.1836718681,
+            "serial_runs_per_second": null,
+            "status": "passed",
+            "strategy": "s2",
+            "synthetic_quote_events_per_run": 58,
+            "threads": 2,
+            "warmup_runs": 4,
+            "warmup_runs_per_worker": 2,
+            "workers": 2,
+            "binary_sha256": "e32984fc22f25582f1206a39045f47ab43b3b4de0da6ee353dba55d933a1f821",
+            "artifact_path": "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.rust.parallel.1.json"
+          },
+          "nautilus": {
+            "status": "passed",
+            "workers": 2,
+            "runs": 6,
+            "warmup_runs": 4,
+            "warmup_runs_per_worker": 2,
+            "raw_samples_ns": [
+              1131583,
+              1178167,
+              1034709,
+              1100917,
+              1136500,
+              1047041
+            ],
+            "checksums_sha256": [
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203"
+            ],
+            "median_ns": 1116250.0,
+            "p95_ns": 1178167,
+            "parallel_wall_ns": 4812084,
+            "parallel_runs_per_second": 1246.861027363612,
+            "peak_rss_by_worker_bytes": {
+              "8502": 73400320,
+              "8503": 73334784
+            },
+            "peak_rss_sum_upper_bound_bytes": 146735104,
+            "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+            "engine_mode": "cached_conversion_new_engine",
+            "engine_mode_reason": "engine reset parity is not established; use the specified safe fallback",
+            "conversion_cached_per_worker": true,
+            "artifact_path": "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.nautilus.parallel.1.json"
+          }
+        }
+      },
+      {
+        "order": [
+          "nautilus",
+          "rust"
+        ],
+        "runs": {
+          "nautilus": {
+            "status": "passed",
+            "workers": 2,
+            "runs": 6,
+            "warmup_runs": 4,
+            "warmup_runs_per_worker": 2,
+            "raw_samples_ns": [
+              1258250,
+              1178750,
+              1057166,
+              1270833,
+              1141834,
+              1035417
+            ],
+            "checksums_sha256": [
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203"
+            ],
+            "median_ns": 1160292.0,
+            "p95_ns": 1270833,
+            "parallel_wall_ns": 4989667,
+            "parallel_runs_per_second": 1202.4850556159358,
+            "peak_rss_by_worker_bytes": {
+              "8507": 73596928,
+              "8506": 73449472
+            },
+            "peak_rss_sum_upper_bound_bytes": 147046400,
+            "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+            "engine_mode": "cached_conversion_new_engine",
+            "engine_mode_reason": "engine reset parity is not established; use the specified safe fallback",
+            "conversion_cached_per_worker": true,
+            "artifact_path": "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.nautilus.parallel.2.json"
+          },
+          "rust": {
+            "build_profile": "release",
+            "golden_preflight": "external_passed",
+            "input_sha256": "9b9009b1586a6f271cd301042f97f2adf84146c870d72802682799d60352ed85",
+            "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+            "measurement_wall_ns": 112500,
+            "median_ns": 18250,
+            "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+            "mode": "parallel",
+            "p95_ns": 27541,
+            "parallel_runs_per_second": 53333.333333333336,
+            "peak_rss_bytes": 11255808,
+            "raw_samples_ns": [
+              20500,
+              12791,
+              18250,
+              27541,
+              14709,
+              14416
+            ],
+            "run_checksum_sha256": "f623f54644042256b2186270b0fe5142b36ab65731d6fc797fef5b3f805ddc9f",
+            "runs": 6,
+            "runs_per_second": 53333.333333333336,
+            "serial_runs_per_second": null,
+            "status": "passed",
+            "strategy": "s2",
+            "synthetic_quote_events_per_run": 58,
+            "threads": 2,
+            "warmup_runs": 4,
+            "warmup_runs_per_worker": 2,
+            "workers": 2,
+            "binary_sha256": "e32984fc22f25582f1206a39045f47ab43b3b4de0da6ee353dba55d933a1f821",
+            "artifact_path": "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.rust.parallel.2.json"
+          }
+        }
+      },
+      {
+        "order": [
+          "rust",
+          "nautilus"
+        ],
+        "runs": {
+          "rust": {
+            "build_profile": "release",
+            "golden_preflight": "external_passed",
+            "input_sha256": "9b9009b1586a6f271cd301042f97f2adf84146c870d72802682799d60352ed85",
+            "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+            "measurement_wall_ns": 101625,
+            "median_ns": 17334,
+            "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+            "mode": "parallel",
+            "p95_ns": 27042,
+            "parallel_runs_per_second": 59040.59040590406,
+            "peak_rss_bytes": 11173888,
+            "raw_samples_ns": [
+              17334,
+              15000,
+              19875,
+              27042,
+              15541,
+              13458
+            ],
+            "run_checksum_sha256": "f623f54644042256b2186270b0fe5142b36ab65731d6fc797fef5b3f805ddc9f",
+            "runs": 6,
+            "runs_per_second": 59040.59040590406,
+            "serial_runs_per_second": null,
+            "status": "passed",
+            "strategy": "s2",
+            "synthetic_quote_events_per_run": 58,
+            "threads": 2,
+            "warmup_runs": 4,
+            "warmup_runs_per_worker": 2,
+            "workers": 2,
+            "binary_sha256": "e32984fc22f25582f1206a39045f47ab43b3b4de0da6ee353dba55d933a1f821",
+            "artifact_path": "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.rust.parallel.3.json"
+          },
+          "nautilus": {
+            "status": "passed",
+            "workers": 2,
+            "runs": 6,
+            "warmup_runs": 4,
+            "warmup_runs_per_worker": 2,
+            "raw_samples_ns": [
+              1187625,
+              1100125,
+              1049625,
+              1109708,
+              1090583,
+              1019416
+            ],
+            "checksums_sha256": [
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203"
+            ],
+            "median_ns": 1095354.0,
+            "p95_ns": 1187625,
+            "parallel_wall_ns": 4897333,
+            "parallel_runs_per_second": 1225.1566311704757,
+            "peak_rss_by_worker_bytes": {
+              "8518": 73170944,
+              "8519": 73596928
+            },
+            "peak_rss_sum_upper_bound_bytes": 146767872,
+            "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+            "engine_mode": "cached_conversion_new_engine",
+            "engine_mode_reason": "engine reset parity is not established; use the specified safe fallback",
+            "conversion_cached_per_worker": true,
+            "artifact_path": "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.nautilus.parallel.3.json"
+          }
+        }
+      },
+      {
+        "order": [
+          "nautilus",
+          "rust"
+        ],
+        "runs": {
+          "nautilus": {
+            "status": "passed",
+            "workers": 2,
+            "runs": 6,
+            "warmup_runs": 4,
+            "warmup_runs_per_worker": 2,
+            "raw_samples_ns": [
+              1527834,
+              1348250,
+              1210000,
+              1538375,
+              1347625,
+              1148125
+            ],
+            "checksums_sha256": [
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203"
+            ],
+            "median_ns": 1347937.5,
+            "p95_ns": 1538375,
+            "parallel_wall_ns": 5411583,
+            "parallel_runs_per_second": 1108.7328790854729,
+            "peak_rss_by_worker_bytes": {
+              "8523": 73285632,
+              "8522": 73334784
+            },
+            "peak_rss_sum_upper_bound_bytes": 146620416,
+            "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+            "engine_mode": "cached_conversion_new_engine",
+            "engine_mode_reason": "engine reset parity is not established; use the specified safe fallback",
+            "conversion_cached_per_worker": true,
+            "artifact_path": "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.nautilus.parallel.4.json"
+          },
+          "rust": {
+            "build_profile": "release",
+            "golden_preflight": "external_passed",
+            "input_sha256": "9b9009b1586a6f271cd301042f97f2adf84146c870d72802682799d60352ed85",
+            "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+            "measurement_wall_ns": 106500,
+            "median_ns": 16875,
+            "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+            "mode": "parallel",
+            "p95_ns": 26625,
+            "parallel_runs_per_second": 56338.028169014084,
+            "peak_rss_bytes": 11223040,
+            "raw_samples_ns": [
+              16875,
+              12291,
+              24792,
+              26625,
+              15625,
+              15250
+            ],
+            "run_checksum_sha256": "f623f54644042256b2186270b0fe5142b36ab65731d6fc797fef5b3f805ddc9f",
+            "runs": 6,
+            "runs_per_second": 56338.028169014084,
+            "serial_runs_per_second": null,
+            "status": "passed",
+            "strategy": "s2",
+            "synthetic_quote_events_per_run": 58,
+            "threads": 2,
+            "warmup_runs": 4,
+            "warmup_runs_per_worker": 2,
+            "workers": 2,
+            "binary_sha256": "e32984fc22f25582f1206a39045f47ab43b3b4de0da6ee353dba55d933a1f821",
+            "artifact_path": "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.rust.parallel.4.json"
+          }
+        }
+      },
+      {
+        "order": [
+          "rust",
+          "nautilus"
+        ],
+        "runs": {
+          "rust": {
+            "build_profile": "release",
+            "golden_preflight": "external_passed",
+            "input_sha256": "9b9009b1586a6f271cd301042f97f2adf84146c870d72802682799d60352ed85",
+            "measurement_scope": "prepared fixture shared; factor and event-account replay per Run; excludes dataset preparation and serialization; std::thread independent Runs",
+            "measurement_wall_ns": 111583,
+            "median_ns": 20083,
+            "memory_status": "isolated Rust measurement child process peak RSS after external golden preflight",
+            "mode": "parallel",
+            "p95_ns": 29875,
+            "parallel_runs_per_second": 53771.63187940815,
+            "peak_rss_bytes": 11223040,
+            "raw_samples_ns": [
+              29875,
+              17708,
+              20083,
+              23583,
+              17750,
+              16709
+            ],
+            "run_checksum_sha256": "f623f54644042256b2186270b0fe5142b36ab65731d6fc797fef5b3f805ddc9f",
+            "runs": 6,
+            "runs_per_second": 53771.63187940815,
+            "serial_runs_per_second": null,
+            "status": "passed",
+            "strategy": "s2",
+            "synthetic_quote_events_per_run": 58,
+            "threads": 2,
+            "warmup_runs": 4,
+            "warmup_runs_per_worker": 2,
+            "workers": 2,
+            "binary_sha256": "e32984fc22f25582f1206a39045f47ab43b3b4de0da6ee353dba55d933a1f821",
+            "artifact_path": "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.rust.parallel.5.json"
+          },
+          "nautilus": {
+            "status": "passed",
+            "workers": 2,
+            "runs": 6,
+            "warmup_runs": 4,
+            "warmup_runs_per_worker": 2,
+            "raw_samples_ns": [
+              1135542,
+              1098166,
+              1036583,
+              1110583,
+              1097666,
+              1014292
+            ],
+            "checksums_sha256": [
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+              "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203"
+            ],
+            "median_ns": 1097916.0,
+            "p95_ns": 1135542,
+            "parallel_wall_ns": 4793208,
+            "parallel_runs_per_second": 1251.7712563277037,
+            "peak_rss_by_worker_bytes": {
+              "8540": 73121792,
+              "8539": 73351168
+            },
+            "peak_rss_sum_upper_bound_bytes": 146472960,
+            "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+            "engine_mode": "cached_conversion_new_engine",
+            "engine_mode_reason": "engine reset parity is not established; use the specified safe fallback",
+            "conversion_cached_per_worker": true,
+            "artifact_path": "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.nautilus.parallel.5.json"
+          }
+        }
+      }
+    ],
+    "rust_parallel_runs_per_second_median": 56338.028169014084,
+    "nautilus_parallel_runs_per_second_median": 1225.1566311704757,
+    "rust_process_peak_rss_bytes": 11255808,
+    "nautilus_peak_rss_sum_upper_bound_bytes": 147046400,
+    "nautilus_engine_mode": "cached_conversion_new_engine",
+    "nautilus_engine_mode_reason": "engine reset parity is not established; use the specified safe fallback",
+    "protocol_status": "matched_fallback",
+    "measurement_groups": 5,
+    "parallel_order_alternated": true
+  },
+  "decision": {
+    "status": "adopt",
+    "reason": "all registered speed and RSS gates passed",
+    "scope": "S2 3x10 matched fallback only; not a full B2 selection"
+  },
+  "adr_0012_exclusions": [
+    "orders.nautilus_native_lifecycle"
+  ],
+  "environment": {
+    "python": "3.12.2 (main, Feb  6 2024, 20:19:44) [Clang 15.0.0 (clang-1500.1.0.2.5)]",
+    "platform": "macOS-26.2-arm64-arm-64bit",
+    "cpu": "arm",
+    "logical_cpu_count": 8,
+    "cargo_lock_sha256": "250f21792a3ded3c139747c74f96b673b37e57d2b5f550a29e480fea71f60041",
+    "binary_sha256": "e32984fc22f25582f1206a39045f47ab43b3b4de0da6ee353dba55d933a1f821",
+    "git_revision": "e2575aba9c076379a109c6e02c361a4d2852b5e7",
+    "dirty_paths": [
+      ".scratch/poc-0-b2-matched-remeasure/issues/02-s2-golden-matched-tracer.md",
+      "HANDOFF.md",
+      "crates/quant-research/src/main.rs",
+      "crates/quant-research/src/poc0_benchmark.rs",
+      "crates/quant-research/tests/poc0_benchmark_cli.rs",
+      "docs/STATUS.md",
+      "poc/poc0-benchmark/POC-0-SYNTHESIS.md",
+      "poc/poc0-benchmark/README.md",
+      "poc/poc0-benchmark/measure-b2-rss.py",
+      "poc/poc0-benchmark/nautilus_adapter.py",
+      ".vscode/",
+      "poc/poc0-benchmark/b2_matched.py",
+      "poc/poc0-benchmark/measure-b2-nautilus.py",
+      "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.json",
+      "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.nautilus.parallel.1.json",
+      "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.nautilus.parallel.2.json",
+      "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.nautilus.parallel.3.json",
+      "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.nautilus.parallel.4.json",
+      "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.nautilus.parallel.5.json",
+      "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.nautilus.serial.0.json",
+      "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.preflight.json",
+      "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.rust.parallel.1.json",
+      "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.rust.parallel.2.json",
+      "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.rust.parallel.3.json",
+      "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.rust.parallel.4.json",
+      "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.rust.parallel.5.json",
+      "poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.rust.serial.0.json",
+      "poc/poc0-benchmark/results/b2-matched-s2-release-build-2026-09-28.json",
+      "poc/poc0-benchmark/results/b2-matched-s2-release-build-boundary-2026-09-28.json",
+      "poc/poc0-benchmark/results/b2-matched-s2-release-build-final-2026-09-28.json",
+      "poc/poc0-benchmark/results/b2-matched-s2-release-build-retry-2026-09-28.json",
+      "poc/poc0-benchmark/results/b2-matched-s2-release-build-reviewed-2026-09-28.json",
+      "poc/poc0-benchmark/test_b2_matched.py",
+      "poc/vendor/polars-io/.cargo-ok",
+      "poc/vendor/polars-io/.cargo_vcs_info.json",
+      "poc/vendor/polars-io/Cargo.lock",
+      "poc/vendor/polars-io/Cargo.toml.orig"
+    ],
+    "build_record": "poc/poc0-benchmark/results/b2-matched-s2-release-build-boundary-2026-09-28.json",
+    "build_record_sha256": "b7c22c22e25e560ff35e7b22d015198633b240940f99c5f137b87fb178397c6b",
+    "nautilus_version_probe": [
+      "2.0.0rc5",
+      null
+    ]
+  }
+}

@@ -532,3 +532,39 @@ S3 input and independent checkpoint expectation are versioned as
 These distinct scopes and worker models are
 not comparable as engine-speed ratios; the registered adoption threshold cannot be evaluated
 from them. Neither throughput nor S3's synthetic prices are investment-performance evidence.
+
+### S2 matched remeasure tracer (ticket `poc-0-b2-matched-remeasure/02`)
+
+`b2_matched.py` starts the Rust S2 golden preflight as a separate process, checks the Nautilus
+S2 projection against the Rust projection (keeping ADR 0012's native order-lifecycle field
+separate), and exposes the registered pure decision function. The Rust B2 CLI supports
+`--mode serial|parallel`, `--workers`, `--runs`, and `--skip-golden-preflight` with the checksum
+from that preflight. If the exact Nautilus wheel is absent or either correctness gate fails,
+the report preserves the reason and no timing is used for a decision.
+
+```bash
+python3 poc/poc0-benchmark/capture-build-resource.py --profile release \
+  --scope poc --action build --estimated-max-additional-bytes 2147483648 \
+  --output poc/poc0-benchmark/results/b2-matched-s2-release-build-boundary-2026-09-28.json
+.venv/bin/python poc/poc0-benchmark/b2_matched.py \
+  --run-measurements \
+  --binary target/release/quant-research \
+  --build-record poc/poc0-benchmark/results/b2-matched-s2-release-build-boundary-2026-09-28.json \
+  --output poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.json
+```
+
+Use `--run-measurements` only after the registered ADR/prediction revision. The recorded S2
+run used the registered safe fallback: each Nautilus worker converts and caches QuoteTicks
+once, then constructs a fresh engine and strategy per Run. Rust workers start and warm before
+their timer; both paths exclude process/thread startup, warmups, serialization and checksum.
+The Nautilus worker result contains only run identity, elapsed time, checksum and RSS; every
+checksum must match the independently checked Nautilus projection before samples are accepted.
+Nautilus parallel workers each process three of the six measured Runs; their completion timestamp
+is captured before projection serialization/checksum and before result IPC is collected. The
+report verifies both initialized workers contributed a measured batch.
+The 2026-09-28 S2 report applies the unchanged ticket 09 gates to S2 only and records `adopt`;
+it does not decide S3, 64×252 robustness or overall B2. Engine-reset parity remains unverified.
+The S2 sample medians were 11,042 ns (Rust) vs 842,146 ns (Nautilus) serial latency,
+56,338 vs 1,225 Runs/s across five alternating 2-worker × 6 Run groups, and 11,255,808 vs
+147,046,400 bytes peak RSS (Nautilus worker-sum upper bound). The report embeds every raw
+sample and links its preflight, build record, and standalone measurement JSON files.

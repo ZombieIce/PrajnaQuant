@@ -19,12 +19,19 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--strategy", choices=("s2", "s3"), required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--mode", choices=("serial", "parallel"), default="parallel")
+    parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument("--runs", type=int, default=6)
+    parser.add_argument("--expected-checksum")
     parser.add_argument("--binary", type=Path, default=ROOT / "target/release/quant-research")
     args = parser.parse_args()
     output = args.output if args.output.is_absolute() else ROOT / args.output
     binary = args.binary if args.binary.is_absolute() else ROOT / args.binary
     command = [str(binary), "benchmark-poc0-b2", "--strategy", args.strategy,
-               "--threads", "2", "--runs", "6", "--output", str(output)]
+               "--mode", args.mode, "--workers", str(args.workers),
+               "--runs", str(args.runs), "--output", str(output)]
+    if args.expected_checksum:
+        command.extend(["--skip-golden-preflight", "--expected-checksum", args.expected_checksum])
     completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
     peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
     peak_bytes = int(peak if platform.system() == "Darwin" else peak * 1024)
@@ -33,7 +40,11 @@ def main() -> int:
         return completed.returncode
     record = json.loads(output.read_text(encoding="utf-8"))
     record["peak_rss_bytes"] = peak_bytes
-    record["memory_status"] = "whole Rust child process peak RSS (includes golden precheck)"
+    record["memory_status"] = (
+        "isolated Rust measurement child process peak RSS after external golden preflight"
+        if args.expected_checksum
+        else "whole Rust child process peak RSS including in-process golden preflight"
+    )
     record["binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
     output.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"strategy": args.strategy, "peak_rss_bytes": peak_bytes,

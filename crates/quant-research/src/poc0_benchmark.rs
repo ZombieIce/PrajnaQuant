@@ -16,9 +16,10 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
+    panic::{AssertUnwindSafe, catch_unwind},
     path::{Path, PathBuf},
     process::Command,
-    sync::Arc,
+    sync::{Arc, Barrier},
     time::Instant,
 };
 
@@ -581,32 +582,56 @@ impl Poc0Report {
     }
 }
 
-pub fn measure_b2_parallel(strategy: &str, threads: usize, runs: usize) -> Result<Value> {
+pub fn measure_b2_parallel(
+    strategy: &str,
+    threads: usize,
+    runs: usize,
+    skip_golden_preflight: bool,
+    expected_checksum: Option<&str>,
+) -> Result<Value> {
     ensure!(matches!(strategy, "s2" | "s3"), "unsupported B2 strategy");
     ensure!(
         threads > 0 && runs >= threads,
         "runs must be >= positive threads"
     );
+    if skip_golden_preflight {
+        ensure!(
+            expected_checksum.is_some_and(|checksum| {
+                checksum.len() == 64 && checksum.bytes().all(|byte| byte.is_ascii_hexdigit())
+            }),
+            "skipping golden preflight requires a 64-character expected checksum"
+        );
+    } else {
+        ensure!(
+            expected_checksum.is_none(),
+            "expected checksum is only accepted when golden preflight is skipped"
+        );
+    }
     let dataset_path = Path::new("poc/poc0-benchmark/fixtures/dataset-v1.json");
     let golden_path = Path::new("poc/poc0-benchmark/fixtures/expected-v1.json");
-    let golden_report = run(dataset_path, golden_path, "soa")?;
-    ensure!(
-        golden_report.correctness_status() == "passed",
-        "B2 golden check failed"
-    );
-    let strategy_report = if strategy == "s2" {
-        &golden_report.b2_fast_event_momentum_rotation
+    let golden_checksum = if let Some(checksum) = expected_checksum {
+        checksum.to_owned()
     } else {
-        &golden_report.b2_fast_event_ma20_60
+        let golden_report = run(dataset_path, golden_path, "soa")?;
+        ensure!(
+            golden_report.correctness_status() == "passed",
+            "B2 golden check failed"
+        );
+        let strategy_report = if strategy == "s2" {
+            &golden_report.b2_fast_event_momentum_rotation
+        } else {
+            &golden_report.b2_fast_event_ma20_60
+        };
+        ensure!(
+            strategy_report.status == "correctness_passed_and_measured",
+            "B2 strategy golden check failed"
+        );
+        strategy_report.checksum_sha256.clone()
     };
-    ensure!(
-        strategy_report.status == "correctness_passed_and_measured",
-        "B2 strategy golden check failed"
-    );
     let prepared = prepare_dataset(serde_json::from_slice(&fs::read(dataset_path)?)?)?;
     let config = experiment_config(&prepared.spec);
     let (ma_dataset, ma_hash) = make_ma_dataset(&prepared.spec)?;
-    let expected_hash = strategy_report.checksum_sha256.clone();
+    let expected_hash = golden_checksum;
     let run_once = || {
         if strategy == "s2" {
             run_rotation_event(&prepared, &config)
@@ -614,58 +639,90 @@ pub fn measure_b2_parallel(strategy: &str, threads: usize, runs: usize) -> Resul
             run_ma_event(&ma_dataset)
         }
     };
-    for _ in 0..threads {
-        ensure!(
-            sha256(&serde_json::to_vec(&run_once().projection)?) == expected_hash,
-            "B2 warmup mismatch"
-        );
-    }
-    let started = Instant::now();
-    let raw = std::thread::scope(|scope| {
+    let warmup_runs = 2 * threads;
+    let raw = std::thread::scope(|scope| -> anyhow::Result<_> {
+        let ready_barrier = Arc::new(Barrier::new(threads + 1));
+        let start_barrier = Arc::new(Barrier::new(threads + 1));
         let workers = (0..threads)
             .map(|worker| {
-                scope.spawn(move || {
-                    let mut samples = Vec::new();
-                    for _ in (worker..runs).step_by(threads) {
-                        let run_started = Instant::now();
-                        let projection = std::hint::black_box(run_once()).projection;
-                        samples.push((
-                            run_started.elapsed().as_nanos(),
-                            sha256(
-                                &serde_json::to_vec(&projection)
-                                    .expect("serializable B2 projection"),
-                            ),
-                        ));
-                    }
-                    samples
-                })
+                let expected_worker_hash = expected_hash.clone();
+                let worker_ready_barrier = Arc::clone(&ready_barrier);
+                let worker_start_barrier = Arc::clone(&start_barrier);
+                scope.spawn(
+                    move || -> anyhow::Result<Vec<(u128, FastEventProjection)>> {
+                        let warmup_result = catch_unwind(AssertUnwindSafe(|| -> Result<()> {
+                            for _ in 0..2 {
+                                let projection = run_once().projection;
+                                let checksum = sha256(&serde_json::to_vec(&projection)?);
+                                ensure!(
+                                    checksum == expected_worker_hash,
+                                    "B2 worker warmup mismatch"
+                                );
+                            }
+                            Ok(())
+                        }));
+                        let warmup_error = match warmup_result {
+                            Ok(Ok(())) => None,
+                            Ok(Err(error)) => Some(error),
+                            Err(_) => Some(anyhow::anyhow!("B2 worker panicked during warmup")),
+                        };
+                        worker_ready_barrier.wait();
+                        worker_start_barrier.wait();
+                        if let Some(error) = warmup_error {
+                            return Err(error);
+                        }
+                        let mut samples = Vec::new();
+                        for _ in (worker..runs).step_by(threads) {
+                            let run_started = Instant::now();
+                            let projection = std::hint::black_box(run_once()).projection;
+                            samples.push((run_started.elapsed().as_nanos(), projection));
+                        }
+                        Ok(samples)
+                    },
+                )
             })
             .collect::<Vec<_>>();
-        workers
-            .into_iter()
-            .flat_map(|worker| worker.join().expect("B2 worker panic"))
-            .collect::<Vec<_>>()
+        ready_barrier.wait();
+        let started = Instant::now();
+        start_barrier.wait();
+        let mut measured = Vec::new();
+        for worker in workers {
+            let worker_runs = match worker.join() {
+                Ok(Ok(runs)) => runs,
+                Ok(Err(error)) => return Err(error),
+                Err(_) => return Err(anyhow::anyhow!("B2 worker panicked")),
+            };
+            measured.extend(worker_runs);
+        }
+        Ok((measured, started.elapsed().as_nanos()))
     });
-    let wall_ns = started.elapsed().as_nanos();
+    let (raw, wall_ns) = raw?;
+    let checksums = raw
+        .iter()
+        .map(|(_, projection)| serde_json::to_vec(projection).map(|bytes| sha256(&bytes)))
+        .collect::<Result<Vec<_>, _>>()?;
     ensure!(
-        raw.iter().all(|(_, hash)| *hash == expected_hash),
+        checksums.iter().all(|checksum| checksum == &expected_hash),
         "B2 measured projection mismatch"
     );
-    let samples = raw
-        .into_iter()
-        .map(|(elapsed, _)| elapsed)
-        .collect::<Vec<_>>();
+    let samples = raw.iter().map(|(elapsed, _)| *elapsed).collect::<Vec<_>>();
     Ok(serde_json::json!({
         "status": "passed",
         "strategy": strategy,
         "threads": threads,
-        "warmup_runs": threads,
+        "workers": threads,
+        "mode": if threads == 1 { "serial" } else { "parallel" },
+        "golden_preflight": if skip_golden_preflight { "external_passed" } else { "in_process_passed" },
+        "warmup_runs": warmup_runs,
+        "warmup_runs_per_worker": 2,
         "runs": runs,
         "raw_samples_ns": samples,
         "median_ns": sorted_median(&samples),
         "p95_ns": sorted_p95(&samples),
-        "parallel_wall_ns": wall_ns,
-        "parallel_runs_per_second": runs as f64 * 1e9 / wall_ns as f64,
+        "measurement_wall_ns": wall_ns,
+        "runs_per_second": runs as f64 * 1e9 / wall_ns as f64,
+        "serial_runs_per_second": if threads == 1 { Some(runs as f64 * 1e9 / wall_ns as f64) } else { None },
+        "parallel_runs_per_second": if threads > 1 { Some(runs as f64 * 1e9 / wall_ns as f64) } else { None },
         "synthetic_quote_events_per_run": if strategy == "s2" { prepared.bars.len() * 2 } else { ma_dataset.bars.len() * 2 },
         "run_checksum_sha256": expected_hash,
         "input_sha256": if strategy == "s2" { sha256(&fs::read(dataset_path)?) } else { ma_hash },

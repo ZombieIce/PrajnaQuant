@@ -96,10 +96,18 @@ enum Command {
     BenchmarkPoc0B2 {
         #[arg(long, value_parser = ["s2", "s3"])]
         strategy: String,
-        #[arg(long, default_value_t = 2)]
-        threads: usize,
+        #[arg(long, value_parser = ["serial", "parallel"], default_value = "parallel")]
+        mode: String,
+        #[arg(long, alias = "threads", default_value_t = 2)]
+        workers: usize,
         #[arg(long, default_value_t = 6)]
         runs: usize,
+        /// Skip in-process golden evaluation after a separate preflight process passed.
+        #[arg(long)]
+        skip_golden_preflight: bool,
+        /// Expected projection checksum emitted by the separate golden preflight.
+        #[arg(long, requires = "skip_golden_preflight")]
+        expected_checksum: Option<String>,
         #[arg(long, default_value = "target/poc-0/b2-throughput.json")]
         output: PathBuf,
     },
@@ -356,11 +364,21 @@ async fn main() -> Result<()> {
         }
         Command::BenchmarkPoc0B2 {
             strategy,
-            threads,
+            mode,
+            workers,
             runs,
+            skip_golden_preflight,
+            expected_checksum,
             output,
         } => {
-            let report = poc0_benchmark::measure_b2_parallel(&strategy, threads, runs)?;
+            let workers = if mode == "serial" { 1 } else { workers };
+            let report = poc0_benchmark::measure_b2_parallel(
+                &strategy,
+                workers,
+                runs,
+                skip_golden_preflight,
+                expected_checksum.as_deref(),
+            )?;
             if let Some(parent) = output.parent() {
                 std::fs::create_dir_all(parent)?;
             }

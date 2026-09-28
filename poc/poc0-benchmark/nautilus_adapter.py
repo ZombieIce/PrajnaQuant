@@ -11,6 +11,7 @@ import hashlib
 import importlib.metadata
 import json
 import math
+import multiprocessing
 import os
 import platform
 import resource
@@ -23,6 +24,8 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 PINNED_NAUTILUS_VERSION = "2.0.0rc5"
+_NAUTILUS_PREPARED_CACHE: dict[tuple[str, str], dict[str, Any]] = {}
+_NAUTILUS_DATASET_CACHE_KEYS: dict[int, str] = {}
 ROOT = Path(__file__).resolve().parents[2]
 INSTALL_EVIDENCE = ROOT / "poc/poc0-benchmark/results/nautilus-install-attempt-2026-09-27.json"
 BAR_OPEN_DOC = (
@@ -378,96 +381,148 @@ def _run_nautilus(dataset: dict[str, Any], strategy: str = "s1") -> dict[str, An
                 else:
                     del self.positions[symbol]
 
-    conversion_started = time.perf_counter_ns()
-    currency = Currency.from_str("CNY")
-    venue = Venue("SIM")
-    ids = []
-    instruments = []
-    rows_by_symbol: dict[str, list[tuple[str, str, Any]]] = {}
-    precision_quantum = Decimal("0.01")
-    bars_by_date = {d: {} for d in dataset["calendar"]}
+    dataset_cache_key = _NAUTILUS_DATASET_CACHE_KEYS.get(id(dataset))
+    if dataset_cache_key is None:
+        dataset_cache_key = hashlib.sha256(json.dumps(dataset, sort_keys=True).encode()).hexdigest()
+    cache_key = (dataset_cache_key, strategy)
+    cached = _NAUTILUS_PREPARED_CACHE.get(cache_key)
+    if cached is not None:
+        currency = cached['currency']
+        venue = cached['venue']
+        ids = cached['ids']
+        instruments = cached['instruments']
+        rows_by_symbol = cached['rows_by_symbol']
+        bars_by_date = cached['bars_by_date']
+        rotation_signals = cached['rotation_signals']
+        rotation_rankings = cached['rotation_rankings']
+        missing = cached['missing']
+        blocked_statuses = cached['blocked_statuses']
+        signal_date = cached['signal_date']
+        signal_ts = cached['signal_ts']
+        open_time = cached['open_time']
+        slippage_rate = cached['slippage_rate']
+        sell_slippage_rate = cached['sell_slippage_rate']
+        targets = cached['targets']
+        open_timestamps = cached['open_timestamps']
+        open_dates = cached['open_dates']
+        close_dates = cached['close_dates']
+        conversion_ns = 0
+    else:
+        conversion_started = time.perf_counter_ns()
+        currency = Currency.from_str("CNY")
+        venue = Venue("SIM")
+        ids = []
+        instruments = []
+        rows_by_symbol: dict[str, list[tuple[str, str, Any]]] = {}
+        precision_quantum = Decimal("0.01")
+        bars_by_date = {d: {} for d in dataset["calendar"]}
+        rotation_signals, rotation_rankings = {}, []
+        missing = {(x["symbol"], x["date"]) for x in dataset.get("missing_bars", [])}
+        blocked_statuses = {
+            (x["symbol"], x["date"]): x.get("trade_status") or "missing_status"
+            for x in dataset.get("execution_status_overrides", [])
+            if not x["is_tradable"] or x.get("trade_status") != "TRADABLE" or not x.get("sources")
+        }
+        signal_date = dataset["calendar"][len(dataset["calendar"]) - 5]
+        open_time = ZoneInfo(dataset.get("timezone", "Asia/Shanghai"))
+        slippage_rate = Decimal(str(dataset["costs"]["buy_slippage_bps"])) / Decimal(10_000)
+        sell_slippage_rate = Decimal(str(dataset["costs"].get("sell_slippage_bps", dataset["costs"]["buy_slippage_bps"]))) / Decimal(10_000)
+        targets: dict[str, int] = {}
+        budget = Decimal(str(dataset["account"]["initial_cash"])) / Decimal(len(dataset["instruments"]))
+        lot = int(dataset["account"]["lot_size"])
+        for instrument_index, item in enumerate(dataset["instruments"]):
+            symbol = item["symbol"]
+            instrument_id = InstrumentId.from_str(f"{symbol}.SIM")
+            ids.append(instrument_id)
+            instruments.append(
+                Equity(
+                    instrument_id=instrument_id,
+                    raw_symbol=Symbol(symbol),
+                    currency=currency,
+                    price_precision=int(item["price_precision"]),
+                    price_increment=Price.from_str("0.01"),
+                    lot_size=Quantity.from_int(lot),
+                    ts_event=0,
+                    ts_init=0,
+                )
+            )
+            open_price = Decimal(str(dataset["bar_defaults"]["open"]))
+            slipped_open = (open_price * (Decimal(1) + slippage_rate)).quantize(
+                precision_quantum, rounding=ROUND_HALF_UP
+            )
+            quantity = int((budget / slipped_open / lot).to_integral_value(rounding="ROUND_DOWN")) * lot
+            targets[symbol] = quantity
+            rows = []
+            for date, close in zip(dataset["calendar"], item["closes"], strict=True):
+                if (symbol, date) in missing:
+                    continue
+                close_price = Decimal(str(close)).quantize(precision_quantum, rounding=ROUND_HALF_UP)
+                close_stamp = int(datetime.fromisoformat(f"{date}T15:00:00+08:00").timestamp() * 1_000_000_000)
+                open_stamp = int(datetime.fromisoformat(f"{date}T09:30:00+08:00").timestamp() * 1_000_000_000)
+                if strategy != "s1":
+                    open_stamp += len(dataset["instruments"]) - instrument_index
+                buy_ask = (open_price * (Decimal(1) + slippage_rate)).quantize(
+                    precision_quantum, rounding=ROUND_HALF_UP
+                )
+                buy_bid = (open_price * (Decimal(1) - sell_slippage_rate)).quantize(
+                    precision_quantum, rounding=ROUND_HALF_UP
+                )
+                open_tick = QuoteTick(
+                    instrument_id, Price.from_str(str(buy_bid)), Price.from_str(str(buy_ask)),
+                    Quantity.from_int(1_000_000), Quantity.from_int(1_000_000), open_stamp, open_stamp
+                )
+                close_tick = QuoteTick(
+                    instrument_id, Price.from_str(str(close_price)), Price.from_str(str(close_price)),
+                    Quantity.from_int(1_000_000), Quantity.from_int(1_000_000), close_stamp, close_stamp
+                )
+                rows.extend([(date, "open", open_tick), (date, "close", close_tick)])
+                bars_by_date[date][symbol] = float(close_price)
+            rows_by_symbol[symbol] = rows
+        signal_ts = int(datetime.fromisoformat(f"{signal_date}T15:00:00+08:00").timestamp() * 1_000_000_000)
+        open_timestamps = {
+            int(datetime.fromisoformat(f"{date}T09:30:00+08:00").timestamp() * 1_000_000_000) + offset
+            for date in dataset["calendar"]
+            if strategy != "s1" or date > signal_date
+            for offset in (range(1, len(ids) + 1) if strategy != "s1" else (0,))
+        }
+        open_dates = {
+            int(datetime.fromisoformat(f"{date}T09:30:00+08:00").timestamp() * 1_000_000_000) + offset: date
+            for date in dataset["calendar"]
+            if strategy != "s1" or date > signal_date
+            for offset in (range(1, len(ids) + 1) if strategy != "s1" else (0,))
+        }
+        close_dates = {
+            int(datetime.fromisoformat(f"{date}T15:00:00+08:00").timestamp() * 1_000_000_000): date
+            for date in dataset["calendar"]
+        }
+        conversion_ns = time.perf_counter_ns() - conversion_started
+        _NAUTILUS_PREPARED_CACHE[cache_key] = {
+            'currency': currency,
+            'venue': venue,
+            'ids': ids,
+            'instruments': instruments,
+            'rows_by_symbol': rows_by_symbol,
+            'bars_by_date': bars_by_date,
+            'rotation_signals': rotation_signals,
+            'rotation_rankings': rotation_rankings,
+            'missing': missing,
+            'blocked_statuses': blocked_statuses,
+            'signal_date': signal_date,
+            'signal_ts': signal_ts,
+            'open_time': open_time,
+            'slippage_rate': slippage_rate,
+            'sell_slippage_rate': sell_slippage_rate,
+            'targets': targets,
+            'open_timestamps': open_timestamps,
+            'open_dates': open_dates,
+            'close_dates': close_dates,
+        }
+
+    factor_started = time.perf_counter_ns()
     rotation_signals, rotation_rankings = _rotation_signals(dataset) if strategy == "s2" else (
         _ma_signals(dataset) if strategy == "s3" else {}, []
     )
-    missing = {(x["symbol"], x["date"]) for x in dataset.get("missing_bars", [])}
-    blocked_statuses = {
-        (x["symbol"], x["date"]): x.get("trade_status") or "missing_status"
-        for x in dataset.get("execution_status_overrides", [])
-        if not x["is_tradable"] or x.get("trade_status") != "TRADABLE" or not x.get("sources")
-    }
-    signal_date = dataset["calendar"][len(dataset["calendar"]) - 5]
-    open_time = ZoneInfo(dataset.get("timezone", "Asia/Shanghai"))
-    slippage_rate = Decimal(str(dataset["costs"]["buy_slippage_bps"])) / Decimal(10_000)
-    sell_slippage_rate = Decimal(str(dataset["costs"].get("sell_slippage_bps", dataset["costs"]["buy_slippage_bps"]))) / Decimal(10_000)
-    targets: dict[str, int] = {}
-    budget = Decimal(str(dataset["account"]["initial_cash"])) / Decimal(len(dataset["instruments"]))
-    lot = int(dataset["account"]["lot_size"])
-    for instrument_index, item in enumerate(dataset["instruments"]):
-        symbol = item["symbol"]
-        instrument_id = InstrumentId.from_str(f"{symbol}.SIM")
-        ids.append(instrument_id)
-        instruments.append(
-            Equity(
-                instrument_id=instrument_id,
-                raw_symbol=Symbol(symbol),
-                currency=currency,
-                price_precision=int(item["price_precision"]),
-                price_increment=Price.from_str("0.01"),
-                lot_size=Quantity.from_int(lot),
-                ts_event=0,
-                ts_init=0,
-            )
-        )
-        open_price = Decimal(str(dataset["bar_defaults"]["open"]))
-        slipped_open = (open_price * (Decimal(1) + slippage_rate)).quantize(
-            precision_quantum, rounding=ROUND_HALF_UP
-        )
-        quantity = int((budget / slipped_open / lot).to_integral_value(rounding="ROUND_DOWN")) * lot
-        targets[symbol] = quantity
-        rows = []
-        for date, close in zip(dataset["calendar"], item["closes"], strict=True):
-            if (symbol, date) in missing:
-                continue
-            close_price = Decimal(str(close)).quantize(precision_quantum, rounding=ROUND_HALF_UP)
-            close_stamp = int(datetime.fromisoformat(f"{date}T15:00:00+08:00").timestamp() * 1_000_000_000)
-            open_stamp = int(datetime.fromisoformat(f"{date}T09:30:00+08:00").timestamp() * 1_000_000_000)
-            if strategy != "s1":
-                open_stamp += len(dataset["instruments"]) - instrument_index
-            buy_ask = (open_price * (Decimal(1) + slippage_rate)).quantize(
-                precision_quantum, rounding=ROUND_HALF_UP
-            )
-            buy_bid = (open_price * (Decimal(1) - sell_slippage_rate)).quantize(
-                precision_quantum, rounding=ROUND_HALF_UP
-            )
-            open_tick = QuoteTick(
-                instrument_id, Price.from_str(str(buy_bid)), Price.from_str(str(buy_ask)),
-                Quantity.from_int(1_000_000), Quantity.from_int(1_000_000), open_stamp, open_stamp
-            )
-            close_tick = QuoteTick(
-                instrument_id, Price.from_str(str(close_price)), Price.from_str(str(close_price)),
-                Quantity.from_int(1_000_000), Quantity.from_int(1_000_000), close_stamp, close_stamp
-            )
-            rows.extend([(date, "open", open_tick), (date, "close", close_tick)])
-            bars_by_date[date][symbol] = float(close_price)
-        rows_by_symbol[symbol] = rows
-    signal_ts = int(datetime.fromisoformat(f"{signal_date}T15:00:00+08:00").timestamp() * 1_000_000_000)
-    open_timestamps = {
-        int(datetime.fromisoformat(f"{date}T09:30:00+08:00").timestamp() * 1_000_000_000) + offset
-        for date in dataset["calendar"]
-        if strategy != "s1" or date > signal_date
-        for offset in (range(1, len(ids) + 1) if strategy != "s1" else (0,))
-    }
-    open_dates = {
-        int(datetime.fromisoformat(f"{date}T09:30:00+08:00").timestamp() * 1_000_000_000) + offset: date
-        for date in dataset["calendar"]
-        if strategy != "s1" or date > signal_date
-        for offset in (range(1, len(ids) + 1) if strategy != "s1" else (0,))
-    }
-    close_dates = {
-        int(datetime.fromisoformat(f"{date}T15:00:00+08:00").timestamp() * 1_000_000_000): date
-        for date in dataset["calendar"]
-    }
-    conversion_ns = time.perf_counter_ns() - conversion_started
+    factor_ns = time.perf_counter_ns() - factor_started
 
     init_started = time.perf_counter_ns()
     engine = BacktestEngine(
@@ -560,6 +615,7 @@ def _run_nautilus(dataset: dict[str, Any], strategy: str = "s1") -> dict[str, An
         },
         "timings_ns": {
             "conversion": conversion_ns,
+            "factor_signal": factor_ns,
             "initialization": init_ns,
             "event_processing": event_ns,
             "end_to_end": time.perf_counter_ns() - started,
@@ -575,6 +631,96 @@ def _parallel_worker(dataset: dict[str, Any], strategy: str) -> dict[str, Any]:
         1024 if sys.platform.startswith("linux") else 1
     )
     return result
+
+
+_B2_WORKER_DATASET: dict[str, Any] | None = None
+_B2_WORKER_STRATEGY: str | None = None
+_B2_WORKER_EXPECTED_CHECKSUM: str | None = None
+_B2_WORKER_WARMUP_CHECKSUM: str | None = None
+_B2_WORKER_READY_BARRIER: Any = None
+_B2_WORKER_MEASUREMENT_BARRIER: Any = None
+
+
+def _projection_checksum(projection: dict[str, Any]) -> str:
+    serialized = json.dumps(projection, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(serialized).hexdigest()
+
+
+def _initialize_b2_digest_worker(
+    dataset: dict[str, Any], strategy: str, expected_checksum: str,
+    ready_barrier: Any = None, measurement_barrier: Any = None,
+) -> None:
+    global _B2_WORKER_DATASET, _B2_WORKER_STRATEGY, _B2_WORKER_EXPECTED_CHECKSUM
+    global _B2_WORKER_WARMUP_CHECKSUM, _B2_WORKER_READY_BARRIER, _B2_WORKER_MEASUREMENT_BARRIER
+    _NAUTILUS_DATASET_CACHE_KEYS[id(dataset)] = hashlib.sha256(
+        json.dumps(dataset, sort_keys=True).encode()
+    ).hexdigest()
+    _B2_WORKER_DATASET = dataset
+    _B2_WORKER_STRATEGY = strategy
+    _B2_WORKER_EXPECTED_CHECKSUM = expected_checksum
+    _B2_WORKER_READY_BARRIER = ready_barrier
+    _B2_WORKER_MEASUREMENT_BARRIER = measurement_barrier
+    for _ in range(2):
+        warmup = _run_nautilus(dataset, strategy=strategy)
+        checksum = _projection_checksum(warmup["projection"])
+        if checksum != expected_checksum:
+            raise RuntimeError("Nautilus warmup differs from the independently checked S2 projection")
+        if _B2_WORKER_WARMUP_CHECKSUM not in (None, checksum):
+            raise RuntimeError("Nautilus warmup projection changed within worker")
+        _B2_WORKER_WARMUP_CHECKSUM = checksum
+    if ready_barrier is not None:
+        ready_barrier.wait(timeout=60)
+
+
+def _parallel_worker_digest(run_index: int) -> dict[str, Any]:
+    """Return only the run identity and measurements across the worker boundary."""
+    if (
+        _B2_WORKER_DATASET is None
+        or _B2_WORKER_STRATEGY is None
+        or _B2_WORKER_EXPECTED_CHECKSUM is None
+        or _B2_WORKER_WARMUP_CHECKSUM is None
+    ):
+        raise RuntimeError("B2 worker was not initialized")
+    result = _run_nautilus(_B2_WORKER_DATASET, strategy=_B2_WORKER_STRATEGY)
+    checksum = _projection_checksum(result["projection"])
+    return {
+        "run_index": run_index,
+        "run_ns": result["timings_ns"]["end_to_end"],
+        "checksum_sha256": checksum,
+        "worker_pid": os.getpid(),
+        "peak_worker_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (
+            1024 if sys.platform.startswith("linux") else 1
+        ),
+    }
+
+
+def _parallel_worker_digest_batch(run_indices: list[int]) -> dict[str, Any]:
+    """Run a worker's assigned samples, then checksum projections after the timed boundary."""
+    if _B2_WORKER_DATASET is None or _B2_WORKER_STRATEGY is None:
+        raise RuntimeError("B2 worker was not initialized")
+    if _B2_WORKER_MEASUREMENT_BARRIER is not None:
+        _B2_WORKER_MEASUREMENT_BARRIER.wait(timeout=60)
+    measured = []
+    for run_index in run_indices:
+        result = _run_nautilus(_B2_WORKER_DATASET, strategy=_B2_WORKER_STRATEGY)
+        measured.append((run_index, result["timings_ns"]["end_to_end"], result["projection"]))
+    completed_ns = time.perf_counter_ns()
+    # Wait for every worker's measured batch before any projection hashing can contend
+    # with another worker's engine runs.
+    if _B2_WORKER_MEASUREMENT_BARRIER is not None:
+        _B2_WORKER_MEASUREMENT_BARRIER.wait(timeout=60)
+    checksummed = [
+        {"run_index": run_index, "run_ns": run_ns, "checksum_sha256": _projection_checksum(projection)}
+        for run_index, run_ns, projection in measured
+    ]
+    return {
+        "worker_pid": os.getpid(),
+        "completed_ns": completed_ns,
+        "runs": checksummed,
+        "peak_worker_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (
+            1024 if sys.platform.startswith("linux") else 1
+        ),
+    }
 
 
 def parallel_runs(dataset: dict[str, Any], strategy: str, *, workers: int = 2, runs: int = 6) -> dict[str, Any]:
@@ -605,6 +751,118 @@ def parallel_runs(dataset: dict[str, Any], strategy: str, *, workers: int = 2, r
         "run_checksum_sha256": hashlib.sha256(projections[0].encode()).hexdigest(),
         "measurement_scope": "warm Python process pool; independent conversion, initialization and Nautilus replay per Run; excludes pool startup",
     }
+
+
+def parallel_digest_runs(
+    dataset: dict[str, Any],
+    strategy: str,
+    expected_checksum: str,
+    *,
+    workers: int = 2,
+    runs: int = 6,
+) -> dict[str, Any]:
+    """Run correctness-gated workers while keeping projection payloads out of IPC."""
+    if workers <= 0 or runs < workers:
+        raise ValueError("runs must be >= positive workers")
+    process_context = multiprocessing.get_context()
+    ready_barrier = process_context.Barrier(workers)
+    measurement_barrier = process_context.Barrier(workers)
+    with ProcessPoolExecutor(
+        max_workers=workers,
+        mp_context=process_context,
+        initializer=_initialize_b2_digest_worker,
+        initargs=(dataset, strategy, expected_checksum, ready_barrier, measurement_barrier),
+    ) as pool:
+        # Force the executor to start and initialize each worker before starting the wall timer.
+        ready_futures = [pool.submit(_parallel_worker_ready) for _ in range(workers)]
+        ready_pids = {probe.result() for probe in ready_futures}
+        if len(ready_pids) != workers:
+            raise RuntimeError("worker startup did not exercise every Nautilus worker")
+        started = time.perf_counter_ns()
+        assignments = [list(range(worker, runs, workers)) for worker in range(workers)]
+        batches = [pool.submit(_parallel_worker_digest_batch, indices) for indices in assignments]
+        measured_batches = [future.result() for future in batches]
+        elapsed = max(item["completed_ns"] for item in measured_batches) - started
+    measured_pids = {batch["worker_pid"] for batch in measured_batches}
+    if measured_pids != ready_pids:
+        raise RuntimeError("each initialized worker must contribute a measured Run")
+    measured = [run for batch in measured_batches for run in batch["runs"]]
+    checksums = {item["checksum_sha256"] for item in measured}
+    if checksums != {expected_checksum}:
+        return {
+            "status": "unresolved",
+            "reason": "parallel projection checksum did not match independently checked Nautilus S2 golden",
+            "mismatched_checksums_sha256": sorted(checksums - {expected_checksum}),
+        }
+    per_worker: dict[int, int] = {}
+    for batch in measured_batches:
+        per_worker[batch["worker_pid"]] = batch["peak_worker_rss_bytes"]
+    samples = [item["run_ns"] for item in measured]
+    return {
+        "status": "passed",
+        "workers": workers,
+        "runs": runs,
+        "warmup_runs": 2 * workers,
+        "warmup_runs_per_worker": 2,
+        "raw_samples_ns": samples,
+        "checksums_sha256": [item["checksum_sha256"] for item in measured],
+        "median_ns": statistics.median(samples),
+        "p95_ns": sorted(samples)[math.ceil(0.95 * len(samples)) - 1],
+        "parallel_wall_ns": elapsed,
+        "parallel_runs_per_second": runs * 1_000_000_000 / elapsed,
+        "peak_rss_by_worker_bytes": per_worker,
+        "peak_rss_sum_upper_bound_bytes": sum(per_worker.values()),
+        "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+        "engine_mode": "cached_conversion_new_engine",
+        "engine_mode_reason": "engine reset parity is not established; use the specified safe fallback",
+        "conversion_cached_per_worker": True,
+    }
+
+
+def serial_digest_runs(
+    dataset: dict[str, Any],
+    strategy: str,
+    expected_checksum: str,
+    *,
+    runs: int = 20,
+) -> dict[str, Any]:
+    """Measure serial Runs after worker-local conversion and two correctness warmups."""
+    if runs <= 0:
+        raise ValueError("runs must be positive")
+    _initialize_b2_digest_worker(dataset, strategy, expected_checksum)
+    measured = [_parallel_worker_digest(index) for index in range(runs)]
+    checksums = {item["checksum_sha256"] for item in measured}
+    if checksums != {expected_checksum}:
+        return {
+            "status": "unresolved",
+            "reason": "serial projection checksum did not match independently checked Nautilus S2 golden",
+            "mismatched_checksums_sha256": sorted(checksums - {expected_checksum}),
+        }
+    samples = [item["run_ns"] for item in measured]
+    ordered = sorted(samples)
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1024 if sys.platform.startswith("linux") else 1)
+    return {
+        "status": "passed",
+        "workers": 1,
+        "warmup_runs": 2,
+        "warmup_runs_per_worker": 2,
+        "runs": runs,
+        "raw_samples_ns": samples,
+        "checksums_sha256": [item["checksum_sha256"] for item in measured],
+        "median_ns": statistics.median(samples),
+        "p95_ns": ordered[math.ceil(0.95 * len(ordered)) - 1],
+        "peak_rss_bytes": peak,
+        "engine_mode": "cached_conversion_new_engine",
+        "engine_mode_reason": "engine reset parity is not established; use the specified safe fallback",
+        "conversion_cached_per_worker": True,
+        "measurement_scope": "single worker; conversion and two warmups excluded; factor/signal, new engine initialization, replay and projection included",
+    }
+
+
+def _parallel_worker_ready() -> int:
+    if _B2_WORKER_WARMUP_CHECKSUM is None:
+        raise RuntimeError("B2 worker warmups did not finish")
+    return os.getpid()
 
 
 def build_report(dataset_path: Path, reference_path: Path) -> dict[str, Any]:

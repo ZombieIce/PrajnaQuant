@@ -2,6 +2,8 @@
 
 ## 当前交接（2026-09-28，POC-0/12 综合报告完成）
 
+POC-0 B2 同口径重测票据 02（S2 fallback tracer 范围）已完成：[入口与验收记录](.scratch/poc-0-b2-matched-remeasure/issues/02-s2-golden-matched-tracer.md)。S2 3×10 golden correctness gate 通过，release matched fallback 测量判定该负载 `adopt`；Nautilus 每 worker 缓存 QuoteTicks、每 Run 新建引擎，Rust/Nautilus 20 个串行样本和五组 2-worker × 6 Run 吞吐、隔离 RSS 均按登记边界记录。重测中位延迟为 11,042 / 842,146 ns，并行吞吐为 56,338 / 1,225 Runs/s，RSS 为 11,255,808 / 147,046,400 bytes。详见 [S2 matched report](poc/poc0-benchmark/results/b2-matched-s2-2026-09-28.json)。这不构成整体 B2 选型：S3、64×252 稳健性和引擎 reset parity 仍开放。预登记规则和预测在 revision `9c487f3` 已保存。**唯一建议下一步：**实现 S2 worker 内引擎 reset 并与 cached-conversion/new-engine fallback 对拍，若有差异保留 fallback，再扩展 S3/稳健性负载。
+
 票据 12 综合报告已完成：[POC-0-SYNTHESIS.md](poc/poc0-benchmark/POC-0-SYNTHESIS.md)。结论为 B1 Custom SoA 在登记 64×252 负载 `defer`，Parquet 受限读取功能通过但布局性能 unresolved；B2 Fast Event/Nautilus 的共同正确性子集通过，速度/RSS 边界不匹配所以选型 unresolved；B3 Python per-bar 和 batch 对登记负载 `reject`，不外推通用 Python/GIL 边界。构建工程成本与运行时吞吐分开，cold build 仍 Unknown。报告保留固定数据、hash、参数、门槛、版本、原始样本/checksum 和复跑入口；不证明生产 Engine、真实 ETF PIT/总回报或实盘能力。
 
 票据 12 文档链接检查通过。独立 review 的 Parquet/B2 RSS 信息缺口已补齐；`/code-review` Spec 轴指出的 Parquet 实测条件与性能门槛区分、B3 Python 转换/维护成本边界也已明确并通过定向复核，Standards 轴无发现。**唯一建议下一步：**如需裁决 B2，引擎双方按一致的数据准备、初始化、并行与 RSS 边界重测后再应用已登记门槛。

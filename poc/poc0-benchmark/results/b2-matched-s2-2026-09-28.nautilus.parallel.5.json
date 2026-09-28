@@ -1,0 +1,36 @@
+{
+  "status": "passed",
+  "workers": 2,
+  "runs": 6,
+  "warmup_runs": 4,
+  "warmup_runs_per_worker": 2,
+  "raw_samples_ns": [
+    1135542,
+    1098166,
+    1036583,
+    1110583,
+    1097666,
+    1014292
+  ],
+  "checksums_sha256": [
+    "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+    "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+    "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+    "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+    "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203",
+    "5ec4f580565a9bdb3d703e4ebdf4171fba10a14e93f092d2c9fd50ed61711203"
+  ],
+  "median_ns": 1097916.0,
+  "p95_ns": 1135542,
+  "parallel_wall_ns": 4793208,
+  "parallel_runs_per_second": 1251.7712563277037,
+  "peak_rss_by_worker_bytes": {
+    "8540": 73121792,
+    "8539": 73351168
+  },
+  "peak_rss_sum_upper_bound_bytes": 146472960,
+  "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+  "engine_mode": "cached_conversion_new_engine",
+  "engine_mode_reason": "engine reset parity is not established; use the specified safe fallback",
+  "conversion_cached_per_worker": true
+}

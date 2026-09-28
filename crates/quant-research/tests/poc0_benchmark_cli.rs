@@ -418,8 +418,10 @@ fn b2_isolated_cli_measures_fixed_parallel_runs_after_correctness_gate() {
         .args([
             "benchmark-poc0-b2",
             "--strategy",
-            "s3",
-            "--threads",
+            "s2",
+            "--mode",
+            "serial",
+            "--workers",
             "2",
             "--runs",
             "6",
@@ -435,11 +437,75 @@ fn b2_isolated_cli_measures_fixed_parallel_runs_after_correctness_gate() {
     );
     let report: Value = serde_json::from_slice(&fs::read(output).unwrap()).unwrap();
     assert_eq!(report["status"], "passed");
-    assert_eq!(report["threads"], 2);
+    assert_eq!(report["mode"], "serial");
+    assert_eq!(report["workers"], 1);
     assert_eq!(report["warmup_runs"], 2);
+    assert_eq!(report["warmup_runs_per_worker"], 2);
     assert_eq!(report["raw_samples_ns"].as_array().unwrap().len(), 6);
     assert_eq!(report["run_checksum_sha256"].as_str().unwrap().len(), 64);
-    assert!(report["parallel_runs_per_second"].as_f64().unwrap() > 0.0);
+    assert!(report["serial_runs_per_second"].as_f64().unwrap() > 0.0);
+    assert!(report["parallel_runs_per_second"].is_null());
+
+    let skipped_output = output_dir.path().join("b2-skipped-preflight.json");
+    let skipped = Command::new(env!("CARGO_BIN_EXE_quant-research"))
+        .current_dir(repo_root())
+        .args([
+            "benchmark-poc0-b2",
+            "--strategy",
+            "s2",
+            "--mode",
+            "serial",
+            "--runs",
+            "1",
+            "--skip-golden-preflight",
+            "--expected-checksum",
+            report["run_checksum_sha256"].as_str().unwrap(),
+            "--output",
+            skipped_output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        skipped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&skipped.stderr)
+    );
+    let skipped_report: Value = serde_json::from_slice(&fs::read(skipped_output).unwrap()).unwrap();
+    assert_eq!(skipped_report["golden_preflight"], "external_passed");
+    assert_eq!(
+        skipped_report["run_checksum_sha256"],
+        report["run_checksum_sha256"]
+    );
+}
+
+#[test]
+fn b2_parallel_warmup_mismatch_returns_instead_of_stranding_workers() {
+    let temporary = tempfile::tempdir().unwrap();
+    let output = temporary.path().join("b2-warmup-mismatch.json");
+    let wrong_checksum = "0".repeat(64);
+    let result = Command::new(env!("CARGO_BIN_EXE_quant-research"))
+        .current_dir(repo_root())
+        .args([
+            "benchmark-poc0-b2",
+            "--strategy",
+            "s2",
+            "--mode",
+            "parallel",
+            "--workers",
+            "2",
+            "--runs",
+            "2",
+            "--skip-golden-preflight",
+            "--expected-checksum",
+            wrong_checksum.as_str(),
+            "--output",
+        ])
+        .arg(output)
+        .output()
+        .unwrap();
+
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("B2 worker warmup mismatch"));
 }
 
 #[test]
