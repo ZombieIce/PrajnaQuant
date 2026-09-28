@@ -31,7 +31,8 @@ jobs:
 
   pyo3:
     name: b3-pyo3
-    runs-on: ubuntu-latest
+    # Same platform as the local POC host (macOS ARM64, Python 3.12 framework build).
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -47,7 +48,8 @@ jobs:
 
   nautilus:
     name: nautilus-integration
-    runs-on: ubuntu-latest
+    # The pinned nautilus_trader 2.0.0rc5 wheel is verified on macOS ARM64 only.
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
