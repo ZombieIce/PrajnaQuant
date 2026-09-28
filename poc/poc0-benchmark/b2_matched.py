@@ -264,7 +264,12 @@ def decide(
         if not passed and field != ADR_EXCLUDED
     ]
     if failures:
-        return {"status": "reject", "reason": "reproducible correctness failure: " + ", ".join(failures)}
+        # ADR 0014: a parity failure does not identify the faulty side; only diagnosis can reject.
+        return {
+            "status": "unresolved",
+            "reason": "unattributed common-subset correctness failure: " + ", ".join(failures),
+            "attribution_required": True,
+        }
     if correctness != "passed":
         return {"status": "unresolved", "reason": "common-subset correctness gate did not pass"}
     if protocol not in PROTOCOL_ENGINE_MODES:

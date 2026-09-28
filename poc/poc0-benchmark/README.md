@@ -659,7 +659,10 @@ python3 poc/poc0-benchmark/capture-build-resource.py --profile release --scope p
 
 The 2026-09-28 report records two independent S2 projection comparisons with identical Nautilus
 checksums and the same six non-excluded failed fields (Rust 351 orders/Fills; Nautilus 348), so it
-skipped S2 performance collection and mapped robustness to `reject`. The compact diagnostics show
+skipped S2 performance collection and mapped robustness to `reject` under the original ADR 0013
+mapping. ADR 0014 (written after this result) re-maps an unattributed cross-candidate failure to
+`unresolved` with `attribution_required`; the archived report is unchanged and B2 remeasure
+ticket 08 owns the attribution. The compact diagnostics show
 the first order/fill shifted from Rust 2025-04-08 to Nautilus 2025-04-09, with associated cash,
 holdings and NAV differences. On the fixture's HALT date/symbol, both project sides have zero
 attempts and fills; the ADR 0012 native lifecycle field remains separately excluded. S3 passed

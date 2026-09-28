@@ -2,7 +2,7 @@
 
 **What to build:** 项目负责人能从证据看到，正式测量采用的 Nautilus 计时模式（每 Run 重置引擎，或回退为每 Run 新建引擎）是按 ADR 0013 的触发条件实测选定的，而不是未经验证就采用回退。票据 02 在未测试 reset 的情况下直接采用了回退模式，本票补齐这一前提。参见 [spec](../spec.md)。
 
-**Blocked by:** 03, 04
+**Blocked by:** 03, 04, 08
 
 **Status:** ready-for-agent
 

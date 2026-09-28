@@ -45,8 +45,9 @@ def combine_robustness(
         return result
     if robustness_status == "correctness_failed":
         return {
-            "status": "reject",
-            "reason": "reproducible common-subset correctness failure on 64x252 robustness workload",
+            "status": "unresolved",
+            "reason": "unattributed 64x252 cross-candidate parity failure; diagnosis required (ADR 0014)",
+            "attribution_required": True,
             "robustness_status": robustness_status,
         }
     if robustness_status != "passed" or robustness_decision is None:
@@ -325,7 +326,11 @@ def run(binary: Path, python: Path, output: Path, collect: bool) -> dict[str, An
         except Exception as error:
             load["measurements"] = {"status": "unverified", "reason": f"{type(error).__name__}: {error}"}
     if correctness_failed:
-        report["decision"] = {"status": "reject", "reason": "reproducible common-subset parity failure; performance collection skipped for the affected load"}
+        report["decision"] = {
+            "status": "unresolved",
+            "reason": "reproducible but unattributed common-subset parity failure; performance collection skipped for the affected load (ADR 0014)",
+            "attribution_required": True,
+        }
     elif not all_passed:
         report["decision"] = {"status": "unverified", "reason": "one or more robustness correctness preflights could not run"}
     elif not collect:
@@ -378,7 +383,8 @@ def main() -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps({"status": report["status"], "output": str(output)}))
-    return 0 if report["status"] in {"correctness_passed", "adopt", "defer", "reject", "unverified"} else 2
+    concluded = report["status"] in {"correctness_passed", "adopt", "defer", "reject", "unverified"}
+    return 0 if concluded or report["decision"].get("attribution_required") else 2
 
 
 if __name__ == "__main__":

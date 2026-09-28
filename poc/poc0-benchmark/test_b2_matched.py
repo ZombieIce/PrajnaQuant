@@ -59,8 +59,10 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(self.decide(rust_serial_median_ns=51.0)["status"], "defer")
         self.assertEqual(self.decide(nautilus_peak_rss_sum_upper_bound_bytes=999)["status"], "defer")
 
-    def test_rejects_only_non_excluded_correctness_failures(self):
-        self.assertEqual(self.decide(correctness_checks={"fills": False})["status"], "reject")
+    def test_non_excluded_correctness_failures_require_attribution_not_reject(self):
+        decision = self.decide(correctness_checks={"fills": False})
+        self.assertEqual(decision["status"], "unresolved")
+        self.assertTrue(decision["attribution_required"])
         self.assertEqual(self.decide(correctness="failed")["status"], "unresolved")
 
     def test_missing_measurement_or_unmatched_protocol_is_unresolved(self):
@@ -273,11 +275,12 @@ class RobustnessDecisionTests(unittest.TestCase):
         self.assertEqual(result["status"], "adopt")
         self.assertEqual(result["robustness_status"], "unverified")
 
-    def test_robustness_correctness_failure_rejects(self):
+    def test_robustness_correctness_failure_requires_attribution(self):
         result = b2_robustness.combine_robustness(
             {"status": "adopt"}, "correctness_failed"
         )
-        self.assertEqual(result["status"], "reject")
+        self.assertEqual(result["status"], "unresolved")
+        self.assertTrue(result["attribution_required"])
 
     def test_unresolved_decision_load_stays_unresolved_when_robustness_passes(self):
         result = b2_robustness.combine_robustness(

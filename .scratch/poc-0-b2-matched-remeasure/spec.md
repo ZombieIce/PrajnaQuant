@@ -71,7 +71,7 @@ POC-0 综合结论把 B2（自研 Fast Event 对 NautilusTrader）标为 `unreso
 - **判定映射（沿用票据 09 并补充稳健性）：**
   - `adopt`：判定负载上 S2、S3 均满足中位单 Run 延迟 ≤ Nautilus 的 1/2、并行 Runs/s ≥ Nautilus 的 2×、峰值 RSS 之和 ≤ Nautilus，且共同子集正确性全部通过；稳健性负载同样满足，或因资源/适配原因未运行（标"稳健性未验证"）。
   - `defer`：双方在匹配口径下均已测得，但判定负载未达门槛；或判定负载达标而稳健性负载未达标。
-  - `reject`：仅在 ADR 0012 排除维度以外出现可复现的正确性失败。
+  - `reject`：仅在 ADR 0012 排除维度以外出现可复现的正确性失败，**且诊断证据归因于 Fast Event 违反独立期望**（[ADR 0014](../../docs/decisions/0014-b2-correctness-failure-attribution.md)，看到票据 04 结果后修订）。未归因的跨候选差异判 `unresolved` 并标 `attribution_required`。
   - `unresolved`：任一必需的判定负载测量缺失、资源闸门阻断，或口径无法按 ADR 对齐。
 - **维护成本代理指标（只记录）：**Fast Event POC 路径与 Nautilus Adapter 的非测试代码行数、测试数、新增直接依赖数（Cargo crate / Python 包）、Python 传递依赖解析数，以及已知不可消除语义差异数。
 - **构建：**使用 `quant-research --no-default-features` release 与共享 workspace target；构建前后执行 10 GiB 空间闸门并记录耗时与 target 增量，冷构建仍为 Unknown。
@@ -80,7 +80,7 @@ POC-0 综合结论把 B2（自研 Fast Event 对 NautilusTrader）标为 `unreso
 ## Testing Decisions
 
 - 好的测试只断言外部行为：给定固定输入与配置，比较报告中的正确性状态、原始样本结构、归因范围标签、判定与理由；不断言候选内部类型、调用次数或绝对耗时。
-- **判定纯函数单元测试**：用手写的固定测量记录覆盖 `adopt`、速度未达门槛的 `defer`、RSS 未达门槛的 `defer`、稳健性不一致的 `defer`、稳健性未运行的 `adopt` + 标签、正确性失败的 `reject`、缺少 RSS/并行测量的 `unresolved`，以及 ADR 0012 排除维度不一致但其余字段通过的情形。边界值（恰好 2×、RSS 相等）须有用例。
+- **判定纯函数单元测试**：用手写的固定测量记录覆盖 `adopt`、速度未达门槛的 `defer`、RSS 未达门槛的 `defer`、稳健性不一致的 `defer`、稳健性未运行的 `adopt` + 标签、未归因正确性失败的 `unresolved` + `attribution_required`、缺少 RSS/并行测量的 `unresolved`，以及 ADR 0012 排除维度不一致但其余字段通过的情形。边界值（恰好 2×、RSS 相等）须有用例。
 - **编排入口集成测试**：用小规模参数运行，断言正确性门失败时不采集该负载性能；报告包含两种计时边界、所用 Nautilus 重置模式、每 worker 与合计 RSS、预测对照节和维护代理指标节。环境缺少固定 Nautilus 版本时跳过，并在报告中标 `unresolved`。
 - **Rust CLI 测试**：新增的数据集选择、串行模式和跳过预检选项在 3×10 fixture 上产生与现有 golden 一致的 checksum；在 64×252 数据集上产生与 B3 已登记 stress checksum 一致的账户投影。
 - **Nautilus 重置一致性测试**：同一 worker 内重置后连续多次 Run 的投影 checksum 与新建引擎一致；不一致时断言入口选择回退模式。

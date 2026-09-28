@@ -2,7 +2,7 @@
 
 **What to build:** 项目负责人拿到一份在 release 构建上按预登记协议正式测得的 B2 结论，能对照书面预测，并在综合报告、状态和路线图中看到一致的证据链与 MVP-3 前置条件。参见 [spec](../spec.md)。
 
-**Blocked by:** 01, 03, 04, 05, 07
+**Blocked by:** 01, 03, 04, 05, 07, 08
 
 **Status:** ready-for-agent
 
