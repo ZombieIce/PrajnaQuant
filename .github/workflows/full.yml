@@ -1,0 +1,89 @@
+name: Full
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 18 * * *" # 02:00 Asia/Shanghai
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust-workspace:
+    name: rust-workspace (bundled DuckDB)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free runner disk for the bundled DuckDB build
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: full-workspace
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+
+  pyo3:
+    name: b3-pyo3
+    # Same platform as the local POC host (macOS ARM64, Python 3.12 framework build).
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: pyo3
+      - run: cargo test -p quant-research --no-default-features --features b3-pyo3 --locked
+
+  nautilus:
+    name: nautilus-integration
+    # The pinned nautilus_trader 2.0.0rc5 wheel is verified on macOS ARM64 only.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: nautilus
+      - run: cargo build -p quant-research --no-default-features --locked
+      - run: python -m pip install -r poc/poc0-benchmark/requirements-nautilus.txt
+      - name: POC Python tests (no skips allowed)
+        run: |
+          set -o pipefail
+          python -m unittest discover -s poc/poc0-benchmark -p 'test*.py' -v 2>&1 | tee unittest.log
+          if grep -q "skipped" unittest.log; then
+            echo "::error::Nautilus integration tests were skipped"
+            exit 1
+          fi
+
+  web:
+    name: web-build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run build

@@ -35,6 +35,22 @@ tower-http = { version = "0.6", features = ["cors", "fs"], optional = true }
 [dev-dependencies]
 tempfile = "3.14"
 
+[[example]]
+name = "audit_daily_snapshot"
+required-features = ["app"]
+
+[[example]]
+name = "etf_status_gated_replay"
+required-features = ["app"]
+
+[[example]]
+name = "etf_universe_mvp"
+required-features = ["app"]
+
+[[example]]
+name = "market_snapshot_fixture"
+required-features = ["app"]
+
 [lints.rust]
 unsafe_code = "forbid"
 

@@ -1,3 +1,5 @@
+#![cfg(feature = "app")]
+
 use anyhow::{Context, Result, ensure};
 use chrono::NaiveDate;
 use quant_research::{
