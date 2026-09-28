@@ -4,6 +4,8 @@
 
 ## Target Architecture Baseline (2026-09-26)
 
+2026-09-28 POC-0 票据 12 综合报告已完成，见 [POC-0-SYNTHESIS](../poc/poc0-benchmark/POC-0-SYNTHESIS.md)：B1 Custom SoA 对登记合成目标负载 `defer`；B1 Parquet 受限读取路径通过功能验证，布局性能仍 unresolved；B2 Fast Event/Nautilus 选型因吞吐与 RSS 计量范围不匹配保持 unresolved；B3 Python per-bar 和 batch 对 64×252 登记负载 `reject`，不外推其他规模。报告聚合输入 hash、参数、门槛、checksums、原始测量链接、构建成本和未知项。无生产 Engine 选型、真实市场 PIT 或历史 ETF 总回报结论。
+
 2026-09-28 POC-0 票据 10 已实现 B3 基础对照：共享 fixture 的 29 个 bar event 按日期/symbol 顺序投递给 Rust Native 与 PyO3 Python `on_bar()`；逐事件比较决策日期、symbol 和目标列表，同日错误 bar 不会通过。Python S1 targets 进入同一个 Rust Fast Event 账户路径后，与独立预期对拍逐单/逐日现金持仓、成本、NAV 和 PortfolioResult。Python 3.12.2 / PyO3 0.29.0 的 release 五样本已记录，复跑命令、provenance 和构建资源见 [B3 ticket 10](../.scratch/poc-0-benchmark/issues/10-pyo3-basic-callback-comparison.md)。该 3 ETF × 10 session 样本太小，吞吐/规模边界结论仍 `unresolved`；不是 Python 研究包或生产策略接口。
 
 2026-09-28 POC-0 票据 11 已由用户验收并标记 `resolved`：S2 Momentum Rotation、S3 MA20/60 的 Rust Native、Python per-bar、Python batch 对拍与并行测量均完成。固定 golden 和 64×252 合成负载正确性均通过；最终 release 上预登记两倍 callback 延迟与 80% Runs/s 门槛未满足，Python per-bar 和 batch 对该目标负载结论为 `reject`。该结论只适用于测量负载/本机，不是通用 Python 或 GIL 结论；RSS 为包含全部候选的共享进程高水位。详细门槛、原始样本、provenance 与复跑方式见 [B3 ticket 11](../.scratch/poc-0-benchmark/issues/11-pyo3-strategies-and-parallel-boundary.md) 与 [POC README](../poc/poc0-benchmark/README.md#b3-real-strategies-and-parallel-boundary-ticket-11)。

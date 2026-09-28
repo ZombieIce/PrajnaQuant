@@ -1,0 +1,53 @@
+# POC-0 综合结论
+
+日期：2026-09-28。本文汇总票据 01–13 的实现和实测证据，供 Rust-first MVP 决策参考。结论只覆盖列出的合成输入、代码版本、机器和测量边界；不构成生产 Engine 选型、真实 ETF 业绩验证或 PIT 证明。
+
+## 决策摘要
+
+| 比较 | 结论 | 当前证据支持什么 | 不支持什么 |
+| --- | --- | --- | --- |
+| B1：Custom SoA / Arrow / Polars S2 | **defer Custom SoA** | 64 instruments × 252 sessions 下，三布局通过独立 golden、跨布局投影及冷热 cache checksum 对拍。SoA 并行 Runs/s 相对最佳替代在 miss 为 +8.99%、hit 为 +0.32%，低于预登记的 20% 门槛。 | 不证明 Polars 或 Arrow 在真实市场、其他硬件或更大规模上的普遍优势；维护成本只作定性记录。 |
+| B1：Parquet / out-of-core | **adopt 读取能力；布局选择 unresolved** | 10,000,029 行、404,509,661 字节的输入在 Linux cgroup 256 MiB 限制下完成筛选复读，无 OOM；命中 2,448 个 row group 中的 1 个、7 列中的 3 列；Rust 子进程 peak RSS 58,933,248 bytes。 | 大部分为裁剪掉的 filler 行，不是代表性全量计算吞吐；cgroup peak 268,435,456 bytes 包含文件缓存与测量进程；单次缓存不受控数据不用于候选性能排名。 |
+| B2：Fast Event / Nautilus | **unresolved** | S1/S2/S3 的共同子集正确性通过：决策、Fill、现金、持仓、成本和 NAV；Adapter 层与 Rust 项目事件契约对齐。 | 票据 09 的 Rust/Nautilus 测量计时边界、准备数据和 RSS 归因不一致，预登记 2×门槛无法判定。停牌原生订单生命周期仍 unresolved，按 ADR 0012 排除在选型子集之外。 |
+| B3：Python PyO3 callback | **reject 64×252 登记负载；其他规模 unresolved** | S2/S3 正确性通过；Python per-bar 和 batch 均未达到预登记延迟与吞吐门槛。 | 不能外推通用 Python/GIL 拐点、其他 workload 或 Python 研究平台的整体适用性。3×10 S1 callback 仅是接口正确性和微型成本样本。 |
+| 构建边界 | **adopt shared lightweight path** | `--no-default-features` POC 路径复用 workspace `target/` 且依赖图排除 DuckDB；按 10 GiB 可用空间保留线记录构建成本。 | 冷构建未测；负 target 字节变化是共享缓存的变化，不是负构建成本。 |
+
+没有候选因一次微基准而自动成为生产 Engine。POC 结果支持保留 Rust 作为账户与结果权威，并把 Python 策略入口限制在后续实测能覆盖的负载；它没有验证生产接口。
+
+## 可追溯证据
+
+### B1：布局、扫描与缓存
+
+- **固定输入：**Dataset Version `poc0.synthetic.etf-daily.v1`，content SHA-256 `f5e178f3bcbf606dcc84145fd1728c2f504ba942e196eeafa08d818b48c7f132`。64 instruments × 252 sessions；S2 momentum 20/60、volatility 20，Top-N `{1,5,10}` × rebalance `{1,5}`。信号/TopK 和权重收益均通过独立期望校验，未来收益只作为评价标签。
+- **源码身份：**report schema `poc0.b1.sweep.v1`；Git revision `22d9728ae19574b0ca0730a388bece86b25c2d79`；Cargo.lock SHA-256 `24b9123ee06436f427f944a2171c47187561330b96bdf096fc1502f263a5e47f`。采样时 dirty worktree 存在未跟踪文件，Git diff identity 不完整；复现以保存的源码为准。
+- **登记判据：**Custom SoA 在两个 cache 状态都需比最佳替代快至少 20%；六轮候选顺序轮转、冷热条件顺序交替，单次 Run 与并行扫描分别记录。结果为 defer，不移动门槛。
+- **测量：**release 并行吞吐（Runs/s）为 miss：SoA 149.63、Arrow 137.29、Polars 6.07；hit：SoA 4264.08、Arrow 4250.42、Polars 4198.37。全进程峰值 RSS 107,905,024 bytes；并非每布局独立 RSS。全部原始 Run 样本、六组扫描、checksum、硬件、依赖锁定身份与统计见 [B1 原始报告](results/b1-sweep-64x252-2026-09-27.json) 和 [RSS 记录](results/b1-sweep-64x252-2026-09-27.rss.json)。
+- **语义/转换成本：**三候选都计算因子、排序/TopK、目标权重和信号日 close 到下一日 close 的评价收益；这不是含现金、费用、订单、Fill 的事件账户 NAV。SoA/Arrow/Polars 布局准备/转换计入端到端和 Run 时间，没有单独测量；SoA 第三套实现的维护负担只作定性记录，未货币化。
+- **复跑：**在仓库根目录构建 `cargo build -p quant-research --no-default-features --release --locked --offline`，再运行 `target/release/quant-research benchmark-poc0-sweep --output target/poc-0/b1-sweep.json`。构建后使用 `target/release/quant-research benchmark-poc0-sweep --help` 查看可覆盖参数；缩小规模的例子见 [README sweep 章节](README.md#b1-parameter-sweep-and-factor-cache-ticket-06)。
+- **工程成本：**共享 warm target dev/release 分别 5.582/9.675 秒，逻辑字节变化 -142,598,341/+53,203；cold build 和每布局独立构建成本 Unknown。构建证据见报告中的 `build_cost_evidence` 及链接记录。
+- **Parquet 边界：**版本化 Parquet、日期/证券过滤、row-group 跳过和分块读路径已验证；10M 行受限复读的 Rust 子进程 peak RSS 为 58,933,248 bytes，cgroup peak/max 均为 268,435,456 bytes，`oom=0`、`oom_kill=0`。cgroup 峰值含文件缓存及测量进程，不能当作 Rust 进程 RSS。输入 hash、完整 cgroup 计数、复跑命令及不代表全量吞吐的限制见[票据 05](../../.scratch/poc-0-benchmark/issues/05-parquet-and-out-of-core.md)。
+
+### B2：事件账本与 Nautilus
+
+- **共同 correctness 子集：**S1 的手算 3 ETF × 10 日金标准含 `UNKNOWN`/`HALTED`、缺 bar、非零佣金/滑点；S2 复用固定目标和状态 fixture，S3 使用版本化 3 instrument × 130 weekday MA20/60 fixture。共同字段逐项对拍通过；T 日收盘形成信号、下一可用日 open 执行。S2/S3 参数、费用（初始资金 100,000 CNY、100 股手、每侧 10 bps 滑点、100 CNY 最低佣金）和逐日预期见 [票据 09](../../.scratch/poc-0-benchmark/issues/09-b2-strategy-parity-and-throughput.md)。
+- **输入与身份：**主 fixture Dataset Version `poc0.synthetic.etf-daily.v1` / SHA-256 `8c16742a2031cab19e08456dbbe009769b02f0331276618831cefdb6827b5a6f`，source identity `poc0-hand-authored-golden-v1`，seed `20260926`；MA20/60 fixture SHA-256 `a605295dd53e2f7e35758622671e2b3b85b35a6a791d42c850aeee55145311ef`。综合报告 checksum `ddbbd29994dbb6a373dae42e8614f2032ee15191aff9a7be7c7bfb256d624472`。代码 revision `d34ecada4eaaa057504b1e0bdd09c6172474b85f`，Cargo.lock SHA-256 `24b9123ee06436f427f944a2171c47187561330b96bdf096fc1502f263a5e47f`；Nautilus 固定为 `2.0.0rc5`，Python 传递依赖仅记录解析快照，未形成完整 lock。
+- **可复跑入口：**Rust 参考 `target/release/quant-research benchmark-poc0 --candidate soa --output target/poc-0/b2-rust.json`；Nautilus 对照 `.venv/bin/python poc/poc0-benchmark/nautilus_adapter.py --dataset poc/poc0-benchmark/fixtures/dataset-v1.json --reference-report target/poc-0/b2-rust.json --output target/poc-0/b2-comparison.json`。安装、空间闸门、构建与依赖要求见 [README B2](README.md#b2-nautilus-adapter-comparison-ticket-08)。
+- **决策限制：**票据 09 登记采用门槛为两策略上 Fast Event 同时达到 2×更低中位单 Run 延迟和 2×更高并行 Runs/s，且 RSS 不增加。现有 Rust 使用两线程、复用已准备 bars；Nautilus 两个 warm worker 每 Run 做 quote 转换和引擎初始化。Rust whole-process peak RSS 为 S2 30,179,328 / S3 30,146,560 bytes（含 golden precheck）；Nautilus 单 worker peak RSS 为 S2 75,399,168 / S3 77,201,408 bytes。Rust 原始计时/RSS 分别见 [S2](results/b2-09-s2-throughput.json) 和 [S3](results/b2-09-s3-throughput.json)，Nautilus 样本见 [合并比较报告](results/b2-09-comparison-2026-09-27.json)。范围不同且未作候选独立同口径采集，不能直接比较，因此速度和 RSS 门槛均不可判，保持 unresolved；不能根据 Sharpe 差或裸吞吐选择。Adapter 转换成本已记录，Adapter 维护成本没有量化（Unknown）。
+- **生命周期差异：**Nautilus 收到 3 单，Rust 项目尝试 4 次；Adapter 生成的 `HALTED` 项目拒单不计为 Nautilus 原生拒单。共同子集通过，但原生停牌订单生命周期保持 unresolved，确切边界见 [ADR 0012](../../docs/decisions/0012-poc0-nautilus-status-gate.md)。
+- **构建成本：**票据 09 Rust warm release build 20.032 秒、target +46,290 bytes；Nautilus review warm rebuild 17.185 秒、target +153,017 bytes，官方预编译 wheel 无引擎 wheel 编译。早期 Adapter 集成报告记录 10.163 秒/+89,966 bytes；这些是不同源码/缓存时点，不能相加或视为候选冷构建成本。原始记录见 [Rust build](results/b2-09-release-build-2026-09-27.json)、[Nautilus review](results/nautilus-adapter-review-2026-09-27.json) 和 [Nautilus build](results/nautilus-build-review-2026-09-27.json)；cold build Unknown。
+
+### B3：PyO3
+
+- **基础回调（票据 10）：**Dataset SHA-256 `8c16742a2031cab19e08456dbbe009769b02f0331276618831cefdb6827b5a6f`，3 ETF × 10 sessions / 29 present-bar events；Python 3.12.2、PyO3 0.29.0。Python/Rust S1 决策和 Rust 账户投影 checksum `f2ffcc44a2e94c778ad33e0731632bed69da98d05696f8934222f7e94f557928` 一致。权威 review-fix 五样本、空回调/策略 callback 延迟与初始化见 [callback report](results/b3-pyo3-callbacks-review-fix-2026-09-28.json)。小样本对规模拐点仍 unresolved。复跑命令见 [README ticket 10](README.md#b3-pyo3-per-bar-callback-comparison-ticket-10)。
+- **目标负载（票据 11）：**S2 Dataset Version `poc0.b3.s2-scale-64x252.v1` / SHA-256 `2ae75e889e3d65a28974f3f467794532621b34c6b58c31c6f37bc75392358dff`，S3 `poc0.b3.s3-scale-64x252.v1` / SHA-256 `d5384e1e27162713df2cd020dcdd655d5838f1d417d3848ac0eaca8f0a002e5a`；64 instruments × 252 sessions，约 16.1k bar events；S2 momentum 20/60 + volatility 20 + Top-5 + 每 5 个 eligible session 调仓，S3 MA20/60；1 次预热、5 次单 Run 样本、2 workers × 6 independent Runs、5 组并行重复。Rust 与 Python per-bar/batch 的决策和 Rust 账户投影正确性通过，S2/S3 stress checksum 分别为 `5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342` 和 `0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70`。代码 revision `0ff844b26afe1ff86e0786fc90dc61246f23540b`，Cargo.lock SHA-256 `250f21792a3ded3c139747c74f96b673b37e57d2b5f550a29e480fea71f60041`。两 worker Runs/s：S2 为 126.04 / 6.67 / 14.48，S3 为 472.64 / 11.58 / 144.38（Rust / per-bar / batch）。
+- **登记判据与结论：**per-bar 两策略都需 callback 并行中位延迟 ≤ Rust 2× 且含账户回放 Runs/s ≥ Rust 80%；若 per-bar 失败，仅当 batch 两策略均过门槛才 defer，否则对该目标负载 reject。两种 Python 候选未达标准。Python 空回调每约 16.1k events 增加 6.81–6.93 ms；共享进程 peak RSS 91,078,656 bytes，不能归因候选。原始测量及完整 provenance 在 [B3 strategy report](results/b3-pyo3-strategies-2026-09-28.json)，参数/复跑在 [README ticket 11](README.md#b3-real-strategies-and-parallel-boundary-ticket-11)。
+- **构建成本：**票据 11 warm release feature rebuild 19.51 秒，target 逻辑字节变化 -960；ticket 10 初次 warm dev/release 83.14/284.00 秒、增量 2,427,198,271/434,471,616 bytes，最终 release rebuild 17.86 秒/+1,022 bytes。Python 环境占用 162,369,399 bytes。均保留 10 GiB 闸门，未清理 target；共享 target 变化不作负成本解释。构建记录见[票据 10](../../.scratch/poc-0-benchmark/issues/10-pyo3-basic-callback-comparison.md)及[票据 11](../../.scratch/poc-0-benchmark/issues/11-pyo3-strategies-and-parallel-boundary.md)。
+
+## 跨候选结论与未决证据
+
+1. **正确性通过不等于性能选型。**B1 的 checksum/参数扫描能支持当前合成负载的 Custom SoA `defer`；B2 的共同子集通过，但无法套用预登记速度门槛；B3 的 `reject` 只裁定 64×252 目标工作负载。
+2. **生产能力仍未建立。**本 POC 没有实现生产 Vector/Fast Event/Accurate Engine、生产 Nautilus Adapter、完整 Python 研究包或 Live Runtime。合成数据不证明历史 universe、历史可知时刻、公司行动总回报或实盘可成交性。
+3. **主要开放项：**B2 双方统一准备/转换、初始化、运行计时和并行/RSS 边界后重测；若要讨论 Python 其他规模，另行登记 workload 与门槛；B1 若要裁决现实市场形状，须取得可许可、可哈希的数据并预登记代表性规模。冷构建与每候选构建归因保持 Unknown。
+4. **构建边界可复用：**POC 使用 `quant-research --no-default-features` 和共享 workspace `target/`，依赖图排除 DuckDB；按可用空间保留 10 GiB，逐次记录耗时、增量和身份。基线与受限失败证据见[票据 13](../../.scratch/poc-0-benchmark/issues/13-build-resource-boundary.md)。
+
+所有报告均包含可用的版本、参数、重复原始样本与 checksum；其中 B1 Git diff 身份因采样时有未跟踪文件而不完整，B2 Python 传递依赖只记录解析快照而未形成完整 lock，相关复现限制必须与原始报告一起阅读。缺失或无法归因的资源数值保持 Unknown，不按零处理。
