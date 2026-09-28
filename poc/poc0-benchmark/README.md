@@ -300,6 +300,123 @@ The report also emits `b2_fast_event_buy_hold`, an independent, deliberately sma
 
 This is a prototype and a correctness smoke on one tiny fixture. It does not establish production Fast Event semantics, broad benchmark performance, or an architecture decision; Nautilus comparison remains a separate ticket.
 
+## B3 PyO3 per-bar callback comparison (ticket 10)
+
+The optional `b3-pyo3` feature embeds CPython with PyO3 and feeds the same sorted fixture
+bar stream to a Rust Native callback and Python `on_bar()` implementations. The no-op case
+measures fixed boundary cost; S1 returns the Buy & Hold target once at the fixture's close
+decision event. Python returns strategy decisions only. The existing Rust Fast Event path
+interprets the S1 action and remains authoritative for orders, fills, costs, positions, cash,
+marks, and the serialized portfolio projection. The report contains one warmup, five raw
+callback samples, per-run latency statistics, callback-plus-Rust-account end-to-end samples,
+Python version, event ordering, decision parity and portfolio checksum.
+
+Use the repository Python 3.12 environment explicitly for both the resource-gated builds and
+the benchmark. The recorder uses the shared root `target/`, captures the dependency graph,
+wall time, target delta and before/after free space, and stops if the 10 GiB reserve is at risk:
+
+```bash
+PYO3_PYTHON="$PWD/.venv/bin/python" .venv/bin/python \
+  poc/poc0-benchmark/capture-build-resource.py --profile dev --features b3-pyo3 \
+  --output poc/poc0-benchmark/results/b3-pyo3-build-dev.json
+PYO3_PYTHON="$PWD/.venv/bin/python" .venv/bin/python \
+  poc/poc0-benchmark/capture-build-resource.py --profile release --features b3-pyo3 \
+  --output poc/poc0-benchmark/results/b3-pyo3-build-release.json
+PYO3_PYTHON="$PWD/.venv/bin/python" cargo run -p quant-research --release \
+  --no-default-features --features b3-pyo3 --locked --offline -- \
+  benchmark-poc0-b3 --output target/poc-0/b3-pyo3-callbacks.json
+```
+
+This fixed 3 ETF × 10 session fixture can establish basic callback parity and measure only
+this tiny workload. It cannot identify a scale crossover, quantify GIL/parallel behavior, or
+support an architecture choice. Build resource evidence is engineering cost and is not folded
+into callback throughput.
+
+The 2026-09-28 release run passed decision parity and compared callback-produced Python S1
+decisions including date, symbol, and targets against Rust Native. A decision on another symbol
+bar of the same date is rejected. The Python S1 target went through the same Rust account runner
+against the independent fixture. All 29 present-bar events were delivered in date/symbol order;
+the Python-derived order produced the same fills, daily ledger, costs, and final equity as the Rust reference (checksum
+`f2ffcc44a2e94c778ad33e0731632bed69da98d05696f8934222f7e94f557928`). The authoritative sample is the
+[review-fix rerun](results/b3-pyo3-callbacks-review-fix-2026-09-28.json), which includes the explicit
+event-identity checks and the corrected 1e-8 float assertion: five-sample callback medians were
+11.6 µs for Python empty, 12.7 µs for Python S1, 0.042 µs for Rust empty, and 0.209 µs for Rust S1.
+Callback-plus-account end-to-end medians were 108.0 µs (Python empty), 109.3 µs (Python S1),
+3.6 µs (Rust empty), and 5.7 µs (Rust S1). These values describe this tiny fixture and one warm
+macOS ARM64 process; they are not a scale crossover or an architecture decision. The
+[initial raw report](results/b3-pyo3-callbacks-2026-09-28.json) is the first, pre-fix run kept only
+as earlier-run provenance; its Rust S1 median (0.292 µs) differs slightly, consistent with
+sub-microsecond noise on this tiny fixture, and is not the number quoted above.
+
+Initial warm feature builds took 83.14 s in dev (+2,427,198,271 logical target bytes) and
+284.00 s in release (+434,471,616 bytes); later same-source warm verification rebuilds were
+17.86 s in release (+1,022 logical target bytes). The configured Python environment occupied
+162,369,399 bytes. See the [dev build](results/b3-pyo3-build-dev-2026-09-28.json),
+[initial release build](results/b3-pyo3-build-release-2026-09-28.json), [final release rebuild](results/b3-pyo3-build-release-final-2026-09-28.json),
+and [final callback test build](results/b3-pyo3-test-final-2026-09-28.json). Every recorded
+build retained at least 10 GiB free; no target was cleaned. The event-identity review-fix test,
+workspace test, workspace Clippy, B3 Clippy and release rebuild are recorded in their
+`*-review-fix-2026-09-28.json` resource reports.
+
+### B3 real strategies and parallel boundary (ticket 11)
+
+The next stage compares S2 Momentum Rotation and S3 MA20/60 in Rust Native, Python `on_bar`,
+and one-call-per-Run Python batch mode. The 3 ETF × 10 session fixture (and the versioned S3
+MA20/60 fixture) gate strategy decisions and Rust account results against existing independent
+goldens. The target workload is deterministic synthetic 64 instruments × 252 sessions. S2 uses
+20/60 momentum, 20-session volatility, Top-5 and five-session rebalance; S3 extends the fixed
+MA20/60 signal path across the target calendar. Scaled-workload parity is checked against Rust
+Native; its generated input identity/hash is included in the report.
+
+Before release measurements, the target gate was registered in ticket 11: for both S2 and S3,
+Python per-bar must have parallel callback median no more than 2× Rust Native and end-to-end
+parallel Runs/s (including Rust account replay) at least 80% of Rust Native to be eligible for
+this target. If per-bar misses but batch passes both strategies, the result is `defer`; if neither
+Python mode passes both, it is `reject` for this target workload. One warmup and five single-run
+samples are used; two workers execute six independent Runs, with five repeated parallel groups.
+Correctness is mandatory. Peak RSS is reported as a process high-water value; the embedded
+interpreter and all candidates share one process, so RSS is not candidate-isolated and does not
+decide the gate.
+
+Rebuild under the 10 GiB resource gate and run the benchmark in release mode:
+
+```bash
+PYO3_PYTHON="$PWD/.venv/bin/python" .venv/bin/python \
+  poc/poc0-benchmark/capture-build-resource.py --profile release --features b3-pyo3 \
+  --output poc/poc0-benchmark/results/b3-strategies-release-build.json
+PYO3_PYTHON="$PWD/.venv/bin/python" cargo run -p quant-research --release \
+  --no-default-features --features b3-pyo3 --locked --offline -- \
+  benchmark-poc0-b3-strategies \
+  --output poc/poc0-benchmark/results/b3-pyo3-strategies-2026-09-28.json
+```
+
+The report separates strategy callback, initialization, Rust account replay, single-run
+end-to-end, independent-run throughput, empty-call boundary baseline, and the GIL arrangement.
+This compares Rust and Python directly and does not import ticket 09's incomparable Fast Event /
+Nautilus throughput result. Conclusions are limited to this generated workload and host.
+
+The 2026-09-28 release report passed the independent small-fixture golden and scaled Rust/Python
+decision plus account checks. At the registered target, two-worker end-to-end throughput was:
+
+| Strategy | Rust Native | Python per-bar | Python batch |
+| --- | ---: | ---: | ---: |
+| S2 Momentum Rotation | 126.04 Runs/s | 6.67 Runs/s | 14.48 Runs/s |
+| S3 MA20/60 | 472.64 Runs/s | 11.58 Runs/s | 144.38 Runs/s |
+
+Both Python modes missed the pre-registered gate for both strategies, so the result is `reject`
+for this 64×252 target workload. This does not establish a general Python or GIL boundary. The
+Python empty callback added 6.81–6.93 ms over the Rust empty loop for about 16.1k events; its
+two-worker callback median was roughly 24× its single-run median on this host. Account replay
+median was about 3.8–4.4 ms per Run and is included in Runs/s. Process peak RSS was 91,078,656
+bytes, shared across embedded Python and all candidates, so it is not a per-candidate memory
+comparison. Python 3.12.2 environment occupancy was 162,369,399 bytes. The final warm release
+feature build took 19.51 s; logical target size changed by -960 bytes as shared-cache contents
+changed. Raw samples and environment identity are in the [B3 strategy report](results/b3-pyo3-strategies-2026-09-28.json),
+[release build record](results/b3-strategies-release-build-final-2026-09-28.json),
+[strategy parity test](results/b3-strategy-parity-test-final-2026-09-28.json),
+[workspace tests](results/b3-strategies-workspace-test-2026-09-28.json), and
+[workspace Clippy](results/b3-strategies-workspace-clippy-2026-09-28.json).
+
 ## B2 Nautilus adapter comparison (ticket 08)
 
 Use the guarded entry point for the pinned wheel, shared-target release build, and

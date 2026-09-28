@@ -1,0 +1,391 @@
+{
+  "schema_version": 1,
+  "started_at_utc": "2026-09-28T01:29:43.234210+00:00",
+  "finished_at_utc": "2026-09-28T01:29:49.387381+00:00",
+  "command": [
+    "cargo",
+    "clippy",
+    "--workspace",
+    "--locked",
+    "--offline",
+    "--all-targets",
+    "--",
+    "-D",
+    "warnings"
+  ],
+  "working_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316",
+  "target_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/target",
+  "cache_state": "warm_existing_workspace_target",
+  "estimated_max_additional_bytes": 2147483648,
+  "minimum_free_bytes": 10737418240,
+  "runtime_stop_free_bytes": 11274289152,
+  "space_samples": [
+    {
+      "observed_at_utc": "2026-09-28T01:29:45.369376+00:00",
+      "volume_free_bytes": 38326939648
+    },
+    {
+      "observed_at_utc": "2026-09-28T01:29:47.370419+00:00",
+      "volume_free_bytes": 38292455424
+    }
+  ],
+  "git_revision": "0ff844b26afe1ff86e0786fc90dc61246f23540b",
+  "working_tree_dirty": true,
+  "tracked_diff_sha256": "b5de1c1a5ccc56b40779141afa42b7a6a5199cdf432276f15640ebdc2daaf2dc",
+  "tracked_diff_summary": ".../issues/10-pyo3-basic-callback-comparison.md    |  16 ++--\n .../11-pyo3-strategies-and-parallel-boundary.md    |   4 +\n Cargo.lock                                         |  70 ++++++++++++++\n HANDOFF.md                                         |  12 ++-\n crates/quant-research/Cargo.toml                   |   2 +\n crates/quant-research/src/main.rs                  |  48 ++++++++++\n crates/quant-research/src/poc0_benchmark.rs        |  36 +++++--\n docs/STATUS.md                                     |   8 +-\n poc/poc0-benchmark/README.md                       |  94 +++++++++++++++++++\n poc/poc0-benchmark/capture-build-resource.py       | 103 +++++++++++++++++----\n 10 files changed, 359 insertions(+), 34 deletions(-)",
+  "changed_paths": [
+    "scratch/poc-0-benchmark/issues/10-pyo3-basic-callback-comparison.md",
+    ".scratch/poc-0-benchmark/issues/11-pyo3-strategies-and-parallel-boundary.md",
+    "Cargo.lock",
+    "HANDOFF.md",
+    "crates/quant-research/Cargo.toml",
+    "crates/quant-research/src/main.rs",
+    "crates/quant-research/src/poc0_benchmark.rs",
+    "docs/STATUS.md",
+    "poc/poc0-benchmark/README.md",
+    "poc/poc0-benchmark/capture-build-resource.py",
+    ".vscode/settings.json",
+    "crates/quant-research/src/poc0_benchmark/b3.rs",
+    "crates/quant-research/src/poc0_benchmark/b3_strategies.rs",
+    "crates/quant-research/tests/poc0_b3_callbacks.rs",
+    "poc/poc0-benchmark/results/b3-pyo3-build-dev-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-build-release-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-build-release-final-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-build-review-fix-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-callback-integration-test-final-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-callbacks-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-callbacks-review-fix-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-clippy-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-clippy-default-features-examples-failure-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-clippy-review-fix-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-debug-correctness-check-failure-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-strategies-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-test-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-test-exact-float-assertion-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-test-final-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-test-review-fix-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-test-review-fix-final-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-workspace-clippy-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-workspace-clippy-review-fix-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-workspace-test-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-workspace-test-review-fix-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-strategies-clippy-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-strategies-clippy-final-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-strategies-dev-build-final-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-strategies-initial-build-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-strategies-release-build-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-strategies-release-build-final-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-strategies-workspace-test-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-strategy-parity-test-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-strategy-parity-test-final-2026-09-28.json",
+    "poc/vendor/polars-io/.cargo-ok",
+    "poc/vendor/polars-io/.cargo_vcs_info.json",
+    "poc/vendor/polars-io/Cargo.lock",
+    "poc/vendor/polars-io/Cargo.toml.orig"
+  ],
+  "untracked_files": [
+    {
+      "path": ".vscode/settings.json",
+      "sha256": "bc66a2fb956260d44f9a442a850fd3981a60ea4e9bb3011c64ac5a38f5b924aa"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/b3.rs",
+      "sha256": "ccad8c8c72e6cee5ea298a5a26f6f829999ce4391e1d3f3857966d923cdbec6f"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/b3_strategies.rs",
+      "sha256": "42b82b696748b9908fcb46438e344e8f44905b338122179bcf5bfc1d2db3798c"
+    },
+    {
+      "path": "crates/quant-research/tests/poc0_b3_callbacks.rs",
+      "sha256": "8d67a34b366aa1d02e0d34d4e8e5caca5aa3ed1c7bcddf2d68cf636cbef50de5"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-build-dev-2026-09-28.json",
+      "sha256": "032202c03cde02f57d1fba651fc18049039aa2c247d6a6835084a2cae847b9a5"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-build-release-2026-09-28.json",
+      "sha256": "fbb1de3f8576756f60d33e66eaaa28d9b53f49ceb79aee2ab39a199b89f5b84a"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-build-release-final-2026-09-28.json",
+      "sha256": "b976ff2644f448c495c2463e2d15ddd2bdae70c598a4da571a4e5c80b2ddedf1"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-build-review-fix-2026-09-28.json",
+      "sha256": "c2de415567a5dd11e3649b70fa78ce18239d9d6f9637f1e328cda51269d268d5"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-callback-integration-test-final-2026-09-28.json",
+      "sha256": "e00e7eb0c8f0a51bad1f97ee08ed79878c3d91d1b62ceedd2327976b8326bf68"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-callbacks-2026-09-28.json",
+      "sha256": "52331a6f7c4925274e6d454e91a651f6d1b57093bb89be66119838d23a0474d4"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-callbacks-review-fix-2026-09-28.json",
+      "sha256": "4dfa570173e9ca630a396195e193fad6b9c9dfe4b35c507c59ccc89715a7e1d1"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-clippy-2026-09-28.json",
+      "sha256": "e03aa3c8f3aa67a6f910b3e75a4ac06b83e4023f5843f7c260cff7f83aaa8753"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-clippy-default-features-examples-failure-2026-09-28.json",
+      "sha256": "815d67ca9f035b2e1476e01e1759f9e15649ce994fa5f0fdeda68f52b9a9511b"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-clippy-review-fix-2026-09-28.json",
+      "sha256": "a62558229db23396641c420348d5533d96b898a336468d6b8e7a4bac857b70e5"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-debug-correctness-check-failure-2026-09-28.json",
+      "sha256": "0b793c6c27cf6aa1796e65755e182d01cc08c0e7a94a452b086a4bb3aab05b74"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-strategies-2026-09-28.json",
+      "sha256": "7f32077729cd263b46eb40b7a6789519b297128605843a482ce58a345dcd7f3c"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-test-2026-09-28.json",
+      "sha256": "bef7d0b5a794d3500f27767f2b0af3437c4e79a8f51ca41bba4ac9b9d83b82a5"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-test-exact-float-assertion-2026-09-28.json",
+      "sha256": "b1cb183b2ab4dfcaa4f51bea98e33e80c16bb48c90aa94ccb8efe56e0ac9edb2"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-test-final-2026-09-28.json",
+      "sha256": "5caac7483f2d3419ffdfc819ebfe2b10cdd80f3a4b77ada1dcfd70e88af3ec86"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-test-review-fix-2026-09-28.json",
+      "sha256": "5386e768098c9b453287c788045f2978c04d88b96fdf58598b0a508de54cbc0a"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-test-review-fix-final-2026-09-28.json",
+      "sha256": "b3ec0cb9f5b6faf7243ad912031864af8cbdb94a2b5f5183bf2fd0b7013fee9d"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-workspace-clippy-2026-09-28.json",
+      "sha256": "a24f29fcf6cecc2f19205fa395375c7e50fd0a215321b36cba7f521f2e990e20"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-workspace-clippy-review-fix-2026-09-28.json",
+      "sha256": "4f775f80834c07fd8e170b06026345b9f1e4963d5f0291182bf243fa5a3f11c8"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-workspace-test-2026-09-28.json",
+      "sha256": "57b651868477d2d51b2647299d2e061d5135599005f48f2621f2b19df360f342"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-workspace-test-review-fix-2026-09-28.json",
+      "sha256": "e08efa95726ff924ef750230f9263d7abdc27d6e7633562d356613a30e720e8a"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-strategies-clippy-2026-09-28.json",
+      "sha256": "c7cdd41b15296704ffe611caf2d7fe2345487a12d10b95e2dbf914abcbb290c9"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-strategies-clippy-final-2026-09-28.json",
+      "sha256": "392de06dc1219bedc7a96c5af4ca8c873a138b6548a415e2cf99957d2f33b8eb"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-strategies-dev-build-final-2026-09-28.json",
+      "sha256": "92a56e2a9a211b41301293d474806690308f683e07df6ed157b42dca37c1b9ea"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-strategies-initial-build-2026-09-28.json",
+      "sha256": "832b5f89622778b3fb0761351e431bb4e472193e8620784e7302d708518dd58b"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-strategies-release-build-2026-09-28.json",
+      "sha256": "88a6a6da53adf78f41e0ffe9b0c167d8bbed7f837079c2fa09c7d007a1f46458"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-strategies-release-build-final-2026-09-28.json",
+      "sha256": "1fe1cfe6610a35a2e5c942744431df70296a0d30e3bdaaa01cd74fd0aaa03968"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-strategies-workspace-test-2026-09-28.json",
+      "sha256": "4073898fb58b783472fac087922427cf49039bc6799973160e0556b8b837b097"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-strategy-parity-test-2026-09-28.json",
+      "sha256": "6f8a23c9ef09193a88ea74742521292a873cfc16b6e1842dd06164a4cc720de9"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-strategy-parity-test-final-2026-09-28.json",
+      "sha256": "c9a7294220f901cbc66b4f14fb524ab7be16e655bd09a74a4df5cd50e6490d9a"
+    },
+    {
+      "path": "poc/vendor/polars-io/.cargo-ok",
+      "sha256": "afbf9d0f3560b0fd7795e81c42a0a79ee6b6fc67e064f77826aee642cad28d91"
+    },
+    {
+      "path": "poc/vendor/polars-io/.cargo_vcs_info.json",
+      "sha256": "ca661de9662a617b4b4b5625d1321ea2fbe7228d84978e7329faefacf66a85dc"
+    },
+    {
+      "path": "poc/vendor/polars-io/Cargo.lock",
+      "sha256": "01a1c65965ee2c92f590f1b9dd70ff826cc008945fc2141da2667f1ea76f02ef"
+    },
+    {
+      "path": "poc/vendor/polars-io/Cargo.toml.orig",
+      "sha256": "2ce6efc2ab6a60c9d40f18c270c3f19b5be108a1ec38b020499c3e163d363673"
+    }
+  ],
+  "untracked_files_complete": true,
+  "dirty_worktree_sha256": "4c3e3e04a6adb0c4361bd435a750329ba51675e82f73a4b1b7c969099d81dfa8",
+  "compiled_source_files": [
+    {
+      "path": ".cargo/config.toml",
+      "sha256": "199dda3f76c1eff2551ad1f2cbdce4b7db5846471992960c08914e580a2fe824"
+    },
+    {
+      "path": "Cargo.lock",
+      "sha256": "250f21792a3ded3c139747c74f96b673b37e57d2b5f550a29e480fea71f60041"
+    },
+    {
+      "path": "Cargo.toml",
+      "sha256": "f7e15b5fe6f8919d9e31e32d99a320db88bf36c7c6f401c329b8172193891b20"
+    },
+    {
+      "path": "crates/quant-research/Cargo.toml",
+      "sha256": "650de46940effb97e67682a865e03a030b638221adc6eb74b5b3cfbcc1b4dd45"
+    },
+    {
+      "path": "crates/quant-research/src/backtest.rs",
+      "sha256": "b1a67aadc12661ab224655e3e966e4f0432370c751f0dc9d23b6965553259540"
+    },
+    {
+      "path": "crates/quant-research/src/batch.rs",
+      "sha256": "4ef3b794065c1a7f22186d497ea3e34ff0e136604eeb1629e5eeb038e2c78b83"
+    },
+    {
+      "path": "crates/quant-research/src/core.rs",
+      "sha256": "dd50175268505788c677829dd276b253adbb3ec624938b2a9f0019d8720ea1ca"
+    },
+    {
+      "path": "crates/quant-research/src/data.rs",
+      "sha256": "3436ac4670ed283ae82951462d7277fdb623f078ea19803fcd75aa29917b02b7"
+    },
+    {
+      "path": "crates/quant-research/src/experiment.rs",
+      "sha256": "f3984c628f8aac5f5ad4f9ae0c9ae0d7d7eccf77b6e7e15b32ad95c3c34716bf"
+    },
+    {
+      "path": "crates/quant-research/src/factor.rs",
+      "sha256": "b2ca1a783fe90b33c4896bd0963ddfe2111fe910a58d71d278723aea2eb60dcf"
+    },
+    {
+      "path": "crates/quant-research/src/feature.rs",
+      "sha256": "e53464fc974a2cd11b93da092b95684816aed36a48ba0790606aebcdba57ca73"
+    },
+    {
+      "path": "crates/quant-research/src/lib.rs",
+      "sha256": "314ccc51e68478d44333c7eddac6ba5431542dbbc5e0c593013380b40bf2787d"
+    },
+    {
+      "path": "crates/quant-research/src/main.rs",
+      "sha256": "2df3c3987b203ce15cb39c39be99e185862348ec6a8beb702cacb983cd4dde23"
+    },
+    {
+      "path": "crates/quant-research/src/market_api.rs",
+      "sha256": "49ddf416fbe3018d33a15cbc6204076311514d33dc6bbcb193f6945d4883673e"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/b3.rs",
+      "sha256": "ccad8c8c72e6cee5ea298a5a26f6f829999ce4391e1d3f3857966d923cdbec6f"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/b3_strategies.rs",
+      "sha256": "42b82b696748b9908fcb46438e344e8f44905b338122179bcf5bfc1d2db3798c"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/parquet.rs",
+      "sha256": "07ef62849d9fed6d021e8b58dc8d3331f1e23a277e69fbe4554a957fe6a529d1"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/sweep.rs",
+      "sha256": "5df3dcd35378687dc148ae57d03207d903bef5ecb5aaf8eccc28dd2404b5e49e"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark.rs",
+      "sha256": "0c12e62fd05813bb43712fa8a813d84642d7417e81e580c76bd8f77df20180f3"
+    },
+    {
+      "path": "crates/quant-research/src/run_jobs.rs",
+      "sha256": "410431ffea185fac385b706af4cf67e976d182e5b25d4bcbeef41a61dc5e7111"
+    },
+    {
+      "path": "crates/quant-research/src/runner.rs",
+      "sha256": "f81594e773547272eca6db4fe89079091f3746ccf8555b2a30735fc0863b6485"
+    },
+    {
+      "path": "crates/quant-research/src/server.rs",
+      "sha256": "5839883ee7c52809f841feeecaf9c634afbee7edcdab4cfa497640c736aec890"
+    },
+    {
+      "path": "crates/quant-research/src/signal.rs",
+      "sha256": "b74a8cd5b9f4477cdd01e6542a5a78184fcdb374976be92cff2d5c941d4f3cde"
+    },
+    {
+      "path": "crates/quant-research/src/strategy.rs",
+      "sha256": "c285e2eff10cd24d7c8cadfebce5a54012e139bf54d9003d97739fba50460150"
+    },
+    {
+      "path": "crates/quant-research/src/universe.rs",
+      "sha256": "47568cb94d37570cacfc2c34662686f72e143df557f2d81d65373978024541c4"
+    },
+    {
+      "path": "crates/quant-research/src/universe_api.rs",
+      "sha256": "a7d0e69f62de6c43f238449b5f69c052464bcf45da081ca45832e32326baa59c"
+    }
+  ],
+  "compiled_source_sha256": "bb4039837295f1577e6ed05ae2e0f9e3aee1519ce60dc131d4c231b23e71b008",
+  "cargo_lock_observation": {
+    "available": true,
+    "tool": "/usr/sbin/lsof",
+    "exit_code": 1,
+    "output": "",
+    "stderr": ""
+  },
+  "python_environment": {
+    "status": "not_configured",
+    "occupancy_bytes": null
+  },
+  "cargo_version": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+  "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "compiler_environment": {
+    "CARGO_TARGET_DIR": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/target",
+    "PYO3_PYTHON": null,
+    "RUSTFLAGS": null,
+    "CARGO_ENCODED_RUSTFLAGS": null
+  },
+  "cargo_lock_sha256": "250f21792a3ded3c139747c74f96b673b37e57d2b5f550a29e480fea71f60041",
+  "dependency_graph_sha256": "a299a6db4a6c6b826d83d81c2ea9ead5aa4923cdf2af2d8147f120faf8e0faef",
+  "dependency_graph_contains_duckdb": true,
+  "profile": "dev",
+  "action": "clippy",
+  "scope": "workspace",
+  "features": [
+    "workspace default features"
+  ],
+  "build_wall_seconds": 4.284142417,
+  "status": "completed",
+  "exit_code": 0,
+  "before": {
+    "volume_free_bytes": 38286131200,
+    "workspace_target_bytes": 26961733938
+  },
+  "after": {
+    "volume_free_bytes": 38284541952,
+    "workspace_target_bytes": 26961874550
+  },
+  "target_delta_bytes": 140612,
+  "stdout": "",
+  "stderr": "warning: `/Users/yibinzhang/.cargo/config` is deprecated in favor of `config.toml`\n  |\n  = help: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\nwarning: `/Users/yibinzhang/.cargo/config` is deprecated in favor of `config.toml`\n  |\n  = help: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\nwarning: unused import: `PlRefPath`\n  --> poc/vendor/polars-io/src/cloud/options.rs:27:42\n   |\n27 | use polars_utils::pl_path::{CloudScheme, PlRefPath};\n   |                                          ^^^^^^^^^\n   |\n   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default\n\nwarning: unused import: `super::parser::next_line_position`\n --> poc/vendor/polars-io/src/csv/read/utils.rs:6:5\n  |\n6 | use super::parser::next_line_position;\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `super::splitfields::SplitFields`\n --> poc/vendor/polars-io/src/csv/read/utils.rs:9:5\n  |\n9 | use super::splitfields::SplitFields;\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `CloudScheme`\n --> poc/vendor/polars-io/src/path_utils/mod.rs:9:29\n  |\n9 | use polars_utils::pl_path::{CloudScheme, PlRefPath};\n  |                             ^^^^^^^^^^^\n\nwarning: unused import: `std::sync::Arc`\n --> poc/vendor/polars-io/src/shared.rs:2:5\n  |\n2 | use std::sync::Arc;\n  |     ^^^^^^^^^^^^^^\n\nwarning: unused import: `crate::options::RowIndex`\n --> poc/vendor/polars-io/src/shared.rs:7:5\n  |\n7 | use crate::options::RowIndex;\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `to_compute_err`\n --> poc/vendor/polars-io/src/utils/compression.rs:6:35\n  |\n6 | use polars_error::{feature_gated, to_compute_err};\n  |                                   ^^^^^^^^^^^^^^\n\nwarning: unused import: `crate::utils::sync_on_close::SyncOnCloseType`\n  --> poc/vendor/polars-io/src/utils/compression.rs:10:5\n   |\n10 | use crate::utils::sync_on_close::SyncOnCloseType;\n   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `polars_err`\n --> poc/vendor/polars-io/src/utils/file.rs:8:49\n  |\n8 | use polars_error::{PolarsResult, feature_gated, polars_err};\n  |                                                 ^^^^^^^^^^\n\nwarning: unused import: `polars_utils::mmap::ensure_not_mapped`\n  --> poc/vendor/polars-io/src/utils/file.rs:11:5\n   |\n11 | use polars_utils::mmap::ensure_not_mapped;\n   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `format_file_uri`\n  --> poc/vendor/polars-io/src/utils/file.rs:12:40\n   |\n12 | use polars_utils::pl_path::{PlRefPath, format_file_uri};\n   |                                        ^^^^^^^^^^^^^^^\n\nwarning: unused variable: `separator`\n   --> poc/vendor/polars-io/src/csv/read/read_impl.rs:157:13\n    |\n157 |         let separator = parse_options.separator;\n    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_separator`\n    |\n    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default\n\nwarning: unused variable: `algo`\n  --> poc/vendor/polars-io/src/utils/compression.rs:49:14\n   |\n49 |     let Some(algo) = SupportedCompression::check(bytes) else {\n   |              ^^^^ help: if this is intentional, prefix it with an underscore: `_algo`\n\nwarning: unused variable: `new_slice_from_read`\n   --> poc/vendor/polars-io/src/utils/compression.rs:192:13\n    |\n192 |         let new_slice_from_read =\n    |             ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_new_slice_from_read`\n\nwarning: unused variable: `writer`\n   --> poc/vendor/polars-io/src/utils/compression.rs:400:17\n    |\n400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {\n    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`\n\nwarning: unused variable: `level`\n   --> poc/vendor/polars-io/src/utils/compression.rs:400:35\n    |\n400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {\n    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`\n\nwarning: unused variable: `writer`\n   --> poc/vendor/polars-io/src/utils/compression.rs:409:17\n    |\n409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {\n    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`\n\nwarning: unused variable: `level`\n   --> poc/vendor/polars-io/src/utils/compression.rs:409:35\n    |\n409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {\n    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`\n\nwarning: unused variable: `buf`\n   --> poc/vendor/polars-io/src/utils/compression.rs:419:25\n    |\n419 |     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {\n    |                         ^^^ help: if this is intentional, prefix it with an underscore: `_buf`\n\nwarning: unused variable: `io_metrics`\n   --> poc/vendor/polars-io/src/utils/byte_source.rs:245:9\n    |\n245 |         io_metrics: Option<Arc<IOMetrics>>,\n    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`\n\nwarning: unused variable: `fetch_config`\n   --> poc/vendor/polars-io/src/utils/byte_source.rs:253:31\n    |\n253 |             Self::ObjectStore(fetch_config) => feature_gated!(\"cloud\", {\n    |                               ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_fetch_config`\n\nwarning: unused variable: `io_metrics`\n  --> poc/vendor/polars-io/src/utils/file.rs:50:9\n   |\n50 |         io_metrics: Option<Arc<IOMetrics>>,\n   |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`\n\nwarning: function `nonzero_usize_max` is never used\n  --> poc/vendor/polars-io/src/csv/read/options.rs:53:10\n   |\n53 | const fn nonzero_usize_max() -> NonZeroUsize {\n   |          ^^^^^^^^^^^^^^^^^\n   |\n   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default\n\nwarning: function `next_line_position` is never used\n   --> poc/vendor/polars-io/src/csv/read/parser.rs:269:15\n    |\n269 | pub(super) fn next_line_position(\n    |               ^^^^^^^^^^^^^^^^^^\n\nwarning: methods `extend` and `extend_from_slice` are never used\n   --> poc/vendor/polars-io/src/path_utils/mod.rs:615:12\n    |\n600 | /     impl<F> OutPaths<'_, F>\n601 | |     where\n602 | |         F: Fn(&PlRefPath) -> bool,\n    | |__________________________________- methods in this implementation\n...\n615 |           fn extend(&mut self, values: impl IntoIterator<Item = PlRefPath>) {\n    |              ^^^^^^\n...\n628 |           fn extend_from_slice(&mut self, values: &[PlRefPath]) {\n    |              ^^^^^^^^^^^^^^^^^\n\nwarning: constant `ESTIMATED_DEFLATE_RATIO` is never used\n   --> poc/vendor/polars-io/src/utils/compression.rs:138:15\n    |\n138 |         const ESTIMATED_DEFLATE_RATIO: usize = 3;\n    |               ^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: constant `ESTIMATED_ZSTD_RATIO` is never used\n   --> poc/vendor/polars-io/src/utils/compression.rs:139:15\n    |\n139 |         const ESTIMATED_ZSTD_RATIO: usize = 5;\n    |               ^^^^^^^^^^^^^^^^^^^^\n\nwarning: function `cloud_writer_coalesce_run_length` is never used\n  --> poc/vendor/polars-io/src/configs.rs:41:15\n   |\n41 | pub(crate) fn cloud_writer_coalesce_run_length() -> usize {\n   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: function `cloud_writer_copy_buffer_size` is never used\n  --> poc/vendor/polars-io/src/configs.rs:65:15\n   |\n65 | pub(crate) fn cloud_writer_copy_buffer_size() -> NonZeroUsize {\n   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: `polars-io` (lib) generated 29 warnings (run `cargo clippy --fix --lib -p polars-io -- -D warnings` to apply 22 suggestions)\n    Checking quant-research v0.1.0 (/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/crates/quant-research)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.12s\n"
+}

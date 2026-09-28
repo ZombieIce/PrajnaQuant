@@ -1,0 +1,381 @@
+{
+  "schema_version": 1,
+  "started_at_utc": "2026-09-27T17:34:47.418606+00:00",
+  "finished_at_utc": "2026-09-27T17:36:12.074251+00:00",
+  "command": [
+    "cargo",
+    "build",
+    "-p",
+    "quant-research",
+    "--no-default-features",
+    "--locked",
+    "--offline",
+    "--profile",
+    "dev",
+    "--features",
+    "b3-pyo3"
+  ],
+  "working_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316",
+  "target_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/target",
+  "cache_state": "warm_existing_workspace_target",
+  "estimated_max_additional_bytes": 2147483648,
+  "minimum_free_bytes": 10737418240,
+  "runtime_stop_free_bytes": 11274289152,
+  "space_samples": [
+    {
+      "observed_at_utc": "2026-09-27T17:34:49.500910+00:00",
+      "volume_free_bytes": 52069498880
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:34:51.505333+00:00",
+      "volume_free_bytes": 52053532672
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:34:53.508643+00:00",
+      "volume_free_bytes": 52038676480
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:34:55.509675+00:00",
+      "volume_free_bytes": 52029812736
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:34:57.512721+00:00",
+      "volume_free_bytes": 52016025600
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:34:59.520428+00:00",
+      "volume_free_bytes": 51973292032
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:01.525622+00:00",
+      "volume_free_bytes": 51923472384
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:03.532246+00:00",
+      "volume_free_bytes": 51904319488
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:05.537369+00:00",
+      "volume_free_bytes": 51883204608
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:07.541859+00:00",
+      "volume_free_bytes": 51873775616
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:09.559301+00:00",
+      "volume_free_bytes": 51850739712
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:11.563149+00:00",
+      "volume_free_bytes": 51817414656
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:13.573545+00:00",
+      "volume_free_bytes": 51811037184
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:15.583771+00:00",
+      "volume_free_bytes": 51772039168
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:17.590949+00:00",
+      "volume_free_bytes": 51681980416
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:19.594937+00:00",
+      "volume_free_bytes": 51680669696
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:21.599670+00:00",
+      "volume_free_bytes": 51602583552
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:23.609826+00:00",
+      "volume_free_bytes": 51509886976
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:25.619412+00:00",
+      "volume_free_bytes": 51503042560
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:27.629537+00:00",
+      "volume_free_bytes": 51503034368
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:29.639651+00:00",
+      "volume_free_bytes": 51503017984
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:31.645399+00:00",
+      "volume_free_bytes": 51486437376
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:33.653127+00:00",
+      "volume_free_bytes": 51470782464
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:35.659056+00:00",
+      "volume_free_bytes": 51439484928
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:37.661579+00:00",
+      "volume_free_bytes": 51380740096
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:39.671847+00:00",
+      "volume_free_bytes": 51263500288
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:41.683177+00:00",
+      "volume_free_bytes": 51212574720
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:43.690884+00:00",
+      "volume_free_bytes": 51121217536
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:45.706235+00:00",
+      "volume_free_bytes": 51085332480
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:47.711296+00:00",
+      "volume_free_bytes": 50945785856
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:49.711899+00:00",
+      "volume_free_bytes": 50736619520
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:51.721848+00:00",
+      "volume_free_bytes": 50710278144
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:53.727294+00:00",
+      "volume_free_bytes": 50374832128
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:55.735814+00:00",
+      "volume_free_bytes": 50137726976
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:57.737477+00:00",
+      "volume_free_bytes": 50096525312
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:35:59.741996+00:00",
+      "volume_free_bytes": 50053656576
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:36:01.745689+00:00",
+      "volume_free_bytes": 49890361344
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:36:03.755821+00:00",
+      "volume_free_bytes": 49776181248
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:36:05.756902+00:00",
+      "volume_free_bytes": 49753219072
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:36:07.760791+00:00",
+      "volume_free_bytes": 49668866048
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:36:09.770705+00:00",
+      "volume_free_bytes": 49656471552
+    }
+  ],
+  "git_revision": "0ff844b26afe1ff86e0786fc90dc61246f23540b",
+  "working_tree_dirty": true,
+  "tracked_diff_sha256": "c5ef334832e554fd79fc028ed18af017d0750148d5809f87f59302c498a86bbb",
+  "tracked_diff_summary": "Cargo.lock                                   | 70 ++++++++++++++++++++++++++++\n crates/quant-research/Cargo.toml             |  2 +\n crates/quant-research/src/main.rs            | 26 +++++++++++\n crates/quant-research/src/poc0_benchmark.rs  |  4 ++\n poc/poc0-benchmark/README.md                 | 32 +++++++++++++\n poc/poc0-benchmark/capture-build-resource.py | 14 ++++--\n 6 files changed, 144 insertions(+), 4 deletions(-)",
+  "changed_paths": [
+    "argo.lock",
+    "crates/quant-research/Cargo.toml",
+    "crates/quant-research/src/main.rs",
+    "crates/quant-research/src/poc0_benchmark.rs",
+    "poc/poc0-benchmark/README.md",
+    "poc/poc0-benchmark/capture-build-resource.py",
+    ".vscode/settings.json",
+    "crates/quant-research/src/poc0_benchmark/b3.rs",
+    "crates/quant-research/tests/poc0_b3_callbacks.rs",
+    "poc/vendor/polars-io/.cargo-ok",
+    "poc/vendor/polars-io/.cargo_vcs_info.json",
+    "poc/vendor/polars-io/Cargo.lock",
+    "poc/vendor/polars-io/Cargo.toml.orig"
+  ],
+  "untracked_files": [
+    {
+      "path": ".vscode/settings.json",
+      "sha256": "bc66a2fb956260d44f9a442a850fd3981a60ea4e9bb3011c64ac5a38f5b924aa"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/b3.rs",
+      "sha256": "3a4a5de58000e9703591c6b8b3d22b48880aa1853c2e15adb6c0d06357179144"
+    },
+    {
+      "path": "crates/quant-research/tests/poc0_b3_callbacks.rs",
+      "sha256": "ff84b065ac4653295ad8a01433f92c82ac4066c52fae415a3b7ac3ef8ce45047"
+    },
+    {
+      "path": "poc/vendor/polars-io/.cargo-ok",
+      "sha256": "afbf9d0f3560b0fd7795e81c42a0a79ee6b6fc67e064f77826aee642cad28d91"
+    },
+    {
+      "path": "poc/vendor/polars-io/.cargo_vcs_info.json",
+      "sha256": "ca661de9662a617b4b4b5625d1321ea2fbe7228d84978e7329faefacf66a85dc"
+    },
+    {
+      "path": "poc/vendor/polars-io/Cargo.lock",
+      "sha256": "01a1c65965ee2c92f590f1b9dd70ff826cc008945fc2141da2667f1ea76f02ef"
+    },
+    {
+      "path": "poc/vendor/polars-io/Cargo.toml.orig",
+      "sha256": "2ce6efc2ab6a60c9d40f18c270c3f19b5be108a1ec38b020499c3e163d363673"
+    }
+  ],
+  "untracked_files_complete": true,
+  "dirty_worktree_sha256": "272b77740bc0a7984004f2584d8533870dd650fd22425d70ff13e80cc8edd391",
+  "compiled_source_files": [
+    {
+      "path": ".cargo/config.toml",
+      "sha256": "199dda3f76c1eff2551ad1f2cbdce4b7db5846471992960c08914e580a2fe824"
+    },
+    {
+      "path": "Cargo.lock",
+      "sha256": "250f21792a3ded3c139747c74f96b673b37e57d2b5f550a29e480fea71f60041"
+    },
+    {
+      "path": "Cargo.toml",
+      "sha256": "f7e15b5fe6f8919d9e31e32d99a320db88bf36c7c6f401c329b8172193891b20"
+    },
+    {
+      "path": "crates/quant-research/Cargo.toml",
+      "sha256": "650de46940effb97e67682a865e03a030b638221adc6eb74b5b3cfbcc1b4dd45"
+    },
+    {
+      "path": "crates/quant-research/src/backtest.rs",
+      "sha256": "b1a67aadc12661ab224655e3e966e4f0432370c751f0dc9d23b6965553259540"
+    },
+    {
+      "path": "crates/quant-research/src/batch.rs",
+      "sha256": "4ef3b794065c1a7f22186d497ea3e34ff0e136604eeb1629e5eeb038e2c78b83"
+    },
+    {
+      "path": "crates/quant-research/src/core.rs",
+      "sha256": "dd50175268505788c677829dd276b253adbb3ec624938b2a9f0019d8720ea1ca"
+    },
+    {
+      "path": "crates/quant-research/src/data.rs",
+      "sha256": "3436ac4670ed283ae82951462d7277fdb623f078ea19803fcd75aa29917b02b7"
+    },
+    {
+      "path": "crates/quant-research/src/experiment.rs",
+      "sha256": "f3984c628f8aac5f5ad4f9ae0c9ae0d7d7eccf77b6e7e15b32ad95c3c34716bf"
+    },
+    {
+      "path": "crates/quant-research/src/factor.rs",
+      "sha256": "b2ca1a783fe90b33c4896bd0963ddfe2111fe910a58d71d278723aea2eb60dcf"
+    },
+    {
+      "path": "crates/quant-research/src/feature.rs",
+      "sha256": "e53464fc974a2cd11b93da092b95684816aed36a48ba0790606aebcdba57ca73"
+    },
+    {
+      "path": "crates/quant-research/src/lib.rs",
+      "sha256": "314ccc51e68478d44333c7eddac6ba5431542dbbc5e0c593013380b40bf2787d"
+    },
+    {
+      "path": "crates/quant-research/src/main.rs",
+      "sha256": "709c9f9098bf3446c0b664c821de34eeec69169ab29f49b4b4164c924e597812"
+    },
+    {
+      "path": "crates/quant-research/src/market_api.rs",
+      "sha256": "49ddf416fbe3018d33a15cbc6204076311514d33dc6bbcb193f6945d4883673e"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/b3.rs",
+      "sha256": "3a4a5de58000e9703591c6b8b3d22b48880aa1853c2e15adb6c0d06357179144"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/parquet.rs",
+      "sha256": "07ef62849d9fed6d021e8b58dc8d3331f1e23a277e69fbe4554a957fe6a529d1"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/sweep.rs",
+      "sha256": "5df3dcd35378687dc148ae57d03207d903bef5ecb5aaf8eccc28dd2404b5e49e"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark.rs",
+      "sha256": "d0748284aad8686e85fe7268a75cae3f60496668493bde8c9891f24a017f7e2d"
+    },
+    {
+      "path": "crates/quant-research/src/run_jobs.rs",
+      "sha256": "410431ffea185fac385b706af4cf67e976d182e5b25d4bcbeef41a61dc5e7111"
+    },
+    {
+      "path": "crates/quant-research/src/runner.rs",
+      "sha256": "f81594e773547272eca6db4fe89079091f3746ccf8555b2a30735fc0863b6485"
+    },
+    {
+      "path": "crates/quant-research/src/server.rs",
+      "sha256": "5839883ee7c52809f841feeecaf9c634afbee7edcdab4cfa497640c736aec890"
+    },
+    {
+      "path": "crates/quant-research/src/signal.rs",
+      "sha256": "b74a8cd5b9f4477cdd01e6542a5a78184fcdb374976be92cff2d5c941d4f3cde"
+    },
+    {
+      "path": "crates/quant-research/src/strategy.rs",
+      "sha256": "c285e2eff10cd24d7c8cadfebce5a54012e139bf54d9003d97739fba50460150"
+    },
+    {
+      "path": "crates/quant-research/src/universe.rs",
+      "sha256": "47568cb94d37570cacfc2c34662686f72e143df557f2d81d65373978024541c4"
+    },
+    {
+      "path": "crates/quant-research/src/universe_api.rs",
+      "sha256": "a7d0e69f62de6c43f238449b5f69c052464bcf45da081ca45832e32326baa59c"
+    }
+  ],
+  "compiled_source_sha256": "1d215950b541a3284ebcbd1a959cffe594882496fc8cec2b7407476fefb608a4",
+  "cargo_lock_observation": {
+    "available": true,
+    "tool": "/usr/sbin/lsof",
+    "exit_code": 1,
+    "output": "",
+    "stderr": ""
+  },
+  "cargo_version": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+  "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "compiler_environment": {
+    "CARGO_TARGET_DIR": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/target",
+    "PYO3_PYTHON": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/.venv/bin/python",
+    "RUSTFLAGS": null,
+    "CARGO_ENCODED_RUSTFLAGS": null
+  },
+  "cargo_lock_sha256": "250f21792a3ded3c139747c74f96b673b37e57d2b5f550a29e480fea71f60041",
+  "dependency_graph_sha256": "0861770bf3e1a3dffb776ba21f7a03f1d139dd2ac5ffa94695b6b75018c3bc24",
+  "dependency_graph_contains_duckdb": false,
+  "profile": "dev",
+  "features": [
+    "poc0 benchmark path; default app features disabled",
+    "b3-pyo3"
+  ],
+  "build_wall_seconds": 83.13793104095384,
+  "status": "completed",
+  "exit_code": 0,
+  "before": {
+    "volume_free_bytes": 52050788352,
+    "workspace_target_bytes": 22500398842
+  },
+  "after": {
+    "volume_free_bytes": 49383329792,
+    "workspace_target_bytes": 24927597113
+  },
+  "target_delta_bytes": 2427198271,
+  "stdout": "",
+  "stderr": "warning: `/Users/yibinzhang/.cargo/config` is deprecated in favor of `config.toml`\n  |\n  = help: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n   Compiling syn v2.0.119\n   Compiling target-lexicon v0.13.5\n   Compiling pyo3-build-config v0.29.0\n   Compiling pyo3-ffi v0.29.0\n   Compiling pyo3 v0.29.0\n   Compiling pyo3-macros-backend v0.29.0\n   Compiling zerocopy-derive v0.8.57\n   Compiling num-derive v0.4.2\n   Compiling strum_macros v0.28.0\n   Compiling async-stream-impl v0.3.6\n   Compiling recursive-proc-macro-impl v0.1.1\n   Compiling recursive v0.1.1\n   Compiling async-stream v0.3.6\n   Compiling zerocopy v0.8.57\n   Compiling pyo3-macros v0.29.0\n   Compiling half v2.7.1\n   Compiling ahash v0.8.12\n   Compiling argminmax v0.6.3\n   Compiling arrow-buffer v58.4.0\n   Compiling polars-utils v0.55.2\n   Compiling arrow-data v58.4.0\n   Compiling arrow-array v58.4.0\n   Compiling polars-buffer v0.55.2\n   Compiling polars-schema v0.55.2\n   Compiling polars-async v0.55.2\n   Compiling polars-arrow v0.55.2\n   Compiling polars-compute v0.55.2\n   Compiling polars-dtype v0.55.2\n   Compiling polars-row v0.55.2\n   Compiling polars-parquet v0.55.2\n   Compiling polars-core v0.55.2\n   Compiling polars-ops v0.55.2\n   Compiling polars-io v0.55.2 (/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/poc/vendor/polars-io)\nwarning: unused import: `PlRefPath`\n  --> poc/vendor/polars-io/src/cloud/options.rs:27:42\n   |\n27 | use polars_utils::pl_path::{CloudScheme, PlRefPath};\n   |                                          ^^^^^^^^^\n   |\n   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default\n\nwarning: unused import: `super::parser::next_line_position`\n --> poc/vendor/polars-io/src/csv/read/utils.rs:6:5\n  |\n6 | use super::parser::next_line_position;\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `super::splitfields::SplitFields`\n --> poc/vendor/polars-io/src/csv/read/utils.rs:9:5\n  |\n9 | use super::splitfields::SplitFields;\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `CloudScheme`\n --> poc/vendor/polars-io/src/path_utils/mod.rs:9:29\n  |\n9 | use polars_utils::pl_path::{CloudScheme, PlRefPath};\n  |                             ^^^^^^^^^^^\n\nwarning: unused import: `std::sync::Arc`\n --> poc/vendor/polars-io/src/shared.rs:2:5\n  |\n2 | use std::sync::Arc;\n  |     ^^^^^^^^^^^^^^\n\nwarning: unused import: `crate::options::RowIndex`\n --> poc/vendor/polars-io/src/shared.rs:7:5\n  |\n7 | use crate::options::RowIndex;\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `to_compute_err`\n --> poc/vendor/polars-io/src/utils/compression.rs:6:35\n  |\n6 | use polars_error::{feature_gated, to_compute_err};\n  |                                   ^^^^^^^^^^^^^^\n\nwarning: unused import: `crate::utils::sync_on_close::SyncOnCloseType`\n  --> poc/vendor/polars-io/src/utils/compression.rs:10:5\n   |\n10 | use crate::utils::sync_on_close::SyncOnCloseType;\n   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `polars_err`\n --> poc/vendor/polars-io/src/utils/file.rs:8:49\n  |\n8 | use polars_error::{PolarsResult, feature_gated, polars_err};\n  |                                                 ^^^^^^^^^^\n\nwarning: unused import: `polars_utils::mmap::ensure_not_mapped`\n  --> poc/vendor/polars-io/src/utils/file.rs:11:5\n   |\n11 | use polars_utils::mmap::ensure_not_mapped;\n   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unused import: `format_file_uri`\n  --> poc/vendor/polars-io/src/utils/file.rs:12:40\n   |\n12 | use polars_utils::pl_path::{PlRefPath, format_file_uri};\n   |                                        ^^^^^^^^^^^^^^^\n\nwarning: unused variable: `separator`\n   --> poc/vendor/polars-io/src/csv/read/read_impl.rs:157:13\n    |\n157 |         let separator = parse_options.separator;\n    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_separator`\n    |\n    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default\n\nwarning: unused variable: `algo`\n  --> poc/vendor/polars-io/src/utils/compression.rs:49:14\n   |\n49 |     let Some(algo) = SupportedCompression::check(bytes) else {\n   |              ^^^^ help: if this is intentional, prefix it with an underscore: `_algo`\n\nwarning: unused variable: `new_slice_from_read`\n   --> poc/vendor/polars-io/src/utils/compression.rs:192:13\n    |\n192 |         let new_slice_from_read =\n    |             ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_new_slice_from_read`\n\nwarning: unused variable: `writer`\n   --> poc/vendor/polars-io/src/utils/compression.rs:400:17\n    |\n400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {\n    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`\n\nwarning: unused variable: `level`\n   --> poc/vendor/polars-io/src/utils/compression.rs:400:35\n    |\n400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {\n    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`\n\nwarning: unused variable: `writer`\n   --> poc/vendor/polars-io/src/utils/compression.rs:409:17\n    |\n409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {\n    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`\n\nwarning: unused variable: `level`\n   --> poc/vendor/polars-io/src/utils/compression.rs:409:35\n    |\n409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {\n    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`\n\nwarning: unused variable: `buf`\n   --> poc/vendor/polars-io/src/utils/compression.rs:419:25\n    |\n419 |     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {\n    |                         ^^^ help: if this is intentional, prefix it with an underscore: `_buf`\n\nwarning: unused variable: `io_metrics`\n   --> poc/vendor/polars-io/src/utils/byte_source.rs:245:9\n    |\n245 |         io_metrics: Option<Arc<IOMetrics>>,\n    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`\n\nwarning: unused variable: `fetch_config`\n   --> poc/vendor/polars-io/src/utils/byte_source.rs:253:31\n    |\n253 |             Self::ObjectStore(fetch_config) => feature_gated!(\"cloud\", {\n    |                               ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_fetch_config`\n\nwarning: unused variable: `io_metrics`\n  --> poc/vendor/polars-io/src/utils/file.rs:50:9\n   |\n50 |         io_metrics: Option<Arc<IOMetrics>>,\n   |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`\n\nwarning: function `nonzero_usize_max` is never used\n  --> poc/vendor/polars-io/src/csv/read/options.rs:53:10\n   |\n53 | const fn nonzero_usize_max() -> NonZeroUsize {\n   |          ^^^^^^^^^^^^^^^^^\n   |\n   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default\n\nwarning: function `next_line_position` is never used\n   --> poc/vendor/polars-io/src/csv/read/parser.rs:269:15\n    |\n269 | pub(super) fn next_line_position(\n    |               ^^^^^^^^^^^^^^^^^^\n\nwarning: methods `extend` and `extend_from_slice` are never used\n   --> poc/vendor/polars-io/src/path_utils/mod.rs:615:12\n    |\n600 | /     impl<F> OutPaths<'_, F>\n601 | |     where\n602 | |         F: Fn(&PlRefPath) -> bool,\n    | |__________________________________- methods in this implementation\n...\n615 |           fn extend(&mut self, values: impl IntoIterator<Item = PlRefPath>) {\n    |              ^^^^^^\n...\n628 |           fn extend_from_slice(&mut self, values: &[PlRefPath]) {\n    |              ^^^^^^^^^^^^^^^^^\n\nwarning: constant `ESTIMATED_DEFLATE_RATIO` is never used\n   --> poc/vendor/polars-io/src/utils/compression.rs:138:15\n    |\n138 |         const ESTIMATED_DEFLATE_RATIO: usize = 3;\n    |               ^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: constant `ESTIMATED_ZSTD_RATIO` is never used\n   --> poc/vendor/polars-io/src/utils/compression.rs:139:15\n    |\n139 |         const ESTIMATED_ZSTD_RATIO: usize = 5;\n    |               ^^^^^^^^^^^^^^^^^^^^\n\nwarning: function `cloud_writer_coalesce_run_length` is never used\n  --> poc/vendor/polars-io/src/configs.rs:41:15\n   |\n41 | pub(crate) fn cloud_writer_coalesce_run_length() -> usize {\n   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: function `cloud_writer_copy_buffer_size` is never used\n  --> poc/vendor/polars-io/src/configs.rs:65:15\n   |\n65 | pub(crate) fn cloud_writer_copy_buffer_size() -> NonZeroUsize {\n   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n   Compiling polars-plan v0.55.2\nwarning: `polars-io` (lib) generated 29 warnings (run `cargo fix --lib -p polars-io` to apply 22 suggestions)\n   Compiling polars-expr v0.55.2\n   Compiling polars-mem-engine v0.55.2\n   Compiling polars-lazy v0.55.2\n   Compiling polars v0.55.2\n   Compiling quant-research v0.1.0 (/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/crates/quant-research)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 23s\n"
+}

@@ -1,0 +1,341 @@
+{
+  "conclusion": "unresolved: fixed 3 ETF x 10 session fixture validates callback parity and measures this tiny workload only; it does not establish a scale crossover or parallel/GIL conclusion",
+  "correctness": {
+    "account_projection_checksum_sha256": "f2ffcc44a2e94c778ad33e0731632bed69da98d05696f8934222f7e94f557928",
+    "empty_callbacks_emit_no_decisions": true,
+    "rust_accounting_nav_invariant_passed": true,
+    "rust_native_python_s1_decisions_match": true
+  },
+  "correctness_checks": [
+    "Rust Native and PyO3 callbacks received the same date/symbol ordered bar stream",
+    "Rust Native S1 and Python on_bar emitted identical decision events",
+    "Empty callbacks returned no decisions for every event"
+  ],
+  "dataset_content_sha256": "8c16742a2031cab19e08456dbbe009769b02f0331276618831cefdb6827b5a6f",
+  "dataset_version": "poc0.synthetic.etf-daily.v1",
+  "decision_date": "2026-01-12",
+  "decision_events": [
+    [
+      "2026-01-12",
+      [
+        "A",
+        "B",
+        "C"
+      ]
+    ]
+  ],
+  "decision_symbol": "C",
+  "engine": "Rust Native + embedded CPython through PyO3",
+  "event_count_per_run": 29,
+  "event_order": "ascending trade date, then ascending symbol; missing bars emit no callback",
+  "measurements": {
+    "python_empty_callback": {
+      "callbacks_per_run": 29,
+      "end_to_end_median_ns": 163167,
+      "end_to_end_p95_ns": 170417,
+      "median_ns": 47000,
+      "p95_ns": 48000,
+      "raw_end_to_end_samples_ns": [
+        170417,
+        164209,
+        162208,
+        162916,
+        163167
+      ],
+      "raw_samples_ns": [
+        47000,
+        47416,
+        46792,
+        46875,
+        48000
+      ],
+      "status": "measured",
+      "warmup_runs": 1
+    },
+    "python_s1_on_bar": {
+      "callbacks_per_run": 29,
+      "end_to_end_median_ns": 169292,
+      "end_to_end_p95_ns": 173167,
+      "median_ns": 50125,
+      "p95_ns": 50875,
+      "raw_end_to_end_samples_ns": [
+        173167,
+        165375,
+        165083,
+        170541,
+        169292
+      ],
+      "raw_samples_ns": [
+        50417,
+        49875,
+        49541,
+        50875,
+        50125
+      ],
+      "status": "measured",
+      "warmup_runs": 1
+    },
+    "python_strategy_scope": "Python returns only the S1 target decision; Rust Fast Event interprets orders, fills, costs, marks, cash, positions, and portfolio result",
+    "requested_runs": 5,
+    "rust_native_empty_callback": {
+      "callbacks_per_run": 29,
+      "end_to_end_median_ns": null,
+      "end_to_end_p95_ns": null,
+      "median_ns": 250,
+      "p95_ns": 250,
+      "raw_end_to_end_samples_ns": [],
+      "raw_samples_ns": [
+        250,
+        250,
+        250,
+        250,
+        250
+      ],
+      "status": "measured",
+      "warmup_runs": 1
+    },
+    "rust_native_s1_callback": {
+      "callbacks_per_run": 29,
+      "end_to_end_median_ns": 35042,
+      "end_to_end_p95_ns": 35667,
+      "median_ns": 1083,
+      "p95_ns": 1125,
+      "raw_end_to_end_samples_ns": [
+        35667,
+        34833,
+        35042,
+        34834,
+        35166
+      ],
+      "raw_samples_ns": [
+        1125,
+        1083,
+        1042,
+        1042,
+        1125
+      ],
+      "status": "measured",
+      "warmup_runs": 1
+    },
+    "timing_scope": "per-run callback loop and callback-plus-Rust-account end-to-end; fixture parsing and report serialization excluded",
+    "warmup_runs": 1
+  },
+  "portfolio_result": {
+    "fills": [
+      {
+        "commission": 100.0,
+        "date": "2026-01-13",
+        "fill_price": 100.1,
+        "gross_value": 30030.0,
+        "quantity": 300,
+        "reference_price": 100.0,
+        "side": "BUY",
+        "slippage_cost": 29.999999999998295,
+        "symbol": "A",
+        "tax": 0.0
+      },
+      {
+        "commission": 100.0,
+        "date": "2026-01-13",
+        "fill_price": 100.1,
+        "gross_value": 30030.0,
+        "quantity": 300,
+        "reference_price": 100.0,
+        "side": "BUY",
+        "slippage_cost": 29.999999999998295,
+        "symbol": "C",
+        "tax": 0.0
+      },
+      {
+        "commission": 100.0,
+        "date": "2026-01-14",
+        "fill_price": 100.1,
+        "gross_value": 30030.0,
+        "quantity": 300,
+        "reference_price": 100.0,
+        "side": "BUY",
+        "slippage_cost": 29.999999999998295,
+        "symbol": "B",
+        "tax": 0.0
+      }
+    ],
+    "ledger": [
+      {
+        "cash": 100000.0,
+        "date": "2026-01-05",
+        "holdings": [],
+        "nav": 100000.0
+      },
+      {
+        "cash": 100000.0,
+        "date": "2026-01-06",
+        "holdings": [],
+        "nav": 100000.0
+      },
+      {
+        "cash": 100000.0,
+        "date": "2026-01-07",
+        "holdings": [],
+        "nav": 100000.0
+      },
+      {
+        "cash": 100000.0,
+        "date": "2026-01-08",
+        "holdings": [],
+        "nav": 100000.0
+      },
+      {
+        "cash": 100000.0,
+        "date": "2026-01-09",
+        "holdings": [],
+        "nav": 100000.0
+      },
+      {
+        "cash": 100000.0,
+        "date": "2026-01-12",
+        "holdings": [],
+        "nav": 100000.0
+      },
+      {
+        "cash": 39740.0,
+        "date": "2026-01-13",
+        "holdings": [
+          {
+            "mark_price": 100.0,
+            "quantity": 300,
+            "symbol": "A"
+          },
+          {
+            "mark_price": 103.0,
+            "quantity": 300,
+            "symbol": "C"
+          }
+        ],
+        "nav": 100640.0
+      },
+      {
+        "cash": 9610.0,
+        "date": "2026-01-14",
+        "holdings": [
+          {
+            "mark_price": 101.0,
+            "quantity": 300,
+            "symbol": "A"
+          },
+          {
+            "mark_price": 100.0,
+            "quantity": 300,
+            "symbol": "B"
+          },
+          {
+            "mark_price": 104.0,
+            "quantity": 300,
+            "symbol": "C"
+          }
+        ],
+        "nav": 101110.0
+      },
+      {
+        "cash": 9610.0,
+        "date": "2026-01-15",
+        "holdings": [
+          {
+            "mark_price": 102.0,
+            "quantity": 300,
+            "symbol": "A"
+          },
+          {
+            "mark_price": 99.0,
+            "quantity": 300,
+            "symbol": "B"
+          },
+          {
+            "mark_price": 103.0,
+            "quantity": 300,
+            "symbol": "C"
+          }
+        ],
+        "nav": 100810.0
+      },
+      {
+        "cash": 9610.0,
+        "date": "2026-01-16",
+        "holdings": [
+          {
+            "mark_price": 103.0,
+            "quantity": 300,
+            "symbol": "A"
+          },
+          {
+            "mark_price": 99.0,
+            "quantity": 300,
+            "symbol": "B"
+          },
+          {
+            "mark_price": 105.0,
+            "quantity": 300,
+            "symbol": "C"
+          }
+        ],
+        "nav": 101710.0
+      }
+    ],
+    "orders": [
+      {
+        "attempt_date": "2026-01-13",
+        "decision_date": "2026-01-12",
+        "quantity": 300,
+        "reason": null,
+        "side": "BUY",
+        "symbol": "A"
+      },
+      {
+        "attempt_date": "2026-01-13",
+        "decision_date": "2026-01-12",
+        "quantity": 0,
+        "reason": "HALTED",
+        "side": "BUY",
+        "symbol": "B"
+      },
+      {
+        "attempt_date": "2026-01-13",
+        "decision_date": "2026-01-12",
+        "quantity": 300,
+        "reason": null,
+        "side": "BUY",
+        "symbol": "C"
+      },
+      {
+        "attempt_date": "2026-01-14",
+        "decision_date": "2026-01-12",
+        "quantity": 300,
+        "reason": null,
+        "side": "BUY",
+        "symbol": "B"
+      }
+    ],
+    "summary": {
+      "commission": 300.0,
+      "final_equity": 101710.0,
+      "final_positions": {
+        "A": 300,
+        "B": 300,
+        "C": 300
+      },
+      "initial_cash": 100000.0,
+      "slippage_cost": 89.99999999999488,
+      "tax": 0.0,
+      "total_cost": 389.9999999999949
+    },
+    "unexecuted_targets": []
+  },
+  "pyo3_version": "0.29.0",
+  "python_version": "3.12.2 (main, Feb  6 2024, 20:19:44) [Clang 15.0.0 (clang-1500.1.0.2.5)]",
+  "schema_version": "poc0.b3.report.v1",
+  "status": "correctness_passed_and_measured",
+  "targets": [
+    "A",
+    "B",
+    "C"
+  ]
+}

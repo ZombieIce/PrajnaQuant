@@ -22,8 +22,14 @@ use std::{
     time::Instant,
 };
 
+#[cfg(feature = "b3-pyo3")]
+mod b3;
 mod parquet;
 mod sweep;
+#[cfg(feature = "b3-pyo3")]
+pub use b3::run_b3;
+#[cfg(feature = "b3-pyo3")]
+pub use b3::run_b3_strategies;
 pub use parquet::{ParquetOptions, run_parquet};
 pub use sweep::{SweepOptions, run_sweep};
 
@@ -1269,18 +1275,34 @@ fn fast_event_checks(
 /// their opens. Targets blocked by status or missing bars remain pending. Holdings are
 /// marked at the latest observed close, never at a fabricated zero price.
 fn run_fast_event(dataset: &PreparedDataset) -> FastEventRun {
-    let end_to_end_started = Instant::now();
-    let calendar = &dataset.spec.calendar;
-    let initial_cash = dataset.spec.account.initial_cash;
+    let decision_index = dataset.spec.calendar.len().saturating_sub(5);
+    let decision_date = dataset.spec.calendar[decision_index];
     let targets = dataset
         .spec
         .instruments
         .iter()
-        .map(|i| i.symbol.clone())
+        .map(|instrument| instrument.symbol.clone())
         .collect::<Vec<_>>();
-    let decision_index = calendar.len().saturating_sub(5);
-    let decision_date = calendar[decision_index];
-    let budget = initial_cash / targets.len() as f64;
+    run_fast_event_with_targets(dataset, decision_date, targets)
+}
+
+fn run_fast_event_with_targets(
+    dataset: &PreparedDataset,
+    decision_date: NaiveDate,
+    targets: Vec<String>,
+) -> FastEventRun {
+    let end_to_end_started = Instant::now();
+    let calendar = &dataset.spec.calendar;
+    let initial_cash = dataset.spec.account.initial_cash;
+    let decision_index = calendar
+        .iter()
+        .position(|date| *date == decision_date)
+        .expect("decision date must belong to the dataset calendar");
+    let budget = if targets.is_empty() {
+        0.0
+    } else {
+        initial_cash / targets.len() as f64
+    };
     let lot = dataset.spec.account.lot_size;
     let initialization_started = Instant::now();
     let mut by_day: BTreeMap<NaiveDate, BTreeMap<&str, &Bar>> = BTreeMap::new();

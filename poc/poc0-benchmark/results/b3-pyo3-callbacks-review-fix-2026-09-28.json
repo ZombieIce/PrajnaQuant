@@ -1,0 +1,422 @@
+{
+  "conclusion": "unresolved: fixed 3 ETF x 10 session fixture validates callback parity and measures this tiny workload only; it does not establish a scale crossover or parallel/GIL conclusion",
+  "correctness": {
+    "account_projection_checksum_sha256": "f2ffcc44a2e94c778ad33e0731632bed69da98d05696f8934222f7e94f557928",
+    "empty_callbacks_emit_no_decisions": true,
+    "python_decision_account_projection_matches_rust": true,
+    "python_s1_decision_matches_expected_event": true,
+    "rust_accounting_nav_invariant_passed": true,
+    "rust_native_python_s1_decisions_match": true,
+    "rust_s1_decision_matches_expected_event": true
+  },
+  "correctness_checks": [
+    "Rust Native and PyO3 callbacks received the same date/symbol ordered bar stream",
+    "Rust Native S1 and Python on_bar emitted identical date/symbol/target decision events",
+    "S1 emitted its decision on the configured bar event",
+    "Empty callbacks returned no decisions for every event"
+  ],
+  "dataset_content_sha256": "8c16742a2031cab19e08456dbbe009769b02f0331276618831cefdb6827b5a6f",
+  "dataset_version": "poc0.synthetic.etf-daily.v1",
+  "decision_date": "2026-01-12",
+  "decision_events": [
+    {
+      "date": "2026-01-12",
+      "symbol": "C",
+      "targets": [
+        "A",
+        "B",
+        "C"
+      ]
+    }
+  ],
+  "decision_symbol": "C",
+  "engine": "Rust Native + embedded CPython through PyO3",
+  "event_count_per_run": 29,
+  "event_order": "ascending trade date, then ascending symbol; missing bars emit no callback",
+  "measurements": {
+    "end_to_end_scope": "Python/Rust empty include their callback loop plus a no-trade Rust account run; S1 includes the callback loop plus Buy & Hold Rust Fast Event accounting; Python per-run module/object setup is included in Python end-to-end and reported separately",
+    "initialization_scope": "per-run embedded module and strategy object creation; the embedded interpreter itself is initialized before warmup",
+    "python_empty_callback": {
+      "callbacks_per_run": 29,
+      "end_to_end_median_ns": 107958,
+      "end_to_end_p95_ns": 118709,
+      "initialization_median_ns": 92000,
+      "median_ns": 11583,
+      "p95_ns": 12084,
+      "raw_end_to_end_samples_ns": [
+        118709,
+        109958,
+        107958,
+        104500,
+        105083
+      ],
+      "raw_initialization_samples_ns": [
+        101541,
+        94209,
+        92000,
+        88542,
+        88583
+      ],
+      "raw_samples_ns": [
+        11375,
+        11167,
+        11583,
+        11583,
+        12084
+      ],
+      "status": "measured",
+      "warmup_runs": 1
+    },
+    "python_s1_on_bar": {
+      "callbacks_per_run": 29,
+      "end_to_end_median_ns": 109333,
+      "end_to_end_p95_ns": 118834,
+      "initialization_median_ns": 90292,
+      "median_ns": 12709,
+      "p95_ns": 13042,
+      "raw_end_to_end_samples_ns": [
+        118834,
+        109333,
+        108500,
+        106875,
+        111583
+      ],
+      "raw_initialization_samples_ns": [
+        98583,
+        90292,
+        89583,
+        88208,
+        92375
+      ],
+      "raw_samples_ns": [
+        12958,
+        12709,
+        12583,
+        12416,
+        13042
+      ],
+      "status": "measured",
+      "warmup_runs": 1
+    },
+    "python_strategy_scope": "Python receives only date/symbol/close and returns the S1 target decision; Rust Fast Event interprets orders, fills, costs, marks, cash, positions, and portfolio result",
+    "requested_runs": 5,
+    "rust_native_empty_callback": {
+      "callbacks_per_run": 29,
+      "end_to_end_median_ns": 3583,
+      "end_to_end_p95_ns": 3834,
+      "initialization_median_ns": null,
+      "median_ns": 42,
+      "p95_ns": 83,
+      "raw_end_to_end_samples_ns": [
+        3834,
+        3666,
+        3542,
+        3583,
+        3583
+      ],
+      "raw_initialization_samples_ns": [],
+      "raw_samples_ns": [
+        83,
+        42,
+        42,
+        42,
+        41
+      ],
+      "status": "measured",
+      "warmup_runs": 1
+    },
+    "rust_native_s1_callback": {
+      "callbacks_per_run": 29,
+      "end_to_end_median_ns": 5667,
+      "end_to_end_p95_ns": 6209,
+      "initialization_median_ns": null,
+      "median_ns": 209,
+      "p95_ns": 333,
+      "raw_end_to_end_samples_ns": [
+        6209,
+        5667,
+        5583,
+        5667,
+        5500
+      ],
+      "raw_initialization_samples_ns": [],
+      "raw_samples_ns": [
+        333,
+        250,
+        209,
+        208,
+        166
+      ],
+      "status": "measured",
+      "warmup_runs": 1
+    },
+    "timing_scope": "per-run callback loop and callback-plus-Rust-account end-to-end; fixture parsing and report serialization excluded",
+    "warmup_runs": 1
+  },
+  "portfolio_result": {
+    "fills": [
+      {
+        "commission": 100.0,
+        "date": "2026-01-13",
+        "fill_price": 100.1,
+        "gross_value": 30030.0,
+        "quantity": 300,
+        "reference_price": 100.0,
+        "side": "BUY",
+        "slippage_cost": 29.999999999998295,
+        "symbol": "A",
+        "tax": 0.0
+      },
+      {
+        "commission": 100.0,
+        "date": "2026-01-13",
+        "fill_price": 100.1,
+        "gross_value": 30030.0,
+        "quantity": 300,
+        "reference_price": 100.0,
+        "side": "BUY",
+        "slippage_cost": 29.999999999998295,
+        "symbol": "C",
+        "tax": 0.0
+      },
+      {
+        "commission": 100.0,
+        "date": "2026-01-14",
+        "fill_price": 100.1,
+        "gross_value": 30030.0,
+        "quantity": 300,
+        "reference_price": 100.0,
+        "side": "BUY",
+        "slippage_cost": 29.999999999998295,
+        "symbol": "B",
+        "tax": 0.0
+      }
+    ],
+    "ledger": [
+      {
+        "cash": 100000.0,
+        "date": "2026-01-05",
+        "holdings": [],
+        "nav": 100000.0
+      },
+      {
+        "cash": 100000.0,
+        "date": "2026-01-06",
+        "holdings": [],
+        "nav": 100000.0
+      },
+      {
+        "cash": 100000.0,
+        "date": "2026-01-07",
+        "holdings": [],
+        "nav": 100000.0
+      },
+      {
+        "cash": 100000.0,
+        "date": "2026-01-08",
+        "holdings": [],
+        "nav": 100000.0
+      },
+      {
+        "cash": 100000.0,
+        "date": "2026-01-09",
+        "holdings": [],
+        "nav": 100000.0
+      },
+      {
+        "cash": 100000.0,
+        "date": "2026-01-12",
+        "holdings": [],
+        "nav": 100000.0
+      },
+      {
+        "cash": 39740.0,
+        "date": "2026-01-13",
+        "holdings": [
+          {
+            "mark_price": 100.0,
+            "quantity": 300,
+            "symbol": "A"
+          },
+          {
+            "mark_price": 103.0,
+            "quantity": 300,
+            "symbol": "C"
+          }
+        ],
+        "nav": 100640.0
+      },
+      {
+        "cash": 9610.0,
+        "date": "2026-01-14",
+        "holdings": [
+          {
+            "mark_price": 101.0,
+            "quantity": 300,
+            "symbol": "A"
+          },
+          {
+            "mark_price": 100.0,
+            "quantity": 300,
+            "symbol": "B"
+          },
+          {
+            "mark_price": 104.0,
+            "quantity": 300,
+            "symbol": "C"
+          }
+        ],
+        "nav": 101110.0
+      },
+      {
+        "cash": 9610.0,
+        "date": "2026-01-15",
+        "holdings": [
+          {
+            "mark_price": 102.0,
+            "quantity": 300,
+            "symbol": "A"
+          },
+          {
+            "mark_price": 99.0,
+            "quantity": 300,
+            "symbol": "B"
+          },
+          {
+            "mark_price": 103.0,
+            "quantity": 300,
+            "symbol": "C"
+          }
+        ],
+        "nav": 100810.0
+      },
+      {
+        "cash": 9610.0,
+        "date": "2026-01-16",
+        "holdings": [
+          {
+            "mark_price": 103.0,
+            "quantity": 300,
+            "symbol": "A"
+          },
+          {
+            "mark_price": 99.0,
+            "quantity": 300,
+            "symbol": "B"
+          },
+          {
+            "mark_price": 105.0,
+            "quantity": 300,
+            "symbol": "C"
+          }
+        ],
+        "nav": 101710.0
+      }
+    ],
+    "orders": [
+      {
+        "attempt_date": "2026-01-13",
+        "decision_date": "2026-01-12",
+        "quantity": 300,
+        "reason": null,
+        "side": "BUY",
+        "symbol": "A"
+      },
+      {
+        "attempt_date": "2026-01-13",
+        "decision_date": "2026-01-12",
+        "quantity": 0,
+        "reason": "HALTED",
+        "side": "BUY",
+        "symbol": "B"
+      },
+      {
+        "attempt_date": "2026-01-13",
+        "decision_date": "2026-01-12",
+        "quantity": 300,
+        "reason": null,
+        "side": "BUY",
+        "symbol": "C"
+      },
+      {
+        "attempt_date": "2026-01-14",
+        "decision_date": "2026-01-12",
+        "quantity": 300,
+        "reason": null,
+        "side": "BUY",
+        "symbol": "B"
+      }
+    ],
+    "summary": {
+      "commission": 300.0,
+      "final_equity": 101710.0,
+      "final_positions": {
+        "A": 300,
+        "B": 300,
+        "C": 300
+      },
+      "initial_cash": 100000.0,
+      "slippage_cost": 89.99999999999488,
+      "tax": 0.0,
+      "total_cost": 389.9999999999949
+    },
+    "unexecuted_targets": []
+  },
+  "provenance": {
+    "architecture": "aarch64",
+    "build_profile": "release",
+    "cargo_lock_sha256": "250f21792a3ded3c139747c74f96b673b37e57d2b5f550a29e480fea71f60041",
+    "changed_paths": [
+      "scratch/poc-0-benchmark/issues/10-pyo3-basic-callback-comparison.md",
+      "Cargo.lock",
+      "HANDOFF.md",
+      "crates/quant-research/Cargo.toml",
+      "crates/quant-research/src/main.rs",
+      "crates/quant-research/src/poc0_benchmark.rs",
+      "docs/STATUS.md",
+      "poc/poc0-benchmark/README.md",
+      "poc/poc0-benchmark/capture-build-resource.py",
+      ".vscode/settings.json",
+      "crates/quant-research/src/poc0_benchmark/b3.rs",
+      "crates/quant-research/tests/poc0_b3_callbacks.rs",
+      "poc/poc0-benchmark/results/b3-pyo3-build-dev-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-build-release-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-build-release-final-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-build-review-fix-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-callbacks-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-clippy-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-clippy-default-features-examples-failure-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-debug-correctness-check-failure-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-test-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-test-exact-float-assertion-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-test-final-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-test-review-fix-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-test-review-fix-final-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-workspace-clippy-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-workspace-test-2026-09-28.json",
+      "poc/vendor/polars-io/.cargo-ok",
+      "poc/vendor/polars-io/.cargo_vcs_info.json",
+      "poc/vendor/polars-io/Cargo.lock",
+      "poc/vendor/polars-io/Cargo.toml.orig"
+    ],
+    "cpu_model": null,
+    "git_revision": "0ff844b26afe1ff86e0786fc90dc61246f23540b",
+    "logical_cpu_count": 8,
+    "operating_system": "macos",
+    "physical_memory_bytes": null,
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "tracked_diff_sha256": "2e7e2dce096c0ee2640a177ad562b97a5b36ebe1a6f71bf876b8173acd060a68",
+    "tracked_diff_summary": ".../issues/10-pyo3-basic-callback-comparison.md    | 16 ++--\n Cargo.lock                                         | 70 ++++++++++++++++\n HANDOFF.md                                         | 12 ++-\n crates/quant-research/Cargo.toml                   |  2 +\n crates/quant-research/src/main.rs                  | 26 ++++++\n crates/quant-research/src/poc0_benchmark.rs        | 34 ++++++--\n docs/STATUS.md                                     |  8 +-\n poc/poc0-benchmark/README.md                       | 52 ++++++++++++\n poc/poc0-benchmark/capture-build-resource.py       | 93 ++++++++++++++++++----\n 9 files changed, 279 insertions(+), 34 deletions(-)",
+    "working_tree_complete": false,
+    "working_tree_dirty": true
+  },
+  "pyo3_version": "0.29.0",
+  "python_version": "3.12.2 (main, Feb  6 2024, 20:19:44) [Clang 15.0.0 (clang-1500.1.0.2.5)]",
+  "schema_version": "poc0.b3.report.v1",
+  "status": "correctness_passed_and_measured",
+  "targets": [
+    "A",
+    "B",
+    "C"
+  ]
+}

@@ -111,9 +111,36 @@ def cargo_lock_observation() -> dict:
     }
 
 
+def python_environment_observation() -> dict:
+    interpreter = os.environ.get("PYO3_PYTHON")
+    if not interpreter:
+        return {"status": "not_configured", "occupancy_bytes": None}
+    try:
+        identity = json.loads(
+            output(
+                [
+                    interpreter,
+                    "-c",
+                    "import json,sys; print(json.dumps({'executable':sys.executable,'version':sys.version,'prefix':sys.prefix}))",
+                ]
+            )
+        )
+        identity["status"] = "observed"
+        identity["occupancy_bytes"] = tree_size(pathlib.Path(identity["prefix"]))
+        return identity
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
+        return {"status": "unavailable", "occupancy_bytes": None, "error": str(error)}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile", choices=("dev", "release"), required=True)
+    parser.add_argument("--features", choices=("b3-pyo3",))
+    parser.add_argument("--action", choices=("build", "test", "clippy"), default="build")
+    parser.add_argument("--scope", choices=("poc", "workspace"), default="poc")
+    parser.add_argument(
+        "--test-target", choices=("poc0_b3_callbacks", "b3_strategy_parity")
+    )
     parser.add_argument("--output", type=pathlib.Path, required=True)
     parser.add_argument(
         "--estimated-max-additional-bytes",
@@ -124,18 +151,47 @@ def main() -> int:
     parser.add_argument("--poll-interval-seconds", type=float, default=2.0)
     args = parser.parse_args()
 
-    command = [
-        "cargo",
-        "build",
-        "-p",
-        "quant-research",
-        "--no-default-features",
-        "--locked",
-        "--offline",
-        "--profile",
-        args.profile,
-    ]
+    if args.scope == "workspace":
+        if args.features or args.action == "build":
+            parser.error("workspace scope supports test/clippy without crate-specific features")
+        command = ["cargo", args.action, "--workspace", "--locked", "--offline"]
+        if args.action == "clippy":
+            command.extend(["--all-targets", "--", "-D", "warnings"])
+        elif args.test_target:
+            parser.error("--test-target is not valid for workspace tests")
+    else:
+        command = ["cargo", args.action]
+        if args.action == "clippy":
+            command.extend(
+                ["-p", "quant-research", "--no-default-features", "--lib", "--bin", "quant-research"]
+            )
+        else:
+            command.extend(["-p", "quant-research", "--no-default-features"])
+        command.extend(["--locked", "--offline"])
+        if args.features:
+            command.extend(["--features", args.features])
+            if args.action == "clippy":
+                command.extend(["--test", "poc0_b3_callbacks"])
+        if args.action == "test":
+            if not args.test_target:
+                parser.error("--action test requires --test-target")
+            if args.test_target == "b3_strategy_parity":
+                command.extend(
+                    [
+                        "--lib",
+                        "s2_s3_python_callbacks_match_fixed_golden_signals_and_accounts",
+                    ]
+                )
+            else:
+                command.extend(["--test", args.test_target])
+        elif args.test_target:
+            parser.error("--test-target is only valid with --action test")
+        if args.action == "build":
+            command.extend(["--profile", args.profile])
+        elif args.action == "clippy":
+            command.extend(["--", "-D", "warnings"])
     before = snapshot()
+    python_environment = python_environment_observation()
     lock_observation = cargo_lock_observation()
     refusal = None
     if before["volume_free_bytes"] < MIN_FREE_BYTES:
@@ -162,8 +218,10 @@ def main() -> int:
         print(refusal, file=sys.stderr)
         return 3
 
-    dependency_graph = output(
-        [
+    if args.scope == "workspace":
+        tree_command = ["cargo", "tree", "--workspace", "--locked", "--offline", "-e", "normal"]
+    else:
+        tree_command = [
             "cargo",
             "tree",
             "-p",
@@ -174,9 +232,11 @@ def main() -> int:
             "-e",
             "normal",
         ]
-    )
+        if args.features:
+            tree_command.extend(["--features", args.features])
+    dependency_graph = output(tree_command)
     forbidden = ("duckdb", "libduckdb-sys", "ashare-warehouse")
-    if any(name in dependency_graph for name in forbidden):
+    if args.scope == "poc" and any(name in dependency_graph for name in forbidden):
         raise SystemExit("refusing build: POC dependency graph contains a forbidden package")
 
     started_at = datetime.now(timezone.utc).isoformat()
@@ -253,18 +313,27 @@ def main() -> int:
         **worktree,
         **source_identity,
         "cargo_lock_observation": lock_observation,
+        "python_environment": python_environment,
         "cargo_version": output(["cargo", "--version"]),
         "rustc_version": output(["rustc", "--version"]),
         "compiler_environment": {
             "CARGO_TARGET_DIR": str(TARGET),
+            "PYO3_PYTHON": os.environ.get("PYO3_PYTHON"),
             "RUSTFLAGS": os.environ.get("RUSTFLAGS"),
             "CARGO_ENCODED_RUSTFLAGS": os.environ.get("CARGO_ENCODED_RUSTFLAGS"),
         },
         "cargo_lock_sha256": lock_hash,
         "dependency_graph_sha256": graph_hash,
-        "dependency_graph_contains_duckdb": False,
+        "dependency_graph_contains_duckdb": "duckdb" in dependency_graph,
         "profile": args.profile,
-        "features": ["poc0 benchmark path; default app features disabled"],
+        "action": args.action,
+        "scope": args.scope,
+        "features": (
+            ["workspace default features"]
+            if args.scope == "workspace"
+            else ["poc0 benchmark path; default app features disabled"]
+            + ([args.features] if args.features else [])
+        ),
         "build_wall_seconds": elapsed,
         "status": status,
         "exit_code": process.returncode,

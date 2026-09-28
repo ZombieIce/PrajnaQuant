@@ -2,7 +2,19 @@
 
 日期：2026-09-26。用户确认 Rust-first 多市场平台路线取代此前 A 股日频 + Web 初级产品交付顺序。目标决策见 [`ARCHITECTURE.md`](ARCHITECTURE.md)，新路线见 [`docs/product-roadmap.md`](docs/product-roadmap.md)，领域词汇见 [`CONTEXT.md`](CONTEXT.md)，POC-0 工作范围与验收见 [本地 spec](.scratch/poc-0-benchmark/spec.md)，执行规范见 [`docs/poc-0-benchmark-spec.md`](docs/poc-0-benchmark-spec.md)，目标 ADR 为 0009–0011。旧 A 股路线保存在 [`docs/legacy-ashare-roadmap.md`](docs/legacy-ashare-roadmap.md)。这些是目标/试验文档，**不是三级引擎、Nautilus 或 Python 入口的已实现证据**；现有功能与量化 P0 风险仍以 `docs/STATUS.md` 及下方 Batch 2 交接为准。
 
-## 当前交接（2026-09-27）
+## 当前交接（2026-09-28，POC-0/10–11 已验收）
+
+票据 10 B3 基础回调对照已实现并通过独立 review：可选 `b3-pyo3` feature 增加 `benchmark-poc0-b3` CLI，PyO3 0.29.0 嵌入 Python 3.12.2。固定 3 ETF × 10 日 fixture 的 29 个 present-bar events 按交易日和 symbol 排序，Rust Native/Python empty 与 S1 回调收到同一事件流；S1 决策按日期、symbol 和目标逐事件相等，同日错误 symbol 会被拒绝。Python 输出的 S1 target 被传入同一 Rust Fast Event 账户 runner，所有订单/Fill、现金/持仓、成本、NAV 和 PortfolioResult 与 Rust reference 与独立 fixture 一致，checksum `f2ffcc44a2e94c778ad33e0731632bed69da98d05696f8934222f7e94f557928`。原始 release 五次样本、版本/数据 hash/provenance 在 [B3 callback report](poc/poc0-benchmark/results/b3-pyo3-callbacks-review-fix-2026-09-28.json)；复跑和限制见 [POC README](poc/poc0-benchmark/README.md#b3-pyo3-per-bar-callback-comparison-ticket-10)。单机微型样本不支持规模拐点、GIL 并行结论或生产选型；ticket 10 性能结论保持 `unresolved`。
+
+初始 warm PyO3 build dev/release 分别 83.14/284.00 s，target 逻辑字节增量 2,427,198,271/434,471,616；Python 环境 162,369,399 bytes。最终源码 release warm rebuild 17.86 s、+1,022 target bytes。workspace target 共用且全程超过 10 GiB 保留线，未清理缓存。构建/测试/Clippy 资源原始记录列于票据 10 与 `poc/poc0-benchmark/results/b3-pyo3-*.json`。
+
+票据 11 已由用户验收：S2 Momentum Rotation 与 S3 MA20/60 的 Rust Native、Python per-bar 与 Python batch 对比已完成。固定独立 golden 对拍通过，64 instruments × 252 sessions 合成目标负载的决策与 Rust 账户 checksum 三候选一致。预登记门槛为两策略均需 callback 并行中位数 ≤ Rust 2× 且端到端 2-worker Runs/s ≥ Rust 80%；最终 release 两策略两种 Python 模式均未达到，结论是 `reject` 该目标负载。Runs/s（Rust / Python per-bar / Python batch）：S2 126.04 / 6.67 / 14.48；S3 472.64 / 11.58 / 144.38。该结论限定在这台机器与合成 64×252 workload，不外推通用 Python 边界。进程共享峰值 RSS 91,078,656 bytes，不能归因单候选；Python 3.12.2 环境 162,369,399 bytes；最终 warm release feature build 19.51 s、target 逻辑字节变化 -960。原始报告与资源记录见 [ticket 11](.scratch/poc-0-benchmark/issues/11-pyo3-strategies-and-parallel-boundary.md)。
+
+验证记录：`cargo fmt --all -- --check`、`python3 -m py_compile poc/poc0-benchmark/capture-build-resource.py`、`git diff --check` 通过；B3 S1 集成测试 1/1、B3 S2/S3 golden parity 测试 1/1 通过；`cargo test --workspace --locked --offline` 为 16 + 65 + 11 passed、1 ignored；workspace Clippy 和 B3 feature Clippy 均通过；S2/S3 release B3 正确性通过。票据 10 的独立 review P2 已修复并复核通过；本轮票据 11 按用户要求未做 independent review。Clippy 保留 vendor `polars-io` 的既有 29 项 unused 警告。调试/首次链接失败均有原始记录。未提交；保留 `.vscode/` 和 `poc/vendor/polars-io/` 下用户工作区既存未跟踪文件。
+
+**唯一建议下一步：**执行票据 12 POC-0 综合结论，逐项保留 09 的跨引擎吞吐不可比状态与 11 的目标负载 reject 结论，不据此宣称生产技术选型。
+
+## 前次交接（2026-09-27）
 
 票据 09 实现交接：固定 3 ETF × 10 日 S2 Momentum Rotation 与 3 instrument × 130 日 S3 MA20/60 已由 Rust Fast Event 和 pinned Nautilus 2.0.0rc5 运行。S2 复用固定因子/排名/TopK 语义，`UNKNOWN` 入场被拒、`HALTED` 出场延期；S3 有独立版本化输入/预期，MA60 首次有效时不交易，cross-up/down 后次日 open 分别买卖 900 股。两个策略的信号、Adapter 项目订单、Fill、账户现金/持仓、成本与逐日 NAV 在共同子集通过。S2 原生停牌订单生命周期按 [ADR 0012](docs/decisions/0012-poc0-nautilus-status-gate.md) 排除在判定外，不冒充 Nautilus 原生拒单。本结论基于上述共同子集成立；停牌场景下的原生订单生命周期语义仍 `unresolved`，不构成本次结论的一部分。
 

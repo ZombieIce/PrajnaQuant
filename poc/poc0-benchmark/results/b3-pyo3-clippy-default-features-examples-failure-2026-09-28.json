@@ -1,0 +1,327 @@
+{
+  "schema_version": 1,
+  "started_at_utc": "2026-09-27T17:52:04.397156+00:00",
+  "finished_at_utc": "2026-09-27T17:52:29.983148+00:00",
+  "command": [
+    "cargo",
+    "clippy",
+    "-p",
+    "quant-research",
+    "--no-default-features",
+    "--all-targets",
+    "--locked",
+    "--offline",
+    "--features",
+    "b3-pyo3",
+    "--",
+    "-D",
+    "warnings"
+  ],
+  "working_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316",
+  "target_directory": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/target",
+  "cache_state": "warm_existing_workspace_target",
+  "estimated_max_additional_bytes": 2147483648,
+  "minimum_free_bytes": 10737418240,
+  "runtime_stop_free_bytes": 11274289152,
+  "space_samples": [
+    {
+      "observed_at_utc": "2026-09-27T17:52:06.481420+00:00",
+      "volume_free_bytes": 48227844096
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:52:08.491613+00:00",
+      "volume_free_bytes": 48202305536
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:52:10.501759+00:00",
+      "volume_free_bytes": 48197046272
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:52:12.502403+00:00",
+      "volume_free_bytes": 48192659456
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:52:14.509281+00:00",
+      "volume_free_bytes": 48190726144
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:52:16.515709+00:00",
+      "volume_free_bytes": 48190251008
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:52:18.519519+00:00",
+      "volume_free_bytes": 48187482112
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:52:20.529612+00:00",
+      "volume_free_bytes": 48164241408
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:52:22.532220+00:00",
+      "volume_free_bytes": 48164159488
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:52:24.534703+00:00",
+      "volume_free_bytes": 48158773248
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:52:26.536084+00:00",
+      "volume_free_bytes": 48140132352
+    },
+    {
+      "observed_at_utc": "2026-09-27T17:52:28.543893+00:00",
+      "volume_free_bytes": 48104783872
+    }
+  ],
+  "git_revision": "0ff844b26afe1ff86e0786fc90dc61246f23540b",
+  "working_tree_dirty": true,
+  "tracked_diff_sha256": "b68bdf955bde1db5ff73ee1f786727264c6c410470d2d874eefb793e31ad23a4",
+  "tracked_diff_summary": ".../issues/10-pyo3-basic-callback-comparison.md    | 16 +++--\n Cargo.lock                                         | 70 ++++++++++++++++++\n crates/quant-research/Cargo.toml                   |  2 +\n crates/quant-research/src/main.rs                  | 26 +++++++\n crates/quant-research/src/poc0_benchmark.rs        | 34 +++++++--\n poc/poc0-benchmark/README.md                       | 51 +++++++++++++\n poc/poc0-benchmark/capture-build-resource.py       | 83 +++++++++++++++++-----\n 7 files changed, 253 insertions(+), 29 deletions(-)",
+  "changed_paths": [
+    "scratch/poc-0-benchmark/issues/10-pyo3-basic-callback-comparison.md",
+    "Cargo.lock",
+    "crates/quant-research/Cargo.toml",
+    "crates/quant-research/src/main.rs",
+    "crates/quant-research/src/poc0_benchmark.rs",
+    "poc/poc0-benchmark/README.md",
+    "poc/poc0-benchmark/capture-build-resource.py",
+    ".vscode/settings.json",
+    "crates/quant-research/src/poc0_benchmark/b3.rs",
+    "crates/quant-research/tests/poc0_b3_callbacks.rs",
+    "poc/poc0-benchmark/results/b3-pyo3-build-dev-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-build-release-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-build-release-final-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-callbacks-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-debug-correctness-check-failure-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-test-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-test-exact-float-assertion-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-test-final-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-workspace-clippy-2026-09-28.json",
+    "poc/poc0-benchmark/results/b3-pyo3-workspace-test-2026-09-28.json",
+    "poc/vendor/polars-io/.cargo-ok",
+    "poc/vendor/polars-io/.cargo_vcs_info.json",
+    "poc/vendor/polars-io/Cargo.lock",
+    "poc/vendor/polars-io/Cargo.toml.orig"
+  ],
+  "untracked_files": [
+    {
+      "path": ".vscode/settings.json",
+      "sha256": "bc66a2fb956260d44f9a442a850fd3981a60ea4e9bb3011c64ac5a38f5b924aa"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/b3.rs",
+      "sha256": "5b05ef6b6ab30a4f5db124425fdfc1e928e81ec7607e813ecbf3962710a06a2c"
+    },
+    {
+      "path": "crates/quant-research/tests/poc0_b3_callbacks.rs",
+      "sha256": "ef3d2132d306f5cc6c522c4051e282d296180ea9efe449e15dac50be966fd5a2"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-build-dev-2026-09-28.json",
+      "sha256": "032202c03cde02f57d1fba651fc18049039aa2c247d6a6835084a2cae847b9a5"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-build-release-2026-09-28.json",
+      "sha256": "fbb1de3f8576756f60d33e66eaaa28d9b53f49ceb79aee2ab39a199b89f5b84a"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-build-release-final-2026-09-28.json",
+      "sha256": "d5d1a8095ed0fbd9e18d016193c77f88ab87007f2eacc10c33041cfcf403395d"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-callbacks-2026-09-28.json",
+      "sha256": "c82a66a6320efa8973d0cdff026533cc59c02f7152f3035f9dc59b073b156393"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-debug-correctness-check-failure-2026-09-28.json",
+      "sha256": "0b793c6c27cf6aa1796e65755e182d01cc08c0e7a94a452b086a4bb3aab05b74"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-test-2026-09-28.json",
+      "sha256": "bef7d0b5a794d3500f27767f2b0af3437c4e79a8f51ca41bba4ac9b9d83b82a5"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-test-exact-float-assertion-2026-09-28.json",
+      "sha256": "b1cb183b2ab4dfcaa4f51bea98e33e80c16bb48c90aa94ccb8efe56e0ac9edb2"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-test-final-2026-09-28.json",
+      "sha256": "1a7659acd487cc5e82274ea89cdc7e4335086cb3ec593b38a87c377d459cbe28"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-workspace-clippy-2026-09-28.json",
+      "sha256": "d7e5c36ffba9466f9dee9f5d40ffbf09c2f90f37b73194720d6faedb096e094b"
+    },
+    {
+      "path": "poc/poc0-benchmark/results/b3-pyo3-workspace-test-2026-09-28.json",
+      "sha256": "56ed108229a72320cd388908a85374daf2a2e82a6d601c061ca3f14a782ff717"
+    },
+    {
+      "path": "poc/vendor/polars-io/.cargo-ok",
+      "sha256": "afbf9d0f3560b0fd7795e81c42a0a79ee6b6fc67e064f77826aee642cad28d91"
+    },
+    {
+      "path": "poc/vendor/polars-io/.cargo_vcs_info.json",
+      "sha256": "ca661de9662a617b4b4b5625d1321ea2fbe7228d84978e7329faefacf66a85dc"
+    },
+    {
+      "path": "poc/vendor/polars-io/Cargo.lock",
+      "sha256": "01a1c65965ee2c92f590f1b9dd70ff826cc008945fc2141da2667f1ea76f02ef"
+    },
+    {
+      "path": "poc/vendor/polars-io/Cargo.toml.orig",
+      "sha256": "2ce6efc2ab6a60c9d40f18c270c3f19b5be108a1ec38b020499c3e163d363673"
+    }
+  ],
+  "untracked_files_complete": true,
+  "dirty_worktree_sha256": "5e7c05718e582c04ea9577917313c331d1b6c7fd43ce3aa3325cecf7fcd19bd5",
+  "compiled_source_files": [
+    {
+      "path": ".cargo/config.toml",
+      "sha256": "199dda3f76c1eff2551ad1f2cbdce4b7db5846471992960c08914e580a2fe824"
+    },
+    {
+      "path": "Cargo.lock",
+      "sha256": "250f21792a3ded3c139747c74f96b673b37e57d2b5f550a29e480fea71f60041"
+    },
+    {
+      "path": "Cargo.toml",
+      "sha256": "f7e15b5fe6f8919d9e31e32d99a320db88bf36c7c6f401c329b8172193891b20"
+    },
+    {
+      "path": "crates/quant-research/Cargo.toml",
+      "sha256": "650de46940effb97e67682a865e03a030b638221adc6eb74b5b3cfbcc1b4dd45"
+    },
+    {
+      "path": "crates/quant-research/src/backtest.rs",
+      "sha256": "b1a67aadc12661ab224655e3e966e4f0432370c751f0dc9d23b6965553259540"
+    },
+    {
+      "path": "crates/quant-research/src/batch.rs",
+      "sha256": "4ef3b794065c1a7f22186d497ea3e34ff0e136604eeb1629e5eeb038e2c78b83"
+    },
+    {
+      "path": "crates/quant-research/src/core.rs",
+      "sha256": "dd50175268505788c677829dd276b253adbb3ec624938b2a9f0019d8720ea1ca"
+    },
+    {
+      "path": "crates/quant-research/src/data.rs",
+      "sha256": "3436ac4670ed283ae82951462d7277fdb623f078ea19803fcd75aa29917b02b7"
+    },
+    {
+      "path": "crates/quant-research/src/experiment.rs",
+      "sha256": "f3984c628f8aac5f5ad4f9ae0c9ae0d7d7eccf77b6e7e15b32ad95c3c34716bf"
+    },
+    {
+      "path": "crates/quant-research/src/factor.rs",
+      "sha256": "b2ca1a783fe90b33c4896bd0963ddfe2111fe910a58d71d278723aea2eb60dcf"
+    },
+    {
+      "path": "crates/quant-research/src/feature.rs",
+      "sha256": "e53464fc974a2cd11b93da092b95684816aed36a48ba0790606aebcdba57ca73"
+    },
+    {
+      "path": "crates/quant-research/src/lib.rs",
+      "sha256": "314ccc51e68478d44333c7eddac6ba5431542dbbc5e0c593013380b40bf2787d"
+    },
+    {
+      "path": "crates/quant-research/src/main.rs",
+      "sha256": "709c9f9098bf3446c0b664c821de34eeec69169ab29f49b4b4164c924e597812"
+    },
+    {
+      "path": "crates/quant-research/src/market_api.rs",
+      "sha256": "49ddf416fbe3018d33a15cbc6204076311514d33dc6bbcb193f6945d4883673e"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/b3.rs",
+      "sha256": "5b05ef6b6ab30a4f5db124425fdfc1e928e81ec7607e813ecbf3962710a06a2c"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/parquet.rs",
+      "sha256": "07ef62849d9fed6d021e8b58dc8d3331f1e23a277e69fbe4554a957fe6a529d1"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark/sweep.rs",
+      "sha256": "5df3dcd35378687dc148ae57d03207d903bef5ecb5aaf8eccc28dd2404b5e49e"
+    },
+    {
+      "path": "crates/quant-research/src/poc0_benchmark.rs",
+      "sha256": "0e3ecc6352d23e2767d65879034c29d8b5bdfde645521a7f0048e05f4436d8bd"
+    },
+    {
+      "path": "crates/quant-research/src/run_jobs.rs",
+      "sha256": "410431ffea185fac385b706af4cf67e976d182e5b25d4bcbeef41a61dc5e7111"
+    },
+    {
+      "path": "crates/quant-research/src/runner.rs",
+      "sha256": "f81594e773547272eca6db4fe89079091f3746ccf8555b2a30735fc0863b6485"
+    },
+    {
+      "path": "crates/quant-research/src/server.rs",
+      "sha256": "5839883ee7c52809f841feeecaf9c634afbee7edcdab4cfa497640c736aec890"
+    },
+    {
+      "path": "crates/quant-research/src/signal.rs",
+      "sha256": "b74a8cd5b9f4477cdd01e6542a5a78184fcdb374976be92cff2d5c941d4f3cde"
+    },
+    {
+      "path": "crates/quant-research/src/strategy.rs",
+      "sha256": "c285e2eff10cd24d7c8cadfebce5a54012e139bf54d9003d97739fba50460150"
+    },
+    {
+      "path": "crates/quant-research/src/universe.rs",
+      "sha256": "47568cb94d37570cacfc2c34662686f72e143df557f2d81d65373978024541c4"
+    },
+    {
+      "path": "crates/quant-research/src/universe_api.rs",
+      "sha256": "a7d0e69f62de6c43f238449b5f69c052464bcf45da081ca45832e32326baa59c"
+    }
+  ],
+  "compiled_source_sha256": "2dd3309014904c6921b71f3a89811bd4f06ee282dfe915275932609958728441",
+  "cargo_lock_observation": {
+    "available": true,
+    "tool": "/usr/sbin/lsof",
+    "exit_code": 1,
+    "output": "",
+    "stderr": ""
+  },
+  "python_environment": {
+    "executable": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/.venv/bin/python",
+    "version": "3.12.2 (main, Feb  6 2024, 20:19:44) [Clang 15.0.0 (clang-1500.1.0.2.5)]",
+    "prefix": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/.venv",
+    "status": "observed",
+    "occupancy_bytes": 162369399
+  },
+  "cargo_version": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+  "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "compiler_environment": {
+    "CARGO_TARGET_DIR": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/target",
+    "PYO3_PYTHON": "/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/.venv/bin/python",
+    "RUSTFLAGS": null,
+    "CARGO_ENCODED_RUSTFLAGS": null
+  },
+  "cargo_lock_sha256": "250f21792a3ded3c139747c74f96b673b37e57d2b5f550a29e480fea71f60041",
+  "dependency_graph_sha256": "0861770bf3e1a3dffb776ba21f7a03f1d139dd2ac5ffa94695b6b75018c3bc24",
+  "dependency_graph_contains_duckdb": false,
+  "profile": "dev",
+  "action": "clippy",
+  "scope": "poc",
+  "features": [
+    "poc0 benchmark path; default app features disabled",
+    "b3-pyo3"
+  ],
+  "build_wall_seconds": 24.487630875082687,
+  "status": "failed",
+  "exit_code": 101,
+  "before": {
+    "volume_free_bytes": 48229269504,
+    "workspace_target_bytes": 26043050394
+  },
+  "after": {
+    "volume_free_bytes": 48098164736,
+    "workspace_target_bytes": 26174300366
+  },
+  "target_delta_bytes": 131249972,
+  "stdout": "",
+  "stderr": "> poc/vendor/polars-io/src/utils/file.rs:12:40\n   |\n12 | use polars_utils::pl_path::{PlRefPath, format_file_uri};\n   |                                        ^^^^^^^^^^^^^^^\n\nwarning: unused variable: `separator`\n   --> poc/vendor/polars-io/src/csv/read/read_impl.rs:157:13\n    |\n157 |         let separator = parse_options.separator;\n    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_separator`\n    |\n    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default\n\nwarning: unused variable: `algo`\n  --> poc/vendor/polars-io/src/utils/compression.rs:49:14\n   |\n49 |     let Some(algo) = SupportedCompression::check(bytes) else {\n   |              ^^^^ help: if this is intentional, prefix it with an underscore: `_algo`\n\nwarning: unused variable: `new_slice_from_read`\n   --> poc/vendor/polars-io/src/utils/compression.rs:192:13\n    |\n192 |         let new_slice_from_read =\n    |             ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_new_slice_from_read`\n\nwarning: unused variable: `writer`\n   --> poc/vendor/polars-io/src/utils/compression.rs:400:17\n    |\n400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {\n    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`\n\nwarning: unused variable: `level`\n   --> poc/vendor/polars-io/src/utils/compression.rs:400:35\n    |\n400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {\n    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`\n\nwarning: unused variable: `writer`\n   --> poc/vendor/polars-io/src/utils/compression.rs:409:17\n    |\n409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {\n    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`\n\nwarning: unused variable: `level`\n   --> poc/vendor/polars-io/src/utils/compression.rs:409:35\n    |\n409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {\n    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`\n\nwarning: unused variable: `buf`\n   --> poc/vendor/polars-io/src/utils/compression.rs:419:25\n    |\n419 |     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {\n    |                         ^^^ help: if this is intentional, prefix it with an underscore: `_buf`\n\nwarning: unused variable: `io_metrics`\n   --> poc/vendor/polars-io/src/utils/byte_source.rs:245:9\n    |\n245 |         io_metrics: Option<Arc<IOMetrics>>,\n    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`\n\nwarning: unused variable: `fetch_config`\n   --> poc/vendor/polars-io/src/utils/byte_source.rs:253:31\n    |\n253 |             Self::ObjectStore(fetch_config) => feature_gated!(\"cloud\", {\n    |                               ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_fetch_config`\n\nwarning: unused variable: `io_metrics`\n  --> poc/vendor/polars-io/src/utils/file.rs:50:9\n   |\n50 |         io_metrics: Option<Arc<IOMetrics>>,\n   |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`\n\nwarning: function `nonzero_usize_max` is never used\n  --> poc/vendor/polars-io/src/csv/read/options.rs:53:10\n   |\n53 | const fn nonzero_usize_max() -> NonZeroUsize {\n   |          ^^^^^^^^^^^^^^^^^\n   |\n   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default\n\nwarning: function `next_line_position` is never used\n   --> poc/vendor/polars-io/src/csv/read/parser.rs:269:15\n    |\n269 | pub(super) fn next_line_position(\n    |               ^^^^^^^^^^^^^^^^^^\n\nwarning: methods `extend` and `extend_from_slice` are never used\n   --> poc/vendor/polars-io/src/path_utils/mod.rs:615:12\n    |\n600 | /     impl<F> OutPaths<'_, F>\n601 | |     where\n602 | |         F: Fn(&PlRefPath) -> bool,\n    | |__________________________________- methods in this implementation\n...\n615 |           fn extend(&mut self, values: impl IntoIterator<Item = PlRefPath>) {\n    |              ^^^^^^\n...\n628 |           fn extend_from_slice(&mut self, values: &[PlRefPath]) {\n    |              ^^^^^^^^^^^^^^^^^\n\nwarning: constant `ESTIMATED_DEFLATE_RATIO` is never used\n   --> poc/vendor/polars-io/src/utils/compression.rs:138:15\n    |\n138 |         const ESTIMATED_DEFLATE_RATIO: usize = 3;\n    |               ^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: constant `ESTIMATED_ZSTD_RATIO` is never used\n   --> poc/vendor/polars-io/src/utils/compression.rs:139:15\n    |\n139 |         const ESTIMATED_ZSTD_RATIO: usize = 5;\n    |               ^^^^^^^^^^^^^^^^^^^^\n\nwarning: function `cloud_writer_coalesce_run_length` is never used\n  --> poc/vendor/polars-io/src/configs.rs:41:15\n   |\n41 | pub(crate) fn cloud_writer_coalesce_run_length() -> usize {\n   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: function `cloud_writer_copy_buffer_size` is never used\n  --> poc/vendor/polars-io/src/configs.rs:65:15\n   |\n65 | pub(crate) fn cloud_writer_copy_buffer_size() -> NonZeroUsize {\n   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: `polars-io` (lib) generated 29 warnings (run `cargo clippy --fix --lib -p polars-io -- -D warnings` to apply 22 suggestions)\n    Checking polars-plan v0.55.2\n    Checking polars-expr v0.55.2\n    Checking polars-mem-engine v0.55.2\n    Checking polars-lazy v0.55.2\n    Checking polars v0.55.2\n    Checking quant-research v0.1.0 (/Users/yibinzhang/Documents/ChatGPT/A\u80a1\u91cf\u5316/crates/quant-research)\nerror[E0432]: unresolved import `quant_research::data`\n --> crates/quant-research/examples/market_snapshot_fixture.rs:5:21\n  |\n5 | use quant_research::data::{DailySnapshotManifest, SnapshotManifest};\n  |                     ^^^^ could not find `data` in `quant_research`\n  |\nnote: found an item that was configured out\n --> crates/quant-research/src/lib.rs:6:9\n  |\n5 | #[cfg(feature = \"app\")]\n  |       --------------- the item is gated behind the `app` feature\n6 | pub mod data;\n  |         ^^^^\n\nerror[E0432]: unresolved import `duckdb`\n --> crates/quant-research/examples/market_snapshot_fixture.rs:4:5\n  |\n4 | use duckdb::Connection;\n  |     ^^^^^^ use of unresolved module or unlinked crate `duckdb`\n  |\n  = help: if you wanted to use a crate named `duckdb`, use `cargo add duckdb` to add it to your `Cargo.toml`\n\nFor more information about this error, try `rustc --explain E0432`.\nerror: could not compile `quant-research` (example \"market_snapshot_fixture\") due to 2 previous errors\nwarning: build failed, waiting for other jobs to finish...\nerror[E0432]: unresolved import `duckdb`\n --> crates/quant-research/examples/etf_status_gated_replay.rs:3:5\n  |\n3 | use duckdb::Connection;\n  |     ^^^^^^ use of unresolved module or unlinked crate `duckdb`\n  |\n  = help: if you wanted to use a crate named `duckdb`, use `cargo add duckdb` to add it to your `Cargo.toml`\n\nerror[E0432]: unresolved imports `quant_research::data`, `quant_research::experiment`, `quant_research::runner`, `quant_research::server`\n  --> crates/quant-research/tests/etf_universe_mvp.rs:5:5\n   |\n 5 |     data::{self, SnapshotManifest},\n   |     ^^^^ could not find `data` in `quant_research`\n 6 |     experiment::ExperimentResult,\n   |     ^^^^^^^^^^ could not find `experiment` in `quant_research`\n 7 |     runner, server,\n   |     ^^^^^^  ^^^^^^ no `server` in the root\n   |     |\n   |     no `runner` in the root\n   |\nnote: found an item that was configured out\n  --> crates/quant-research/src/lib.rs:6:9\n   |\n 5 | #[cfg(feature = \"app\")]\n   |       --------------- the item is gated behind the `app` feature\n 6 | pub mod data;\n   |         ^^^^\nnote: found an item that was configured out\n  --> crates/quant-research/src/lib.rs:8:9\n   |\n 7 | #[cfg(feature = \"app\")]\n   |       --------------- the item is gated behind the `app` feature\n 8 | pub mod experiment;\n   |         ^^^^^^^^^^\nnote: found an item that was configured out\n  --> crates/quant-research/src/lib.rs:13:9\n   |\n12 | #[cfg(feature = \"app\")]\n   |       --------------- the item is gated behind the `app` feature\n13 | pub mod runner;\n   |         ^^^^^^\nnote: found an item that was configured out\n  --> crates/quant-research/src/lib.rs:15:9\n   |\n14 | #[cfg(feature = \"app\")]\n   |       --------------- the item is gated behind the `app` feature\n15 | pub mod server;\n   |         ^^^^^^\n\nerror[E0432]: unresolved imports `quant_research::data`, `quant_research::experiment`, `quant_research::runner`, `quant_research::server`\n  --> crates/quant-research/examples/etf_status_gated_replay.rs:4:22\n   |\n 4 | use quant_research::{data, experiment::ExperimentResult, runner, server};\n   |                      ^^^^  ^^^^^^^^^^                    ^^^^^^  ^^^^^^ no `server` in the root\n   |                      |     |                             |\n   |                      |     |                             no `runner` in the root\n   |                      |     could not find `experiment` in `quant_research`\n   |                      no `data` in the root\n   |\nnote: found an item that was configured out\n  --> crates/quant-research/src/lib.rs:6:9\n   |\n 5 | #[cfg(feature = \"app\")]\n   |       --------------- the item is gated behind the `app` feature\n 6 | pub mod data;\n   |         ^^^^\nnote: found an item that was configured out\n  --> crates/quant-research/src/lib.rs:8:9\n   |\n 7 | #[cfg(feature = \"app\")]\n   |       --------------- the item is gated behind the `app` feature\n 8 | pub mod experiment;\n   |         ^^^^^^^^^^\nnote: found an item that was configured out\n  --> crates/quant-research/src/lib.rs:13:9\n   |\n12 | #[cfg(feature = \"app\")]\n   |       --------------- the item is gated behind the `app` feature\n13 | pub mod runner;\n   |         ^^^^^^\nnote: found an item that was configured out\n  --> crates/quant-research/src/lib.rs:15:9\n   |\n14 | #[cfg(feature = \"app\")]\n   |       --------------- the item is gated behind the `app` feature\n15 | pub mod server;\n   |         ^^^^^^\n\nerror: could not compile `quant-research` (example \"etf_status_gated_replay\") due to 2 previous errors\nerror[E0432]: unresolved import `quant_research::data`\n --> crates/quant-research/examples/audit_daily_snapshot.rs:3:21\n  |\n3 | use quant_research::data::audit_daily_market_coverage;\n  |                     ^^^^ could not find `data` in `quant_research`\n  |\nnote: found an item that was configured out\n --> crates/quant-research/src/lib.rs:6:9\n  |\n5 | #[cfg(feature = \"app\")]\n  |       --------------- the item is gated behind the `app` feature\n6 | pub mod data;\n  |         ^^^^\n\nerror: could not compile `quant-research` (example \"audit_daily_snapshot\") due to 1 previous error\nerror[E0432]: unresolved imports `quant_research::data`, `quant_research::runner`, `quant_research::server`\n  --> crates/quant-research/examples/etf_universe_mvp.rs:5:5\n   |\n 5 |     data::{self, SnapshotManifest},\n   |     ^^^^ could not find `data` in `quant_research`\n 6 |     runner, server,\n   |     ^^^^^^  ^^^^^^ no `server` in the root\n   |     |\n   |     no `runner` in the root\n   |\nnote: found an item that was configured out\n  --> crates/quant-research/src/lib.rs:6:9\n   |\n 5 | #[cfg(feature = \"app\")]\n   |       --------------- the item is gated behind the `app` feature\n 6 | pub mod data;\n   |         ^^^^\nnote: found an item that was configured out\n  --> crates/quant-research/src/lib.rs:13:9\n   |\n12 | #[cfg(feature = \"app\")]\n   |       --------------- the item is gated behind the `app` feature\n13 | pub mod runner;\n   |         ^^^^^^\nnote: found an item that was configured out\n  --> crates/quant-research/src/lib.rs:15:9\n   |\n14 | #[cfg(feature = \"app\")]\n   |       --------------- the item is gated behind the `app` feature\n15 | pub mod server;\n   |         ^^^^^^\n\nerror: could not compile `quant-research` (example \"etf_universe_mvp\") due to 1 previous error\nerror: could not compile `quant-research` (test \"etf_universe_mvp\") due to 1 previous error\n"
+}

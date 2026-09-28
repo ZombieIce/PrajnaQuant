@@ -103,6 +103,22 @@ enum Command {
         #[arg(long, default_value = "target/poc-0/b2-throughput.json")]
         output: PathBuf,
     },
+    /// Compare Rust Native and PyO3 Python per-bar callbacks on the fixed S1 event stream.
+    #[cfg(feature = "b3-pyo3")]
+    BenchmarkPoc0B3 {
+        #[arg(long, default_value = "poc/poc0-benchmark/fixtures/dataset-v1.json")]
+        dataset: PathBuf,
+        #[arg(long, default_value = "poc/poc0-benchmark/fixtures/expected-v1.json")]
+        expected: PathBuf,
+        #[arg(long, default_value = "target/poc-0/b3-pyo3-callbacks.json")]
+        output: PathBuf,
+    },
+    /// Compare Rust Native and PyO3 implementations of B3 S2/S3 and run-boundary choices.
+    #[cfg(feature = "b3-pyo3")]
+    BenchmarkPoc0B3Strategies {
+        #[arg(long, default_value = "target/poc-0/b3-strategies-parallel.json")]
+        output: PathBuf,
+    },
     /// Generate a versioned Parquet fixture and benchmark the three B1 paths on one scan.
     BenchmarkPoc0Parquet {
         #[arg(long, default_value = "poc/poc0-benchmark/fixtures/dataset-v1.json")]
@@ -350,6 +366,38 @@ async fn main() -> Result<()> {
             }
             std::fs::write(&output, serde_json::to_vec_pretty(&report)?)?;
             println!("POC-0 B2 {}: {}", report["status"], output.display());
+        }
+        #[cfg(feature = "b3-pyo3")]
+        Command::BenchmarkPoc0B3 {
+            dataset,
+            expected,
+            output,
+        } => {
+            let report = poc0_benchmark::run_b3(&dataset, &expected)?;
+            if let Some(parent) = output.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&output, serde_json::to_vec_pretty(&report)?)?;
+            println!("POC-0 B3 {}: {}", report["status"], output.display());
+            if report["status"] != "correctness_passed_and_measured" {
+                std::process::exit(2);
+            }
+        }
+        #[cfg(feature = "b3-pyo3")]
+        Command::BenchmarkPoc0B3Strategies { output } => {
+            let report = poc0_benchmark::run_b3_strategies()?;
+            if let Some(parent) = output.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&output, serde_json::to_vec_pretty(&report)?)?;
+            println!(
+                "POC-0 B3 strategies {}: {}",
+                report["status"],
+                output.display()
+            );
+            if report["status"] != "correctness_passed_and_measured" {
+                std::process::exit(2);
+            }
         }
         Command::BenchmarkPoc0Sweep {
             dataset,

@@ -1,0 +1,2260 @@
+{
+  "conclusion": "reject: Python candidates missed the pre-registered target workload latency or throughput gates",
+  "conclusion_scope": "64x252 synthetic target workload on this host only; does not establish a universal workload crossover or production suitability",
+  "engine": "Rust Native + embedded CPython through PyO3",
+  "parallelism_scope": "independent Runs on two native threads; Python worker threads re-enter CPython per callback and contend on the GIL; batch candidate enters Python once per Run",
+  "peak_rss_bytes": 91078656,
+  "peak_rss_scope": "whole benchmark process high-water, including embedded Python and all sequential candidates; not candidate-isolated",
+  "pre_registered_protocol": {
+    "acceptance_gate": "per candidate and both S2/S3: parallel callback p95 is reported; callback median no more than 2x Rust Native and parallel Runs/s at least 80% of Rust Native; correctness is mandatory; peak RSS is reported as process high-water but is not a candidate gate because the embedded-interpreter process is shared",
+    "decision_method": "adopt per-bar if its gate passes for both strategies; otherwise defer if batch passes both; otherwise reject for this target workload",
+    "parallel_runs": 6,
+    "parallel_workers": 2,
+    "single_run_repeats": 5,
+    "target_workload": "64 instruments x 252 sessions",
+    "warmup_runs": 1
+  },
+  "provenance": {
+    "architecture": "aarch64",
+    "build_profile": "release",
+    "cargo_lock_sha256": "250f21792a3ded3c139747c74f96b673b37e57d2b5f550a29e480fea71f60041",
+    "changed_paths": [
+      "scratch/poc-0-benchmark/issues/10-pyo3-basic-callback-comparison.md",
+      ".scratch/poc-0-benchmark/issues/11-pyo3-strategies-and-parallel-boundary.md",
+      "Cargo.lock",
+      "HANDOFF.md",
+      "crates/quant-research/Cargo.toml",
+      "crates/quant-research/src/main.rs",
+      "crates/quant-research/src/poc0_benchmark.rs",
+      "docs/STATUS.md",
+      "poc/poc0-benchmark/README.md",
+      "poc/poc0-benchmark/capture-build-resource.py",
+      ".vscode/settings.json",
+      "crates/quant-research/src/poc0_benchmark/b3.rs",
+      "crates/quant-research/src/poc0_benchmark/b3_strategies.rs",
+      "crates/quant-research/tests/poc0_b3_callbacks.rs",
+      "poc/poc0-benchmark/results/b3-pyo3-build-dev-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-build-release-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-build-release-final-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-build-review-fix-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-callback-integration-test-final-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-callbacks-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-callbacks-review-fix-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-clippy-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-clippy-default-features-examples-failure-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-clippy-review-fix-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-debug-correctness-check-failure-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-strategies-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-test-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-test-exact-float-assertion-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-test-final-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-test-review-fix-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-test-review-fix-final-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-workspace-clippy-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-workspace-clippy-review-fix-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-workspace-test-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-pyo3-workspace-test-review-fix-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-strategies-clippy-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-strategies-clippy-final-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-strategies-dev-build-final-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-strategies-initial-build-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-strategies-release-build-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-strategies-release-build-final-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-strategy-parity-test-2026-09-28.json",
+      "poc/poc0-benchmark/results/b3-strategy-parity-test-final-2026-09-28.json",
+      "poc/vendor/polars-io/.cargo-ok",
+      "poc/vendor/polars-io/.cargo_vcs_info.json",
+      "poc/vendor/polars-io/Cargo.lock",
+      "poc/vendor/polars-io/Cargo.toml.orig"
+    ],
+    "cpu_model": null,
+    "git_revision": "0ff844b26afe1ff86e0786fc90dc61246f23540b",
+    "logical_cpu_count": 8,
+    "operating_system": "macos",
+    "physical_memory_bytes": null,
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "tracked_diff_sha256": "30cbd7583fdc0e596cd3ec166dbc23727c55fb55795a764ac68a25ed92eaf196",
+    "tracked_diff_summary": ".../issues/10-pyo3-basic-callback-comparison.md    |  16 ++--\n .../11-pyo3-strategies-and-parallel-boundary.md    |   4 +\n Cargo.lock                                         |  70 ++++++++++++++\n HANDOFF.md                                         |  12 ++-\n crates/quant-research/Cargo.toml                   |   2 +\n crates/quant-research/src/main.rs                  |  48 ++++++++++\n crates/quant-research/src/poc0_benchmark.rs        |  36 +++++--\n docs/STATUS.md                                     |   8 +-\n poc/poc0-benchmark/README.md                       |  94 +++++++++++++++++++\n poc/poc0-benchmark/capture-build-resource.py       | 103 +++++++++++++++++----\n 10 files changed, 359 insertions(+), 34 deletions(-)",
+    "working_tree_complete": false,
+    "working_tree_dirty": true
+  },
+  "pyo3_version": "0.29.0",
+  "python_version": "3.12.2 (main, Feb  6 2024, 20:19:44) [Clang 15.0.0 (clang-1500.1.0.2.5)]",
+  "schema_version": "poc0.b3.strategies.report.v1",
+  "status": "correctness_passed_and_measured",
+  "strategies": [
+    {
+      "correctness": {
+        "account_projection_matches": true,
+        "small_fixture_checksum_sha256": "f623f54644042256b2186270b0fe5142b36ab65731d6fc797fef5b3f805ddc9f",
+        "small_fixture_event_count": 29,
+        "small_fixture_matches_independent_golden": true,
+        "status": "passed",
+        "stress_checksum_sha256": "5fa75bb28180d61d1422772fd746f8abc6aa3e8e71e733a550b04f4d36ab3342",
+        "stress_event_count": 16127,
+        "stress_python_batch_matches_rust_native": true,
+        "stress_python_on_bar_matches_rust_native": true
+      },
+      "small_fixture": {
+        "dataset_content_sha256": "8c16742a2031cab19e08456dbbe009769b02f0331276618831cefdb6827b5a6f",
+        "dataset_version": "poc0.synthetic.etf-daily.v1",
+        "signals": [
+          {
+            "date": "2026-01-07",
+            "symbol": "C",
+            "targets": [
+              "C"
+            ]
+          },
+          {
+            "date": "2026-01-08",
+            "symbol": "C",
+            "targets": [
+              "B"
+            ]
+          },
+          {
+            "date": "2026-01-09",
+            "symbol": "C",
+            "targets": [
+              "B"
+            ]
+          },
+          {
+            "date": "2026-01-12",
+            "symbol": "C",
+            "targets": [
+              "C"
+            ]
+          },
+          {
+            "date": "2026-01-13",
+            "symbol": "C",
+            "targets": [
+              "A"
+            ]
+          },
+          {
+            "date": "2026-01-14",
+            "symbol": "C",
+            "targets": [
+              "A"
+            ]
+          },
+          {
+            "date": "2026-01-15",
+            "symbol": "C",
+            "targets": [
+              "A"
+            ]
+          },
+          {
+            "date": "2026-01-16",
+            "symbol": "C",
+            "targets": [
+              "C"
+            ]
+          }
+        ]
+      },
+      "strategy": "s2_momentum_rotation",
+      "target_workload": {
+        "dataset_content_sha256": "2ae75e889e3d65a28974f3f467794532621b34c6b58c31c6f37bc75392358dff",
+        "dataset_version": "poc0.b3.s2-scale-64x252.v1",
+        "empty_callback_boundary_delta_median_ns": 6811958,
+        "event_count": 16127,
+        "instruments": 64,
+        "measurements": {
+          "python_batch": {
+            "account_scope": "same Rust Fast Event target replay after the strategy emits date/target decisions; separately included in end-to-end and parallel Runs/s",
+            "parallel_runs": {
+              "account_median_ns": 4206292,
+              "callback_median_ns": 121563042,
+              "callback_median_vs_single_ratio": 1.820867981971701,
+              "callback_p95_ns": 133387875,
+              "parallel_wall_median_ns": 414222000,
+              "raw_account_samples_ns": [
+                4381792,
+                4177500,
+                4206292,
+                4099250,
+                4116916,
+                4208208,
+                4149083,
+                4192458,
+                4261250,
+                4119834,
+                4166292,
+                4234542,
+                4111333,
+                4109209,
+                4217083,
+                4142000,
+                4362875,
+                4245417,
+                4112250,
+                4153625,
+                4209709,
+                4210541,
+                4336833,
+                4295875,
+                4120833,
+                4138875,
+                4186291,
+                4310375,
+                4286625,
+                4327375
+              ],
+              "raw_callback_samples_ns": [
+                128070834,
+                121164250,
+                121456834,
+                133387875,
+                123114500,
+                121595500,
+                128692583,
+                121309459,
+                113426958,
+                133119958,
+                121563042,
+                119924125,
+                132793208,
+                121886666,
+                121374375,
+                128429208,
+                121032375,
+                121453084,
+                133573959,
+                120958916,
+                121535333,
+                129005583,
+                120933916,
+                120997000,
+                133144542,
+                121592125,
+                121065750,
+                128469500,
+                119708291,
+                121443250
+              ],
+              "raw_initialization_samples_ns": [
+                940750,
+                950000,
+                876916,
+                789125,
+                866250,
+                925583,
+                977417,
+                932584,
+                885291,
+                819000,
+                846125,
+                859584,
+                820125,
+                821834,
+                868625,
+                893542,
+                954750,
+                898042,
+                1144500,
+                806333,
+                843125,
+                872500,
+                902416,
+                904041,
+                860458,
+                817833,
+                855209,
+                880375,
+                859375,
+                949042
+              ],
+              "raw_parallel_wall_samples_ns": [
+                414291041,
+                413260708,
+                414622958,
+                413458125,
+                414222000
+              ],
+              "requested_runs": 6,
+              "runs_per_second_median": 14.484986311687935,
+              "throughput_speedup_vs_single": 1.0780149340208873,
+              "warmup_runs": 2,
+              "workers": 2
+            },
+            "single_run": {
+              "account_median_ns": 4355125,
+              "account_p95_ns": 4391541,
+              "callback_median_ns": 66761041,
+              "callback_p95_ns": 67478917,
+              "end_to_end_median_ns": 74422917,
+              "end_to_end_p95_ns": 75202083,
+              "initialization_median_ns": 851667,
+              "raw_account_samples_ns": [
+                4355125,
+                4383167,
+                4391541,
+                4333708,
+                4176542
+              ],
+              "raw_callback_samples_ns": [
+                66715166,
+                67337709,
+                67478917,
+                66761041,
+                66544500
+              ],
+              "raw_end_to_end_samples_ns": [
+                74406375,
+                75052042,
+                75202083,
+                74422917,
+                74001000
+              ],
+              "raw_initialization_samples_ns": [
+                856666,
+                843875,
+                851667,
+                860541,
+                818542
+              ],
+              "warmup_runs": 1
+            },
+            "timing_scope": "Python strategy initialization excluded from callback; one PyO3 boundary per Run; Python processes the complete event list"
+          },
+          "python_empty": {
+            "account_scope": "same Rust Fast Event target replay after the strategy emits date/target decisions; separately included in end-to-end and parallel Runs/s",
+            "parallel_runs": {
+              "account_median_ns": 4005166,
+              "callback_median_ns": 166653958,
+              "callback_median_vs_single_ratio": 24.425617078443135,
+              "callback_p95_ns": 232117000,
+              "parallel_wall_median_ns": 517994250,
+              "raw_account_samples_ns": [
+                3980000,
+                3991333,
+                4000166,
+                4028417,
+                3994084,
+                3803208,
+                4000542,
+                4031208,
+                4677917,
+                4009917,
+                4743500,
+                3773708,
+                3987250,
+                5211041,
+                3862042,
+                3997917,
+                5139167,
+                4546791,
+                4005166,
+                5432542,
+                4028208,
+                4014125,
+                5287875,
+                3751375,
+                3978458,
+                3986667,
+                3795208,
+                3978459,
+                4019958,
+                4006916
+              ],
+              "raw_callback_samples_ns": [
+                171820416,
+                180991167,
+                139659625,
+                166653958,
+                145317917,
+                181697792,
+                128279500,
+                149601500,
+                133626625,
+                184420334,
+                232117000,
+                63824042,
+                165962334,
+                173816333,
+                185468417,
+                167998500,
+                158391792,
+                152275708,
+                181637875,
+                204020416,
+                155586833,
+                131590167,
+                274637000,
+                176034416,
+                210046167,
+                161065875,
+                117935708,
+                112705375,
+                189674375,
+                133834875
+              ],
+              "raw_initialization_samples_ns": [
+                855042,
+                867917,
+                785542,
+                708792,
+                956125,
+                858291,
+                903750,
+                861667,
+                838917,
+                763209,
+                784209,
+                905458,
+                953875,
+                920625,
+                863875,
+                726667,
+                760042,
+                859917,
+                875458,
+                912583,
+                994834,
+                952708,
+                909333,
+                879375,
+                938250,
+                931625,
+                856791,
+                793958,
+                953042,
+                857791
+              ],
+              "raw_parallel_wall_samples_ns": [
+                517994250,
+                503744375,
+                541621416,
+                602353417,
+                505169625
+              ],
+              "requested_runs": 6,
+              "runs_per_second_median": 11.583140160339617,
+              "throughput_speedup_vs_single": 0.1321370922553677,
+              "warmup_runs": 2,
+              "workers": 2
+            },
+            "single_run": {
+              "account_median_ns": 3746166,
+              "account_p95_ns": 3761791,
+              "callback_median_ns": 6822917,
+              "callback_p95_ns": 6944250,
+              "end_to_end_median_ns": 11407709,
+              "end_to_end_p95_ns": 11658875,
+              "initialization_median_ns": 715416,
+              "raw_account_samples_ns": [
+                3740625,
+                3748583,
+                3761791,
+                3727542,
+                3746166
+              ],
+              "raw_callback_samples_ns": [
+                6944250,
+                6901625,
+                6762291,
+                6822917,
+                6470291
+              ],
+              "raw_end_to_end_samples_ns": [
+                11658875,
+                11550083,
+                11376417,
+                11407709,
+                11062459
+              ],
+              "raw_initialization_samples_ns": [
+                829917,
+                757417,
+                710417,
+                715416,
+                704209
+              ],
+              "warmup_runs": 1
+            },
+            "timing_scope": "Python empty on_bar callback; one GIL reacquisition per event"
+          },
+          "python_on_bar": {
+            "account_scope": "same Rust Fast Event target replay after the strategy emits date/target decisions; separately included in end-to-end and parallel Runs/s",
+            "parallel_runs": {
+              "account_median_ns": 4253458,
+              "callback_median_ns": 285527041,
+              "callback_median_vs_single_ratio": 4.123655205531385,
+              "callback_p95_ns": 324091875,
+              "parallel_wall_median_ns": 899060166,
+              "raw_account_samples_ns": [
+                4270084,
+                4227792,
+                4160125,
+                4260167,
+                4228750,
+                4253458,
+                4230708,
+                4293458,
+                4249084,
+                4248709,
+                4339792,
+                4093500,
+                4268541,
+                4314250,
+                4421500,
+                4231167,
+                4254709,
+                4248084,
+                4232459,
+                4208416,
+                4275583,
+                4089125,
+                4279667,
+                4156375,
+                4273209,
+                4298459,
+                4373583,
+                4231000,
+                4246959,
+                4255125
+              ],
+              "raw_callback_samples_ns": [
+                308455458,
+                324091875,
+                241772541,
+                250990250,
+                290462792,
+                257659458,
+                286716542,
+                303729417,
+                278536417,
+                306035250,
+                270310625,
+                298747792,
+                337608416,
+                277458167,
+                257534083,
+                244128250,
+                277813042,
+                298868125,
+                294380750,
+                269703958,
+                265286625,
+                299643333,
+                299909833,
+                278093375,
+                305781667,
+                299526500,
+                262948958,
+                285527041,
+                247678459,
+                272827417
+              ],
+              "raw_initialization_samples_ns": [
+                928500,
+                945667,
+                994000,
+                918750,
+                932000,
+                996583,
+                997208,
+                982583,
+                859875,
+                897834,
+                915958,
+                943958,
+                944541,
+                914459,
+                882833,
+                825750,
+                952958,
+                914959,
+                887375,
+                991459,
+                985042,
+                912333,
+                881041,
+                959208,
+                886333,
+                916875,
+                949833,
+                961834,
+                945250,
+                968333
+              ],
+              "raw_parallel_wall_samples_ns": [
+                899060166,
+                901755333,
+                895914541,
+                901486917,
+                893924084
+              ],
+              "requested_runs": 6,
+              "runs_per_second_median": 6.6736356774592105,
+              "throughput_speedup_vs_single": 0.5152499949597367,
+              "warmup_runs": 2,
+              "workers": 2
+            },
+            "single_run": {
+              "account_median_ns": 4299166,
+              "account_p95_ns": 4350083,
+              "callback_median_ns": 69241250,
+              "callback_p95_ns": 72365542,
+              "end_to_end_median_ns": 77206791,
+              "end_to_end_p95_ns": 80398125,
+              "initialization_median_ns": 974292,
+              "raw_account_samples_ns": [
+                4350083,
+                4227958,
+                4299166,
+                4340250,
+                4197708
+              ],
+              "raw_callback_samples_ns": [
+                67726250,
+                70212917,
+                69241250,
+                72365542,
+                68168125
+              ],
+              "raw_end_to_end_samples_ns": [
+                75374000,
+                77738875,
+                77206791,
+                80398125,
+                75857416
+              ],
+              "raw_initialization_samples_ns": [
+                839416,
+                812833,
+                975625,
+                1048167,
+                974292
+              ],
+              "warmup_runs": 1
+            },
+            "timing_scope": "Python strategy initialization excluded from callback; one GIL reacquisition and on_bar call per event"
+          },
+          "rust_empty": {
+            "account_scope": "same Rust Fast Event target replay after the strategy emits date/target decisions; separately included in end-to-end and parallel Runs/s",
+            "parallel_runs": {
+              "account_median_ns": 5515042,
+              "callback_median_ns": 11166,
+              "callback_median_vs_single_ratio": 1.0188885847248836,
+              "callback_p95_ns": 22000,
+              "parallel_wall_median_ns": 17144042,
+              "raw_account_samples_ns": [
+                5731542,
+                5572416,
+                5503625,
+                5705625,
+                5551125,
+                5453166,
+                5523542,
+                5595208,
+                5442791,
+                5577375,
+                5620417,
+                5481500,
+                5594083,
+                5464375,
+                5426042,
+                5631917,
+                5508792,
+                5477750,
+                5528500,
+                5397500,
+                5356833,
+                5576041,
+                5515916,
+                5389208,
+                5515042,
+                5435000,
+                5399750,
+                5588750,
+                5462958,
+                5445208
+              ],
+              "raw_callback_samples_ns": [
+                10958,
+                11958,
+                11291,
+                12750,
+                10875,
+                10708,
+                19166,
+                10709,
+                10792,
+                22000,
+                11125,
+                11000,
+                19042,
+                10792,
+                14292,
+                22000,
+                11583,
+                11000,
+                19084,
+                10833,
+                16500,
+                22083,
+                11166,
+                10875,
+                14666,
+                10750,
+                10750,
+                17208,
+                11000,
+                10958
+              ],
+              "raw_initialization_samples_ns": [
+                42,
+                41,
+                0,
+                42,
+                42,
+                42,
+                42,
+                42,
+                42,
+                42,
+                42,
+                41,
+                41,
+                0,
+                41,
+                42,
+                41,
+                42,
+                42,
+                0,
+                41,
+                42,
+                42,
+                41,
+                42,
+                42,
+                42,
+                42,
+                41,
+                41
+              ],
+              "raw_parallel_wall_samples_ns": [
+                17414208,
+                17209959,
+                17144042,
+                17007750,
+                17008417
+              ],
+              "requested_runs": 6,
+              "runs_per_second_median": 349.9758108385409,
+              "throughput_speedup_vs_single": 1.36718050504076,
+              "warmup_runs": 2,
+              "workers": 2
+            },
+            "single_run": {
+              "account_median_ns": 3754291,
+              "account_p95_ns": 3806625,
+              "callback_median_ns": 10959,
+              "callback_p95_ns": 11000,
+              "end_to_end_median_ns": 3906500,
+              "end_to_end_p95_ns": 3958167,
+              "initialization_median_ns": 42,
+              "raw_account_samples_ns": [
+                3754291,
+                3754959,
+                3739000,
+                3806625,
+                3742334
+              ],
+              "raw_callback_samples_ns": [
+                11000,
+                10959,
+                10958,
+                10959,
+                10958
+              ],
+              "raw_end_to_end_samples_ns": [
+                3914666,
+                3906500,
+                3890542,
+                3958167,
+                3893833
+              ],
+              "raw_initialization_samples_ns": [
+                42,
+                42,
+                0,
+                0,
+                42
+              ],
+              "warmup_runs": 1
+            },
+            "timing_scope": "Rust empty event loop"
+          },
+          "rust_native": {
+            "account_scope": "same Rust Fast Event target replay after the strategy emits date/target decisions; separately included in end-to-end and parallel Runs/s",
+            "parallel_runs": {
+              "account_median_ns": 4340500,
+              "callback_median_ns": 9149542,
+              "callback_median_vs_single_ratio": 1.042890832929644,
+              "callback_p95_ns": 9316916,
+              "parallel_wall_median_ns": 47602250,
+              "raw_account_samples_ns": [
+                4339916,
+                4283083,
+                4254625,
+                4397083,
+                4264291,
+                4290375,
+                4402084,
+                4363958,
+                4305125,
+                4358542,
+                4420458,
+                4316208,
+                4387750,
+                4442750,
+                4357416,
+                4365542,
+                4456209,
+                4417333,
+                4340500,
+                4338375,
+                4339333,
+                4338666,
+                4338375,
+                4329375,
+                4352208,
+                4387042,
+                4337458,
+                4307000,
+                4341208,
+                4295750
+              ],
+              "raw_callback_samples_ns": [
+                9516167,
+                9139667,
+                9261541,
+                9316916,
+                9072458,
+                9115334,
+                9164458,
+                9146000,
+                9125792,
+                9135333,
+                9167959,
+                9153416,
+                9201792,
+                9137333,
+                9190291,
+                9171041,
+                9129500,
+                9162208,
+                9273500,
+                9128166,
+                9169292,
+                9213166,
+                9123542,
+                9165375,
+                9090959,
+                9132417,
+                9149542,
+                9074667,
+                9103083,
+                9141417
+              ],
+              "raw_initialization_samples_ns": [
+                1146875,
+                937583,
+                937833,
+                1135333,
+                941791,
+                940209,
+                945208,
+                940250,
+                942750,
+                951583,
+                942042,
+                943000,
+                956417,
+                934458,
+                954917,
+                955250,
+                993833,
+                966417,
+                966667,
+                934250,
+                937834,
+                962500,
+                973791,
+                955292,
+                951459,
+                939625,
+                934375,
+                941833,
+                1003208,
+                980625
+              ],
+              "raw_parallel_wall_samples_ns": [
+                47997750,
+                47550041,
+                47733583,
+                47602250,
+                47437333
+              ],
+              "requested_runs": 6,
+              "runs_per_second_median": 126.04446218403542,
+              "throughput_speedup_vs_single": 1.9065853399786774,
+              "warmup_runs": 2,
+              "workers": 2
+            },
+            "single_run": {
+              "account_median_ns": 4034417,
+              "account_p95_ns": 4169666,
+              "callback_median_ns": 8773250,
+              "callback_p95_ns": 8821916,
+              "end_to_end_median_ns": 15126292,
+              "end_to_end_p95_ns": 15207209,
+              "initialization_median_ns": 946584,
+              "raw_account_samples_ns": [
+                4022625,
+                4146208,
+                4034417,
+                4169666,
+                4020000
+              ],
+              "raw_callback_samples_ns": [
+                8821916,
+                8803875,
+                8773250,
+                8755375,
+                8769667
+              ],
+              "raw_end_to_end_samples_ns": [
+                15126292,
+                15207209,
+                15057208,
+                15197042,
+                15036958
+              ],
+              "raw_initialization_samples_ns": [
+                950000,
+                954750,
+                943792,
+                943083,
+                946584
+              ],
+              "warmup_runs": 1
+            },
+            "timing_scope": "Rust Native event callback loop; initialization is reported separately"
+          }
+        },
+        "seed": 20260928,
+        "sessions": 252,
+        "signals": [
+          {
+            "date": "2025-03-31",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF054",
+              "ETF003",
+              "ETF007",
+              "ETF012",
+              "ETF025"
+            ]
+          },
+          {
+            "date": "2025-04-07",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF041",
+              "ETF055",
+              "ETF046",
+              "ETF038",
+              "ETF051"
+            ]
+          },
+          {
+            "date": "2025-04-14",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF028",
+              "ETF041",
+              "ETF042",
+              "ETF020",
+              "ETF034"
+            ]
+          },
+          {
+            "date": "2025-04-21",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF028",
+              "ETF029",
+              "ETF059",
+              "ETF025",
+              "ETF060"
+            ]
+          },
+          {
+            "date": "2025-04-28",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF015",
+              "ETF016",
+              "ETF033",
+              "ETF051",
+              "ETF034"
+            ]
+          },
+          {
+            "date": "2025-05-05",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF002",
+              "ETF003",
+              "ETF007",
+              "ETF012",
+              "ETF008"
+            ]
+          },
+          {
+            "date": "2025-05-12",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF048",
+              "ETF055",
+              "ETF046",
+              "ETF025",
+              "ETF038"
+            ]
+          },
+          {
+            "date": "2025-05-19",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF054",
+              "ETF042",
+              "ETF020",
+              "ETF051",
+              "ETF008"
+            ]
+          },
+          {
+            "date": "2025-05-26",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF048",
+              "ETF041",
+              "ETF029",
+              "ETF059",
+              "ETF012"
+            ]
+          },
+          {
+            "date": "2025-06-02",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF028",
+              "ETF016",
+              "ETF033",
+              "ETF025",
+              "ETF038"
+            ]
+          },
+          {
+            "date": "2025-06-09",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF015",
+              "ETF028",
+              "ETF003",
+              "ETF007",
+              "ETF051"
+            ]
+          },
+          {
+            "date": "2025-06-16",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF015",
+              "ETF055",
+              "ETF046",
+              "ETF012",
+              "ETF021"
+            ]
+          },
+          {
+            "date": "2025-06-23",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF030",
+              "ETF002",
+              "ETF042",
+              "ETF020",
+              "ETF038"
+            ]
+          },
+          {
+            "date": "2025-06-30",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF054",
+              "ETF029",
+              "ETF059",
+              "ETF034",
+              "ETF026"
+            ]
+          },
+          {
+            "date": "2025-07-07",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF054",
+              "ETF016",
+              "ETF033",
+              "ETF012",
+              "ETF025"
+            ]
+          },
+          {
+            "date": "2025-07-14",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF041",
+              "ETF003",
+              "ETF007",
+              "ETF038",
+              "ETF051"
+            ]
+          },
+          {
+            "date": "2025-07-21",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF028",
+              "ETF055",
+              "ETF046",
+              "ETF008",
+              "ETF026"
+            ]
+          },
+          {
+            "date": "2025-07-28",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF015",
+              "ETF042",
+              "ETF020",
+              "ETF025",
+              "ETF047"
+            ]
+          },
+          {
+            "date": "2025-08-04",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF002",
+              "ETF015",
+              "ETF029",
+              "ETF059",
+              "ETF051"
+            ]
+          },
+          {
+            "date": "2025-08-11",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF002",
+              "ETF016",
+              "ETF033",
+              "ETF012",
+              "ETF060"
+            ]
+          },
+          {
+            "date": "2025-08-18",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF054",
+              "ETF003",
+              "ETF007",
+              "ETF025",
+              "ETF038"
+            ]
+          },
+          {
+            "date": "2025-08-25",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF041",
+              "ETF054",
+              "ETF055",
+              "ETF046",
+              "ETF051"
+            ]
+          },
+          {
+            "date": "2025-09-01",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF041",
+              "ETF042",
+              "ETF055",
+              "ETF020",
+              "ETF012"
+            ]
+          },
+          {
+            "date": "2025-09-08",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF028",
+              "ETF029",
+              "ETF059",
+              "ETF025",
+              "ETF038"
+            ]
+          },
+          {
+            "date": "2025-09-15",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF015",
+              "ETF016",
+              "ETF033",
+              "ETF051",
+              "ETF047"
+            ]
+          },
+          {
+            "date": "2025-09-22",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF002",
+              "ETF003",
+              "ETF007",
+              "ETF012",
+              "ETF008"
+            ]
+          },
+          {
+            "date": "2025-09-29",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF002",
+              "ETF046",
+              "ETF059",
+              "ETF038",
+              "ETF047"
+            ]
+          },
+          {
+            "date": "2025-10-06",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF054",
+              "ETF042",
+              "ETF055",
+              "ETF020",
+              "ETF021"
+            ]
+          },
+          {
+            "date": "2025-10-13",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF041",
+              "ETF029",
+              "ETF042",
+              "ETF059",
+              "ETF012"
+            ]
+          },
+          {
+            "date": "2025-10-20",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF028",
+              "ETF041",
+              "ETF016",
+              "ETF033",
+              "ETF046"
+            ]
+          },
+          {
+            "date": "2025-10-27",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF028",
+              "ETF003",
+              "ETF007",
+              "ETF060",
+              "ETF039"
+            ]
+          },
+          {
+            "date": "2025-11-03",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF022",
+              "ETF015",
+              "ETF046",
+              "ETF059",
+              "ETF025"
+            ]
+          },
+          {
+            "date": "2025-11-10",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF002",
+              "ETF055",
+              "ETF020",
+              "ETF033",
+              "ETF051"
+            ]
+          },
+          {
+            "date": "2025-11-17",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF022",
+              "ETF029",
+              "ETF042",
+              "ETF059",
+              "ETF012"
+            ]
+          },
+          {
+            "date": "2025-11-24",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF054",
+              "ETF016",
+              "ETF029",
+              "ETF033",
+              "ETF046"
+            ]
+          },
+          {
+            "date": "2025-12-01",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF041",
+              "ETF003",
+              "ETF007",
+              "ETF020",
+              "ETF051"
+            ]
+          },
+          {
+            "date": "2025-12-08",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF028",
+              "ETF046",
+              "ETF059",
+              "ETF012",
+              "ETF021"
+            ]
+          },
+          {
+            "date": "2025-12-15",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF017",
+              "ETF015",
+              "ETF028",
+              "ETF055",
+              "ETF020"
+            ]
+          },
+          {
+            "date": "2025-12-22",
+            "symbol": "ETF063",
+            "targets": [
+              "ETF015",
+              "ETF042",
+              "ETF007",
+              "ETF051",
+              "ETF021"
+            ]
+          }
+        ],
+        "strategy_parameters": {
+          "long_momentum_weight": 1.0,
+          "momentum_long_days": 60,
+          "momentum_short_days": 20,
+          "name": "Momentum Rotation",
+          "rebalance_every": 5,
+          "short_momentum_weight": 1.0,
+          "tie_break": "symbol ascending",
+          "top_n": 5,
+          "trend_filter": false,
+          "version": "poc0-golden-v1",
+          "volatility_weight": 1.0,
+          "volatility_window": 20
+        }
+      }
+    },
+    {
+      "correctness": {
+        "account_projection_matches": true,
+        "small_fixture_checksum_sha256": "6a43d9ec5f98119378bec61c833d481c50974e854a41dd04572da40355760023",
+        "small_fixture_event_count": 390,
+        "small_fixture_matches_independent_golden": true,
+        "status": "passed",
+        "stress_checksum_sha256": "0fade879d4715940f343a25de71e96279b2477396feb206d457a17571abffd70",
+        "stress_event_count": 16128,
+        "stress_python_batch_matches_rust_native": true,
+        "stress_python_on_bar_matches_rust_native": true
+      },
+      "small_fixture": {
+        "dataset_content_sha256": "a605295dd53e2f7e35758622671e2b3b85b35a6a791d42c850aeee55145311ef",
+        "dataset_version": "poc0.b2.ma20-60.v1",
+        "signals": [
+          {
+            "date": "2026-03-30",
+            "symbol": "A",
+            "targets": [
+              "A"
+            ]
+          },
+          {
+            "date": "2026-05-04",
+            "symbol": "A",
+            "targets": []
+          }
+        ]
+      },
+      "strategy": "s3_ma20_60",
+      "target_workload": {
+        "dataset_content_sha256": "d5384e1e27162713df2cd020dcdd655d5838f1d417d3848ac0eaca8f0a002e5a",
+        "dataset_version": "poc0.b3.s3-scale-64x252.v1",
+        "empty_callback_boundary_delta_median_ns": 6931958,
+        "event_count": 16128,
+        "instruments": 64,
+        "measurements": {
+          "python_batch": {
+            "account_scope": "same Rust Fast Event target replay after the strategy emits date/target decisions; separately included in end-to-end and parallel Runs/s",
+            "parallel_runs": {
+              "account_median_ns": 3800375,
+              "callback_median_ns": 5844792,
+              "callback_median_vs_single_ratio": 1.0032685920267777,
+              "callback_p95_ns": 9785833,
+              "parallel_wall_median_ns": 41557125,
+              "raw_account_samples_ns": [
+                3795000,
+                3778833,
+                3839459,
+                3787250,
+                3827458,
+                3821417,
+                3800375,
+                3808250,
+                3791084,
+                3793416,
+                3808250,
+                3805667,
+                3794750,
+                3778875,
+                3793292,
+                3859125,
+                3794584,
+                3794584,
+                3754000,
+                3789209,
+                3827542,
+                3829625,
+                3805666,
+                3786709,
+                3777583,
+                3834792,
+                3834292,
+                3802625,
+                3785208,
+                3819083
+              ],
+              "raw_callback_samples_ns": [
+                6537083,
+                5850875,
+                5827542,
+                9800500,
+                5796958,
+                5803083,
+                6380583,
+                5787333,
+                5809541,
+                9659458,
+                5938167,
+                5831875,
+                6446292,
+                5901167,
+                5809083,
+                9726125,
+                5799959,
+                5792917,
+                9785833,
+                5839750,
+                5815916,
+                6510167,
+                5826250,
+                5831500,
+                9631708,
+                5820500,
+                5802291,
+                6323916,
+                5852667,
+                5844792
+              ],
+              "raw_initialization_samples_ns": [
+                832500,
+                773084,
+                750625,
+                713834,
+                735000,
+                743333,
+                743375,
+                738584,
+                742292,
+                706625,
+                723583,
+                718708,
+                732833,
+                752791,
+                726250,
+                707208,
+                723041,
+                715458,
+                711375,
+                726875,
+                721208,
+                712834,
+                730250,
+                728917,
+                703125,
+                720708,
+                746584,
+                752833,
+                741042,
+                718208
+              ],
+              "raw_parallel_wall_samples_ns": [
+                41830167,
+                41557125,
+                41525708,
+                41611667,
+                41548417
+              ],
+              "requested_runs": 6,
+              "runs_per_second_median": 144.37957389978254,
+              "throughput_speedup_vs_single": 1.5205275629630297,
+              "warmup_runs": 2,
+              "workers": 2
+            },
+            "single_run": {
+              "account_median_ns": 3805375,
+              "account_p95_ns": 3926542,
+              "callback_median_ns": 5825750,
+              "callback_p95_ns": 5839459,
+              "end_to_end_median_ns": 10531459,
+              "end_to_end_p95_ns": 10638250,
+              "initialization_median_ns": 736375,
+              "raw_account_samples_ns": [
+                3781250,
+                3799416,
+                3805375,
+                3834834,
+                3926542
+              ],
+              "raw_callback_samples_ns": [
+                5798334,
+                5782833,
+                5825750,
+                5839459,
+                5837083
+              ],
+              "raw_end_to_end_samples_ns": [
+                10490083,
+                10488542,
+                10531459,
+                10569292,
+                10638250
+              ],
+              "raw_initialization_samples_ns": [
+                748333,
+                743375,
+                733625,
+                736375,
+                710417
+              ],
+              "warmup_runs": 1
+            },
+            "timing_scope": "Python strategy initialization excluded from callback; one PyO3 boundary per Run; Python processes the complete event list"
+          },
+          "python_empty": {
+            "account_scope": "same Rust Fast Event target replay after the strategy emits date/target decisions; separately included in end-to-end and parallel Runs/s",
+            "parallel_runs": {
+              "account_median_ns": 3993875,
+              "callback_median_ns": 165608792,
+              "callback_median_vs_single_ratio": 23.85305683884558,
+              "callback_p95_ns": 201130542,
+              "parallel_wall_median_ns": 515228709,
+              "raw_account_samples_ns": [
+                4091334,
+                3992583,
+                3967583,
+                4004541,
+                4029958,
+                3916000,
+                3982666,
+                4005250,
+                3995833,
+                4083000,
+                3991750,
+                4011583,
+                3982125,
+                3987542,
+                3904292,
+                3993875,
+                3998667,
+                4001542,
+                3826000,
+                4133583,
+                4049917,
+                3983292,
+                3976458,
+                3971500,
+                3995959,
+                3935125,
+                4015625,
+                4037042,
+                3975459,
+                3946875
+              ],
+              "raw_callback_samples_ns": [
+                142755791,
+                139130584,
+                200872500,
+                208051292,
+                165608792,
+                109966292,
+                161437000,
+                132355000,
+                184203291,
+                171867042,
+                201130542,
+                116883459,
+                179437209,
+                162038917,
+                160796167,
+                140280666,
+                166810625,
+                178537625,
+                167637375,
+                185225708,
+                141014834,
+                168584000,
+                132367042,
+                182761375,
+                175935500,
+                161217208,
+                159763916,
+                144022250,
+                173363125,
+                144771000
+              ],
+              "raw_initialization_samples_ns": [
+                841042,
+                836917,
+                932208,
+                700583,
+                800583,
+                877958,
+                886250,
+                828583,
+                915875,
+                784375,
+                817125,
+                836125,
+                837875,
+                768541,
+                736667,
+                755166,
+                876583,
+                835125,
+                870375,
+                857625,
+                910083,
+                840875,
+                945666,
+                857250,
+                1061750,
+                770833,
+                707333,
+                729000,
+                903791,
+                822083
+              ],
+              "raw_parallel_wall_samples_ns": [
+                515228709,
+                513034584,
+                519490041,
+                515720125,
+                512626666
+              ],
+              "requested_runs": 6,
+              "runs_per_second_median": 11.645313809561028,
+              "throughput_speedup_vs_single": 0.1350293467439525,
+              "warmup_runs": 2,
+              "workers": 2
+            },
+            "single_run": {
+              "account_median_ns": 3789000,
+              "account_p95_ns": 3876166,
+              "callback_median_ns": 6942875,
+              "callback_p95_ns": 7006416,
+              "end_to_end_median_ns": 11595166,
+              "end_to_end_p95_ns": 11727125,
+              "initialization_median_ns": 703125,
+              "raw_account_samples_ns": [
+                3789000,
+                3829875,
+                3784916,
+                3876166,
+                3786666
+              ],
+              "raw_callback_samples_ns": [
+                6942875,
+                6941417,
+                6899666,
+                7006416,
+                6951833
+              ],
+              "raw_end_to_end_samples_ns": [
+                11595166,
+                11613250,
+                11538416,
+                11727125,
+                11581416
+              ],
+              "raw_initialization_samples_ns": [
+                721458,
+                700041,
+                712125,
+                703125,
+                701583
+              ],
+              "warmup_runs": 1
+            },
+            "timing_scope": "Python empty on_bar callback; one GIL reacquisition per event"
+          },
+          "python_on_bar": {
+            "account_scope": "same Rust Fast Event target replay after the strategy emits date/target decisions; separately included in end-to-end and parallel Runs/s",
+            "parallel_runs": {
+              "account_median_ns": 3995083,
+              "callback_median_ns": 168633458,
+              "callback_median_vs_single_ratio": 23.16009348998133,
+              "callback_p95_ns": 199070208,
+              "parallel_wall_median_ns": 518072750,
+              "raw_account_samples_ns": [
+                4021042,
+                4023125,
+                3994000,
+                4008459,
+                4003334,
+                3884375,
+                3997500,
+                4003666,
+                3979416,
+                3998250,
+                3975167,
+                3891333,
+                3988375,
+                3895250,
+                4009625,
+                4022167,
+                3989791,
+                3783667,
+                6528583,
+                3990000,
+                3816042,
+                6312333,
+                3996500,
+                4000167,
+                3987458,
+                3913375,
+                3920083,
+                4010625,
+                3995083,
+                3953416
+              ],
+              "raw_callback_samples_ns": [
+                171045416,
+                136019167,
+                163212584,
+                158988375,
+                200226292,
+                127836375,
+                130613583,
+                178326667,
+                168633458,
+                199070208,
+                160957625,
+                133377000,
+                164029542,
+                172729708,
+                160417500,
+                168876458,
+                161009500,
+                169494541,
+                172001333,
+                156139792,
+                179184834,
+                169624167,
+                183587875,
+                147735708,
+                162060125,
+                173822292,
+                166916750,
+                178215041,
+                136040542,
+                169890084
+              ],
+              "raw_initialization_samples_ns": [
+                746166,
+                734459,
+                822875,
+                720333,
+                811541,
+                798334,
+                855375,
+                826708,
+                844500,
+                744000,
+                802708,
+                829042,
+                952625,
+                914875,
+                815500,
+                860042,
+                811834,
+                883416,
+                851167,
+                1238792,
+                937250,
+                763791,
+                1152917,
+                884333,
+                880334,
+                871625,
+                748667,
+                786958,
+                785375,
+                868291
+              ],
+              "raw_parallel_wall_samples_ns": [
+                510767542,
+                514427833,
+                518072750,
+                525456000,
+                518618625
+              ],
+              "requested_runs": 6,
+              "runs_per_second_median": 11.581385046791208,
+              "throughput_speedup_vs_single": 0.138272576583115,
+              "warmup_runs": 2,
+              "workers": 2
+            },
+            "single_run": {
+              "account_median_ns": 3782042,
+              "account_p95_ns": 3936167,
+              "callback_median_ns": 7281208,
+              "callback_p95_ns": 7619000,
+              "end_to_end_median_ns": 11939209,
+              "end_to_end_p95_ns": 12373375,
+              "initialization_median_ns": 737958,
+              "raw_account_samples_ns": [
+                3936167,
+                3786334,
+                3760667,
+                3782042,
+                3764041
+              ],
+              "raw_callback_samples_ns": [
+                7052250,
+                7619000,
+                7146958,
+                7441292,
+                7281208
+              ],
+              "raw_end_to_end_samples_ns": [
+                11939209,
+                12373375,
+                11801959,
+                12096167,
+                11930042
+              ],
+              "raw_initialization_samples_ns": [
+                783417,
+                805958,
+                737958,
+                716666,
+                728292
+              ],
+              "warmup_runs": 1
+            },
+            "timing_scope": "Python strategy initialization excluded from callback; one GIL reacquisition and on_bar call per event"
+          },
+          "rust_empty": {
+            "account_scope": "same Rust Fast Event target replay after the strategy emits date/target decisions; separately included in end-to-end and parallel Runs/s",
+            "parallel_runs": {
+              "account_median_ns": 3991375,
+              "callback_median_ns": 10959,
+              "callback_median_vs_single_ratio": 1.00384721077219,
+              "callback_p95_ns": 22084,
+              "parallel_wall_median_ns": 12588667,
+              "raw_account_samples_ns": [
+                4048458,
+                3987625,
+                4003875,
+                3970292,
+                3986958,
+                3962041,
+                4041834,
+                4030250,
+                3957000,
+                3973250,
+                3957334,
+                3991375,
+                4057709,
+                4018917,
+                3985750,
+                3979083,
+                3981625,
+                4011083,
+                3965375,
+                3956166,
+                3959917,
+                4033625,
+                4005791,
+                4004000,
+                4082791,
+                3976833,
+                4030750,
+                3987875,
+                4007791,
+                4021125
+              ],
+              "raw_callback_samples_ns": [
+                19834,
+                11041,
+                11041,
+                22334,
+                10750,
+                10625,
+                19333,
+                10958,
+                10916,
+                22084,
+                10708,
+                11584,
+                14291,
+                10958,
+                10959,
+                16458,
+                10750,
+                10667,
+                10958,
+                10666,
+                10708,
+                12542,
+                10958,
+                10917,
+                14208,
+                10916,
+                11167,
+                16625,
+                17833,
+                10625
+              ],
+              "raw_initialization_samples_ns": [
+                42,
+                42,
+                42,
+                42,
+                0,
+                42,
+                41,
+                42,
+                42,
+                42,
+                0,
+                42,
+                42,
+                41,
+                42,
+                42,
+                42,
+                0,
+                42,
+                42,
+                41,
+                0,
+                41,
+                41,
+                0,
+                0,
+                0,
+                0,
+                42,
+                41
+              ],
+              "raw_parallel_wall_samples_ns": [
+                12621083,
+                12563250,
+                12588667,
+                12555666,
+                12604916
+              ],
+              "requested_runs": 6,
+              "runs_per_second_median": 476.6191686538376,
+              "throughput_speedup_vs_single": 1.8874714852652787,
+              "warmup_runs": 2,
+              "workers": 2
+            },
+            "single_run": {
+              "account_median_ns": 3807458,
+              "account_p95_ns": 3887375,
+              "callback_median_ns": 10917,
+              "callback_p95_ns": 10958,
+              "end_to_end_median_ns": 3960125,
+              "end_to_end_p95_ns": 4039208,
+              "initialization_median_ns": 42,
+              "raw_account_samples_ns": [
+                3808542,
+                3887375,
+                3790042,
+                3788917,
+                3807458
+              ],
+              "raw_callback_samples_ns": [
+                10917,
+                10917,
+                10958,
+                10917,
+                10958
+              ],
+              "raw_end_to_end_samples_ns": [
+                3960125,
+                4039208,
+                3941708,
+                3940375,
+                3961583
+              ],
+              "raw_initialization_samples_ns": [
+                41,
+                41,
+                42,
+                42,
+                42
+              ],
+              "warmup_runs": 1
+            },
+            "timing_scope": "Rust empty event loop"
+          },
+          "rust_native": {
+            "account_scope": "same Rust Fast Event target replay after the strategy emits date/target decisions; separately included in end-to-end and parallel Runs/s",
+            "parallel_runs": {
+              "account_median_ns": 3992333,
+              "callback_median_ns": 29250,
+              "callback_median_vs_single_ratio": 0.9971364287175292,
+              "callback_p95_ns": 33834,
+              "parallel_wall_median_ns": 12694625,
+              "raw_account_samples_ns": [
+                4129709,
+                4000250,
+                4002167,
+                3986541,
+                3962875,
+                3940833,
+                3970333,
+                3948666,
+                3950833,
+                4092459,
+                4004959,
+                4003333,
+                3959167,
+                3952459,
+                3946125,
+                4042958,
+                4001167,
+                3992333,
+                3959959,
+                3936416,
+                3919166,
+                4042208,
+                3996166,
+                4050917,
+                3972291,
+                3932916,
+                3934959,
+                4048750,
+                4007542,
+                4001250
+              ],
+              "raw_callback_samples_ns": [
+                34084,
+                29459,
+                29167,
+                31500,
+                29042,
+                29041,
+                30625,
+                29125,
+                28916,
+                31875,
+                29417,
+                29167,
+                31667,
+                28875,
+                29250,
+                31958,
+                29250,
+                28958,
+                33834,
+                31375,
+                28958,
+                32792,
+                29000,
+                29042,
+                31500,
+                29000,
+                29125,
+                31959,
+                29084,
+                29000
+              ],
+              "raw_initialization_samples_ns": [
+                42,
+                42,
+                0,
+                41,
+                42,
+                0,
+                42,
+                41,
+                42,
+                42,
+                41,
+                42,
+                41,
+                42,
+                41,
+                0,
+                42,
+                42,
+                0,
+                42,
+                42,
+                42,
+                41,
+                0,
+                42,
+                0,
+                42,
+                42,
+                0,
+                42
+              ],
+              "raw_parallel_wall_samples_ns": [
+                12786209,
+                12715625,
+                12647541,
+                12694625,
+                12669292
+              ],
+              "requested_runs": 6,
+              "runs_per_second_median": 472.64097994229843,
+              "throughput_speedup_vs_single": 1.894542138897368,
+              "warmup_runs": 2,
+              "workers": 2
+            },
+            "single_run": {
+              "account_median_ns": 3823792,
+              "account_p95_ns": 3887584,
+              "callback_median_ns": 29334,
+              "callback_p95_ns": 29584,
+              "end_to_end_median_ns": 4008417,
+              "end_to_end_p95_ns": 4071334,
+              "initialization_median_ns": 42,
+              "raw_account_samples_ns": [
+                3887584,
+                3835959,
+                3802375,
+                3823792,
+                3804583
+              ],
+              "raw_callback_samples_ns": [
+                29584,
+                29459,
+                29291,
+                29334,
+                29208
+              ],
+              "raw_end_to_end_samples_ns": [
+                4071334,
+                4017792,
+                3984375,
+                4008417,
+                3985958
+              ],
+              "raw_initialization_samples_ns": [
+                42,
+                42,
+                0,
+                42,
+                42
+              ],
+              "warmup_runs": 1
+            },
+            "timing_scope": "Rust Native event callback loop; initialization is reported separately"
+          }
+        },
+        "seed": 20260928,
+        "sessions": 252,
+        "signals": [
+          {
+            "date": "2026-03-30",
+            "symbol": "A",
+            "targets": [
+              "A"
+            ]
+          },
+          {
+            "date": "2026-05-04",
+            "symbol": "A",
+            "targets": []
+          }
+        ],
+        "strategy_parameters": {
+          "long_momentum_weight": 1.0,
+          "momentum_long_days": 1,
+          "momentum_short_days": 1,
+          "name": "Momentum Rotation",
+          "rebalance_every": 1,
+          "short_momentum_weight": 1.0,
+          "tie_break": "symbol ascending",
+          "top_n": 1,
+          "trend_filter": false,
+          "version": "poc0-golden-v1",
+          "volatility_weight": 0.0,
+          "volatility_window": 2
+        }
+      }
+    }
+  ]
+}
