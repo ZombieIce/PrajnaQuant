@@ -1,6 +1,6 @@
 # ADR 0012：POC-0 Nautilus Adapter 的执行状态门槛
 
-- 状态：Accepted for the fixed POC-0 S1 fixture only，2026-09-27；跨引擎原生订单生命周期仍 Unresolved
+- 状态：Accepted for the fixed POC-0 S1 fixture only，2026-09-27；Nautilus 2.0.0rc5 HALT 原生拒单隔离实验已证实（[票据 14 证据](../../poc/poc0-benchmark/results/nautilus-halt-native-probe-2026-09-28.md)）；跨引擎原生订单生命周期仍 Unresolved
 
 POC-0 的 Rust Fast Event 参考路径在有价格 bar 但执行状态为 `HALTED` 时记录零数量拒单，并在下一可交易日重试。Nautilus 候选使用合成开盘/收盘 QuoteTick；仅省略停牌日行情会让既有订单保持待成交，无法代表 Rust 的拒单语义。
 
@@ -19,7 +19,7 @@ POC-0 的 Rust Fast Event 参考路径在有价格 bar 但执行状态为 `HALTE
 
 ## 后续比较边界（供票据 09 及以后引用，无需重新论证）
 
-- Nautilus 2.0.0rc5 是否会在收到 `InstrumentStatus(action=HALT)` 后对期间提交的订单产生撮合引擎原生拒单，本 ADR 尚未做隔离实验验证，状态为 **Unknown**（不是"已证实不支持"）。要证实或证伪这一点，须先写一个独立小样例（单 instrument、一条 `QuoteTick` + 一条 `InstrumentStatus(HALT)`、一次 `submit_order()`），断言是否触发 `on_order_rejected`；不得直接在 S2/S3 全量 fixture 上验证，也不得未经验证就宣称任一结论。
+- Nautilus 2.0.0rc5 收到 `InstrumentStatus(action=HALT)` 后，对停牌期间提交的市价单原生触发 `on_order_rejected`，状态为 **已证实**：独立单 instrument、一条 `QuoteTick`、一条 HALT、一次 `submit_order()` 的[隔离实验](../../poc/poc0-benchmark/results/nautilus-halt-native-probe-2026-09-28.md)记录了拒单原因及引擎缓存 `REJECTED`；无 HALT 对照在同一报价上成交。现有 S1/S2/S3 Adapter 仍自行拦单，本实验不证明它们已经接通原生状态处理。
 - 不论上述验证结果如何，从本 ADR 起，B2 的 `adopt / defer / reject` 结论按以下范围一次性划定，票据 09 及以后直接引用，不需要每次重新论证或重新测量同一个问题：
   - **计入结论的共同子集**：Fill 数量/价格/佣金、现金、持仓、每日 NAV、总成本、events/s、runs/s、单 Run 延迟、峰值 RSS。
   - **排除在外、只记录不判定的维度**：停牌/执行状态导致的订单事件数量与生命周期一致性（Adapter 项目契约 vs Nautilus 原生提交计数），以及该维度上的跨引擎吞吐差异。
