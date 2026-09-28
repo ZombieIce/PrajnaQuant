@@ -22,6 +22,39 @@ def fixed_nautilus_available() -> bool:
         return False
 
 
+def valid_mode_evidence(reset_parity: str) -> dict:
+    selected = "reset" if reset_parity == "passed" else "cached_conversion_new_engine"
+    checksum = "a" * 64
+    state = {"iteration_count": 10}
+    failed = reset_parity == "failed"
+    loads = []
+    for name in ("s2_decision", "s3_decision", "s2_robustness", "s3_robustness"):
+        loads.append({
+            "name": name,
+            "fresh_engine_checksum_sha256": checksum,
+            "golden_checksum_sha256": checksum if name.endswith("decision") else None,
+            "golden_match": name.endswith("decision"),
+            "reset_checksums_sha256": [checksum] * 3,
+            "reset_runs": 3,
+            "fresh_engine_state": state,
+            "reset_engine_states": [state] * 3,
+            "reset_runs_engine_reused": [True] * 3,
+            "parity": "failed" if failed else "passed",
+            "reset_error_logs": ["native error"] * 3 if failed else [],
+        })
+    return {
+        "schema_version": b2_matched.RESET_PARITY_SCHEMA,
+        "nautilus_version": "2.0.0rc5",
+        "revision": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=b2_matched.ROOT, text=True
+        ).strip(),
+        "dirty_worktree": False,
+        "reset_parity": reset_parity,
+        "selected_mode": selected,
+        "loads": loads,
+    }
+
+
 class EnvironmentTests(unittest.TestCase):
     def test_hardware_identity_falls_back_without_leaking_system_profiler_output(self):
         with patch.object(b2_matched.platform, "system", return_value="Darwin"), patch.object(
@@ -75,7 +108,7 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(exploratory["evidence_level"], "exploratory")
         with_evidence = self.decide(
             protocol="fallback_reset_unverified",
-            mode_selection={"reset_parity": "failed", "selected_mode": "cached_conversion_new_engine"},
+            mode_selection=valid_mode_evidence("failed"),
         )
         self.assertEqual(with_evidence["evidence_level"], "exploratory")
 
@@ -86,8 +119,8 @@ class DecisionTests(unittest.TestCase):
             self.assertEqual(decision["evidence_level"], "exploratory")
 
     def test_registered_only_when_mode_matches_adr_0013_selection(self):
-        reset = {"reset_parity": "passed", "selected_mode": "reset"}
-        fallback = {"reset_parity": "failed", "selected_mode": "cached_conversion_new_engine"}
+        reset = valid_mode_evidence("passed")
+        fallback = valid_mode_evidence("failed")
         self.assertEqual(self.decide(protocol="matched", mode_selection=reset)["evidence_level"], "registered")
         self.assertEqual(self.decide(protocol="matched_fallback", mode_selection=fallback)["evidence_level"], "registered")
         self.assertEqual(self.decide(protocol="matched_fallback", mode_selection=reset)["status"], "unresolved")
@@ -95,6 +128,40 @@ class DecisionTests(unittest.TestCase):
         inconsistent = {"reset_parity": "passed", "selected_mode": "cached_conversion_new_engine"}
         self.assertEqual(self.decide(protocol="matched_fallback", mode_selection=inconsistent)["status"], "unresolved")
         self.assertEqual(self.decide(protocol="matched", mode_selection={})["status"], "unresolved")
+
+    def test_mode_selection_requires_complete_clean_pinned_evidence(self):
+        incomplete = valid_mode_evidence("failed")
+        incomplete["loads"].pop()
+        decision = self.decide(protocol="matched_fallback", mode_selection=incomplete)
+        self.assertEqual(decision["status"], "unresolved")
+        self.assertIn("four required loads", decision["reason"])
+
+        malformed = valid_mode_evidence("passed")
+        malformed["loads"][0].pop("fresh_engine_state")
+        malformed["loads"][0]["reset_engine_states"] = [None] * 3
+        decision = self.decide(protocol="matched", mode_selection=malformed)
+        self.assertEqual(decision["status"], "unresolved")
+        self.assertIn("engine-state snapshots", decision["reason"])
+
+        malformed = valid_mode_evidence("passed")
+        malformed["loads"][0]["name"] = []
+        decision = self.decide(protocol="matched", mode_selection=malformed)
+        self.assertEqual(decision["status"], "unresolved")
+        self.assertIn("invalid load name", decision["reason"])
+
+        malformed = valid_mode_evidence("passed")
+        malformed["revision"] = "f" * 40
+        decision = self.decide(protocol="matched", mode_selection=malformed)
+        self.assertEqual(decision["status"], "unresolved")
+        self.assertIn("not an available Git commit", decision["reason"])
+
+        contradictory = valid_mode_evidence("failed")
+        for load in contradictory["loads"]:
+            load["parity"] = "failed"
+            load["reset_error_logs"] = []
+        decision = self.decide(protocol="matched_fallback", mode_selection=contradictory)
+        self.assertEqual(decision["status"], "unresolved")
+        self.assertIn("contradicts observed parity", decision["reason"])
 
     def test_maintenance_proxy_changes_never_change_decision(self):
         metrics = b2_matched.maintenance_cost_proxies(Path(sys.executable))
@@ -342,6 +409,8 @@ class CoordinatorTests(unittest.TestCase):
     def test_coordinator_report_exposes_both_decision_loads_and_required_sections(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "decision-loads.json"
+            mode_evidence = Path(temporary) / "reset-parity.json"
+            mode_evidence.write_text(json.dumps(valid_mode_evidence("failed")))
             binary = b2_matched.ROOT / "target/debug/quant-research"
             result = subprocess.run(
                 [
@@ -351,6 +420,8 @@ class CoordinatorTests(unittest.TestCase):
                     str(binary),
                     "--python",
                     sys.executable,
+                    "--reset-parity-evidence",
+                    str(mode_evidence),
                     "--output",
                     str(output),
                 ],
@@ -368,6 +439,12 @@ class CoordinatorTests(unittest.TestCase):
             self.assertIn("rss_baselines", report)
             self.assertIn("rustc_vv", report["environment"])
             self.assertIn("python_transitive_dependency_snapshot", report["environment"])
+            self.assertEqual(report["nautilus_mode_selection"]["reset_parity"], "failed")
+            self.assertEqual(report["nautilus_mode_selection"]["selected_mode"], "cached_conversion_new_engine")
+            self.assertEqual(
+                report["nautilus_mode_selection"]["revision"],
+                subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=b2_matched.ROOT, text=True).strip(),
+            )
 
 
 class NautilusIntegrationTests(unittest.TestCase):

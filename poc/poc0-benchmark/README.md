@@ -584,6 +584,46 @@ parity remains unverified (ticket 07).
 
 ### Full S2/S3 decision-load remeasurement (ticket `poc-0-b2-matched-remeasure/03`)
 
+#### Nautilus reset-mode gate (ticket `poc-0-b2-matched-remeasure/07`)
+
+Run the reset verifier before the formal matched remeasurement. It replays all four registered
+loads (S2/S3 decision fixtures and S2/S3 64×252 robustness fixtures) in one worker per load:
+one fresh-engine reference, one setup Run, then three consecutive `reset()` Runs. The report
+checks the full adapter projection checksum, first differing projection field, account balances,
+open/total orders and positions, iteration count, replay bounds, strategy/instrument cache, and
+per-instrument quote-cache counts. The two decision checksums come from an earlier report whose
+projections passed the independent Rust golden field comparison; only ADR 0012's native order
+lifecycle field is excluded. If the pinned Nautilus version is unavailable, the report is
+`unresolved`. Reset mismatch or native engine error logs uniformly selects
+`cached_conversion_new_engine`; four clean matching loads select `reset`. A missing or
+mismatched decision golden leaves selection unresolved. Native errors are retained with their
+first field (`engine_log.error`) so matching projections cannot hide an invalid lifecycle.
+
+```bash
+.venv/bin/python poc/poc0-benchmark/verify-b2-nautilus-reset.py \
+  --golden-checksums poc/poc0-benchmark/fixtures/b2-nautilus-reset-golden-checksums-v1.json \
+  --output poc/poc0-benchmark/results/b2-nautilus-reset-parity-2026-09-28.json
+.venv/bin/python poc/poc0-benchmark/b2_matched.py \
+  --binary target/release/quant-research --python .venv/bin/python \
+  --reset-parity-evidence poc/poc0-benchmark/results/b2-nautilus-reset-parity-2026-09-28.json \
+  --run-measurements \
+  --output poc/poc0-benchmark/results/b2-matched-decision-loads-reset-selected-2026-09-28.json
+```
+
+The coordinator copies reset evidence (Nautilus version, Git revision, four dataset hashes,
+projection checksum lists, and selected mode) into the combined comparison report and passes
+`reset_parity` / `selected_mode` to the pure decision function. It sends the selected mode to
+every serial and parallel Nautilus worker. Without an evidence file, the cached-conversion / new
+engine fallback stays `exploratory`; an explicit unresolved evidence file cannot produce a
+registered decision.
+
+The evidence-backed 2026-09-28 coordinator report is
+[`b2-matched-decision-loads-reset-selected-2026-09-28.json`](results/b2-matched-decision-loads-reset-selected-2026-09-28.json).
+Both S2 and S3 correctness gates passed, the selected fallback mode was recorded as
+`registered`, and both decision loads passed the registered latency, 2-worker throughput,
+and RSS gates. The report was measured from clean revision `ecf7f94`; this is a decision-load
+result only and does not include the separate 64×252 robustness conclusion.
+
 The decision-load coordinator runs independent correctness preflight for S2 3×10 and S3
 3×130, then uses 20 single-worker serial samples and five alternating-order groups of two
 workers × six Runs for each candidate and load. Raw sample files and the combined report keep

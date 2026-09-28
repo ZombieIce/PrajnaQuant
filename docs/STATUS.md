@@ -1,5 +1,7 @@
 # Project Status
 
+2026-09-28 B2 reset parity（GitHub Issue #2）已在固定 Nautilus `2.0.0rc5` 上实测：S2 3×10、S3 3×130 与 S2/S3 64×252 四个负载，各连续运行三次 reset Run；完整投影及引擎状态快照与新建引擎一致，两个判定负载 checksum 与先前经 Rust golden 字段对拍的 Nautilus projection checksum 一致。但每次 reset Run 均记录 Nautilus 原生 `Invalid state trigger READY -> INITIALIZE` 错误日志，因此按 fail-closed 规则统一选择 `cached_conversion_new_engine`。带模式证据重跑后 S2/S3 decision loads 为 registered `adopt`，完整数据见[决策负载报告](../poc/poc0-benchmark/results/b2-matched-decision-loads-reset-selected-2026-09-28.json)；reset 错误日志、输入 hash、checksum 与状态快照见[reset evidence](../poc/poc0-benchmark/results/b2-nautilus-reset-parity-2026-09-28.json)，复跑入口见[README](../poc/poc0-benchmark/README.md)。64×252 robustness 尚未按所选模式 registered 复核，因此整体 B2 仍为 `unresolved`。没有据此得出生产 Engine 或真实 ETF 收益结论。
+
 实现扫描日期：2026-09-25；目标路线更新：2026-09-26。状态含义：Implemented=代码存在；Partially Implemented=只覆盖部分契约；Planned=有明确路线但无实现；Missing=未见实现；Unknown=仓库证据不足。**Implemented 不表示量化正确性已被充分测试或数据已被验收。**代码仓库已关联 GitHub `ZombieIce/PrajnaQuant`；本机被忽略的数据仍不是可交接资产。
 
 ## Target Architecture Baseline (2026-09-26)

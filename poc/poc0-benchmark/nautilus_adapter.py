@@ -15,10 +15,12 @@ import math
 import multiprocessing
 import os
 import platform
+import re
 import resource
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -27,6 +29,7 @@ from zoneinfo import ZoneInfo
 PINNED_NAUTILUS_VERSION = "2.0.0rc5"
 _NAUTILUS_PREPARED_CACHE: dict[tuple[str, str], dict[str, Any]] = {}
 _NAUTILUS_DATASET_CACHE_KEYS: dict[int, str] = {}
+_NAUTILUS_RESET_ENGINES: dict[tuple[str, str], Any] = {}
 ROOT = Path(__file__).resolve().parents[2]
 INSTALL_EVIDENCE = ROOT / "poc/poc0-benchmark/results/nautilus-install-attempt-2026-09-27.json"
 BAR_OPEN_DOC = (
@@ -153,8 +156,16 @@ def _ma_signals(dataset: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return signals
 
 
-def _run_nautilus(dataset: dict[str, Any], strategy: str = "s1") -> dict[str, Any]:
+def _run_nautilus(
+    dataset: dict[str, Any],
+    strategy: str = "s1",
+    *,
+    engine_mode: str = "cached_conversion_new_engine",
+    capture_engine_state: bool = False,
+) -> dict[str, Any]:
     """Run one isolated B2 scenario through public Nautilus 2.x Python APIs."""
+    if engine_mode not in {"cached_conversion_new_engine", "reset"}:
+        raise ValueError(f"unsupported Nautilus engine mode: {engine_mode}")
     started = time.perf_counter_ns()
     from nautilus_trader.backtest import BacktestEngine
     from nautilus_trader.config import BacktestEngineConfig, LoggerConfig
@@ -543,20 +554,34 @@ def _run_nautilus(dataset: dict[str, Any], strategy: str = "s1") -> dict[str, An
     factor_ns = time.perf_counter_ns() - factor_started
 
     init_started = time.perf_counter_ns()
-    engine = BacktestEngine(
-        BacktestEngineConfig(logging=LoggerConfig(stdout_level=LogLevel.ERROR))
-    )
-    engine.add_venue(
-        venue=venue,
-        oms_type=OmsType.NETTING,
-        account_type=AccountType.CASH,
-        starting_balances=[Money.from_str(f"{dataset['account']['initial_cash']:.2f} CNY")],
-        base_currency=currency,
-        fee_model=FixedFeeModel(Money.from_str(f"{dataset['costs']['minimum_commission']:.2f} CNY")),
-    )
-    for instrument, item in zip(instruments, dataset["instruments"], strict=True):
-        engine.add_instrument(instrument)
-        engine.add_data([row[2] for row in rows_by_symbol[item["symbol"]]])
+    dataset_digest = _NAUTILUS_DATASET_CACHE_KEYS.get(id(dataset))
+    if dataset_digest is None:
+        dataset_digest = hashlib.sha256(json.dumps(dataset, sort_keys=True).encode()).hexdigest()
+    reset_engine_key = (dataset_digest, strategy)
+    engine = _NAUTILUS_RESET_ENGINES.get(reset_engine_key) if engine_mode == "reset" else None
+    reused_engine = engine is not None
+    if engine is None:
+        engine = BacktestEngine(
+            BacktestEngineConfig(logging=LoggerConfig(stdout_level=LogLevel.ERROR))
+        )
+        engine.add_venue(
+            venue=venue,
+            oms_type=OmsType.NETTING,
+            account_type=AccountType.CASH,
+            starting_balances=[Money.from_str(f"{dataset['account']['initial_cash']:.2f} CNY")],
+            base_currency=currency,
+            fee_model=FixedFeeModel(Money.from_str(f"{dataset['costs']['minimum_commission']:.2f} CNY")),
+        )
+        for instrument, item in zip(instruments, dataset["instruments"], strict=True):
+            engine.add_instrument(instrument)
+            engine.add_data([row[2] for row in rows_by_symbol[item["symbol"]]])
+        if engine_mode == "reset":
+            _NAUTILUS_RESET_ENGINES[reset_engine_key] = engine
+    else:
+        # BacktestEngine.reset() preserves venue, instruments and data. Clear the old
+        # Strategy explicitly before registering a fresh instance for this Run.
+        engine.reset()
+        engine.clear_strategies()
     strategy_instance = (RotationStrategy if strategy != "s1" else BuyHoldStrategy)(
         AdapterConfig(
             ids=ids,
@@ -607,8 +632,33 @@ def _run_nautilus(dataset: dict[str, Any], strategy: str = "s1") -> dict[str, An
         ]
         nav = cash + sum(h["quantity"] * h["mark_price"] for h in marked_holdings)
         ledger.append({"date": date, "cash": cash, "holdings": marked_holdings, "nav": nav})
-    engine.dispose()
+    engine_state = None
+    if capture_engine_state:
+        account = engine.cache.account_for_venue(venue)
+        engine_state = {
+            "account_balances": {
+                currency_code.code: str(balance.total)
+                for currency_code, balance in sorted(account.balances().items(), key=lambda item: item[0].code)
+            },
+            "order_count": engine.cache.orders_total_count(),
+            "open_order_count": engine.cache.orders_open_count(),
+            "position_count": engine.cache.positions_total_count(),
+            "open_position_count": engine.cache.positions_open_count(),
+            "iteration_count": engine.iteration,
+            "backtest_start": engine.backtest_start,
+            "backtest_end": engine.backtest_end,
+            "strategy_ids": sorted(str(value) for value in engine.cache.strategy_ids()),
+            "instrument_ids": sorted(str(value.id) for value in engine.cache.instruments()),
+            "quote_counts_by_instrument": {
+                str(instrument_id): engine.cache.quote_count(instrument_id)
+                for instrument_id in sorted(engine.cache.instrument_ids(), key=str)
+            },
+        }
+    if engine_mode != "reset":
+        engine.dispose()
     return {
+        "engine_mode": engine_mode,
+        "engine_reused": reused_engine,
         "projection": {
             "orders": sorted(strategy_instance.order_events, key=lambda x: (x.get("attempt_date", ""), x.get("side") != "SELL", x["symbol"])),
             "fills": fills,
@@ -638,6 +688,7 @@ def _run_nautilus(dataset: dict[str, Any], strategy: str = "s1") -> dict[str, An
             "event_processing": event_ns,
             "end_to_end": time.perf_counter_ns() - started,
         },
+        **({"engine_state": engine_state} if capture_engine_state else {}),
     }
 
 
@@ -655,6 +706,7 @@ _B2_WORKER_DATASET: dict[str, Any] | None = None
 _B2_WORKER_STRATEGY: str | None = None
 _B2_WORKER_EXPECTED_CHECKSUM: str | None = None
 _B2_WORKER_WARMUP_CHECKSUM: str | None = None
+_B2_WORKER_ENGINE_MODE = "cached_conversion_new_engine"
 _B2_WORKER_READY_BARRIER: Any = None
 _B2_WORKER_MEASUREMENT_BARRIER: Any = None
 
@@ -664,12 +716,211 @@ def _projection_checksum(projection: dict[str, Any]) -> str:
     return hashlib.sha256(serialized).hexdigest()
 
 
+def _first_projection_difference(expected: Any, actual: Any, path: str = "projection") -> str | None:
+    if type(expected) is not type(actual):
+        return path
+    if isinstance(expected, dict):
+        if expected.keys() != actual.keys():
+            keys = sorted(set(expected) | set(actual))
+            return next(f"{path}.{key}" for key in keys if key not in expected or key not in actual)
+        for key in sorted(expected):
+            difference = _first_projection_difference(expected[key], actual[key], f"{path}.{key}")
+            if difference is not None:
+                return difference
+        return None
+    if isinstance(expected, list):
+        if len(expected) != len(actual):
+            return f"{path}.length"
+        for index, (left, right) in enumerate(zip(expected, actual, strict=True)):
+            difference = _first_projection_difference(left, right, f"{path}[{index}]")
+            if difference is not None:
+                return difference
+        return None
+    return None if expected == actual else path
+
+
+def _run_with_native_log_capture(*args: Any, **kwargs: Any) -> tuple[dict[str, Any], list[str]]:
+    """Capture Rust/C logger output so a matching projection cannot hide engine errors."""
+    sys.stdout.flush()
+    sys.stderr.flush()
+    with tempfile.TemporaryFile() as captured:
+        saved_stdout, saved_stderr = os.dup(1), os.dup(2)
+        try:
+            os.dup2(captured.fileno(), 1)
+            os.dup2(captured.fileno(), 2)
+            result = _run_nautilus(*args, **kwargs)
+            sys.stdout.flush()
+            sys.stderr.flush()
+        finally:
+            os.dup2(saved_stdout, 1)
+            os.dup2(saved_stderr, 2)
+            os.close(saved_stdout)
+            os.close(saved_stderr)
+        captured.seek(0)
+        log_lines = captured.read().decode("utf-8", errors="replace").splitlines()
+    return result, [
+        re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", line)
+        for line in log_lines
+        if "[ERROR]" in line or "\tERROR\t" in line
+    ]
+
+
+def verify_reset_parity(
+    workloads: list[dict[str, Any]],
+    *,
+    minimum_reset_runs: int = 3,
+) -> dict[str, Any]:
+    """Compare repeated reset Runs with fresh-engine projections on all four B2 loads.
+
+    Each workload has ``name``, ``strategy``, ``dataset`` and, for decision loads,
+    ``golden_checksum_sha256``. The first reset-mode call primes venue/instrument/data;
+    the following ``minimum_reset_runs`` calls each reset that same engine first.
+    """
+    version, version_error = _version_probe()
+    evidence: dict[str, Any] = {
+        "schema_version": "poc0.b2-nautilus-reset-parity.v1",
+        "nautilus_version": version,
+        "revision": None,
+        "reset_parity": "unresolved",
+        "selected_mode": None,
+        "loads": [],
+    }
+    try:
+        evidence["revision"] = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True,
+            capture_output=True, check=True,
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=ROOT, text=True,
+            capture_output=True, check=True,
+        ).stdout.splitlines()
+        evidence["dirty_worktree"] = bool(dirty)
+        evidence["dirty_paths"] = [line[3:] for line in dirty]
+    except (OSError, subprocess.CalledProcessError) as error:
+        evidence["revision_error"] = f"{type(error).__name__}: {error}"
+    if version_error:
+        evidence["reason"] = f"pinned Nautilus runtime unavailable: {version_error}"
+        return evidence
+    if minimum_reset_runs < 3:
+        raise ValueError("ticket 07 requires at least three reset Runs per workload")
+    if len(workloads) != 4 or len({item.get("name") for item in workloads}) != 4:
+        evidence["reason"] = "reset parity requires four uniquely named decision and robustness workloads"
+        return evidence
+
+    parity_failures = []
+    golden_failures = []
+    for workload in workloads:
+        name = workload["name"]
+        strategy = workload["strategy"]
+        dataset = workload["dataset"]
+        dataset_digest = hashlib.sha256(json.dumps(dataset, sort_keys=True).encode()).hexdigest()
+        _NAUTILUS_DATASET_CACHE_KEYS[id(dataset)] = dataset_digest
+        reset_key = (dataset_digest, strategy)
+        previous_engine = _NAUTILUS_RESET_ENGINES.pop(reset_key, None)
+        if previous_engine is not None:
+            previous_engine.dispose()
+
+        fresh = _run_nautilus(
+            dataset, strategy=strategy, engine_mode="cached_conversion_new_engine", capture_engine_state=True
+        )
+        fresh_checksum = _projection_checksum(fresh["projection"])
+        golden_checksum = workload.get("golden_checksum_sha256")
+        golden_required = workload.get("golden_required", name in {"s2_decision", "s3_decision"})
+        golden_match = None if golden_checksum is None else fresh_checksum == golden_checksum
+        first_difference = None
+        if golden_required and golden_checksum is None:
+            first_difference = "golden_checksum_sha256 (required but missing)"
+        elif golden_match is False:
+            first_difference = "projection (fresh Nautilus checksum differs from independent golden)"
+
+        # The first reset-mode call loads the reusable engine; all subsequent calls
+        # exercise reset(), clear_strategies(), and a newly constructed Strategy.
+        prime = _run_nautilus(dataset, strategy=strategy, engine_mode="reset", capture_engine_state=True)
+        reset_results = [
+            _run_with_native_log_capture(
+                dataset,
+                strategy=strategy,
+                engine_mode="reset",
+                capture_engine_state=True,
+            )
+            for _ in range(minimum_reset_runs)
+        ]
+        reset_runs = [item[0] for item in reset_results]
+        reset_error_logs = [line for _, lines in reset_results for line in lines]
+        reset_checksums = [_projection_checksum(item["projection"]) for item in reset_runs]
+        reset_differences = [
+            _first_projection_difference(fresh["projection"], item["projection"])
+            for item in reset_runs
+        ]
+        state_differences = [
+            _first_projection_difference(fresh["engine_state"], item["engine_state"], "engine_state")
+            for item in reset_runs
+        ]
+        parity_ok = (
+            all(value == fresh_checksum for value in reset_checksums)
+            and all(difference is None for difference in state_differences)
+            and not reset_error_logs
+        )
+        if not parity_ok and first_difference is None:
+            first_difference = next(
+                (
+                    value for value in reset_differences + state_differences if value is not None
+                ),
+                "engine_log.error" if reset_error_logs else None,
+            )
+        if not parity_ok:
+            parity_failures.append(name)
+        if golden_required and golden_match is not True:
+            golden_failures.append(name)
+        evidence["loads"].append({
+            "name": name,
+            "strategy": strategy,
+            "dataset_sha256": dataset_digest,
+            "fresh_engine_checksum_sha256": fresh_checksum,
+            "golden_checksum_sha256": golden_checksum,
+            "golden_match": golden_match,
+            "reset_checksums_sha256": reset_checksums,
+            "fresh_engine_state": fresh["engine_state"],
+            "reset_engine_states": [item["engine_state"] for item in reset_runs],
+            "reset_runs": len(reset_runs),
+            "reset_runs_engine_reused": [item["engine_reused"] for item in reset_runs],
+            "reset_error_logs": reset_error_logs,
+            "parity": "failed" if not parity_ok else "unresolved" if golden_required and golden_match is not True else "passed",
+            "first_difference_field": first_difference,
+            "prime_checksum_sha256": _projection_checksum(prime["projection"]),
+        })
+        cached_engine = _NAUTILUS_RESET_ENGINES.pop(reset_key, None)
+        if cached_engine is not None:
+            cached_engine.dispose()
+
+    if parity_failures:
+        evidence["reset_parity"] = "failed"
+        evidence["selected_mode"] = "cached_conversion_new_engine"
+        evidence["reason"] = "one or more reset Runs differed from a fresh engine or emitted native engine error logs"
+        evidence["failed_loads"] = parity_failures
+        if golden_failures:
+            evidence["golden_unresolved_loads"] = golden_failures
+    elif golden_failures:
+        evidence["reset_parity"] = "unresolved"
+        evidence["reason"] = "reset projections matched fresh engines, but a required decision-load golden was missing or mismatched"
+        evidence["golden_unresolved_loads"] = golden_failures
+    else:
+        evidence["reset_parity"] = "passed"
+        evidence["selected_mode"] = "reset"
+        evidence["reason"] = "all four loads matched fresh-engine projections; decision loads also matched independent goldens"
+    return evidence
+
+
 def _initialize_b2_digest_worker(
     dataset: dict[str, Any], strategy: str, expected_checksum: str,
     ready_barrier: Any = None, measurement_barrier: Any = None,
+    engine_mode: str = "cached_conversion_new_engine",
 ) -> None:
     global _B2_WORKER_DATASET, _B2_WORKER_STRATEGY, _B2_WORKER_EXPECTED_CHECKSUM
     global _B2_WORKER_WARMUP_CHECKSUM, _B2_WORKER_READY_BARRIER, _B2_WORKER_MEASUREMENT_BARRIER
+    global _B2_WORKER_ENGINE_MODE
+    if engine_mode not in {"reset", "cached_conversion_new_engine"}:
+        raise ValueError(f"unsupported Nautilus engine mode: {engine_mode}")
     _NAUTILUS_DATASET_CACHE_KEYS[id(dataset)] = hashlib.sha256(
         json.dumps(dataset, sort_keys=True).encode()
     ).hexdigest()
@@ -678,8 +929,9 @@ def _initialize_b2_digest_worker(
     _B2_WORKER_EXPECTED_CHECKSUM = expected_checksum
     _B2_WORKER_READY_BARRIER = ready_barrier
     _B2_WORKER_MEASUREMENT_BARRIER = measurement_barrier
+    _B2_WORKER_ENGINE_MODE = engine_mode
     for _ in range(2):
-        warmup = _run_nautilus(dataset, strategy=strategy)
+        warmup = _run_nautilus(dataset, strategy=strategy, engine_mode=engine_mode)
         checksum = _projection_checksum(warmup["projection"])
         if checksum != expected_checksum:
             raise RuntimeError("Nautilus warmup differs from the independently checked S2 projection")
@@ -699,7 +951,11 @@ def _parallel_worker_digest(run_index: int) -> dict[str, Any]:
         or _B2_WORKER_WARMUP_CHECKSUM is None
     ):
         raise RuntimeError("B2 worker was not initialized")
-    result = _run_nautilus(_B2_WORKER_DATASET, strategy=_B2_WORKER_STRATEGY)
+    result = _run_nautilus(
+        _B2_WORKER_DATASET,
+        strategy=_B2_WORKER_STRATEGY,
+        engine_mode=_B2_WORKER_ENGINE_MODE,
+    )
     checksum = _projection_checksum(result["projection"])
     return {
         "run_index": run_index,
@@ -720,7 +976,11 @@ def _parallel_worker_digest_batch(run_indices: list[int]) -> dict[str, Any]:
         _B2_WORKER_MEASUREMENT_BARRIER.wait(timeout=60)
     measured = []
     for run_index in run_indices:
-        result = _run_nautilus(_B2_WORKER_DATASET, strategy=_B2_WORKER_STRATEGY)
+        result = _run_nautilus(
+            _B2_WORKER_DATASET,
+            strategy=_B2_WORKER_STRATEGY,
+            engine_mode=_B2_WORKER_ENGINE_MODE,
+        )
         measured.append((run_index, result["timings_ns"]["end_to_end"], result["projection"]))
     completed_ns = time.perf_counter_ns()
     # Wait for every worker's measured batch before any projection hashing can contend
@@ -778,6 +1038,7 @@ def parallel_digest_runs(
     *,
     workers: int = 2,
     runs: int = 6,
+    engine_mode: str = "cached_conversion_new_engine",
 ) -> dict[str, Any]:
     """Run correctness-gated workers while keeping projection payloads out of IPC."""
     if workers <= 0 or runs < workers:
@@ -789,7 +1050,7 @@ def parallel_digest_runs(
         max_workers=workers,
         mp_context=process_context,
         initializer=_initialize_b2_digest_worker,
-        initargs=(dataset, strategy, expected_checksum, ready_barrier, measurement_barrier),
+        initargs=(dataset, strategy, expected_checksum, ready_barrier, measurement_barrier, engine_mode),
     ) as pool:
         ready_futures = [pool.submit(_parallel_worker_ready) for _ in range(workers)]
         ready_pids = {probe.result() for probe in ready_futures}
@@ -843,8 +1104,8 @@ def parallel_digest_runs(
         "peak_rss_by_worker_bytes": per_worker,
         "peak_rss_sum_upper_bound_bytes": sum(per_worker.values()),
         "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
-        "engine_mode": "cached_conversion_new_engine",
-        "engine_mode_reason": "reset parity untested (ticket 07); exploratory fallback, not selected by ADR 0013 evidence",
+        "engine_mode": engine_mode,
+        "engine_mode_reason": "selected by ticket 07 reset parity evidence" if engine_mode == "reset" else "fallback selected by ticket 07 reset parity evidence or used without evidence",
         "conversion_cached_per_worker": True,
     }
 
@@ -855,11 +1116,12 @@ def serial_digest_runs(
     expected_checksum: str,
     *,
     runs: int = 20,
+    engine_mode: str = "cached_conversion_new_engine",
 ) -> dict[str, Any]:
     """Measure serial Runs after worker-local conversion and two correctness warmups."""
     if runs <= 0:
         raise ValueError("runs must be positive")
-    _initialize_b2_digest_worker(dataset, strategy, expected_checksum)
+    _initialize_b2_digest_worker(dataset, strategy, expected_checksum, engine_mode=engine_mode)
     measured = [_parallel_worker_digest(index) for index in range(runs)]
     checksums = {item["checksum_sha256"] for item in measured}
     if checksums != {expected_checksum}:
@@ -891,8 +1153,8 @@ def serial_digest_runs(
         "median_ns": statistics.median(samples),
         "p95_ns": ordered[math.ceil(0.95 * len(ordered)) - 1],
         "peak_rss_bytes": peak,
-        "engine_mode": "cached_conversion_new_engine",
-        "engine_mode_reason": "reset parity untested (ticket 07); exploratory fallback, not selected by ADR 0013 evidence",
+        "engine_mode": engine_mode,
+        "engine_mode_reason": "selected by ticket 07 reset parity evidence" if engine_mode == "reset" else "fallback selected by ticket 07 reset parity evidence or used without evidence",
         "conversion_cached_per_worker": True,
         "measurement_scope": "single worker; conversion and two warmups excluded; factor/signal, new engine initialization, replay and projection included",
     }

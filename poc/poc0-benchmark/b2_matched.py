@@ -28,6 +28,104 @@ PROTOCOL_ENGINE_MODES = {
 # ADR 0013: reset is selected only when parity passes; fallback only when it fails.
 ADR_0013_MODE_FOR_PARITY = {"passed": "reset", "failed": "cached_conversion_new_engine"}
 NAUTILUS_DIRECT_REQUIREMENT = "nautilus_trader==2.0.0rc5"
+RESET_PARITY_SCHEMA = "poc0.b2-nautilus-reset-parity.v1"
+RESET_PARITY_LOADS = {"s2_decision", "s3_decision", "s2_robustness", "s3_robustness"}
+
+
+def _mode_evidence_error(evidence: dict[str, Any]) -> str | None:
+    """Reject incomplete or mismatched reset-parity artifacts before registration."""
+    if evidence.get("schema_version") != RESET_PARITY_SCHEMA:
+        return "mode-selection evidence has an unsupported schema"
+    if evidence.get("nautilus_version") != NAUTILUS_DIRECT_REQUIREMENT.split("==", 1)[1]:
+        return "mode-selection evidence does not use the pinned Nautilus version"
+    revision = evidence.get("revision")
+    if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        return "mode-selection evidence has no valid source revision"
+    try:
+        commit_exists = subprocess.run(
+            ["git", "cat-file", "-e", f"{revision}^{{commit}}"],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+        ).returncode == 0
+    except OSError:
+        commit_exists = False
+    if not commit_exists:
+        return "mode-selection evidence revision is not an available Git commit"
+    if evidence.get("dirty_worktree") is not False:
+        return "mode-selection evidence was not captured from a clean worktree"
+
+    loads = evidence.get("loads")
+    if not isinstance(loads, list) or any(not isinstance(item, dict) for item in loads):
+        return "mode-selection evidence contains invalid load records"
+    names = [item.get("name") for item in loads]
+    if any(not isinstance(name, str) for name in names):
+        return "mode-selection evidence contains an invalid load name"
+    if len(names) != len(RESET_PARITY_LOADS) or set(names) != RESET_PARITY_LOADS:
+        return "mode-selection evidence does not cover all four required loads"
+    for load in loads:
+        name = load["name"]
+        digest = load.get("fresh_engine_checksum_sha256")
+        resets = load.get("reset_checksums_sha256")
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            return f"mode-selection evidence has no fresh-engine checksum for {name}"
+        reset_runs = load.get("reset_runs")
+        if not isinstance(reset_runs, int) or isinstance(reset_runs, bool) or reset_runs < 3:
+            return f"mode-selection evidence records fewer than three reset Runs for {name}"
+        if not isinstance(resets, list) or len(resets) != reset_runs or any(
+            not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None
+            for value in resets
+        ):
+            return f"mode-selection evidence has incomplete reset checksums for {name}"
+        states = load.get("reset_engine_states")
+        fresh_state = load.get("fresh_engine_state")
+        if (
+            not isinstance(fresh_state, dict)
+            or not fresh_state
+            or not isinstance(states, list)
+            or len(states) != reset_runs
+            or any(not isinstance(state, dict) or not state for state in states)
+        ):
+            return f"mode-selection evidence has incomplete engine-state snapshots for {name}"
+        reused = load.get("reset_runs_engine_reused")
+        if not isinstance(reused, list) or len(reused) != reset_runs or not all(
+            isinstance(value, bool) and value for value in reused
+        ):
+            return f"mode-selection evidence does not prove engine reuse for {name}"
+    by_name = {load["name"]: load for load in loads}
+    for name in ("s2_decision", "s3_decision"):
+        load = by_name[name]
+        golden = load.get("golden_checksum_sha256")
+        if load.get("golden_match") is not True or golden != load.get("fresh_engine_checksum_sha256"):
+            return f"mode-selection evidence does not match the independent golden for {name}"
+
+    parity = evidence.get("reset_parity")
+    if not isinstance(parity, str):
+        return "mode-selection evidence has an invalid parity result"
+    expected_mode = ADR_0013_MODE_FOR_PARITY.get(parity)
+    if expected_mode is None or evidence.get("selected_mode") != expected_mode:
+        return "mode-selection evidence is inconsistent with ADR 0013"
+    observed_failures = []
+    for load in loads:
+        checksum_mismatch = any(
+            value != load["fresh_engine_checksum_sha256"]
+            for value in load["reset_checksums_sha256"]
+        )
+        state_mismatch = any(
+            state != load["fresh_engine_state"] for state in load["reset_engine_states"]
+        )
+        error_logs = load.get("reset_error_logs")
+        if not isinstance(error_logs, list) or any(not isinstance(line, str) for line in error_logs):
+            return f"mode-selection evidence has invalid engine logs for {load['name']}"
+        observed_failure = checksum_mismatch or state_mismatch or bool(error_logs)
+        if load.get("parity") != ("failed" if observed_failure else "passed"):
+            return f"mode-selection evidence load result contradicts observed parity for {load['name']}"
+        observed_failures.append(observed_failure)
+    if parity == "passed" and any(observed_failures):
+        return "mode-selection evidence claims parity passed despite a failed load or native error"
+    if parity == "failed" and not any(observed_failures):
+        return "mode-selection evidence claims failure without a checksum, state, or engine-log mismatch"
+    return None
 
 
 def _code_line_count(path: Path) -> int:
@@ -276,9 +374,12 @@ def decide(
         return {"status": "unresolved", "reason": "measurement boundaries or Nautilus reuse mode are not matched"}
     evidence_level = "exploratory"
     if mode_selection is not None and protocol != "fallback_reset_unverified":
+        if not isinstance(mode_selection, dict):
+            return {"status": "unresolved", "reason": "mode-selection evidence is not an object"}
         selected = mode_selection.get("selected_mode")
-        if selected is None or ADR_0013_MODE_FOR_PARITY.get(mode_selection.get("reset_parity")) != selected:
-            return {"status": "unresolved", "reason": "mode-selection evidence is inconsistent with ADR 0013"}
+        evidence_error = _mode_evidence_error(mode_selection)
+        if evidence_error:
+            return {"status": "unresolved", "reason": evidence_error}
         if PROTOCOL_ENGINE_MODES[protocol] != selected:
             return {"status": "unresolved", "reason": "measured Nautilus mode differs from the ticket 07 selection"}
         evidence_level = "registered"
@@ -442,11 +543,15 @@ def main() -> int:
     parser.add_argument("--python", type=Path, default=ROOT / ".venv/bin/python")
     parser.add_argument("--output", type=Path, default=ROOT / "poc/poc0-benchmark/results/b2-matched-decision-loads.json")
     parser.add_argument("--build-record", type=Path, default=ROOT / "poc/poc0-benchmark/results/b2-matched-s2-release-build-boundary-2026-09-28.json")
+    parser.add_argument("--reset-parity-evidence", type=Path, help="ticket 07 reset parity JSON from verify-b2-nautilus-reset.py")
     parser.add_argument("--run-measurements", action="store_true", help="collect timing after independent golden preflight")
     args = parser.parse_args()
     binary = args.binary if args.binary.is_absolute() else ROOT / args.binary
     output = args.output if args.output.is_absolute() else ROOT / args.output
     python = args.python if args.python.is_absolute() else ROOT / args.python
+    build_record = args.build_record if args.build_record.is_absolute() else ROOT / args.build_record
+    # Snapshot source identity before this invocation creates its own preflight/report files.
+    environment_snapshot = _environment(binary, python, build_record)
 
     fixtures = {
         "s2": {"dataset": DATASET, "expected": EXPECTED, "version": "poc0.synthetic.etf-daily.v1"},
@@ -506,9 +611,26 @@ def main() -> int:
         "environment": {},
         "rss_baselines": {},
     }
-    build_record = args.build_record if args.build_record.is_absolute() else ROOT / args.build_record
-    report["environment"] = _environment(binary, python, build_record)
+    report["environment"] = environment_snapshot
     report["rss_baselines"] = _rss_baselines(binary, python)
+    mode_evidence = None
+    if args.reset_parity_evidence is not None:
+        evidence_path = args.reset_parity_evidence if args.reset_parity_evidence.is_absolute() else ROOT / args.reset_parity_evidence
+        try:
+            mode_evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            report["nautilus_mode_selection"] = {
+                **mode_evidence,
+                "evidence_path": evidence_path.relative_to(ROOT).as_posix() if evidence_path.is_relative_to(ROOT) else str(evidence_path),
+            }
+        except (OSError, json.JSONDecodeError) as error:
+            mode_evidence = {
+                "reset_parity": "unresolved",
+                "selected_mode": None,
+                "reason": f"could not read reset parity evidence: {type(error).__name__}: {error}",
+            }
+            report["nautilus_mode_selection"] = mode_evidence
+    else:
+        report["nautilus_mode_selection"] = None
     if preflight.returncode != 0:
         report["preflight_error"] = preflight_error or preflight.stderr[-4000:]
         report["decision"]["reason"] = "independent Rust golden preflight failed"
@@ -587,7 +709,9 @@ def main() -> int:
                     if backend == "rust":
                         command.extend(["--binary", str(binary), "--expected-checksum", rust_checksum])
                     else:
-                        command.extend(["--expected-checksum", nautilus_checksum])
+                        selected_mode = (mode_evidence or {}).get("selected_mode")
+                        engine_mode = selected_mode or "cached_conversion_new_engine"
+                        command.extend(["--expected-checksum", nautilus_checksum, "--engine-mode", engine_mode])
                     result = _run(command)
                     if result.returncode:
                         raise RuntimeError(f"{backend} {strategy} {mode} measurement failed: {result.stderr[-3000:]}")
@@ -604,7 +728,12 @@ def main() -> int:
                 rust_peak = max(group["runs"]["rust"]["peak_rss_bytes"] for group in groups)
                 nautilus_peak = max(group["runs"]["nautilus"]["peak_rss_sum_upper_bound_bytes"] for group in groups)
                 engine_mode = serial["nautilus"].get("engine_mode")
-                protocol = "fallback_reset_unverified" if engine_mode == "cached_conversion_new_engine" and all(group["runs"]["nautilus"].get("engine_mode") == engine_mode for group in groups) else "unmatched"
+                if engine_mode == "reset" and all(group["runs"]["nautilus"].get("engine_mode") == engine_mode for group in groups):
+                    protocol = "matched"
+                elif engine_mode == "cached_conversion_new_engine" and all(group["runs"]["nautilus"].get("engine_mode") == engine_mode for group in groups):
+                    protocol = "matched_fallback" if mode_evidence is not None else "fallback_reset_unverified"
+                else:
+                    protocol = "unmatched"
                 serial_median = {backend: serial[backend].get("median_ns") for backend in serial}
                 primary = {
                     "serial": serial,
@@ -645,6 +774,7 @@ def main() -> int:
                     rust_parallel_runs_per_second=statistics.median(rust_rates), nautilus_parallel_runs_per_second=statistics.median(nautilus_rates),
                     rust_peak_rss_bytes=rust_peak, nautilus_peak_rss_sum_upper_bound_bytes=nautilus_peak,
                     correctness_checks={check["field"]: check["passed"] for check in load["correctness"]["checks"]},
+                    mode_selection=mode_evidence,
                 )
                 if load_decision.get("evidence_level") == "exploratory":
                     predicted_pass = True
@@ -669,7 +799,7 @@ def main() -> int:
                 overall = "adopt" if all(status == "adopt" for status in statuses) else "defer"
             report["decision"] = {
                 "status": overall,
-                "reason": "both S2 and S3 have exploratory fallback measurements; formal adoption remains unresolved until Nautilus reset parity is established",
+                "reason": "registered Nautilus mode selected by ticket 07 evidence" if mode_evidence is not None else "measurements use an unverified fallback and remain exploratory until ticket 07 reset parity is established",
                 "per_load": {key: value.get("decision", {"status": "unresolved"}) for key, value in report["decision_loads"].items()},
             }
             report["timing_boundaries"]["secondary"]["status"] = "measured_and_excluded_from_decision"
