@@ -1,5 +1,11 @@
 # Agent Handoff — 新平台目标基线与 POC-0
 
+## 当前交接（2026-09-29，GitHub Issue #8）
+
+分支 `8-prajna-domain-fixed-point` 新增 `crates/prajna-domain`，仅直接依赖 `chrono` 与 `serde`，并加入 workspace 和轻量 CI 的依赖守卫/Clippy/测试。D4 数值范围已实现：`Price`、`Quantity` 与 `Notional`（`Amount` 别名）保存 scale 18 的 `i128` 尾数，绝对值严格小于 `10^38`；只接受 JSON 数字字面量字符串、拒绝无法精确表示的第 19 位非零小数和越界值，serde 始终写字符串，且仅暴露显式 `to_f64()`。规范化字符串会删除小数尾零，`-0` 输出 `0`；tick 对齐、整数倍乘法、比较及零 increment 均有单元测试。#7 的 Instrument、Bar、Raw、Data Lake 和 Parquet/Arrow 范围尚未实现，本票不宣称覆盖。
+
+已通过 `cargo fmt --all -- --check`、`cargo clippy -p prajna-domain --all-targets --locked --offline -- -D warnings`、`cargo test -p prajna-domain --locked --offline`（6 passed）、`cargo tree -p prajna-domain -e normal,build,dev --prefix none --locked --offline`，以及完整 `cargo test --workspace --locked --offline`（16 warehouse + 6 domain + 66 research unit tests，集成测试通过）和 `cargo clippy --workspace --all-targets --locked --offline -- -D warnings`；workspace Clippy 仅重现 vendor `polars-io` 的既有 warnings。独立 Spec review 为 0 项；Standards review 最初指出 `checked_cmp` 没有可达失败路径，已改为 checked subtraction、补极值溢出测试并复核为 0 项。唯一建议下一步是创建包含 `Closes #8` 的 PR，后续 #9 才能依赖这些数值类型。
+
 ## 当前交接（2026-09-28，B2 票据 08 归因）
 
 固定 S2 64×252 首差已按 [ADR 0014](docs/decisions/0014-b2-correctness-failure-attribution.md) 归因为 Nautilus Adapter 逐证券开盘 Quote 的先买后卖问题，而非 Fast Event 错误。[诊断票据](.scratch/poc-0-b2-matched-remeasure/issues/08-s2-64x252-parity-diagnosis.md)给出裁剪自固定输入的 10 ETF / 68 session 手算用例：2025-04-07 close 信号、04-08 08:50 可用的 TRADABLE 状态、09:30 先卖五只再买五只，现金 48350、NAV 99560；Rust 与修正后 Adapter 测试通过。04-07/08/09 ETF038 均有 bar，无阻断状态。原 S2 351/348（Rust-only 133、Nautilus-only 130）在修复后变为两边 351 订单/Fill 且所有共同子集字段通过。旧报告保持归档，不改写。
