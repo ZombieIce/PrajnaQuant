@@ -1,6 +1,6 @@
 use super::super::{
-    B1SoaProjection, DatasetInput, PreparedDataset, SignalProjection, make_ma_dataset,
-    prepare_dataset, replay_event_targets, run, sorted_median, sorted_p95,
+    B1SoaProjection, DatasetInput, MA_FIXTURE_PATH, PreparedDataset, SignalProjection,
+    make_ma_dataset, prepare_dataset, replay_event_targets, run, sorted_median, sorted_p95,
 };
 use super::{BarEvent, StrategyDecision};
 use anyhow::{Context, Result, ensure};
@@ -97,7 +97,7 @@ pub fn run_b3_strategies() -> Result<Value> {
             && baseline_report.b2_fast_event_ma20_60.status == "correctness_passed_and_measured",
         "B3 S2/S3 reference event accounting failed its golden checks"
     );
-    let (ma_base, _) = make_ma_dataset(&base.spec)?;
+    let (ma_base, _) = make_ma_dataset(&base.spec, Path::new(MA_FIXTURE_PATH))?;
     let s2_stress = make_s2_stress_dataset(&base.spec, TARGET_INSTRUMENTS, TARGET_SESSIONS)?;
     let s3_stress = make_s3_stress_dataset(&ma_base, TARGET_INSTRUMENTS, TARGET_SESSIONS)?;
 
@@ -1084,7 +1084,8 @@ mod tests {
             );
         }
 
-        let (ma_dataset, _) = make_ma_dataset(&prepared.spec).expect("make fixed S3 fixture");
+        let (ma_dataset, _) = make_ma_dataset(&prepared.spec, Path::new(MA_FIXTURE_PATH))
+            .expect("make fixed S3 fixture");
         let s3_events = ordered_events(&ma_dataset);
         let expected_s3 = decisions_from_signals(
             StrategyKind::S3Ma20_60,
