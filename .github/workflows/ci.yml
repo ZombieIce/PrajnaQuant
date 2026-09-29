@@ -40,20 +40,24 @@ jobs:
             exit 1
           fi
 
-      - name: Guard - prajna-domain must not pull in bundled DuckDB
+      - name: Guard - prajna-domain and prajna-data must not pull in legacy warehouse dependencies
         run: |
           set -euo pipefail
-          tree=$(cargo tree -p prajna-domain -e normal,build,dev --prefix none --locked)
-          if grep -E '^(libduckdb-sys|duckdb|ashare-warehouse) ' <<<"$tree"; then
-            echo "::error::DuckDB or ashare-warehouse is in the prajna-domain dependency graph"
-            exit 1
-          fi
+          for package in prajna-domain prajna-data; do
+            tree=$(cargo tree -p "$package" -e normal,build,dev --prefix none --locked)
+            if grep -E '^(libduckdb-sys|duckdb|ashare-warehouse|polars[^ ]*) ' <<<"$tree"; then
+              echo "::error::DuckDB, Polars, or ashare-warehouse is in the $package dependency graph"
+              exit 1
+            fi
+          done
 
       - run: cargo fmt --all -- --check
       - run: cargo clippy -p quant-research --no-default-features --all-targets --locked -- -D warnings
       - run: cargo test -p quant-research --no-default-features --locked
       - run: cargo clippy -p prajna-domain --all-targets --locked -- -D warnings
       - run: cargo test -p prajna-domain --locked
+      - run: cargo clippy -p prajna-data --all-targets --locked -- -D warnings
+      - run: cargo test -p prajna-data --locked
 
       - uses: actions/setup-python@v5
         with:

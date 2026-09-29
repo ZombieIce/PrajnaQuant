@@ -1,0 +1,20 @@
+[package]
+name = "prajna-data"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.1"
+description = "Arrow and Parquet data contracts for Prajna Quant"
+license = "MIT"
+publish = false
+
+[dependencies]
+arrow-array = "=58.4.0"
+arrow-schema = "=58.4.0"
+parquet = { version = "=58.4.0", default-features = false, features = ["arrow", "zstd"] }
+prajna-domain = { path = "../prajna-domain" }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
