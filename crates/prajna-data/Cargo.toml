@@ -12,6 +12,12 @@ arrow-array = "=58.4.0"
 arrow-schema = "=58.4.0"
 parquet = { version = "=58.4.0", default-features = false, features = ["arrow", "zstd"] }
 prajna-domain = { path = "../prajna-domain" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3.14"
 
 [lints.rust]
 unsafe_code = "forbid"

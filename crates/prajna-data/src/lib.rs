@@ -1,5 +1,9 @@
 //! Arrow and Parquet data layer for Prajna Quant.
 
+mod raw;
+
+pub use raw::{RawStore, RawStoreError, SourceKind, SourceRecord, SourceRecordInput};
+
 #[cfg(test)]
 mod tests {
     #[test]
