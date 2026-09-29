@@ -2,7 +2,7 @@
 
 ## 当前交接（2026-09-29，GitHub Issue #12：MVP-0 Raw store）
 
-分支 `12-raw-store` 基于最新 `origin/main`（`793987e`）。`prajna-data` 现提供 `RawStore::open/put/get/sources`：Raw 对象存于 `raw/sha256/<前两位>/<hex>`，身份格式为 `sha256:<小写 hex>`；写入使用唯一临时文件、文件 `sync_all` 后原子 rename。重复 put 会校验现存字节和 hash；读取时重算 hash。来源以 D6 字段追加至 `raw-sources/sha256/<前两位>/<hex>.jsonl`，query、header、JSON/form body 中 key 名含 token/key/secret/signature/password/auth 的值会脱敏。来源追加在进程内串行化，满足本票线程并发场景；未承诺跨进程追加并发。
+分支 `12-raw-store` 基于最新 `origin/main`（`793987e`）。`prajna-data` 现提供 `RawStore::open/put/get/sources`：Raw 对象存于 `raw/sha256/<前两位>/<hex>`，身份格式为 `sha256:<小写 hex>`；写入使用唯一临时文件、文件 `sync_all` 后原子 rename。重复 put 会校验现存字节和 hash；读取时重算 hash。来源记录追加至 `raw-sources/sha256/<前两位>/<hex>.jsonl`，字段为 `raw_sha256`、`content_type`、`source_kind`、`source_id`、`request`、`observed_at`、`ingested_by`；query、header、JSON/form body 中 key 名含 token/key/secret/signature/password/auth 的值会脱敏。来源追加在进程内串行化，满足本票线程并发场景；未承诺跨进程追加并发。
 
 验证通过：`cargo fmt --all -- --check`、`cargo test -p prajna-data --locked --offline`（5 passed）、`cargo clippy -p prajna-data --all-targets --locked --offline -- -D warnings`、prajna-domain/prajna-data DuckDB/Polars/ashare-warehouse 依赖守卫、`cargo clippy -p quant-research --no-default-features --all-targets --locked --offline -- -D warnings` 与 `cargo check -p quant-research --no-default-features --features b3-pyo3 --all-targets --locked --offline`。Python 3.12 POC 测试 42 项通过、8 项因固定 Nautilus 未安装而跳过。`cargo test -p quant-research --no-default-features --locked --offline` 有 38 项通过、1 项既有 Parquet CLI 测试因磁盘余量不足失败：测试要求 10 GiB，本机约 6.2 GiB，预检报告 `unresolved`。实现者 Standards/Spec 自查无剩余发现。PR [#35](https://github.com/ZombieIce/PrajnaQuant/pull/35)；Independent review: see PR #35。
 
