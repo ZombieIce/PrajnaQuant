@@ -6,7 +6,7 @@ Issues, specs and PRs for this repo live on GitHub at `ZombieIce/PrajnaQuant`. U
 
 ## Conventions
 
-- **Spec:** one issue labelled `spec`, titled with the feature name. Its body uses the spec template.
+- **Spec:** one issue labelled `spec`, titled with the feature name. Its body uses the spec template and includes `Notes`, `Decisions-so-far`, and `Fog` sections when created; any of these sections may be empty.
 - **Ticket:** one issue per ticket, never a combined checklist issue. The body starts with `Parent: #<spec>` when there is a spec, then `What to build`, acceptance criteria as task-list checkboxes, and `Blocked by: #N, #N` (or `None`).
 - **Triage state:** exactly one triage label from `triage-labels.md`. A ticket that has been claimed has an assignee.
 - **Milestone:** the roadmap stage the work belongs to (`POC-0`, `MVP-0` … `MVP-6`). Repo infrastructure that isn't tied to a stage has no milestone.
@@ -17,7 +17,7 @@ Issues, specs and PRs for this repo live on GitHub at `ZombieIce/PrajnaQuant`. U
 
 - One ticket → one branch `<issue>-<slug>` from the latest `main` → one PR whose description contains `Closes #<issue>`.
 - Agents may commit and push to their own branch. They must not push to `main`, force-push a shared branch, or merge.
-- Independent review happens on the PR, by an agent that did not write the change. Findings and their resolution are recorded as PR comments.
+- Independent review happens after the PR is created. An agent that did not implement the change gives the review as a PR comment; implementation self-review before PR creation does not count as independent review and must not be described as one in the PR description. Before the PR is merged, it must have at least one such review comment and an implementation-agent reply addressing each finding.
 - The project owner merges. Merging closes the issue.
 - One working tree carries one branch. Run parallel tasks in separate `git worktree` checkouts.
 
@@ -36,4 +36,4 @@ Create the issue with `gh issue create --title ... --body-file ... --label <tria
 - **Blocking:** a `Blocked by: #N, #N` line. A ticket is unblocked when every listed issue is closed as completed.
 - **Frontier:** `gh issue list --state open --label ready-for-agent`. Keep issues with no assignee whose blockers are all closed; the lowest number wins.
 - **Claim:** `gh issue edit <N> --add-assignee @me` and a comment saying the work has started, before any work.
-- **Resolve:** merge the PR that says `Closes #N` (owner), or for non-code tickets add the answer as a comment and `gh issue close <N>`. Then append a gist and a link to the map issue's Decisions-so-far.
+- **Resolve:** merge the PR that says `Closes #N` (owner), or for non-code tickets add the answer as a comment and `gh issue close <N>`. Remove the issue's triage label when it is closed; its closed state and `Conclusion` express the outcome, not its labels. When the ticket belongs to a map issue, after the PR is merged or the issue is closed, the implementation agent appends a gist and a link to the map issue's `Decisions-so-far`; if the implementation agent is unavailable, the review agent does so. No `Decisions-so-far` update is needed when there is no map issue.
