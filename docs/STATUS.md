@@ -1,5 +1,7 @@
 # Project Status
 
+2026-09-29 GitHub Issue #9 在分支 `9-instrument-identity` 实现了 `VenueId`、`Currency`、规范 `InstrumentId`、独立声明的 `InstrumentKind`、经校验的 `InstrumentSpec` 与同 ID 重用检测；并提供 SH/SZ/BJ 旧格式到 XSHG/XSHE/BJSE 的单向映射。实现位于 `prajna-domain`，没有修改 `quant-research`。Domain crate 测试/clippy、workspace 轻量 Rust 路径（`quant-research` clippy/test、`b3-pyo3` check、DuckDB 依赖守卫）及格式检查通过。Python 轻量测试因本机缺少 `.venv` 且系统 Python 为 3.8，无法按 CI Python 3.12 环境验证。实现者双轴自检无剩余发现。PR [#33](https://github.com/ZombieIce/PrajnaQuant/pull/33)；Independent review: see PR #33。#7 的其余 Domain Core 与 Data/Arrow 范围未实现。
+
 2026-09-29 GitHub Issue #31 adds the repository-local `implement-ticket` and `review-pr` workflows and clarifies shared-account review roles and the pre-merge review check. The workflows are agent guidance, not automated enforcement. Independent review: see [PR #32](https://github.com/ZombieIce/PrajnaQuant/pull/32).
 
 2026-09-29 GitHub Issue #11（MVP-0 `prajna-data`）在分支 `11-prajna-data-skeleton-parquet-duckdb-guard` 新增 workspace crate 骨架，依赖 `prajna-domain`、Arrow 58.4.0 与 Parquet 58.4.0（仅启用 `arrow`/`zstd`）；Cargo.lock 已在线更新并提交。轻量 CI 对 `prajna-domain` 与 `prajna-data` 检查 DuckDB、Polars 和 `ashare-warehouse`，并为 `prajna-data` 增加 Clippy/test。`cargo fmt --all -- --check`、`cargo test --workspace --locked --offline`（104 passed、1 ignored）、workspace Clippy 及新 crate 定向验证通过；workspace Clippy保留 vendor `polars-io` 的 29 项既有 warnings。PR [#34](https://github.com/ZombieIce/PrajnaQuant/pull/34)；Independent review: see PR #34。此票只交付骨架，不包含数据业务逻辑。
