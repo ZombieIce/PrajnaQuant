@@ -1,5 +1,13 @@
 # Agent Handoff — 新平台目标基线与 POC-0
 
+## 当前交接（2026-09-29，GitHub Issue #10：MVP-0 时间与 Bar）
+
+已认领 Issue #10（阻塞项 #9 已关闭），从最新 `origin/main` 建立分支 `10-time-bar-types`。`prajna-domain` 新增 `TimestampNs`（带显式 offset 的 RFC3339 输入、UTC 纳秒存储）、规范化 `BarSpec`、受检 `Session`，以及由 `BarData` 校验构成的 `Bar`。目前仅实现每日 session/fixed-offset 区间；输入验证覆盖时间边界、OHLCV、session identity 和 spec bounds；`available_at=None` 保留为未知。`CONTEXT.md` 已记录领域词汇。
+
+验证：`cargo fmt --all -- --check`、`cargo test -p prajna-domain --locked --offline`（18 passed）、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings`、`cargo check -p quant-research --no-default-features --features b3-pyo3 --all-targets --locked --offline` 均通过；Clippy 留有 vendor `polars-io` 的既有 warnings。Bundled Python 3.12 POC suite 42 passed、8 项因缺少 Nautilus runtime 按预期跳过。`cargo test --workspace --locked --offline` 和 `cargo test -p quant-research --no-default-features --locked --offline` 均被既有 Parquet CLI 10 GiB 可用空间闸门拦截（当时约 5.77 GB 可用，测试标为 unresolved）；未清理缓存或降低保留线。Spec/Standards 为实现者自查，未发现剩余问题。PR [#36](https://github.com/ZombieIce/PrajnaQuant/pull/36)；Independent review: see PR #36。
+
+**唯一建议下一步：**由项目负责人在新 reviewer session 对 PR #36 执行独立 `review-pr`；实现者完成 ready 评论后停止。
+
 ## 当前交接（2026-09-29，GitHub Issue #11：MVP-0 prajna-data）
 
 已认领 Issue #11（#8 阻塞项已关闭），在最新 `main` 上建立分支 `11-prajna-data-skeleton-parquet-duckdb-guard`。新增 workspace crate `crates/prajna-data`，只依赖 `prajna-domain`、Arrow 58.4.0 与 Parquet 58.4.0；Parquet 关闭默认特性，仅开 `arrow`/`zstd`。更新 Cargo.lock。轻量 CI 对 `prajna-domain` 和 `prajna-data` 的依赖树拒绝 DuckDB、Polars 与 `ashare-warehouse`，并新增 `prajna-data` clippy/test。仅有最小 compile test，无业务逻辑。
