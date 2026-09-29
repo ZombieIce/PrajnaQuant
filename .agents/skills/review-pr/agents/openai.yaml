@@ -1,0 +1,3 @@
+interface:
+  display_name: "Review PR"
+  short_description: "Independently review a ticket PR"

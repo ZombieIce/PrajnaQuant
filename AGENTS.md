@@ -64,9 +64,11 @@ CI（`.github/workflows/`）分两条：`CI` 的 `lightweight` job 是合并必�
 
 ## Agent Completion Checklist
 
-运行相关测试、formatter/lint；复查未来函数、时序、组合核算和交易成本；完成独立 agent review 并处理发现；更新 `docs/STATUS.md` 与 `HANDOFF.md`。仅在发生重要决策/契约变化时更新 ADR、API、README。交接中写明已验证命令、review 结果、失败、开放问题和唯一建议下一步。
+运行相关测试、formatter/lint；复查未来函数、时序、组合核算和交易成本；完成独立 agent review 并处理发现；更新 `docs/STATUS.md` 与 `HANDOFF.md`。仅在发生重要决策/契约变化时更新 ADR、API、README。交接中写明已验证命令、PR 链接、失败、开放问题和唯一建议下一步；review 结论以 PR 评论为准，不复制结论到分支文档，避免文档提交使 review 落后于最新 push。
 
 ## Agent skills
+
+The project owner starts ticket work with `/implement-ticket` and starts independent review in a fresh agent session with `/review-pr`. The upstream `implement` skill's `/code-review` step is implementer self-check only; label that PR section `Self-check (implementer)`. Do not use `implement-spec`'s one-spec/one-PR workflow for tickets.
 
 ### Issue tracker
 
