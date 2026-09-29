@@ -1,5 +1,12 @@
 # Agent Handoff — 新平台目标基线与 POC-0
 
+## 当前交接（2026-09-29，GitHub Issue #8）
+
+分支 `8-prajna-domain-fixed-point` 新增 `crates/prajna-domain`，仅直接依赖 `chrono` 与 `serde`，并加入 workspace 和轻量 CI 的依赖守卫/Clippy/测试。D4 数值范围已实现：`Price`、`Quantity` 与 `Notional`（`Amount` 别名）保存 scale 18 的 `i128` 尾数，绝对值严格小于 `10^38`；只接受 JSON 数字字面量字符串、拒绝无法精确表示的第 19 位非零小数和越界值，serde 始终写字符串，且仅暴露显式 `to_f64()`。规范化字符串会删除小数尾零，`-0` 输出 `0`；tick 对齐、整数倍乘法、比较及零 increment 均有单元测试。#7 的 Instrument、Bar、Raw、Data Lake 和 Parquet/Arrow 范围尚未实现，本票不宣称覆盖。
+
+已通过 `cargo fmt --all -- --check`、`cargo clippy -p prajna-domain --all-targets --locked --offline -- -D warnings`、`cargo test -p prajna-domain --locked --offline`（6 passed）、`cargo tree -p prajna-domain -e normal,build,dev --prefix none --locked --offline`，以及完整 `cargo test --workspace --locked --offline`（16 warehouse + 6 domain + 66 research unit tests，集成测试通过）和 `cargo clippy --workspace --all-targets --locked --offline -- -D warnings`；workspace Clippy 仅重现 vendor `polars-io` 的既有 warnings。独立 Spec review 为 0 项；Standards review 最初指出 `checked_cmp` 没有可达失败路径，已改为 checked subtraction、补极值溢出测试并复核为 0 项。PR [#24](https://github.com/ZombieIce/PrajnaQuant/pull/24) 已包含 `Closes #8` 和 review 记录；唯一建议下一步是项目负责人审阅并合并该 PR，后续 #9 才能依赖这些数值类型。
+
+
 ## 当前交接（2026-09-28，POC-0 B2 Issue #3 完成）
 
 POC-0 B2 按预登记协议的正式结论为 **`adopt`**，限定于 Nautilus 2.0.0rc5、当前保存的代码/依赖身份、Apple M1 本机及四个固定合成负载。3×10 S2、3×130 S3 与 64×252 S2/S3 的共同字段 correctness 均通过；两种策略在判定负载和稳健性负载上的中位延迟、2-worker Runs/s 和 RSS 上界均满足原门槛，书面速度/RSS 预测成立。完整原始证据在[正式报告](poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.json)、[release build record](poc/poc0-benchmark/results/b2-formal-release-build-2026-09-28.json)与[复跑说明](poc/poc0-benchmark/README.md#formal-b2-robustness-and-conclusion-github-issue-3)。
