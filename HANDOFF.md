@@ -1,5 +1,13 @@
 # Agent Handoff — 新平台目标基线与 POC-0
 
+## 当前交接（2026-09-29，GitHub Issue #9）
+
+分支 `9-instrument-identity` 基于最新 `origin/main`，实现 D3 Instrument 身份：严格验证 venue/currency 代码和 `{symbol}.{VENUE}` ID；ID 解析只切分 symbol 与 venue，不推断 kind；`InstrumentSpecData` 经构造校验后成为字段私有的 `InstrumentSpec`；Perpetual/Future settle currency、Future expiry、其他 kind 不得 expiry、price/size increment 为正。`InstrumentSpecs` 对相同 ID 的相同 spec 幂等，对不同 spec 报错。旧格式仅接受 `SH:`/`SZ:`/`BJ:` 六位代码与 `sh`/`sz`/`bj` 紧凑格式，并单向映射至 XSHG/XSHE/BJSE。未修改 `quant-research`。
+
+验证通过：`cargo fmt --all -- --check`、`cargo test -p prajna-domain --locked --offline`（11 passed）、`cargo clippy -p prajna-domain --all-targets --locked --offline -- -D warnings`、`cargo tree -p prajna-domain -e normal,build,dev --prefix none --locked --offline`、轻量 CI DuckDB 依赖守卫、`cargo clippy -p quant-research --no-default-features --all-targets --locked --offline -- -D warnings`、`cargo test -p quant-research --no-default-features --locked --offline`、`cargo check -p quant-research --no-default-features --features b3-pyo3 --all-targets --locked --offline`。Python 测试未能在 CI 等效环境验证：本机缺少 `.venv`，系统 Python 3.8；CI 要求 Python 3.12，直接运行受 `zoneinfo` 和 `Path.is_relative_to` API 版本限制。首轮 Spec 自查发现非法非 ASCII 旧 ID 会 panic，现已改为安全 UTF-8 边界读取并加回归用例；最终 Spec/Standards 自查均为 0 项。PR [#33](https://github.com/ZombieIce/PrajnaQuant/pull/33)；Independent review: see PR #33。PR comments 是独立 review 结果与 implementer 回复的唯一记录来源。
+
+**唯一建议下一步：**由项目负责人启动 PR #33 的独立 `review-pr` 审查。
+
 ## 当前交接（2026-09-29，GitHub Issue #31）
 
 分支 `31-agent-workflow-skills` 从最新 `origin/main` 创建。新增 `.agents/skills/implement-ticket/SKILL.md` 与 `.agents/skills/review-pr/SKILL.md`，并在 `AGENTS.md` 和 `docs/agents/issue-tracker.md` 固化实现自查与独立审查边界、共享 GitHub 账号的评论角色标识及合并前复核要求。`skills-lock.json` 与锁定上游 skill 文件未改。

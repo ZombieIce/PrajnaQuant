@@ -1,5 +1,13 @@
 //! Stable domain primitives shared by the platform's data and execution layers.
 
+mod instrument;
+
+pub use instrument::{
+    CodeError, Currency, InstrumentId, InstrumentIdError, InstrumentKind, InstrumentSpec,
+    InstrumentSpecData, InstrumentSpecError, InstrumentSpecs, LegacyInstrumentIdError, VenueId,
+    instrument_id_from_legacy,
+};
+
 use core::{cmp::Ordering, fmt, str::FromStr};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
