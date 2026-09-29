@@ -1,5 +1,13 @@
 # Agent Handoff — 新平台目标基线与 POC-0
 
+## 当前交接（2026-09-29，GitHub Issue #11：MVP-0 prajna-data）
+
+已认领 Issue #11（#8 阻塞项已关闭），在最新 `main` 上建立分支 `11-prajna-data-skeleton-parquet-duckdb-guard`。新增 workspace crate `crates/prajna-data`，只依赖 `prajna-domain`、Arrow 58.4.0 与 Parquet 58.4.0；Parquet 关闭默认特性，仅开 `arrow`/`zstd`。更新 Cargo.lock。轻量 CI 对 `prajna-domain` 和 `prajna-data` 的依赖树拒绝 DuckDB、Polars 与 `ashare-warehouse`，并新增 `prajna-data` clippy/test。仅有最小 compile test，无业务逻辑。
+
+已通过 `cargo fmt --all -- --check`、`cargo test -p prajna-data --locked --offline`（1 passed）、`cargo clippy -p prajna-data --all-targets --locked --offline -- -D warnings`、`cargo tree -p prajna-data -e normal,build,dev --prefix none --locked --offline`、`cargo test --workspace --locked --offline`（104 passed，1 ignored）及 `cargo clippy --workspace --all-targets --locked --offline -- -D warnings`。依赖守卫对两个 crate 均通过；向同一 grep 模式输入模拟 `polars-core v0.1.0` 会被拦截。workspace Clippy 仍打印 vendor `polars-io` 的 29 项既有 warnings，退出码为 0。自查 Standards/Spec 均无发现。PR [#34](https://github.com/ZombieIce/PrajnaQuant/pull/34)；Independent review: see PR #34。PR 描述含 `cargo tree` 依赖证据。
+
+**唯一建议下一步：**项目负责人用新 reviewer session 对 PR #34 执行独立 review；实现方在本轮完成 ready 评论后停止。
+
 ## 当前交接（2026-09-29，GitHub Issue #31）
 
 分支 `31-agent-workflow-skills` 从最新 `origin/main` 创建。新增 `.agents/skills/implement-ticket/SKILL.md` 与 `.agents/skills/review-pr/SKILL.md`，并在 `AGENTS.md` 和 `docs/agents/issue-tracker.md` 固化实现自查与独立审查边界、共享 GitHub 账号的评论角色标识及合并前复核要求。`skills-lock.json` 与锁定上游 skill 文件未改。
