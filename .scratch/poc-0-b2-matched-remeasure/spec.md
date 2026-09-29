@@ -1,7 +1,9 @@
 # POC-0 B2：Fast Event / Nautilus 同口径重测
 
-Status: ready-for-agent
+Status: resolved
 Type: spec
+
+**Conclusion:** 2026-09-29 完成，B2 正式结论 `adopt` 及负责人确认的范围见 [POC-0-SYNTHESIS B2 小节](../../poc/poc0-benchmark/POC-0-SYNTHESIS.md)。
 
 ## Problem Statement
 

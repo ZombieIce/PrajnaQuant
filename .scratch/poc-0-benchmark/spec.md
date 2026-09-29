@@ -1,7 +1,9 @@
 # POC-0：可复跑的性能与一致性基准
 
-Status: ready-for-agent
+Status: resolved
 Type: spec
+
+**Conclusion:** 2026-09-29 POC-0 完成，B1/B2/B3 结论与范围见 [POC-0-SYNTHESIS](../../poc/poc0-benchmark/POC-0-SYNTHESIS.md)。
 
 ## Problem Statement
 
