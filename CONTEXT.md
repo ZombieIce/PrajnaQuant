@@ -16,6 +16,9 @@
 **BarSpec**:
 行情 Bar 的长度与区间锚点，例如 `1d@session` 或 `1d@+08:00`；session 锚定区间使用对应的 Session，固定偏移区间按该偏移的本地日期切分。
 
+**BarData**:
+按 D7 字段名组织的 Bar 输入值；只有经 OHLC、数量、时间与区间校验后才构造成 Bar。
+
 **Bar**:
 按 Instrument、Bar Spec 和交易日标识的 OHLCV 行情区间；`available_at` 表示数据可用时刻，缺失表示未知，不从 `ts_close` 推定。
 

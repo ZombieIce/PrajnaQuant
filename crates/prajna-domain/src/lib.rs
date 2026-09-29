@@ -9,8 +9,8 @@ pub use instrument::{
     instrument_id_from_legacy,
 };
 pub use time_bar::{
-    Bar, BarSpec, BarSpecError, BarSpecInterval, BarValidationError, Session, SessionError,
-    TimestampNs, TimestampParseError,
+    Bar, BarData, BarSpec, BarSpecError, BarSpecInterval, BarValidationError, Session,
+    SessionError, TimestampNs, TimestampParseError,
 };
 
 use core::{cmp::Ordering, fmt, str::FromStr};

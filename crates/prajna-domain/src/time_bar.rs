@@ -361,21 +361,27 @@ impl fmt::Display for SessionError {
 
 impl std::error::Error for SessionError {}
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// Named field input for constructing a validated [`Bar`].
+pub struct BarData {
+    pub instrument_id: InstrumentId,
+    pub bar_spec: BarSpec,
+    pub session_date: NaiveDate,
+    pub ts_open: TimestampNs,
+    pub ts_close: TimestampNs,
+    pub open: Price,
+    pub high: Price,
+    pub low: Price,
+    pub close: Price,
+    pub volume: Quantity,
+    pub amount: Option<Notional>,
+    pub available_at: Option<TimestampNs>,
+}
+
 /// A validated normalized bar. `available_at` remains optional: unknown is not inferred.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bar {
-    instrument_id: InstrumentId,
-    bar_spec: BarSpec,
-    session_date: NaiveDate,
-    ts_open: TimestampNs,
-    ts_close: TimestampNs,
-    open: Price,
-    high: Price,
-    low: Price,
-    close: Price,
-    volume: Quantity,
-    amount: Option<Notional>,
-    available_at: Option<TimestampNs>,
+    data: BarData,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -397,116 +403,89 @@ pub enum BarValidationError {
 }
 
 impl Bar {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        instrument_id: InstrumentId,
-        bar_spec: BarSpec,
-        session: Option<&Session>,
-        session_date: NaiveDate,
-        ts_open: TimestampNs,
-        ts_close: TimestampNs,
-        open: Price,
-        high: Price,
-        low: Price,
-        close: Price,
-        volume: Quantity,
-        amount: Option<Notional>,
-        available_at: Option<TimestampNs>,
-    ) -> Result<Self, BarValidationError> {
+    pub fn new(data: BarData, session: Option<&Session>) -> Result<Self, BarValidationError> {
         if let Some(session) = session {
-            if instrument_id.venue() != session.venue_id() {
+            if data.instrument_id.venue() != session.venue_id() {
                 return Err(BarValidationError::VenueMismatch);
             }
-            if session_date != session.session_date() {
+            if data.session_date != session.session_date() {
                 return Err(BarValidationError::SessionDateMismatch);
             }
-        } else if matches!(bar_spec.anchor, BarAnchor::Session) {
+        } else if matches!(data.bar_spec.anchor, BarAnchor::Session) {
             return Err(BarValidationError::SessionRequired);
         }
-        if ts_open >= ts_close {
+        if data.ts_open >= data.ts_close {
             return Err(BarValidationError::InvalidBounds);
         }
-        if open < Price::ZERO {
+        if data.open < Price::ZERO {
             return Err(BarValidationError::NegativeOpen);
         }
-        if high < Price::ZERO {
+        if data.high < Price::ZERO {
             return Err(BarValidationError::NegativeHigh);
         }
-        if low < Price::ZERO {
+        if data.low < Price::ZERO {
             return Err(BarValidationError::NegativeLow);
         }
-        if close < Price::ZERO {
+        if data.close < Price::ZERO {
             return Err(BarValidationError::NegativeClose);
         }
-        if volume < Quantity::ZERO {
+        if data.volume < Quantity::ZERO {
             return Err(BarValidationError::NegativeVolume);
         }
-        if low > high {
+        if data.low > data.high {
             return Err(BarValidationError::LowAboveHigh);
         }
-        if low > open || low > close {
+        if data.low > data.open || data.low > data.close {
             return Err(BarValidationError::LowAboveOpenOrClose);
         }
-        if high < open || high < close {
+        if data.high < data.open || data.high < data.close {
             return Err(BarValidationError::HighBelowOpenOrClose);
         }
-        let (expected_open, expected_close) = bar_spec
-            .bounds(session_date, session)
+        let (expected_open, expected_close) = data
+            .bar_spec
+            .bounds(data.session_date, session)
             .map_err(|_| BarValidationError::UnsupportedBarBounds)?;
-        if ts_open != expected_open || ts_close != expected_close {
+        if data.ts_open != expected_open || data.ts_close != expected_close {
             return Err(BarValidationError::SpecBoundsMismatch);
         }
-        Ok(Self {
-            instrument_id,
-            bar_spec,
-            session_date,
-            ts_open,
-            ts_close,
-            open,
-            high,
-            low,
-            close,
-            volume,
-            amount,
-            available_at,
-        })
+        Ok(Self { data })
     }
 
     pub fn instrument_id(&self) -> &InstrumentId {
-        &self.instrument_id
+        &self.data.instrument_id
     }
     pub const fn bar_spec(&self) -> BarSpec {
-        self.bar_spec
+        self.data.bar_spec
     }
     pub const fn session_date(&self) -> NaiveDate {
-        self.session_date
+        self.data.session_date
     }
     pub const fn ts_open(&self) -> TimestampNs {
-        self.ts_open
+        self.data.ts_open
     }
     pub const fn ts_close(&self) -> TimestampNs {
-        self.ts_close
+        self.data.ts_close
     }
     pub const fn open(&self) -> Price {
-        self.open
+        self.data.open
     }
     pub const fn high(&self) -> Price {
-        self.high
+        self.data.high
     }
     pub const fn low(&self) -> Price {
-        self.low
+        self.data.low
     }
     pub const fn close(&self) -> Price {
-        self.close
+        self.data.close
     }
     pub const fn volume(&self) -> Quantity {
-        self.volume
+        self.data.volume
     }
     pub const fn amount(&self) -> Option<Notional> {
-        self.amount
+        self.data.amount
     }
     pub const fn available_at(&self) -> Option<TimestampNs> {
-        self.available_at
+        self.data.available_at
     }
 }
 
@@ -542,8 +521,8 @@ mod tests {
     use crate::{InstrumentId, Price, Quantity, VenueId};
 
     use super::{
-        Bar, BarSpec, BarSpecError, BarValidationError, Session, SessionError, TimestampNs,
-        TimestampParseError,
+        Bar, BarData, BarSpec, BarSpecError, BarValidationError, Session, SessionError,
+        TimestampNs, TimestampParseError,
     };
 
     fn date() -> NaiveDate {
@@ -651,6 +630,43 @@ mod tests {
         .unwrap()
     }
 
+    fn bar_data(
+        instrument_id: &str,
+        bar_spec: &str,
+        session_date: NaiveDate,
+        ts_open: TimestampNs,
+        ts_close: TimestampNs,
+    ) -> BarData {
+        BarData {
+            instrument_id: instrument_id.parse::<InstrumentId>().unwrap(),
+            bar_spec: bar_spec.parse().unwrap(),
+            session_date,
+            ts_open,
+            ts_close,
+            open: Price::parse("10").unwrap(),
+            high: Price::parse("12").unwrap(),
+            low: Price::parse("9").unwrap(),
+            close: Price::parse("11").unwrap(),
+            volume: Quantity::parse("1").unwrap(),
+            amount: None,
+            available_at: None,
+        }
+    }
+
+    fn validate_bar(
+        instrument_id: &str,
+        bar_spec: &str,
+        session: Option<&Session>,
+        session_date: NaiveDate,
+        ts_open: TimestampNs,
+        ts_close: TimestampNs,
+    ) -> Result<Bar, BarValidationError> {
+        Bar::new(
+            bar_data(instrument_id, bar_spec, session_date, ts_open, ts_close),
+            session,
+        )
+    }
+
     fn sample_bar(
         session: &Session,
         open: &str,
@@ -660,21 +676,20 @@ mod tests {
         volume: &str,
         available_at: Option<TimestampNs>,
     ) -> Result<Bar, BarValidationError> {
-        Bar::new(
-            "510300.XSHG".parse::<InstrumentId>().unwrap(),
-            "1d@session".parse().unwrap(),
-            Some(session),
+        let mut data = bar_data(
+            "510300.XSHG",
+            "1d@session",
             date(),
             session.ts_open(),
             session.ts_close(),
-            Price::parse(open).unwrap(),
-            Price::parse(high).unwrap(),
-            Price::parse(low).unwrap(),
-            Price::parse(close).unwrap(),
-            Quantity::parse(volume).unwrap(),
-            None,
-            available_at,
-        )
+        );
+        data.open = Price::parse(open).unwrap();
+        data.high = Price::parse(high).unwrap();
+        data.low = Price::parse(low).unwrap();
+        data.close = Price::parse(close).unwrap();
+        data.volume = Quantity::parse(volume).unwrap();
+        data.available_at = available_at;
+        Bar::new(data, Some(session))
     }
 
     #[test]
@@ -724,74 +739,46 @@ mod tests {
     fn bar_rejects_bounds_that_disagree_with_daily_spec_and_session_identity() {
         let session = sample_session();
         assert_eq!(
-            Bar::new(
-                "510300.XSHG".parse().unwrap(),
-                "1d@+08:00".parse().unwrap(),
+            validate_bar(
+                "510300.XSHG",
+                "1d@+08:00",
                 Some(&session),
                 date(),
                 session.ts_open(),
                 session.ts_close(),
-                Price::parse("10").unwrap(),
-                Price::parse("12").unwrap(),
-                Price::parse("9").unwrap(),
-                Price::parse("11").unwrap(),
-                Quantity::parse("1").unwrap(),
-                None,
-                None,
             ),
             Err(BarValidationError::SpecBoundsMismatch)
         );
         assert_eq!(
-            Bar::new(
-                "510300.XSHG".parse().unwrap(),
-                "1d@session".parse().unwrap(),
+            validate_bar(
+                "510300.XSHG",
+                "1d@session",
                 Some(&session),
                 date(),
                 session.ts_close(),
                 session.ts_open(),
-                Price::parse("10").unwrap(),
-                Price::parse("12").unwrap(),
-                Price::parse("9").unwrap(),
-                Price::parse("11").unwrap(),
-                Quantity::parse("1").unwrap(),
-                None,
-                None,
             ),
             Err(BarValidationError::InvalidBounds)
         );
         assert_eq!(
-            Bar::new(
-                "510300.XSHE".parse().unwrap(),
-                "1d@session".parse().unwrap(),
+            validate_bar(
+                "510300.XSHE",
+                "1d@session",
                 Some(&session),
                 date(),
                 session.ts_open(),
                 session.ts_close(),
-                Price::parse("10").unwrap(),
-                Price::parse("12").unwrap(),
-                Price::parse("9").unwrap(),
-                Price::parse("11").unwrap(),
-                Quantity::parse("1").unwrap(),
-                None,
-                None,
             ),
             Err(BarValidationError::VenueMismatch)
         );
         assert_eq!(
-            Bar::new(
-                "510300.XSHG".parse().unwrap(),
-                "1d@session".parse().unwrap(),
+            validate_bar(
+                "510300.XSHG",
+                "1d@session",
                 Some(&session),
                 date().succ_opt().unwrap(),
                 session.ts_open(),
                 session.ts_close(),
-                Price::parse("10").unwrap(),
-                Price::parse("12").unwrap(),
-                Price::parse("9").unwrap(),
-                Price::parse("11").unwrap(),
-                Quantity::parse("1").unwrap(),
-                None,
-                None,
             ),
             Err(BarValidationError::SessionDateMismatch)
         );
@@ -801,37 +788,25 @@ mod tests {
             .bounds(date(), None)
             .unwrap();
         assert!(
-            Bar::new(
-                "BTC-USDT.BINANCE".parse().unwrap(),
-                "1d@+08:00".parse().unwrap(),
+            validate_bar(
+                "BTC-USDT.BINANCE",
+                "1d@+08:00",
                 None,
                 date(),
                 ts_open,
-                ts_close,
-                Price::parse("10").unwrap(),
-                Price::parse("12").unwrap(),
-                Price::parse("9").unwrap(),
-                Price::parse("11").unwrap(),
-                Quantity::parse("1").unwrap(),
-                None,
-                None,
+                ts_close
             )
             .is_ok()
         );
         assert_eq!(
             Bar::new(
-                "510300.XSHG".parse().unwrap(),
-                "1d@session".parse().unwrap(),
-                None,
-                date(),
-                session.ts_open(),
-                session.ts_close(),
-                Price::parse("10").unwrap(),
-                Price::parse("12").unwrap(),
-                Price::parse("9").unwrap(),
-                Price::parse("11").unwrap(),
-                Quantity::parse("1").unwrap(),
-                None,
+                bar_data(
+                    "510300.XSHG",
+                    "1d@session",
+                    date(),
+                    session.ts_open(),
+                    session.ts_close(),
+                ),
                 None,
             ),
             Err(BarValidationError::SessionRequired)
