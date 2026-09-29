@@ -17,9 +17,10 @@ Issues, specs and PRs for this repo live on GitHub at `ZombieIce/PrajnaQuant`. U
 
 - One ticket → one branch `<issue>-<slug>` from the latest `main` → one PR whose description contains `Closes #<issue>`.
 - Agents may commit and push to their own branch. They must not push to `main`, force-push a shared branch, or merge.
-- Independent review happens after the PR is created. An agent that did not implement the change gives the review as a PR comment; implementation self-review before PR creation does not count as independent review and must not be described as one in the PR description. Before the PR is merged, it must have at least one such review comment and an implementation-agent reply addressing each finding.
+- Independent review happens after the PR is created. The project owner starts a fresh reviewer session; the implementer posts a ready-for-review comment and stops. An agent that did not implement the change gives the review as a PR comment; implementation self-review before PR creation does not count as independent review and must not be described as one in the PR description. Before the PR is merged, it must have a review comment on the latest pushed head and an implementation-agent reply addressing each finding.
 - All agents use one GitHub account; identify the speaker in each review-thread comment with the exact prefix `**Implementer:**` or `**Independent reviewer:**`.
 - Before merging, the project owner confirms that an independent-review comment was posted after the latest push to the PR branch.
+- PR comments are the source of truth for review findings and conclusions. In `STATUS.md` and `HANDOFF.md`, link the PR and write `Independent review: see PR #N`; do not copy reviewer conclusions into branch documents.
 - The project owner merges. Merging closes the issue.
 - One working tree carries one branch. Run parallel tasks in separate `git worktree` checkouts.
 
