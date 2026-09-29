@@ -1,0 +1,70 @@
+{
+  "status": "passed",
+  "workers": 2,
+  "runs": 6,
+  "warmup_runs": 4,
+  "warmup_runs_per_worker": 2,
+  "raw_samples_ns": [
+    171812625,
+    170363750,
+    171730167,
+    166569000,
+    165123542,
+    164778292
+  ],
+  "secondary_boundary_samples_ns": [
+    {
+      "run_index": 0,
+      "end_to_end_ns": 299941333,
+      "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+    },
+    {
+      "run_index": 1,
+      "end_to_end_ns": 311112084,
+      "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+    },
+    {
+      "run_index": 2,
+      "end_to_end_ns": 290541875,
+      "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+    },
+    {
+      "run_index": 3,
+      "end_to_end_ns": 294143458,
+      "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+    },
+    {
+      "run_index": 4,
+      "end_to_end_ns": 285234042,
+      "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+    },
+    {
+      "run_index": 5,
+      "end_to_end_ns": 290967292,
+      "checksum_sha256": "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+    }
+  ],
+  "secondary_boundary_median_ns": 292555375.0,
+  "secondary_boundary_p95_ns": 311112084,
+  "checksums_sha256": [
+    "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+    "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+    "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+    "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+    "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf",
+    "e43fb494718e7765850e7ac0f29cf93e0e98c2fb48b5a6316792e3fd83bf04cf"
+  ],
+  "median_ns": 168466375.0,
+  "p95_ns": 171812625,
+  "parallel_wall_ns": 515686750,
+  "parallel_runs_per_second": 11.634970260531224,
+  "peak_rss_by_worker_bytes": {
+    "15106": 150093824,
+    "15107": 148242432
+  },
+  "peak_rss_sum_upper_bound_bytes": 298336256,
+  "measurement_scope": "warm Python process pool; worker completion timestamps precede projection checksumming and IPC result collection",
+  "engine_mode": "cached_conversion_new_engine",
+  "engine_mode_reason": "fallback selected by ticket 07 reset parity evidence or used without evidence",
+  "conversion_cached_per_worker": true
+}

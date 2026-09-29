@@ -1,6 +1,6 @@
 # ADR 0013：POC-0 B2 Fast Event / Nautilus 同口径重测
 
-- 状态：Accepted，预登记保存于 2026-09-28，revision `9c487f3ee60e2f8bbfc38b543b3b3cfd6b00bf2d`；正式同口径重测尚未开始
+- 状态：Accepted；预登记保存于 2026-09-28，revision `9c487f3ee60e2f8bbfc38b543b3b3cfd6b00bf2d`。正式同口径测量已完成，B2 结论为 `adopt`；结果只适用于选定的 `cached_conversion_new_engine` 模式和登记计时边界，见[正式报告](../../poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.json)。本状态更新不改写下方预登记协议、门槛或预测。
 - 部分修订：`reject` 映射由 [ADR 0014](0014-b2-correctness-failure-attribution.md) 修订（测量后制定，须先归因）；本文正文保持预登记原文。
 - 关联： [B2 matched remeasure spec](../../.scratch/poc-0-b2-matched-remeasure/spec.md)、[票据 01](../../.scratch/poc-0-b2-matched-remeasure/issues/01-preregister-matched-boundary-and-prediction.md)、[票据 09](../../.scratch/poc-0-benchmark/issues/09-b2-strategy-parity-and-throughput.md)、[ADR 0012](0012-poc0-nautilus-status-gate.md)
 
