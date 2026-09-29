@@ -14,7 +14,7 @@
 | MVP-0 | 自有 Domain Core、不可变 Raw、版本化 Dataset、Parquet/Arrow 契约 | 一份合成数据从来源/hash 到版本化输入可重建；当前 DuckDB 发布链边界仍可追溯 |
 | MVP-1 | Factor Registry、Factor Cache、Vector Engine | 相同因子定义/输入复用缓存，缺失/可用时刻口径正确；S2 Momentum Rotation 与独立金标准一致 |
 | MVP-2 | Experiment、Run 身份、ResultLevel、Rayon 参数扫描 | 固定代码/数据/配置/seed 可重放；Summary 扫描不写完整事件，吞吐和资源有实测 |
-| MVP-3 | Portfolio、Virtual Portfolio、Fast Event L1 | S1/S2/S3 逐日现金＋持仓＝权益，费用可追溯；与 Vector 在共同语义下对拍 |
+| MVP-3 | Portfolio、Virtual Portfolio、Fast Event L1 | 开工前由项目负责人审阅 POC-0 B2 正式结论与适用范围；实现验收为 S1/S2/S3 逐日现金＋持仓＝权益、费用可追溯，并与 Vector 在共同语义下对拍。B2 `adopt` 仅适用于登记合成负载，不等于生产 Engine 选型。 |
 | MVP-4 | Nautilus Adapter 与 Accurate Backend | Backend 隔离于自有 Domain；固定金标准与 Fast Event 的差异可解释，转换成本实测 |
 | MVP-5 | Python 研究/策略入口与 PyO3 | Python 定义可驱动 Rust 执行；逐 bar callback 的适用规模由 B3 结果约束 |
 | MVP-6 | 真实 ETF Rotation 纵向验收 | 历史 Universe、分红/价格口径、交易状态可知性与逐日账本证据满足当前 P0 门槛，结果可重放 |
