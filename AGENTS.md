@@ -68,6 +68,8 @@ CI（`.github/workflows/`）分两条：`CI` 的 `lightweight` job 是合并必�
 
 ## Agent skills
 
+For ticket implementation, use the repository-local `implement-ticket` skill. The upstream `implement` skill's `/code-review` step is implementer self-check only; label that PR section `Self-check (implementer)`. Do not use `implement-spec`'s one-spec/one-PR workflow for tickets. After a PR exists, use `review-pr` in a separate agent session for the independent review.
+
 ### Issue tracker
 
 Issues, specs and PRs live on GitHub (`ZombieIce/PrajnaQuant`); `.scratch/` is a read-only archive of the earlier local tracker. See `docs/agents/issue-tracker.md`.

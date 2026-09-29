@@ -1,5 +1,13 @@
 # Agent Handoff — 新平台目标基线与 POC-0
 
+## 当前交接（2026-09-29，GitHub Issue #31）
+
+分支 `31-agent-workflow-skills` 从最新 `origin/main` 创建。新增 `.agents/skills/implement-ticket/SKILL.md` 与 `.agents/skills/review-pr/SKILL.md`，并在 `AGENTS.md` 和 `docs/agents/issue-tracker.md` 固化实现自查与独立审查边界、共享 GitHub 账号的评论角色标识及合并前复核要求。`skills-lock.json` 与锁定上游 skill 文件未改。
+
+验证：`cargo fmt --all -- --check`、`cargo test --workspace --locked --offline`（16 + 6 + 66 unit tests、15 CLI tests passed；1 opt-in integration test ignored）、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings`、`cd apps/web && npm run build`、`git diff --check` 均通过。Python unittest 21 项通过；`test_warehouse` 因环境未安装 `duckdb` 而无法导入。Clippy 保留 vendor `polars-io` 的 29 项既有 warnings；前端构建有既有 chunk size warning。锁文件与上游锁定 skill 文件未改。Self-check 和 PR 创建待完成，独立 review 及 implementer 回复须在 PR 建立后完成。
+
+**唯一建议下一步：**完成自查并开 PR，随后由隔离的 reviewer session 留下独立 review 评论，逐条回复其发现。
+
 ## 当前交接（2026-09-29，GitHub Issue #8）
 
 分支 `8-prajna-domain-fixed-point` 新增 `crates/prajna-domain`，仅直接依赖 `chrono` 与 `serde`，并加入 workspace 和轻量 CI 的依赖守卫/Clippy/测试。D4 数值范围已实现：`Price`、`Quantity` 与 `Notional`（`Amount` 别名）保存 scale 18 的 `i128` 尾数，绝对值严格小于 `10^38`；只接受 JSON 数字字面量字符串、拒绝无法精确表示的第 19 位非零小数和越界值，serde 始终写字符串，且仅暴露显式 `to_f64()`。规范化字符串会删除小数尾零，`-0` 输出 `0`；tick 对齐、整数倍乘法、比较及零 increment 均有单元测试。#7 的 Instrument、Bar、Raw、Data Lake 和 Parquet/Arrow 范围尚未实现，本票不宣称覆盖。
