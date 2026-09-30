@@ -1,6 +1,14 @@
 # Agent Handoff — 新平台目标基线与 POC-0
 
-## 当前交接（2026-09-30，GitHub Issue #13：规范编码与逻辑 hash）
+## 当前交接（2026-09-30，GitHub Issue #15：Manifest 与 Dataset Version）
+
+已认领 Issue #15（依赖 #13 已完成），从最新 `origin/main` 建立分支 `15-manifest-dataset-version`。`prajna-data` 新增 `Manifest`、D8 core/provenance 类型、`Manifest::new`、`write_manifest` 与 `read_manifest`。构造时按 raw hash 和 table 名排序；DSV 为受限 JCS(core) 的 SHA-256，provenance 不进入身份。manifest 落入 `manifests/<dsv_hex>.json`，使用已同步 staging 文件后原子 rename；相同 core 重写幂等，不同 core 冲突；读取校验文件 DSV 与重算值。
+
+验证通过：`cargo fmt --all -- --check`、`cargo test -p prajna-data --locked --offline`（15 passed）、`cargo clippy -p prajna-data --all-targets --locked --offline -- -D warnings`、`cargo test -p prajna-domain --locked --offline`（18 passed）、`cargo clippy -p prajna-domain --all-targets --locked --offline -- -D warnings`、`cargo clippy -p quant-research --no-default-features --all-targets --locked --offline -- -D warnings`、`cargo test -p quant-research --no-default-features --locked --offline`（39 passed）、`cargo check -p quant-research --no-default-features --features b3-pyo3 --all-targets --locked --offline`、依赖图守卫。Python 3.12 POC suite 42 passed、8 项因固定 Nautilus runtime 不可用而按 lightweight CI 设计跳过。自查报告与并发写入边界见 PR 描述。PR [#40](https://github.com/ZombieIce/PrajnaQuant/pull/40)；Independent review: see PR #40。
+
+**唯一建议下一步：**由项目负责人在新 reviewer session 对 PR #40 执行独立 review；实现者发布 ready 评论后停止。
+
+## 前次交接（2026-09-30，GitHub Issue #13：规范编码与逻辑 hash）
 
 分支 `13-canonical-encoding-hash` 从最新 `origin/main` 建立。`prajna-data` 现提供受限 JCS、schema fingerprint（排除 schema metadata 中的 `prajna.dsv`）与按主键排序的 Arrow logical hash；拒绝重复主键、不支持类型和 JCS 浮点数，字典列按解码值编码。新增两行 `sessions` 完整 hex 向量，包含 null、负 Decimal128 与多字节 UTF-8；已在 [spec Issue #7 评论](https://github.com/ZombieIce/PrajnaQuant/issues/7#issuecomment-5902283970) 发布。独立命令 `xxd -r -p crates/prajna-data/tests/fixtures/sessions-logical-hash.hex | shasum -a 256` 得到 `2c627a1813303394238717869776a089234b08da095a9c1bae0198ca26c2b58c`。
 
