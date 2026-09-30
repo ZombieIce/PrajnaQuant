@@ -226,12 +226,13 @@ pub fn publish_dataset(
         return Ok(existing);
     }
 
-    let destination = normalized_root.join(dsv_hex);
-    // A prior process may have stopped after publishing the complete DSV
-    // directory but before committing its manifest. That directory is an
-    // uncommitted orphan, so remove it before rebuilding.
-    if destination.exists() {
-        fs::remove_dir_all(&destination)?;
+    // Without a manifest, table directories are uncommitted. A prior writer
+    // may have stopped between the per-table renames and the manifest commit.
+    for table in &tables {
+        let destination = normalized_root.join(table.name).join(dsv_hex);
+        if destination.exists() {
+            fs::remove_dir_all(destination)?;
+        }
     }
     remove_stale_stage_dirs(&normalized_root, dsv_hex)?;
     let stage_root = create_stage_dir(&normalized_root, dsv_hex)?;
@@ -247,17 +248,21 @@ pub fn publish_dataset(
             File::open(&stage_table)?.sync_all()?;
             let bytes = fs::read(&stage_file)?;
             files.push(ManifestFile {
-                path: format!("normalized/{dsv_hex}/{}/part-00000.parquet", table.name),
+                path: format!("normalized/{}/{dsv_hex}/part-00000.parquet", table.name),
                 sha256: format!("sha256:{:x}", Sha256::digest(&bytes)),
                 byte_len: bytes.len() as u64,
             });
         }
 
-        // The tables share one DSV directory. A single same-filesystem rename
-        // makes the complete dataset visible atomically.
+        // D6 puts each DSV under its table. The manifest is the commit marker:
+        // readers must not discover datasets from normalized directories alone.
         File::open(&stage_root)?.sync_all()?;
-        fs::rename(&stage_root, &destination)?;
-        File::open(&normalized_root)?.sync_all()?;
+        for table in &tables {
+            let table_root = normalized_root.join(table.name);
+            fs::create_dir_all(&table_root)?;
+            fs::rename(stage_root.join(table.name), table_root.join(dsv_hex))?;
+            File::open(&table_root)?.sync_all()?;
+        }
 
         let manifest = Manifest::new(
             core,
@@ -282,6 +287,11 @@ pub fn publish_dataset(
     })();
 
     let _ = fs::remove_dir_all(&stage_root);
+    if result.is_err() {
+        for table in &tables {
+            let _ = fs::remove_dir_all(normalized_root.join(table.name).join(dsv_hex));
+        }
+    }
     result
 }
 
@@ -413,9 +423,8 @@ mod tests {
         .unwrap();
         fs::remove_dir_all(
             root.path()
-                .join("normalized")
-                .join(first.dsv.trim_start_matches("dsv:sha256:"))
-                .join("sessions"),
+                .join("normalized/sessions")
+                .join(first.dsv.trim_start_matches("dsv:sha256:")),
         )
         .unwrap();
         let first = publish_dataset(
@@ -430,9 +439,9 @@ mod tests {
         .unwrap();
         assert!(
             root.path()
-                .join("normalized")
+                .join("normalized/sessions")
                 .join(first.dsv.trim_start_matches("dsv:sha256:"))
-                .join("sessions/part-00000.parquet")
+                .join("part-00000.parquet")
                 .is_file()
         );
         for file in &first.provenance.files {
@@ -489,7 +498,7 @@ mod tests {
             let path = root.path().join(&file.path);
             assert!(path.is_file());
             if file.path.starts_with("normalized/") {
-                let table = file.path.split('/').nth(2).unwrap();
+                let table = file.path.split('/').nth(1).unwrap();
                 let batches = read_parquet(&path, table, "1").unwrap();
                 assert_eq!(
                     batches[0].schema().metadata().get("prajna.dsv"),
@@ -595,16 +604,16 @@ mod tests {
 
         assert_eq!(manifests[0].dsv, manifests[1].dsv);
         assert!(super::published_files_match(root.path(), &manifests[0]).unwrap());
-        assert_eq!(
-            fs::read_dir(
+        for table in ["bars", "instruments", "sessions"] {
+            assert!(
                 root.path()
                     .join("normalized")
-                    .join(manifests[0].dsv.trim_start_matches("dsv:sha256:"),)
-            )
-            .unwrap()
-            .count(),
-            3
-        );
+                    .join(table)
+                    .join(manifests[0].dsv.trim_start_matches("dsv:sha256:"))
+                    .join("part-00000.parquet")
+                    .is_file()
+            );
+        }
     }
 
     #[test]

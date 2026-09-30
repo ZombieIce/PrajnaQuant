@@ -913,6 +913,17 @@ mod tests {
         assert_eq!(opens_at.value(2), 1_767_749_400_000_000_000_i64);
         assert_eq!(closes_at.value(2), 1_767_769_200_000_000_000_i64);
         assert_eq!(available_at.value(2), closes_at.value(2));
+        // A on 2026-01-09 closes below the fixed open; this checks the
+        // opposite branch of both OHLC rules.
+        let index = 4;
+        assert_eq!(ids.value(index), "A.SYNTH");
+        assert_eq!(opens.value(index), 100 * 10_i128.pow(18));
+        assert_eq!(highs.value(index), 100 * 10_i128.pow(18));
+        assert_eq!(lows.value(index), 99 * 10_i128.pow(18));
+        assert_eq!(closes.value(index), 99 * 10_i128.pow(18));
+        assert_eq!(opens_at.value(index), 1_767_922_200_000_000_000_i64);
+        assert_eq!(closes_at.value(index), 1_767_942_000_000_000_000_i64);
+        assert_eq!(available_at.value(index), closes_at.value(index));
 
         let coverage = output.coverage.get("B").unwrap();
         assert_eq!(coverage.get("expected_sessions"), Some(&json!(10)));
