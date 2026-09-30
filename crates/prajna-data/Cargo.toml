@@ -11,6 +11,7 @@ publish = false
 arrow-cast = "=58.4.0"
 arrow-array = "=58.4.0"
 arrow-schema = "=58.4.0"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 parquet = { version = "=58.4.0", default-features = false, features = ["arrow", "zstd"] }
 prajna-domain = { path = "../prajna-domain" }
 serde = { version = "1.0", features = ["derive"] }
