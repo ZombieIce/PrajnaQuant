@@ -1,7 +1,12 @@
 //! Arrow and Parquet data layer for Prajna Quant.
 
+mod manifest;
 mod raw;
 
+pub use manifest::{
+    Manifest, ManifestCore, ManifestError, ManifestFile, ManifestInput, ManifestProvenance,
+    ManifestTable, NormalizerIdentity, read_manifest, write_manifest,
+};
 pub use raw::{RawStore, RawStoreError, SourceKind, SourceRecord, SourceRecordInput};
 
 use std::{cmp::Ordering, fmt};
