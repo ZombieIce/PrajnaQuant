@@ -2,7 +2,15 @@
 
 mod manifest;
 mod normalized;
+mod normalizer;
+mod publish;
 mod raw;
+
+pub use normalizer::{
+    NormalizationIssue, NormalizationOutput, NormalizedTables, Normalizer, NormalizerRegistry,
+    RawInput,
+};
+pub use publish::{PublishError, publish_dataset};
 
 pub use manifest::{
     Manifest, ManifestCore, ManifestError, ManifestFile, ManifestInput, ManifestProvenance,
