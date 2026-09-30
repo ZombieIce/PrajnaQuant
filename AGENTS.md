@@ -57,14 +57,14 @@ CI（`.github/workflows/`）分两条：`CI` 的 `lightweight` job 是合并必�
 
 每次新对话先读 `AGENTS.md`，运行 `git status`、`git log -5 --oneline`，再按任务范围加载资料：
 
-- **POC-0 / 新平台实现：**读当前 GitHub Issue（`gh issue view <N> --comments`）与对应 spec、`ARCHITECTURE.md`、相关 ADR、任务代码和测试；需要阶段顺序时读 `docs/product-roadmap.md`，需要领域词汇时读 `CONTEXT.md`，需要现状或交接时只读 `docs/STATUS.md` 与 `HANDOFF.md` 的当前 POC 段落。构建资源任务另读 `docs/poc-0-benchmark-spec.md` 与票据 13。旧 A 股路线文档不作为这一路径的启动必读项。
+- **POC-0 / 新平台实现：**读当前 GitHub Issue（`gh issue view <N> --comments`）与对应 spec、`ARCHITECTURE.md`、相关 ADR、任务代码和测试；需要阶段顺序时读 `docs/product-roadmap.md`，需要领域词汇时读 `CONTEXT.md`，需要现状时读 `docs/STATUS.md`；需要交接时读 Issue 评论、相关 PR 描述与 `HANDOFF.md` 入口（逐票历史在 `docs/handoffs/poc-0-mvp-0-handoff-archive.md`，按需查阅）。构建资源任务另读 `docs/poc-0-benchmark-spec.md` 与票据 13。旧 A 股路线文档不作为这一路径的启动必读项。
 - **旧 A 股实现或明确复用其契约：**按修改范围读取 `README.md`、`docs/architecture.md`、`docs/time-model.md`、`docs/data-model.md`、`docs/factor-system.md`、`docs/strategy-system.md`、`docs/backtest-engine.md`、`docs/STATUS.md`、`docs/priorities.md` 及相关 ADR；只读与任务有关的部分。
 
 完成任务所需的代码与测试阅读后，再进行相关验证；不要为了履行启动清单通读无关历史文档。
 
 ## Agent Completion Checklist
 
-运行相关测试、formatter/lint；复查未来函数、时序、组合核算和交易成本；完成独立 agent review 并处理发现；更新 `docs/STATUS.md` 与 `HANDOFF.md`。仅在发生重要决策/契约变化时更新 ADR、API、README。交接中写明已验证命令、PR 链接、失败、开放问题和唯一建议下一步；review 结论以 PR 评论为准，不复制结论到分支文档，避免文档提交使 review 落后于最新 push。
+运行相关测试、formatter/lint；复查未来函数、时序、组合核算和交易成本；完成独立 agent review 并处理发现。`HANDOFF.md` 是入口，不随 PR 修改；交接写在 PR 描述（已验证命令、失败与环境限制、开放问题、唯一建议下一步），review 结论以 PR 评论为准。`docs/STATUS.md` 仅在能力、风险、量化口径或验证状态实际变化时更新，并在对应主题下改一条，不追加逐票流水；纯文档/流程类 PR 不改。仅在发生重要决策/契约变化时更新 ADR、API、README。不因补文档而在 review 后再推提交，避免 review 落后于最新 push 和并行 PR 冲突。
 
 ## Agent skills
 

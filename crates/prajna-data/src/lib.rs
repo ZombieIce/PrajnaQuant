@@ -1,8 +1,13 @@
 //! Arrow and Parquet data layer for Prajna Quant.
 
+mod manifest;
 mod normalized;
 mod raw;
 
+pub use manifest::{
+    Manifest, ManifestCore, ManifestError, ManifestFile, ManifestInput, ManifestProvenance,
+    ManifestTable, NormalizerIdentity, read_manifest, write_manifest,
+};
 pub use normalized::{
     DataError, ParquetWriteOptions, bars_from_record_batch, bars_schema, bars_to_record_batch,
     instruments_from_record_batch, instruments_schema, instruments_to_record_batch,

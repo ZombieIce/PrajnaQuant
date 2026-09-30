@@ -1,6 +1,6 @@
 # Project Status
 
-2026-09-30 GitHub Issue #14 在 `prajna-data` 实现 D7 `instruments`、`bars`、`sessions` Arrow schema、Domain/RecordBatch 双向转换和固定参数 Parquet 读写。Schema 快照覆盖字段顺序、类型、nullable 与完整字段 metadata；写入固定使用 ZSTD level 3、row group 65,536，把 `dsv` 写入 `prajna.dsv`，并校验批次主键按存储值字节序严格递增；读取校验表名、schema version 与字段。`Bar` 反序列化使用调用方提供的 `Session` 验证区间。`cargo test -p prajna-data --locked --offline`（17 passed）、对应 Clippy、`cargo fmt --all -- --check` 与新 crate 依赖守卫通过。轻量 `quant-research` test 24 unit + 15 CLI passed，strict Clippy 和 `b3-pyo3` check 通过；vendor `polars-io` 保留 29 项既有 warnings。`prajna-domain` 测试 18 passed。PR [#41](https://github.com/ZombieIce/PrajnaQuant/pull/41)；Independent review: see PR #41。
+2026-09-30 GitHub Issue #15 在分支 `15-manifest-dataset-version` 实现 `prajna-data` 的 D8 Manifest 与 Dataset Version：`Manifest::new` 对 inputs/table 排序并按受限 JCS(core) 计算 `dsv:sha256:<hex>`；provenance 不参与身份。manifest 写至 `manifests/<dsv_hex>.json`，先同步 staging 文件再原子 rename；现存相同 core 幂等，core 不同时报错；读取会重算并验证 DSV。固定手写 JCS/DSV 向量及 provenance、core 字段变化、顺序、篡改、幂等与冲突测试均通过。轻量 CI 对应的本地验证通过。PR [#40](https://github.com/ZombieIce/PrajnaQuant/pull/40)；Independent review: see PR #40。
 
 2026-09-30 GitHub Issue #13 实现 `prajna-data` 的受限 JCS、schema fingerprint 与 Arrow logical hash。hash 按主键排序，解码字典列，拒绝重复键和 Appendix A 外类型；schema fingerprint 排除 `prajna.dsv`。两行 `sessions` 测试向量（含 null、负 Decimal128 和多字节 UTF-8）已提交为 hex fixture，并发布到 [spec Issue #7](https://github.com/ZombieIce/PrajnaQuant/issues/7#issuecomment-5902283970)；独立 `xxd -r -p | shasum -a 256` 输出 `2c627a1813303394238717869776a089234b08da095a9c1bae0198ca26c2b58c`。定向 test/clippy、格式与新 crate 依赖守卫通过。轻量 `quant-research` test 中既有 Parquet round-trip 用例因本机约 2.98 GB 可用空间低于 10 GiB reserve gate 而返回 `unresolved`；其余过滤后用例通过。实现者双轴自查无剩余发现。PR [#37](https://github.com/ZombieIce/PrajnaQuant/pull/37)；Independent review: see PR #37。
 
@@ -63,6 +63,8 @@ POC-0 已按获确认的拆分发布为 [13 张本地执行票据](../.scratch/p
 完整的问题排序、解决路径及验收判据见 [`priorities.md`](priorities.md)。这里保留按领域归类的事实状态。
 
 ## Current Phase
+
+MVP-0 数据层现有 D7 instruments、bars、sessions 的 Arrow schema、Domain/RecordBatch 双向转换和 Parquet 读写；写入固定 ZSTD level 3、65,536 row group，记录规范 DSV 并校验主键按存储值字节序严格递增；读取校验表名、schema version 与字段定义。Bar 反序列化需调用方提供 Session 以验证区间。相关能力已通过定向测试、Clippy 与格式检查；真实多市场数据、PIT 和量化收益仍未因此验证。
 
 此前 A 股股票/ETF 日频 + Web 的初级产品路线已归档到 [`legacy-ashare-roadmap.md`](legacy-ashare-roadmap.md)；当前仍是本地 ETF Rotation MVP 加 A 股仓库。Batch 2 已有显式证券增量同步/失败恢复/不可变发布代码，隔离股票+ETF 真实小样本通过；已发布快照的只读证券/日线 API 和 K 线页面在合成目录通过。Batch 3 的日更身份导入与 ETF 诊断作业已有代码；生产同步/调度、真实状态、可信历史作业、Python 研究包和远程认证部署仍未验。五 ETF 真实状态覆盖不足，旧实验仍 `legacy_bar_only`，新 `status_gated` 占位跑全 UNKNOWN，P0-3 开放；股票回测没有开放。
 
