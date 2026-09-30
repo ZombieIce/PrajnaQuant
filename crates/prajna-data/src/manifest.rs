@@ -362,17 +362,8 @@ mod tests {
             provenance("2026-09-30T00:00:00Z"),
         )
         .unwrap();
-        let expected_jcs = format!(
-            "{{\"inputs\":[{{\"raw_sha256\":\"sha256:{}\"}}],\"manifest_version\":1,\"normalizer\":{{\"config_sha256\":\"sha256:{}\",\"id\":\"synthetic-etf-daily\",\"version\":\"v1\"}},\"tables\":[{{\"logical_hash\":\"{}\",\"row_count\":2,\"schema_fingerprint\":\"{}\",\"schema_version\":1,\"table\":\"sessions\"}}]}}",
-            "0".repeat(64),
-            "1".repeat(64),
-            "2".repeat(64),
-            "3".repeat(64),
-        );
-        assert_eq!(
-            restricted_core(&manifest.core).unwrap(),
-            expected_jcs.as_bytes()
-        );
+        let expected_jcs = br#"{"inputs":[{"raw_sha256":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}],"manifest_version":1,"normalizer":{"config_sha256":"sha256:1111111111111111111111111111111111111111111111111111111111111111","id":"synthetic-etf-daily","version":"v1"},"tables":[{"logical_hash":"2222222222222222222222222222222222222222222222222222222222222222","row_count":2,"schema_fingerprint":"3333333333333333333333333333333333333333333333333333333333333333","schema_version":1,"table":"sessions"}]}"#;
+        assert_eq!(restricted_core(&manifest.core).unwrap(), &expected_jcs[..]);
         assert_eq!(
             manifest.dsv,
             "dsv:sha256:57c21db71d2d18a5c6fd5b849cef4b748a2c12af3479384c05497ab59dbc80ec"
@@ -397,6 +388,12 @@ mod tests {
             Manifest::new(changed, provenance("first")).unwrap().dsv
         );
         let mut changed = baseline_core.clone();
+        changed.normalizer.id = "other-normalizer".into();
+        assert_ne!(
+            baseline.dsv,
+            Manifest::new(changed, provenance("first")).unwrap().dsv
+        );
+        let mut changed = baseline_core.clone();
         changed.normalizer.version = "v2".into();
         assert_ne!(
             baseline.dsv,
@@ -410,6 +407,12 @@ mod tests {
         );
         let mut changed = baseline_core.clone();
         changed.inputs[0].raw_sha256.push('x');
+        assert_ne!(
+            baseline.dsv,
+            Manifest::new(changed, provenance("first")).unwrap().dsv
+        );
+        let mut changed = baseline_core.clone();
+        changed.tables[0].table = "sessions".into();
         assert_ne!(
             baseline.dsv,
             Manifest::new(changed, provenance("first")).unwrap().dsv
