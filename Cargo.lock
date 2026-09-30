@@ -2587,9 +2587,12 @@ name = "prajna-data"
 version = "0.1.0"
 dependencies = [
  "arrow-array",
+ "arrow-cast",
  "arrow-schema",
  "parquet",
  "prajna-domain",
+ "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]
