@@ -1,5 +1,9 @@
 //! Arrow and Parquet data layer for Prajna Quant.
 
+mod raw;
+
+pub use raw::{RawStore, RawStoreError, SourceKind, SourceRecord, SourceRecordInput};
+
 use std::{cmp::Ordering, fmt};
 
 use arrow_array::{Array, ArrayRef, RecordBatch};
@@ -435,6 +439,14 @@ mod tests {
     use serde_json::json;
 
     use super::{encode_logical_rows, logical_hash, read_cell, restricted_jcs, schema_fingerprint};
+
+    #[test]
+    fn crate_compiles_with_arrow_and_parquet_dependencies() {
+        let schema = arrow_schema::Schema::empty();
+        let _batch = arrow_array::RecordBatch::new_empty(Arc::new(schema));
+        let _writer_properties = parquet::file::properties::WriterProperties::builder().build();
+        let _domain_type = std::any::type_name::<prajna_domain::Price>();
+    }
 
     fn sessions_schema() -> Schema {
         let mut metadata = HashMap::new();
