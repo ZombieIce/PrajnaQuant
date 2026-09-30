@@ -1,5 +1,7 @@
 # Project Status
 
+2026-09-30 GitHub Issue #13 实现 `prajna-data` 的受限 JCS、schema fingerprint 与 Arrow logical hash。hash 按主键排序，解码字典列，拒绝重复键和 Appendix A 外类型；schema fingerprint 排除 `prajna.dsv`。两行 `sessions` 测试向量（含 null、负 Decimal128 和多字节 UTF-8）已提交为 hex fixture，并发布到 [spec Issue #7](https://github.com/ZombieIce/PrajnaQuant/issues/7#issuecomment-5902283970)；独立 `xxd -r -p | shasum -a 256` 输出 `2c627a1813303394238717869776a089234b08da095a9c1bae0198ca26c2b58c`。定向 test/clippy、格式与新 crate 依赖守卫通过。轻量 `quant-research` test 中既有 Parquet round-trip 用例因本机约 2.98 GB 可用空间低于 10 GiB reserve gate 而返回 `unresolved`；其余过滤后用例通过。实现者双轴自查无剩余发现。PR [#37](https://github.com/ZombieIce/PrajnaQuant/pull/37)；Independent review: see PR #37。
+
 2026-09-29 GitHub Issue #9 在分支 `9-instrument-identity` 实现了 `VenueId`、`Currency`、规范 `InstrumentId`、独立声明的 `InstrumentKind`、经校验的 `InstrumentSpec` 与同 ID 重用检测；并提供 SH/SZ/BJ 旧格式到 XSHG/XSHE/BJSE 的单向映射。实现位于 `prajna-domain`，没有修改 `quant-research`。Domain crate 测试/clippy、workspace 轻量 Rust 路径（`quant-research` clippy/test、`b3-pyo3` check、DuckDB 依赖守卫）及格式检查通过。Python 轻量测试因本机缺少 `.venv` 且系统 Python 为 3.8，无法按 CI Python 3.12 环境验证。实现者双轴自检无剩余发现。PR [#33](https://github.com/ZombieIce/PrajnaQuant/pull/33)；Independent review: see PR #33。#7 的其余 Domain Core 与 Data/Arrow 范围未实现。
 
 2026-09-29 GitHub Issue #31 adds the repository-local `implement-ticket` and `review-pr` workflows and clarifies shared-account review roles and the pre-merge review check. The workflows are agent guidance, not automated enforcement. Independent review: see [PR #32](https://github.com/ZombieIce/PrajnaQuant/pull/32).

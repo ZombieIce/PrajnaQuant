@@ -1,5 +1,13 @@
 # Agent Handoff — 新平台目标基线与 POC-0
 
+## 当前交接（2026-09-30，GitHub Issue #13：规范编码与逻辑 hash）
+
+分支 `13-canonical-encoding-hash` 从最新 `origin/main` 建立。`prajna-data` 现提供受限 JCS、schema fingerprint（排除 schema metadata 中的 `prajna.dsv`）与按主键排序的 Arrow logical hash；拒绝重复主键、不支持类型和 JCS 浮点数，字典列按解码值编码。新增两行 `sessions` 完整 hex 向量，包含 null、负 Decimal128 与多字节 UTF-8；已在 [spec Issue #7 评论](https://github.com/ZombieIce/PrajnaQuant/issues/7#issuecomment-5902283970) 发布。独立命令 `xxd -r -p crates/prajna-data/tests/fixtures/sessions-logical-hash.hex | shasum -a 256` 得到 `2c627a1813303394238717869776a089234b08da095a9c1bae0198ca26c2b58c`。
+
+通过 `cargo fmt --all -- --check`、`cargo test -p prajna-data --locked --offline`（6 passed）、`cargo clippy -p prajna-data --all-targets --locked --offline -- -D warnings`、prajna-data/prajna-domain 依赖守卫、`cargo clippy -p quant-research --no-default-features --all-targets --locked --offline -- -D warnings`、`cargo clippy -p prajna-domain --all-targets --locked --offline -- -D warnings`、`cargo test -p prajna-domain --locked --offline`（11 passed）。`cargo test -p quant-research --no-default-features --locked --offline` 在现有 Parquet round-trip 测试失败：本机仅约 2.98 GB 可用空间，低于其 10 GiB reserve gate，测试报告 `unresolved`；过滤该测试后 24 unit 与 14 CLI tests 通过。自查发现的空输入类型验证缺口已修复，最终 Standards/Spec implementer self-check 无发现。PR [#37](https://github.com/ZombieIce/PrajnaQuant/pull/37)；Independent review: see PR #37。完整命令和本机限制记录在 PR 描述中。
+
+**唯一建议下一步：**实现方发布最新 head SHA 的 ready 评论后停止；项目负责人启动新 reviewer session 对 PR #37 执行独立 review。
+
 ## 当前交接（2026-09-29，GitHub Issue #11：MVP-0 prajna-data）
 
 已认领 Issue #11（#8 阻塞项已关闭），在最新 `main` 上建立分支 `11-prajna-data-skeleton-parquet-duckdb-guard`。新增 workspace crate `crates/prajna-data`，只依赖 `prajna-domain`、Arrow 58.4.0 与 Parquet 58.4.0；Parquet 关闭默认特性，仅开 `arrow`/`zstd`。更新 Cargo.lock。轻量 CI 对 `prajna-domain` 和 `prajna-data` 的依赖树拒绝 DuckDB、Polars 与 `ashare-warehouse`，并新增 `prajna-data` clippy/test。仅有最小 compile test，无业务逻辑。
