@@ -1,5 +1,13 @@
 # Agent Handoff — 新平台目标基线与 POC-0
 
+## 当前交接（2026-09-30，GitHub Issue #14：Arrow schema 与 Parquet）
+
+分支 `14-arrow-parquet` 从最新 `origin/main` 创建，实现提交为 `07345f9`。`prajna-data` 新增三张 D7 schema、经 schema/version/field 校验的 Domain ↔ RecordBatch 转换，以及 Parquet 读写。写入按主键排序后的 batch，使用固定 ZSTD level 3 与 65,536 row group，并返回 `ParquetWriteOptions` 供 provenance 记录；传入的 DSV 存入 `prajna.dsv`。读取校验表名、schema version 和字段定义，再把 Arrow schema metadata 附回返回批次。Round-trip 覆盖 null `amount`/`available_at` 与负 Decimal128；schema 快照覆盖字段顺序、类型、nullable 和全部字段 metadata。
+
+验证通过：`cargo fmt --all -- --check`、`cargo test -p prajna-data --locked --offline`（14 passed）、`cargo clippy -p prajna-data --all-targets --locked --offline -- -D warnings`、prajna-domain/prajna-data DuckDB/Polars/ashare-warehouse 依赖守卫、`cargo test -p prajna-domain --locked --offline`（18 passed）、`cargo clippy -p quant-research --no-default-features --all-targets --locked --offline -- -D warnings`、`cargo test -p quant-research --no-default-features --locked --offline`（24 unit + 15 CLI passed）与 `cargo check -p quant-research --no-default-features --features b3-pyo3 --all-targets --locked --offline`。量化研究检查期间 vendor `polars-io` 输出 29 项既有 warnings，命令退出 0。实现者 self-check 的 Spec 轴无发现；Standards 轴无规范违规，保留一个非阻塞 smell：转换器使用重复的 positional column indices。PR [#41](https://github.com/ZombieIce/PrajnaQuant/pull/41)；Independent review: see PR #41。完整验收命令和实现者自查见 PR 描述。
+
+**唯一建议下一步：**项目负责人在新 reviewer session 对 PR #41 执行独立 `review-pr`；实现者发布当前 head SHA 的 ready 评论后停止。
+
 ## 当前交接（2026-09-30，GitHub Issue #13：规范编码与逻辑 hash）
 
 分支 `13-canonical-encoding-hash` 从最新 `origin/main` 建立。`prajna-data` 现提供受限 JCS、schema fingerprint（排除 schema metadata 中的 `prajna.dsv`）与按主键排序的 Arrow logical hash；拒绝重复主键、不支持类型和 JCS 浮点数，字典列按解码值编码。新增两行 `sessions` 完整 hex 向量，包含 null、负 Decimal128 与多字节 UTF-8；已在 [spec Issue #7 评论](https://github.com/ZombieIce/PrajnaQuant/issues/7#issuecomment-5902283970) 发布。独立命令 `xxd -r -p crates/prajna-data/tests/fixtures/sessions-logical-hash.hex | shasum -a 256` 得到 `2c627a1813303394238717869776a089234b08da095a9c1bae0198ca26c2b58c`。
