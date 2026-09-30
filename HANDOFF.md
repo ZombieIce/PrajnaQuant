@@ -1,5 +1,13 @@
 # Agent Handoff — 新平台目标基线与 POC-0
 
+## 当前交接（2026-09-29，GitHub Issue #10：MVP-0 时间与 Bar）
+
+已认领 Issue #10（阻塞项 #9 已关闭），从最新 `origin/main` 建立分支 `10-time-bar-types`。`prajna-domain` 新增 `TimestampNs`（带显式 offset 的 RFC3339 输入、UTC 纳秒存储）、规范化 `BarSpec`、受检 `Session`，以及由 `BarData` 校验构成的 `Bar`。目前仅实现每日 session/fixed-offset 区间；输入验证覆盖时间边界、OHLCV、session identity 和 spec bounds；`available_at=None` 保留为未知。`CONTEXT.md` 已记录领域词汇。
+
+验证：`cargo fmt --all -- --check`、`cargo test -p prajna-domain --locked --offline`（18 passed）、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings`、`cargo check -p quant-research --no-default-features --features b3-pyo3 --all-targets --locked --offline` 均通过；Clippy 留有 vendor `polars-io` 的既有 warnings。Bundled Python 3.12 POC suite 42 passed、8 项因缺少 Nautilus runtime 按预期跳过。`cargo test --workspace --locked --offline` 和 `cargo test -p quant-research --no-default-features --locked --offline` 均被既有 Parquet CLI 10 GiB 可用空间闸门拦截（当时约 5.77 GB 可用，测试标为 unresolved）；未清理缓存或降低保留线。Spec/Standards 为实现者自查，未发现剩余问题。PR [#36](https://github.com/ZombieIce/PrajnaQuant/pull/36)；Independent review: see PR #36。
+
+**唯一建议下一步：**由项目负责人在新 reviewer session 对 PR #36 执行独立 `review-pr`；实现者完成 ready 评论后停止。
+
 ## 当前交接（2026-09-29，GitHub Issue #12：MVP-0 Raw store）
 
 分支 `12-raw-store` 基于最新 `origin/main`（`793987e`）。`prajna-data` 现提供 `RawStore::open/put/get/sources`：Raw 对象存于 `raw/sha256/<前两位>/<hex>`，身份格式为 `sha256:<小写 hex>`；写入使用唯一临时文件、文件 `sync_all` 后原子 rename。重复 put 会校验现存字节和 hash；读取时重算 hash。来源记录追加至 `raw-sources/sha256/<前两位>/<hex>.jsonl`，字段为 `raw_sha256`、`content_type`、`source_kind`、`source_id`、`request`、`observed_at`、`ingested_by`；query、header、JSON/form body 中 key 名含 token/key/secret/signature/password/auth 的值会脱敏。来源追加在进程内串行化，满足本票线程并发场景；未承诺跨进程追加并发。
