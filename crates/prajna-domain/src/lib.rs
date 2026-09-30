@@ -1,11 +1,16 @@
 //! Stable domain primitives shared by the platform's data and execution layers.
 
 mod instrument;
+mod time_bar;
 
 pub use instrument::{
     CodeError, Currency, InstrumentId, InstrumentIdError, InstrumentKind, InstrumentSpec,
     InstrumentSpecData, InstrumentSpecError, InstrumentSpecs, LegacyInstrumentIdError, VenueId,
     instrument_id_from_legacy,
+};
+pub use time_bar::{
+    Bar, BarData, BarSpec, BarSpecError, BarSpecInterval, BarValidationError, Session,
+    SessionError, TimestampNs, TimestampParseError,
 };
 
 use core::{cmp::Ordering, fmt, str::FromStr};

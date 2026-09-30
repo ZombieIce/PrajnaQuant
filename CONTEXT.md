@@ -7,6 +7,21 @@
 **Venue**:
 提供行情或执行交易的市场场所；同一资产可在不同 Venue 有不同规则。
 
+**Session**:
+一个 Venue 在本地交易日内的开闭市区间，使用 UTC 纳秒时间戳表示边界，且 `ts_open < ts_close`。
+
+**TimestampNs**:
+带显式时区的 RFC 3339 时间规范化成的 UTC Unix 纳秒时间戳；没有时区的时间不能构造。
+
+**BarSpec**:
+行情 Bar 的长度与区间锚点，例如 `1d@session` 或 `1d@+08:00`；session 锚定区间使用对应的 Session，固定偏移区间按该偏移的本地日期切分。
+
+**BarData**:
+按 D7 字段名组织的 Bar 输入值；只有经 OHLC、数量、时间与区间校验后才构造成 Bar。
+
+**Bar**:
+按 Instrument、Bar Spec 和交易日标识的 OHLCV 行情区间；`available_at` 表示数据可用时刻，缺失表示未知，不从 `ts_close` 推定。
+
 **Instrument**:
 可被观察、评分、持有或交易的具体金融标的，身份须能区分 Venue 与资产类型。
 _Avoid_: 仅用裸 symbol 代表跨市场唯一身份。
