@@ -1,5 +1,13 @@
 # Agent Handoff — 新平台目标基线与 POC-0
 
+## 当前交接（2026-09-30，GitHub Issue #13：规范编码与逻辑 hash）
+
+分支 `13-canonical-encoding-hash` 从最新 `origin/main` 建立。`prajna-data` 现提供受限 JCS、schema fingerprint（排除 schema metadata 中的 `prajna.dsv`）与按主键排序的 Arrow logical hash；拒绝重复主键、不支持类型和 JCS 浮点数，字典列按解码值编码。新增两行 `sessions` 完整 hex 向量，包含 null、负 Decimal128 与多字节 UTF-8；已在 [spec Issue #7 评论](https://github.com/ZombieIce/PrajnaQuant/issues/7#issuecomment-5902283970) 发布。独立命令 `xxd -r -p crates/prajna-data/tests/fixtures/sessions-logical-hash.hex | shasum -a 256` 得到 `2c627a1813303394238717869776a089234b08da095a9c1bae0198ca26c2b58c`。
+
+通过 `cargo fmt --all -- --check`、`cargo test -p prajna-data --locked --offline`（6 passed）、`cargo clippy -p prajna-data --all-targets --locked --offline -- -D warnings`、prajna-data/prajna-domain 依赖守卫、`cargo clippy -p quant-research --no-default-features --all-targets --locked --offline -- -D warnings`、`cargo clippy -p prajna-domain --all-targets --locked --offline -- -D warnings`、`cargo test -p prajna-domain --locked --offline`（11 passed）。`cargo test -p quant-research --no-default-features --locked --offline` 在现有 Parquet round-trip 测试失败：本机仅约 2.98 GB 可用空间，低于其 10 GiB reserve gate，测试报告 `unresolved`；过滤该测试后 24 unit 与 14 CLI tests 通过。自查发现的空输入类型验证缺口已修复，最终 Standards/Spec implementer self-check 无发现。PR [#37](https://github.com/ZombieIce/PrajnaQuant/pull/37)；Independent review: see PR #37。完整命令和本机限制记录在 PR 描述中。
+
+**唯一建议下一步：**实现方发布最新 head SHA 的 ready 评论后停止；项目负责人启动新 reviewer session 对 PR #37 执行独立 review。
+
 ## 当前交接（2026-09-29，GitHub Issue #10：MVP-0 时间与 Bar）
 
 已认领 Issue #10（阻塞项 #9 已关闭），从最新 `origin/main` 建立分支 `10-time-bar-types`。`prajna-domain` 新增 `TimestampNs`（带显式 offset 的 RFC3339 输入、UTC 纳秒存储）、规范化 `BarSpec`、受检 `Session`，以及由 `BarData` 校验构成的 `Bar`。目前仅实现每日 session/fixed-offset 区间；输入验证覆盖时间边界、OHLCV、session identity 和 spec bounds；`available_at=None` 保留为未知。`CONTEXT.md` 已记录领域词汇。
@@ -12,7 +20,7 @@
 
 分支 `12-raw-store` 基于最新 `origin/main`（`793987e`）。`prajna-data` 现提供 `RawStore::open/put/get/sources`：Raw 对象存于 `raw/sha256/<前两位>/<hex>`，身份格式为 `sha256:<小写 hex>`；写入使用唯一临时文件、文件 `sync_all` 后原子 rename。重复 put 会校验现存字节和 hash；读取时重算 hash。来源记录追加至 `raw-sources/sha256/<前两位>/<hex>.jsonl`，字段为 `raw_sha256`、`byte_len`、`content_type`、`source_kind`、`source_id`、`request`、`observed_at`、`ingested_by`；URL query/userinfo、header、JSON/form body 中 key 名含 token/key/secret/signature/password/auth 的值会脱敏。来源追加在进程内串行化，满足本票线程并发场景；未承诺跨进程追加并发。
 
-验证通过：`cargo fmt --all -- --check`、`cargo test -p prajna-data --locked --offline`（5 passed）、`cargo clippy -p prajna-data --all-targets --locked --offline -- -D warnings`、prajna-domain/prajna-data DuckDB/Polars/ashare-warehouse 依赖守卫、`cargo clippy -p quant-research --no-default-features --all-targets --locked --offline -- -D warnings` 与 `cargo check -p quant-research --no-default-features --features b3-pyo3 --all-targets --locked --offline`。Python 3.12 POC 测试 42 项通过、8 项因固定 Nautilus 未安装而跳过。`cargo test -p quant-research --no-default-features --locked --offline` 有 38 项通过、1 项既有 Parquet CLI 测试因磁盘余量不足失败：测试要求 10 GiB，本机约 6.2 GiB，预检报告 `unresolved`。实现者 Standards/Spec 自查无剩余发现。PR [#35](https://github.com/ZombieIce/PrajnaQuant/pull/35)；Independent review: see PR #35。
+验证通过：`cargo fmt --all -- --check`、`cargo test -p prajna-data --locked --offline`（合并 #13 后 11 passed，其中 5 项 Raw store 测试）、`cargo clippy -p prajna-data --all-targets --locked --offline -- -D warnings`、prajna-domain/prajna-data DuckDB/Polars/ashare-warehouse 依赖守卫、`cargo clippy -p quant-research --no-default-features --all-targets --locked --offline -- -D warnings` 与 `cargo check -p quant-research --no-default-features --features b3-pyo3 --all-targets --locked --offline`。Python 3.12 POC 测试 42 项通过、8 项因固定 Nautilus 未安装而跳过。`cargo test -p quant-research --no-default-features --locked --offline` 有 38 项通过、1 项既有 Parquet CLI 测试因磁盘余量不足失败：测试要求 10 GiB，本机约 6.2 GiB，预检报告 `unresolved`。实现者 Standards/Spec 自查无剩余发现。PR [#35](https://github.com/ZombieIce/PrajnaQuant/pull/35)；Independent review: see PR #35。
 
 **唯一建议下一步：**项目负责人用新 reviewer session 对 PR #35 执行独立 review；实现方在发布 ready 评论后停止。
 

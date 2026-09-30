@@ -2587,6 +2587,7 @@ name = "prajna-data"
 version = "0.1.0"
 dependencies = [
  "arrow-array",
+ "arrow-cast",
  "arrow-schema",
  "parquet",
  "prajna-domain",
