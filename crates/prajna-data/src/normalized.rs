@@ -1,6 +1,6 @@
 //! Arrow schemas and fixed-parameter Parquet transport for normalized domain rows.
 
-use std::{collections::HashMap, fs::File, path::Path, sync::Arc};
+use std::{cmp::Ordering, collections::HashMap, fs::File, path::Path, sync::Arc};
 
 use arrow_array::{
     Array, ArrayRef, BooleanArray, Date32Array, Decimal128Array, RecordBatch, StringArray,
@@ -21,6 +21,29 @@ use prajna_domain::{
 const SCHEMA_VERSION: &str = "1";
 const ZSTD_LEVEL: i32 = 3;
 const ROW_GROUP_SIZE: usize = 65_536;
+
+fn kind_code(kind: InstrumentKind) -> &'static str {
+    match kind {
+        InstrumentKind::Equity => "Equity",
+        InstrumentKind::Etf => "Etf",
+        InstrumentKind::Spot => "Spot",
+        InstrumentKind::Perpetual => "Perpetual",
+        InstrumentKind::Future => "Future",
+    }
+}
+
+fn parse_kind(code: &str) -> Result<InstrumentKind, DataError> {
+    [
+        InstrumentKind::Equity,
+        InstrumentKind::Etf,
+        InstrumentKind::Spot,
+        InstrumentKind::Perpetual,
+        InstrumentKind::Future,
+    ]
+    .into_iter()
+    .find(|kind| kind_code(*kind) == code)
+    .ok_or_else(|| err("invalid instrument kind"))
+}
 
 /// Fixed settings applied to every normalized Parquet file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,25 +190,23 @@ fn date32(value: NaiveDate) -> Result<i32, DataError> {
     i32::try_from(days).map_err(|_| err("date is outside Arrow Date32 range"))
 }
 fn naive_date(value: i32) -> Result<NaiveDate, DataError> {
-    NaiveDate::from_ymd_opt(1970, 1, 1)
-        .unwrap()
-        .checked_add_days(chrono::Days::new(value as u64))
-        .or_else(|| {
-            if value < 0 {
-                NaiveDate::from_ymd_opt(1970, 1, 1)
-                    .unwrap()
-                    .checked_sub_days(chrono::Days::new(value.unsigned_abs() as u64))
-            } else {
-                None
-            }
-        })
-        .ok_or_else(|| err("invalid Arrow Date32 value"))
+    let days = i64::from(value)
+        + i64::from(
+            NaiveDate::from_ymd_opt(1970, 1, 1)
+                .unwrap()
+                .num_days_from_ce(),
+        );
+    let days = i32::try_from(days).map_err(|_| err("invalid Arrow Date32 value"))?;
+    NaiveDate::from_num_days_from_ce_opt(days).ok_or_else(|| err("invalid Arrow Date32 value"))
 }
 
 pub fn instruments_to_record_batch(rows: &[InstrumentSpec]) -> Result<RecordBatch, DataError> {
-    let mut ordered = rows.iter().collect::<Vec<_>>();
-    ordered.sort_by(|a, b| a.id().cmp(b.id()));
-    let rows = ordered;
+    let mut ordered = rows
+        .iter()
+        .map(|row| (row.id().to_string(), row))
+        .collect::<Vec<_>>();
+    ordered.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+    let rows = ordered.iter().map(|(_, row)| *row).collect::<Vec<_>>();
     let schema = instruments_schema();
     let cols: Vec<ArrayRef> = vec![
         Arc::new(StringArray::from_iter_values(
@@ -195,7 +216,7 @@ pub fn instruments_to_record_batch(rows: &[InstrumentSpec]) -> Result<RecordBatc
             rows.iter().map(|v| v.id().venue().as_str()),
         )),
         Arc::new(StringArray::from_iter_values(
-            rows.iter().map(|v| format!("{:?}", v.kind())),
+            rows.iter().map(|v| kind_code(v.kind())),
         )),
         Arc::new(StringArray::from_iter_values(
             rows.iter().map(|v| v.native_symbol()),
@@ -283,14 +304,7 @@ pub fn instruments_from_record_batch(
         if id.venue().as_str() != text(1)? {
             return Err(err("venue_id does not match instrument_id"));
         }
-        let kind = match text(2)? {
-            "Equity" => InstrumentKind::Equity,
-            "Etf" => InstrumentKind::Etf,
-            "Spot" => InstrumentKind::Spot,
-            "Perpetual" => InstrumentKind::Perpetual,
-            "Future" => InstrumentKind::Future,
-            _ => return Err(err("invalid instrument kind")),
-        };
+        let kind = parse_kind(text(2)?)?;
         let currency = |column| -> Result<Option<Currency>, DataError> {
             optional_text(column)?
                 .map(|v| Currency::new(v).map_err(|e| err(e.to_string())))
@@ -385,15 +399,22 @@ pub fn sessions_from_record_batch(batch: &RecordBatch) -> Result<Vec<Session>, D
 }
 
 pub fn bars_to_record_batch(rows: &[Bar]) -> Result<RecordBatch, DataError> {
-    let mut ordered = rows.iter().collect::<Vec<_>>();
-    ordered.sort_by(|a, b| {
-        (a.instrument_id(), a.bar_spec().to_string(), a.ts_open()).cmp(&(
-            b.instrument_id(),
-            b.bar_spec().to_string(),
-            b.ts_open(),
-        ))
-    });
-    let rows = ordered;
+    let mut ordered = rows
+        .iter()
+        .map(|row| {
+            (
+                row.instrument_id().to_string(),
+                row.bar_spec().to_string(),
+                row.ts_open(),
+                row,
+            )
+        })
+        .collect::<Vec<_>>();
+    ordered.sort_by(|a, b| (&a.0, &a.1, a.2).cmp(&(&b.0, &b.1, b.2)));
+    let rows = ordered
+        .iter()
+        .map(|(_, _, _, row)| *row)
+        .collect::<Vec<_>>();
     let schema = bars_schema();
     let cols: Vec<ArrayRef> = vec![
         Arc::new(StringArray::from_iter_values(
@@ -423,8 +444,19 @@ pub fn bars_to_record_batch(rows: &[Bar]) -> Result<RecordBatch, DataError> {
     ];
     RecordBatch::try_new(schema, cols).map_err(Into::into)
 }
-pub fn bars_from_record_batch(batch: &RecordBatch) -> Result<Vec<Bar>, DataError> {
+/// Decode bars against authoritative session bounds for session-anchored bar specs.
+pub fn bars_from_record_batch(
+    batch: &RecordBatch,
+    sessions: &[Session],
+) -> Result<Vec<Bar>, DataError> {
     check_batch(batch, "bars")?;
+    let mut sessions_by_key = HashMap::new();
+    for session in sessions {
+        let key = (session.venue_id().clone(), session.session_date());
+        if sessions_by_key.insert(key, session).is_some() {
+            return Err(err("duplicate session key"));
+        }
+    }
     let mut out = Vec::with_capacity(batch.num_rows());
     for i in 0..batch.num_rows() {
         let id = string_at(batch, 0, i)?
@@ -441,8 +473,9 @@ pub fn bars_from_record_batch(batch: &RecordBatch) -> Result<Vec<Bar>, DataError
         let session_date = naive_date(dates.value(i))?;
         let ts_open = TimestampNs::from_unix_nanos(timestamp_at(batch, 3, i)?);
         let ts_close = TimestampNs::from_unix_nanos(timestamp_at(batch, 4, i)?);
-        let session = Session::new(id.venue().clone(), session_date, ts_open, ts_close)
-            .map_err(|e| err(e.to_string()))?;
+        let session = sessions_by_key
+            .get(&(id.venue().clone(), session_date))
+            .copied();
         let amount = optional_decimal(batch, 10, i)?
             .map(Notional::from_mantissa)
             .transpose()
@@ -467,7 +500,7 @@ pub fn bars_from_record_batch(batch: &RecordBatch) -> Result<Vec<Bar>, DataError
             amount,
             available_at,
         };
-        out.push(Bar::new(data, Some(&session)).map_err(|e| err(e.to_string()))?);
+        out.push(Bar::new(data, session).map_err(|e| err(e.to_string()))?);
     }
     Ok(out)
 }
@@ -533,6 +566,15 @@ fn optional_timestamp_at(
     Ok((!a.is_null(row)).then(|| TimestampNs::from_unix_nanos(a.value(row))))
 }
 
+fn expected_schema(table: &str) -> Result<SchemaRef, DataError> {
+    match table {
+        "instruments" => Ok(instruments_schema()),
+        "bars" => Ok(bars_schema()),
+        "sessions" => Ok(sessions_schema()),
+        _ => Err(err("unsupported normalized table")),
+    }
+}
+
 fn check_batch(batch: &RecordBatch, table: &str) -> Result<(), DataError> {
     let schema = batch.schema();
     let m = schema.metadata();
@@ -541,14 +583,45 @@ fn check_batch(batch: &RecordBatch, table: &str) -> Result<(), DataError> {
     {
         return Err(err("Arrow schema table or schema_version mismatch"));
     }
-    let expected = match table {
-        "instruments" => instruments_schema(),
-        "bars" => bars_schema(),
-        "sessions" => sessions_schema(),
-        _ => return Err(err("unsupported normalized table")),
-    };
+    let expected = expected_schema(table)?;
     if schema.fields() != expected.fields() {
         return Err(err("Arrow schema fields do not match the table schema"));
+    }
+    Ok(())
+}
+
+fn check_primary_key_order(batch: &RecordBatch, table: &str) -> Result<(), DataError> {
+    let key_columns: &[usize] = match table {
+        "instruments" => &[0],
+        "bars" => &[0, 1, 3],
+        "sessions" => &[0, 1],
+        _ => return Err(err("unsupported normalized table")),
+    };
+    let schema = batch.schema();
+    let mut previous: Option<Vec<super::Cell>> = None;
+    for row in 0..batch.num_rows() {
+        let key = key_columns
+            .iter()
+            .map(|&column| {
+                super::read_cell(batch.column(column), schema.field(column), row)
+                    .map_err(|error| err(error.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if key.iter().any(|cell| matches!(cell, super::Cell::Null)) {
+            return Err(err("primary key contains null"));
+        }
+        if let Some(previous) = &previous {
+            let ordering = previous
+                .iter()
+                .zip(&key)
+                .map(|(left, right)| super::compare_cell(left, right))
+                .find(|ordering| *ordering != Ordering::Equal)
+                .unwrap_or(Ordering::Equal);
+            if ordering != Ordering::Less {
+                return Err(err("primary keys must be unique and sorted"));
+            }
+        }
+        previous = Some(key);
     }
     Ok(())
 }
@@ -566,6 +639,10 @@ pub fn write_parquet(
         .cloned()
         .ok_or_else(|| err("missing prajna.table"))?;
     check_batch(batch, &table)?;
+    check_primary_key_order(batch, &table)?;
+    if dsv.trim().is_empty() {
+        return Err(err("prajna.dsv must not be empty"));
+    }
     let mut metadata = batch.schema().metadata().clone();
     metadata.insert("prajna.dsv".into(), dsv.into());
     let schema = Arc::new(Schema::new_with_metadata(
@@ -600,12 +677,7 @@ pub fn read_parquet(
         return Err(err("Parquet table or schema_version mismatch"));
     }
     let schema = builder.schema().clone();
-    let expected = match table {
-        "instruments" => instruments_schema(),
-        "bars" => bars_schema(),
-        "sessions" => sessions_schema(),
-        _ => return Err(err("unsupported normalized table")),
-    };
+    let expected = expected_schema(table)?;
     if schema.fields() != expected.fields() {
         return Err(err("Parquet fields do not match the table schema"));
     }
@@ -622,29 +694,76 @@ pub fn read_parquet(
 mod tests {
     use super::*;
     use arrow_schema::DataType;
+    use parquet::file::reader::{FileReader, SerializedFileReader};
 
-    fn fixture_bar() -> Bar {
-        let venue = VenueId::new("SYNTH").unwrap();
-        let id = InstrumentId::new("ETF001", venue.clone()).unwrap();
+    fn fixture_session(venue: &str) -> Session {
+        let venue = VenueId::new(venue).unwrap();
         let date = NaiveDate::from_ymd_opt(2026, 1, 5).unwrap();
         let open = TimestampNs::parse("2026-01-05T09:30:00+08:00").unwrap();
         let close = TimestampNs::parse("2026-01-05T15:00:00+08:00").unwrap();
-        let session = Session::new(venue, date, open, close).unwrap();
+        Session::new(venue, date, open, close).unwrap()
+    }
+
+    fn fixture_bar_for(
+        symbol: &str,
+        venue: &str,
+        amount: Option<Notional>,
+        available_at: Option<TimestampNs>,
+    ) -> Bar {
+        let session = fixture_session(venue);
         let data = BarData {
-            instrument_id: id,
+            instrument_id: InstrumentId::new(symbol, session.venue_id().clone()).unwrap(),
             bar_spec: "1d@session".parse().unwrap(),
-            session_date: date,
-            ts_open: open,
-            ts_close: close,
+            session_date: session.session_date(),
+            ts_open: session.ts_open(),
+            ts_close: session.ts_close(),
             open: Price::parse("1.2").unwrap(),
             high: Price::parse("1.4").unwrap(),
             low: Price::parse("1.1").unwrap(),
             close: Price::parse("1.3").unwrap(),
             volume: Quantity::parse("10").unwrap(),
-            amount: Some(Notional::parse("-2.5").unwrap()),
-            available_at: None,
+            amount,
+            available_at,
         };
         Bar::new(data, Some(&session)).unwrap()
+    }
+
+    fn fixture_bar() -> Bar {
+        fixture_bar_for(
+            "ETF001",
+            "SYNTH",
+            Some(Notional::parse("-2.5").unwrap()),
+            None,
+        )
+    }
+
+    fn fixture_spec(symbol: &str, venue: &str) -> InstrumentSpec {
+        let perpetual = symbol.ends_with("-PERP");
+        InstrumentSpec::new(InstrumentSpecData {
+            id: InstrumentId::new(symbol, VenueId::new(venue).unwrap()).unwrap(),
+            kind: if venue == "BINANCE" {
+                if perpetual {
+                    InstrumentKind::Perpetual
+                } else {
+                    InstrumentKind::Spot
+                }
+            } else {
+                InstrumentKind::Etf
+            },
+            native_symbol: symbol.into(),
+            market_segment: None,
+            base_currency: None,
+            quote_currency: None,
+            settle_currency: perpetual.then(|| Currency::new("USDT").unwrap()),
+            is_inverse: false,
+            multiplier: Some(Quantity::parse("-0.25").unwrap()),
+            expiry: None,
+            price_increment: Price::parse("0.01").unwrap(),
+            size_increment: Quantity::parse("1").unwrap(),
+            lot_size: None,
+            session_timezone: Some("Asia/Shanghai".into()),
+        })
+        .unwrap()
     }
 
     #[test]
@@ -739,8 +858,14 @@ mod tests {
 
     #[test]
     fn domain_arrow_parquet_domain_round_trip_preserves_nulls_and_negative_decimal() {
-        let row = fixture_bar();
-        let batch = bars_to_record_batch(std::slice::from_ref(&row)).unwrap();
+        let negative_amount = fixture_bar();
+        let null_amount = fixture_bar_for(
+            "ETF002",
+            "SYNTH",
+            None,
+            Some(TimestampNs::parse("2026-01-05T16:00:00+08:00").unwrap()),
+        );
+        let batch = bars_to_record_batch(&[null_amount.clone(), negative_amount.clone()]).unwrap();
         let path = tempfile::NamedTempFile::new().unwrap();
         assert_eq!(
             write_parquet(path.path(), &batch, "dsv:sha256:fixture").unwrap(),
@@ -748,6 +873,7 @@ mod tests {
         );
         let read = read_parquet(path.path(), "bars", "1").unwrap();
         assert_eq!(read.len(), 1);
+        assert_eq!(read[0].num_rows(), 2);
         assert_eq!(
             read[0]
                 .schema()
@@ -756,54 +882,182 @@ mod tests {
                 .map(String::as_str),
             Some("dsv:sha256:fixture")
         );
-        let restored = bars_from_record_batch(&read[0]).unwrap();
-        assert_eq!(restored, vec![row]);
+        let session = fixture_session("SYNTH");
+        let restored = bars_from_record_batch(&read[0], std::slice::from_ref(&session)).unwrap();
+        assert_eq!(restored, vec![negative_amount, null_amount]);
         assert_eq!(
             restored[0].amount().unwrap().mantissa(),
             Notional::parse("-2.5").unwrap().mantissa()
         );
         assert_eq!(restored[0].available_at(), None);
+        assert_eq!(restored[1].amount(), None);
+        assert_eq!(
+            restored[1].available_at(),
+            Some(TimestampNs::parse("2026-01-05T16:00:00+08:00").unwrap())
+        );
+        assert!(bars_from_record_batch(&read[0], &[]).is_err());
+        let wrong_session = Session::new(
+            session.venue_id().clone(),
+            session.session_date(),
+            TimestampNs::from_unix_nanos(session.ts_open().as_unix_nanos() + 1),
+            session.ts_close(),
+        )
+        .unwrap();
+        assert!(bars_from_record_batch(&read[0], &[wrong_session]).is_err());
         assert!(read_parquet(path.path(), "sessions", "1").is_err());
         assert!(read_parquet(path.path(), "bars", "2").is_err());
     }
 
     #[test]
-    fn instruments_and_sessions_convert_to_and_from_arrow() {
-        let venue = VenueId::new("SYNTH").unwrap();
-        let spec = InstrumentSpec::new(InstrumentSpecData {
-            id: InstrumentId::new("ETF001", venue.clone()).unwrap(),
-            kind: InstrumentKind::Etf,
-            native_symbol: "ETF001".into(),
-            market_segment: None,
-            base_currency: None,
-            quote_currency: None,
-            settle_currency: None,
-            is_inverse: false,
-            multiplier: Some(Quantity::parse("-0.25").unwrap()),
-            expiry: None,
-            price_increment: Price::parse("0.01").unwrap(),
-            size_increment: Quantity::parse("1").unwrap(),
-            lot_size: None,
-            session_timezone: Some("Asia/Shanghai".into()),
-        })
-        .unwrap();
+    fn instruments_and_sessions_round_trip_through_parquet() {
+        let spec = fixture_spec("ETF001", "SYNTH");
         let instruments = instruments_to_record_batch(std::slice::from_ref(&spec)).unwrap();
         assert_eq!(
             instruments_from_record_batch(&instruments).unwrap(),
+            vec![spec.clone()]
+        );
+        let instrument_path = tempfile::NamedTempFile::new().unwrap();
+        write_parquet(instrument_path.path(), &instruments, "dsv:sha256:fixture").unwrap();
+        let restored = read_parquet(instrument_path.path(), "instruments", "1").unwrap();
+        assert_eq!(
+            instruments_from_record_batch(&restored[0]).unwrap(),
             vec![spec]
         );
-        let bar = fixture_bar();
-        let session = Session::new(
-            bar.instrument_id().venue().clone(),
-            bar.session_date(),
-            bar.ts_open(),
-            bar.ts_close(),
-        )
-        .unwrap();
+
+        let session = fixture_session("SYNTH");
         let sessions = sessions_to_record_batch(std::slice::from_ref(&session)).unwrap();
         assert_eq!(
             sessions_from_record_batch(&sessions).unwrap(),
+            vec![session.clone()]
+        );
+        let session_path = tempfile::NamedTempFile::new().unwrap();
+        write_parquet(session_path.path(), &sessions, "dsv:sha256:fixture").unwrap();
+        let restored = read_parquet(session_path.path(), "sessions", "1").unwrap();
+        assert_eq!(
+            sessions_from_record_batch(&restored[0]).unwrap(),
             vec![session]
+        );
+    }
+
+    #[test]
+    fn instrument_and_bar_order_uses_encoded_primary_key_bytes() {
+        let spot = fixture_spec("BTC-USDT", "BINANCE");
+        let perpetual = fixture_spec("BTC-USDT-PERP", "BINANCE");
+        let instruments = instruments_to_record_batch(&[spot, perpetual]).unwrap();
+        let ids = instruments
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(ids.value(0), "BTC-USDT-PERP.BINANCE");
+        assert_eq!(ids.value(1), "BTC-USDT.BINANCE");
+
+        let crypto_bar = |symbol: &str| {
+            let session_date = NaiveDate::from_ymd_opt(2026, 1, 5).unwrap();
+            let bar_spec: BarSpec = "1d@+08:00".parse().unwrap();
+            let (ts_open, ts_close) = bar_spec.bounds(session_date, None).unwrap();
+            Bar::new(
+                BarData {
+                    instrument_id: InstrumentId::new(symbol, VenueId::new("BINANCE").unwrap())
+                        .unwrap(),
+                    bar_spec,
+                    session_date,
+                    ts_open,
+                    ts_close,
+                    open: Price::parse("1").unwrap(),
+                    high: Price::parse("1").unwrap(),
+                    low: Price::parse("1").unwrap(),
+                    close: Price::parse("1").unwrap(),
+                    volume: Quantity::parse("1").unwrap(),
+                    amount: None,
+                    available_at: None,
+                },
+                None,
+            )
+            .unwrap()
+        };
+        let bars =
+            bars_to_record_batch(&[crypto_bar("BTC-USDT"), crypto_bar("BTC-USDT-PERP")]).unwrap();
+        let ids = bars
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(ids.value(0), "BTC-USDT-PERP.BINANCE");
+        assert_eq!(ids.value(1), "BTC-USDT.BINANCE");
+        let path = tempfile::NamedTempFile::new().unwrap();
+        write_parquet(path.path(), &bars, "dsv:sha256:fixture").unwrap();
+        let read = read_parquet(path.path(), "bars", "1").unwrap();
+        assert_eq!(bars_from_record_batch(&read[0], &[]).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn writer_rejects_unsorted_primary_keys_and_empty_dsv_before_file_creation() {
+        let batch = RecordBatch::try_new(
+            sessions_schema(),
+            vec![
+                Arc::new(StringArray::from(vec!["SYNTH", "SYNTH"])),
+                Arc::new(Date32Array::from(vec![1, 0])),
+                timestamps(vec![
+                    Some(TimestampNs::from_unix_nanos(10)),
+                    Some(TimestampNs::from_unix_nanos(20)),
+                ]),
+                timestamps(vec![
+                    Some(TimestampNs::from_unix_nanos(11)),
+                    Some(TimestampNs::from_unix_nanos(21)),
+                ]),
+            ],
+        )
+        .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let unsorted_path = directory.path().join("unsorted.parquet");
+        assert!(write_parquet(&unsorted_path, &batch, "dsv:sha256:fixture").is_err());
+        assert!(!unsorted_path.exists());
+
+        let sorted = sessions_to_record_batch(&[fixture_session("SYNTH")]).unwrap();
+        let empty_dsv_path = directory.path().join("empty-dsv.parquet");
+        assert!(write_parquet(&empty_dsv_path, &sorted, " ").is_err());
+        assert!(!empty_dsv_path.exists());
+    }
+
+    #[test]
+    fn writer_respects_fixed_row_group_limit() {
+        let venue = VenueId::new("SYNTH").unwrap();
+        let start_date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let start_ns = TimestampNs::parse("2000-01-01T00:00:00Z")
+            .unwrap()
+            .as_unix_nanos();
+        let rows = (0..70_000_u64)
+            .map(|index| {
+                let date = start_date
+                    .checked_add_days(chrono::Days::new(index))
+                    .unwrap();
+                let open = start_ns + index as i64 * 86_400_000_000_000;
+                Session::new(
+                    venue.clone(),
+                    date,
+                    TimestampNs::from_unix_nanos(open),
+                    TimestampNs::from_unix_nanos(open + 1_000_000_000),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let batch = sessions_to_record_batch(&rows).unwrap();
+        let path = tempfile::NamedTempFile::new().unwrap();
+        write_parquet(path.path(), &batch, "dsv:sha256:fixture").unwrap();
+        let file = SerializedFileReader::new(File::open(path.path()).unwrap()).unwrap();
+        let groups = file
+            .metadata()
+            .row_groups()
+            .iter()
+            .map(|group| group.num_rows())
+            .collect::<Vec<_>>();
+        assert_eq!(groups, vec![65_536, 4_464]);
+        assert!(
+            file.metadata()
+                .row_groups()
+                .iter()
+                .all(|group| matches!(group.column(0).compression(), Compression::ZSTD(_)))
         );
     }
 }
