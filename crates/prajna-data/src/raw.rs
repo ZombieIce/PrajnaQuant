@@ -41,6 +41,7 @@ pub struct SourceRecordInput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SourceRecord {
     pub raw_sha256: String,
+    pub byte_len: u64,
     pub content_type: String,
     pub source_kind: SourceKind,
     pub source_id: String,
@@ -113,7 +114,7 @@ impl RawStore {
         bytes: &[u8],
         source_record: SourceRecordInput,
     ) -> Result<String, RawStoreError> {
-        let hash = format!("sha256:{:x}", Sha256::digest(bytes));
+        let hash = sha256_id(bytes);
         let object_path = self.object_path(&hash)?;
         let parent = object_path.parent().expect("object path has a parent");
         fs::create_dir_all(parent)?;
@@ -126,6 +127,7 @@ impl RawStore {
 
         let record = SourceRecord {
             raw_sha256: hash.clone(),
+            byte_len: bytes.len() as u64,
             content_type: source_record.content_type,
             source_kind: source_record.source_kind,
             source_id: source_record.source_id,
@@ -141,13 +143,13 @@ impl RawStore {
     pub fn get(&self, hash: &str) -> Result<Vec<u8>, RawStoreError> {
         let path = self.object_path(hash)?;
         let bytes = fs::read(path)?;
-        if format!("sha256:{:x}", Sha256::digest(&bytes)) != hash {
+        if sha256_id(&bytes) != hash {
             return Err(RawStoreError::CorruptObject(hash.to_owned()));
         }
         Ok(bytes)
     }
 
-    /// Returns every valid source record appended for an object.
+    /// Reads all appended source records, returning an error if any JSONL line is invalid.
     pub fn sources(&self, hash: &str) -> Result<Vec<SourceRecord>, RawStoreError> {
         let path = self.source_path(hash)?;
         let contents = match fs::read(path) {
@@ -183,7 +185,7 @@ impl RawStore {
         hash: &str,
     ) -> Result<(), RawStoreError> {
         let stored = fs::read(path)?;
-        if stored != expected || format!("sha256:{:x}", Sha256::digest(&stored)) != hash {
+        if stored != expected || sha256_id(&stored) != hash {
             return Err(RawStoreError::CorruptObject(hash.to_owned()));
         }
         Ok(())
@@ -201,6 +203,9 @@ impl RawStore {
         file.sync_all()?;
         drop(file);
 
+        // A competing RawStore::put can publish the same hash after the
+        // existence check. That writer has the same SHA-256 identity and bytes;
+        // an object already observed as corrupt fails in verify_existing.
         match fs::rename(&temp_path.0, destination) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists || destination.exists() => {
@@ -220,8 +225,9 @@ impl RawStore {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-        serde_json::to_writer(&mut file, record)?;
-        file.write_all(b"\n")?;
+        let mut line = serde_json::to_vec(record)?;
+        line.push(b'\n');
+        file.write_all(&line)?;
         file.sync_all()?;
         Ok(())
     }
@@ -259,6 +265,10 @@ fn parse_hash(hash: &str) -> Result<&str, RawStoreError> {
         return Err(RawStoreError::InvalidHash(hash.to_owned()));
     }
     Ok(hex)
+}
+
+fn sha256_id(bytes: &[u8]) -> String {
+    format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
 fn is_credential_key(key: &str) -> bool {
@@ -300,6 +310,9 @@ fn sanitize_value(value: &mut Value) {
             }
         }
         Value::Array(values) => values.iter_mut().for_each(sanitize_value),
+        Value::String(value) if value.contains('?') || value.contains("://") => {
+            *value = sanitize_url(value);
+        }
         _ => {}
     }
 }
@@ -320,8 +333,9 @@ fn sanitize_body(value: &mut Value) {
 }
 
 fn sanitize_url(url: &str) -> String {
+    let url = sanitize_url_userinfo(url);
     let Some(query_start) = url.find('?') else {
-        return url.to_owned();
+        return url;
     };
     let fragment_start = url[query_start..].find('#').map(|i| query_start + i);
     let query_end = fragment_start.unwrap_or(url.len());
@@ -331,6 +345,26 @@ fn sanitize_url(url: &str) -> String {
         &url[..query_start],
         sanitize_query_parameters(query),
         &url[query_end..]
+    )
+}
+
+fn sanitize_url_userinfo(url: &str) -> String {
+    let Some(authority_start) = url.find("://").map(|index| index + 3) else {
+        return url.to_owned();
+    };
+    let authority_end = url[authority_start..]
+        .find(['/', '?', '#'])
+        .map(|index| authority_start + index)
+        .unwrap_or(url.len());
+    let authority = &url[authority_start..authority_end];
+    let Some(at_index) = authority.rfind('@') else {
+        return url.to_owned();
+    };
+    format!(
+        "{}[REDACTED]@{}{}",
+        &url[..authority_start],
+        &authority[at_index + 1..],
+        &url[authority_end..]
     )
 }
 
@@ -421,6 +455,7 @@ mod tests {
         let sources = store.sources(&first_hash).unwrap();
         assert_eq!(sources.len(), 2);
         assert_eq!(sources[0].source_id, "first");
+        assert_eq!(sources[0].byte_len, bytes.len() as u64);
         assert_eq!(sources[1].source_id, "second");
     }
 
@@ -474,7 +509,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let store = RawStore::open(temp.path()).unwrap();
         let request = json!({
-            "url": "https://example.test/data?apiKey=abc&ok=yes&%61uth=xyz#frag",
+            "endpoint": "https://user:password@example.test/data?apiKey=abc&ok=yes&%61uth=xyz#frag",
             "headers": {"aUtHoRiZaTiOn": "Bearer secret", "X-Api-Key": "top-secret"},
             "body": {"clientSecret": "hidden", "nested": {"PASSWORD": "also-hidden"}, "value": 4}
         });
@@ -482,8 +517,8 @@ mod tests {
         let stored = store.sources(&hash).unwrap().remove(0);
 
         assert_eq!(
-            stored.request["url"],
-            "https://example.test/data?apiKey=[REDACTED]&ok=yes&%61uth=[REDACTED]#frag"
+            stored.request["endpoint"],
+            "https://[REDACTED]@example.test/data?apiKey=[REDACTED]&ok=yes&%61uth=[REDACTED]#frag"
         );
         assert_eq!(stored.request["headers"]["aUtHoRiZaTiOn"], "[REDACTED]");
         assert_eq!(stored.request["headers"]["X-Api-Key"], "[REDACTED]");
