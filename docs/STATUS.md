@@ -64,7 +64,7 @@ POC-0 已按获确认的拆分发布为 [13 张本地执行票据](../.scratch/p
 
 ## Current Phase
 
-MVP-0 数据层现有 D7 instruments、bars、sessions 的 Arrow schema、Domain/RecordBatch 双向转换和 Parquet 读写；写入固定 ZSTD level 3、65,536 row group，记录规范 DSV 并校验主键按存储值字节序严格递增；读取校验表名、schema version 与字段定义。Bar 反序列化需调用方提供 Session 以验证区间。Issue #16 新增按 `(id, version)` 注册的 `Normalizer` API、`synthetic-etf-daily` v1/v2 fixture 映射及 Raw → 三表 Parquet → manifest 发布路径；v1 fixture 产出 instruments 3、sessions 10、bars 29，覆盖率标记 B 缺 2026-01-16，Raw 数值字面量直接解析为 scale-18 定点数。验收范围只涵盖该合成 fixture，不证明真实市场数据、PIT 或量化收益。相关能力已通过定向测试、Clippy 与格式检查。
+MVP-0 数据层现有 D7 instruments、bars、sessions 的 Arrow schema、Domain/RecordBatch 双向转换和 Parquet 读写；写入固定 ZSTD level 3、65,536 row group，记录规范 DSV 并校验主键按存储值字节序严格递增；读取校验表名、schema version 与字段定义。Bar 反序列化需调用方提供 Session 以验证区间。Issue #16 新增按 `(id, version)` 注册的 `Normalizer` API、`synthetic-etf-daily` v1/v2 fixture 映射及 Raw → 三表 Parquet → manifest 发布路径；v1 fixture 产出 instruments 3、sessions 10、bars 29，覆盖率标记 B 缺 2026-01-16，Raw 数值字面量直接解析为 scale-18 定点数。三表在同一 DSV 目录中暂存并以单次目录 rename 发布，同 DSV 写入由文件锁串行化。验收范围只涵盖该合成 fixture，不证明真实市场数据、PIT 或量化收益。29 项定向测试、Clippy 与格式检查通过；详见 [PR #47](https://github.com/ZombieIce/PrajnaQuant/pull/47)，独立复核待 PR review。
 
 此前 A 股股票/ETF 日频 + Web 的初级产品路线已归档到 [`legacy-ashare-roadmap.md`](legacy-ashare-roadmap.md)；当前仍是本地 ETF Rotation MVP 加 A 股仓库。Batch 2 已有显式证券增量同步/失败恢复/不可变发布代码，隔离股票+ETF 真实小样本通过；已发布快照的只读证券/日线 API 和 K 线页面在合成目录通过。Batch 3 的日更身份导入与 ETF 诊断作业已有代码；生产同步/调度、真实状态、可信历史作业、Python 研究包和远程认证部署仍未验。五 ETF 真实状态覆盖不足，旧实验仍 `legacy_bar_only`，新 `status_gated` 占位跑全 UNKNOWN，P0-3 开放；股票回测没有开放。
 

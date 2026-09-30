@@ -1,11 +1,12 @@
 # Agent Handoff
 
-本文件是入口，**不随票据 PR 修改**（避免并行 PR 在同一位置冲突）。
+本文件是入口；本轮票据交接与验证细节见对应 PR。
 
 ## 当前交接在哪里
 
 - 进行中的票据：`gh issue list -R ZombieIce/PrajnaQuant --state open`，用 `gh issue view <N> --comments` 读取。
 - 已实现内容、验证命令、环境限制、开放问题与唯一建议下一步：对应 PR 描述（`gh pr list -R ZombieIce/PrajnaQuant`）。
+- Issue #16 当前交接：[PR #47](https://github.com/ZombieIce/PrajnaQuant/pull/47)；Independent review: see PR #47（待复核）。
 - review 发现与结论：PR 评论。
 - 项目当前能力、风险与量化口径：[`docs/STATUS.md`](docs/STATUS.md)。
 - 逐票历史（截至 2026-09-30，含 POC-0、MVP-0、Batch 2 集成结论、验证记录）：[`docs/handoffs/poc-0-mvp-0-handoff-archive.md`](docs/handoffs/poc-0-mvp-0-handoff-archive.md)；更早的批次交接见 [`docs/handoffs/`](docs/handoffs/)。
