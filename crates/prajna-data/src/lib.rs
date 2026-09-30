@@ -183,6 +183,9 @@ pub fn logical_hash(
     if primary_key.is_empty() {
         return Err(CanonicalError::new("primary key must not be empty"));
     }
+    for field in schema.fields() {
+        validate_logical_type(field.data_type())?;
+    }
 
     let key_indices = primary_key
         .iter()
@@ -216,6 +219,24 @@ pub fn logical_hash(
     }
 
     Ok(sha256(&encode_logical_rows(table_name, schema, &rows)?))
+}
+
+fn validate_logical_type(data_type: &DataType) -> Result<(), CanonicalError> {
+    match data_type {
+        DataType::Dictionary(_, value_type) => validate_logical_type(value_type),
+        DataType::Utf8
+        | DataType::Int64
+        | DataType::Decimal128(38, 18)
+        | DataType::Date32
+        | DataType::Boolean => Ok(()),
+        DataType::Timestamp(TimeUnit::Nanosecond, Some(timezone)) if timezone.as_ref() == "UTC" => {
+            Ok(())
+        }
+        other => Err(CanonicalError::new(format!(
+            "unsupported logical hash type: {}",
+            canonical_type(other)
+        ))),
+    }
 }
 
 fn encode_logical_rows(
@@ -593,12 +614,15 @@ mod tests {
         fields[2] = Arc::new(changed_field);
         assert_ne!(
             schema_fingerprint(&base),
-            schema_fingerprint(&Schema::new(fields.clone()))
+            schema_fingerprint(&Schema::new_with_metadata(
+                fields.clone(),
+                base.metadata().clone(),
+            ))
         );
         fields[2] = Arc::new(Field::new("ts_open", DataType::Int64, false));
         assert_ne!(
             schema_fingerprint(&base),
-            schema_fingerprint(&Schema::new(fields))
+            schema_fingerprint(&Schema::new_with_metadata(fields, base.metadata().clone()))
         );
     }
 
@@ -702,6 +726,7 @@ mod tests {
         ])
         .unwrap();
         assert!(logical_hash("t", &float_schema, &[float_batch], &["key"]).is_err());
+        assert!(logical_hash("t", &float_schema, &[], &["key"]).is_err());
     }
 
     #[test]
