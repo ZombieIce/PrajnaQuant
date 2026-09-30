@@ -626,6 +626,16 @@ fn check_primary_key_order(batch: &RecordBatch, table: &str) -> Result<(), DataE
     Ok(())
 }
 
+fn valid_dsv(dsv: &str) -> bool {
+    let Some(digest) = dsv.strip_prefix("dsv:sha256:") else {
+        return false;
+    };
+    digest.len() == 64
+        && digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
 /// Write a single table batch using the registered DSV and fixed writer settings.
 pub fn write_parquet(
     path: impl AsRef<Path>,
@@ -640,8 +650,8 @@ pub fn write_parquet(
         .ok_or_else(|| err("missing prajna.table"))?;
     check_batch(batch, &table)?;
     check_primary_key_order(batch, &table)?;
-    if dsv.trim().is_empty() {
-        return Err(err("prajna.dsv must not be empty"));
+    if !valid_dsv(dsv) {
+        return Err(err("prajna.dsv must be dsv:sha256:<64 lowercase hex>"));
     }
     let mut metadata = batch.schema().metadata().clone();
     metadata.insert("prajna.dsv".into(), dsv.into());
@@ -695,6 +705,9 @@ mod tests {
     use super::*;
     use arrow_schema::DataType;
     use parquet::file::reader::{FileReader, SerializedFileReader};
+
+    const TEST_DSV: &str =
+        "dsv:sha256:0000000000000000000000000000000000000000000000000000000000000000";
 
     fn fixture_session(venue: &str) -> Session {
         let venue = VenueId::new(venue).unwrap();
@@ -868,7 +881,7 @@ mod tests {
         let batch = bars_to_record_batch(&[null_amount.clone(), negative_amount.clone()]).unwrap();
         let path = tempfile::NamedTempFile::new().unwrap();
         assert_eq!(
-            write_parquet(path.path(), &batch, "dsv:sha256:fixture").unwrap(),
+            write_parquet(path.path(), &batch, TEST_DSV).unwrap(),
             parquet_write_options()
         );
         let read = read_parquet(path.path(), "bars", "1").unwrap();
@@ -880,7 +893,7 @@ mod tests {
                 .metadata()
                 .get("prajna.dsv")
                 .map(String::as_str),
-            Some("dsv:sha256:fixture")
+            Some(TEST_DSV)
         );
         let session = fixture_session("SYNTH");
         let restored = bars_from_record_batch(&read[0], std::slice::from_ref(&session)).unwrap();
@@ -917,7 +930,7 @@ mod tests {
             vec![spec.clone()]
         );
         let instrument_path = tempfile::NamedTempFile::new().unwrap();
-        write_parquet(instrument_path.path(), &instruments, "dsv:sha256:fixture").unwrap();
+        write_parquet(instrument_path.path(), &instruments, TEST_DSV).unwrap();
         let restored = read_parquet(instrument_path.path(), "instruments", "1").unwrap();
         assert_eq!(
             instruments_from_record_batch(&restored[0]).unwrap(),
@@ -931,7 +944,7 @@ mod tests {
             vec![session.clone()]
         );
         let session_path = tempfile::NamedTempFile::new().unwrap();
-        write_parquet(session_path.path(), &sessions, "dsv:sha256:fixture").unwrap();
+        write_parquet(session_path.path(), &sessions, TEST_DSV).unwrap();
         let restored = read_parquet(session_path.path(), "sessions", "1").unwrap();
         assert_eq!(
             sessions_from_record_batch(&restored[0]).unwrap(),
@@ -986,13 +999,13 @@ mod tests {
         assert_eq!(ids.value(0), "BTC-USDT-PERP.BINANCE");
         assert_eq!(ids.value(1), "BTC-USDT.BINANCE");
         let path = tempfile::NamedTempFile::new().unwrap();
-        write_parquet(path.path(), &bars, "dsv:sha256:fixture").unwrap();
+        write_parquet(path.path(), &bars, TEST_DSV).unwrap();
         let read = read_parquet(path.path(), "bars", "1").unwrap();
         assert_eq!(bars_from_record_batch(&read[0], &[]).unwrap().len(), 2);
     }
 
     #[test]
-    fn writer_rejects_unsorted_primary_keys_and_empty_dsv_before_file_creation() {
+    fn writer_rejects_unsorted_primary_keys_and_invalid_dsv_before_file_creation() {
         let batch = RecordBatch::try_new(
             sessions_schema(),
             vec![
@@ -1011,13 +1024,16 @@ mod tests {
         .unwrap();
         let directory = tempfile::tempdir().unwrap();
         let unsorted_path = directory.path().join("unsorted.parquet");
-        assert!(write_parquet(&unsorted_path, &batch, "dsv:sha256:fixture").is_err());
+        assert!(write_parquet(&unsorted_path, &batch, TEST_DSV).is_err());
         assert!(!unsorted_path.exists());
 
         let sorted = sessions_to_record_batch(&[fixture_session("SYNTH")]).unwrap();
         let empty_dsv_path = directory.path().join("empty-dsv.parquet");
         assert!(write_parquet(&empty_dsv_path, &sorted, " ").is_err());
         assert!(!empty_dsv_path.exists());
+        let malformed_dsv_path = directory.path().join("malformed-dsv.parquet");
+        assert!(write_parquet(&malformed_dsv_path, &sorted, "dsv:sha256:fixture").is_err());
+        assert!(!malformed_dsv_path.exists());
     }
 
     #[test]
@@ -1044,7 +1060,7 @@ mod tests {
             .collect::<Vec<_>>();
         let batch = sessions_to_record_batch(&rows).unwrap();
         let path = tempfile::NamedTempFile::new().unwrap();
-        write_parquet(path.path(), &batch, "dsv:sha256:fixture").unwrap();
+        write_parquet(path.path(), &batch, TEST_DSV).unwrap();
         let file = SerializedFileReader::new(File::open(path.path()).unwrap()).unwrap();
         let groups = file
             .metadata()
