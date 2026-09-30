@@ -345,4 +345,4 @@ Mac 睡眠不会保证采集发生；恢复后按最后成功水位补任务。�
 
 - 用户提供的 a-stock-data v3.9.0 是本设计的端点与字段主要依据；[项目主页](https://github.com/simonlin1212/a-stock-data)已打开核对项目背景，未用远程新版本覆盖附件。
 - [DuckDB 并发](https://duckdb.org/docs/current/connect/concurrency)及[Parquet文档](https://duckdb.org/docs/current/data/parquet/overview)用于数据库选型边界。
-- 作者历史“实测”不等同于本机当日验证。旧文提及的 `验证记录.md` 当前不在仓库；本轮实测摘要见 `HANDOFF.md`。无完整证据的官方历史覆盖、PIT 可靠性和接口可用性均作为待验收事项。
+- 作者历史“实测”不等同于本机当日验证。旧文提及的 `验证记录.md` 当前不在仓库；本轮实测摘要见 [`handoffs/poc-0-mvp-0-handoff-archive.md`](handoffs/poc-0-mvp-0-handoff-archive.md)。无完整证据的官方历史覆盖、PIT 可靠性和接口可用性均作为待验收事项。

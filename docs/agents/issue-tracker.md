@@ -20,7 +20,7 @@ Issues, specs and PRs for this repo live on GitHub at `ZombieIce/PrajnaQuant`. U
 - Independent review happens after the PR is created. The project owner starts a fresh reviewer session; the implementer posts a ready-for-review comment and stops. An agent that did not implement the change gives the review as a PR comment; implementation self-review before PR creation does not count as independent review and must not be described as one in the PR description. Before the PR is merged, it must have a review comment on the latest pushed head and an implementation-agent reply addressing each finding.
 - All agents use one GitHub account; identify the speaker in each review-thread comment with the exact prefix `**Implementer:**` or `**Independent reviewer:**`.
 - Before merging, the project owner confirms that an independent-review comment was posted after the latest push to the PR branch.
-- PR comments are the source of truth for review findings and conclusions. In `STATUS.md` and `HANDOFF.md`, link the PR and write `Independent review: see PR #N`; do not copy reviewer conclusions into branch documents.
+- PR comments are the source of truth for review findings and conclusions. Do not copy reviewer conclusions into branch documents. Ticket hand-off (verified commands, limits, open questions, next step) lives in the PR description; `HANDOFF.md` is an entry point that PRs do not edit. Update `STATUS.md` only when capability, risk, quantitative semantics, or verification status changes, as a single entry under its topic, and never append per-ticket log entries.
 - The project owner merges. Merging closes the issue.
 - One working tree carries one branch. Run parallel tasks in separate `git worktree` checkouts.
 
