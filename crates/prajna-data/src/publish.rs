@@ -7,6 +7,7 @@ use std::{
 
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
+use fs2::FileExt;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
@@ -201,6 +202,23 @@ pub fn publish_dataset(
         },
     )?;
     let lake_root = lake_root.as_ref();
+    let dsv_hex = initial_manifest
+        .dsv
+        .strip_prefix("dsv:sha256:")
+        .expect("Manifest::new returns a validated DSV");
+    let normalized_root = lake_root.join("normalized");
+    fs::create_dir_all(&normalized_root)?;
+    let lock_path = normalized_root.join(format!(".publish-{dsv_hex}.lock"));
+    let lock_file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(lock_path)?;
+    lock_file.lock_exclusive()?;
+
+    // Recheck only after acquiring the per-DSV lock. Another publisher may
+    // have completed while this process was waiting.
     if let Some(existing) = try_read_manifest(lake_root, &initial_manifest.dsv)? {
         if existing.core != initial_manifest.core || !published_files_match(lake_root, &existing)? {
             return Err(PublishError::ExistingOutputConflict(initial_manifest.dsv));
@@ -208,14 +226,15 @@ pub fn publish_dataset(
         return Ok(existing);
     }
 
-    let dsv_hex = initial_manifest
-        .dsv
-        .strip_prefix("dsv:sha256:")
-        .expect("Manifest::new returns a validated DSV");
-    let normalized_root = lake_root.join("normalized");
-    fs::create_dir_all(&normalized_root)?;
+    let destination = normalized_root.join(dsv_hex);
+    // A prior process may have stopped after publishing the complete DSV
+    // directory but before committing its manifest. That directory is an
+    // uncommitted orphan, so remove it before rebuilding.
+    if destination.exists() {
+        fs::remove_dir_all(&destination)?;
+    }
+    remove_stale_stage_dirs(&normalized_root, dsv_hex)?;
     let stage_root = create_stage_dir(&normalized_root, dsv_hex)?;
-    let mut new_destinations = Vec::new();
     let result: Result<Manifest, PublishError> = (|| {
         let mut files = initial_manifest.provenance.files.clone();
         for table in &tables {
@@ -225,28 +244,20 @@ pub fn publish_dataset(
             write_parquet(&stage_file, table.batch, &initial_manifest.dsv)
                 .map_err(|error| PublishError::Io(io::Error::other(error.to_string())))?;
             File::open(&stage_file)?.sync_all()?;
+            File::open(&stage_table)?.sync_all()?;
             let bytes = fs::read(&stage_file)?;
             files.push(ManifestFile {
-                path: format!("normalized/{}/{dsv_hex}/part-00000.parquet", table.name),
+                path: format!("normalized/{dsv_hex}/{}/part-00000.parquet", table.name),
                 sha256: format!("sha256:{:x}", Sha256::digest(&bytes)),
                 byte_len: bytes.len() as u64,
             });
         }
 
-        for table in &tables {
-            let table_root = normalized_root.join(table.name);
-            fs::create_dir_all(&table_root)?;
-            let destination = table_root.join(dsv_hex);
-            if destination.exists() {
-                return Err(PublishError::Io(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    format!("output already exists at {}", destination.display()),
-                )));
-            }
-            fs::rename(stage_root.join(table.name), &destination)?;
-            new_destinations.push(destination);
-            File::open(&table_root)?.sync_all()?;
-        }
+        // The tables share one DSV directory. A single same-filesystem rename
+        // makes the complete dataset visible atomically.
+        File::open(&stage_root)?.sync_all()?;
+        fs::rename(&stage_root, &destination)?;
+        File::open(&normalized_root)?.sync_all()?;
 
         let manifest = Manifest::new(
             core,
@@ -270,11 +281,6 @@ pub fn publish_dataset(
         Ok::<Manifest, PublishError>(manifest)
     })();
 
-    if result.is_err() {
-        for destination in new_destinations.iter().rev() {
-            let _ = fs::remove_dir_all(destination);
-        }
-    }
     let _ = fs::remove_dir_all(&stage_root);
     result
 }
@@ -323,9 +329,25 @@ fn create_stage_dir(normalized_root: &Path, dsv_hex: &str) -> io::Result<PathBuf
     }
 }
 
+fn remove_stale_stage_dirs(normalized_root: &Path, dsv_hex: &str) -> io::Result<()> {
+    let prefix = format!(".stage-{dsv_hex}-");
+    for entry in fs::read_dir(normalized_root)? {
+        let entry = entry?;
+        if entry.file_name().to_string_lossy().starts_with(&prefix) {
+            fs::remove_dir_all(entry.path())?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::Path};
+    use std::{
+        fs,
+        path::Path,
+        sync::{Arc, Barrier},
+        thread,
+    };
 
     use serde_json::json;
     use sha2::{Digest, Sha256};
@@ -381,6 +403,38 @@ mod tests {
         )
         .unwrap();
         assert_eq!(first.provenance.files.len(), 4);
+
+        // Model an interrupted publication that left an uncommitted partial
+        // DSV directory. Retrying must discard and atomically replace it.
+        fs::remove_file(root.path().join("manifests").join(format!(
+            "{}.json",
+            first.dsv.trim_start_matches("dsv:sha256:")
+        )))
+        .unwrap();
+        fs::remove_dir_all(
+            root.path()
+                .join("normalized")
+                .join(first.dsv.trim_start_matches("dsv:sha256:"))
+                .join("sessions"),
+        )
+        .unwrap();
+        let first = publish_dataset(
+            root.path(),
+            &store,
+            &registry,
+            "synthetic-etf-daily",
+            "1",
+            std::slice::from_ref(&raw_hash),
+            "2026-09-30T00:00:00Z",
+        )
+        .unwrap();
+        assert!(
+            root.path()
+                .join("normalized")
+                .join(first.dsv.trim_start_matches("dsv:sha256:"))
+                .join("sessions/part-00000.parquet")
+                .is_file()
+        );
         for file in &first.provenance.files {
             let bytes = fs::read(root.path().join(&file.path)).unwrap();
             assert_eq!(bytes.len() as u64, file.byte_len, "{}", file.path);
@@ -435,7 +489,7 @@ mod tests {
             let path = root.path().join(&file.path);
             assert!(path.is_file());
             if file.path.starts_with("normalized/") {
-                let table = file.path.split('/').nth(1).unwrap();
+                let table = file.path.split('/').nth(2).unwrap();
                 let batches = read_parquet(&path, table, "1").unwrap();
                 assert_eq!(
                     batches[0].schema().metadata().get("prajna.dsv"),
@@ -503,6 +557,53 @@ mod tests {
                 .find(|row| row.table == "bars")
                 .unwrap()
                 .logical_hash,
+        );
+    }
+
+    #[test]
+    fn concurrent_publishes_for_the_same_dsv_commit_one_complete_dataset() {
+        let root = tempfile::tempdir().unwrap();
+        let (_store, raw_hash) = store_fixture(root.path(), FIXTURE);
+        let lake_root = root.path().to_path_buf();
+        let barrier = Arc::new(Barrier::new(2));
+        let workers = (0..2)
+            .map(|_| {
+                let lake_root = lake_root.clone();
+                let raw_hash = raw_hash.clone();
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    let store = RawStore::open(&lake_root).unwrap();
+                    let registry = NormalizerRegistry::with_builtins();
+                    barrier.wait();
+                    publish_dataset(
+                        &lake_root,
+                        &store,
+                        &registry,
+                        "synthetic-etf-daily",
+                        "1",
+                        &[raw_hash],
+                        "2026-09-30T00:00:00Z",
+                    )
+                    .unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+        let manifests = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(manifests[0].dsv, manifests[1].dsv);
+        assert!(super::published_files_match(root.path(), &manifests[0]).unwrap());
+        assert_eq!(
+            fs::read_dir(
+                root.path()
+                    .join("normalized")
+                    .join(manifests[0].dsv.trim_start_matches("dsv:sha256:"),)
+            )
+            .unwrap()
+            .count(),
+            3
         );
     }
 
