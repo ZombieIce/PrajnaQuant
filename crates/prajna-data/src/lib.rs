@@ -1,7 +1,14 @@
 //! Arrow and Parquet data layer for Prajna Quant.
 
+mod normalized;
 mod raw;
 
+pub use normalized::{
+    DataError, ParquetWriteOptions, bars_from_record_batch, bars_schema, bars_to_record_batch,
+    instruments_from_record_batch, instruments_schema, instruments_to_record_batch,
+    parquet_write_options, read_parquet, sessions_from_record_batch, sessions_schema,
+    sessions_to_record_batch, write_parquet,
+};
 pub use raw::{RawStore, RawStoreError, SourceKind, SourceRecord, SourceRecordInput};
 
 use std::{cmp::Ordering, fmt};
