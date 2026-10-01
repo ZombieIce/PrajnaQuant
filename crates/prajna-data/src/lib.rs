@@ -10,7 +10,7 @@ pub use normalizer::{
     NormalizationIssue, NormalizationOutput, NormalizedTables, Normalizer, NormalizerRegistry,
     RawInput,
 };
-pub use publish::{PublishError, publish_dataset};
+pub use publish::{PublishError, RebuildError, publish_dataset, rebuild_dataset};
 
 pub use manifest::{
     Manifest, ManifestCore, ManifestError, ManifestFile, ManifestInput, ManifestProvenance,
