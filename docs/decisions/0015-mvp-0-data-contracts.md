@@ -1,7 +1,7 @@
 # ADR 0015：MVP-0 数据契约（身份、定点、切日、Raw 布局、DSV）
 
 - 状态：Accepted，2026-10-01；实现范围限于 MVP-0 合成 fixture
-- 补充对象：[ADR 0011](0011-immutable-data-and-reproducible-runs.md) 中“物理存储路径与 hash 编码留给后续契约设计”的部分；ADR 0011 的原文不改。
+- 补充对象：[ADR 0011](0011-immutable-data-and-reproducible-runs.md) 中“物理存储路径与 hash 编码留给后续契约设计”的部分；ADR 0011 只在末尾追加一行指向本 ADR，原文不改。
 - 来源：[spec Issue #7](https://github.com/ZombieIce/PrajnaQuant/issues/7) 的 D3–D8、D10、D11 与附录 A/B，以及已合并的票据 #8–#19。
 
 本 ADR 固定 `prajna-domain` 与 `prajna-data` 已采用的契约。每条决定后列出实现与测试位置；没有实现或测试的部分在“未实现的决定”中单列，不视为已验证。所有数据均为合成 fixture（`poc/poc0-benchmark/fixtures/dataset-v1.json`），不证明真实市场数据、PIT 或收益口径。
@@ -9,8 +9,8 @@
 ## 1. Instrument 身份与 ID
 
 1. `VenueId` 指交易所本身（`XSHG`、`XSHE`、`BJSE`、`BINANCE`、`OKX`、`HYPERLIQUID`），合成数据用 `SYNTH`。格式为首字符大写字母、2–16 位大写字母/数字/下划线。
-2. `InstrumentId` 的规范形式为 `{SYMBOL}.{VENUE}`，symbol 只含大写字母、数字、`-`、`_`，在 venue 内唯一且稳定。例：`510300.XSHG`、`BTC-USDT.BINANCE`（spot）、`BTC-USDT-PERP.BINANCE`（线性永续）、`BTC-USD-PERP.BINANCE`（反向永续）、`BTC-USDT-20261225.BINANCE`（交割）。
-3. 不得从 ID 解析语义；语义全部在 `InstrumentSpec`（`kind`、`native_symbol`、`market_segment`、各币种、`is_inverse`、`multiplier`、`expiry`、`price_increment`、`size_increment`、`lot_size`、`session_timezone`）。`InstrumentKind` 为 `Equity | Etf | Spot | Perpetual | Future`；Perpetual/Future 必须有 `settle_currency`，只有 Future 可且必须有 `expiry`，两个 increment 必须为正。
+2. `InstrumentId` 的规范形式为 `{SYMBOL}.{VENUE}`，symbol 只含大写字母、数字、`-`、`_`，长度 1–64，在 venue 内唯一且稳定。例：`510300.XSHG`、`BTC-USDT.BINANCE`（spot）、`BTC-USDT-PERP.BINANCE`（线性永续）、`BTC-USD-PERP.BINANCE`（反向永续）、`BTC-USDT-20261225.BINANCE`（交割）。
+3. 不得从 ID 解析语义；语义全部在 `InstrumentSpec`（`kind`、`native_symbol`、`market_segment`、各币种（`Currency`：2–12 位大写字母/数字）、`is_inverse`、`multiplier`、`expiry`、`price_increment`、`size_increment`、`lot_size`、`session_timezone`）。`InstrumentKind` 为 `Equity | Etf | Spot | Perpetual | Future`；Perpetual/Future 必须有 `settle_currency`，只有 Future 可且必须有 `expiry`，两个 increment 必须为正。
 4. 同一 ID 全生命周期只指一个标的：`InstrumentSpecs::insert` 对同 ID 同 Spec 幂等，同 ID 不同 Spec 返回 `IdReused`。
 5. 旧格式（`SH:600000`、`sh510300`，SH/SZ/BJ）只提供单向映射到 XSHG/XSHE/BJSE，不改旧代码。
 6. `Amount` 与 `Notional` 统一为 **`Notional`**（成交额类型），`Amount` 保留为类型别名；Arrow 列名仍为 `amount`。
@@ -34,11 +34,11 @@
 1. 时间戳：`ts_open`/`ts_close` 为 `Timestamp(ns,"UTC")`，`session_date` 为 Date32。`TimestampNs` 只接受带显式 offset 的 RFC 3339。
 2. 有交易时段的市场（A 股、`SYNTH`、未来美股）：`bar_spec = 1d@session`，`session_date` 为交易所本地交易日，区间为该 Session 的 `[ts_open, ts_close)`。
 3. 连续交易市场（Crypto）：`bar_spec = 1d@+08:00`，区间为 `[00:00+08:00, 次日 00:00+08:00)`。只提供 UTC 日线的 venue 必须由更细 bar 重采样，否则拒绝生成（见“未实现的决定”）。
-4. `available_at` 可为 null，表示 Unknown，不得默认为 `ts_close`。合成 fixture 取 `available_at = ts_close`，manifest 的 `provenance.synthetic_assumptions` 声明这一假设。`observed_at` 只出现在 Raw 来源记录，合成数据为 `"synthetic"`。
+4. `available_at` 可为 null，表示 Unknown，不得默认为 `ts_close`。合成 fixture 取 `available_at = ts_close`，manifest 的 `provenance.synthetic_assumptions` 声明这一假设。`observed_at` 只出现在 Raw 来源记录，合成数据为 `"synthetic"`（由调用方写入，见 [`SourceRecordInput`](../../crates/prajna-data/src/raw.rs#L30) 与 [fixture 发布示例](../../crates/prajna-data/examples/fixture_v1.rs)，并未由库强制）。
 
 实现：[`BarSpec`/`bounds`](../../crates/prajna-domain/src/time_bar.rs#L115)、[`Session`](../../crates/prajna-domain/src/time_bar.rs#L312)、[`Bar::new`](../../crates/prajna-domain/src/time_bar.rs#L406)、[fixture 的 09:30–15:00（+08:00）Session 生成](../../crates/prajna-data/src/normalizer/synthetic_etf_daily.rs#L569)。
 
-测试：[显式 offset 时间戳](../../crates/prajna-domain/src/time_bar.rs#L533)、[拒绝无 offset](../../crates/prajna-domain/src/time_bar.rs#L543)、[BarSpec 语法](../../crates/prajna-domain/src/time_bar.rs#L553)、[`1d@+08:00` 手算区间](../../crates/prajna-domain/src/time_bar.rs#L583)、[`1d@session` 区间](../../crates/prajna-domain/src/time_bar.rs#L591)、[Bar 校验且 `available_at` 保持 Unknown](../../crates/prajna-domain/src/time_bar.rs#L696)、[区间与 Spec/Session 不符被拒](../../crates/prajna-domain/src/time_bar.rs#L739)、[crypto `1d@+08:00` 的 bar 主键排序](../../crates/prajna-data/src/normalized.rs#L956)、[fixture 的 `available_at = ts_close`](../../crates/prajna-data/src/normalizer/synthetic_etf_daily.rs#L841)。
+测试：[显式 offset 时间戳](../../crates/prajna-domain/src/time_bar.rs#L533)、[拒绝无 offset](../../crates/prajna-domain/src/time_bar.rs#L543)、[BarSpec 语法](../../crates/prajna-domain/src/time_bar.rs#L553)、[`1d@+08:00` 手算区间](../../crates/prajna-domain/src/time_bar.rs#L583)、[`1d@session` 区间](../../crates/prajna-domain/src/time_bar.rs#L591)、[Bar 校验且 `available_at` 保持 Unknown](../../crates/prajna-domain/src/time_bar.rs#L696)、[区间与 Spec/Session 不符被拒](../../crates/prajna-domain/src/time_bar.rs#L739)、[crypto 样式 ID 的 bar 主键排序（不验证窗口）](../../crates/prajna-data/src/normalized.rs#L956)、[fixture 的 `available_at = ts_close`](../../crates/prajna-data/src/normalizer/synthetic_etf_daily.rs#L841)。
 
 ## 4. Raw 布局与写入语义
 
@@ -82,7 +82,7 @@ Lake 根由调用方指定，不与 `data-core/` 混放：
 5. Normalizer 注册表按 `(id, version)` 登记；修订规则产生新版本。本阶段 `synthetic-etf-daily` v1/v2 只处理合成 fixture（v2 把 `volume` 按“手”×100，是为验证版本机制而人为设计的修订），不得用于真实数据。
 6. 重建：`rebuild_dataset(raw_store, registry, manifest)` 按 `core.inputs` 读取 Raw 并校验 hash，取注册表中的 Normalizer 并校验 `config_sha256`，重算后逐项比对 `core`，返回 dsv；它不发布 Parquet。
 
-实现：[`restricted_jcs`](../../crates/prajna-data/src/lib.rs#L57)、[`schema_fingerprint`](../../crates/prajna-data/src/lib.rs#L123)、[`logical_hash`](../../crates/prajna-data/src/lib.rs#L198)、[`Manifest`/`calculate_dsv`](../../crates/prajna-data/src/manifest.rs#L23)、[`NormalizerRegistry`](../../crates/prajna-data/src/normalizer.rs#L79)、[`synthetic-etf-daily` v1/v2 配置](../../crates/prajna-data/src/normalizer/synthetic_etf_daily.rs#L17)、[`rebuild_dataset`](../../crates/prajna-data/src/publish.rs#L346)。
+实现：[`restricted_jcs`](../../crates/prajna-data/src/lib.rs#L57)、[`schema_fingerprint`](../../crates/prajna-data/src/lib.rs#L123)、[`logical_hash`](../../crates/prajna-data/src/lib.rs#L198)、[`Manifest`/`calculate_dsv`](../../crates/prajna-data/src/manifest.rs#L23)、[`NormalizerRegistry`](../../crates/prajna-data/src/normalizer.rs#L79)、[`synthetic-etf-daily` v1/v2 配置常量](../../crates/prajna-data/src/normalizer/synthetic_etf_daily.rs#L19)、[`rebuild_dataset`](../../crates/prajna-data/src/publish.rs#L346)。
 
 测试：[Appendix C 外部 hex 向量](../../crates/prajna-data/src/lib.rs#L522)（fixture [`sessions-logical-hash.hex`](../../crates/prajna-data/tests/fixtures/sessions-logical-hash.hex)，期望 `2c627a18…2b58c` 见 [spec Issue #7 评论](https://github.com/ZombieIce/PrajnaQuant/issues/7#issuecomment-5902283970)）、[行序/分块/字典不改变 hash](../../crates/prajna-data/src/lib.rs#L570)、[指纹排除 `prajna.dsv` 但含字段 metadata 与类型](../../crates/prajna-data/src/lib.rs#L635)、[内容/null/字段顺序改变 hash](../../crates/prajna-data/src/lib.rs#L662)、[重复主键、非支持类型被拒](../../crates/prajna-data/src/lib.rs#L739)、[JCS 排序与浮点/大整数拒绝](../../crates/prajna-data/src/lib.rs#L765)、[固定 JCS/DSV 向量](../../crates/prajna-data/src/manifest.rs#L356)、[provenance 不影响 dsv 而 core 各字段影响](../../crates/prajna-data/src/manifest.rs#L374)、[注册表精确身份](../../crates/prajna-data/src/normalizer.rs#L121)、[v1 行数与手算 bar](../../crates/prajna-data/src/normalizer/synthetic_etf_daily.rs#L841)、[v1/v2 volume 修订版本化](../../crates/prajna-data/src/normalizer/synthetic_etf_daily.rs#L941)、[非法 fixture 返回结构化错误](../../crates/prajna-data/src/normalizer/synthetic_etf_daily.rs#L999)、[每种非法 fixture 在任何 normalized 文件或 manifest 出现前被拒](../../crates/prajna-data/src/publish.rs#L908)、[Raw → v1/v2 → 删除 `normalized/` → 重建，dsv 不变，Raw 与来源记录未变；instruments/sessions 逻辑 hash 相同，bars 不同](../../crates/prajna-data/tests/rebuild.rs#L85)、[缺 Normalizer / config hash 不符](../../crates/prajna-data/tests/rebuild.rs#L172)、[缺失或损坏的 Raw](../../crates/prajna-data/tests/rebuild.rs#L188)、[core 中变化项被定位](../../crates/prajna-data/tests/rebuild.rs#L221)。
 
@@ -94,9 +94,9 @@ schema 7 发布链（[ADR 0008](0008-published-daily-snapshot-boundary.md)）不
 
 - **Crypto 日线重采样**：“只提供 UTC 日线的 venue 必须由更细 bar 重采样，否则拒绝生成”没有实现，也没有测试；MVP-0 没有 Crypto 数据路径。仅有 `1d@+08:00` 的区间计算与 bar 校验，以及 crypto 样式 ID 的解析和排序测试。
 - **Crypto 数据路径**：spot/perp/交割的 ID 解析与 `InstrumentSpec` 校验有测试，但没有对应的 Normalizer 或真实 venue 数据。
-- **既有存储与 D6 原文的差异**：已发布的 normalized 目录冲突检测比较 manifest core 与文件 sha256/字节数，而不是重算逻辑 hash。逻辑 hash 在发布前由 Normalizer 输出计算并写入 core。
+- **既有存储与 D6 原文的差异**：已发布的 normalized 目录冲突检测比较 manifest core 与文件 sha256/字节数，而不是重算逻辑 hash（spec D6 写的是“比对逻辑 hash”）。逻辑 hash 在发布前由 Normalizer 输出计算并写入 core。是否改为比较逻辑 hash 尚未决定，需项目负责人确认。
 - **provenance 填充**：`git_rev`、`git_dirty`、`host` 字段存在，但 `publish_dataset` 当前写入 `None`；覆盖率与被忽略字段由 Normalizer 输出。
-- **不在本阶段**：Python 端逻辑 hash、已发布快照导入为 Raw、分区策略、quarantine、别名/改名历史、命名 tag、旧 Normalizer 版本保留/下线、停牌与无成交表示、CLI。
+- **不在本阶段**：Python 端逻辑 hash、已发布快照导入为 Raw、分区策略、quarantine、别名/改名历史、命名 tag、旧 Normalizer 版本保留/下线、停牌与无成交表示、CLI（即 spec 的 Fog 项）。
 
 ## 后果
 
