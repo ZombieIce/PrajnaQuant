@@ -91,7 +91,7 @@ jobs:
       - name: PyArrow interoperability tests (no skips allowed)
         run: |
           set -o pipefail
-          python -m unittest discover -s poc/poc0-benchmark -p 'test_pyarrow_interop.py' -v 2>&1 | tee unittest.log
+          python -m unittest discover -s crates/prajna-data/tests/python -p 'test_pyarrow_interop.py' -v 2>&1 | tee unittest.log
           if grep -q "skipped" unittest.log; then
             echo "::error::PyArrow interoperability tests were skipped"
             exit 1

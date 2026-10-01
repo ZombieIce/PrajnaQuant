@@ -14,7 +14,7 @@ except ImportError:
     pq = None
 
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]
+ROOT = pathlib.Path(__file__).resolve().parents[4]
 
 
 @unittest.skipIf(pa is None, "pyarrow is not installed in lightweight CI")
