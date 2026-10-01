@@ -62,7 +62,7 @@ jobs:
         with:
           key: nautilus
       - run: cargo build -p quant-research --no-default-features --locked
-      - run: python -m pip install -r poc/poc0-benchmark/requirements-nautilus.txt
+      - run: python -m pip install -r poc/poc0-benchmark/requirements-nautilus.txt -r poc/poc0-benchmark/requirements-pyarrow.txt
       - name: POC Python tests (no skips allowed)
         run: |
           set -o pipefail
