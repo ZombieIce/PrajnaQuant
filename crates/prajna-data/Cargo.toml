@@ -11,11 +11,12 @@ publish = false
 arrow-cast = "=58.4.0"
 arrow-array = "=58.4.0"
 arrow-schema = "=58.4.0"
+fs2 = "=0.4.3"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 parquet = { version = "=58.4.0", default-features = false, features = ["arrow", "zstd"] }
 prajna-domain = { path = "../prajna-domain" }
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["arbitrary_precision"] }
 sha2 = "0.10"
 
 [dev-dependencies]
