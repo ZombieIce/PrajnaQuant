@@ -72,6 +72,31 @@ jobs:
             exit 1
           fi
 
+  pyarrow-interop:
+    name: pyarrow-interop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: pyarrow-interop
+      - run: cargo build -p prajna-data --example fixture_v1 --locked
+      - run: python -m pip install -r poc/poc0-benchmark/requirements-pyarrow.txt
+      - name: PyArrow interoperability tests (no skips allowed)
+        run: |
+          set -o pipefail
+          python -m unittest discover -s crates/prajna-data/tests/python -p 'test_pyarrow_interop.py' -v 2>&1 | tee unittest.log
+          if grep -q "skipped" unittest.log; then
+            echo "::error::PyArrow interoperability tests were skipped"
+            exit 1
+          fi
+
   web:
     name: web-build
     runs-on: ubuntu-latest
