@@ -13,8 +13,9 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     Manifest, ManifestCore, ManifestError, ManifestFile, ManifestInput, ManifestProvenance,
-    ManifestTable, NormalizationIssue, NormalizerRegistry, RawInput, RawStore, RawStoreError,
-    SourceKind, logical_hash, read_manifest, schema_fingerprint, write_manifest, write_parquet,
+    ManifestTable, NormalizationIssue, NormalizedTables, NormalizerRegistry, RawInput, RawStore,
+    RawStoreError, SourceKind, logical_hash, read_manifest, schema_fingerprint, write_manifest,
+    write_parquet,
 };
 
 static NEXT_STAGE_ID: AtomicU64 = AtomicU64::new(0);
@@ -28,6 +29,85 @@ pub enum PublishError {
     NormalizerNotFound { id: String, version: String },
     ExistingOutputConflict(String),
     Hash(String),
+}
+
+#[derive(Debug)]
+pub enum RebuildError {
+    Raw(RawStoreError),
+    MissingRaw(String),
+    Manifest(ManifestError),
+    NormalizerNotFound {
+        id: String,
+        version: String,
+    },
+    ConfigHashMismatch {
+        id: String,
+        version: String,
+        expected: String,
+        actual: String,
+    },
+    Validation(Vec<NormalizationIssue>),
+    CoreMismatch {
+        item: String,
+        expected: String,
+        actual: String,
+    },
+    Hash(String),
+}
+
+impl std::fmt::Display for RebuildError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Raw(error) => write!(formatter, "read Raw input: {error}"),
+            Self::MissingRaw(hash) => write!(formatter, "Raw object is missing: {hash}"),
+            Self::Manifest(error) => write!(formatter, "validate manifest: {error}"),
+            Self::NormalizerNotFound { id, version } => {
+                write!(formatter, "Normalizer not registered: {id} v{version}")
+            }
+            Self::ConfigHashMismatch {
+                id,
+                version,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "Normalizer config_sha256 mismatch for {id} v{version}: manifest has {expected}, registry has {actual}"
+            ),
+            Self::Validation(issues) => write!(
+                formatter,
+                "normalization rejected: {}",
+                issues
+                    .iter()
+                    .map(|issue| format!("{} at {}: {}", issue.code, issue.path, issue.message))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ),
+            Self::CoreMismatch {
+                item,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "rebuilt manifest core differs at {item}: expected {expected}, got {actual}"
+            ),
+            Self::Hash(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for RebuildError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Raw(error) => Some(error),
+            Self::Manifest(error) => Some(error),
+            Self::MissingRaw(_)
+            | Self::NormalizerNotFound { .. }
+            | Self::ConfigHashMismatch { .. }
+            | Self::Validation(_)
+            | Self::CoreMismatch { .. }
+            | Self::Hash(_) => None,
+        }
+    }
 }
 
 impl std::fmt::Display for PublishError {
@@ -117,48 +197,8 @@ pub fn publish_dataset(
         .normalize(&raw_inputs)
         .map_err(PublishError::Validation)?;
 
-    let tables = [
-        TableToPublish {
-            name: "instruments",
-            schema_version: 1,
-            schema: output.tables.instruments.schema(),
-            batch: &output.tables.instruments,
-            primary_key: &["instrument_id"],
-        },
-        TableToPublish {
-            name: "sessions",
-            schema_version: 1,
-            schema: output.tables.sessions.schema(),
-            batch: &output.tables.sessions,
-            primary_key: &["venue_id", "session_date"],
-        },
-        TableToPublish {
-            name: "bars",
-            schema_version: 1,
-            schema: output.tables.bars.schema(),
-            batch: &output.tables.bars,
-            primary_key: &["instrument_id", "bar_spec", "ts_open"],
-        },
-    ];
-    let manifest_tables = tables
-        .iter()
-        .map(|table| {
-            Ok(ManifestTable {
-                table: table.name.into(),
-                schema_version: table.schema_version,
-                schema_fingerprint: schema_fingerprint(&table.schema)
-                    .map_err(|error| PublishError::Hash(error.to_string()))?,
-                logical_hash: logical_hash(
-                    table.name,
-                    &table.schema,
-                    std::slice::from_ref(table.batch),
-                    table.primary_key,
-                )
-                .map_err(|error| PublishError::Hash(error.to_string()))?,
-                row_count: table.batch.num_rows() as u64,
-            })
-        })
-        .collect::<Result<Vec<_>, PublishError>>()?;
+    let tables = table_descriptors(&output.tables);
+    let manifest_tables = table_manifest_entries(&tables).map_err(PublishError::Hash)?;
     let core = ManifestCore {
         manifest_version: 1,
         normalizer: crate::NormalizerIdentity {
@@ -302,12 +342,198 @@ pub fn publish_dataset(
     result
 }
 
+/// Recomputes the content identity named by a manifest without publishing files.
+pub fn rebuild_dataset(
+    raw_store: &RawStore,
+    registry: &NormalizerRegistry,
+    manifest: &Manifest,
+) -> Result<String, RebuildError> {
+    manifest.validate().map_err(RebuildError::Manifest)?;
+
+    let raw_inputs = manifest
+        .core
+        .inputs
+        .iter()
+        .map(|input| {
+            let bytes = match raw_store.get(&input.raw_sha256) {
+                Ok(bytes) => bytes,
+                Err(RawStoreError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
+                    return Err(RebuildError::MissingRaw(input.raw_sha256.clone()));
+                }
+                Err(error) => return Err(RebuildError::Raw(error)),
+            };
+            Ok(RawInput {
+                raw_sha256: input.raw_sha256.clone(),
+                bytes,
+            })
+        })
+        .collect::<Result<Vec<_>, RebuildError>>()?;
+
+    let normalizer = registry
+        .get(
+            &manifest.core.normalizer.id,
+            &manifest.core.normalizer.version,
+        )
+        .ok_or_else(|| RebuildError::NormalizerNotFound {
+            id: manifest.core.normalizer.id.clone(),
+            version: manifest.core.normalizer.version.clone(),
+        })?;
+    let actual_config_sha256 = normalizer.config_sha256();
+    if actual_config_sha256 != manifest.core.normalizer.config_sha256 {
+        return Err(RebuildError::ConfigHashMismatch {
+            id: manifest.core.normalizer.id.clone(),
+            version: manifest.core.normalizer.version.clone(),
+            expected: manifest.core.normalizer.config_sha256.clone(),
+            actual: actual_config_sha256,
+        });
+    }
+
+    let output = normalizer
+        .normalize(&raw_inputs)
+        .map_err(RebuildError::Validation)?;
+    let tables = table_descriptors(&output.tables);
+    let manifest_tables = table_manifest_entries(&tables).map_err(RebuildError::Hash)?;
+    let rebuilt = Manifest::new(
+        ManifestCore {
+            manifest_version: manifest.core.manifest_version,
+            normalizer: crate::NormalizerIdentity {
+                id: normalizer.id().to_owned(),
+                version: normalizer.version().to_owned(),
+                config_sha256: actual_config_sha256,
+            },
+            inputs: manifest.core.inputs.clone(),
+            tables: manifest_tables,
+        },
+        manifest.provenance.clone(),
+    )
+    .map_err(RebuildError::Manifest)?;
+    compare_cores(&manifest.core, &rebuilt.core)?;
+    Ok(rebuilt.dsv)
+}
+
 struct TableToPublish<'a> {
     name: &'static str,
     schema_version: u32,
     schema: SchemaRef,
     batch: &'a RecordBatch,
     primary_key: &'static [&'static str],
+}
+
+fn table_descriptors(tables: &NormalizedTables) -> [TableToPublish<'_>; 3] {
+    [
+        TableToPublish {
+            name: "instruments",
+            schema_version: 1,
+            schema: tables.instruments.schema(),
+            batch: &tables.instruments,
+            primary_key: &["instrument_id"],
+        },
+        TableToPublish {
+            name: "sessions",
+            schema_version: 1,
+            schema: tables.sessions.schema(),
+            batch: &tables.sessions,
+            primary_key: &["venue_id", "session_date"],
+        },
+        TableToPublish {
+            name: "bars",
+            schema_version: 1,
+            schema: tables.bars.schema(),
+            batch: &tables.bars,
+            primary_key: &["instrument_id", "bar_spec", "ts_open"],
+        },
+    ]
+}
+
+fn table_manifest_entries(tables: &[TableToPublish<'_>]) -> Result<Vec<ManifestTable>, String> {
+    tables
+        .iter()
+        .map(|table| {
+            Ok(ManifestTable {
+                table: table.name.into(),
+                schema_version: table.schema_version,
+                schema_fingerprint: schema_fingerprint(&table.schema)
+                    .map_err(|error| error.to_string())?,
+                logical_hash: logical_hash(
+                    table.name,
+                    &table.schema,
+                    std::slice::from_ref(table.batch),
+                    table.primary_key,
+                )
+                .map_err(|error| error.to_string())?,
+                row_count: table.batch.num_rows() as u64,
+            })
+        })
+        .collect()
+}
+
+fn compare_cores(expected: &ManifestCore, actual: &ManifestCore) -> Result<(), RebuildError> {
+    compare_core_item(
+        "manifest_version",
+        &expected.manifest_version,
+        &actual.manifest_version,
+    )?;
+    compare_core_item(
+        "normalizer.id",
+        &expected.normalizer.id,
+        &actual.normalizer.id,
+    )?;
+    compare_core_item(
+        "normalizer.version",
+        &expected.normalizer.version,
+        &actual.normalizer.version,
+    )?;
+    compare_core_item(
+        "normalizer.config_sha256",
+        &expected.normalizer.config_sha256,
+        &actual.normalizer.config_sha256,
+    )?;
+    compare_core_item("inputs", &expected.inputs, &actual.inputs)?;
+    compare_core_item("tables.len", &expected.tables.len(), &actual.tables.len())?;
+    for (expected_table, actual_table) in expected.tables.iter().zip(&actual.tables) {
+        let prefix = format!("tables.{}", expected_table.table);
+        compare_core_item(
+            &format!("{prefix}.table"),
+            &expected_table.table,
+            &actual_table.table,
+        )?;
+        compare_core_item(
+            &format!("{prefix}.schema_version"),
+            &expected_table.schema_version,
+            &actual_table.schema_version,
+        )?;
+        compare_core_item(
+            &format!("{prefix}.schema_fingerprint"),
+            &expected_table.schema_fingerprint,
+            &actual_table.schema_fingerprint,
+        )?;
+        compare_core_item(
+            &format!("{prefix}.logical_hash"),
+            &expected_table.logical_hash,
+            &actual_table.logical_hash,
+        )?;
+        compare_core_item(
+            &format!("{prefix}.row_count"),
+            &expected_table.row_count,
+            &actual_table.row_count,
+        )?;
+    }
+    Ok(())
+}
+
+fn compare_core_item<T: std::fmt::Debug + PartialEq>(
+    item: &str,
+    expected: &T,
+    actual: &T,
+) -> Result<(), RebuildError> {
+    if expected != actual {
+        return Err(RebuildError::CoreMismatch {
+            item: item.to_owned(),
+            expected: format!("{expected:?}"),
+            actual: format!("{actual:?}"),
+        });
+    }
+    Ok(())
 }
 
 fn try_read_manifest(lake_root: &Path, dsv: &str) -> Result<Option<Manifest>, PublishError> {
