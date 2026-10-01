@@ -30,7 +30,6 @@ class PyArrowInteropTest(unittest.TestCase):
                     "--example",
                     "fixture_v1",
                     "--locked",
-                    "--offline",
                     "--",
                     directory,
                 ],
