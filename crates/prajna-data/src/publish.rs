@@ -288,8 +288,15 @@ pub fn publish_dataset(
 
     let _ = fs::remove_dir_all(&stage_root);
     if result.is_err() {
-        for table in &tables {
-            let _ = fs::remove_dir_all(normalized_root.join(table.name).join(dsv_hex));
+        let manifest_path = lake_root.join("manifests").join(format!("{dsv_hex}.json"));
+        let manifest_missing = matches!(
+            fs::symlink_metadata(manifest_path),
+            Err(error) if error.kind() == io::ErrorKind::NotFound
+        );
+        if manifest_missing {
+            for table in &tables {
+                let _ = fs::remove_dir_all(normalized_root.join(table.name).join(dsv_hex));
+            }
         }
     }
     result
@@ -358,6 +365,9 @@ mod tests {
         sync::{Arc, Barrier},
         thread,
     };
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     use serde_json::json;
     use sha2::{Digest, Sha256};
@@ -614,6 +624,58 @@ mod tests {
                     .is_file()
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn manifest_sync_failure_preserves_committed_files_and_retry_is_idempotent() {
+        let root = tempfile::tempdir().unwrap();
+        let (store, raw_hash) = store_fixture(root.path(), FIXTURE);
+        let manifest_dir = root.path().join("manifests");
+        fs::create_dir(&manifest_dir).unwrap();
+        fs::set_permissions(&manifest_dir, fs::Permissions::from_mode(0o300)).unwrap();
+
+        let result = publish_dataset(
+            root.path(),
+            &store,
+            &NormalizerRegistry::with_builtins(),
+            "synthetic-etf-daily",
+            "1",
+            std::slice::from_ref(&raw_hash),
+            "2026-09-30T00:00:00Z",
+        );
+
+        fs::set_permissions(&manifest_dir, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(matches!(result, Err(PublishError::Manifest(_))));
+
+        let manifest_path = fs::read_dir(&manifest_dir)
+            .unwrap()
+            .map(Result::unwrap)
+            .find(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .is_some_and(|extension| extension == "json")
+            })
+            .expect("manifest rename committed before directory sync failed")
+            .path();
+        let dsv_hex = manifest_path.file_stem().unwrap().to_str().unwrap();
+        let dsv = format!("dsv:sha256:{dsv_hex}");
+        let committed = read_manifest(root.path(), &dsv).unwrap();
+        assert!(super::published_files_match(root.path(), &committed).unwrap());
+
+        let retried = publish_dataset(
+            root.path(),
+            &store,
+            &NormalizerRegistry::with_builtins(),
+            "synthetic-etf-daily",
+            "1",
+            std::slice::from_ref(&raw_hash),
+            "2026-09-30T00:00:00Z",
+        )
+        .unwrap();
+        assert_eq!(retried.dsv, committed.dsv);
+        assert!(super::published_files_match(root.path(), &retried).unwrap());
     }
 
     #[test]
