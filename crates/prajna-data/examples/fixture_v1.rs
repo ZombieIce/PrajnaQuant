@@ -15,6 +15,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     fs::create_dir_all(&output)?;
     let store = RawStore::open(&output)?;
+    // observed_at/published_at are fixed placeholders: this fixture feeds a
+    // deterministic cross-language contract test, not a point-in-time dataset,
+    // so the values only need to be stable, not real collection timestamps.
     let raw_hash = store.put(
         FIXTURE,
         SourceRecordInput {

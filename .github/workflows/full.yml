@@ -62,6 +62,8 @@ jobs:
         with:
           key: nautilus
       - run: cargo build -p quant-research --no-default-features --locked
+      - name: Prefetch prajna-data fixture example (for offline pyarrow interop test)
+        run: cargo build -p prajna-data --example fixture_v1 --locked
       - run: python -m pip install -r poc/poc0-benchmark/requirements-nautilus.txt -r poc/poc0-benchmark/requirements-pyarrow.txt
       - name: POC Python tests (no skips allowed)
         run: |
