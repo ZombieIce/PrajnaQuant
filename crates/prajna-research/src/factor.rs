@@ -123,10 +123,36 @@ pub fn values_schema() -> ValuesSchema {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Closed MVP-1 M6 factor definitions, versioned independently by kind.
+///
+/// The v1 inputs are D7 normalized `bars.close` values for Venue Sessions.
+/// Each value is observable after the current session close; its availability
+/// is the maximum `available_at` of its required inputs. An unknown input
+/// availability yields `unknown_availability`, unless the Run explicitly
+/// chooses the M7 `TreatUnknownAsTsClose` assumption. A missing required bar
+/// yields `missing_input`, while insufficient session history yields
+/// `insufficient_window`; non-`ok` values are null. This crate defines those
+/// semantics but does not calculate factor values.
+///
+/// | Kind | v1 definition and direction |
+/// | --- | --- |
+/// | [`Momentum`](Self::Momentum) | `close_t / close_(t-n) - 1`; larger values indicate stronger momentum. |
+/// | [`Volatility`](Self::Volatility) | Sample standard deviation of `n` consecutive close-to-close returns; the composite subtracts `w_v * volatility`. |
+/// | [`TrendFilter`](Self::TrendFilter) | `close_t >= mean(close_(t-n+1..t))`, yielding 1 or 0; zero filters a composite score. |
+/// | [`RotationScore`](Self::RotationScore) | `w_s * momentum(short) + w_l * momentum(long) - w_v * volatility(vol)`; larger scores rank higher. |
+///
+/// `RotationScore` propagates dependency statuses in the order
+/// `insufficient_window > missing_input > unknown_availability`. These
+/// definitions follow the MVP-1 M6/M7 contract over D7 bars; each kind's v1
+/// identity is included in [`Factor::canonical_json`].
 pub enum FactorKind {
+    /// Uses the close at `t` and `t-n`; `n` must be at least 1.
     Momentum,
+    /// Uses `n` consecutive returns and therefore `n+1` closes; `n` must be at least 2.
     Volatility,
+    /// Uses `n` closes from `t-n+1` through `t`; `n` must be at least 1.
     TrendFilter,
+    /// Composes the configured child factors; each window follows its child kind's rules.
     RotationScore,
 }
 
