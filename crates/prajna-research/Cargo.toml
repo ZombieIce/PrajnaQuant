@@ -1,0 +1,25 @@
+[package]
+name = "prajna-research"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.1"
+description = "Research data panels for Prajna Quant"
+license = "MIT"
+publish = false
+
+[dependencies]
+arrow-array = "=58.4.0"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+polars = { version = "=0.55.2", default-features = false, features = ["lazy", "dtype-date", "dtype-datetime"] }
+polars-io = { version = "=0.55.2", default-features = false, features = ["parquet"] }
+prajna-data = { path = "../prajna-data" }
+prajna-domain = { path = "../prajna-domain" }
+
+[dev-dependencies]
+tempfile = "3.14"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
