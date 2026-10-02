@@ -2944,11 +2944,13 @@ name = "prajna-research"
 version = "0.1.0"
 dependencies = [
  "arrow-array",
+ "arrow-schema",
  "chrono",
  "polars",
  "polars-io",
  "prajna-data",
  "prajna-domain",
+ "serde_json",
  "tempfile",
 ]
 
