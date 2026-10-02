@@ -110,4 +110,56 @@ status for `ETF002` on 2025-07-02. The preceding session executes the pending
 target, so no execution record is expected on the HALTED session itself. The
 golden tests verify these statuses, complete factor/session coverage, non-zero
 gross returns, the trend-filtered ranking difference, and byte-for-byte
-reproducibility.
+reproducibility. They also assert that `valuation_carried` on 2025-07-01
+contains `ETF001.SYNTH`.
+
+## 64×252 HALTED execution golden
+
+The v2 scale golden never reaches a HALTED execution: ETF002 is neither held
+nor a pending target on 2025-07-02. This separate fixture keeps the v2 bytes
+and SHA-256 unchanged and adds two HALTED execution-status records that hit a
+pending rebalance. It is derived by `s2_halted_dataset` in
+`poc/poc0-benchmark/generate-b2-stress-fixtures.py`
+(`dataset_version` `poc0.b3.s2-scale-64x252-halted.v1`; the three earlier
+fixtures regenerate byte-identically). Its SHA-256 is
+`14f9b485c97bda657682eed5a4d5b2179a19123616b6c2d0a94f1d9697e23de3`.
+Only the plain output (no `--trend`) is committed; the trend-filtered ranking
+is already covered by the v2 golden.
+
+```sh
+python3 poc/poc0-benchmark/generate-b2-stress-fixtures.py
+
+python3 poc/mvp1-golden/vector_golden.py \
+  --fixture poc/poc0-benchmark/fixtures/b2-s2-scale-64x252-halted-v1.json \
+  --out poc/mvp1-golden/expected/b2-s2-scale-64x252-halted-v1.json
+```
+
+Hand check, with the same 20/60 momentum, 20 volatility, `top_n=5`,
+`rebalance_every=5` and cost parameters as v2 (cost rate
+`0.001 + 10 / 1e4 = 0.002` per unit turnover):
+
+- **2025-07-08, `blocked`.** The 2025-07-07 decision drops held ETF029 and
+  targets ETF012/016/025/033/054. ETF029 is HALTED at the 07-08 open, so the
+  execution is `deferred` with `blocked: ["ETF029.SYNTH"]`: no trade, turnover
+  0, cost 0, and the pending target stays. The next decision (07-14) comes
+  after 07-09, so the target is not replaced.
+- **2025-07-09, deferred execution lands.** All names are tradable, so the
+  same target executes (`executed`, no blocked or skipped buys) with five
+  weights of 0.2.
+- **2025-07-15, `skipped_buys`.** The 07-14 decision targets
+  ETF003/007/038/041/051. ETF041 is HALTED at the open and not held, so the
+  buy is skipped and its 0.2 stays in cash; the execution is `executed` with
+  `skipped_buys: ["ETF041.SYNTH"]`. The four remaining targets get 0.2 each
+  and share no name with the prior book, so turnover is 0.8 + 1.0 = 1.8 and
+  cost is 1.8 × 0.002 = 0.0036.
+- **2025-07-01.** ETF001's bar is missing, so its valuation is carried and
+  `valuation_carried` contains `ETF001.SYNTH`.
+
+`test_scale_halted_golden_blocks_sells_and_skips_buys` asserts the above and
+the byte-for-byte output. It also reruns the fixture with
+`execution_status_overrides` cleared (HALTED ignored): 07-08 then executes
+without a block, and 07-15 has no skipped buy and holds ETF041, so the
+assertions fail if HALTED is ignored.
+
+The fixture is synthetic: it makes no point-in-time claim and is not
+validation against real-market data.

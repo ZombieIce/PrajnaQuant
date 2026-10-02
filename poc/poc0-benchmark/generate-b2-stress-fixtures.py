@@ -78,6 +78,21 @@ def s2_dataset_v2(base: dict) -> dict:
     return result
 
 
+def s2_halted_dataset(base: dict) -> dict:
+    result = s2_dataset_v2(base)
+    calendar, symbols = result["calendar"], [i["symbol"] for i in result["instruments"]]
+    result["dataset_version"] = "poc0.b3.s2-scale-64x252-halted.v1"
+    result["execution_status_overrides"] += [
+        {
+            "symbol": symbols[symbol_index], "date": calendar[session_index],
+            "trade_status": "HALTED", "is_tradable": False,
+            "sources": "poc0-mvp1-halted-scale-fixture", "available_at": "08:50:00+08:00",
+        }
+        for symbol_index, session_index in ((29, 131), (41, 136))
+    ]
+    return result
+
+
 def s3_dataset(base: dict, ma: dict) -> dict:
     sessions = 252
     calendar = weekdays(date.fromisoformat(ma["start_date"]), sessions)
@@ -119,6 +134,8 @@ def main() -> None:
         json.dumps(s2_dataset(base), indent=2) + "\n", encoding="utf-8")
     FIXTURES.joinpath("b2-s2-scale-64x252-v2.json").write_text(
         json.dumps(s2_dataset_v2(base), indent=2) + "\n", encoding="utf-8")
+    FIXTURES.joinpath("b2-s2-scale-64x252-halted-v1.json").write_text(
+        json.dumps(s2_halted_dataset(base), indent=2) + "\n", encoding="utf-8")
     FIXTURES.joinpath("b2-s3-scale-64x252-v1.json").write_text(
         json.dumps(s3_dataset(base, ma), indent=2) + "\n", encoding="utf-8")
 
