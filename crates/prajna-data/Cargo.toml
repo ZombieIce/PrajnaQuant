@@ -13,6 +13,7 @@ arrow-array = "=58.4.0"
 arrow-schema = "=58.4.0"
 fs2 = "=0.4.3"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
+chrono-tz = "0.10"
 parquet = { version = "=58.4.0", default-features = false, features = ["arrow", "zstd"] }
 prajna-domain = { path = "../prajna-domain" }
 serde = { version = "1.0", features = ["derive"] }

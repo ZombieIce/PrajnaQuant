@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Offset, TimeZone};
+use chrono_tz::Tz;
 use prajna_domain::{
     Bar, BarData, Currency, InstrumentId, InstrumentKind, InstrumentSpec, InstrumentSpecData,
     InstrumentSpecs, Notional, Price, Quantity, Session, TimestampNs, VenueId,
@@ -9,8 +10,9 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    NormalizationIssue, NormalizationOutput, NormalizedTables, bars_to_record_batch,
-    instruments_to_record_batch, sessions_to_record_batch,
+    ExecutionStatusRow, NormalizationIssue, NormalizationOutput, NormalizedTables,
+    bars_to_record_batch, execution_status_to_record_batch, instruments_to_record_batch,
+    sessions_to_record_batch,
 };
 
 use super::{Normalizer, RawInput};
@@ -18,6 +20,22 @@ use super::{Normalizer, RawInput};
 const NORMALIZER_ID: &str = "synthetic-etf-daily";
 const CONFIG_V1: &str = r#"{"bar_spec":"1d@session","high":"max(open,close)","instrument_kind":"Etf","low":"min(open,close)","session_close":"15:00:00+08:00","session_open":"09:30:00+08:00","timezone":"Asia/Shanghai","volume":"shares","volume_multiplier":1}"#;
 const CONFIG_V2: &str = r#"{"bar_spec":"1d@session","high":"max(open,close)","instrument_kind":"Etf","low":"min(open,close)","session_close":"15:00:00+08:00","session_open":"09:30:00+08:00","timezone":"Asia/Shanghai","volume":"lots","volume_multiplier":100}"#;
+const CONFIG_V3: &str = r#"{"bar_spec":"1d@session","execution_status":"instrument_session","high":"max(open,close)","instrument_kind":"Etf","low":"min(open,close)","open":"instrument_opens_or_bar_default","session_close":"15:00:00+08:00","session_open":"09:30:00+08:00","timezone":"fixture_timezone","volume":"lots","volume_multiplier":100}"#;
+
+#[derive(Clone)]
+struct ExecutionStatusInput {
+    trade_status: String,
+    is_tradable: bool,
+    source: String,
+    available_at: String,
+    path: String,
+}
+
+struct ExecutionStatusOverride {
+    symbol: String,
+    date: NaiveDate,
+    status: ExecutionStatusInput,
+}
 
 pub(super) struct SyntheticEtfDaily {
     version: &'static str,
@@ -41,6 +59,14 @@ impl SyntheticEtfDaily {
             config: CONFIG_V2,
         }
     }
+
+    pub(super) const fn v3() -> Self {
+        Self {
+            version: "3",
+            volume_multiplier: 100,
+            config: CONFIG_V3,
+        }
+    }
 }
 
 impl Normalizer for SyntheticEtfDaily {
@@ -60,13 +86,14 @@ impl Normalizer for SyntheticEtfDaily {
         &self,
         raw_inputs: &[RawInput],
     ) -> Result<NormalizationOutput, Vec<NormalizationIssue>> {
-        normalize_fixture(raw_inputs, self.volume_multiplier)
+        normalize_fixture(raw_inputs, self.volume_multiplier, self.version == "3")
     }
 }
 
 fn normalize_fixture(
     raw_inputs: &[RawInput],
     volume_multiplier: i128,
+    include_execution_status: bool,
 ) -> Result<NormalizationOutput, Vec<NormalizationIssue>> {
     if raw_inputs.len() != 1 {
         return Err(vec![issue(
@@ -162,6 +189,48 @@ fn normalize_fixture(
     let instruments = array_field(root.get("instruments"), "instruments", &mut issues)
         .map_or(&[][..], |values| values.as_slice());
     let missing_bars = parse_missing_bars(root.get("missing_bars"), &mut issues);
+    let (execution_timezone, execution_status_default, execution_status_overrides) =
+        if include_execution_status {
+            let timezone =
+                required_string(root, "timezone", "$", &mut issues).and_then(|timezone| {
+                    match timezone.parse::<Tz>() {
+                        Ok(timezone) => Some(timezone),
+                        Err(_) => {
+                            issues.push(issue(
+                                "invalid_timezone",
+                                "timezone",
+                                "timezone must be a valid IANA timezone",
+                            ));
+                            None
+                        }
+                    }
+                });
+            let default = object_field(root, "execution_status_default", "$", &mut issues)
+                .and_then(|object| {
+                    parse_execution_status_input(object, "execution_status_default", &mut issues)
+                });
+            let overrides = parse_execution_status_overrides(
+                root.get("execution_status_overrides"),
+                &mut issues,
+            );
+            (timezone, default, overrides)
+        } else {
+            (None, None, Vec::new())
+        };
+    let mut execution_status_overrides_by_key = BTreeMap::new();
+    for status_override in execution_status_overrides {
+        let key = (status_override.symbol.clone(), status_override.date);
+        if execution_status_overrides_by_key
+            .insert(key, status_override)
+            .is_some()
+        {
+            issues.push(issue(
+                "duplicate_execution_status_override",
+                "execution_status_overrides",
+                "only one override is allowed per symbol and date",
+            ));
+        }
+    }
 
     if calendar.is_empty() {
         issues.push(issue(
@@ -211,6 +280,7 @@ fn normalize_fixture(
     }
 
     let mut bars = Vec::new();
+    let mut execution_status = Vec::new();
     let mut coverage = serde_json::Map::new();
     let mut symbols_seen: BTreeMap<String, (String, u64, u64)> = BTreeMap::new();
     for (instrument_index, instrument_value) in instruments.iter().enumerate() {
@@ -253,6 +323,24 @@ fn normalize_fixture(
                 "invalid_closes_length",
                 format!("{path}.closes"),
                 "closes must have one value for every calendar session",
+            ));
+            continue;
+        }
+        let opens = if include_execution_status {
+            instrument
+                .get("opens")
+                .and_then(|value| decimal_array(Some(value), &format!("{path}.opens"), &mut issues))
+        } else {
+            None
+        };
+        if opens
+            .as_ref()
+            .is_some_and(|values| values.len() != closes.len())
+        {
+            issues.push(issue(
+                "invalid_opens_length",
+                format!("{path}.opens"),
+                "opens must have the same length as closes",
             ));
             continue;
         }
@@ -373,6 +461,37 @@ fn normalize_fixture(
             continue;
         }
         specs.push(spec);
+        if include_execution_status {
+            if let (Some(timezone), Some(default_status)) = (
+                execution_timezone.as_ref(),
+                execution_status_default.as_ref(),
+            ) {
+                for (_, date) in &calendar {
+                    let override_status =
+                        execution_status_overrides_by_key.get(&(symbol.clone(), *date));
+                    let status = override_status
+                        .map(|value| &value.status)
+                        .unwrap_or(default_status);
+                    let available_at = status_available_at(
+                        *date,
+                        &status.available_at,
+                        timezone,
+                        &format!("{}.available_at", status.path),
+                        &mut issues,
+                    );
+                    if let Some(available_at) = available_at {
+                        execution_status.push(ExecutionStatusRow {
+                            instrument_id: id.clone(),
+                            session_date: *date,
+                            trade_status: status.trade_status.clone(),
+                            is_tradable: status.is_tradable,
+                            available_at: Some(available_at),
+                            source: status.source.clone(),
+                        });
+                    }
+                }
+            }
+        }
 
         let volume = match default_volume {
             Some(value) => match value.checked_mul(volume_multiplier) {
@@ -425,11 +544,12 @@ fn normalize_fixture(
         let mut actual_bars = 0_u64;
         let expected_sessions = calendar.len() as u64;
         let mut missing_dates = BTreeSet::new();
-        for ((_, date), close) in calendar.iter().zip(closes) {
+        for (session_index, ((_, date), close)) in calendar.iter().zip(closes).enumerate() {
             if missing_bars.contains(&(symbol.clone(), *date)) {
                 missing_dates.insert(date.to_string());
                 continue;
             }
+            let open = opens.as_ref().map(|values| values[session_index]).or(open);
             let (Some(open), Some(amount), Some(session)) =
                 (open, amount, sessions_by_date.get(date))
             else {
@@ -522,6 +642,28 @@ fn normalize_fixture(
             ));
         }
     }
+    for status_override in execution_status_overrides_by_key.values() {
+        if !symbols_seen.contains_key(&status_override.symbol) {
+            issues.push(issue(
+                "execution_status_unknown_instrument",
+                format!("{}.symbol", status_override.status.path),
+                format!(
+                    "execution status override references unknown instrument {}",
+                    status_override.symbol
+                ),
+            ));
+        }
+        if !seen_dates.contains(&status_override.date) {
+            issues.push(issue(
+                "execution_status_unknown_session",
+                format!("{}.date", status_override.status.path),
+                format!(
+                    "execution status override references unknown session {}",
+                    status_override.date
+                ),
+            ));
+        }
+    }
 
     if !issues.is_empty() {
         return Err(issues);
@@ -537,33 +679,165 @@ fn normalize_fixture(
             instruments: instruments_to_record_batch(&specs).map_err(|error| error.to_string())?,
             sessions: sessions_to_record_batch(&sessions).map_err(|error| error.to_string())?,
             bars: bars_to_record_batch(&bars).map_err(|error| error.to_string())?,
+            execution_status: if include_execution_status {
+                Some(
+                    execution_status_to_record_batch(&execution_status)
+                        .map_err(|error| error.to_string())?,
+                )
+            } else {
+                None
+            },
         })
     })();
     let tables =
         batch_result.map_err(|error| vec![issue("table_conversion_failed", "$", error)])?;
+    let mut ignored_input_fields: Vec<String> = vec![
+        "dataset_version".into(),
+        "seed".into(),
+        "seed_semantics".into(),
+        "source_identity".into(),
+        "calendar_basis".into(),
+        "timezone".into(),
+        "bar_defaults.open_available_at".into(),
+        "bar_defaults.close_available_at".into(),
+        "missing_bars[].reason".into(),
+        "execution_status_default".into(),
+        "execution_status_overrides".into(),
+        "time_model".into(),
+        "result_model_boundary".into(),
+        "strategy".into(),
+        "costs".into(),
+        "account.initial_cash".into(),
+    ];
+    if include_execution_status {
+        ignored_input_fields.retain(|field| {
+            !matches!(
+                field.as_str(),
+                "timezone" | "execution_status_default" | "execution_status_overrides"
+            )
+        });
+    }
     Ok(NormalizationOutput {
         tables,
         coverage: Value::Object(coverage),
         synthetic_assumptions: vec!["available_at = ts_close".into()],
-        ignored_input_fields: vec![
-            "dataset_version".into(),
-            "seed".into(),
-            "seed_semantics".into(),
-            "source_identity".into(),
-            "calendar_basis".into(),
-            "timezone".into(),
-            "bar_defaults.open_available_at".into(),
-            "bar_defaults.close_available_at".into(),
-            "missing_bars[].reason".into(),
-            "execution_status_default".into(),
-            "execution_status_overrides".into(),
-            "time_model".into(),
-            "result_model_boundary".into(),
-            "strategy".into(),
-            "costs".into(),
-            "account.initial_cash".into(),
-        ],
+        ignored_input_fields,
     })
+}
+
+fn parse_execution_status_input(
+    object: &Map<String, Value>,
+    path: &str,
+    issues: &mut Vec<NormalizationIssue>,
+) -> Option<ExecutionStatusInput> {
+    let trade_status = required_string(object, "trade_status", path, issues)?;
+    let is_tradable = required_bool(object, "is_tradable", path, issues)?;
+    let source = required_string(object, "sources", path, issues)?;
+    let available_at = required_string(object, "available_at", path, issues)?;
+    Some(ExecutionStatusInput {
+        trade_status,
+        is_tradable,
+        source,
+        available_at,
+        path: path.to_owned(),
+    })
+}
+
+fn parse_execution_status_overrides(
+    value: Option<&Value>,
+    issues: &mut Vec<NormalizationIssue>,
+) -> Vec<ExecutionStatusOverride> {
+    let Some(value) = value else {
+        return Vec::new();
+    };
+    let Some(values) = value.as_array() else {
+        issues.push(issue(
+            "missing_or_invalid_field",
+            "execution_status_overrides",
+            "execution_status_overrides must be an array",
+        ));
+        return Vec::new();
+    };
+    values
+        .iter()
+        .enumerate()
+        .filter_map(|(index, value)| {
+            let path = format!("execution_status_overrides[{index}]");
+            let Some(object) = value.as_object() else {
+                issues.push(issue(
+                    "invalid_execution_status_override",
+                    &path,
+                    "execution status override must be an object",
+                ));
+                return None;
+            };
+            let symbol = required_string(object, "symbol", &path, issues)?;
+            let date_text = required_string(object, "date", &path, issues)?;
+            let date = match NaiveDate::parse_from_str(&date_text, "%Y-%m-%d") {
+                Ok(date) => date,
+                Err(_) => {
+                    issues.push(issue(
+                        "invalid_date",
+                        format!("{path}.date"),
+                        "date must use YYYY-MM-DD",
+                    ));
+                    return None;
+                }
+            };
+            let status = parse_execution_status_input(object, &path, issues)?;
+            Some(ExecutionStatusOverride {
+                symbol,
+                date,
+                status,
+            })
+        })
+        .collect()
+}
+
+fn status_available_at(
+    date: NaiveDate,
+    time_text: &str,
+    timezone: &Tz,
+    path: &str,
+    issues: &mut Vec<NormalizationIssue>,
+) -> Option<TimestampNs> {
+    let local_text = format!("{date}T{time_text}");
+    let parsed = match DateTime::parse_from_rfc3339(&local_text) {
+        Ok(value) => value,
+        Err(_) => {
+            issues.push(issue(
+                "invalid_available_at",
+                path,
+                "available_at must be a local time with an explicit UTC offset",
+            ));
+            return None;
+        }
+    };
+    let Some(localized) = timezone.from_local_datetime(&parsed.naive_local()).single() else {
+        issues.push(issue(
+            "invalid_available_at",
+            path,
+            "available_at is ambiguous or nonexistent in the fixture timezone",
+        ));
+        return None;
+    };
+    if localized.offset().fix() != *parsed.offset() {
+        issues.push(issue(
+            "invalid_available_at",
+            path,
+            "available_at UTC offset does not match the fixture timezone",
+        ));
+        return None;
+    }
+    let Some(nanoseconds) = localized.timestamp_nanos_opt() else {
+        issues.push(issue(
+            "invalid_available_at",
+            path,
+            "available_at is outside the supported timestamp range",
+        ));
+        return None;
+    };
+    Some(TimestampNs::from_unix_nanos(nanoseconds))
 }
 
 fn make_session(venue: VenueId, date: NaiveDate) -> Option<Session> {
@@ -648,6 +922,26 @@ fn required_string(
                 "missing_or_invalid_field",
                 path,
                 "required string field is missing or invalid",
+            ));
+            None
+        }
+    }
+}
+
+fn required_bool(
+    object: &Map<String, Value>,
+    name: &str,
+    parent: &str,
+    issues: &mut Vec<NormalizationIssue>,
+) -> Option<bool> {
+    let path = format!("{parent}.{name}");
+    match object.get(name).and_then(Value::as_bool) {
+        Some(value) => Some(value),
+        None => {
+            issues.push(issue(
+                "missing_or_invalid_field",
+                path,
+                "required boolean field is missing or invalid",
             ));
             None
         }

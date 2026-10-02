@@ -153,7 +153,7 @@ impl From<io::Error> for PublishError {
 }
 
 /// Reads immutable Raw inputs, normalizes and validates them, and publishes the
-/// three Parquet tables and manifest under their content-derived DSV.
+/// normalized Parquet tables and manifest under their content-derived DSV.
 pub fn publish_dataset(
     lake_root: impl AsRef<Path>,
     raw_store: &RawStore,
@@ -419,8 +419,8 @@ struct TableToPublish<'a> {
     primary_key: &'static [&'static str],
 }
 
-fn table_descriptors(tables: &NormalizedTables) -> [TableToPublish<'_>; 3] {
-    [
+fn table_descriptors(tables: &NormalizedTables) -> Vec<TableToPublish<'_>> {
+    let mut descriptors = vec![
         TableToPublish {
             name: "instruments",
             schema_version: 1,
@@ -442,7 +442,17 @@ fn table_descriptors(tables: &NormalizedTables) -> [TableToPublish<'_>; 3] {
             batch: &tables.bars,
             primary_key: &["instrument_id", "bar_spec", "ts_open"],
         },
-    ]
+    ];
+    if let Some(batch) = &tables.execution_status {
+        descriptors.push(TableToPublish {
+            name: "execution_status",
+            schema_version: 1,
+            schema: batch.schema(),
+            batch,
+            primary_key: &["instrument_id", "session_date"],
+        });
+    }
+    descriptors
 }
 
 fn table_manifest_entries(tables: &[TableToPublish<'_>]) -> Result<Vec<ManifestTable>, String> {
@@ -557,7 +567,7 @@ fn published_files_match(lake_root: &Path, manifest: &Manifest) -> Result<bool, 
             return Ok(false);
         }
     }
-    Ok(manifest.provenance.files.len() == 3 + manifest.core.inputs.len())
+    Ok(manifest.provenance.files.len() == manifest.core.tables.len() + manifest.core.inputs.len())
 }
 
 fn create_stage_dir(normalized_root: &Path, dsv_hex: &str) -> io::Result<PathBuf> {
