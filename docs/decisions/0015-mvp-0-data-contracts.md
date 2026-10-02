@@ -66,12 +66,15 @@ Lake 根由调用方指定，不与 `data-core/` 混放：
 | `instruments` | `instrument_id` | 1 |
 | `bars` | `(instrument_id, bar_spec, ts_open)` | 1 |
 | `sessions` | `(venue_id, session_date)` | 1 |
+| `execution_status` | `(instrument_id, session_date)` | 1 |
 
 按主键存储值字节序排序，固定 row group 65,536，ZSTD level 3，不做 hive 分区；writer 参数记入 manifest provenance。Schema metadata 为 `prajna.table`、`prajna.schema_version`、`prajna.dsv`；时间列字段 metadata 为 `prajna.time_role`。不兼容的 schema 变更必须递增 `schema_version`。
 
-实现：[`SCHEMA_VERSION`/`ZSTD_LEVEL`/`ROW_GROUP_SIZE`](../../crates/prajna-data/src/normalized.rs#L21)、[`instruments_schema`](../../crates/prajna-data/src/normalized.rs#L130)、[`bars_schema`](../../crates/prajna-data/src/normalized.rs#L152)、[`sessions_schema`](../../crates/prajna-data/src/normalized.rs#L171)、[`write_parquet`](../../crates/prajna-data/src/normalized.rs#L640)。
+`execution_status`（MVP-1 M3，[spec Issue #53](https://github.com/ZombieIce/PrajnaQuant/issues/53)）的 `session_date` 为 Date32、`available_at` 为可空 UTC 纳秒时间戳；无某个 `(instrument_id, session_date)` 记录表示 UNKNOWN 且不可交易。该表已支持 schema、Arrow 转换和通用 Parquet 读写，但当前 Normalizer/publish 路径尚未产出它。
 
-测试：[D7 schema 快照（字段、类型、nullability、metadata）](../../crates/prajna-data/src/normalized.rs#L783)、[instruments/sessions Parquet round-trip](../../crates/prajna-data/src/normalized.rs#L925)、[主键未排序/非法 DSV 在建文件前被拒](../../crates/prajna-data/src/normalized.rs#L1008)、[row group 上限](../../crates/prajna-data/src/normalized.rs#L1040)、[pyarrow 读取三表并校验 schema、metadata、行数与抽样数值](../../crates/prajna-data/tests/python/test_pyarrow_interop.py)（Full workflow `pyarrow-interop` job，出现跳过即失败）。
+实现：[`SCHEMA_VERSION`/`ZSTD_LEVEL`/`ROW_GROUP_SIZE`](../../crates/prajna-data/src/normalized.rs#L21)、[`instruments_schema`](../../crates/prajna-data/src/normalized.rs#L141)、[`bars_schema`](../../crates/prajna-data/src/normalized.rs#L163)、[`sessions_schema`](../../crates/prajna-data/src/normalized.rs#L182)、[`execution_status_schema`](../../crates/prajna-data/src/normalized.rs#L193)、[`execution_status_to_record_batch`](../../crates/prajna-data/src/normalized.rs#L425)、[`execution_status_from_record_batch`](../../crates/prajna-data/src/normalized.rs#L465)、[`write_parquet`](../../crates/prajna-data/src/normalized.rs#L742)、[`read_parquet`](../../crates/prajna-data/src/normalized.rs#L779)。
+
+测试：[D7 四表 schema 快照（字段、类型、nullability、metadata；schema 与期望数量相等）](../../crates/prajna-data/src/normalized.rs#L885)、[execution_status 排序、重复主键、hash 与 Parquet round-trip](../../crates/prajna-data/src/normalized.rs#L1009)、[instruments/sessions Parquet round-trip](../../crates/prajna-data/src/normalized.rs#L1113)、[主键未排序/非法 DSV 在建文件前被拒](../../crates/prajna-data/src/normalized.rs#L1196)、[row group 上限](../../crates/prajna-data/src/normalized.rs#L1228)、[pyarrow 读取已发布三表并校验 schema、metadata、行数与抽样数值](../../crates/prajna-data/tests/python/test_pyarrow_interop.py)（Full workflow `pyarrow-interop` job，出现跳过即失败）。
 
 ## 6. Dataset Version、逻辑 hash 与 schema 指纹
 

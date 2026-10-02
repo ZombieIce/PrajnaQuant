@@ -53,6 +53,17 @@ pub struct ParquetWriteOptions {
     pub row_group_size: usize,
 }
 
+/// Normalized tradability status for one instrument and venue session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionStatusRow {
+    pub instrument_id: InstrumentId,
+    pub session_date: NaiveDate,
+    pub trade_status: String,
+    pub is_tradable: bool,
+    pub available_at: Option<TimestampNs>,
+    pub source: String,
+}
+
 pub const fn parquet_write_options() -> ParquetWriteOptions {
     ParquetWriteOptions {
         compression: "ZSTD",
@@ -176,6 +187,19 @@ pub fn sessions_schema() -> SchemaRef {
             date("session_date"),
             timestamp("ts_open", false),
             timestamp("ts_close", false),
+        ],
+    )
+}
+pub fn execution_status_schema() -> SchemaRef {
+    schema(
+        "execution_status",
+        vec![
+            utf8("instrument_id", false),
+            date("session_date"),
+            utf8("trade_status", false),
+            field("is_tradable", DataType::Boolean, false),
+            timestamp("available_at", true),
+            utf8("source", false),
         ],
     )
 }
@@ -398,6 +422,82 @@ pub fn sessions_from_record_batch(batch: &RecordBatch) -> Result<Vec<Session>, D
     Ok(out)
 }
 
+pub fn execution_status_to_record_batch(
+    rows: &[ExecutionStatusRow],
+) -> Result<RecordBatch, DataError> {
+    let mut ordered = rows
+        .iter()
+        .map(|row| (row.instrument_id.to_string(), row.session_date, row))
+        .collect::<Vec<_>>();
+    ordered.sort_by(|left, right| (&left.0, left.1).cmp(&(&right.0, right.1)));
+    if ordered
+        .windows(2)
+        .any(|pair| pair[0].0 == pair[1].0 && pair[0].1 == pair[1].1)
+    {
+        return Err(err("duplicate execution status primary key"));
+    }
+
+    let rows = ordered.iter().map(|(_, _, row)| *row).collect::<Vec<_>>();
+    let schema = execution_status_schema();
+    let cols: Vec<ArrayRef> = vec![
+        Arc::new(StringArray::from_iter_values(
+            rows.iter().map(|row| row.instrument_id.to_string()),
+        )),
+        Arc::new(Date32Array::from(
+            rows.iter()
+                .map(|row| date32(row.session_date))
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        Arc::new(StringArray::from_iter_values(
+            rows.iter().map(|row| row.trade_status.as_str()),
+        )),
+        Arc::new(BooleanArray::from(
+            rows.iter().map(|row| row.is_tradable).collect::<Vec<_>>(),
+        )),
+        timestamps(rows.iter().map(|row| row.available_at).collect()),
+        Arc::new(StringArray::from_iter_values(
+            rows.iter().map(|row| row.source.as_str()),
+        )),
+    ];
+    RecordBatch::try_new(schema, cols).map_err(Into::into)
+}
+
+pub fn execution_status_from_record_batch(
+    batch: &RecordBatch,
+) -> Result<Vec<ExecutionStatusRow>, DataError> {
+    check_batch(batch, "execution_status")?;
+    let dates = batch
+        .column(1)
+        .as_any()
+        .downcast_ref::<Date32Array>()
+        .ok_or_else(|| err("expected Date32"))?;
+    let tradability = batch
+        .column(3)
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .ok_or_else(|| err("expected Boolean column"))?;
+    let mut rows = Vec::with_capacity(batch.num_rows());
+    for index in 0..batch.num_rows() {
+        if dates.is_null(index) {
+            return Err(err("unexpected null session date"));
+        }
+        if tradability.is_null(index) {
+            return Err(err("unexpected null tradability value"));
+        }
+        rows.push(ExecutionStatusRow {
+            instrument_id: string_at(batch, 0, index)?
+                .parse::<InstrumentId>()
+                .map_err(|error| err(error.to_string()))?,
+            session_date: naive_date(dates.value(index))?,
+            trade_status: string_at(batch, 2, index)?.to_owned(),
+            is_tradable: tradability.value(index),
+            available_at: optional_timestamp_at(batch, 4, index)?,
+            source: string_at(batch, 5, index)?.to_owned(),
+        });
+    }
+    Ok(rows)
+}
+
 pub fn bars_to_record_batch(rows: &[Bar]) -> Result<RecordBatch, DataError> {
     let mut ordered = rows
         .iter()
@@ -571,6 +671,7 @@ fn expected_schema(table: &str) -> Result<SchemaRef, DataError> {
         "instruments" => Ok(instruments_schema()),
         "bars" => Ok(bars_schema()),
         "sessions" => Ok(sessions_schema()),
+        "execution_status" => Ok(execution_status_schema()),
         _ => Err(err("unsupported normalized table")),
     }
 }
@@ -595,6 +696,7 @@ fn check_primary_key_order(batch: &RecordBatch, table: &str) -> Result<(), DataE
         "instruments" => &[0],
         "bars" => &[0, 1, 3],
         "sessions" => &[0, 1],
+        "execution_status" => &[0, 1],
         _ => return Err(err("unsupported normalized table")),
     };
     let schema = batch.schema();
@@ -781,7 +883,12 @@ mod tests {
 
     #[test]
     fn d7_schema_snapshot_has_exact_fields_types_nullability_and_metadata() {
-        let schemas = [instruments_schema(), bars_schema(), sessions_schema()];
+        let schemas = [
+            instruments_schema(),
+            bars_schema(),
+            sessions_schema(),
+            execution_status_schema(),
+        ];
         let expected = [
             (
                 "instruments",
@@ -829,7 +936,19 @@ mod tests {
                     ("ts_close", "Timestamp(Nanosecond, Some(\"UTC\"))", false),
                 ],
             ),
+            (
+                "execution_status",
+                vec![
+                    ("instrument_id", "Utf8", false),
+                    ("session_date", "Date32", false),
+                    ("trade_status", "Utf8", false),
+                    ("is_tradable", "Boolean", false),
+                    ("available_at", "Timestamp(Nanosecond, Some(\"UTC\"))", true),
+                    ("source", "Utf8", false),
+                ],
+            ),
         ];
+        assert_eq!(schemas.len(), expected.len());
         for (schema, (table, fields)) in schemas.iter().zip(expected) {
             assert_eq!(
                 schema.metadata().get("prajna.table").map(String::as_str),
@@ -866,6 +985,75 @@ mod tests {
                 compression_level: 3,
                 row_group_size: 65_536
             }
+        );
+    }
+
+    fn fixture_execution_status(
+        symbol: &str,
+        session_date: NaiveDate,
+        trade_status: &str,
+        is_tradable: bool,
+        available_at: Option<TimestampNs>,
+    ) -> ExecutionStatusRow {
+        ExecutionStatusRow {
+            instrument_id: InstrumentId::new(symbol, VenueId::new("SYNTH").unwrap()).unwrap(),
+            session_date,
+            trade_status: trade_status.into(),
+            is_tradable,
+            available_at,
+            source: "fixture".into(),
+        }
+    }
+
+    #[test]
+    fn execution_status_round_trip_sorts_rows_and_rejects_duplicate_primary_keys() {
+        let jan_5 = NaiveDate::from_ymd_opt(2026, 1, 5).unwrap();
+        let first = fixture_execution_status(
+            "ETF001",
+            jan_5,
+            "TRADABLE",
+            true,
+            Some(TimestampNs::parse("2026-01-05T16:00:00+08:00").unwrap()),
+        );
+        let second = fixture_execution_status(
+            "ETF001",
+            NaiveDate::from_ymd_opt(2026, 1, 6).unwrap(),
+            "UNKNOWN",
+            false,
+            None,
+        );
+        let third = fixture_execution_status("ETF002", jan_5, "HALTED", false, None);
+        let batch =
+            execution_status_to_record_batch(&[third.clone(), second.clone(), first.clone()])
+                .unwrap();
+
+        let schema = execution_status_schema();
+        assert_eq!(crate::schema_fingerprint(&schema).unwrap().len(), 64);
+        assert!(
+            crate::logical_hash(
+                "execution_status",
+                &schema,
+                std::slice::from_ref(&batch),
+                &["instrument_id", "session_date"],
+            )
+            .is_ok()
+        );
+        assert!(execution_status_to_record_batch(&[first.clone(), first.clone()]).is_err());
+
+        let path = tempfile::NamedTempFile::new().unwrap();
+        write_parquet(path.path(), &batch, TEST_DSV).unwrap();
+        let read = read_parquet(path.path(), "execution_status", "1").unwrap();
+        assert_eq!(read.len(), 1);
+        assert_eq!(
+            execution_status_from_record_batch(&read[0]).unwrap(),
+            vec![first, second, third]
+        );
+        assert!(execution_status_from_record_batch(&batch).is_ok());
+        assert!(
+            execution_status_from_record_batch(
+                &sessions_to_record_batch(&[fixture_session("SYNTH")]).unwrap()
+            )
+            .is_err()
         );
     }
 
