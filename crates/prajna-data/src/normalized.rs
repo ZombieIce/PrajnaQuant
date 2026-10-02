@@ -883,7 +883,12 @@ mod tests {
 
     #[test]
     fn d7_schema_snapshot_has_exact_fields_types_nullability_and_metadata() {
-        let schemas = [instruments_schema(), bars_schema(), sessions_schema()];
+        let schemas = [
+            instruments_schema(),
+            bars_schema(),
+            sessions_schema(),
+            execution_status_schema(),
+        ];
         let expected = [
             (
                 "instruments",
@@ -943,6 +948,7 @@ mod tests {
                 ],
             ),
         ];
+        assert_eq!(schemas.len(), expected.len());
         for (schema, (table, fields)) in schemas.iter().zip(expected) {
             assert_eq!(
                 schema.metadata().get("prajna.table").map(String::as_str),
