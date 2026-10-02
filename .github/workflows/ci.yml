@@ -51,6 +51,15 @@ jobs:
             fi
           done
 
+      - name: Guard - prajna-research must not depend on the legacy warehouse or quant engine
+        run: |
+          set -euo pipefail
+          tree=$(cargo tree -p prajna-research -e normal,build,dev --prefix none --locked)
+          if grep -E '^(libduckdb-sys|duckdb|ashare-warehouse|quant-research) ' <<<"$tree"; then
+            echo "::error::prajna-research depends on the legacy warehouse or quant-research"
+            exit 1
+          fi
+
       - run: cargo fmt --all -- --check
       - run: cargo clippy -p quant-research --no-default-features --all-targets --locked -- -D warnings
       - run: cargo test -p quant-research --no-default-features --locked
@@ -58,6 +67,8 @@ jobs:
       - run: cargo test -p prajna-domain --locked
       - run: cargo clippy -p prajna-data --all-targets --locked -- -D warnings
       - run: cargo test -p prajna-data --locked
+      - run: cargo clippy -p prajna-research --all-targets --locked -- -D warnings
+      - run: cargo test -p prajna-research --locked
 
       - uses: actions/setup-python@v5
         with:
