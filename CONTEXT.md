@@ -34,6 +34,9 @@ _Avoid_: 用 ID 字符串推断标的是现货、永续还是交割。
 某个决策时点按明确来源、版本和成员可知性规则得到的候选 Instrument 集合。
 _Avoid_: 把今天的静态名单称为历史可投资全集。
 
+**Static Universe**:
+不随决策时点变化、带版本的显式 Instrument 列表；没有成员可知性证明，不是 point-in-time Universe。
+
 **Dataset Version**:
 可追溯到原始资料、规范化规则和内容身份的一版研究输入；修订产生新版本。
 
@@ -51,7 +54,17 @@ _Avoid_: 用 Parquet 文件字节 hash 判断两次重建是否相同。
 ## Research and execution
 
 **Factor**:
-在指定观察与可用时刻、Universe 和数据版本上产生可比较数值的研究定义。
+带版本的研究定义，声明种类、参数、输入字段、窗口、方向、缺失规则与可用时刻规则；本身不绑定 Universe 或 Dataset Version。
+
+**Factor Values**:
+一个 Factor 应用于特定 Dataset Version 与 Universe 得到的、带可用时刻的数值；同一 Factor 在不同输入上产生不同的 Factor Values。
+_Avoid_: 把计算结果直接称为 Factor。
+
+**Factor Cache**:
+按产生 Factor Values 的完整输入身份保存的不可变 Factor Values，可跨 Run 与进程复用。
+
+**Availability Assumption**:
+输入可用时刻未知时，Run 显式声明并随结果保存的替代规则；未声明时可用时刻未知的值不得用于决策。
 
 **Strategy**:
 依据可用信息产生目标权重或交易意图的版本化规则；其所需数据与执行能力由 Strategy Capability 声明。
