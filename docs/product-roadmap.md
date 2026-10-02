@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | POC-0 | 可复跑的性能/一致性 harness；B1 列式布局、B2 Fast Event 对 Nautilus、B3 Rust 对 Python callback | 固定输入/环境/版本、独立金标准、原始测量与结论；未测项目保持 unresolved |
 | MVP-0 | 自有 Domain Core、不可变 Raw、版本化 Dataset、Parquet/Arrow 契约 | 一份合成数据从来源/hash 到版本化输入可重建；当前 DuckDB 发布链边界仍可追溯 |
-| MVP-1 | Factor Registry、Factor Cache、Vector Engine | 相同因子定义/输入复用缓存，缺失/可用时刻口径正确；S2 Momentum Rotation 与独立金标准一致 |
+| MVP-1 | Factor Registry、Factor Cache、Vector Engine；含 D7 执行状态补充（[ADR 0016](decisions/0016-factor-cache-identity.md)、[ADR 0017](decisions/0017-vector-engine-semantics.md)） | 相同因子定义/输入复用缓存，缺失/可用时刻口径正确；S2 Momentum Rotation 与独立金标准一致 |
 | MVP-2 | Experiment、Run 身份、ResultLevel、Rayon 参数扫描 | 固定代码/数据/配置/seed 可重放；Summary 扫描不写完整事件，吞吐和资源有实测 |
 | MVP-3 | Portfolio、Virtual Portfolio、Fast Event L1 | 开工前由项目负责人审阅 POC-0 B2 正式结论与适用范围；实现验收为 S1/S2/S3 逐日现金＋持仓＝权益、费用可追溯，并与 Vector 在共同语义下对拍。B2 `adopt` 仅适用于登记合成负载，不等于生产 Engine 选型。 |
 | MVP-4 | Nautilus Adapter 与 Accurate Backend | Backend 隔离于自有 Domain；固定金标准与 Fast Event 的差异可解释，转换成本实测 |
@@ -24,4 +24,4 @@
 
 ## 最近的一个开发任务
 
-按 [`POC-0 Benchmark Spec`](poc-0-benchmark-spec.md) 扩展已跑通的 B1 标量读取切片：锁定 S2 的合成价格面板、缺失/窗口/排序规则和独立期望输出，再补 Polars 表达式、Parquet 扫描、排名/TopK、组合收益、转换与内存测量。任何历史 ETF 结果继续保留现有风险标注。B2/B3 在完整 B1 harness 可复跑后接入。
+MVP-1 首批可并行票据：D7 `execution_status` 表；独立 Vector 金标准（因子部分）；`prajna-research` crate 与 D7 面板读取。随后为 normalizer v3、64×252 v2 fixture（变化的 open）、Factor Registry/Cache、Vector Engine 与 S2 端到端验收。任何历史 ETF 结果继续保留现有风险标注。
