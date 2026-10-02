@@ -1,15 +1,16 @@
 # MVP-1 independent factor golden
 
-This is the independent Python-standard-library factor-value slice of M13. It
-reads the hand-authored JSON fixture directly; it does not read D7 Parquet or
-reuse Rust or `prajna-research` code.
+This is the independent Python-standard-library factor and Vector-result
+golden for the 3×10 fixture in M13. It reads the hand-authored JSON fixture
+directly; it does not read D7 Parquet or reuse Rust or `prajna-research` code.
 
-Regenerate the committed 3×10 expected output from the repository root:
+Regenerate the committed 3×10 factors and Vector result from the repository
+root:
 
 ```sh
 python3 poc/mvp1-golden/vector_golden.py \
   --fixture poc/poc0-benchmark/fixtures/dataset-v1.json \
-  --out poc/mvp1-golden/expected/dataset-v1.factors.json
+  --out poc/mvp1-golden/expected/dataset-v1.json
 ```
 
 Run the focused tests:
@@ -43,10 +44,42 @@ Availability follows spec M7. For this synthetic fixture only, each bar is
 assumed available at its session close, constructed from the session date and
 `bar_defaults.close_available_at`, then converted to an RFC 3339 UTC string.
 The result records the SHA-256 of the exact fixture bytes and the factor
-absolute tolerance (`1e-12`). This synthetic assumption is not evidence of
-real-market point-in-time availability.
+absolute tolerance (`1e-12`) and NAV absolute tolerance (`1e-10`). This
+synthetic assumption is not evidence of real-market point-in-time
+availability.
 
-The M6/M7 definitions and M13 independent-golden requirement are in
-[spec issue #53](https://github.com/ZombieIce/PrajnaQuant/issues/53). This
-ticket covers the 3×10 factor values and statuses only; it does not implement
-the larger M13 ranking or vector-result goldens.
+## Vector result
+
+The first decision is the first Venue Session with at least one `ok`
+`rotation_score`; subsequent decisions follow `rebalance_every` Venue
+Sessions. Scores rank descending with `instrument_id` as the ascending
+tie-breaker, and the first `top_n` names receive equal target weights. Sparse
+weight maps omit zero-weight instruments; omitted instruments are cash or
+zero-weight holdings.
+
+A decision made after a session close is attempted at the next session open.
+On a later decision, any still-pending target is replaced. An execution is
+deferred when any currently held instrument is not executable; otherwise
+unexecutable buy legs are skipped without redistributing their target weight.
+An instrument is executable only when it has an open bar, is marked tradable,
+and its execution-status availability is no later than the session open.
+Missing execution-status records are not executable.
+
+Session returns are measured from the previous Venue Session open to the
+current open using the previous session's post-execution weights. Missing
+open prices carry the last known valuation forward and are listed in
+`valuation_carried`; their return is recognized when a later open is observed.
+Target weights on each session row reflect the latest decision made by that
+session's close, while `weights_after_execution` reflect the open execution.
+NAV starts at `1.0` on the first session open; session transaction costs are
+applied after the open-to-open gross return. Cost is proportional:
+`buys * (commission_rate + buy_slippage_bps / 1e4 + buy_tax_rate) +
+sells * (commission_rate + sell_slippage_bps / 1e4 + sell_tax_rate)`.
+Minimum commission and lots are not modeled.
+
+M6/M7 and the independent-golden requirement are specified in
+[issue #53](https://github.com/ZombieIce/PrajnaQuant/issues/53); the Vector
+decision and execution rules are M11/M12. This fixture has constant opens, so
+all gross returns are zero and NAV changes only through transaction costs.
+It is a hand-checkable boundary fixture, not a point-in-time proof of a
+real-market universe or availability.
