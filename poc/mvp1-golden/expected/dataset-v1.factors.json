@@ -1,0 +1,654 @@
+{
+  "factors": {
+    "momentum(1)": [
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-05",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": "2026-01-06T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-06",
+        "status": "ok",
+        "value": 0.010000000000000009
+      },
+      {
+        "available_at": "2026-01-07T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-07",
+        "status": "ok",
+        "value": 0.00990099009900991
+      },
+      {
+        "available_at": "2026-01-08T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-08",
+        "status": "ok",
+        "value": 0.009803921568627416
+      },
+      {
+        "available_at": "2026-01-09T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-09",
+        "status": "ok",
+        "value": -0.03883495145631066
+      },
+      {
+        "available_at": "2026-01-12T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-12",
+        "status": "ok",
+        "value": -0.010101010101010055
+      },
+      {
+        "available_at": "2026-01-13T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-13",
+        "status": "ok",
+        "value": 0.020408163265306145
+      },
+      {
+        "available_at": "2026-01-14T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-14",
+        "status": "ok",
+        "value": 0.010000000000000009
+      },
+      {
+        "available_at": "2026-01-15T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-15",
+        "status": "ok",
+        "value": 0.00990099009900991
+      },
+      {
+        "available_at": "2026-01-16T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-16",
+        "status": "ok",
+        "value": 0.009803921568627416
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-05",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": "2026-01-06T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-06",
+        "status": "ok",
+        "value": -0.010000000000000009
+      },
+      {
+        "available_at": "2026-01-07T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-07",
+        "status": "ok",
+        "value": -0.010101010101010055
+      },
+      {
+        "available_at": "2026-01-08T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-08",
+        "status": "ok",
+        "value": 0.010204081632652962
+      },
+      {
+        "available_at": "2026-01-09T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-09",
+        "status": "ok",
+        "value": 0.030303030303030276
+      },
+      {
+        "available_at": "2026-01-12T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-12",
+        "status": "ok",
+        "value": 0.009803921568627416
+      },
+      {
+        "available_at": "2026-01-13T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-13",
+        "status": "ok",
+        "value": -0.01941747572815533
+      },
+      {
+        "available_at": "2026-01-14T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-14",
+        "status": "ok",
+        "value": -0.00990099009900991
+      },
+      {
+        "available_at": "2026-01-15T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-15",
+        "status": "ok",
+        "value": -0.010000000000000009
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-16",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-05",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": "2026-01-06T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-06",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-01-07T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-07",
+        "status": "ok",
+        "value": 0.010000000000000009
+      },
+      {
+        "available_at": "2026-01-08T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-08",
+        "status": "ok",
+        "value": -0.00990099009900991
+      },
+      {
+        "available_at": "2026-01-09T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-09",
+        "status": "ok",
+        "value": 0.010000000000000009
+      },
+      {
+        "available_at": "2026-01-12T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-12",
+        "status": "ok",
+        "value": 0.00990099009900991
+      },
+      {
+        "available_at": "2026-01-13T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-13",
+        "status": "ok",
+        "value": 0.009803921568627416
+      },
+      {
+        "available_at": "2026-01-14T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-14",
+        "status": "ok",
+        "value": 0.009708737864077666
+      },
+      {
+        "available_at": "2026-01-15T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-15",
+        "status": "ok",
+        "value": -0.009615384615384581
+      },
+      {
+        "available_at": "2026-01-16T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-16",
+        "status": "ok",
+        "value": 0.01941747572815533
+      }
+    ],
+    "rotation_score": [
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-05",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-06",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": "2026-01-07T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-07",
+        "status": "ok",
+        "value": 0.01980198019801982
+      },
+      {
+        "available_at": "2026-01-08T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-08",
+        "status": "ok",
+        "value": 0.019607843137254832
+      },
+      {
+        "available_at": "2026-01-09T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-09",
+        "status": "ok",
+        "value": -0.07766990291262132
+      },
+      {
+        "available_at": "2026-01-12T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-12",
+        "status": "ok",
+        "value": -0.02020202020202011
+      },
+      {
+        "available_at": "2026-01-13T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-13",
+        "status": "ok",
+        "value": 0.04081632653061229
+      },
+      {
+        "available_at": "2026-01-14T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-14",
+        "status": "ok",
+        "value": 0.020000000000000018
+      },
+      {
+        "available_at": "2026-01-15T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-15",
+        "status": "ok",
+        "value": 0.01980198019801982
+      },
+      {
+        "available_at": "2026-01-16T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-16",
+        "status": "ok",
+        "value": 0.019607843137254832
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-05",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-06",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": "2026-01-07T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-07",
+        "status": "ok",
+        "value": -0.02020202020202011
+      },
+      {
+        "available_at": "2026-01-08T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-08",
+        "status": "ok",
+        "value": 0.020408163265305923
+      },
+      {
+        "available_at": "2026-01-09T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-09",
+        "status": "ok",
+        "value": 0.06060606060606055
+      },
+      {
+        "available_at": "2026-01-12T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-12",
+        "status": "ok",
+        "value": 0.019607843137254832
+      },
+      {
+        "available_at": "2026-01-13T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-13",
+        "status": "ok",
+        "value": -0.03883495145631066
+      },
+      {
+        "available_at": "2026-01-14T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-14",
+        "status": "ok",
+        "value": -0.01980198019801982
+      },
+      {
+        "available_at": "2026-01-15T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-15",
+        "status": "ok",
+        "value": -0.020000000000000018
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-16",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-05",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-06",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": "2026-01-07T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-07",
+        "status": "ok",
+        "value": 0.020000000000000018
+      },
+      {
+        "available_at": "2026-01-08T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-08",
+        "status": "ok",
+        "value": -0.01980198019801982
+      },
+      {
+        "available_at": "2026-01-09T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-09",
+        "status": "ok",
+        "value": 0.020000000000000018
+      },
+      {
+        "available_at": "2026-01-12T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-12",
+        "status": "ok",
+        "value": 0.01980198019801982
+      },
+      {
+        "available_at": "2026-01-13T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-13",
+        "status": "ok",
+        "value": 0.019607843137254832
+      },
+      {
+        "available_at": "2026-01-14T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-14",
+        "status": "ok",
+        "value": 0.01941747572815533
+      },
+      {
+        "available_at": "2026-01-15T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-15",
+        "status": "ok",
+        "value": -0.019230769230769162
+      },
+      {
+        "available_at": "2026-01-16T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-16",
+        "status": "ok",
+        "value": 0.03883495145631066
+      }
+    ],
+    "volatility(2)": [
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-05",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-06",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": "2026-01-07T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-07",
+        "status": "ok",
+        "value": 7.001057239470774e-05
+      },
+      {
+        "available_at": "2026-01-08T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-08",
+        "status": "ok",
+        "value": 6.863781607327367e-05
+      },
+      {
+        "available_at": "2026-01-09T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-09",
+        "status": "ok",
+        "value": 0.03439287694520516
+      },
+      {
+        "available_at": "2026-01-12T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-12",
+        "status": "ok",
+        "value": 0.020317964782549637
+      },
+      {
+        "available_at": "2026-01-13T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-13",
+        "status": "ok",
+        "value": 0.02157324337571819
+      },
+      {
+        "available_at": "2026-01-14T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-14",
+        "status": "ok",
+        "value": 0.007359682824594688
+      },
+      {
+        "available_at": "2026-01-15T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-15",
+        "status": "ok",
+        "value": 7.001057239470774e-05
+      },
+      {
+        "available_at": "2026-01-16T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-16",
+        "status": "ok",
+        "value": 6.863781607327367e-05
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-05",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-06",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": "2026-01-07T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-07",
+        "status": "ok",
+        "value": 7.142492739254176e-05
+      },
+      {
+        "available_at": "2026-01-08T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-08",
+        "status": "ok",
+        "value": 0.01435786805748803
+      },
+      {
+        "available_at": "2026-01-09T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-09",
+        "status": "ok",
+        "value": 0.014212102899544141
+      },
+      {
+        "available_at": "2026-01-12T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-12",
+        "status": "ok",
+        "value": 0.014495058794376648
+      },
+      {
+        "available_at": "2026-01-13T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-13",
+        "status": "ok",
+        "value": 0.02066264818430133
+      },
+      {
+        "available_at": "2026-01-14T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-14",
+        "status": "ok",
+        "value": 0.0067291715214330555
+      },
+      {
+        "available_at": "2026-01-15T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-15",
+        "status": "ok",
+        "value": 7.001057239470774e-05
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-16",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-05",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-06",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": "2026-01-07T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-07",
+        "status": "ok",
+        "value": 0.007071067811865481
+      },
+      {
+        "available_at": "2026-01-08T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-08",
+        "status": "ok",
+        "value": 0.014072125051336254
+      },
+      {
+        "available_at": "2026-01-09T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-09",
+        "status": "ok",
+        "value": 0.014072125051336254
+      },
+      {
+        "available_at": "2026-01-12T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-12",
+        "status": "ok",
+        "value": 7.001057239470774e-05
+      },
+      {
+        "available_at": "2026-01-13T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-13",
+        "status": "ok",
+        "value": 6.863781607327367e-05
+      },
+      {
+        "available_at": "2026-01-14T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-14",
+        "status": "ok",
+        "value": 6.730504294558546e-05
+      },
+      {
+        "available_at": "2026-01-15T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-15",
+        "status": "ok",
+        "value": 0.013664218045707156
+      },
+      {
+        "available_at": "2026-01-16T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-16",
+        "status": "ok",
+        "value": 0.02052933242615907
+      }
+    ]
+  },
+  "fixture_sha256": "9b9009b1586a6f271cd301042f97f2adf84146c870d72802682799d60352ed85",
+  "parameters": {
+    "long_momentum_weight": 1.0,
+    "momentum_long_days": 1,
+    "momentum_short_days": 1,
+    "short_momentum_weight": 1.0,
+    "trend_filter": false,
+    "trend_window": null,
+    "volatility_weight": 0.0,
+    "volatility_window": 2
+  },
+  "tolerance": {
+    "factor_abs": 1e-12
+  }
+}
