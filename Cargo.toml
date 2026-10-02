@@ -16,7 +16,12 @@ debug = "line-tables-only"
 incremental = true
 
 [workspace]
-members = ["crates/prajna-domain", "crates/prajna-data", "crates/quant-research"]
+members = [
+    "crates/prajna-domain",
+    "crates/prajna-data",
+    "crates/prajna-research",
+    "crates/quant-research",
+]
 resolver = "2"
 
 [patch.crates-io]
