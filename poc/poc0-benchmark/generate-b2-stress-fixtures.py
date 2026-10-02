@@ -55,6 +55,29 @@ def s2_dataset(base: dict) -> dict:
     return result
 
 
+def s2_dataset_v2(base: dict) -> dict:
+    result = s2_dataset(base)
+    result["dataset_version"] = "poc0.b3.s2-scale-64x252.v2"
+    result["seed_semantics"] = (
+        "deterministic arithmetic close paths; open[0] = close[0]; "
+        "open[d] = round(close[d-1] * "
+        "(1 + (((instrument_index * 7 + d * 3) % 11 - 5) * 0.001)), 2) for d > 0"
+    )
+    for instrument_index, instrument in enumerate(result["instruments"]):
+        closes = instrument["closes"]
+        instrument["opens"] = [
+            closes[0]
+            if day == 0
+            else round(
+                closes[day - 1]
+                * (1 + (((instrument_index * 7 + day * 3) % 11 - 5) * 0.001)),
+                2,
+            )
+            for day in range(len(closes))
+        ]
+    return result
+
+
 def s3_dataset(base: dict, ma: dict) -> dict:
     sessions = 252
     calendar = weekdays(date.fromisoformat(ma["start_date"]), sessions)
@@ -94,6 +117,8 @@ def main() -> None:
     ma = json.loads((FIXTURES / "b2-ma20-60-v1.json").read_text())
     FIXTURES.joinpath("b2-s2-scale-64x252-v1.json").write_text(
         json.dumps(s2_dataset(base), indent=2) + "\n", encoding="utf-8")
+    FIXTURES.joinpath("b2-s2-scale-64x252-v2.json").write_text(
+        json.dumps(s2_dataset_v2(base), indent=2) + "\n", encoding="utf-8")
     FIXTURES.joinpath("b2-s3-scale-64x252-v1.json").write_text(
         json.dumps(s3_dataset(base, ma), indent=2) + "\n", encoding="utf-8")
 
