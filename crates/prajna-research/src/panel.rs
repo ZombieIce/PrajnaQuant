@@ -100,9 +100,9 @@ pub fn load_panel(
         )));
     }
 
-    let instruments_batches = read_table(lake_root, &manifest, "instruments")?;
-    let sessions_batches = read_table(lake_root, &manifest, "sessions")?;
-    let bars_batches = read_table(lake_root, &manifest, "bars")?;
+    let (_, instruments_batches) = read_table(lake_root, &manifest, "instruments")?;
+    let (_, sessions_batches) = read_table(lake_root, &manifest, "sessions")?;
+    let (_, bars_batches) = read_table(lake_root, &manifest, "bars")?;
 
     let instruments = read_instruments(&instruments_batches, venue)?;
     let sessions = read_sessions(&sessions_batches, venue)?;

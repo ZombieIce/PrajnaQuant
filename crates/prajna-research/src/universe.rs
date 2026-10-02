@@ -8,6 +8,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use fs2::FileExt;
 use prajna_data::{
     CanonicalError, DataError, ManifestError, instruments_from_record_batch, instruments_schema,
     logical_hash, read_manifest, restricted_jcs, schema_fingerprint,
@@ -206,6 +207,14 @@ impl StaticUniverse {
         let directory = lake_root.as_ref().join("universes");
         fs::create_dir_all(&directory)?;
         let destination = directory.join(format!("{hex}.json"));
+        let lock_path = directory.join(format!(".{hex}.lock"));
+        let lock_file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(lock_path)?;
+        FileExt::lock_exclusive(&lock_file)?;
 
         if destination.exists() {
             return verify_existing(&destination, &bytes);
@@ -283,13 +292,7 @@ fn read_dsv_instruments(
             manifest.core.manifest_version
         )));
     }
-    let table = manifest
-        .core
-        .tables
-        .iter()
-        .find(|table| table.table == "instruments")
-        .ok_or_else(|| UniverseError::InvalidManifest("missing instruments table".into()))?;
-    let batches = read_table(lake_root, &manifest, "instruments")?;
+    let (table, batches) = read_table(lake_root, &manifest, "instruments")?;
     let schema = batches
         .first()
         .map(|batch| batch.schema())

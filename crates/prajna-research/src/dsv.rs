@@ -1,7 +1,7 @@
 use std::{error::Error, fmt, path::Path};
 
 use arrow_array::RecordBatch;
-use prajna_data::{DataError, Manifest, read_parquet};
+use prajna_data::{DataError, Manifest, ManifestTable, read_parquet};
 
 #[derive(Debug)]
 pub(crate) enum DsvTableError {
@@ -35,11 +35,11 @@ impl From<DataError> for DsvTableError {
     }
 }
 
-pub(crate) fn read_table(
+pub(crate) fn read_table<'a>(
     lake_root: &Path,
-    manifest: &Manifest,
+    manifest: &'a Manifest,
     table_name: &str,
-) -> Result<Vec<RecordBatch>, DsvTableError> {
+) -> Result<(&'a ManifestTable, Vec<RecordBatch>), DsvTableError> {
     let table = manifest
         .core
         .tables
@@ -76,5 +76,5 @@ pub(crate) fn read_table(
             )));
         }
     }
-    Ok(batches)
+    Ok((table, batches))
 }
