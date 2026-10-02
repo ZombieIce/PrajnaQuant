@@ -26,12 +26,27 @@
 可被观察、评分、持有或交易的具体金融标的，身份须能区分 Venue 与资产类型。
 _Avoid_: 仅用裸 symbol 代表跨市场唯一身份。
 
+**InstrumentSpec**:
+对一个 Instrument 的经校验描述：种类、币种、乘数、到期日、价格与数量最小变动单位、交易时区；语义只从它读取，不从 `{SYMBOL}.{VENUE}` 形式的 ID 解析，同一 ID 不得对应不同 Spec。
+_Avoid_: 用 ID 字符串推断标的是现货、永续还是交割。
+
 **Universe**:
 某个决策时点按明确来源、版本和成员可知性规则得到的候选 Instrument 集合。
 _Avoid_: 把今天的静态名单称为历史可投资全集。
 
 **Dataset Version**:
 可追溯到原始资料、规范化规则和内容身份的一版研究输入；修订产生新版本。
+
+**Raw Object**:
+按 SHA-256 内容寻址、写入后不可改的原始字节，附只追加的来源记录；同一 hash 的字节不同即为损坏，不覆盖。
+_Avoid_: 把规范化后的表或本地采集时间 `observed_at` 当作原文或历史发布时间。
+
+**Normalizer**:
+按 `(id, version)` 登记、把 Raw Object 确定性地转换为规范化表的版本化规则；规则修订是新版本，并产生新的 Dataset Version。
+
+**Logical Hash**:
+对一张规范化表按主键排序后的值（而非 Parquet 文件字节）计算的 SHA-256，与 schema 指纹共同判定“逻辑相同”。
+_Avoid_: 用 Parquet 文件字节 hash 判断两次重建是否相同。
 
 ## Research and execution
 
