@@ -2590,6 +2590,7 @@ dependencies = [
  "arrow-cast",
  "arrow-schema",
  "chrono",
+ "chrono-tz",
  "fs2",
  "parquet",
  "prajna-domain",

@@ -47,7 +47,7 @@ impl NormalizationIssue {
     }
 }
 
-/// The three logical tables and audit facts produced by a Normalizer.
+/// Logical tables and audit facts produced by a Normalizer.
 #[derive(Debug, Clone)]
 pub struct NormalizationOutput {
     pub tables: NormalizedTables,
@@ -61,6 +61,7 @@ pub struct NormalizedTables {
     pub instruments: RecordBatch,
     pub sessions: RecordBatch,
     pub bars: RecordBatch,
+    pub execution_status: Option<RecordBatch>,
 }
 
 /// A versioned conversion from immutable raw bytes to the normalized contract.
@@ -89,6 +90,7 @@ impl NormalizerRegistry {
         let mut registry = Self::new();
         registry.register(synthetic_etf_daily::SyntheticEtfDaily::v1());
         registry.register(synthetic_etf_daily::SyntheticEtfDaily::v2());
+        registry.register(synthetic_etf_daily::SyntheticEtfDaily::v3());
         registry
     }
 
@@ -123,7 +125,7 @@ mod tests {
 
         assert!(registry.contains("synthetic-etf-daily", "1"));
         assert!(registry.contains("synthetic-etf-daily", "2"));
-        assert!(!registry.contains("synthetic-etf-daily", "3"));
+        assert!(registry.contains("synthetic-etf-daily", "3"));
         assert!(!registry.contains("other", "1"));
     }
 }
