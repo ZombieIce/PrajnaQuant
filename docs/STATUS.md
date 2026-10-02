@@ -119,7 +119,7 @@ Batch 2 的增量同步/行情页已有代码、隔离小样本和合成浏览�
 ## Missing
 
 - 历史 ETF 名录与上市/退市日期、可信历史交易状态源及可知时刻、涨跌停规则执行、公司行动/分红总回报。
-- Factor Values 数值计算与持久缓存、因子值分布统计和相关矩阵；独立订单流水/可查询持仓时序 API；统一策略 ID/版本。回测报告内已有逐日持仓快照，但尚无独立持仓查询接口。MVP-1 M13 的独立标准库因子值/status 金标准目前覆盖 3×10 fixture（见 `poc/mvp1-golden/`）；64×252、排名与 Vector 组合结果金标准尚未交付。
+- Factor Values 数值计算与持久缓存、因子值分布统计和相关矩阵；独立订单流水/可查询持仓时序 API；统一策略 ID/版本。回测报告内已有逐日持仓快照，但尚无独立持仓查询接口。MVP-1 M13 的独立标准库因子值/status、排名与 Vector 组合结果金标准已覆盖 3×10 和 64×252 v2（含 trend20）合成 fixture（见 `poc/mvp1-golden/`）；这不是 PIT 或真实市场数据验证。
 - 后端 Sortino、Win Rate、Benchmark Return、Excess Return、Tracking Error、Information Ratio。
 - 历史指数成分 provider 和完整覆盖证明；当前指数 Universe API 对历史成分明确返回空、unknown/gaps。
 - React 的基准/超额净值、月度收益热图、年度收益、逐日持仓权重、组合换手、成交与交易成本明细；因子值分布与相关热图。策略详情现有逐日资金占用率、持股数量和期末逐标的盈亏摘要。
