@@ -697,6 +697,13 @@ python3 poc/poc0-benchmark/capture-build-resource.py --profile release --scope p
   --run-measurements
 ```
 
+The generator also writes the MVP-1 S2 fixture
+[`b2-s2-scale-64x252-v2.json`](fixtures/b2-s2-scale-64x252-v2.json), whose per-instrument opens
+vary deterministically from the prior session's close. Its SHA-256 is
+`c805d3ef0873171d89b4380ef593c5a032d9c302783ce620b11eb09a85d5c36e`. The existing v1 S2 and
+S3 fixture hashes remain `5e806babd29091858c63c5a04f7e1165d61599d03f26726f5132a587caac9593` and
+`1f9396bf449d0ac79ad2040b5ef2a5fe4970345b1888fbadbfac540f17a5c747`, respectively.
+
 The 2026-09-28 report records two independent S2 projection comparisons with identical Nautilus
 checksums and the same six non-excluded failed fields (Rust 351 orders/Fills; Nautilus 348), so it
 skipped S2 performance collection and mapped robustness to `reject` under the original ADR 0013
