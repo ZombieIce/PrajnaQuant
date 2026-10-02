@@ -377,9 +377,7 @@ fn required_string<'a>(
     table: &str,
     name: &str,
 ) -> Result<&'a str, PanelError> {
-    if values.is_null(row) {
-        return Err(invalid_table(table, format!("null {name} at row {row}")));
-    }
+    require_non_null(values, row, table, name)?;
     Ok(values.value(row))
 }
 
@@ -389,9 +387,7 @@ fn required_date(
     table: &str,
     name: &str,
 ) -> Result<i32, PanelError> {
-    if values.is_null(row) {
-        return Err(invalid_table(table, format!("null {name} at row {row}")));
-    }
+    require_non_null(values, row, table, name)?;
     Ok(values.value(row))
 }
 
@@ -401,9 +397,7 @@ fn required_timestamp(
     table: &str,
     name: &str,
 ) -> Result<i64, PanelError> {
-    if values.is_null(row) {
-        return Err(invalid_table(table, format!("null {name} at row {row}")));
-    }
+    require_non_null(values, row, table, name)?;
     Ok(values.value(row))
 }
 
@@ -413,10 +407,20 @@ fn required_decimal(
     table: &str,
     name: &str,
 ) -> Result<i128, PanelError> {
+    require_non_null(values, row, table, name)?;
+    Ok(values.value(row))
+}
+
+fn require_non_null(
+    values: &dyn Array,
+    row: usize,
+    table: &str,
+    name: &str,
+) -> Result<(), PanelError> {
     if values.is_null(row) {
         return Err(invalid_table(table, format!("null {name} at row {row}")));
     }
-    Ok(values.value(row))
+    Ok(())
 }
 
 fn date32_to_naive_date(days: i32) -> Result<NaiveDate, PanelError> {
