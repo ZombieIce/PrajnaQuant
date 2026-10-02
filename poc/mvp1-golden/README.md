@@ -83,3 +83,31 @@ decision and execution rules are M11/M12. This fixture has constant opens, so
 all gross returns are zero and NAV changes only through transaction costs.
 It is a hand-checkable boundary fixture, not a point-in-time proof of a
 real-market universe or availability.
+
+## 64×252 v2 scale golden
+
+Both outputs use
+`poc/poc0-benchmark/fixtures/b2-s2-scale-64x252-v2.json`, whose SHA-256 is
+`c805d3ef0873171d89b4380ef593c5a032d9c302783ce620b11eb09a85d5c36e`.
+The fixture configures momentum windows 20/60, volatility window 20, score
+weights 1/1/1, `top_n=5`, and `rebalance_every=5`.
+
+Regenerate the outputs from the repository root:
+
+```sh
+python3 poc/mvp1-golden/vector_golden.py \
+  --fixture poc/poc0-benchmark/fixtures/b2-s2-scale-64x252-v2.json \
+  --out poc/mvp1-golden/expected/b2-s2-scale-64x252-v2.json
+
+python3 poc/mvp1-golden/vector_golden.py \
+  --fixture poc/poc0-benchmark/fixtures/b2-s2-scale-64x252-v2.json \
+  --trend 20 \
+  --out poc/mvp1-golden/expected/b2-s2-scale-64x252-v2.trend20.json
+```
+
+The scale fixture includes a missing `ETF001` bar on 2025-07-01 and a HALTED
+status for `ETF002` on 2025-07-02. The preceding session executes the pending
+target, so no execution record is expected on the HALTED session itself. The
+golden tests verify these statuses, complete factor/session coverage, non-zero
+gross returns, the trend-filtered ranking difference, and byte-for-byte
+reproducibility.

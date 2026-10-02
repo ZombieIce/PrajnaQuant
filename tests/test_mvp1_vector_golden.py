@@ -10,6 +10,11 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "poc/poc0-benchmark/fixtures/dataset-v1.json"
 SCRIPT = ROOT / "poc/mvp1-golden/vector_golden.py"
+SCALE_FIXTURE = ROOT / "poc/poc0-benchmark/fixtures/b2-s2-scale-64x252-v2.json"
+SCALE_EXPECTED = {
+    None: ROOT / "poc/mvp1-golden/expected/b2-s2-scale-64x252-v2.json",
+    20: ROOT / "poc/mvp1-golden/expected/b2-s2-scale-64x252-v2.trend20.json",
+}
 
 
 class VectorGoldenTests(unittest.TestCase):
@@ -94,6 +99,132 @@ class VectorGoldenTests(unittest.TestCase):
             first = self.run_cli(Path(directory) / "first.json")
             second = self.run_cli(Path(directory) / "second.json")
             self.assertEqual(first, second)
+
+    def test_scale_v2_expected_outputs_cover_structure_and_semantics(self):
+        fixture = json.loads(SCALE_FIXTURE.read_text(encoding="utf-8"))
+        self.assertEqual(len(fixture["calendar"]), 252)
+        self.assertEqual(len(fixture["instruments"]), 64)
+        expected_rows = len(fixture["calendar"]) * len(fixture["instruments"])
+        expected_factor_rows = {
+            (f"{instrument['symbol']}.SYNTH", session_date)
+            for instrument in fixture["instruments"]
+            for session_date in fixture["calendar"]
+        }
+        expected_factor_names = {
+            "momentum(20)",
+            "momentum(60)",
+            "volatility(20)",
+            "rotation_score",
+        }
+        missing_bar = fixture["missing_bars"][0]
+        halted = fixture["execution_status_overrides"][0]
+        self.assertEqual(halted["trade_status"], "HALTED")
+        self.assertFalse(halted["is_tradable"])
+
+        outputs = {}
+        with tempfile.TemporaryDirectory() as directory:
+            for trend in (None, 20):
+                output_path = Path(directory) / f"trend-{trend}.json"
+                generated = self.run_cli(
+                    output_path,
+                    fixture_path=SCALE_FIXTURE,
+                    trend=trend,
+                )
+                repeated = self.run_cli(
+                    Path(directory) / f"repeat-trend-{trend}.json",
+                    fixture_path=SCALE_FIXTURE,
+                    trend=trend,
+                )
+                self.assertEqual(generated, repeated)
+                self.assertEqual(generated, SCALE_EXPECTED[trend].read_bytes())
+                outputs[trend] = json.loads(generated)
+
+        for trend, output in outputs.items():
+            factor_names = expected_factor_names | (
+                {"trend_filter(20)"} if trend is not None else set()
+            )
+            self.assertEqual(set(output["factors"]), factor_names)
+            for rows in output["factors"].values():
+                self.assertEqual(len(rows), expected_rows)
+                self.assertEqual(
+                    {
+                        (row["instrument_id"], row["session_date"])
+                        for row in rows
+                    },
+                    expected_factor_rows,
+                )
+
+            vector = output["vector"]
+            self.assertEqual(
+                [row["session_date"] for row in vector["sessions"]],
+                fixture["calendar"],
+            )
+            self.assertEqual(len(vector["sessions"]), 252)
+
+            missing_instrument = f"{missing_bar['symbol']}.SYNTH"
+            for factor_name in factor_names - {"trend_filter(20)"}:
+                missing_row = next(
+                    row
+                    for row in output["factors"][factor_name]
+                    if row["instrument_id"] == missing_instrument
+                    and row["session_date"] == missing_bar["date"]
+                )
+                self.assertEqual(missing_row["status"], "missing_input")
+                self.assertIsNone(missing_row["value"])
+                self.assertIsNone(missing_row["available_at"])
+            if trend is not None:
+                missing_trend = next(
+                    row
+                    for row in output["factors"]["trend_filter(20)"]
+                    if row["instrument_id"] == missing_instrument
+                    and row["session_date"] == missing_bar["date"]
+                )
+                self.assertEqual(missing_trend["status"], "missing_input")
+                self.assertIsNone(missing_trend["value"])
+                self.assertIsNone(missing_trend["available_at"])
+
+            execution_dates = {
+                row["session_date"] for row in vector["executions"]
+            }
+            previous_session = fixture["calendar"][
+                fixture["calendar"].index(halted["date"]) - 1
+            ]
+            previous_execution = next(
+                row
+                for row in vector["executions"]
+                if row["session_date"] == previous_session
+            )
+            self.assertEqual(previous_execution["kind"], "executed")
+            self.assertNotIn(halted["date"], execution_dates)
+            self.assertTrue(
+                any(row["gross_return"] != 0 for row in vector["sessions"])
+            )
+
+        trend_output = outputs[20]
+        self.assertTrue(
+            any(
+                row["status"] == "filtered"
+                for row in trend_output["factors"]["rotation_score"]
+            )
+        )
+        plain_decisions = {
+            row["decision_session"]: row
+            for row in outputs[None]["vector"]["decisions"]
+        }
+        trend_decisions = {
+            row["decision_session"]: row
+            for row in trend_output["vector"]["decisions"]
+        }
+        self.assertEqual(set(plain_decisions), set(trend_decisions))
+        self.assertTrue(
+            any(
+                plain_decisions[session]["ranked"]
+                != trend_decisions[session]["ranked"]
+                or plain_decisions[session]["targets"]
+                != trend_decisions[session]["targets"]
+                for session in plain_decisions
+            )
+        )
 
     def test_committed_expected_output_matches_the_cli(self):
         expected_path = ROOT / "poc/mvp1-golden/expected/dataset-v1.json"
