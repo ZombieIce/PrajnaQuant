@@ -649,6 +649,386 @@
     "volatility_window": 2
   },
   "tolerance": {
-    "factor_abs": 1e-12
+    "factor_abs": 1e-12,
+    "nav_abs": 1e-10
+  },
+  "vector": {
+    "decisions": [
+      {
+        "decision_session": "2026-01-07",
+        "ranked": [
+          {
+            "instrument_id": "C.SYNTH",
+            "rank": 1,
+            "score": 0.020000000000000018
+          },
+          {
+            "instrument_id": "A.SYNTH",
+            "rank": 2,
+            "score": 0.01980198019801982
+          },
+          {
+            "instrument_id": "B.SYNTH",
+            "rank": 3,
+            "score": -0.02020202020202011
+          }
+        ],
+        "targets": {
+          "C.SYNTH": 1.0
+        }
+      },
+      {
+        "decision_session": "2026-01-08",
+        "ranked": [
+          {
+            "instrument_id": "B.SYNTH",
+            "rank": 1,
+            "score": 0.020408163265305923
+          },
+          {
+            "instrument_id": "A.SYNTH",
+            "rank": 2,
+            "score": 0.019607843137254832
+          },
+          {
+            "instrument_id": "C.SYNTH",
+            "rank": 3,
+            "score": -0.01980198019801982
+          }
+        ],
+        "targets": {
+          "B.SYNTH": 1.0
+        }
+      },
+      {
+        "decision_session": "2026-01-09",
+        "ranked": [
+          {
+            "instrument_id": "B.SYNTH",
+            "rank": 1,
+            "score": 0.06060606060606055
+          },
+          {
+            "instrument_id": "C.SYNTH",
+            "rank": 2,
+            "score": 0.020000000000000018
+          },
+          {
+            "instrument_id": "A.SYNTH",
+            "rank": 3,
+            "score": -0.07766990291262132
+          }
+        ],
+        "targets": {
+          "B.SYNTH": 1.0
+        }
+      },
+      {
+        "decision_session": "2026-01-12",
+        "ranked": [
+          {
+            "instrument_id": "C.SYNTH",
+            "rank": 1,
+            "score": 0.01980198019801982
+          },
+          {
+            "instrument_id": "B.SYNTH",
+            "rank": 2,
+            "score": 0.019607843137254832
+          },
+          {
+            "instrument_id": "A.SYNTH",
+            "rank": 3,
+            "score": -0.02020202020202011
+          }
+        ],
+        "targets": {
+          "C.SYNTH": 1.0
+        }
+      },
+      {
+        "decision_session": "2026-01-13",
+        "ranked": [
+          {
+            "instrument_id": "A.SYNTH",
+            "rank": 1,
+            "score": 0.04081632653061229
+          },
+          {
+            "instrument_id": "C.SYNTH",
+            "rank": 2,
+            "score": 0.019607843137254832
+          },
+          {
+            "instrument_id": "B.SYNTH",
+            "rank": 3,
+            "score": -0.03883495145631066
+          }
+        ],
+        "targets": {
+          "A.SYNTH": 1.0
+        }
+      },
+      {
+        "decision_session": "2026-01-14",
+        "ranked": [
+          {
+            "instrument_id": "A.SYNTH",
+            "rank": 1,
+            "score": 0.020000000000000018
+          },
+          {
+            "instrument_id": "C.SYNTH",
+            "rank": 2,
+            "score": 0.01941747572815533
+          },
+          {
+            "instrument_id": "B.SYNTH",
+            "rank": 3,
+            "score": -0.01980198019801982
+          }
+        ],
+        "targets": {
+          "A.SYNTH": 1.0
+        }
+      },
+      {
+        "decision_session": "2026-01-15",
+        "ranked": [
+          {
+            "instrument_id": "A.SYNTH",
+            "rank": 1,
+            "score": 0.01980198019801982
+          },
+          {
+            "instrument_id": "C.SYNTH",
+            "rank": 2,
+            "score": -0.019230769230769162
+          },
+          {
+            "instrument_id": "B.SYNTH",
+            "rank": 3,
+            "score": -0.020000000000000018
+          }
+        ],
+        "targets": {
+          "A.SYNTH": 1.0
+        }
+      },
+      {
+        "decision_session": "2026-01-16",
+        "ranked": [
+          {
+            "instrument_id": "C.SYNTH",
+            "rank": 1,
+            "score": 0.03883495145631066
+          },
+          {
+            "instrument_id": "A.SYNTH",
+            "rank": 2,
+            "score": 0.019607843137254832
+          }
+        ],
+        "targets": {
+          "C.SYNTH": 1.0
+        }
+      }
+    ],
+    "executions": [
+      {
+        "blocked": [],
+        "kind": "executed",
+        "session_date": "2026-01-08",
+        "skipped_buys": [
+          "C.SYNTH"
+        ]
+      },
+      {
+        "blocked": [],
+        "kind": "executed",
+        "session_date": "2026-01-09",
+        "skipped_buys": []
+      },
+      {
+        "blocked": [],
+        "kind": "executed",
+        "session_date": "2026-01-12",
+        "skipped_buys": []
+      },
+      {
+        "blocked": [
+          "B.SYNTH"
+        ],
+        "kind": "deferred",
+        "session_date": "2026-01-13",
+        "skipped_buys": []
+      },
+      {
+        "blocked": [],
+        "kind": "executed",
+        "session_date": "2026-01-14",
+        "skipped_buys": []
+      },
+      {
+        "blocked": [],
+        "kind": "executed",
+        "session_date": "2026-01-15",
+        "skipped_buys": []
+      },
+      {
+        "blocked": [],
+        "kind": "executed",
+        "session_date": "2026-01-16",
+        "skipped_buys": []
+      }
+    ],
+    "pending_at_end": {
+      "decision_session": "2026-01-16",
+      "targets": {
+        "C.SYNTH": 1.0
+      }
+    },
+    "sessions": [
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-05",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-06",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-07",
+        "target_weights": {
+          "C.SYNTH": 1.0
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-08",
+        "target_weights": {
+          "B.SYNTH": 1.0
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.002,
+        "gross_return": 0.0,
+        "nav": 0.998,
+        "net_return": -0.0020000000000000018,
+        "session_date": "2026-01-09",
+        "target_weights": {
+          "B.SYNTH": 1.0
+        },
+        "turnover": 1.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "B.SYNTH": 1.0
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.998,
+        "net_return": 0.0,
+        "session_date": "2026-01-12",
+        "target_weights": {
+          "C.SYNTH": 1.0
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "B.SYNTH": 1.0
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.998,
+        "net_return": 0.0,
+        "session_date": "2026-01-13",
+        "target_weights": {
+          "A.SYNTH": 1.0
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "B.SYNTH": 1.0
+        }
+      },
+      {
+        "cost": 0.004,
+        "gross_return": 0.0,
+        "nav": 0.994008,
+        "net_return": -0.0040000000000000036,
+        "session_date": "2026-01-14",
+        "target_weights": {
+          "A.SYNTH": 1.0
+        },
+        "turnover": 2.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 1.0
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.994008,
+        "net_return": 0.0,
+        "session_date": "2026-01-15",
+        "target_weights": {
+          "A.SYNTH": 1.0
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 1.0
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.994008,
+        "net_return": 0.0,
+        "session_date": "2026-01-16",
+        "target_weights": {
+          "C.SYNTH": 1.0
+        },
+        "turnover": 0.0,
+        "valuation_carried": [
+          "B.SYNTH"
+        ],
+        "weights_after_execution": {
+          "A.SYNTH": 1.0
+        }
+      }
+    ]
   }
 }

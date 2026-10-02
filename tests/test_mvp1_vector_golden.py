@@ -33,7 +33,10 @@ class VectorGoldenTests(unittest.TestCase):
             output_bytes = self.run_cli(output_path)
             output = json.loads(output_bytes)
 
-            self.assertEqual(output["tolerance"], {"factor_abs": 1e-12})
+            self.assertEqual(
+                output["tolerance"],
+                {"factor_abs": 1e-12, "nav_abs": 1e-10},
+            )
             self.assertEqual(
                 set(output["factors"]),
                 {"momentum(1)", "volatility(2)", "rotation_score"},
@@ -93,12 +96,89 @@ class VectorGoldenTests(unittest.TestCase):
             self.assertEqual(first, second)
 
     def test_committed_expected_output_matches_the_cli(self):
-        expected_path = (
-            ROOT / "poc/mvp1-golden/expected/dataset-v1.factors.json"
-        )
+        expected_path = ROOT / "poc/mvp1-golden/expected/dataset-v1.json"
         with tempfile.TemporaryDirectory() as directory:
-            generated = self.run_cli(Path(directory) / "factors.json")
+            generated = self.run_cli(Path(directory) / "dataset-v1.json")
         self.assertEqual(generated, expected_path.read_bytes())
+
+    def test_vector_matches_hand_derived_execution_costs_and_nav(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output_path = Path(directory) / "dataset-v1.json"
+            self.run_cli(output_path)
+            output = json.loads(output_path.read_bytes())
+
+        vector = output["vector"]
+        sessions = {
+            row["session_date"]: row for row in vector["sessions"]
+        }
+        decisions = {
+            row["decision_session"]: row for row in vector["decisions"]
+        }
+        executions = {
+            row["session_date"]: row for row in vector["executions"]
+        }
+        self.assertEqual(len(vector["sessions"]), 10)
+        self.assertEqual(len(vector["decisions"]), 8)
+
+        # Jan 7 selects C; Jan 8 skips its UNKNOWN buy; Jan 13 defers the
+        # C rebalance because held B is HALTED; Jan 14 executes the new A target.
+        self.assertEqual(
+            decisions["2026-01-07"]["targets"], {"C.SYNTH": 1.0}
+        )
+        self.assertEqual(
+            executions["2026-01-08"],
+            {
+                "session_date": "2026-01-08",
+                "kind": "executed",
+                "blocked": [],
+                "skipped_buys": ["C.SYNTH"],
+            },
+        )
+        self.assertEqual(
+            executions["2026-01-13"],
+            {
+                "session_date": "2026-01-13",
+                "kind": "deferred",
+                "blocked": ["B.SYNTH"],
+                "skipped_buys": [],
+            },
+        )
+        self.assertEqual(sessions["2026-01-09"]["turnover"], 1.0)
+        self.assertAlmostEqual(
+            sessions["2026-01-09"]["cost"], 0.002, delta=1e-15
+        )
+        self.assertEqual(sessions["2026-01-14"]["turnover"], 2.0)
+        self.assertAlmostEqual(
+            sessions["2026-01-14"]["cost"], 0.004, delta=1e-15
+        )
+        self.assertTrue(
+            all(row["gross_return"] == 0 for row in vector["sessions"])
+        )
+        expected_nav = [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.998,
+            0.998,
+            0.998,
+            0.994008,
+            0.994008,
+            0.994008,
+        ]
+        for row, expected in zip(vector["sessions"], expected_nav):
+            self.assertAlmostEqual(row["nav"], expected, delta=1e-10)
+        self.assertEqual(
+            sessions["2026-01-16"]["valuation_carried"], ["B.SYNTH"]
+        )
+        self.assertEqual(
+            vector["pending_at_end"],
+            {
+                "decision_session": "2026-01-16",
+                "targets": {"C.SYNTH": 1.0},
+            },
+        )
+        self.assertEqual(output["tolerance"]["nav_abs"], 1e-10)
 
     def test_cli_applies_trend_filter_and_preserves_its_availability(self):
         with tempfile.TemporaryDirectory() as directory:

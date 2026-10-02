@@ -55,6 +55,20 @@ def timestamp_text(timestamp):
     return timestamp.isoformat().replace("+00:00", "Z")
 
 
+def session_timestamp(session_date, local_time, field_name):
+    if local_time is None:
+        return None
+    if not isinstance(local_time, str):
+        raise ValueError(f"{field_name} must be a string or null")
+    try:
+        timestamp = datetime.fromisoformat(f"{session_date}T{local_time}")
+    except ValueError as exc:
+        raise ValueError(f"invalid {field_name} for session {session_date}") from exc
+    if timestamp.utcoffset() is None:
+        raise ValueError(f"{field_name} for session {session_date} needs an explicit offset")
+    return timestamp.astimezone(timezone.utc)
+
+
 def build_inputs(fixture):
     if not isinstance(fixture, dict):
         raise ValueError("fixture must be a JSON object")
@@ -218,6 +232,332 @@ def factor_result(value, available_at, status):
     }
 
 
+def execution_record(value, session_date):
+    if not isinstance(value, dict):
+        raise ValueError("execution status must be an object")
+    is_tradable = value.get("is_tradable")
+    if not isinstance(is_tradable, bool):
+        raise ValueError("execution status is_tradable must be a boolean")
+    if "available_at" not in value:
+        raise ValueError("execution status available_at is required")
+    return {
+        "is_tradable": is_tradable,
+        "available_at": session_timestamp(
+            session_date, value["available_at"], "execution_status.available_at"
+        ),
+    }
+
+
+def build_vector_inputs(fixture, calendar, bars_by_symbol):
+    defaults = fixture["bar_defaults"]
+    if "open_available_at" not in defaults:
+        raise ValueError("bar_defaults.open_available_at is required")
+    open_times = [
+        session_timestamp(
+            session_date,
+            defaults["open_available_at"],
+            "bar_defaults.open_available_at",
+        )
+        for session_date in calendar
+    ]
+    if any(timestamp is None for timestamp in open_times):
+        raise ValueError("bar_defaults.open_available_at cannot be null")
+    default_open = finite_number(defaults.get("open"), "bar_defaults.open")
+    if default_open <= 0:
+        raise ValueError("bar_defaults.open must be positive")
+
+    instruments = {}
+    for instrument in fixture.get("instruments", []):
+        symbol = instrument["symbol"]
+        opens = instrument.get("opens")
+        if opens is None:
+            prices = [default_open] * len(calendar)
+        else:
+            if not isinstance(opens, list) or len(opens) != len(calendar):
+                raise ValueError(f"{symbol}.opens must match fixture.calendar")
+            prices = []
+            for index, price in enumerate(opens):
+                if price is None:
+                    prices.append(None)
+                    continue
+                price = finite_number(price, f"{symbol}.opens[{index}]")
+                if price <= 0:
+                    raise ValueError(f"{symbol}.opens[{index}] must be positive")
+                prices.append(price)
+
+        instrument_id = f"{symbol}.SYNTH"
+        instruments[instrument_id] = [
+            price if bars_by_symbol[symbol][index] is not None else None
+            for index, price in enumerate(prices)
+        ]
+
+    default_status = fixture.get("execution_status_default")
+    if default_status is not None and not isinstance(default_status, dict):
+        raise ValueError("fixture.execution_status_default must be an object")
+    statuses = {}
+    if default_status is not None:
+        for instrument in fixture["instruments"]:
+            for session_date in calendar:
+                statuses[(instrument["symbol"], session_date)] = execution_record(
+                    default_status, session_date
+                )
+
+    overrides = fixture.get("execution_status_overrides", [])
+    if not isinstance(overrides, list):
+        raise ValueError("fixture.execution_status_overrides must be a list")
+    symbols = {instrument["symbol"] for instrument in fixture["instruments"]}
+    seen_overrides = set()
+    calendar_dates = set(calendar)
+    for override in overrides:
+        if not isinstance(override, dict):
+            raise ValueError("each execution status override must be an object")
+        symbol = override.get("symbol")
+        session_date = override.get("date")
+        key = (symbol, session_date)
+        if symbol not in symbols or session_date not in calendar_dates:
+            raise ValueError(
+                f"execution status override references an unknown symbol or session: {key}"
+            )
+        if key in seen_overrides:
+            raise ValueError(f"duplicate execution status override: {key}")
+        seen_overrides.add(key)
+        statuses[key] = execution_record(override, session_date)
+
+    return instruments, open_times, statuses
+
+
+def build_vector_result(fixture, calendar, bars_by_symbol, factors):
+    instruments, open_times, statuses = build_vector_inputs(
+        fixture, calendar, bars_by_symbol
+    )
+    strategy = fixture["strategy"]
+    top_k = positive_integer(strategy.get("top_n"), "strategy.top_n")
+    rebalance_every = positive_integer(
+        strategy.get("rebalance_every"), "strategy.rebalance_every"
+    )
+    fixture_costs = fixture.get("costs")
+    if not isinstance(fixture_costs, dict):
+        raise ValueError("fixture.costs must be an object")
+    cost_parameters = {
+        name: finite_number(fixture_costs.get(name), f"costs.{name}")
+        for name in (
+            "commission_rate",
+            "buy_tax_rate",
+            "sell_tax_rate",
+            "buy_slippage_bps",
+            "sell_slippage_bps",
+        )
+    }
+    if any(value < 0 for value in cost_parameters.values()):
+        raise ValueError("vector transaction costs must be non-negative")
+    buy_rate = (
+        cost_parameters["commission_rate"]
+        + cost_parameters["buy_slippage_bps"] / 10000
+        + cost_parameters["buy_tax_rate"]
+    )
+    sell_rate = (
+        cost_parameters["commission_rate"]
+        + cost_parameters["sell_slippage_bps"] / 10000
+        + cost_parameters["sell_tax_rate"]
+    )
+    instrument_ids = sorted(instruments)
+    symbols = {
+        f"{instrument['symbol']}.SYNTH": instrument["symbol"]
+        for instrument in fixture["instruments"]
+    }
+
+    scores_by_date = {}
+    for row in factors["rotation_score"]:
+        if row["status"] == "ok":
+            scores_by_date.setdefault(row["session_date"], []).append(
+                (row["instrument_id"], finite_number(row["value"], "rotation_score"))
+            )
+
+    first_decision_index = next(
+        (
+            index
+            for index, session_date in enumerate(calendar)
+            if scores_by_date.get(session_date)
+        ),
+        None,
+    )
+    decision_indices = (
+        set(
+            range(
+                first_decision_index,
+                len(calendar),
+                rebalance_every,
+            )
+        )
+        if first_decision_index is not None
+        else set()
+    )
+    decision_rows = []
+    decisions_by_index = {}
+    for index in sorted(decision_indices):
+        session_date = calendar[index]
+        ranked_scores = sorted(
+            scores_by_date.get(session_date, []),
+            key=lambda item: (-item[1], item[0]),
+        )
+        ranked = [
+            {
+                "instrument_id": instrument_id,
+                "score": score,
+                "rank": rank,
+            }
+            for rank, (instrument_id, score) in enumerate(ranked_scores, start=1)
+        ]
+        selected = ranked[:top_k]
+        weight = 1.0 / len(selected) if selected else 0.0
+        targets = {
+            item["instrument_id"]: weight for item in selected
+        }
+        decision = {
+            "decision_session": session_date,
+            "ranked": ranked,
+            "targets": targets,
+        }
+        decision_rows.append(decision)
+        decisions_by_index[index] = decision
+
+    sessions = []
+    executions = []
+    weights = {}
+    target_weights = {}
+    pending = None
+    last_prices = {}
+    nav = 1.0
+
+    for index, session_date in enumerate(calendar):
+        marks = {}
+        valuation_carried = []
+        for instrument_id in instrument_ids:
+            price = instruments[instrument_id][index]
+            if price is not None:
+                marks[instrument_id] = price
+            elif instrument_id in last_prices:
+                marks[instrument_id] = last_prices[instrument_id]
+                valuation_carried.append(instrument_id)
+
+        gross_return = 0.0
+        if index > 0:
+            contributions = []
+            for instrument_id, weight in weights.items():
+                if instrument_id not in marks or instrument_id not in last_prices:
+                    raise ValueError(
+                        f"held instrument has no valuation price: {instrument_id}"
+                    )
+                contributions.append(
+                    weight * (marks[instrument_id] / last_prices[instrument_id] - 1)
+                )
+            gross_return = math.fsum(contributions)
+            divisor = 1 + gross_return
+            if divisor <= 0:
+                raise ValueError("portfolio return cannot reduce NAV to zero")
+            drifted_weights = {
+                instrument_id: weight
+                * (marks[instrument_id] / last_prices[instrument_id])
+                / divisor
+                for instrument_id, weight in weights.items()
+            }
+            weights = drifted_weights
+
+        pretrade_nav = nav * (1 + gross_return)
+        session_cost = 0.0
+        turnover = 0.0
+        if pending is not None:
+            executable = {}
+            for instrument_id in instrument_ids:
+                symbol = symbols[instrument_id]
+                status = statuses.get((symbol, session_date))
+                executable[instrument_id] = (
+                    instruments[instrument_id][index] is not None
+                    and status is not None
+                    and status["is_tradable"]
+                    and status["available_at"] is not None
+                    and status["available_at"] <= open_times[index]
+                )
+            blocked = sorted(
+                instrument_id
+                for instrument_id, weight in weights.items()
+                if weight > 0 and not executable[instrument_id]
+            )
+            if blocked:
+                executions.append(
+                    {
+                        "session_date": session_date,
+                        "kind": "deferred",
+                        "blocked": blocked,
+                        "skipped_buys": [],
+                    }
+                )
+            else:
+                skipped_buys = sorted(
+                    instrument_id
+                    for instrument_id, weight in pending["targets"].items()
+                    if weight > 0 and not executable[instrument_id]
+                )
+                next_weights = {
+                    instrument_id: weight
+                    for instrument_id, weight in pending["targets"].items()
+                    if executable[instrument_id]
+                }
+                deltas = {
+                    instrument_id: next_weights.get(instrument_id, 0.0)
+                    - weights.get(instrument_id, 0.0)
+                    for instrument_id in instrument_ids
+                }
+                buys = math.fsum(max(delta, 0.0) for delta in deltas.values())
+                sells = math.fsum(max(-delta, 0.0) for delta in deltas.values())
+                turnover = buys + sells
+                session_cost = buys * buy_rate + sells * sell_rate
+                if session_cost >= 1:
+                    raise ValueError("transaction costs must be less than 100% of NAV")
+                weights = next_weights
+                executions.append(
+                    {
+                        "session_date": session_date,
+                        "kind": "executed",
+                        "blocked": [],
+                        "skipped_buys": skipped_buys,
+                    }
+                )
+                pending = None
+
+        nav = pretrade_nav * (1 - session_cost)
+        net_return = (1 + gross_return) * (1 - session_cost) - 1
+        decision = decisions_by_index.get(index)
+        if decision is not None:
+            pending = {
+                "decision_session": session_date,
+                "targets": decision["targets"],
+            }
+            target_weights = decision["targets"]
+
+        sessions.append(
+            {
+                "session_date": session_date,
+                "target_weights": target_weights,
+                "weights_after_execution": weights,
+                "turnover": turnover,
+                "cost": session_cost,
+                "gross_return": gross_return,
+                "net_return": net_return,
+                "nav": nav,
+                "valuation_carried": valuation_carried,
+            }
+        )
+        last_prices = marks
+
+    return {
+        "sessions": sessions,
+        "decisions": decision_rows,
+        "executions": executions,
+        "pending_at_end": pending,
+    }
+
+
 def build_output(fixture_bytes, trend_window=None):
     fixture = json.loads(fixture_bytes)
     calendar, bars_by_symbol, parameters, configured_trend = build_inputs(fixture)
@@ -332,8 +672,9 @@ def build_output(fixture_bytes, trend_window=None):
     return {
         "fixture_sha256": hashlib.sha256(fixture_bytes).hexdigest(),
         "parameters": parameters,
-        "tolerance": {"factor_abs": 1e-12},
+        "tolerance": {"factor_abs": 1e-12, "nav_abs": 1e-10},
         "factors": factors,
+        "vector": build_vector_result(fixture, calendar, bars_by_symbol, factors),
     }
 
 
