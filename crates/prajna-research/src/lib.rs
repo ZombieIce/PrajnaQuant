@@ -10,6 +10,7 @@ pub mod factor;
 mod panel;
 pub mod strategy;
 mod universe;
+pub mod vector;
 
 pub use panel::{
     ExecutionStatusMap, Panel, PanelError, PanelSession, executable, load_execution_status,

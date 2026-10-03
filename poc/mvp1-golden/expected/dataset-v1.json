@@ -653,6 +653,24 @@
     "nav_abs": 1e-10
   },
   "vector": {
+    "assumptions": [
+      "proportional transaction costs",
+      "no minimum commission or lot size",
+      "raw open-to-open returns",
+      "Static Universe is not point-in-time",
+      "conservative deferral when a held instrument is unavailable",
+      "weight-based Vector NAV is not a cash-and-quantity account ledger",
+      "long-only unlevered weights; residual cash earns zero return",
+      "availability assumption: none"
+    ],
+    "availability_assumption": "none",
+    "costs": {
+      "buy_slippage_bps": 10.0,
+      "buy_tax_rate": 0.0,
+      "commission_rate": 0.001,
+      "sell_slippage_bps": 10.0,
+      "sell_tax_rate": 0.0
+    },
     "decisions": [
       {
         "decision_session": "2026-01-07",

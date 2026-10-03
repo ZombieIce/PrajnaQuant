@@ -421,15 +421,10 @@ def build_vector_result(fixture, calendar, bars_by_symbol, factors):
         decision_rows.append(decision)
         decisions_by_index[index] = decision
 
-    sessions = []
-    executions = []
-    weights = {}
-    target_weights = {}
-    pending = None
+    marks_by_index = []
+    carried_by_index = []
     last_prices = {}
-    nav = 1.0
-
-    for index, session_date in enumerate(calendar):
+    for index in range(len(calendar)):
         marks = {}
         valuation_carried = []
         for instrument_id in instrument_ids:
@@ -439,31 +434,21 @@ def build_vector_result(fixture, calendar, bars_by_symbol, factors):
             elif instrument_id in last_prices:
                 marks[instrument_id] = last_prices[instrument_id]
                 valuation_carried.append(instrument_id)
+        marks_by_index.append(marks)
+        carried_by_index.append(valuation_carried)
+        last_prices = marks
 
-        gross_return = 0.0
-        if index > 0:
-            contributions = []
-            for instrument_id, weight in weights.items():
-                if instrument_id not in marks or instrument_id not in last_prices:
-                    raise ValueError(
-                        f"held instrument has no valuation price: {instrument_id}"
-                    )
-                contributions.append(
-                    weight * (marks[instrument_id] / last_prices[instrument_id] - 1)
-                )
-            gross_return = math.fsum(contributions)
-            divisor = 1 + gross_return
-            if divisor <= 0:
-                raise ValueError("portfolio return cannot reduce NAV to zero")
-            drifted_weights = {
-                instrument_id: weight
-                * (marks[instrument_id] / last_prices[instrument_id])
-                / divisor
-                for instrument_id, weight in weights.items()
-            }
-            weights = drifted_weights
+    sessions = []
+    executions = []
+    weights = {}
+    target_weights = {}
+    pending = None
+    nav = 1.0
 
-        pretrade_nav = nav * (1 + gross_return)
+    for index, session_date in enumerate(calendar):
+        marks = marks_by_index[index]
+        valuation_carried = carried_by_index[index]
+
         session_cost = 0.0
         turnover = 0.0
         if pending is not None:
@@ -525,8 +510,32 @@ def build_vector_result(fixture, calendar, bars_by_symbol, factors):
                 )
                 pending = None
 
-        nav = pretrade_nav * (1 - session_cost)
-        net_return = (1 + gross_return) * (1 - session_cost) - 1
+        weights_after_execution = weights.copy()
+        gross_return = 0.0
+        if index + 1 < len(calendar):
+            next_marks = marks_by_index[index + 1]
+            contributions = []
+            for instrument_id, weight in weights.items():
+                if instrument_id not in marks or instrument_id not in next_marks:
+                    raise ValueError(
+                        f"held instrument has no valuation price: {instrument_id}"
+                    )
+                contributions.append(
+                    weight * (next_marks[instrument_id] / marks[instrument_id] - 1)
+                )
+            gross_return = math.fsum(contributions)
+            divisor = 1 + gross_return
+            if divisor <= 0:
+                raise ValueError("portfolio return cannot reduce NAV to zero")
+            weights = {
+                instrument_id: weight
+                * (next_marks[instrument_id] / marks[instrument_id])
+                / divisor
+                for instrument_id, weight in weights.items()
+            }
+
+        nav *= (1 - session_cost) * (1 + gross_return)
+        net_return = (1 - session_cost) * (1 + gross_return) - 1
         decision = decisions_by_index.get(index)
         if decision is not None:
             pending = {
@@ -539,7 +548,7 @@ def build_vector_result(fixture, calendar, bars_by_symbol, factors):
             {
                 "session_date": session_date,
                 "target_weights": target_weights,
-                "weights_after_execution": weights,
+                "weights_after_execution": weights_after_execution,
                 "turnover": turnover,
                 "cost": session_cost,
                 "gross_return": gross_return,
@@ -548,13 +557,25 @@ def build_vector_result(fixture, calendar, bars_by_symbol, factors):
                 "valuation_carried": valuation_carried,
             }
         )
-        last_prices = marks
 
+    assumptions = [
+        "proportional transaction costs",
+        "no minimum commission or lot size",
+        "raw open-to-open returns",
+        "Static Universe is not point-in-time",
+        "conservative deferral when a held instrument is unavailable",
+        "weight-based Vector NAV is not a cash-and-quantity account ledger",
+        "long-only unlevered weights; residual cash earns zero return",
+        "availability assumption: none",
+    ]
     return {
         "sessions": sessions,
         "decisions": decision_rows,
         "executions": executions,
         "pending_at_end": pending,
+        "assumptions": assumptions,
+        "costs": cost_parameters,
+        "availability_assumption": "none",
     }
 
 
