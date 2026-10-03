@@ -1,4 +1,4 @@
-//! Versioned definitions from PrajnaQuant Issue #53 M6/M7; no numerical evaluation.
+//! Versioned definitions from PrajnaQuant Issue #53 M6/M7; base numerical evaluation lives in `compute_base`.
 //! Finite weights preserve all binary64 bits in canonical JSON, including signed zero.
 //! Negative weights reverse the corresponding score contribution; positivity is not required.
 //! Factor Values rows cover Universe × Session, sorted by (instrument_id, session_date).
@@ -137,7 +137,7 @@ pub fn values_schema() -> ValuesSchema {
 /// chooses the M7 `TreatUnknownAsTsClose` assumption. A missing required bar
 /// yields `missing_input`, while insufficient session history yields
 /// `insufficient_window`; non-`ok` values are null. This crate defines those
-/// semantics but does not calculate factor values.
+/// semantics; `compute_base` evaluates the three base kinds.
 ///
 /// | Kind | v1 definition and direction |
 /// | --- | --- |
@@ -261,6 +261,7 @@ impl From<RotationScoreParams> for FactorParams {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FactorError {
+    Evaluation(String),
     UnknownKind(String),
     UnknownStatus(String),
     UnknownAvailabilityAssumption(String),
@@ -286,6 +287,7 @@ pub enum FactorError {
 impl fmt::Display for FactorError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Evaluation(message) => formatter.write_str(message),
             Self::UnknownKind(kind) => write!(formatter, "unknown factor kind {kind:?}"),
             Self::UnknownStatus(status) => write!(formatter, "unknown factor status {status:?}"),
             Self::UnknownAvailabilityAssumption(assumption) => {
@@ -317,6 +319,12 @@ impl fmt::Display for FactorError {
 }
 
 impl Error for FactorError {}
+
+impl From<polars::error::PolarsError> for FactorError {
+    fn from(error: polars::error::PolarsError) -> Self {
+        Self::Evaluation(error.to_string())
+    }
+}
 
 impl FactorParams {
     fn kind(&self) -> FactorKind {
