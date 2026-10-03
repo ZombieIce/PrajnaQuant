@@ -1,6 +1,6 @@
 # ADR 0016：Factor Cache 以完整输入身份键控且不可变
 
-- 状态：Accepted，2026-10-02；尚未实现
+- 状态：Accepted，2026-10-02；身份键生成已实现，持久缓存尚未实现
 
 [`ADR 0011`](0011-immutable-data-and-reproducible-runs.md) 要求 Factor Cache 不能仅按因子名命中，但把物理存储与 hash 编码留给后续契约。MVP-1 将其固定：Factor Values 以 restricted-JCS 规范化后取 `fv:sha256:<hex>` 为键，键包含 Factor ID/版本与规范化参数、依赖 Factor 的键（递归）、Dataset Version（DSV）、Static Universe 身份 `uni:sha256:<hex>`、Availability Assumption、计算实现身份（research crate 与 Polars 版本）及 Factor Values 输出 schema 版本；不包含日期区间（总按整份 DSV 计算）、Strategy 参数或线程数。缓存以长表 Parquet 一次写入、原子重命名后不再覆盖；命中时校验内容 hash 与元数据中的键，不一致即报错，不静默删除或重算。
 
