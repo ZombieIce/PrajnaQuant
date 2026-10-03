@@ -1,10 +1,16 @@
 //! Versioned factor definitions only; evaluation belongs to a separate layer.
+//! Definition source: PrajnaQuant Issue #53 M6/M7; each kind is version 1.
 //!
 //! Windows count Venue Sessions. Inputs are raw close, never future-return labels.
 //! Momentum uses close[t]/close[t-n]-1; volatility uses n returns and sample
 //! standard deviation; trend uses close[t] >= mean of the last n closes.
 //! Rotation combines short/long momentum minus volatility, optionally filtering
-//! on trend. Availability is the maximum input availability (unknown propagates
+//! on trend. Higher momentum means a larger trailing return; higher volatility
+//! means greater dispersion (a penalty for positive w_v). Trend is a Boolean
+//! eligibility gate, with 1 passing and 0 filtering. Rotation is ranked higher
+//! first: w_s*m_short + w_l*m_long - w_v*volatility. Negative weights reverse
+//! the corresponding contribution; no positivity restriction is imposed.
+//! Availability is the maximum input availability (unknown propagates
 //! unless the Run explicitly declares an assumption). Missing inputs are never
 //! filled; status precedence is insufficient_window > missing_input >
 //! unknown_availability, then filtered when an otherwise valid trend is zero.
