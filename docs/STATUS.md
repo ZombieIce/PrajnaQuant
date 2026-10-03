@@ -70,7 +70,7 @@ MVP-0 数据层现有 D7 instruments、bars、sessions 的 Arrow schema、Domain
 
 ### MVP-1 D7 面板与 Factor 定义模型
 
-`prajna-research` 的 `load_panel` 已能校验 DSV manifest 并读取 schema v1 的 instruments、sessions、bars，按 Venue 生成有序 Session/Instrument 列表及完整 instrument × session Polars 网格。缺 bar 保持价格 null 且 `has_bar=false`；`close_available_at` 保留源 available_at 的 UTC 纳秒值，不推定为 close。M6 Factor 定义模型实现了四种封闭的 v1 种类、强类型参数与窗口/有限权重校验；canonical JSON 将权重编码为 IEEE-754 bit pattern 十六进制字符串，区分 `0.0` 与 `-0.0`。`RotationScore` 依赖可拓扑排序、去重及检测环；status、Availability Assumption 字符串和 v1 Arrow/Polars 长表 schema 已定义。验证限于单元/集成契约测试与 `synthetic-etf-daily` v1 的 3×10 面板 fixture；`compute_base` 已用 Polars lazy 实现 momentum、样本 volatility 与 trend_filter，按完整 Session 网格计算所需窗口、状态优先级与输入最大可用时刻，支持显式 TreatUnknownAsTsClose 假设；3×10 v1 DSV 手算、缺失窗口和可用时刻测试覆盖其合成口径。尚未实现组合 Factor 数值计算、持久缓存或执行，不代表真实数据、PIT 或量化结果能力。
+`prajna-research` 的 `load_panel` 已能校验 DSV manifest 并读取 schema v1 的 instruments、sessions、bars，按 Venue 生成有序 Session/Instrument 列表及完整 instrument × session Polars 网格。缺 bar 保持价格 null 且 `has_bar=false`；`close_available_at` 保留源 available_at 的 UTC 纳秒值，不推定为 close。M6 Factor 定义模型实现了四种封闭的 v1 种类、强类型参数与窗口/有限权重校验；canonical JSON 将权重编码为 IEEE-754 bit pattern 十六进制字符串，区分 `0.0` 与 `-0.0`。`RotationScore` 依赖可拓扑排序、去重及检测环；status、Availability Assumption 字符串和 v1 Arrow/Polars 长表 schema 已定义。验证限于单元/集成契约测试与 `synthetic-etf-daily` v1 的 3×10 面板 fixture；`compute_base` 已用 Polars lazy 实现 momentum、样本 volatility 与 trend_filter，按完整 Session 网格计算所需窗口、状态优先级与输入最大可用时刻，支持显式 TreatUnknownAsTsClose 假设；`compute_composite` 已按 `(instrument_id, session_date)` 对齐依赖，传播 `insufficient_window > missing_input > unknown_availability`、计算加权 rotation_score 并在 trend=0 时过滤，所有行保留依赖中已知 available_at 的最大值（全部未知则 null）。依赖角色、schema、键网格和状态/值不一致显式报错；零权重不免除依赖，trend=None 不依赖 trend_filter。`compute` 按 FactorGraph 拓扑序直接计算整棵依赖树，同次调用复用共享定义，无持久缓存。3×10 v1 DSV 手算、状态组合、乱序键对齐、trend 过滤、缺失窗口和可用时刻测试覆盖其合成口径。尚未实现持久缓存或执行，不代表真实数据、PIT 或量化结果能力。
 
 M9 Factor Cache 身份键现可通过 `cache::key::FactorKey` 确定性生成：输入包括因子 canonical JSON、按角色排序的依赖键、DSV、Universe、Availability Assumption、`prajna-research`/Polars 版本及 Factor Values schema 版本；`for_tree` 递归生成依赖键。测试覆盖各输入变更、`fv:sha256:<hex>` 格式、锁定 Polars 版本与依赖树排序。这里只实现键和元数据对象，不计算 Factor Values 或读写持久缓存；验证为合成因子定义测试。
 
@@ -123,7 +123,7 @@ Batch 2 的增量同步/行情页已有代码、隔离小样本和合成浏览�
 ## Missing
 
 - 历史 ETF 名录与上市/退市日期、可信历史交易状态源及可知时刻、涨跌停规则执行、公司行动/分红总回报。
-- 组合 Factor Values 数值计算与持久缓存、因子值分布统计和相关矩阵；独立订单流水/可查询持仓时序 API；统一策略 ID/版本。回测报告内已有逐日持仓快照，但尚无独立持仓查询接口。MVP-1 M13 的独立标准库因子值/status、排名与 Vector 组合结果金标准已覆盖 3×10 和 64×252 v2（含 trend20）合成 fixture（见 `poc/mvp1-golden/`）；这不是 PIT 或真实市场数据验证。
+- Factor Values 持久缓存、因子值分布统计和相关矩阵；独立订单流水/可查询持仓时序 API；统一策略 ID/版本。回测报告内已有逐日持仓快照，但尚无独立持仓查询接口。MVP-1 M13 的独立标准库因子值/status、排名与 Vector 组合结果金标准已覆盖 3×10 和 64×252 v2（含 trend20）合成 fixture（见 `poc/mvp1-golden/`）；这不是 PIT 或真实市场数据验证。
 - 后端 Sortino、Win Rate、Benchmark Return、Excess Return、Tracking Error、Information Ratio。
 - 历史指数成分 provider 和完整覆盖证明；当前指数 Universe API 对历史成分明确返回空、unknown/gaps。
 - React 的基准/超额净值、月度收益热图、年度收益、逐日持仓权重、组合换手、成交与交易成本明细；因子值分布与相关热图。策略详情现有逐日资金占用率、持股数量和期末逐标的盈亏摘要。
