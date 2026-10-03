@@ -1,4 +1,5 @@
 mod base;
+pub mod cache;
 pub use base::compute_base;
 mod composite;
 pub use composite::compute_composite;

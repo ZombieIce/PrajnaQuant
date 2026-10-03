@@ -72,6 +72,8 @@ MVP-0 数据层现有 D7 instruments、bars、sessions 的 Arrow schema、Domain
 
 `prajna-research` 的 `load_panel` 已能校验 DSV manifest 并读取 schema v1 的 instruments、sessions、bars，按 Venue 生成有序 Session/Instrument 列表及完整 instrument × session Polars 网格。缺 bar 保持价格 null 且 `has_bar=false`；`close_available_at` 保留源 available_at 的 UTC 纳秒值，不推定为 close。M6 Factor 定义模型实现了四种封闭的 v1 种类、强类型参数与窗口/有限权重校验；canonical JSON 将权重编码为 IEEE-754 bit pattern 十六进制字符串，区分 `0.0` 与 `-0.0`。`RotationScore` 依赖可拓扑排序、去重及检测环；status、Availability Assumption 字符串和 v1 Arrow/Polars 长表 schema 已定义。验证限于单元/集成契约测试与 `synthetic-etf-daily` v1 的 3×10 面板 fixture；`compute_base` 已用 Polars lazy 实现 momentum、样本 volatility 与 trend_filter，按完整 Session 网格计算所需窗口、状态优先级与输入最大可用时刻，支持显式 TreatUnknownAsTsClose 假设；`compute_composite` 已按 `(instrument_id, session_date)` 对齐依赖，传播 `insufficient_window > missing_input > unknown_availability`、计算加权 rotation_score 并在 trend=0 时过滤，所有行保留依赖中已知 available_at 的最大值（全部未知则 null）。依赖角色、schema、键网格和状态/值不一致显式报错；零权重不免除依赖，trend=None 不依赖 trend_filter。`compute` 按 FactorGraph 拓扑序直接计算整棵依赖树，同次调用复用共享定义，无持久缓存。3×10 v1 DSV 手算、状态组合、乱序键对齐、trend 过滤、缺失窗口和可用时刻测试覆盖其合成口径。尚未实现持久缓存或执行，不代表真实数据、PIT 或量化结果能力。
 
+M9 Factor Cache 身份键现可通过 `cache::key::FactorKey` 确定性生成：输入包括因子 canonical JSON、按角色排序的依赖键、DSV、Universe、Availability Assumption、`prajna-research`/Polars 版本及 Factor Values schema 版本；`for_tree` 递归生成依赖键。测试覆盖各输入变更、`fv:sha256:<hex>` 格式、锁定 Polars 版本与依赖树排序。这里只实现键和元数据对象，不计算 Factor Values 或读写持久缓存；验证为合成因子定义测试。
+
 `prajna-research` 现提供 `StaticUniverse`：成员排序去重后以 restricted-JCS SHA-256 身份存储，原子发布、幂等复用并在读取时校验身份；可对照 DSV v1 instruments 表报告缺失成员。3×10 fixture 已验证 A/B/C 通过、含 D 失败。它是固定成员列表，不提供 point-in-time 成员可知性证明。
 
 ## Batch 2 Integration Acceptance (2026-09-25)
