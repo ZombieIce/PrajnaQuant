@@ -2945,10 +2945,14 @@ version = "0.1.0"
 dependencies = [
  "arrow-array",
  "chrono",
+ "fs2",
  "polars",
  "polars-io",
  "prajna-data",
  "prajna-domain",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
  "tempfile",
 ]
 

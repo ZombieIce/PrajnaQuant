@@ -10,8 +10,10 @@ use arrow_array::{
 };
 use chrono::{Duration, NaiveDate};
 use polars::prelude::{DataFrame, DataType, NamedFrom, Series, TimeUnit, TimeZone};
-use prajna_data::{DataError, Manifest, ManifestError, read_manifest, read_parquet};
+use prajna_data::{DataError, ManifestError, read_manifest};
 use prajna_domain::{InstrumentId, Price, Session, TimestampNs, VenueId};
+
+use crate::dsv::{DsvTableError, read_table};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PanelSession {
@@ -69,9 +71,12 @@ impl From<ManifestError> for PanelError {
     }
 }
 
-impl From<DataError> for PanelError {
-    fn from(error: DataError) -> Self {
-        Self::Data(error)
+impl From<DsvTableError> for PanelError {
+    fn from(error: DsvTableError) -> Self {
+        match error {
+            DsvTableError::Data(error) => Self::Data(error),
+            DsvTableError::InvalidManifest(message) => Self::InvalidManifest(message),
+        }
     }
 }
 
@@ -95,9 +100,9 @@ pub fn load_panel(
         )));
     }
 
-    let instruments_batches = read_table(lake_root, &manifest, "instruments")?;
-    let sessions_batches = read_table(lake_root, &manifest, "sessions")?;
-    let bars_batches = read_table(lake_root, &manifest, "bars")?;
+    let (_, instruments_batches) = read_table(lake_root, &manifest, "instruments")?;
+    let (_, sessions_batches) = read_table(lake_root, &manifest, "sessions")?;
+    let (_, bars_batches) = read_table(lake_root, &manifest, "bars")?;
 
     let instruments = read_instruments(&instruments_batches, venue)?;
     let sessions = read_sessions(&sessions_batches, venue)?;
@@ -109,51 +114,6 @@ pub fn load_panel(
         instruments,
         grid,
     })
-}
-
-fn read_table(
-    lake_root: &Path,
-    manifest: &Manifest,
-    table_name: &'static str,
-) -> Result<Vec<RecordBatch>, PanelError> {
-    let table = manifest
-        .core
-        .tables
-        .iter()
-        .find(|table| table.table == table_name)
-        .ok_or_else(|| {
-            PanelError::InvalidManifest(format!("missing {table_name} table descriptor"))
-        })?;
-    if table.schema_version != 1 {
-        return Err(PanelError::InvalidManifest(format!(
-            "unsupported {table_name} schema version {}",
-            table.schema_version
-        )));
-    }
-    let dsv_hex = manifest
-        .dsv
-        .strip_prefix("dsv:sha256:")
-        .ok_or_else(|| PanelError::InvalidManifest("manifest DSV has an invalid format".into()))?;
-    let path = lake_root
-        .join("normalized")
-        .join(table_name)
-        .join(dsv_hex)
-        .join("part-00000.parquet");
-    let batches = read_parquet(path, table_name, &table.schema_version.to_string())?;
-    for batch in &batches {
-        if batch
-            .schema()
-            .metadata()
-            .get("prajna.dsv")
-            .map(String::as_str)
-            != Some(manifest.dsv.as_str())
-        {
-            return Err(PanelError::InvalidManifest(format!(
-                "{table_name} Parquet DSV does not match the manifest"
-            )));
-        }
-    }
-    Ok(batches)
 }
 
 fn read_instruments(
