@@ -425,9 +425,9 @@ impl Factor {
                 "short": params.short,
                 "long": params.long,
                 "vol": params.vol,
-                "w_s": weight_bits(params.w_s),
-                "w_l": weight_bits(params.w_l),
-                "w_v": weight_bits(params.w_v),
+                "w_s": canonical_float_bits(params.w_s),
+                "w_l": canonical_float_bits(params.w_l),
+                "w_v": canonical_float_bits(params.w_v),
                 "trend": params.trend
             }),
         };
@@ -501,7 +501,11 @@ where
     Ok(ordered)
 }
 
-fn weight_bits(value: f64) -> String {
+/// Encodes a finite or non-finite `f64` as its exact IEEE 754 bit pattern.
+///
+/// Identity-bearing configuration values use this representation so decimal
+/// spellings that parse to the same value normalize identically.
+pub fn canonical_float_bits(value: f64) -> String {
     format!("{:016x}", value.to_bits())
 }
 

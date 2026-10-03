@@ -51,6 +51,15 @@ jobs:
             fi
           done
 
+      - name: Guard - prajna-experiment must not depend on legacy execution stacks
+        run: |
+          set -euo pipefail
+          tree=$(cargo tree -p prajna-experiment -e normal,build,dev --prefix none --locked)
+          if grep -E '^(libduckdb-sys|duckdb|ashare-warehouse|quant-research) ' <<<"$tree"; then
+            echo "::error::prajna-experiment depends on a prohibited legacy package"
+            exit 1
+          fi
+
       - name: Guard - prajna-research must not depend on the legacy warehouse or quant engine
         run: |
           set -euo pipefail
@@ -69,6 +78,8 @@ jobs:
       - run: cargo test -p prajna-data --locked
       - run: cargo clippy -p prajna-research --all-targets --locked -- -D warnings
       - run: cargo test -p prajna-research --locked
+      - run: cargo clippy -p prajna-experiment --all-targets --locked -- -D warnings
+      - run: cargo test -p prajna-experiment --locked
 
       - uses: actions/setup-python@v5
         with:
