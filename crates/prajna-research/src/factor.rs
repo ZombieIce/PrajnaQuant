@@ -1,37 +1,166 @@
-//! Versioned factor definitions only; evaluation belongs to a separate layer.
-//! Definition source: PrajnaQuant Issue #53 M6/M7; each kind is version 1.
-//!
-//! Windows count Venue Sessions. Inputs are raw close, never future-return labels.
-//! Momentum uses close[t]/close[t-n]-1; volatility uses n returns and sample
-//! standard deviation; trend uses close[t] >= mean of the last n closes.
-//! Rotation combines short/long momentum minus volatility, optionally filtering
-//! on trend. Higher momentum means a larger trailing return; higher volatility
-//! means greater dispersion (a penalty for positive w_v). Trend is a Boolean
-//! eligibility gate, with 1 passing and 0 filtering. Rotation is ranked higher
-//! first: w_s*m_short + w_l*m_long - w_v*volatility. Negative weights reverse
-//! the corresponding contribution; no positivity restriction is imposed.
-//! Availability is the maximum input availability (unknown propagates
-//! unless the Run explicitly declares an assumption). Missing inputs are never
-//! filled; status precedence is insufficient_window > missing_input >
-//! unknown_availability, then filtered when an otherwise valid trend is zero.
+//! Versioned definitions from PrajnaQuant Issue #53 M6/M7; no numerical evaluation.
+//! Finite weights preserve all binary64 bits in canonical JSON, including signed zero.
+//! Negative weights reverse the corresponding score contribution; positivity is not required.
+//! Factor Values rows cover Universe × Session, sorted by (instrument_id, session_date).
 
-use arrow_schema::{DataType, Field, Schema, SchemaRef, TimeUnit};
-use serde_json::{Value, json};
-use std::{
-    collections::{BTreeSet, HashMap},
-    error::Error,
-    fmt,
-    str::FromStr,
-    sync::Arc,
+use std::{collections::BTreeSet, error::Error, fmt, str::FromStr, sync::Arc};
+
+use arrow_schema::{
+    DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema, SchemaRef,
+    TimeUnit as ArrowTimeUnit,
 };
+use polars::prelude::{
+    DataType as PolarsDataType, Schema as PolarsSchema, TimeUnit as PolarsTimeUnit, TimeZone,
+};
+use serde_json::{Value, json};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+const MOMENTUM_VERSION: &str = "1";
+const VOLATILITY_VERSION: &str = "1";
+const TREND_FILTER_VERSION: &str = "1";
+const ROTATION_SCORE_VERSION: &str = "1";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FactorStatus {
+    Ok,
+    InsufficientWindow,
+    MissingInput,
+    UnknownAvailability,
+    Filtered,
+}
+
+impl FactorStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::InsufficientWindow => "insufficient_window",
+            Self::MissingInput => "missing_input",
+            Self::UnknownAvailability => "unknown_availability",
+            Self::Filtered => "filtered",
+        }
+    }
+}
+
+impl fmt::Display for FactorStatus {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl FromStr for FactorStatus {
+    type Err = FactorError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "ok" => Ok(Self::Ok),
+            "insufficient_window" => Ok(Self::InsufficientWindow),
+            "missing_input" => Ok(Self::MissingInput),
+            "unknown_availability" => Ok(Self::UnknownAvailability),
+            "filtered" => Ok(Self::Filtered),
+            _ => Err(FactorError::UnknownStatus(value.to_owned())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AvailabilityAssumption {
+    None,
+    TreatUnknownAsTsClose,
+}
+
+impl AvailabilityAssumption {
+    pub const fn canonical_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::TreatUnknownAsTsClose => "treat_unknown_as_ts_close",
+        }
+    }
+}
+
+impl fmt::Display for AvailabilityAssumption {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.canonical_str())
+    }
+}
+
+impl FromStr for AvailabilityAssumption {
+    type Err = FactorError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "none" => Ok(Self::None),
+            "treat_unknown_as_ts_close" => Ok(Self::TreatUnknownAsTsClose),
+            _ => Err(FactorError::UnknownAvailabilityAssumption(value.to_owned())),
+        }
+    }
+}
+
+pub const VALUES_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone)]
+pub struct ValuesSchema {
+    pub arrow: SchemaRef,
+    pub polars: PolarsSchema,
+}
+
+pub fn values_schema() -> ValuesSchema {
+    let arrow = Arc::new(ArrowSchema::new(vec![
+        ArrowField::new("instrument_id", ArrowDataType::Utf8, false),
+        ArrowField::new("session_date", ArrowDataType::Date32, false),
+        ArrowField::new("value", ArrowDataType::Float64, true),
+        ArrowField::new(
+            "available_at",
+            ArrowDataType::Timestamp(ArrowTimeUnit::Nanosecond, Some("UTC".into())),
+            true,
+        ),
+        ArrowField::new("status", ArrowDataType::Utf8, false),
+    ]));
+    let polars = PolarsSchema::from_iter([
+        ("instrument_id".into(), PolarsDataType::String),
+        ("session_date".into(), PolarsDataType::Date),
+        ("value".into(), PolarsDataType::Float64),
+        (
+            "available_at".into(),
+            PolarsDataType::Datetime(PolarsTimeUnit::Nanoseconds, Some(TimeZone::UTC)),
+        ),
+        ("status".into(), PolarsDataType::String),
+    ]);
+    ValuesSchema { arrow, polars }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Closed MVP-1 M6 factor definitions, versioned independently by kind.
+///
+/// The v1 inputs are D7 normalized `bars.close` values for Venue Sessions.
+/// Each value is observable after the current session close; its availability
+/// is the maximum `available_at` of its required inputs. An unknown input
+/// availability yields `unknown_availability`, unless the Run explicitly
+/// chooses the M7 `TreatUnknownAsTsClose` assumption. A missing required bar
+/// yields `missing_input`, while insufficient session history yields
+/// `insufficient_window`; non-`ok` values are null. This crate defines those
+/// semantics but does not calculate factor values.
+///
+/// | Kind | v1 definition and direction |
+/// | --- | --- |
+/// | [`Momentum`](Self::Momentum) | `close_t / close_(t-n) - 1`; larger values indicate stronger momentum. |
+/// | [`Volatility`](Self::Volatility) | Sample standard deviation of `n` consecutive close-to-close returns; the composite subtracts `w_v * volatility`. |
+/// | [`TrendFilter`](Self::TrendFilter) | `close_t >= mean(close_(t-n+1..t))`, yielding 1 or 0; zero filters a composite score. |
+/// | [`RotationScore`](Self::RotationScore) | `w_s * momentum(short) + w_l * momentum(long) - w_v * volatility(vol)`; larger scores rank higher. |
+///
+/// `RotationScore` propagates dependency statuses in the order
+/// `insufficient_window > missing_input > unknown_availability`. These
+/// definitions follow the MVP-1 M6/M7 contract over D7 bars; each kind's v1
+/// identity is included in [`Factor::canonical_json`].
 pub enum FactorKind {
+    /// Uses the close at `t` and `t-n`; `n` must be at least 1.
     Momentum,
+    /// Uses `n` consecutive returns and therefore `n+1` closes; `n` must be at least 2.
     Volatility,
+    /// Uses `n` closes from `t-n+1` through `t`; `n` must be at least 1.
     TrendFilter,
+    /// Composes the configured child factors; each window follows its child kind's rules.
     RotationScore,
 }
+
 impl FactorKind {
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -41,16 +170,53 @@ impl FactorKind {
             Self::RotationScore => "rotation_score",
         }
     }
+
     pub const fn version(self) -> &'static str {
-        "1"
+        match self {
+            Self::Momentum => MOMENTUM_VERSION,
+            Self::Volatility => VOLATILITY_VERSION,
+            Self::TrendFilter => TREND_FILTER_VERSION,
+            Self::RotationScore => ROTATION_SCORE_VERSION,
+        }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WindowParams {
+impl fmt::Display for FactorKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl FromStr for FactorKind {
+    type Err = FactorError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "momentum" => Ok(Self::Momentum),
+            "volatility" => Ok(Self::Volatility),
+            "trend_filter" => Ok(Self::TrendFilter),
+            "rotation_score" => Ok(Self::RotationScore),
+            _ => Err(FactorError::UnknownKind(value.to_owned())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MomentumParams {
     pub n: u32,
 }
-#[derive(Debug, Clone, Copy, PartialEq)]
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct VolatilityParams {
+    pub n: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrendFilterParams {
+    pub n: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct RotationScoreParams {
     pub short: u32,
     pub long: u32,
@@ -60,254 +226,334 @@ pub struct RotationScoreParams {
     pub w_v: f64,
     pub trend: Option<u32>,
 }
-#[derive(Debug, Clone, Copy, PartialEq)]
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum FactorParams {
-    Momentum(WindowParams),
-    Volatility(WindowParams),
-    TrendFilter(WindowParams),
+    Momentum(MomentumParams),
+    Volatility(VolatilityParams),
+    TrendFilter(TrendFilterParams),
     RotationScore(RotationScoreParams),
 }
-/// A validated definition. Private fields prevent mismatched kind/params and
-/// bypassing validation; callers may copy parameters but cannot mutate a Factor.
-#[derive(Debug, Clone)]
-pub struct Factor {
-    params: FactorParams,
+
+impl From<MomentumParams> for FactorParams {
+    fn from(params: MomentumParams) -> Self {
+        Self::Momentum(params)
+    }
+}
+
+impl From<VolatilityParams> for FactorParams {
+    fn from(params: VolatilityParams) -> Self {
+        Self::Volatility(params)
+    }
+}
+
+impl From<TrendFilterParams> for FactorParams {
+    fn from(params: TrendFilterParams) -> Self {
+        Self::TrendFilter(params)
+    }
+}
+
+impl From<RotationScoreParams> for FactorParams {
+    fn from(params: RotationScoreParams) -> Self {
+        Self::RotationScore(params)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FactorError {
+    UnknownKind(String),
+    UnknownStatus(String),
+    UnknownAvailabilityAssumption(String),
+    ParamsKindMismatch {
+        kind: FactorKind,
+        params_kind: FactorKind,
+    },
     InvalidWindow {
-        role: &'static str,
+        kind: FactorKind,
+        parameter: &'static str,
         minimum: u32,
-        actual: u32,
+        value: u32,
     },
-    NonFiniteWeight(&'static str),
-    Cycle,
-    UnknownString {
-        category: &'static str,
-        value: String,
+    InvalidWeight {
+        kind: FactorKind,
+        parameter: &'static str,
+    },
+    DependencyCycle {
+        factor: String,
     },
 }
+
 impl fmt::Display for FactorError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnknownKind(kind) => write!(formatter, "unknown factor kind {kind:?}"),
+            Self::UnknownStatus(status) => write!(formatter, "unknown factor status {status:?}"),
+            Self::UnknownAvailabilityAssumption(assumption) => {
+                write!(formatter, "unknown availability assumption {assumption:?}")
+            }
+            Self::ParamsKindMismatch { kind, params_kind } => {
+                write!(
+                    formatter,
+                    "factor kind {kind} does not match params for {params_kind}"
+                )
+            }
             Self::InvalidWindow {
-                role,
+                kind,
+                parameter,
                 minimum,
-                actual,
-            } => write!(f, "{role} window {actual} must be >= {minimum}"),
-            Self::NonFiniteWeight(role) => write!(f, "{role} weight must be finite"),
-            Self::Cycle => f.write_str("factor dependency cycle"),
-            Self::UnknownString { category, value } => write!(f, "unknown {category}: {value}"),
-        }
-    }
-}
-impl Error for FactorError {}
-fn window(role: &'static str, n: u32, minimum: u32) -> Result<(), FactorError> {
-    if n < minimum {
-        Err(FactorError::InvalidWindow {
-            role,
-            minimum,
-            actual: n,
-        })
-    } else {
-        Ok(())
-    }
-}
-impl Factor {
-    pub fn new(params: FactorParams) -> Result<Self, FactorError> {
-        match params {
-            FactorParams::Momentum(p) => window("momentum", p.n, 1)?,
-            FactorParams::Volatility(p) => window("volatility", p.n, 2)?,
-            FactorParams::TrendFilter(p) => window("trend", p.n, 1)?,
-            FactorParams::RotationScore(p) => {
-                window("short", p.short, 1)?;
-                window("long", p.long, 1)?;
-                window("volatility", p.vol, 2)?;
-                if let Some(n) = p.trend {
-                    window("trend", n, 1)?;
-                }
-                for (role, weight) in [("w_s", p.w_s), ("w_l", p.w_l), ("w_v", p.w_v)] {
-                    if !weight.is_finite() {
-                        return Err(FactorError::NonFiniteWeight(role));
-                    }
-                }
+                value,
+            } => write!(
+                formatter,
+                "{kind} parameter {parameter} must be at least {minimum}, got {value}"
+            ),
+            Self::InvalidWeight { kind, parameter } => {
+                write!(formatter, "{kind} weight {parameter} must be finite")
+            }
+            Self::DependencyCycle { factor } => {
+                write!(formatter, "factor dependency cycle includes {factor}")
             }
         }
-        Ok(Self { params })
     }
-    pub fn kind(&self) -> FactorKind {
-        match self.params {
-            FactorParams::Momentum(_) => FactorKind::Momentum,
-            FactorParams::Volatility(_) => FactorKind::Volatility,
-            FactorParams::TrendFilter(_) => FactorKind::TrendFilter,
-            FactorParams::RotationScore(_) => FactorKind::RotationScore,
+}
+
+impl Error for FactorError {}
+
+impl FactorParams {
+    fn kind(&self) -> FactorKind {
+        match self {
+            Self::Momentum(_) => FactorKind::Momentum,
+            Self::Volatility(_) => FactorKind::Volatility,
+            Self::TrendFilter(_) => FactorKind::TrendFilter,
+            Self::RotationScore(_) => FactorKind::RotationScore,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct Factor {
+    kind: FactorKind,
+    params: FactorParams,
+}
+
+impl Factor {
+    pub fn new<P>(kind: FactorKind, params: P) -> Result<Self, FactorError>
+    where
+        P: Into<FactorParams>,
+    {
+        let params = params.into();
+        if params.kind() != kind {
+            return Err(FactorError::ParamsKindMismatch {
+                kind,
+                params_kind: params.kind(),
+            });
+        }
+
+        validate_params(kind, &params)?;
+        Ok(Self::from_validated(kind, params))
+    }
+
+    fn from_validated(kind: FactorKind, params: FactorParams) -> Self {
+        Self { kind, params }
+    }
+
+    pub const fn kind(&self) -> FactorKind {
+        self.kind
+    }
+
     pub fn params(&self) -> &FactorParams {
         &self.params
     }
-    /// Weights are 16 lowercase hex digits encoding IEEE-754 binary64 bits.
-    /// All finite bits are preserved, including distinct positive/negative zero.
-    pub fn canonical_json(&self) -> Value {
-        let params = match self.params {
-            FactorParams::Momentum(p)
-            | FactorParams::Volatility(p)
-            | FactorParams::TrendFilter(p) => json!({"n": p.n}),
-            FactorParams::RotationScore(p) => {
-                json!({"short": p.short, "long": p.long, "vol": p.vol, "w_s": format!("{:016x}", p.w_s.to_bits()), "w_l": format!("{:016x}", p.w_l.to_bits()), "w_v": format!("{:016x}", p.w_v.to_bits()), "trend": p.trend})
-            }
-        };
-        json!({"kind": self.kind().as_str(), "version": self.kind().version(), "params": params})
-    }
+
     pub fn dependencies(&self) -> Vec<(&'static str, Factor)> {
-        let FactorParams::RotationScore(p) = self.params else {
-            return vec![];
+        let FactorParams::RotationScore(params) = &self.params else {
+            return Vec::new();
         };
-        // Parent validation guarantees every dependency is valid.
-        let mut deps = vec![
+
+        let mut dependencies = vec![
             (
                 "momentum_short",
-                Self {
-                    params: FactorParams::Momentum(WindowParams { n: p.short }),
-                },
+                Self::from_validated(
+                    FactorKind::Momentum,
+                    MomentumParams { n: params.short }.into(),
+                ),
             ),
             (
                 "momentum_long",
-                Self {
-                    params: FactorParams::Momentum(WindowParams { n: p.long }),
-                },
+                Self::from_validated(
+                    FactorKind::Momentum,
+                    MomentumParams { n: params.long }.into(),
+                ),
             ),
             (
                 "volatility",
-                Self {
-                    params: FactorParams::Volatility(WindowParams { n: p.vol }),
-                },
+                Self::from_validated(
+                    FactorKind::Volatility,
+                    VolatilityParams { n: params.vol }.into(),
+                ),
             ),
         ];
-        if let Some(n) = p.trend {
-            deps.push((
+        if let Some(trend) = params.trend {
+            dependencies.push((
                 "trend",
-                Self {
-                    params: FactorParams::TrendFilter(WindowParams { n }),
-                },
+                Self::from_validated(
+                    FactorKind::TrendFilter,
+                    TrendFilterParams { n: trend }.into(),
+                ),
             ));
         }
-        deps
+        dependencies
+    }
+
+    pub fn canonical_json(&self) -> Value {
+        let params = match &self.params {
+            FactorParams::Momentum(params) => json!({"n": params.n}),
+            FactorParams::Volatility(params) => json!({"n": params.n}),
+            FactorParams::TrendFilter(params) => json!({"n": params.n}),
+            FactorParams::RotationScore(params) => json!({
+                "short": params.short,
+                "long": params.long,
+                "vol": params.vol,
+                "w_s": weight_bits(params.w_s),
+                "w_l": weight_bits(params.w_l),
+                "w_v": weight_bits(params.w_v),
+                "trend": params.trend
+            }),
+        };
+        json!({
+            "kind": self.kind.as_str(),
+            "version": self.kind.version(),
+            "params": params
+        })
     }
 }
 
-pub struct FactorGraph;
-impl FactorGraph {
-    /// Deterministic dependency-first order, deduplicated by full identity.
-    pub fn resolve(root: &Factor) -> Result<Vec<Factor>, FactorError> {
-        Self::resolve_with(root, &Factor::dependencies)
+impl PartialEq for Factor {
+    fn eq(&self, other: &Self) -> bool {
+        self.canonical_json() == other.canonical_json()
     }
-    // Private injection seam lets tests exercise cycles without opening the
-    // production registry to unsupported kinds or arbitrary dependencies.
-    fn resolve_with(
-        root: &Factor,
-        dependencies: &impl Fn(&Factor) -> Vec<(&'static str, Factor)>,
-    ) -> Result<Vec<Factor>, FactorError> {
-        fn visit(
-            factor: &Factor,
-            dependencies: &impl Fn(&Factor) -> Vec<(&'static str, Factor)>,
-            active: &mut BTreeSet<String>,
-            done: &mut BTreeSet<String>,
-            output: &mut Vec<Factor>,
-        ) -> Result<(), FactorError> {
-            let key = factor.canonical_json().to_string();
-            if done.contains(&key) {
-                return Ok(());
-            }
-            if !active.insert(key.clone()) {
-                return Err(FactorError::Cycle);
-            }
-            for (_, dependency) in dependencies(factor) {
-                visit(&dependency, dependencies, active, done, output)?;
-            }
-            active.remove(&key);
-            done.insert(key);
-            output.push(factor.clone());
+}
+
+impl Eq for Factor {}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FactorGraph;
+
+impl FactorGraph {
+    pub fn resolve(root: Factor) -> Result<Vec<Factor>, FactorError> {
+        resolve_with_dependencies(root, &Factor::dependencies)
+    }
+}
+
+fn resolve_with_dependencies<F>(root: Factor, dependencies: &F) -> Result<Vec<Factor>, FactorError>
+where
+    F: Fn(&Factor) -> Vec<(&'static str, Factor)>,
+{
+    fn visit<F>(
+        factor: Factor,
+        dependencies: &F,
+        visiting: &mut BTreeSet<String>,
+        visited: &mut BTreeSet<String>,
+        ordered: &mut Vec<Factor>,
+    ) -> Result<(), FactorError>
+    where
+        F: Fn(&Factor) -> Vec<(&'static str, Factor)>,
+    {
+        let identity = factor.canonical_json().to_string();
+        if visited.contains(&identity) {
+            return Ok(());
+        }
+        if !visiting.insert(identity.clone()) {
+            return Err(FactorError::DependencyCycle { factor: identity });
+        }
+
+        for (_, dependency) in dependencies(&factor) {
+            visit(dependency, dependencies, visiting, visited, ordered)?;
+        }
+
+        visiting.remove(&identity);
+        visited.insert(identity);
+        ordered.push(factor);
+        Ok(())
+    }
+
+    let mut visiting = BTreeSet::new();
+    let mut visited = BTreeSet::new();
+    let mut ordered = Vec::new();
+    visit(
+        root,
+        dependencies,
+        &mut visiting,
+        &mut visited,
+        &mut ordered,
+    )?;
+    Ok(ordered)
+}
+
+fn weight_bits(value: f64) -> String {
+    format!("{:016x}", value.to_bits())
+}
+
+fn validate_params(kind: FactorKind, params: &FactorParams) -> Result<(), FactorError> {
+    let window = |parameter, value, minimum| {
+        if value < minimum {
+            Err(FactorError::InvalidWindow {
+                kind,
+                parameter,
+                minimum,
+                value,
+            })
+        } else {
             Ok(())
         }
-        let mut output = vec![];
-        visit(
-            root,
-            dependencies,
-            &mut BTreeSet::new(),
-            &mut BTreeSet::new(),
-            &mut output,
-        )?;
-        Ok(output)
-    }
-}
-
-macro_rules! string_enum {
-    ($name:ident, $category:literal, {$($variant:ident => $text:literal),+ $(,)?}) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        pub enum $name { $($variant),+ }
-        impl $name { pub const fn as_str(self) -> &'static str { match self { $(Self::$variant => $text),+ } } }
-        impl fmt::Display for $name { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(self.as_str()) } }
-        impl FromStr for $name { type Err = FactorError; fn from_str(value: &str) -> Result<Self, Self::Err> { match value { $($text => Ok(Self::$variant)),+, _ => Err(FactorError::UnknownString {category: $category, value: value.into()}) } } }
     };
-}
-string_enum!(FactorStatus, "factor status", { Ok => "ok", InsufficientWindow => "insufficient_window", MissingInput => "missing_input", UnknownAvailability => "unknown_availability", Filtered => "filtered" });
-string_enum!(AvailabilityAssumption, "availability assumption", { None => "none", TreatUnknownAsTsClose => "treat_unknown_as_ts_close" });
 
-pub const VALUES_SCHEMA_VERSION: u32 = 1;
-/// Arrow schema for the Universe × Session long table, sorted by
-/// (instrument_id, session_date). Non-ok status requires a null value.
-/// Arrow Utf8/Date32/Float64/Timestamp(ns, UTC) map to Polars
-/// String/Date/Float64/Datetime(Nanoseconds, UTC), respectively.
-pub fn values_schema() -> SchemaRef {
-    Arc::new(Schema::new_with_metadata(
-        vec![
-            Field::new("instrument_id", DataType::Utf8, false),
-            Field::new("session_date", DataType::Date32, false),
-            Field::new("value", DataType::Float64, true),
-            Field::new(
-                "available_at",
-                DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into())),
-                true,
-            )
-            .with_metadata(HashMap::from([(
-                "prajna.time_role".into(),
-                "available_at".into(),
-            )])),
-            Field::new("status", DataType::Utf8, false),
-        ],
-        HashMap::from([
-            ("prajna.table".into(), "factor_values".into()),
-            (
-                "prajna.schema_version".into(),
-                VALUES_SCHEMA_VERSION.to_string(),
-            ),
-        ]),
-    ))
+    let finite_weight = |parameter, value: f64| {
+        if value.is_finite() {
+            Ok(())
+        } else {
+            Err(FactorError::InvalidWeight { kind, parameter })
+        }
+    };
+
+    match params {
+        FactorParams::Momentum(params) => window("n", params.n, 1),
+        FactorParams::Volatility(params) => window("n", params.n, 2),
+        FactorParams::TrendFilter(params) => window("n", params.n, 1),
+        FactorParams::RotationScore(params) => {
+            window("short", params.short, 1)?;
+            window("long", params.long, 1)?;
+            window("vol", params.vol, 2)?;
+            if let Some(trend) = params.trend {
+                window("trend", trend, 1)?;
+            }
+            finite_weight("w_s", params.w_s)?;
+            finite_weight("w_l", params.w_l)?;
+            finite_weight("w_v", params.w_v)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn rejects_direct_and_indirect_cycles() {
-        let a = Factor::new(FactorParams::Momentum(WindowParams { n: 1 })).unwrap();
-        let b = Factor::new(FactorParams::Momentum(WindowParams { n: 2 })).unwrap();
-        assert!(matches!(
-            FactorGraph::resolve_with(&a, &|_| vec![("self", a.clone())]),
-            Err(FactorError::Cycle)
-        ));
-        assert!(matches!(
-            FactorGraph::resolve_with(&a, &|f| vec![(
-                "next",
-                if f.canonical_json() == a.canonical_json() {
-                    b.clone()
-                } else {
-                    a.clone()
-                }
-            )]),
-            Err(FactorError::Cycle)
-        ));
+    fn injected_self_dependency_is_rejected() {
+        let root = Factor::new(FactorKind::Momentum, MomentumParams { n: 1 }).unwrap();
+        let cycle = resolve_with_dependencies(root.clone(), &|_| vec![("self", root.clone())]);
+        assert!(matches!(cycle, Err(FactorError::DependencyCycle { .. })));
+    }
+
+    #[test]
+    fn injected_dependency_cycle_is_rejected() {
+        let momentum = Factor::new(FactorKind::Momentum, MomentumParams { n: 1 }).unwrap();
+        let volatility = Factor::new(FactorKind::Volatility, VolatilityParams { n: 2 }).unwrap();
+        let cycle = resolve_with_dependencies(momentum.clone(), &|factor| match factor.kind() {
+            FactorKind::Momentum => vec![("cycle", volatility.clone())],
+            FactorKind::Volatility => vec![("cycle", momentum.clone())],
+            _ => Vec::new(),
+        });
+
+        assert!(matches!(cycle, Err(FactorError::DependencyCycle { .. })));
     }
 }

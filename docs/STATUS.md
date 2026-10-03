@@ -68,9 +68,9 @@ MVP-0 数据层现有 D7 instruments、bars、sessions 的 Arrow schema、Domain
 
 此前 A 股股票/ETF 日频 + Web 的初级产品路线已归档到 [`legacy-ashare-roadmap.md`](legacy-ashare-roadmap.md)；当前仍是本地 ETF Rotation MVP 加 A 股仓库。Batch 2 已有显式证券增量同步/失败恢复/不可变发布代码，隔离股票+ETF 真实小样本通过；已发布快照的只读证券/日线 API 和 K 线页面在合成目录通过。Batch 3 的日更身份导入与 ETF 诊断作业已有代码；生产同步/调度、真实状态、可信历史作业、Python 研究包和远程认证部署仍未验。五 ETF 真实状态覆盖不足，旧实验仍 `legacy_bar_only`，新 `status_gated` 占位跑全 UNKNOWN，P0-3 开放；股票回测没有开放。
 
-### MVP-1 D7 面板读取
+### MVP-1 D7 面板与 Factor 定义模型
 
-`prajna-research` 的 `load_panel` 已能校验 DSV manifest 并读取 schema v1 的 instruments、sessions、bars，按 Venue 生成有序 Session/Instrument 列表及完整 instrument × session Polars 网格。缺 bar 保持价格 null 且 `has_bar=false`；`close_available_at` 保留源 available_at 的 UTC 纳秒值，不推定为 close。当前面板验证限于 `synthetic-etf-daily` v1 的 3×10 合成 fixture。`factor` 模块已提供四种版本化定义、强类型参数校验、dependency-first 去重 DAG（含注入环测试）、status/availability 字符串与 Factor Values Arrow schema v1；canonical JSON 的有限 f64 权重用 16 位小写 IEEE-754 hex 保存，明确区分正负零。定义模型与身份有参数差异、非法输入和 schema 测试；尚无因子数值计算、持久缓存或 Vector 执行能力，也不证明真实数据或 PIT。
+`prajna-research` 的 `load_panel` 已能校验 DSV manifest 并读取 schema v1 的 instruments、sessions、bars，按 Venue 生成有序 Session/Instrument 列表及完整 instrument × session Polars 网格。缺 bar 保持价格 null 且 `has_bar=false`；`close_available_at` 保留源 available_at 的 UTC 纳秒值，不推定为 close。M6 Factor 定义模型实现了四种封闭的 v1 种类、强类型参数与窗口/有限权重校验；canonical JSON 将权重编码为 IEEE-754 bit pattern 十六进制字符串，区分 `0.0` 与 `-0.0`。`RotationScore` 依赖可拓扑排序、去重及检测环；status、Availability Assumption 字符串和 v1 Arrow/Polars 长表 schema 已定义。验证限于单元/集成契约测试与 `synthetic-etf-daily` v1 的 3×10 面板 fixture；尚未实现 Factor Values 数值计算、持久缓存或执行，不代表真实数据、PIT 或量化结果能力。
 
 `prajna-research` 现提供 `StaticUniverse`：成员排序去重后以 restricted-JCS SHA-256 身份存储，原子发布、幂等复用并在读取时校验身份；可对照 DSV v1 instruments 表报告缺失成员。3×10 fixture 已验证 A/B/C 通过、含 D 失败。它是固定成员列表，不提供 point-in-time 成员可知性证明。
 
@@ -121,7 +121,7 @@ Batch 2 的增量同步/行情页已有代码、隔离小样本和合成浏览�
 ## Missing
 
 - 历史 ETF 名录与上市/退市日期、可信历史交易状态源及可知时刻、涨跌停规则执行、公司行动/分红总回报。
-- 通用 Factor Registry/版本/持久缓存、因子值分布统计和相关矩阵；独立订单流水/可查询持仓时序 API；统一策略 ID/版本。回测报告内已有逐日持仓快照，但尚无独立持仓查询接口。MVP-1 M13 的独立标准库因子值/status、排名与 Vector 组合结果金标准已覆盖 3×10 和 64×252 v2（含 trend20）合成 fixture（见 `poc/mvp1-golden/`）；这不是 PIT 或真实市场数据验证。
+- Factor Values 数值计算与持久缓存、因子值分布统计和相关矩阵；独立订单流水/可查询持仓时序 API；统一策略 ID/版本。回测报告内已有逐日持仓快照，但尚无独立持仓查询接口。MVP-1 M13 的独立标准库因子值/status、排名与 Vector 组合结果金标准已覆盖 3×10 和 64×252 v2（含 trend20）合成 fixture（见 `poc/mvp1-golden/`）；这不是 PIT 或真实市场数据验证。
 - 后端 Sortino、Win Rate、Benchmark Return、Excess Return、Tracking Error、Information Ratio。
 - 历史指数成分 provider 和完整覆盖证明；当前指数 Universe API 对历史成分明确返回空、unknown/gaps。
 - React 的基准/超额净值、月度收益热图、年度收益、逐日持仓权重、组合换手、成交与交易成本明细；因子值分布与相关热图。策略详情现有逐日资金占用率、持股数量和期末逐标的盈亏摘要。
