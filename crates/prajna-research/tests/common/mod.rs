@@ -5,6 +5,10 @@ use prajna_data::{NormalizerRegistry, RawStore, SourceKind, SourceRecordInput, p
 const FIXTURE: &[u8] = include_bytes!("../../../../poc/poc0-benchmark/fixtures/dataset-v1.json");
 
 pub fn publish_v1(lake_root: &Path) -> String {
+    publish_version(lake_root, "1")
+}
+
+pub fn publish_version(lake_root: &Path, version: &str) -> String {
     let store = RawStore::open(lake_root).unwrap();
     let raw_hash = store
         .put(
@@ -24,7 +28,7 @@ pub fn publish_v1(lake_root: &Path) -> String {
         &store,
         &NormalizerRegistry::with_builtins(),
         "synthetic-etf-daily",
-        "1",
+        version,
         &[raw_hash],
         "2026-09-30T00:00:00Z",
     )

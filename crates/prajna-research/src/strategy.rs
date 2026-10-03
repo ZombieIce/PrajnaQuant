@@ -47,6 +47,90 @@ pub struct Decision {
     pub targets: BTreeMap<InstrumentId, f64>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExecutionEvent {
+    Deferred {
+        decision_session: PanelSession,
+        attempt_session: PanelSession,
+        blocked: BTreeSet<InstrumentId>,
+    },
+    Executed {
+        decision_session: PanelSession,
+        attempt_session: PanelSession,
+        applied: BTreeMap<InstrumentId, f64>,
+        skipped_buys: BTreeSet<InstrumentId>,
+    },
+    PendingAtEnd {
+        decision_session: PanelSession,
+        targets: BTreeMap<InstrumentId, f64>,
+    },
+}
+
+pub fn execute(
+    decisions: &[Decision],
+    sessions: &[PanelSession],
+    executable: impl Fn(&InstrumentId, &PanelSession) -> bool,
+) -> Vec<ExecutionEvent> {
+    let decisions_by_session = decisions
+        .iter()
+        .map(|decision| (decision.decision_session.session_date, decision))
+        .collect::<BTreeMap<_, _>>();
+    let mut held = BTreeSet::new();
+    let mut pending: Option<&Decision> = None;
+    let mut events = Vec::new();
+
+    for session in sessions {
+        if let Some(decision) = pending {
+            let blocked = held
+                .iter()
+                .filter(|instrument| !executable(instrument, session))
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            if blocked.is_empty() {
+                let mut applied = BTreeMap::new();
+                let mut skipped_buys = BTreeSet::new();
+                for (instrument, weight) in &decision.targets {
+                    if executable(instrument, session) {
+                        applied.insert(instrument.clone(), *weight);
+                    } else {
+                        skipped_buys.insert(instrument.clone());
+                    }
+                }
+                held = applied
+                    .iter()
+                    .filter(|(_, weight)| **weight > 0.0)
+                    .map(|(instrument, _)| instrument.clone())
+                    .collect();
+                events.push(ExecutionEvent::Executed {
+                    decision_session: decision.decision_session.clone(),
+                    attempt_session: session.clone(),
+                    applied,
+                    skipped_buys,
+                });
+                pending = None;
+            } else {
+                events.push(ExecutionEvent::Deferred {
+                    decision_session: decision.decision_session.clone(),
+                    attempt_session: session.clone(),
+                    blocked,
+                });
+            }
+        }
+
+        if let Some(decision) = decisions_by_session.get(&session.session_date) {
+            pending = Some(*decision);
+        }
+    }
+
+    if let Some(decision) = pending {
+        events.push(ExecutionEvent::PendingAtEnd {
+            decision_session: decision.decision_session.clone(),
+            targets: decision.targets.clone(),
+        });
+    }
+    events
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EngineError {
     UnsupportedCapability,

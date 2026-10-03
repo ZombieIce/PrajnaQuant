@@ -11,5 +11,8 @@ mod panel;
 pub mod strategy;
 mod universe;
 
-pub use panel::{Panel, PanelError, PanelSession, load_panel};
+pub use panel::{
+    ExecutionStatusMap, Panel, PanelError, PanelSession, executable, load_execution_status,
+    load_panel,
+};
 pub use universe::{StaticUniverse, UniverseError};

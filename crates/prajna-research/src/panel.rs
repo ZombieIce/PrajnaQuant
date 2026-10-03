@@ -10,7 +10,9 @@ use arrow_array::{
 };
 use chrono::{Duration, NaiveDate};
 use polars::prelude::{DataFrame, DataType, NamedFrom, Series, TimeUnit, TimeZone};
-use prajna_data::{DataError, ManifestError, read_manifest};
+use prajna_data::{
+    DataError, ExecutionStatusRow, ManifestError, execution_status_from_record_batch, read_manifest,
+};
 use prajna_domain::{InstrumentId, Price, Session, TimestampNs, VenueId};
 
 use crate::dsv::{DsvTableError, read_table};
@@ -28,6 +30,8 @@ pub struct Panel {
     pub instruments: Vec<InstrumentId>,
     pub grid: DataFrame,
 }
+
+pub type ExecutionStatusMap = BTreeMap<(InstrumentId, NaiveDate), ExecutionStatusRow>;
 
 #[derive(Debug)]
 pub enum PanelError {
@@ -71,6 +75,12 @@ impl From<ManifestError> for PanelError {
     }
 }
 
+impl From<DataError> for PanelError {
+    fn from(error: DataError) -> Self {
+        Self::Data(error)
+    }
+}
+
 impl From<DsvTableError> for PanelError {
     fn from(error: DsvTableError) -> Self {
         match error {
@@ -92,13 +102,7 @@ pub fn load_panel(
     venue: &VenueId,
 ) -> Result<Panel, PanelError> {
     let lake_root = lake_root.as_ref();
-    let manifest = read_manifest(lake_root, dsv)?;
-    if manifest.core.manifest_version != 1 {
-        return Err(PanelError::InvalidManifest(format!(
-            "unsupported manifest version {}",
-            manifest.core.manifest_version
-        )));
-    }
+    let manifest = read_panel_manifest(lake_root, dsv)?;
 
     let (_, instruments_batches) = read_table(lake_root, &manifest, "instruments")?;
     let (_, sessions_batches) = read_table(lake_root, &manifest, "sessions")?;
@@ -114,6 +118,96 @@ pub fn load_panel(
         instruments,
         grid,
     })
+}
+
+pub fn load_execution_status(
+    lake_root: impl AsRef<Path>,
+    dsv: &str,
+) -> Result<ExecutionStatusMap, PanelError> {
+    let lake_root = lake_root.as_ref();
+    let manifest = read_panel_manifest(lake_root, dsv)?;
+    let (_, batches) = read_table(lake_root, &manifest, "execution_status")?;
+    let mut statuses = BTreeMap::new();
+
+    for batch in &batches {
+        for status in execution_status_from_record_batch(batch)? {
+            let key = (status.instrument_id.clone(), status.session_date);
+            if statuses.insert(key.clone(), status).is_some() {
+                return Err(invalid_table(
+                    "execution_status",
+                    format!("duplicate instrument/session key {} on {}", key.0, key.1),
+                ));
+            }
+        }
+    }
+
+    Ok(statuses)
+}
+
+pub fn executable(
+    panel: &Panel,
+    statuses: &ExecutionStatusMap,
+    instrument: &InstrumentId,
+    session: &PanelSession,
+) -> Result<bool, PanelError> {
+    let instrument_index = panel.instruments.binary_search(instrument).map_err(|_| {
+        invalid_table(
+            "bars",
+            format!("execution check references unknown instrument {instrument}"),
+        )
+    })?;
+    let session_index = panel
+        .sessions
+        .binary_search_by_key(&session.session_date, |candidate| candidate.session_date)
+        .map_err(|_| {
+            invalid_table(
+                "sessions",
+                format!(
+                    "execution check references unknown session {}",
+                    session.session_date
+                ),
+            )
+        })?;
+    if panel.sessions[session_index] != *session {
+        return Err(invalid_table(
+            "sessions",
+            format!(
+                "execution check has inconsistent session times for {}",
+                session.session_date
+            ),
+        ));
+    }
+
+    let row = instrument_index
+        .checked_mul(panel.sessions.len())
+        .and_then(|offset| offset.checked_add(session_index))
+        .ok_or_else(|| invalid_table("bars", "execution grid row index overflow"))?;
+    let has_bar = panel
+        .grid
+        .column("has_bar")?
+        .bool()?
+        .get(row)
+        .ok_or_else(|| invalid_table("bars", "execution grid has a null has_bar value"))?;
+    let Some(status) = statuses.get(&(instrument.clone(), session.session_date)) else {
+        return Ok(false);
+    };
+
+    Ok(has_bar
+        && status.is_tradable
+        && status
+            .available_at
+            .is_some_and(|available_at| available_at <= session.ts_open))
+}
+
+fn read_panel_manifest(lake_root: &Path, dsv: &str) -> Result<prajna_data::Manifest, PanelError> {
+    let manifest = read_manifest(lake_root, dsv)?;
+    if manifest.core.manifest_version != 1 {
+        return Err(PanelError::InvalidManifest(format!(
+            "unsupported manifest version {}",
+            manifest.core.manifest_version
+        )));
+    }
+    Ok(manifest)
 }
 
 fn read_instruments(
