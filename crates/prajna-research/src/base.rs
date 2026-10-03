@@ -66,14 +66,16 @@ pub fn compute_base(
         return Err(FactorError::Evaluation("incomplete Panel grid".into()));
     }
     let mut grid = panel.grid.clone();
+    // Work in UTC nanoseconds to avoid timezone casts inside Polars window lists.
     grid.with_column(
-        Series::new("_ts_close".into(), closes)
-            .cast(&DataType::Datetime(
-                TimeUnit::Nanoseconds,
-                Some(TimeZone::UTC),
-            ))?
+        grid.column("close_available_at")?
+            .datetime()?
+            .physical()
+            .clone()
+            .into_series()
             .into(),
     )?;
+    grid.with_column(Series::new("_ts_close".into(), closes).into())?;
     let mut frame = grid
         .filter(&BooleanChunked::from_slice("".into(), &selected))?
         .lazy()

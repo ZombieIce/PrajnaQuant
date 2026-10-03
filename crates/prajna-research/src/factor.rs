@@ -1,4 +1,5 @@
-//! Versioned definitions from PrajnaQuant Issue #53 M6/M7; base numerical evaluation lives in `compute_base`.
+//! Versioned definitions from PrajnaQuant Issue #53 M6/M7; evaluation lives in
+//! `compute_base`, `compute_composite` and the DAG entry point `compute`.
 //! Finite weights preserve all binary64 bits in canonical JSON, including signed zero.
 //! Negative weights reverse the corresponding score contribution; positivity is not required.
 //! Factor Values rows cover Universe × Session, sorted by (instrument_id, session_date).
@@ -137,7 +138,8 @@ pub fn values_schema() -> ValuesSchema {
 /// chooses the M7 `TreatUnknownAsTsClose` assumption. A missing required bar
 /// yields `missing_input`, while insufficient session history yields
 /// `insufficient_window`; non-`ok` values are null. This crate defines those
-/// semantics; `compute_base` evaluates the three base kinds.
+/// semantics; `compute_base` evaluates the three base kinds and
+/// `compute_composite` evaluates RotationScore from dependency Values.
 ///
 /// | Kind | v1 definition and direction |
 /// | --- | --- |
