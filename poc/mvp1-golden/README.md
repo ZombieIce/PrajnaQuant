@@ -65,17 +65,25 @@ An instrument is executable only when it has an open bar, is marked tradable,
 and its execution-status availability is no later than the session open.
 Missing execution-status records are not executable.
 
-Session returns are measured from the previous Venue Session open to the
-current open using the previous session's post-execution weights. Missing
-open prices carry the last known valuation forward and are listed in
-`valuation_carried`; their return is recognized when a later open is observed.
-Target weights on each session row reflect the latest decision made by that
-session's close, while `weights_after_execution` reflect the open execution.
-NAV starts at `1.0` on the first session open; session transaction costs are
-applied after the open-to-open gross return. Cost is proportional:
+At each Session open, the pending rebalance executes first and its cost is
+charged against the drifted weights. For every non-final Session, gross return
+then measures that Session's open to the next Session's open using the
+post-execution weights, which drift afterward. Missing open prices carry the
+last known valuation forward and are listed in `valuation_carried`; their
+return is recognized when a later open is observed. Target weights on each
+session row reflect the latest decision made by that session's close, while
+`weights_after_execution` reflect the weights immediately after that open's
+execution. NAV starts at `1.0` on the first session open, and `net_return`
+includes the execution cost and the following open-to-open gross return. Cost
+is proportional:
 `buys * (commission_rate + buy_slippage_bps / 1e4 + buy_tax_rate) +
 sells * (commission_rate + sell_slippage_bps / 1e4 + sell_tax_rate)`.
 Minimum commission and lots are not modeled.
+
+The `vector` result also records the exact proportional-cost inputs,
+`availability_assumption`, and the assumptions used for transaction costs,
+raw open-to-open prices, Static Universe point-in-time limits, and conservative
+execution deferrals.
 
 M6/M7 and the independent-golden requirement are specified in
 [issue #53](https://github.com/ZombieIce/PrajnaQuant/issues/53); the Vector
