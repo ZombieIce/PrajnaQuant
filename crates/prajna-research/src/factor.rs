@@ -1,3 +1,8 @@
+//! Versioned definitions from PrajnaQuant Issue #53 M6/M7; no numerical evaluation.
+//! Finite weights preserve all binary64 bits in canonical JSON, including signed zero.
+//! Negative weights reverse the corresponding score contribution; positivity is not required.
+//! Factor Values rows cover Universe × Session, sorted by (instrument_id, session_date).
+
 use std::{collections::BTreeSet, error::Error, fmt, str::FromStr, sync::Arc};
 
 use arrow_schema::{
@@ -531,6 +536,13 @@ fn validate_params(kind: FactorKind, params: &FactorParams) -> Result<(), Factor
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn injected_self_dependency_is_rejected() {
+        let root = Factor::new(FactorKind::Momentum, MomentumParams { n: 1 }).unwrap();
+        let cycle = resolve_with_dependencies(root.clone(), &|_| vec![("self", root.clone())]);
+        assert!(matches!(cycle, Err(FactorError::DependencyCycle { .. })));
+    }
 
     #[test]
     fn injected_dependency_cycle_is_rejected() {

@@ -408,3 +408,92 @@ fn factor_values_arrow_and_polars_schemas_match_m6() {
         dtype => panic!("expected UTC nanosecond datetime, got {dtype:?}"),
     }
 }
+
+#[test]
+fn restricted_jcs_preserves_all_weight_slots_and_extreme_finite_values() {
+    let make = |weights: [f64; 3]| {
+        Factor::new(
+            FactorKind::RotationScore,
+            RotationScoreParams {
+                short: 1,
+                long: 1,
+                vol: 2,
+                w_s: weights[0],
+                w_l: weights[1],
+                w_v: weights[2],
+                trend: None,
+            },
+        )
+        .unwrap()
+    };
+    for slot in 0..3 {
+        for (left, right) in [(0.0, -0.0), (1.0, 1.0000000000000002)] {
+            let mut a = [1.0; 3];
+            let mut b = a;
+            a[slot] = left;
+            b[slot] = right;
+            assert_ne!(
+                prajna_data::restricted_jcs(&make(a).canonical_json()).unwrap(),
+                prajna_data::restricted_jcs(&make(b).canonical_json()).unwrap()
+            );
+        }
+        for weight in [f64::MIN_POSITIVE, f64::from_bits(1), f64::MAX, -f64::MAX] {
+            let mut weights = [1.0; 3];
+            weights[slot] = weight;
+            let factor = make(weights);
+            let canonical = prajna_data::restricted_jcs(&factor.canonical_json()).unwrap();
+            assert_eq!(
+                canonical,
+                prajna_data::restricted_jcs(&make(weights).canonical_json()).unwrap()
+            );
+        }
+    }
+}
+
+#[test]
+fn rotation_rejects_each_invalid_window_and_nonfinite_weight_slot() {
+    for (short, long, vol, trend) in [
+        (0, 1, 2, None),
+        (1, 0, 2, None),
+        (1, 1, 0, None),
+        (1, 1, 1, None),
+        (1, 1, 2, Some(0)),
+    ] {
+        assert!(
+            Factor::new(
+                FactorKind::RotationScore,
+                RotationScoreParams {
+                    short,
+                    long,
+                    vol,
+                    trend,
+                    w_s: 0.0,
+                    w_l: 0.0,
+                    w_v: 0.0
+                }
+            )
+            .is_err()
+        );
+    }
+    for slot in 0..3 {
+        for weight in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut w = [0.0; 3];
+            w[slot] = weight;
+            assert!(
+                Factor::new(
+                    FactorKind::RotationScore,
+                    RotationScoreParams {
+                        short: 1,
+                        long: 1,
+                        vol: 2,
+                        trend: None,
+                        w_s: w[0],
+                        w_l: w[1],
+                        w_v: w[2]
+                    }
+                )
+                .is_err()
+            );
+        }
+    }
+}
