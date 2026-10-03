@@ -1,5 +1,5 @@
-pub mod factor;
 mod dsv;
+pub mod factor;
 mod panel;
 mod universe;
 
