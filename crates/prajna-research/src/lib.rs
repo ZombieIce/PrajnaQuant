@@ -8,6 +8,7 @@ pub use compute::compute;
 mod dsv;
 pub mod factor;
 mod panel;
+pub mod strategy;
 mod universe;
 
 pub use panel::{Panel, PanelError, PanelSession, load_panel};
