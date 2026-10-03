@@ -1,3 +1,4 @@
+pub mod cache;
 mod dsv;
 pub mod factor;
 mod panel;
