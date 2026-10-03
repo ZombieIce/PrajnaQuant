@@ -106,6 +106,7 @@ mod tests {
     use crate::factor::{
         AvailabilityAssumption, Factor, FactorKind, MomentumParams, VALUES_SCHEMA_VERSION,
     };
+    use sha2::Digest;
 
     fn momentum(n: u32) -> Factor {
         Factor::new(FactorKind::Momentum, MomentumParams { n }).unwrap()
@@ -248,6 +249,41 @@ mod tests {
         for (input, changed) in changed_inputs {
             assert_ne!(baseline, changed, "changing {input} must change the key");
         }
+    }
+
+    #[test]
+    fn rotation_score_key_does_not_collide_with_version_one_semantics() {
+        let factor = Factor::new(
+            FactorKind::RotationScore,
+            crate::factor::RotationScoreParams {
+                short: 3,
+                long: 10,
+                vol: 5,
+                w_s: 1.0,
+                w_l: 1.0,
+                w_v: 1.0,
+                trend: None,
+            },
+        )
+        .unwrap();
+        let key = FactorKey::with_versions(
+            &factor,
+            &[],
+            "dsv",
+            "universe",
+            AvailabilityAssumption::None,
+            KEY_VERSION,
+            VALUES_SCHEMA_VERSION,
+        );
+
+        // Version "1" cached null-status rows with a non-null available_at.
+        let mut legacy = key.key_object().clone();
+        legacy["factor"]["version"] = serde_json::json!("1");
+        let canonical = prajna_data::restricted_jcs(&legacy).unwrap();
+        let legacy_key = format!("fv:sha256:{:x}", sha2::Sha256::digest(canonical));
+
+        assert_eq!(key.key_object()["factor"]["version"], "2");
+        assert_ne!(key.as_str(), legacy_key);
     }
 
     #[test]

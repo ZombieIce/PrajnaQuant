@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 const MOMENTUM_VERSION: &str = "1";
 const VOLATILITY_VERSION: &str = "1";
 const TREND_FILTER_VERSION: &str = "1";
-const ROTATION_SCORE_VERSION: &str = "1";
+const ROTATION_SCORE_VERSION: &str = "2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FactorStatus {
