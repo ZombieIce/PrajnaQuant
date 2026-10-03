@@ -6,7 +6,9 @@ use chrono::{Datelike, NaiveDate, TimeZone, Utc};
 use polars::prelude::{DataFrame, DataType, NamedFrom, Series};
 use prajna_domain::{InstrumentId, TimestampNs, VenueId};
 use prajna_research::{
-    Panel, PanelSession, executable, load_execution_status, load_panel,
+    Panel, PanelSession, executable,
+    factor::AvailabilityAssumption,
+    load_execution_status, load_panel,
     strategy::{Decision, ExecutionEvent, execute},
     vector::{VectorCosts, run_vector},
 };
@@ -128,7 +130,14 @@ fn three_by_ten_result_has_golden_json_shape_and_zero_gross_returns() {
     let events = execute(&decisions, &panel.sessions, |instrument, session| {
         executable(&panel, &statuses, instrument, session).unwrap()
     });
-    let result = run_vector(&panel, &decisions, &events, &vector_costs()).unwrap();
+    let result = run_vector(
+        &panel,
+        &decisions,
+        &events,
+        &vector_costs(),
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
 
     assert_eq!(result.sessions.len(), 10);
     assert!(
@@ -179,7 +188,14 @@ fn runs_an_empty_strategy_without_execution_events() {
     let dsv = common::publish_v1(lake.path());
     let panel = load_panel(lake.path(), &dsv, &VenueId::new("SYNTH").unwrap()).unwrap();
 
-    let result = run_vector(&panel, &[], &[], &vector_costs()).unwrap();
+    let result = run_vector(
+        &panel,
+        &[],
+        &[],
+        &vector_costs(),
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
 
     assert!(result.decisions.is_empty());
     assert!(result.executions.is_empty());
@@ -208,12 +224,82 @@ fn rejects_an_executed_leg_without_an_open_price() {
         skipped_buys: BTreeSet::new(),
     }];
 
-    let error = run_vector(&panel, &decisions, &events, &vector_costs()).unwrap_err();
+    let error = run_vector(
+        &panel,
+        &decisions,
+        &events,
+        &vector_costs(),
+        AvailabilityAssumption::None,
+    )
+    .unwrap_err();
 
     assert!(
         error
             .to_string()
             .contains("executed event applies Y.SYNTH without an open price")
+    );
+}
+
+#[test]
+fn rejects_liquidating_a_holding_without_an_open_price() {
+    let panel = manual_panel();
+    let decisions = [
+        Decision {
+            decision_session: panel.sessions[0].clone(),
+            ranked: vec![(instrument("Y.SYNTH"), 1.0, 1)],
+            targets: weights(&[("Y.SYNTH", 1.0)]),
+        },
+        Decision {
+            decision_session: panel.sessions[1].clone(),
+            ranked: vec![(instrument("Y.SYNTH"), 1.0, 1)],
+            targets: BTreeMap::new(),
+        },
+    ];
+    let events = [
+        ExecutionEvent::Executed {
+            decision_session: panel.sessions[0].clone(),
+            attempt_session: panel.sessions[1].clone(),
+            applied: weights(&[("Y.SYNTH", 1.0)]),
+            skipped_buys: BTreeSet::new(),
+        },
+        ExecutionEvent::Executed {
+            decision_session: panel.sessions[1].clone(),
+            attempt_session: panel.sessions[2].clone(),
+            applied: BTreeMap::new(),
+            skipped_buys: BTreeSet::new(),
+        },
+    ];
+
+    let error = run_vector(
+        &panel,
+        &decisions,
+        &events,
+        &vector_costs(),
+        AvailabilityAssumption::None,
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("without an open price"));
+}
+
+#[test]
+fn result_records_the_upstream_availability_assumption_and_account_simplifications() {
+    let panel = manual_panel();
+    let assumption = AvailabilityAssumption::TreatUnknownAsTsClose;
+    let result = run_vector(&panel, &[], &[], &vector_costs(), assumption).unwrap();
+
+    assert_eq!(result.availability_assumption, "treat_unknown_as_ts_close");
+    for expected in [
+        "availability assumption: treat_unknown_as_ts_close",
+        "long-only unlevered weights; residual cash earns zero return",
+    ] {
+        assert!(result.assumptions.iter().any(|item| item == expected));
+    }
+    assert!(
+        !result
+            .assumptions
+            .iter()
+            .any(|item| item == "availability assumption: none")
     );
 }
 
@@ -310,7 +396,14 @@ fn hand_calculation_covers_execution_cost_drift_and_carried_valuation() {
 
     // D2 buys 50/50; D2-D3 earns 5% on X while Y carries, then D3-D4
     // recognizes Y's 10% move using the carried D3 valuation.
-    let result = run_vector(&panel, &decisions, &events, &costs).unwrap();
+    let result = run_vector(
+        &panel,
+        &decisions,
+        &events,
+        &costs,
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
 
     assert_eq!(result.sessions[0].cost, 0.0);
     assert_eq!(result.sessions[0].nav, 1.0);

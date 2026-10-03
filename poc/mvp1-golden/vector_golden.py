@@ -564,8 +564,9 @@ def build_vector_result(fixture, calendar, bars_by_symbol, factors):
         "raw open-to-open returns",
         "Static Universe is not point-in-time",
         "conservative deferral when a held instrument is unavailable",
-        "availability assumption: none",
         "weight-based Vector NAV is not a cash-and-quantity account ledger",
+        "long-only unlevered weights; residual cash earns zero return",
+        "availability assumption: none",
     ]
     return {
         "sessions": sessions,

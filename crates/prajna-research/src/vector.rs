@@ -121,6 +121,7 @@ pub fn run_vector(
     decisions: &[Decision],
     events: &[ExecutionEvent],
     costs: &VectorCosts,
+    availability_assumption: AvailabilityAssumption,
 ) -> Result<VectorResult, VectorError> {
     validate_costs(costs)?;
     let prices = read_prices(panel)?;
@@ -197,7 +198,7 @@ pub fn run_vector(
                     } => {
                         validate_applied_weights(panel, applied)?;
                         validate_skipped_buys(pending, applied, skipped_buys)?;
-                        for instrument in applied.keys() {
+                        for instrument in applied.keys().chain(weights.keys()) {
                             let instrument_index =
                                 panel.instruments.binary_search(instrument).map_err(|_| {
                                     invalid_input(format!("unknown held instrument {instrument}"))
@@ -372,9 +373,9 @@ pub fn run_vector(
         decisions: result_decisions,
         executions: result_executions,
         pending_at_end,
-        assumptions: assumptions(),
+        assumptions: assumptions(availability_assumption),
         costs: *costs,
-        availability_assumption: AvailabilityAssumption::None.canonical_str().to_owned(),
+        availability_assumption: availability_assumption.canonical_str().to_owned(),
     })
 }
 
@@ -682,18 +683,22 @@ fn session_index(panel: &Panel, session: &PanelSession) -> Result<usize, VectorE
     Ok(index)
 }
 
-fn assumptions() -> Vec<String> {
+fn assumptions(availability_assumption: AvailabilityAssumption) -> Vec<String> {
     [
         "proportional transaction costs",
         "no minimum commission or lot size",
         "raw open-to-open returns",
         "Static Universe is not point-in-time",
         "conservative deferral when a held instrument is unavailable",
-        "availability assumption: none",
         "weight-based Vector NAV is not a cash-and-quantity account ledger",
+        "long-only unlevered weights; residual cash earns zero return",
     ]
     .into_iter()
     .map(str::to_owned)
+    .chain([format!(
+        "availability assumption: {}",
+        availability_assumption.canonical_str()
+    )])
     .collect()
 }
 
