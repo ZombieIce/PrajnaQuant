@@ -78,6 +78,8 @@ M10 `strategy::VectorStrategy` 与 `VectorEngine::validate` 已实现：仅声�
 
 `prajna-research` 现提供 `StaticUniverse`：成员排序去重后以 restricted-JCS SHA-256 身份存储，原子发布、幂等复用并在读取时校验身份；可对照 DSV v1 instruments 表报告缺失成员。3×10 fixture 已验证 A/B/C 通过、含 D 失败。它是固定成员列表，不提供 point-in-time 成员可知性证明。
 
+MVP-2 的 `prajna-experiment`（Issue #99）现可解析并校验 `experiment.json`，要求存在且有效的 DSV、同一 lake 中的 Static Universe 及其成员覆盖、合法 Venue、固定的 `s2_rotation`/`vector` 类型、有限成本和完整参数空间；grid/list 均只校验、不展开。restricted-JCS 身份覆盖 Experiment、`vector@1` Run Spec 与含 git revision、tracked/untracked diff hash、rustc 版本和 target triple 的 Experiment Execution；脏工作树标为不可完全复现。尚未执行 Run、计算 Metrics、写入 ResultLevel 或按参数扫描；验证仅限合成 fixture。
+
 ## Batch 2 Integration Acceptance (2026-09-25)
 
 总评**部分通过**；要求、代码/测试/真实样本/浏览器证据及限制见 [`handoffs/batch2-integration-acceptance.md`](handoffs/batch2-integration-acceptance.md)。A：241×5 状态格全 UNKNOWN，只有一条无交易所原文的盘中限制二级消息；同价面板/Universe 复跑 0 成交、24 个 unknown 拒单，只验证缺证拒单。B：仓库迁移 007 和 `sync-daily`/`publish-sync` 支持显式证券增量、修订回看、重试/断点、审计和不可变快照；隔离真实样本重复同步不增有效修订，生产状态 Unknown。C：新增 `/api/v1/instruments` 通用发布快照搜索、`/api/v1/daily-bars` 分页与 `/market` 页面；B 格式的发布指针与 C 只读 API 已接通并测试固定版本。B 真实小样本证券目录缺身份/分类，因此生产股票/ETF 行情页面仍未验。调度脚本未安装/启用。

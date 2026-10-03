@@ -20,6 +20,7 @@ members = [
     "crates/prajna-domain",
     "crates/prajna-data",
     "crates/prajna-research",
+    "crates/prajna-experiment",
     "crates/quant-research",
 ]
 resolver = "2"
