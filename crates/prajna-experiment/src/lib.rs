@@ -449,6 +449,22 @@ fn normalize_parameter_axis(name: &str, value: &Value) -> Value {
     }
 }
 
+/// Target triple this crate was compiled for, captured by `build.rs`.
+const BUILD_TARGET: &str = env!("PRAJNA_BUILD_TARGET");
+
+#[cfg(unix)]
+fn path_from_git_bytes(bytes: &[u8]) -> Result<std::path::PathBuf, ExperimentError> {
+    use std::os::unix::ffi::OsStrExt;
+    Ok(std::path::PathBuf::from(std::ffi::OsStr::from_bytes(bytes)))
+}
+
+#[cfg(not(unix))]
+fn path_from_git_bytes(bytes: &[u8]) -> Result<std::path::PathBuf, ExperimentError> {
+    String::from_utf8(bytes.to_vec())
+        .map(std::path::PathBuf::from)
+        .map_err(|error| ExperimentError::Git(format!("git path is not UTF-8: {error}")))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExecutionIdentity {
     pub id: String,
@@ -474,13 +490,19 @@ impl ExecutionIdentity {
         let reproducible = status.is_empty();
         let mut diff = git_bytes(repository, &["diff", "--binary", "HEAD"])?;
         diff.extend_from_slice(b"\0untracked\0");
-        let untracked = git_text(repository, &["ls-files", "--others", "--exclude-standard"])?;
-        let mut paths = untracked.lines().map(str::to_owned).collect::<Vec<_>>();
+        let untracked = git_bytes(
+            repository,
+            &["ls-files", "-z", "--others", "--exclude-standard"],
+        )?;
+        let mut paths = untracked
+            .split(|byte| *byte == 0)
+            .filter(|path| !path.is_empty())
+            .collect::<Vec<_>>();
         paths.sort();
         for path in paths {
-            let file = repository.join(&path);
+            let file = repository.join(path_from_git_bytes(path)?);
             let content_hash = digest(&fs::read(file)?);
-            diff.extend_from_slice(path.as_bytes());
+            diff.extend_from_slice(path);
             diff.push(0);
             diff.extend_from_slice(content_hash.as_bytes());
             diff.push(b'\n');
@@ -495,13 +517,7 @@ impl ExecutionIdentity {
                 "rustc --version returned an empty version".into(),
             ));
         }
-        let rustc_verbose = String::from_utf8(command_output(repository, "rustc", &["-vV"])?)
-            .map_err(|error| ExperimentError::Git(format!("rustc output is not UTF-8: {error}")))?;
-        let target_triple = rustc_verbose
-            .lines()
-            .find(|line| line.starts_with("host: "))
-            .map(|line| line[6..].to_owned())
-            .ok_or_else(|| ExperimentError::Git("rustc -vV did not report a host target".into()))?;
+        let target_triple = BUILD_TARGET.to_owned();
         let value = serde_json::json!({
             "experiment": experiment_id,
             "git_revision": git_revision,
@@ -948,6 +964,25 @@ mod tests {
             tracked_dirty.working_tree_diff_sha256,
             untracked_dirty.working_tree_diff_sha256
         );
+        assert_ne!(clean.id, tracked_dirty.id);
+        assert_ne!(tracked_dirty.id, untracked_dirty.id);
+        assert_ne!(
+            untracked_dirty.id,
+            ExecutionIdentity::capture("exp:sha256:other", repository.path())
+                .unwrap()
+                .id
+        );
+        assert_eq!(clean.target_triple, env!("PRAJNA_BUILD_TARGET"));
+
+        fs::write(repository.path().join("研究 \"x\".txt"), "unicode").unwrap();
+        let special = ExecutionIdentity::capture("exp:sha256:test", repository.path()).unwrap();
+        assert!(!special.reproducible);
+        assert_ne!(untracked_dirty.id, special.id);
+        git(&["add", "tracked.txt"]);
+        git(&["commit", "-qm", "second"]);
+        let next = ExecutionIdentity::capture("exp:sha256:test", repository.path()).unwrap();
+        assert_ne!(clean.git_revision, next.git_revision);
+        assert_ne!(special.id, next.id);
     }
 
     #[test]
