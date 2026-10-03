@@ -83,20 +83,22 @@ pub fn compute_base(
         );
     // Oversized windows have no eligible sessions; avoid allocating expressions proportional to n.
     if start as usize >= panel.sessions.len() {
-        return Ok(frame
-            .select([
-                col("instrument_id"),
-                col("session_date"),
-                lit(NULL).cast(DataType::Float64).alias("value"),
-                lit(NULL)
-                    .cast(DataType::Datetime(
-                        TimeUnit::Nanoseconds,
-                        Some(TimeZone::UTC),
-                    ))
-                    .alias("available_at"),
-                lit(FactorStatus::InsufficientWindow.as_str()).alias("status"),
-            ])
-            .collect()?);
+        return values_with_utc(
+            frame
+                .select([
+                    col("instrument_id"),
+                    col("session_date"),
+                    lit(NULL).cast(DataType::Float64).alias("value"),
+                    lit(NULL)
+                        .cast(DataType::Datetime(
+                            TimeUnit::Nanoseconds,
+                            Some(TimeZone::UTC),
+                        ))
+                        .alias("available_at"),
+                    lit(FactorStatus::InsufficientWindow.as_str()).alias("status"),
+                ])
+                .collect()?,
+        );
     }
     let offsets: Vec<u32> = match factor.params() {
         FactorParams::Momentum(_) => vec![0, n],
@@ -160,21 +162,41 @@ pub fn compute_base(
         .then(lit(FactorStatus::UnknownAvailability.as_str()))
         .otherwise(lit(FactorStatus::Ok.as_str()))
         .alias("status");
-    Ok(frame
-        .with_column(status)
-        .select([
-            col("instrument_id"),
-            col("session_date"),
-            when(col("status").eq(lit("ok")))
-                .then(value)
-                .otherwise(lit(NULL))
-                .cast(DataType::Float64)
-                .alias("value"),
-            when(col("status").eq(lit("ok")))
-                .then(max_horizontal(times)?)
-                .otherwise(lit(NULL))
-                .alias("available_at"),
-            col("status"),
-        ])
-        .collect()?)
+    values_with_utc(
+        frame
+            .with_column(status)
+            .select([
+                col("instrument_id"),
+                col("session_date"),
+                when(col("status").eq(lit("ok")))
+                    .then(value)
+                    .otherwise(lit(NULL))
+                    .cast(DataType::Float64)
+                    .alias("value"),
+                when(col("status").eq(lit("ok")))
+                    .then(max_horizontal(times)?)
+                    .otherwise(lit(NULL))
+                    .cast(DataType::Datetime(
+                        TimeUnit::Nanoseconds,
+                        Some(TimeZone::UTC),
+                    ))
+                    .alias("available_at"),
+                col("status"),
+            ])
+            .collect()?,
+    )
+}
+
+// Without Polars' timezones feature, lazy casts may treat UTC and no timezone
+// as equivalent and optimize away the cast. Preserve the M6 schema literally.
+fn values_with_utc(mut values: DataFrame) -> Result<DataFrame, FactorError> {
+    let available = values
+        .column("available_at")?
+        .datetime()?
+        .physical()
+        .clone()
+        .into_datetime(TimeUnit::Nanoseconds, Some(TimeZone::UTC))
+        .into_series();
+    values.with_column(available.into())?;
+    Ok(values)
 }

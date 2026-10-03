@@ -147,7 +147,7 @@ fn unknown_availability_requires_explicit_assumption_and_uses_each_inputs_close(
         .datetime()
         .unwrap()
         .physical()
-        .into_iter()
+        .iter()
         .collect();
     times[0] = None;
     // A historical input can be published after the current session close.
@@ -317,7 +317,7 @@ fn status_precedence_and_future_input_isolation() {
         .unwrap()
         .f64()
         .unwrap()
-        .into_iter()
+        .iter()
         .collect();
     prices[9] = Some(9999.0);
     clean
