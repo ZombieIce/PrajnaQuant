@@ -97,7 +97,7 @@ pub fn compute_composite(
             "dependency roles must exactly match the factor definition".into(),
         ));
     }
-    let mut inputs = Vec::with_capacity(expected.len());
+    let mut inputs = BTreeMap::new();
     for (role, _) in &expected {
         let matching: Vec<_> = deps.iter().filter(|(name, _)| name == role).collect();
         if matching.len() != 1 {
@@ -105,14 +105,10 @@ pub fn compute_composite(
                 "expected exactly one dependency for role {role}"
             )));
         }
-        inputs.push(dependency_rows(&matching[0].1)?);
+        inputs.insert(*role, dependency_rows(&matching[0].1)?);
     }
-    let first = &inputs[0];
-    if inputs
-        .iter()
-        .skip(1)
-        .any(|rows| !rows.keys().eq(first.keys()))
-    {
+    let first = &inputs["momentum_short"];
+    if inputs.values().any(|rows| !rows.keys().eq(first.keys())) {
         return Err(FactorError::Evaluation(
             "dependency key grids must match".into(),
         ));
@@ -123,7 +119,7 @@ pub fn compute_composite(
     let mut times = Vec::with_capacity(first.len());
     let mut statuses = Vec::with_capacity(first.len());
     for key in first.keys() {
-        let rows: Vec<_> = inputs.iter().map(|input| input[key]).collect();
+        let rows: Vec<_> = inputs.values().map(|input| input[key]).collect();
         let mut status = rows
             .iter()
             .map(|row| row.status)
@@ -131,23 +127,33 @@ pub fn compute_composite(
             .ok_or_else(|| FactorError::Evaluation("missing dependencies".into()))?;
         let mut value = None;
         if status == FactorStatus::Ok {
-            let numbers = rows
-                .iter()
-                .map(|row| {
-                    row.value
-                        .ok_or_else(|| FactorError::Evaluation("ok dependency has no value".into()))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            if params.trend.is_some() && !matches!(numbers[3], 0.0 | 1.0) {
-                return Err(FactorError::Evaluation(
-                    "trend dependency must be 0 or 1".into(),
-                ));
-            }
-            if params.trend.is_some() && numbers[3] == 0.0 {
+            let number = |role: &str| {
+                inputs
+                    .get(role)
+                    .and_then(|input| input[key].value)
+                    .ok_or_else(|| {
+                        FactorError::Evaluation(format!("ok dependency {role} has no value"))
+                    })
+            };
+            let filtered = if params.trend.is_some() {
+                match number("trend")? {
+                    0.0 => true,
+                    1.0 => false,
+                    _ => {
+                        return Err(FactorError::Evaluation(
+                            "trend dependency must be 0 or 1".into(),
+                        ));
+                    }
+                }
+            } else {
+                false
+            };
+            if filtered {
                 status = FactorStatus::Filtered;
             } else {
-                let score =
-                    params.w_s * numbers[0] + params.w_l * numbers[1] - params.w_v * numbers[2];
+                let score = params.w_s * number("momentum_short")?
+                    + params.w_l * number("momentum_long")?
+                    - params.w_v * number("volatility")?;
                 if !score.is_finite() {
                     return Err(FactorError::Evaluation("non-finite rotation_score".into()));
                 }
