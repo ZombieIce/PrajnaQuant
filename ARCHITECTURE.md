@@ -40,7 +40,7 @@ Portfolio 是资金与风险管理的一等对象：Trading Account 可分配资
 
 Factor 是版本化对象，至少记录 ID、定义、参数、依赖、Universe、频率、输入字段、窗口、观察/可用时刻、方向、缺失规则、Dataset Version、来源及输出 schema。MVP 目标含 Factor Registry 与按完整输入身份键控的 Factor Cache，使共享因子可跨 Run 复用。未来收益标签只用于评价。当前固定信号目录及一次网格内评分复用不能称为这一目标已完成。
 
-Experiment 包含策略与版本、Universe、数据版本、参数空间、成本模型、引擎、种子和多个 Run。目标 Run 身份由规范化有效配置、代码/引擎版本、Dataset manifest、成本模型和 seed 确定；结果应能回答“什么代码、数据与参数生成了它”。脏工作树需记录差异摘要或明确标为不可完全复现。`ResultLevel` 为 `Summary`（扫描默认）、`Standard`（曲线、交易等）和 `Full`（事件、订单、成交、持仓、诊断）；每级明确数据可用性，避免把省略字段解释成零或无事件。当前实验 UUID 与 JSON 报告尚不满足该目标身份契约。
+Experiment 包含策略与版本、Universe、数据版本、参数空间、成本模型、引擎、种子和多个 Run。目标 Run 身份由规范化有效配置、引擎语义版本、Dataset manifest、成本模型和 seed（仅随机性 Engine）确定，代码修订与编译环境决定 Experiment Execution 身份（[ADR 0018](docs/decisions/0018-run-spec-experiment-execution-identity.md)）；结果应能回答“什么代码、数据与参数生成了它”。脏工作树需记录差异摘要或明确标为不可完全复现。`ResultLevel` 为 `Summary`（扫描默认）、`Standard`（曲线、交易等）和 `Full`（事件、订单、成交、持仓、诊断）；每级明确数据可用性，避免把省略字段解释成零或无事件。当前实验 UUID 与 JSON 报告尚不满足该目标身份契约。
 
 单机优先：以 Run 为 CPU 并行单位，Rayon 执行；Tokio 用于 I/O。数据读取按证券、日期和列裁剪，并用流式/分块路径处理大于内存的数据集。是否需要分布式、何时拆分单次回测或采用其他运行时由测量决定。
 

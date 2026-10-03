@@ -93,10 +93,22 @@ Order 实际成交的一次记录，包含数量、价格、时间与费用依�
 在声明的估值、成本和执行假设下得到的组合表现及可用明细；不同 Engine 可提供不同粒度。
 
 **Experiment**:
-由固定研究问题、策略、数据、参数空间、成本与 Engine 选择构成的一组可比较 Run。
+由固定研究问题、Strategy、Dataset Version、Universe、成本、Engine 与 Parameter Space 构成的一组可比较 Run；定义相同即为同一 Experiment，重跑须与已保存结果一致。
+_Avoid_: 把每次执行当作新的 Experiment。
+
+**Parameter Space**:
+Experiment 中允许变化的 Strategy 参数组合，以网格或显式列表给出并按规范化后的组合去重；成本、数据、Universe 与 Engine 不属于 Parameter Space。
+
+**Run Spec**:
+决定一个 Run 输入的规范化描述：Dataset Version、Universe、Strategy 及参数、成本、Availability Assumption、Engine 及其语义版本，以及仅当 Engine 使用随机性时的随机种子；相同 Run Spec 在相同代码上必须得到相同结果。
+_Avoid_: 把代码修订当成 Run Spec 的一部分；为不使用随机性的 Engine 填写种子。
 
 **Run**:
-Experiment 中一组确定参数和输入身份的一次执行，结果须可追溯到代码、数据、成本与随机种子。
+按一个 Run Spec 的一次执行；结果须可追溯到 Run Spec 与执行时的代码修订，工作树不干净时标为不可完全复现。
+
+**Experiment Execution**:
+一个 Experiment 在确定代码修订、工作树差异与编译环境上的一次执行；相同 Execution 的重放须逐 Run 一致，代码变化产生新的 Execution，可按 Run Spec 与旧 Execution 对比。
+_Avoid_: 把不同代码上的结果覆盖或合并到同一 Execution。
 
 **ResultLevel**:
-Run 持久化结果的详细程度：Summary、Standard 或 Full；省略的明细表示未保存。
+Run 持久化结果的详细程度：Summary、Standard 或 Full；省略的明细表示未保存。Engine 本身不产生的明细（如 Vector 的订单与成交）另行标注，与“未保存”不同，都不表示零。
