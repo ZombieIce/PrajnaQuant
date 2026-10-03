@@ -13,4 +13,4 @@
 
 ## Consequences
 
-Static Universe 成员须在给定 DSV 的 instruments 表中存在。Factor Values 用 `status`（`ok`、`insufficient_window`、`missing_input`、`unknown_availability`、`filtered`）说明 null 的原因。RotationScore 传播非 `ok` 依赖状态时，`value` 与 `available_at` 均为 null；全部依赖有效但被 trend 过滤时，`value` 为 null 且保留依赖可用时刻。依赖升级会导致全量冷缓存，这是有意的代价。
+Static Universe 成员须在给定 DSV 的 instruments 表中存在。Factor Values 用 `status`（`ok`、`insufficient_window`、`missing_input`、`unknown_availability`、`filtered`）说明 null 的原因。RotationScore 传播非 `ok` 依赖状态时，`value` 与 `available_at` 均为 null；全部依赖有效但被 trend 过滤时，`value` 为 null 且保留依赖可用时刻。该语义变更已将 RotationScore 版本升至 `"2"`，旧版本缓存条目因 key 不同而不再复用（不删除、不覆盖）；依赖升级会导致全量冷缓存，这是有意的代价。
