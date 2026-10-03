@@ -70,7 +70,7 @@ MVP-0 数据层现有 D7 instruments、bars、sessions 的 Arrow schema、Domain
 
 ### MVP-1 D7 面板读取
 
-`prajna-research` 的 `load_panel` 已能校验 DSV manifest 并读取 schema v1 的 instruments、sessions、bars，按 Venue 生成有序 Session/Instrument 列表及完整 instrument × session Polars 网格。缺 bar 保持价格 null 且 `has_bar=false`；`close_available_at` 保留源 available_at 的 UTC 纳秒值，不推定为 close。当前验证限于 `synthetic-etf-daily` v1 的 3×10 合成 fixture；不代表真实数据、因子、缓存或执行能力。
+`prajna-research` 的 `load_panel` 已能校验 DSV manifest 并读取 schema v1 的 instruments、sessions、bars，按 Venue 生成有序 Session/Instrument 列表及完整 instrument × session Polars 网格。缺 bar 保持价格 null 且 `has_bar=false`；`close_available_at` 保留源 available_at 的 UTC 纳秒值，不推定为 close。当前面板验证限于 `synthetic-etf-daily` v1 的 3×10 合成 fixture。`factor` 模块已提供四种版本化定义、强类型参数校验、dependency-first 去重 DAG（含注入环测试）、status/availability 字符串与 Factor Values Arrow schema v1；canonical JSON 的有限 f64 权重用 16 位小写 IEEE-754 hex 保存，明确区分正负零。定义模型与身份有参数差异、非法输入和 schema 测试；尚无因子数值计算、持久缓存或 Vector 执行能力，也不证明真实数据或 PIT。
 
 `prajna-research` 现提供 `StaticUniverse`：成员排序去重后以 restricted-JCS SHA-256 身份存储，原子发布、幂等复用并在读取时校验身份；可对照 DSV v1 instruments 表报告缺失成员。3×10 fixture 已验证 A/B/C 通过、含 D 失败。它是固定成员列表，不提供 point-in-time 成员可知性证明。
 
