@@ -81,7 +81,7 @@ Lake 根由调用方指定，不与 `data-core/` 混放：
 1. `dsv = "dsv:sha256:" + hex(sha256(受限 JCS(core)))`，`core = { manifest_version: 1, normalizer: {id, version, config_sha256}, inputs: [{raw_sha256}] 按 hash 排序, tables: [{table, schema_version, schema_fingerprint, logical_hash, row_count}] 按表名排序 }`。manifest 文件为 `{ dsv, core, provenance }`；`provenance`（文件路径/sha256/字节数、writer 参数、`created_at`、`git_rev`/`git_dirty`、主机、合成假设、覆盖率、被忽略的输入字段）不参与 dsv。
 2. 受限 JCS 遵循 RFC 8785，值只允许字符串、布尔、null、`|n| ≤ 2^53−1` 的整数、数组与对象；禁止浮点数。
 3. schema 指纹 = `sha256(受限 JCS({fields:[{name,type,nullable,metadata}], metadata}))`，字段保持 schema 顺序，schema 级 metadata 排除 `prajna.dsv`；字典编码按解码后的值类型。
-4. 逻辑 hash：按主键升序，字节流依次为 `b"PRAJNA-LH\x01"`、表名（u32 LE 长度 + UTF-8）、32 字节 schema 指纹、行数（u64 LE）、逐行逐列的 tag + 值（null `0x00`、Utf8 `0x01`、Int64 `0x02`、Decimal128(38,18) `0x03`、Timestamp(ns,UTC) `0x04`、Date32 `0x05`、Boolean `0x06`）；字典/分块列按解码后的值；表外类型与重复主键报错。对整个流做 SHA-256，由此判定“逻辑相同”，不要求 Parquet 文件逐字节相同。
+4. 逻辑 hash：按主键升序，字节流依次为 `b"PRAJNA-LH\x01"`、表名（u32 LE 长度 + UTF-8）、32 字节 schema 指纹、行数（u64 LE）、逐行逐列的 tag + 值（null `0x00`、Utf8 `0x01`、Int64 `0x02`、Decimal128(38,18) `0x03`、Timestamp(ns,UTC) `0x04`、Date32 `0x05`、Boolean `0x06`）；字典/分块列按解码后的值；Float64 使用独立 tag `0x07`，按 `f64::to_bits()` 的 8 字节小端编码，拒绝 NaN，接受 ±inf，且不允许作主键；表外类型与重复主键报错。对整个流做 SHA-256，由此判定“逻辑相同”，不要求 Parquet 文件逐字节相同。
 5. Normalizer 注册表按 `(id, version)` 登记；修订规则产生新版本。MVP-0 `synthetic-etf-daily` v1/v2 与 MVP-1 v3 只处理合成 fixture；v2 将 `volume` 按“手”×100，v3 保持该规则并加入执行状态及可选逐标的 open，不得用于真实数据。
 6. 重建：`rebuild_dataset(raw_store, registry, manifest)` 按 `core.inputs` 读取 Raw 并校验 hash，取注册表中的 Normalizer 并校验 `config_sha256`，重算后逐项比对 `core`，返回 dsv；它不发布 Parquet。
 
