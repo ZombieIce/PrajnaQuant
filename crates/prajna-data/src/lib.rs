@@ -221,6 +221,18 @@ pub fn logical_hash(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
+    for index in &key_indices {
+        let data_type = match schema.field(*index).data_type() {
+            DataType::Dictionary(_, value_type) => value_type.as_ref(),
+            data_type => data_type,
+        };
+        if matches!(data_type, DataType::Float64) {
+            return Err(CanonicalError::new(
+                "Float64 fields cannot be part of the primary key",
+            ));
+        }
+    }
+
     let mut rows = Vec::new();
     for batch in batches {
         if batch.schema().as_ref() != schema {
@@ -251,6 +263,7 @@ fn validate_logical_type(data_type: &DataType) -> Result<(), CanonicalError> {
         DataType::Dictionary(_, value_type) => validate_logical_type(value_type),
         DataType::Utf8
         | DataType::Int64
+        | DataType::Float64
         | DataType::Decimal128(38, 18)
         | DataType::Date32
         | DataType::Boolean => Ok(()),
@@ -290,6 +303,7 @@ enum Cell {
     Null,
     Utf8(String),
     Int64(i64),
+    Float64(u64),
     Decimal128(i128),
     Timestamp(i64),
     Date32(i32),
@@ -308,6 +322,10 @@ impl Cell {
             Cell::Int64(value) => {
                 output.push(0x02);
                 output.extend_from_slice(&value.to_le_bytes());
+            }
+            Cell::Float64(bits) => {
+                output.push(0x07);
+                output.extend_from_slice(&bits.to_le_bytes());
             }
             Cell::Decimal128(value) => {
                 output.push(0x03);
@@ -365,6 +383,19 @@ fn read_cell(array: &ArrayRef, field: &Field, row: usize) -> Result<Cell, Canoni
                 .ok_or_else(|| CanonicalError::new("invalid Int64 array"))?
                 .value(row),
         )),
+        DataType::Float64 => {
+            let value = array
+                .as_any()
+                .downcast_ref::<arrow_array::Float64Array>()
+                .ok_or_else(|| CanonicalError::new("invalid Float64 array"))?
+                .value(row);
+            if value.is_nan() {
+                return Err(CanonicalError::new(
+                    "NaN is not a supported logical hash value",
+                ));
+            }
+            Ok(Cell::Float64(value.to_bits()))
+        }
         DataType::Decimal128(38, 18) => Ok(Cell::Decimal128(
             array
                 .as_any()
@@ -746,20 +777,110 @@ mod tests {
         .unwrap();
         assert!(logical_hash("t", &schema, &[duplicate], &["key"]).is_err());
 
-        let float_schema = Schema::new(vec![
+        let unsupported_schema = Schema::new(vec![
             Field::new("key", DataType::Utf8, false),
-            Field::new("x", DataType::Float64, false),
+            Field::new("x", DataType::Float32, false),
         ]);
-        let float_batch = RecordBatch::try_from_iter(vec![
+        let unsupported_batch = RecordBatch::try_from_iter(vec![
             ("key", Arc::new(StringArray::from(vec!["a"])) as ArrayRef),
             (
                 "x",
-                Arc::new(arrow_array::Float64Array::from(vec![1.0])) as ArrayRef,
+                Arc::new(arrow_array::Float32Array::from(vec![1.0])) as ArrayRef,
             ),
         ])
         .unwrap();
-        assert!(logical_hash("t", &float_schema, &[float_batch], &["key"]).is_err());
-        assert!(logical_hash("t", &float_schema, &[], &["key"]).is_err());
+        assert!(logical_hash("t", &unsupported_schema, &[unsupported_batch], &["key"]).is_err());
+        assert!(logical_hash("t", &unsupported_schema, &[], &["key"]).is_err());
+    }
+
+    #[test]
+    fn float64_values_are_canonical_by_bits_and_reject_nan_and_primary_keys() {
+        let schema = Schema::new(vec![
+            Field::new("key", DataType::Utf8, false),
+            Field::new("value", DataType::Float64, true),
+        ]);
+        let make_batch = |keys: Vec<&str>, values: Vec<Option<f64>>| {
+            RecordBatch::try_new(
+                Arc::new(schema.clone()),
+                vec![
+                    Arc::new(StringArray::from(keys)) as ArrayRef,
+                    Arc::new(arrow_array::Float64Array::from(values)) as ArrayRef,
+                ],
+            )
+            .unwrap()
+        };
+
+        let base = logical_hash(
+            "float64",
+            &schema,
+            &[make_batch(
+                vec!["b", "a"],
+                vec![Some(1.0 + f64::EPSILON), Some(1.0)],
+            )],
+            &["key"],
+        )
+        .unwrap();
+        let reordered = logical_hash(
+            "float64",
+            &schema,
+            &[make_batch(
+                vec!["a", "b"],
+                vec![Some(1.0), Some(1.0 + f64::EPSILON)],
+            )],
+            &["key"],
+        )
+        .unwrap();
+        assert_eq!(base, reordered);
+        assert_ne!(
+            base,
+            logical_hash(
+                "float64",
+                &schema,
+                &[make_batch(vec!["a", "b"], vec![Some(1.0), Some(1.0)])],
+                &["key"],
+            )
+            .unwrap()
+        );
+
+        let signed_zero = |value| {
+            logical_hash(
+                "float64",
+                &schema,
+                &[make_batch(vec!["a"], vec![Some(value)])],
+                &["key"],
+            )
+            .unwrap()
+        };
+        assert_ne!(signed_zero(-0.0), signed_zero(0.0));
+        assert_ne!(
+            logical_hash(
+                "float64",
+                &schema,
+                &[make_batch(vec!["a"], vec![None])],
+                &["key"],
+            )
+            .unwrap(),
+            signed_zero(0.0)
+        );
+
+        let nan = make_batch(vec!["a"], vec![Some(f64::from_bits(0x7ff8_0000_0000_0001))]);
+        let error = logical_hash("float64", &schema, &[nan], &["key"]).unwrap_err();
+        assert!(error.to_string().contains("NaN"));
+
+        let infinity = make_batch(
+            vec!["a", "b"],
+            vec![Some(f64::NEG_INFINITY), Some(f64::INFINITY)],
+        );
+        assert!(logical_hash("float64", &schema, &[infinity], &["key"]).is_ok());
+
+        let key_schema = Schema::new(vec![Field::new("key", DataType::Float64, false)]);
+        let key_batch = RecordBatch::try_from_iter(vec![(
+            "key",
+            Arc::new(arrow_array::Float64Array::from(vec![1.0])) as ArrayRef,
+        )])
+        .unwrap();
+        let error = logical_hash("float64", &key_schema, &[key_batch], &["key"]).unwrap_err();
+        assert!(error.to_string().contains("primary key"));
     }
 
     #[test]
