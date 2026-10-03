@@ -111,7 +111,7 @@ fn every_pair_of_dependency_statuses_obeys_priority_even_for_zero_weight() {
                     .unwrap()
                     .physical()
                     .get(0),
-                Some(100)
+                (expected[left][right] == Ok).then_some(100)
             );
         }
     }
