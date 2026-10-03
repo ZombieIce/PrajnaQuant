@@ -1,4 +1,6 @@
+mod base;
 pub mod cache;
+pub use base::compute_base;
 mod dsv;
 pub mod factor;
 mod panel;
