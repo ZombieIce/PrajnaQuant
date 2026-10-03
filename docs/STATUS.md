@@ -74,7 +74,7 @@ MVP-0 数据层现有 D7 instruments、bars、sessions 的 Arrow schema、Domain
 
 M9 Factor Cache 身份键由 `cache::key::FactorKey` 确定性生成；`cache::store::FactorCache` 按依赖拓扑逐节点查缓存、仅计算未命中节点，并将 `values.parquet` 与含 key object、fv、字节 SHA-256 和行数的 `meta.json` 写入 staging 后 fsync、原子发布。命中校验键、文件 hash、schema 和行数；损坏返回 Integrity，不静默删除或重算。并发发布时逻辑内容相同则复用，内容不同时返回 Conflict；`compute_count` 支持观察实际计算次数。集成测试以合成 3×10 面板验证 rotation_score 的首次 4 节点计算、二次零计算、Parquet 字节稳定、损坏拒绝、并发相同/不同结果及 staging 清理。以上不代表真实数据或 point-in-time 能力。
 
-M10 `strategy::VectorStrategy` 与 `VectorEngine::validate` 已实现：仅声明 `Vectorizable` 的策略可通过校验，`top_k` 和 `rebalance_every` 必须至少为 1。M11 `VectorStrategy::decide` 使用 Factor Values v1，在首个至少有一个 `ok` 且于该 Session 收盘前可用的 Session 开始，按 Venue Session 序号定期决策；排名平局按 `instrument_id` 字符串升序，targets 对 top-k 等权分配，无可用分数时为空目标。已用 3×10 合成 fixture 对照独立 golden，并覆盖 2、5、8 决策日序列及延迟可用分数；该实现不包含执行、成本或收益计算。
+M10 `strategy::VectorStrategy` 与 `VectorEngine::validate` 已实现：仅声明 `Vectorizable` 的策略可通过校验，`top_k` 和 `rebalance_every` 必须至少为 1。M11 `VectorStrategy::decide` 使用 Factor Values v1，在首个至少有一个 `ok` 且于该 Session 收盘前可用的 Session 开始，按 Venue Session 序号定期决策；排名平局按 `instrument_id` 字符串升序，targets 对 top-k 等权分配，无可用分数时为空目标。已用 3×10 合成 fixture 对照独立 golden，并覆盖 2、5、8 决策日序列及延迟可用分数。执行层新增 `panel::load_execution_status` 与 `executable`：旧版 DSV 缺少状态表时显式报错，缺状态记录、缺 bar、非可交易状态或 `available_at` 晚于开盘均 fail closed；`strategy::execute` 在下一 Session 开盘尝试 pending target，持仓任一不可执行时整次延期，延期后新决策替换旧目标，不能执行的目标买腿跳过且不归一，并记录执行/延期及最终 pending。v3 合成 3×10 手写事件序列覆盖 C UNKNOWN、B HALTED 与 B 缺 bar，另测持仓阻塞后的重试。权重漂移、成本和收益计算仍未实现；上述测试不代表真实数据或 PIT 验证。
 
 `prajna-research` 现提供 `StaticUniverse`：成员排序去重后以 restricted-JCS SHA-256 身份存储，原子发布、幂等复用并在读取时校验身份；可对照 DSV v1 instruments 表报告缺失成员。3×10 fixture 已验证 A/B/C 通过、含 D 失败。它是固定成员列表，不提供 point-in-time 成员可知性证明。
 
