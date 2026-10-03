@@ -72,6 +72,8 @@ MVP-0 数据层现有 D7 instruments、bars、sessions 的 Arrow schema、Domain
 
 `prajna-research` 的 `load_panel` 已能校验 DSV manifest 并读取 schema v1 的 instruments、sessions、bars，按 Venue 生成有序 Session/Instrument 列表及完整 instrument × session Polars 网格。缺 bar 保持价格 null 且 `has_bar=false`；`close_available_at` 保留源 available_at 的 UTC 纳秒值，不推定为 close。M6 Factor 定义模型实现了四种封闭的 v1 种类、强类型参数与窗口/有限权重校验；canonical JSON 将权重编码为 IEEE-754 bit pattern 十六进制字符串，区分 `0.0` 与 `-0.0`。`RotationScore` 依赖可拓扑排序、去重及检测环；status、Availability Assumption 字符串和 v1 Arrow/Polars 长表 schema 已定义。验证限于单元/集成契约测试与 `synthetic-etf-daily` v1 的 3×10 面板 fixture；尚未实现 Factor Values 数值计算、持久缓存或执行，不代表真实数据、PIT 或量化结果能力。
 
+`prajna-research` 现提供 `StaticUniverse`：成员排序去重后以 restricted-JCS SHA-256 身份存储，原子发布、幂等复用并在读取时校验身份；可对照 DSV v1 instruments 表报告缺失成员。3×10 fixture 已验证 A/B/C 通过、含 D 失败。它是固定成员列表，不提供 point-in-time 成员可知性证明。
+
 ## Batch 2 Integration Acceptance (2026-09-25)
 
 总评**部分通过**；要求、代码/测试/真实样本/浏览器证据及限制见 [`handoffs/batch2-integration-acceptance.md`](handoffs/batch2-integration-acceptance.md)。A：241×5 状态格全 UNKNOWN，只有一条无交易所原文的盘中限制二级消息；同价面板/Universe 复跑 0 成交、24 个 unknown 拒单，只验证缺证拒单。B：仓库迁移 007 和 `sync-daily`/`publish-sync` 支持显式证券增量、修订回看、重试/断点、审计和不可变快照；隔离真实样本重复同步不增有效修订，生产状态 Unknown。C：新增 `/api/v1/instruments` 通用发布快照搜索、`/api/v1/daily-bars` 分页与 `/market` 页面；B 格式的发布指针与 C 只读 API 已接通并测试固定版本。B 真实小样本证券目录缺身份/分类，因此生产股票/ETF 行情页面仍未验。调度脚本未安装/启用。

@@ -1,44 +1,15 @@
-use std::{fs, path::Path};
+mod common;
+
+use std::fs;
 
 use polars::prelude::{DataType, TimeUnit, TimeZone};
-use prajna_data::{NormalizerRegistry, RawStore, SourceKind, SourceRecordInput, publish_dataset};
 use prajna_domain::VenueId;
 use prajna_research::{PanelError, load_panel};
-
-const FIXTURE: &[u8] = include_bytes!("../../../poc/poc0-benchmark/fixtures/dataset-v1.json");
-
-fn publish_v1(lake_root: &Path) -> String {
-    let store = RawStore::open(lake_root).unwrap();
-    let raw_hash = store
-        .put(
-            FIXTURE,
-            SourceRecordInput {
-                content_type: "application/json".into(),
-                source_kind: SourceKind::Fixture,
-                source_id: "poc0-dataset-v1".into(),
-                request: Default::default(),
-                observed_at: "synthetic".into(),
-                ingested_by: "prajna-research-test".into(),
-            },
-        )
-        .unwrap();
-    publish_dataset(
-        lake_root,
-        &store,
-        &NormalizerRegistry::with_builtins(),
-        "synthetic-etf-daily",
-        "1",
-        &[raw_hash],
-        "2026-09-30T00:00:00Z",
-    )
-    .unwrap()
-    .dsv
-}
 
 #[test]
 fn loads_v1_as_a_complete_venue_session_grid_with_missing_bars_preserved() {
     let lake = tempfile::tempdir().unwrap();
-    let dsv = publish_v1(lake.path());
+    let dsv = common::publish_v1(lake.path());
     let venue = VenueId::new("SYNTH").unwrap();
 
     let panel = load_panel(lake.path(), &dsv, &venue).unwrap();
@@ -155,7 +126,7 @@ fn rejects_a_dsv_without_a_manifest() {
 #[test]
 fn rejects_a_manifest_whose_core_no_longer_matches_the_dsv() {
     let lake = tempfile::tempdir().unwrap();
-    let dsv = publish_v1(lake.path());
+    let dsv = common::publish_v1(lake.path());
     let dsv_hex = dsv.strip_prefix("dsv:sha256:").unwrap();
     let manifest_path = lake
         .path()
