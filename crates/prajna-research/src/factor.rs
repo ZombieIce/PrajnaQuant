@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 const MOMENTUM_VERSION: &str = "1";
 const VOLATILITY_VERSION: &str = "1";
 const TREND_FILTER_VERSION: &str = "1";
-const ROTATION_SCORE_VERSION: &str = "1";
+const ROTATION_SCORE_VERSION: &str = "2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FactorStatus {
@@ -137,9 +137,11 @@ pub fn values_schema() -> ValuesSchema {
 /// availability yields `unknown_availability`, unless the Run explicitly
 /// chooses the M7 `TreatUnknownAsTsClose` assumption. A missing required bar
 /// yields `missing_input`, while insufficient session history yields
-/// `insufficient_window`; non-`ok` values are null. This crate defines those
-/// semantics; `compute_base` evaluates the three base kinds and
-/// `compute_composite` evaluates RotationScore from dependency Values.
+/// `insufficient_window`; non-`ok` values are null. A non-`ok` RotationScore
+/// also has no `available_at`; a trend-filtered score retains the availability
+/// of its known inputs. This crate defines those semantics; `compute_base`
+/// evaluates the three base kinds and `compute_composite` evaluates
+/// RotationScore from dependency Values.
 ///
 /// | Kind | v1 definition and direction |
 /// | --- | --- |

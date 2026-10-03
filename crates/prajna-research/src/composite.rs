@@ -80,8 +80,8 @@ fn priority(status: FactorStatus) -> u8 {
 ///
 /// Dependencies must have the same unique key grid and the v1 Values schema;
 /// input row order and role order are irrelevant. Non-ok values are null.
-/// Availability is the maximum known dependency availability, including on
-/// filtered/non-ok rows; no unknown timestamp is inferred here.
+/// Availability is the maximum dependency availability for ok or filtered
+/// rows. A propagated non-ok dependency status yields no availability time.
 pub fn compute_composite(
     factor: &Factor,
     deps: &[(&str, DataFrame)],
@@ -160,10 +160,15 @@ pub fn compute_composite(
                 value = Some(score);
             }
         }
+        let available_at = if matches!(status, FactorStatus::Ok | FactorStatus::Filtered) {
+            rows.iter().filter_map(|row| row.available_at).max()
+        } else {
+            None
+        };
         ids.push(key.0);
         dates.push(key.1);
         values.push(value);
-        times.push(rows.iter().filter_map(|row| row.available_at).max());
+        times.push(available_at);
         statuses.push(status.as_str());
     }
     Ok(DataFrame::new(

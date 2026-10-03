@@ -62,7 +62,7 @@ fn canonical_json_is_stable_and_preserves_exact_weight_bits() {
         rotation_score(1.0, -0.0).canonical_json(),
         json!({
             "kind": "rotation_score",
-            "version": "1",
+            "version": "2",
             "params": {
                 "short": 2,
                 "long": 5,
