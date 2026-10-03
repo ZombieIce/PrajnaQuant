@@ -197,6 +197,18 @@ pub fn run_vector(
                     } => {
                         validate_applied_weights(panel, applied)?;
                         validate_skipped_buys(pending, applied, skipped_buys)?;
+                        for instrument in applied.keys() {
+                            let instrument_index =
+                                panel.instruments.binary_search(instrument).map_err(|_| {
+                                    invalid_input(format!("unknown held instrument {instrument}"))
+                                })?;
+                            if prices[instrument_index][session_index].is_none() {
+                                return Err(invalid_input(format!(
+                                    "executed event applies {instrument} without an open price on {}",
+                                    session.session_date
+                                )));
+                            }
+                        }
                         let mut buys = 0.0;
                         let mut sells = 0.0;
                         for instrument in &panel.instruments {
@@ -245,6 +257,7 @@ pub fn run_vector(
 
         let weights_after_execution = weights.clone();
         let mut gross_return = 0.0;
+        let mut price_relatives = BTreeMap::new();
         if let Some(next_marks) = marks_by_session.get(session_index + 1) {
             for (instrument, weight) in &weights {
                 let instrument_index = panel
@@ -259,10 +272,12 @@ pub fn run_vector(
                     })?;
                 let next_price = next_marks[instrument_index].ok_or_else(|| {
                     invalid_input(format!(
-                        "held instrument {instrument} has no next valuation price"
+                        "held instrument {instrument} has no next valuation price to carry"
                     ))
                 })?;
-                gross_return += weight * (next_price / current_price - 1.0);
+                let relative = next_price / current_price;
+                price_relatives.insert(instrument.clone(), relative);
+                gross_return += weight * (relative - 1.0);
             }
             if !gross_return.is_finite() || 1.0 + gross_return <= 0.0 {
                 return Err(invalid_input(
@@ -283,23 +298,12 @@ pub fn run_vector(
         if session_index + 1 < panel.sessions.len() {
             let return_divisor = 1.0 + gross_return;
             for (instrument, weight) in &mut weights {
-                let instrument_index = panel
-                    .instruments
-                    .binary_search(instrument)
-                    .map_err(|_| invalid_input(format!("unknown held instrument {instrument}")))?;
-                let current_price =
-                    marks_by_session[session_index][instrument_index].ok_or_else(|| {
-                        invalid_input(format!(
-                            "held instrument {instrument} has no current valuation price"
-                        ))
-                    })?;
-                let next_price =
-                    marks_by_session[session_index + 1][instrument_index].ok_or_else(|| {
-                        invalid_input(format!(
-                            "held instrument {instrument} has no next valuation price"
-                        ))
-                    })?;
-                *weight *= next_price / current_price / return_divisor;
+                let relative = price_relatives.get(instrument).ok_or_else(|| {
+                    invalid_input(format!(
+                        "missing price transition for held instrument {instrument}"
+                    ))
+                })?;
+                *weight *= relative / return_divisor;
             }
             validate_applied_weights(panel, &weights)?;
         }
@@ -686,6 +690,7 @@ fn assumptions() -> Vec<String> {
         "Static Universe is not point-in-time",
         "conservative deferral when a held instrument is unavailable",
         "availability assumption: none",
+        "weight-based Vector NAV is not a cash-and-quantity account ledger",
     ]
     .into_iter()
     .map(str::to_owned)

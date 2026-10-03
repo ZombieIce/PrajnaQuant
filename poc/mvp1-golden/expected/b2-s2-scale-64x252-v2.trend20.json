@@ -564513,7 +564513,8 @@
       "raw open-to-open returns",
       "Static Universe is not point-in-time",
       "conservative deferral when a held instrument is unavailable",
-      "availability assumption: none"
+      "availability assumption: none",
+      "weight-based Vector NAV is not a cash-and-quantity account ledger"
     ],
     "availability_assumption": "none",
     "costs": {

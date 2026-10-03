@@ -83,7 +83,8 @@ Minimum commission and lots are not modeled.
 The `vector` result also records the exact proportional-cost inputs,
 `availability_assumption`, and the assumptions used for transaction costs,
 raw open-to-open prices, Static Universe point-in-time limits, and conservative
-execution deferrals.
+execution deferrals. This is a weight-based return summary, not a
+cash-and-quantity account ledger; its NAV does not assert account conservation.
 
 M6/M7 and the independent-golden requirement are specified in
 [issue #53](https://github.com/ZombieIce/PrajnaQuant/issues/53); the Vector

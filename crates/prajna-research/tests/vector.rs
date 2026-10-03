@@ -65,47 +65,48 @@ fn assert_close(actual: f64, expected: f64) {
     );
 }
 
-fn golden_shape_matches(actual: &Value, expected: &Value) {
-    let actual = actual.as_object().unwrap();
-    let expected = expected.as_object().unwrap();
-    let mut actual_keys = actual.keys().collect::<Vec<_>>();
-    let mut expected_keys = expected.keys().collect::<Vec<_>>();
-    actual_keys.sort();
-    expected_keys.sort();
-    assert_eq!(actual_keys, expected_keys);
-
-    for (key, actual_value) in actual {
-        let expected_value = &expected[key];
-        if key == "sessions" || key == "decisions" || key == "executions" {
-            let actual_rows = actual_value.as_array().unwrap();
-            let expected_rows = expected_value.as_array().unwrap();
-            assert!(!actual_rows.is_empty());
-            assert!(!expected_rows.is_empty());
-            for (index, actual_row) in actual_rows.iter().enumerate() {
-                let expected_row = &expected_rows[index.min(expected_rows.len() - 1)];
-                assert_object_keys_match(actual_row, expected_row);
-                if key == "decisions" {
-                    assert_object_keys_match(&actual_row["ranked"][0], &expected_row["ranked"][0]);
-                }
-            }
-        } else if key == "pending_at_end" {
-            if !actual_value.is_null() {
-                assert_object_keys_match(actual_value, expected_value);
-            }
-        } else if key == "costs" {
-            assert_object_keys_match(actual_value, expected_value);
-        }
+fn assert_json_shape(actual: &Value, expected: &Value, field: Option<&str>) {
+    if matches!(
+        field,
+        Some("targets" | "target_weights" | "weights_after_execution")
+    ) {
+        let actual_weights = actual.as_object().unwrap();
+        let expected_weights = expected.as_object().unwrap();
+        assert!(actual_weights.values().all(Value::is_number));
+        assert!(expected_weights.values().all(Value::is_number));
+        return;
     }
-}
 
-fn assert_object_keys_match(actual: &Value, expected: &Value) {
-    let actual = actual.as_object().unwrap();
-    let expected = expected.as_object().unwrap();
-    let mut actual_keys = actual.keys().collect::<Vec<_>>();
-    let mut expected_keys = expected.keys().collect::<Vec<_>>();
-    actual_keys.sort();
-    expected_keys.sort();
-    assert_eq!(actual_keys, expected_keys);
+    match (actual, expected) {
+        (Value::Object(actual), Value::Object(expected)) => {
+            let mut actual_keys = actual.keys().collect::<Vec<_>>();
+            let mut expected_keys = expected.keys().collect::<Vec<_>>();
+            actual_keys.sort();
+            expected_keys.sort();
+            assert_eq!(actual_keys, expected_keys);
+            for (key, actual_value) in actual {
+                assert_json_shape(actual_value, &expected[key], Some(key));
+            }
+        }
+        (Value::Array(actual), Value::Array(expected)) => {
+            if actual.iter().any(Value::is_object) || expected.iter().any(Value::is_object) {
+                if matches!(field, Some("sessions" | "decisions" | "executions")) {
+                    assert_eq!(actual.len(), expected.len(), "{field:?} record count");
+                }
+                for (actual_value, expected_value) in actual.iter().zip(expected) {
+                    assert_json_shape(actual_value, expected_value, None);
+                }
+            } else {
+                assert!(actual.iter().all(Value::is_string));
+                assert!(expected.iter().all(Value::is_string));
+            }
+        }
+        (Value::String(_), Value::String(_))
+        | (Value::Number(_), Value::Number(_))
+        | (Value::Bool(_), Value::Bool(_))
+        | (Value::Null, Value::Null) => {}
+        _ => panic!("JSON value shapes differ: {actual} vs {expected}"),
+    }
 }
 
 #[test]
@@ -169,7 +170,7 @@ fn three_by_ten_result_has_golden_json_shape_and_zero_gross_returns() {
         "../../../poc/mvp1-golden/expected/dataset-v1.json"
     ))
     .unwrap();
-    golden_shape_matches(&actual, &expected["vector"]);
+    assert_json_shape(&actual, &expected["vector"], None);
 }
 
 #[test]
@@ -188,6 +189,31 @@ fn runs_an_empty_strategy_without_execution_events() {
             .sessions
             .iter()
             .all(|session| session.cost == 0.0 && session.nav == 1.0)
+    );
+}
+
+#[test]
+fn rejects_an_executed_leg_without_an_open_price() {
+    let panel = manual_panel();
+    let target_weights = weights(&[("Y.SYNTH", 1.0)]);
+    let decisions = [Decision {
+        decision_session: panel.sessions[1].clone(),
+        ranked: vec![(instrument("Y.SYNTH"), 1.0, 1)],
+        targets: target_weights.clone(),
+    }];
+    let events = [ExecutionEvent::Executed {
+        decision_session: panel.sessions[1].clone(),
+        attempt_session: panel.sessions[2].clone(),
+        applied: target_weights,
+        skipped_buys: BTreeSet::new(),
+    }];
+
+    let error = run_vector(&panel, &decisions, &events, &vector_costs()).unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("executed event applies Y.SYNTH without an open price")
     );
 }
 
@@ -286,6 +312,8 @@ fn hand_calculation_covers_execution_cost_drift_and_carried_valuation() {
     // recognizes Y's 10% move using the carried D3 valuation.
     let result = run_vector(&panel, &decisions, &events, &costs).unwrap();
 
+    assert_eq!(result.sessions[0].cost, 0.0);
+    assert_eq!(result.sessions[0].nav, 1.0);
     let execution = &result.sessions[1];
     assert_close(execution.turnover, 1.0);
     assert_eq!(execution.cost, 0.01);
@@ -304,5 +332,13 @@ fn hand_calculation_covers_execution_cost_drift_and_carried_valuation() {
     assert_close(carried.nav, 1.089);
     assert!((carried.weights_after_execution[&instrument("X.SYNTH")] - 11.0 / 21.0).abs() <= 1e-12);
     assert!((carried.weights_after_execution[&instrument("Y.SYNTH")] - 10.0 / 21.0).abs() <= 1e-12);
-    assert_eq!(result.sessions[3].cost, 0.0);
+    let final_session = &result.sessions[3];
+    assert_eq!(final_session.cost, 0.0);
+    assert_close(final_session.gross_return, 0.0);
+    assert_close(final_session.net_return, 0.0);
+    assert_close(final_session.nav, carried.nav);
+    assert_eq!(
+        final_session.weights_after_execution,
+        weights(&[("X.SYNTH", 0.5), ("Y.SYNTH", 0.5)])
+    );
 }
