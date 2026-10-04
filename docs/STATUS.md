@@ -78,7 +78,7 @@ M10 `strategy::VectorStrategy` 与 `VectorEngine::validate` 已实现：仅声�
 
 `prajna-research` 现提供 `StaticUniverse`：成员排序去重后以 restricted-JCS SHA-256 身份存储，原子发布、幂等复用并在读取时校验身份；可对照 DSV v1 instruments 表报告缺失成员。3×10 fixture 已验证 A/B/C 通过、含 D 失败。它是固定成员列表，不提供 point-in-time 成员可知性证明。
 
-MVP-2 的 `prajna-experiment`（Issue #99）现可解析并校验 `experiment.json`，要求存在且有效的 DSV、同一 lake 中的 Static Universe 及其成员覆盖、合法 Venue、固定的 `s2_rotation`/`vector` 类型、有限成本和完整参数空间；grid/list 均只校验、不展开。restricted-JCS 身份覆盖 Experiment、`vector@1` Run Spec 与含 git revision、tracked/untracked diff hash、rustc 版本和 target triple 的 Experiment Execution；脏工作树标为不可完全复现。尚未执行 Run、计算 Metrics、写入 ResultLevel 或按参数扫描；验证仅限合成 fixture。
+MVP-2 的 `prajna-experiment`（Issue #99/#100）可解析并校验 `experiment.json`，按固定字段顺序展开并按 Run 身份去重；无效组合整体拒绝。restricted-JCS 身份覆盖 Experiment、`vector@1` Run Spec 与含 git revision、tracked/untracked diff hash、rustc 版本和 target triple 的 Experiment Execution；脏工作树标为不可完全复现。两阶段 Rayon 路径先按 FactorKey 去重并分层计算因子，再并行执行 Vector Runs；单 Run 执行错误记录为 failed，其余继续，并返回进程内结果、阶段耗时和缓存计算/命中数。64×252 v2 的 24-run 一线程/四线程结果字节一致，单 Run 与 MVP-1 golden 容差对拍通过。尚未计算 Summary Metrics 或持久化 ResultLevel/Execution；验证仅限合成 fixture。
 
 ## Batch 2 Integration Acceptance (2026-09-25)
 

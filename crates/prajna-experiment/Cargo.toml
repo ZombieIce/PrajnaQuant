@@ -8,9 +8,12 @@ license = "MIT"
 publish = false
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 prajna-domain = { path = "../prajna-domain" }
 prajna-data = { path = "../prajna-data" }
 prajna-research = { path = "../prajna-research" }
+polars = { version = "=0.55.2", default-features = false, features = ["dtype-date", "dtype-datetime"] }
+rayon = "1.11"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["arbitrary_precision"] }
 sha2 = "0.10"

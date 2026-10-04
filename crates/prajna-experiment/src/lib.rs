@@ -1,19 +1,33 @@
-//! Experiment definition validation and content-addressed identities.
-//!
-//! This crate parses MVP-2 `experiment.json` definitions and creates Experiment,
-//! Run Spec, and Experiment Execution identities. It does not execute Runs.
+//! Experiment definitions, content-addressed identities, and in-process Run execution.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     error::Error,
     fmt, fs,
     path::Path,
     process::Command,
+    time::Instant,
 };
 
+use polars::prelude::DataFrame;
 use prajna_data::{ManifestError, read_manifest, restricted_jcs};
-use prajna_domain::VenueId;
-use prajna_research::{StaticUniverse, factor::canonical_float_bits};
+use prajna_domain::{InstrumentId, VenueId};
+use prajna_research::{
+    Panel, StaticUniverse,
+    cache::{key::FactorKey, store::FactorCache},
+    executable,
+    factor::{
+        AvailabilityAssumption, Factor, FactorGraph, FactorKind, RotationScoreParams,
+        canonical_float_bits,
+    },
+    load_execution_status, load_panel,
+    strategy::{
+        RankDirection, StrategyCapability, VectorEngine, VectorStrategy, Weighting, execute,
+    },
+    vector::{VectorCosts, VectorResult, run_vector},
+};
+use rayon::ThreadPoolBuilder;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -39,6 +53,7 @@ pub enum ExperimentError {
     Canonical(String),
     Io(std::io::Error),
     Git(String),
+    Execution(String),
 }
 
 impl fmt::Display for ExperimentError {
@@ -53,6 +68,7 @@ impl fmt::Display for ExperimentError {
             }
             Self::Io(error) => write!(formatter, "experiment provenance I/O error: {error}"),
             Self::Git(message) => write!(formatter, "cannot capture git provenance: {message}"),
+            Self::Execution(message) => formatter.write_str(message),
         }
     }
 }
@@ -64,7 +80,9 @@ impl Error for ExperimentError {
             Self::Manifest(error) => Some(error),
             Self::Universe(error) => Some(error),
             Self::Io(error) => Some(error),
-            Self::InvalidDefinition(_) | Self::Canonical(_) | Self::Git(_) => None,
+            Self::InvalidDefinition(_) | Self::Canonical(_) | Self::Git(_) | Self::Execution(_) => {
+                None
+            }
         }
     }
 }
@@ -117,8 +135,8 @@ impl StrategyParameters {
             w_l: finite_number(&object["w_l"], "w_l")?,
             w_v: finite_number(&object["w_v"], "w_v")?,
             trend: optional_positive_integer(&object["trend"], "trend")?,
-            top_k: positive_integer(&object["top_k"], "top_k")?,
-            rebalance_every: positive_integer(&object["rebalance_every"], "rebalance_every")?,
+            top_k: nonnegative_integer(&object["top_k"], "top_k")?,
+            rebalance_every: nonnegative_integer(&object["rebalance_every"], "rebalance_every")?,
         })
     }
 
@@ -134,6 +152,45 @@ impl StrategyParameters {
             "top_k": self.top_k,
             "rebalance_every": self.rebalance_every,
         })
+    }
+
+    fn factor(&self) -> Result<Factor, ExperimentError> {
+        let short = u32_parameter(self.short, "short")?;
+        let long = u32_parameter(self.long, "long")?;
+        let vol = u32_parameter(self.vol, "vol")?;
+        let trend = self
+            .trend
+            .map(|value| u32_parameter(value, "trend"))
+            .transpose()?;
+        Factor::new(
+            FactorKind::RotationScore,
+            RotationScoreParams {
+                short,
+                long,
+                vol,
+                w_s: self.w_s,
+                w_l: self.w_l,
+                w_v: self.w_v,
+                trend,
+            },
+        )
+        .map_err(|error| invalid(format!("invalid rotation score factor: {error}")))
+    }
+
+    fn strategy(&self, score: Factor) -> Result<VectorStrategy, ExperimentError> {
+        let top_k = u32_parameter(self.top_k, "top_k")?;
+        let rebalance_every = u32_parameter(self.rebalance_every, "rebalance_every")?;
+        let strategy = VectorStrategy {
+            score,
+            direction: RankDirection::Descending,
+            top_k,
+            rebalance_every,
+            weighting: Weighting::EqualWeight,
+            capabilities: BTreeSet::from([StrategyCapability::Vectorizable]),
+        };
+        VectorEngine::validate(&strategy)
+            .map_err(|error| invalid(format!("invalid vector strategy: {error}")))?;
+        Ok(strategy)
     }
 }
 
@@ -311,7 +368,14 @@ impl Experiment {
 
     /// Returns the content address of one parameterized Run Spec.
     pub fn run_id(&self, parameters: &StrategyParameters) -> Result<String, ExperimentError> {
-        let run_spec = serde_json::json!({
+        let bytes = restricted_jcs(&self.run_spec(parameters))
+            .map_err(|error| ExperimentError::Canonical(error.to_string()))?;
+        Ok(identity("run", &bytes))
+    }
+
+    /// Canonical Run Spec JSON, including its identity-bearing semantics.
+    pub fn run_spec(&self, parameters: &StrategyParameters) -> Value {
+        serde_json::json!({
             "dsv": self.dsv,
             "universe": self.universe,
             "venue": self.venue,
@@ -320,11 +384,353 @@ impl Experiment {
             "availability_assumption": self.availability_assumption,
             "engine": { "kind": "vector", "semantic_version": "vector@1" },
             "seed": Value::Null,
-        });
-        let bytes = restricted_jcs(&run_spec)
-            .map_err(|error| ExperimentError::Canonical(error.to_string()))?;
-        Ok(identity("run", &bytes))
+        })
     }
+
+    /// Expands and validates every parameter combination before returning any Runs.
+    pub fn expand(&self, lake_root: impl AsRef<Path>) -> Result<Vec<ExpandedRun>, ExperimentError> {
+        let universe = StaticUniverse::load(lake_root, &self.universe)?;
+        self.expand_for_universe(&universe)
+    }
+
+    fn expand_for_universe(
+        &self,
+        universe: &StaticUniverse,
+    ) -> Result<Vec<ExpandedRun>, ExperimentError> {
+        let candidates = match &self.parameter_space {
+            ParameterSpace::Grid(axes) => expand_grid(axes)?,
+            ParameterSpace::List(values) => values.clone(),
+        };
+        let mut runs = BTreeMap::new();
+        for (index, parameters) in candidates.into_iter().enumerate() {
+            let fail = |message: String| {
+                invalid(format!(
+                    "parameter combination {} is invalid: {message}",
+                    index + 1
+                ))
+            };
+            if parameters.short >= parameters.long {
+                return Err(fail("short must be less than long".into()));
+            }
+            if parameters.top_k == 0 {
+                return Err(fail("top_k must be greater than zero".into()));
+            }
+            if parameters.rebalance_every == 0 {
+                return Err(fail("rebalance_every must be greater than zero".into()));
+            }
+            if parameters.top_k as u128 > universe.members().len() as u128 {
+                return Err(fail(format!(
+                    "top_k {} exceeds Universe member count {}",
+                    parameters.top_k,
+                    universe.members().len()
+                )));
+            }
+            let factor = parameters
+                .factor()
+                .map_err(|error| fail(error.to_string()))?;
+            parameters
+                .strategy(factor.clone())
+                .map_err(|error| fail(error.to_string()))?;
+            let run_id = self.run_id(&parameters)?;
+            runs.entry(run_id.clone()).or_insert_with(|| ExpandedRun {
+                run_spec: self.run_spec(&parameters),
+                run_id,
+                parameters,
+                factor,
+            });
+        }
+        Ok(runs.into_values().collect())
+    }
+
+    /// Executes a grid using one local Rayon pool and a two-stage factor/run schedule.
+    pub fn execute(
+        &self,
+        lake_root: impl AsRef<Path>,
+        threads: usize,
+    ) -> Result<ExecutionReport, ExperimentError> {
+        if threads == 0 {
+            return Err(invalid("threads must be greater than zero"));
+        }
+        let lake_root = lake_root.as_ref();
+        let universe = StaticUniverse::load(lake_root, &self.universe)?;
+        let runs = self.expand_for_universe(&universe)?;
+        let venue = self
+            .venue
+            .parse::<VenueId>()
+            .map_err(|_| invalid("venue is not a valid VenueId"))?;
+        let panel = load_panel(lake_root, &self.dsv, &venue)
+            .map_err(|error| execution_error("load panel", error))?;
+        let statuses = load_execution_status(lake_root, &self.dsv)
+            .map_err(|error| execution_error("load execution status", error))?;
+        universe
+            .validate_against(lake_root, &self.dsv)
+            .map_err(|error| execution_error("validate Universe", error))?;
+
+        // Resolve execution availability once; the callback in each Run then reads this shared map.
+        let mut executable_by_key = HashMap::new();
+        for instrument in universe.members() {
+            for session in &panel.sessions {
+                let allowed = executable(&panel, &statuses, instrument, session)
+                    .map_err(|error| execution_error("resolve execution status", error))?;
+                executable_by_key.insert((instrument.clone(), session.session_date), allowed);
+            }
+        }
+
+        let mut factor_nodes = BTreeMap::new();
+        for run in &runs {
+            for factor in FactorGraph::resolve(run.factor.clone())
+                .map_err(|error| execution_error("resolve factor graph", error))?
+            {
+                factor_nodes
+                    .entry(factor.canonical_json().to_string())
+                    .or_insert(factor);
+            }
+        }
+        let mut base_nodes = Vec::new();
+        let mut score_nodes = Vec::new();
+        for factor in factor_nodes.into_values() {
+            let key = FactorKey::for_tree(
+                &factor,
+                &self.dsv,
+                &self.universe,
+                self.availability_assumption()?,
+            );
+            if factor.kind() == FactorKind::RotationScore {
+                score_nodes.push((factor, key));
+            } else {
+                base_nodes.push((factor, key));
+            }
+        }
+        base_nodes.sort_by(|left, right| left.1.as_str().cmp(right.1.as_str()));
+        score_nodes.sort_by(|left, right| left.1.as_str().cmp(right.1.as_str()));
+        let cache = FactorCache::open(lake_root)
+            .map_err(|error| execution_error("open Factor Cache", error))?;
+        let pool = ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .map_err(|error| invalid(format!("cannot create Rayon pool: {error}")))?;
+
+        let assumption = self.availability_assumption()?;
+        let factor_started = Instant::now();
+        let base_values = pool
+            .install(|| {
+                base_nodes
+                    .par_iter()
+                    .map(|(factor, _key)| {
+                        cache
+                            .get_or_compute(
+                                &panel,
+                                universe.members(),
+                                &self.universe,
+                                &self.dsv,
+                                factor,
+                                assumption,
+                            )
+                            .map(|values| (factor.canonical_json().to_string(), values))
+                            .map_err(|error| error.to_string())
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .map_err(|error| {
+                ExperimentError::Execution(format!("base factor stage failed: {error}"))
+            })?;
+        let mut factor_values = base_values.into_iter().collect::<HashMap<_, _>>();
+
+        // All dependency keys have been published by the completed base layer before scores start.
+        let score_values = pool
+            .install(|| {
+                score_nodes
+                    .par_iter()
+                    .map(|(factor, _key)| {
+                        cache
+                            .get_or_compute(
+                                &panel,
+                                universe.members(),
+                                &self.universe,
+                                &self.dsv,
+                                factor,
+                                assumption,
+                            )
+                            .map(|values| (factor.canonical_json().to_string(), values))
+                            .map_err(|error| error.to_string())
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .map_err(|error| {
+                ExperimentError::Execution(format!("score factor stage failed: {error}"))
+            })?;
+        factor_values.extend(score_values);
+        let factor_time_ms = factor_started.elapsed().as_millis();
+
+        let costs = self.vector_costs();
+        let run_started = Instant::now();
+        let results = pool.install(|| {
+            execute_runs(&runs, |run| {
+                execute_run(
+                    run,
+                    &factor_values,
+                    &panel,
+                    &executable_by_key,
+                    &costs,
+                    assumption,
+                )
+            })
+        });
+        let run_time_ms = run_started.elapsed().as_millis();
+        let compute_count = cache.compute_count();
+        let cache_hit_count = cache.hit_count();
+        Ok(ExecutionReport {
+            runs: results,
+            factor_time_ms,
+            run_time_ms,
+            compute_count,
+            cache_hit_count,
+        })
+    }
+
+    fn availability_assumption(&self) -> Result<AvailabilityAssumption, ExperimentError> {
+        self.availability_assumption
+            .parse()
+            .map_err(|error| invalid(format!("invalid availability assumption: {error}")))
+    }
+
+    fn vector_costs(&self) -> VectorCosts {
+        VectorCosts {
+            commission_rate: self.costs.commission_rate,
+            buy_slippage_bps: self.costs.buy_slippage_bps,
+            sell_slippage_bps: self.costs.sell_slippage_bps,
+            buy_tax_rate: self.costs.buy_tax_rate,
+            sell_tax_rate: self.costs.sell_tax_rate,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ExpandedRun {
+    pub run_spec: Value,
+    pub run_id: String,
+    pub parameters: StrategyParameters,
+    factor: Factor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunStatus {
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RunExecution {
+    pub run_spec: Value,
+    pub run_id: String,
+    pub status: RunStatus,
+    pub result: Option<VectorResult>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ExecutionReport {
+    pub runs: Vec<RunExecution>,
+    pub factor_time_ms: u128,
+    pub run_time_ms: u128,
+    pub compute_count: u64,
+    pub cache_hit_count: u64,
+}
+
+fn execute_run(
+    run: &ExpandedRun,
+    factor_values: &HashMap<String, DataFrame>,
+    panel: &Panel,
+    executable_by_key: &HashMap<(InstrumentId, chrono::NaiveDate), bool>,
+    costs: &VectorCosts,
+    assumption: AvailabilityAssumption,
+) -> Result<VectorResult, String> {
+    (|| {
+        let score = factor_values
+            .get(&run.factor.canonical_json().to_string())
+            .ok_or_else(|| "stage 1 did not produce this Run's score Factor Values".to_owned())?;
+        let strategy = run
+            .parameters
+            .strategy(run.factor.clone())
+            .map_err(|error| error.to_string())?;
+        let decisions = strategy
+            .decide(score, &panel.sessions)
+            .map_err(|error| error.to_string())?;
+        let events = execute(&decisions, &panel.sessions, |instrument, session| {
+            executable_by_key
+                .get(&(instrument.clone(), session.session_date))
+                .copied()
+                .unwrap_or(false)
+        });
+        run_vector(panel, &decisions, &events, costs, assumption).map_err(|error| error.to_string())
+    })()
+}
+
+fn execute_runs(
+    runs: &[ExpandedRun],
+    execute_one: impl Fn(&ExpandedRun) -> Result<VectorResult, String> + Sync,
+) -> Vec<RunExecution> {
+    runs.par_iter()
+        .map(|run| match execute_one(run) {
+            Ok(result) => RunExecution {
+                run_spec: run.run_spec.clone(),
+                run_id: run.run_id.clone(),
+                status: RunStatus::Completed,
+                result: Some(result),
+                error: None,
+            },
+            Err(error) => RunExecution {
+                run_spec: run.run_spec.clone(),
+                run_id: run.run_id.clone(),
+                status: RunStatus::Failed,
+                result: None,
+                error: Some(error),
+            },
+        })
+        .collect()
+}
+
+fn expand_grid(
+    axes: &BTreeMap<String, Vec<Value>>,
+) -> Result<Vec<StrategyParameters>, ExperimentError> {
+    let mut count = 1usize;
+    for name in PARAMETERS {
+        count = count
+            .checked_mul(axes[name].len())
+            .ok_or_else(|| invalid("parameter grid size exceeds addressable memory"))?;
+    }
+    let mut combinations = Vec::with_capacity(count);
+    let mut current = Map::new();
+    fn append(
+        axis_index: usize,
+        axes: &BTreeMap<String, Vec<Value>>,
+        current: &mut Map<String, Value>,
+        combinations: &mut Vec<StrategyParameters>,
+    ) -> Result<(), ExperimentError> {
+        if axis_index == PARAMETERS.len() {
+            combinations.push(StrategyParameters::parse(&Value::Object(current.clone()))?);
+            return Ok(());
+        }
+        let name = PARAMETERS[axis_index];
+        for value in &axes[name] {
+            current.insert(name.to_owned(), value.clone());
+            append(axis_index + 1, axes, current, combinations)?;
+        }
+        current.remove(name);
+        Ok(())
+    }
+    append(0, axes, &mut current, &mut combinations)?;
+    Ok(combinations)
+}
+
+fn u32_parameter(value: u64, name: &str) -> Result<u32, ExperimentError> {
+    u32::try_from(value)
+        .map_err(|_| invalid(format!("{name} must be no greater than {}", u32::MAX)))
+}
+
+fn execution_error(context: &str, error: impl fmt::Display) -> ExperimentError {
+    ExperimentError::Execution(format!("{context} failed: {error}"))
 }
 
 fn parse_parameter_space(value: &Value) -> Result<ParameterSpace, ExperimentError> {
@@ -375,15 +781,15 @@ fn parse_parameter_space(value: &Value) -> Result<ParameterSpace, ExperimentErro
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ParameterValueKind {
     PositiveInteger,
+    NonnegativeInteger,
     FloatBits,
     OptionalPositiveInteger,
 }
 
 fn parameter_value_kind(name: &str) -> Option<ParameterValueKind> {
     match name {
-        "short" | "long" | "vol" | "top_k" | "rebalance_every" => {
-            Some(ParameterValueKind::PositiveInteger)
-        }
+        "short" | "long" | "vol" => Some(ParameterValueKind::PositiveInteger),
+        "top_k" | "rebalance_every" => Some(ParameterValueKind::NonnegativeInteger),
         "w_s" | "w_l" | "w_v" => Some(ParameterValueKind::FloatBits),
         "trend" => Some(ParameterValueKind::OptionalPositiveInteger),
         _ => None,
@@ -394,6 +800,9 @@ fn validate_parameter_value(name: &str, value: &Value) -> Result<(), ExperimentE
     match parameter_value_kind(name) {
         Some(ParameterValueKind::PositiveInteger) => {
             positive_integer(value, name)?;
+        }
+        Some(ParameterValueKind::NonnegativeInteger) => {
+            nonnegative_integer(value, name)?;
         }
         Some(ParameterValueKind::FloatBits) => {
             finite_number(value, name)?;
@@ -571,6 +980,16 @@ fn positive_integer(value: &Value, name: &str) -> Result<u64, ExperimentError> {
             ))
         })
 }
+fn nonnegative_integer(value: &Value, name: &str) -> Result<u64, ExperimentError> {
+    value
+        .as_u64()
+        .filter(|value| *value <= MAX_SAFE_INTEGER)
+        .ok_or_else(|| {
+            invalid(format!(
+                "{name} must be a non-negative integer no greater than 2^53 - 1"
+            ))
+        })
+}
 fn optional_positive_integer(value: &Value, name: &str) -> Result<Option<u64>, ExperimentError> {
     if value.is_null() {
         Ok(None)
@@ -664,6 +1083,66 @@ mod tests {
             manifest.dsv,
             universe.id().unwrap(),
         )
+    }
+
+    fn scale_fixture(root: &Path) -> (String, String, String) {
+        const FIXTURE: &[u8] =
+            include_bytes!("../../../poc/poc0-benchmark/fixtures/b2-s2-scale-64x252-v2.json");
+        let lake = root.join("lake");
+        let store = RawStore::open(&lake).unwrap();
+        let raw_hash = store
+            .put(
+                FIXTURE,
+                SourceRecordInput {
+                    content_type: "application/json".into(),
+                    source_kind: SourceKind::Fixture,
+                    source_id: "b2-s2-scale-64x252-v2".into(),
+                    request: json!({}),
+                    observed_at: "synthetic".into(),
+                    ingested_by: "prajna-experiment-tests".into(),
+                },
+            )
+            .unwrap();
+        let manifest = publish_dataset(
+            &lake,
+            &store,
+            &NormalizerRegistry::with_builtins(),
+            "synthetic-etf-daily",
+            "3",
+            &[raw_hash],
+            "2026-10-03T00:00:00Z",
+        )
+        .unwrap();
+        let venue = VenueId::new("SYNTH").unwrap();
+        let panel = load_panel(&lake, &manifest.dsv, &venue).unwrap();
+        let universe = StaticUniverse::new("all", panel.instruments).unwrap();
+        universe.store(&lake).unwrap();
+        (
+            lake.to_string_lossy().into_owned(),
+            manifest.dsv,
+            universe.id().unwrap(),
+        )
+    }
+
+    fn scale_definition(dsv: &str, universe: &str, space: Value) -> Value {
+        json!({
+            "experiment_version": 1,
+            "dsv": dsv,
+            "universe": universe,
+            "venue": "SYNTH",
+            "strategy": "s2_rotation",
+            "engine": "vector",
+            "availability_assumption": "none",
+            "costs": {
+                "commission_rate": 0.001,
+                "buy_slippage_bps": 10.0,
+                "sell_slippage_bps": 10.0,
+                "buy_tax_rate": 0.0,
+                "sell_tax_rate": 0.0
+            },
+            "sessions_per_year": 252,
+            "parameter_space": space
+        })
     }
 
     fn definition(dsv: &str, universe: &str) -> Value {
@@ -764,6 +1243,152 @@ mod tests {
                 .id()
                 .unwrap(),
             experiment.id().unwrap()
+        );
+        assert_eq!(experiment.expand(&lake).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn expands_fixed_order_grid_and_deduplicates_runs_by_identity() {
+        let temp = TempDir::new().unwrap();
+        let (lake, dsv, universe) = fixture(temp.path());
+        let mut value = definition(&dsv, &universe);
+        value["parameter_space"] = json!({"grid": {
+            "short": [1, 2], "long": [3, 5], "vol": [2],
+            "w_s": [0.1], "w_l": [1.0], "w_v": [0.2],
+            "trend": [null, 20], "top_k": [1], "rebalance_every": [1, 2]
+        }});
+        let experiment = Experiment::parse(&value.to_string(), &lake).unwrap();
+        let expanded = experiment.expand(&lake).unwrap();
+        assert_eq!(expanded.len(), 16);
+        assert!(
+            expanded
+                .windows(2)
+                .all(|pair| pair[0].run_id < pair[1].run_id)
+        );
+
+        value["parameter_space"] = json!({"list": [
+            value["parameter_space"]["grid"]
+                .as_object().unwrap().iter().map(|(key, values)| (key.clone(), values[0].clone())).collect::<Map<_, _>>(),
+            value["parameter_space"]["grid"]
+                .as_object().unwrap().iter().map(|(key, values)| (key.clone(), values[0].clone())).collect::<Map<_, _>>()
+        ]});
+        let duplicates = Experiment::parse(&value.to_string(), &lake)
+            .unwrap()
+            .expand(&lake)
+            .unwrap();
+        assert_eq!(duplicates.len(), 1);
+    }
+
+    #[test]
+    fn expansion_rejects_the_first_invalid_combination() {
+        let temp = TempDir::new().unwrap();
+        let (lake, dsv, universe) = fixture(temp.path());
+        let valid = definition(&dsv, &universe)["parameter_space"]["list"][0].clone();
+        for (field, invalid_value, expected) in [
+            ("long", json!(2), "short must be less than long"),
+            ("vol", json!(1), "invalid rotation score factor"),
+            ("top_k", json!(0), "top_k must be greater than zero"),
+            ("top_k", json!(3), "exceeds Universe member count"),
+            (
+                "rebalance_every",
+                json!(0),
+                "rebalance_every must be greater than zero",
+            ),
+        ] {
+            let mut combination = valid.clone();
+            combination[field] = invalid_value;
+            let experiment = Experiment::parse(
+                &{
+                    let mut input = definition(&dsv, &universe);
+                    input["parameter_space"] = json!({"list": [combination]});
+                    input.to_string()
+                },
+                &lake,
+            )
+            .unwrap();
+            let error = experiment.expand(&lake).unwrap_err().to_string();
+            assert!(error.contains("combination 1"), "{error}");
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn rayon_grid_is_deterministic_reuses_factor_cache_and_matches_s2_golden() {
+        let temp = TempDir::new().unwrap();
+        let (lake, dsv, universe) = scale_fixture(temp.path());
+        let space = json!({"grid": {
+            "short": [5, 10, 20], "long": [40], "vol": [10],
+            "w_s": [1.0], "w_l": [1.0], "w_v": [1.0],
+            "trend": [null], "top_k": [1, 3], "rebalance_every": [1, 5, 10, 20]
+        }});
+        let experiment =
+            Experiment::parse(&scale_definition(&dsv, &universe, space).to_string(), &lake)
+                .unwrap();
+        let expanded = experiment.expand(&lake).unwrap();
+        let expected_keys = expanded
+            .iter()
+            .flat_map(|run| FactorGraph::resolve(run.factor.clone()).unwrap())
+            .map(|factor| {
+                FactorKey::for_tree(&factor, &dsv, &universe, AvailabilityAssumption::None)
+                    .as_str()
+                    .to_owned()
+            })
+            .collect::<BTreeSet<_>>();
+        let one_thread = experiment.execute(&lake, 1).unwrap();
+        let four_threads = experiment.execute(&lake, 4).unwrap();
+        assert_eq!(one_thread.runs.len(), 24);
+        assert_eq!(one_thread.compute_count, expected_keys.len() as u64);
+        assert!(one_thread.cache_hit_count > 0);
+        assert_eq!(four_threads.compute_count, 0);
+        assert!(four_threads.cache_hit_count > 0);
+        assert_eq!(
+            serde_json::to_vec(&one_thread.runs).unwrap(),
+            serde_json::to_vec(&four_threads.runs).unwrap()
+        );
+        let injected = execute_runs(&expanded[..2], |run| {
+            if run.run_id == expanded[0].run_id {
+                Err("injected stage 2 failure".to_owned())
+            } else {
+                Ok(one_thread.runs[1].result.clone().unwrap())
+            }
+        });
+        assert_eq!(injected[0].status, RunStatus::Failed);
+        assert_eq!(
+            injected[0].error.as_deref(),
+            Some("injected stage 2 failure")
+        );
+        assert_eq!(injected[1].status, RunStatus::Completed);
+        assert_eq!(
+            serde_json::to_vec(injected[1].result.as_ref().unwrap()).unwrap(),
+            serde_json::to_vec(one_thread.runs[1].result.as_ref().unwrap()).unwrap()
+        );
+
+        let golden_experiment = Experiment::parse(
+            &scale_definition(
+                &dsv,
+                &universe,
+                json!({"list": [{
+                    "short": 20, "long": 60, "vol": 20,
+                    "w_s": 1.0, "w_l": 1.0, "w_v": 1.0,
+                    "trend": 20, "top_k": 5, "rebalance_every": 5
+                }]}),
+            )
+            .to_string(),
+            &lake,
+        )
+        .unwrap();
+        let golden = golden_experiment.execute(&lake, 1).unwrap();
+        let expected: Value = serde_json::from_slice(include_bytes!(
+            "../../../poc/mvp1-golden/expected/b2-s2-scale-64x252-v2.trend20.json"
+        ))
+        .unwrap();
+        let expected_vector = &expected["vector"];
+        let actual_vector = serde_json::to_value(golden.runs[0].result.as_ref().unwrap()).unwrap();
+        assert_vector_matches(
+            &actual_vector,
+            expected_vector,
+            "vector",
+            &expected["tolerance"],
         );
     }
 
@@ -988,5 +1613,48 @@ mod tests {
     #[test]
     fn float_bit_encoding_is_shared_with_factor_canonicalization() {
         assert_eq!(canonical_float_bits(0.1), "3fb999999999999a");
+    }
+
+    fn assert_vector_matches(actual: &Value, expected: &Value, path: &str, tolerance: &Value) {
+        match (actual, expected) {
+            (Value::Object(actual), Value::Object(expected)) => {
+                assert_eq!(
+                    actual.keys().collect::<Vec<_>>(),
+                    expected.keys().collect::<Vec<_>>(),
+                    "{path}"
+                );
+                for (key, expected_value) in expected {
+                    assert_vector_matches(
+                        &actual[key],
+                        expected_value,
+                        &format!("{path}.{key}"),
+                        tolerance,
+                    );
+                }
+            }
+            (Value::Array(actual), Value::Array(expected)) => {
+                assert_eq!(actual.len(), expected.len(), "{path}");
+                for (index, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+                    assert_vector_matches(actual, expected, &format!("{path}[{index}]"), tolerance);
+                }
+            }
+            (Value::Number(actual), Value::Number(expected))
+                if actual.is_f64() || expected.is_f64() =>
+            {
+                let actual = actual.as_f64().unwrap();
+                let expected = expected.as_f64().unwrap();
+                let tolerance_key = if path.contains(".ranked[") && path.ends_with(".score") {
+                    "factor_abs"
+                } else {
+                    "nav_abs"
+                };
+                let tolerance = tolerance[tolerance_key].as_f64().unwrap();
+                assert!(
+                    (actual - expected).abs() <= tolerance,
+                    "{path}: {actual} != {expected} (tolerance {tolerance})"
+                );
+            }
+            _ => assert_eq!(actual, expected, "{path}"),
+        }
     }
 }
