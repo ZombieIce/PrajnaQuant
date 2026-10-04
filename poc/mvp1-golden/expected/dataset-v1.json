@@ -648,6 +648,38 @@
     "volatility_weight": 0.0,
     "volatility_window": 2
   },
+  "summary": {
+    "annualized_return": -0.15488340078693796,
+    "annualized_volatility": 0.022449944320643667,
+    "assumptions": [
+      "proportional transaction costs",
+      "no minimum commission or lot size",
+      "raw open-to-open returns",
+      "Static Universe is not point-in-time",
+      "conservative deferral when a held instrument is unavailable",
+      "weight-based Vector NAV is not a cash-and-quantity account ledger",
+      "long-only unlevered weights; residual cash earns zero return",
+      "availability assumption: none"
+    ],
+    "availability_assumption": "none",
+    "deferred_count": 1,
+    "drawdown_peak_session": "2026-01-05",
+    "drawdown_trough_session": "2026-01-14",
+    "executed_count": 6,
+    "insufficient_sessions": false,
+    "max_drawdown": -0.005991999999999997,
+    "mean_return": -0.0006666666666666673,
+    "n_returns": 9,
+    "pending_at_end": true,
+    "session_count": 10,
+    "sharpe": -7.483314773547884,
+    "skipped_buy_count": 1,
+    "std_return": 0.0014142135623730961,
+    "total_cost": 0.006,
+    "total_return": -0.005991999999999997,
+    "total_turnover": 3.0,
+    "zero_volatility": false
+  },
   "tolerance": {
     "factor_abs": 1e-12,
     "nav_abs": 1e-10

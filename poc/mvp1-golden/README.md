@@ -1,8 +1,9 @@
 # MVP-1 independent factor golden
 
 This is the independent Python-standard-library factor and Vector-result
-golden for the 3×10 fixture in M13. It reads the hand-authored JSON fixture
-directly; it does not read D7 Parquet or reuse Rust or `prajna-research` code.
+golden for the 3×10 fixture in M13, now including the E11 Summary. It reads the
+hand-authored JSON fixture directly; it does not read D7 Parquet or reuse Rust
+or `prajna-research` code.
 
 Regenerate the committed 3×10 factors and Vector result from the repository
 root:
@@ -85,6 +86,23 @@ The `vector` result also records the exact proportional-cost inputs,
 raw open-to-open prices, Static Universe point-in-time limits, and conservative
 execution deferrals. This is a weight-based return summary, not a
 cash-and-quantity account ledger; its NAV does not assert account conservation.
+
+## Summary metrics
+
+The top-level `summary` is calculated in Python from the generated Vector
+sessions and execution trajectory. It uses `sessions_per_year=252`, with
+`n_returns=session_count-1`: the first Session is the opening NAV of 1.0 and
+subsequent `net_return` values form the return series. `nav_abs=1e-10` is also
+the absolute tolerance for Summary floats. Sample standard deviation requires
+two returns; otherwise the standard deviation, annualized volatility, and
+Sharpe are null with `insufficient_sessions=true`. Sharpe is null with
+`zero_volatility=true` when the available standard deviation is zero. The
+assumptions and availability assumption are copied from the Vector result.
+
+The 3×10 hand check has nine returns, total turnover 3.0, total cost 0.006,
+and final NAV `0.998 × 0.996 = 0.994008`. Its seven zero returns and two costs
+of 0.002 and 0.004 give mean return `−0.006/9`, sample standard deviation
+`√(2×10⁻⁶)`, and maximum drawdown `−0.005992` from 2026-01-05 to 2026-01-14.
 
 M6/M7 and the independent-golden requirement are specified in
 [issue #53](https://github.com/ZombieIce/PrajnaQuant/issues/53); the Vector

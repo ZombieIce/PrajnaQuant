@@ -78,7 +78,7 @@ M10 `strategy::VectorStrategy` 与 `VectorEngine::validate` 已实现：仅声�
 
 `prajna-research` 现提供 `StaticUniverse`：成员排序去重后以 restricted-JCS SHA-256 身份存储，原子发布、幂等复用并在读取时校验身份；可对照 DSV v1 instruments 表报告缺失成员。3×10 fixture 已验证 A/B/C 通过、含 D 失败。它是固定成员列表，不提供 point-in-time 成员可知性证明。
 
-MVP-2 的 `prajna-experiment`（Issue #99）现可解析并校验 `experiment.json`，要求存在且有效的 DSV、同一 lake 中的 Static Universe 及其成员覆盖、合法 Venue、固定的 `s2_rotation`/`vector` 类型、有限成本和完整参数空间；grid/list 均只校验、不展开。restricted-JCS 身份覆盖 Experiment、`vector@1` Run Spec 与含 git revision、tracked/untracked diff hash、rustc 版本和 target triple 的 Experiment Execution；脏工作树标为不可完全复现。尚未执行 Run、计算 Metrics、写入 ResultLevel 或按参数扫描；验证仅限合成 fixture。
+MVP-2 的 `prajna-experiment`（Issue #99）现可解析并校验 `experiment.json`，要求存在且有效的 DSV、同一 lake 中的 Static Universe 及其成员覆盖、合法 Venue、固定的 `s2_rotation`/`vector` 类型、有限成本和完整参数空间；grid/list 均只校验、不展开。restricted-JCS 身份覆盖 Experiment、`vector@1` Run Spec 与含 git revision、tracked/untracked diff hash、rustc 版本和 target triple 的 Experiment Execution；脏工作树标为不可完全复现。Issue #101 新增纯函数 Vector Summary Metrics，独立 Python 金标准和 Rust 对照已覆盖 3×10 与 64×252 S2 fixtures。尚未集成 Run 执行、持久化 ResultLevel 或按参数扫描；验证仅限合成 fixture。
 
 ## Batch 2 Integration Acceptance (2026-09-25)
 

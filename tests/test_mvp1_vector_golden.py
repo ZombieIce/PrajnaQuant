@@ -100,6 +100,38 @@ class VectorGoldenTests(unittest.TestCase):
                 "missing_input",
             )
 
+    def test_3x10_summary_matches_hand_calculated_metrics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = json.loads(self.run_cli(Path(directory) / "golden.json"))
+
+        summary = output["summary"]
+        # Ten opens span nine returns. Two proportional costs of 0.002 and
+        # 0.004 leave NAV=0.998*0.996=0.994008; the final peak/trough is Jan 5/14.
+        self.assertEqual(summary["n_returns"], 9)
+        self.assertAlmostEqual(summary["total_return"], -0.005992, delta=1e-12)
+        self.assertAlmostEqual(
+            summary["annualized_return"], 0.994008 ** (252 / 9) - 1, delta=1e-12
+        )
+        self.assertAlmostEqual(summary["mean_return"], -0.006 / 9, delta=1e-12)
+        self.assertAlmostEqual(
+            summary["std_return"], math.sqrt(2e-6), delta=1e-12
+        )
+        self.assertAlmostEqual(summary["max_drawdown"], -0.005992, delta=1e-12)
+        self.assertEqual(summary["drawdown_peak_session"], "2026-01-05")
+        self.assertEqual(summary["drawdown_trough_session"], "2026-01-14")
+        self.assertEqual(summary["total_turnover"], 3.0)
+        self.assertAlmostEqual(summary["total_cost"], 0.006, delta=1e-12)
+        self.assertEqual(summary["executed_count"], 6)
+        self.assertEqual(summary["deferred_count"], 1)
+        self.assertEqual(summary["skipped_buy_count"], 1)
+        self.assertEqual(summary["session_count"], 10)
+        self.assertTrue(summary["pending_at_end"])
+        self.assertEqual(summary["assumptions"], output["vector"]["assumptions"])
+        self.assertEqual(
+            summary["availability_assumption"],
+            output["vector"]["availability_assumption"],
+        )
+
     def test_cli_output_is_byte_for_byte_deterministic(self):
         with tempfile.TemporaryDirectory() as directory:
             first = self.run_cli(Path(directory) / "first.json")
