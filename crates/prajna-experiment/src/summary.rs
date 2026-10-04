@@ -101,6 +101,10 @@ pub fn summarize(result: &VectorResult, sessions_per_year: u64) -> RunSummary {
 }
 
 fn sample_std(values: &[f64]) -> f64 {
+    // A rounded mean would turn identical returns into a tiny nonzero deviation.
+    if values.windows(2).all(|pair| pair[0] == pair[1]) {
+        return 0.0;
+    }
     let mean = values.iter().sum::<f64>() / values.len() as f64;
     let sum_squared_deviations = values
         .iter()
@@ -215,6 +219,22 @@ mod tests {
         assert_eq!(summary.sharpe, None);
         assert!(!summary.insufficient_sessions);
         assert!(summary.zero_volatility);
+    }
+
+    #[test]
+    fn long_constant_returns_have_exact_zero_volatility_and_null_sharpe() {
+        for count in [3, 10] {
+            let mut rows = vec![(1.0, 0.0)];
+            let mut nav = 1.0;
+            for _ in 0..count {
+                nav *= 1.1;
+                rows.push((nav, 0.1));
+            }
+            let summary = summarize(&result(&rows), 252);
+            assert_eq!(summary.std_return, Some(0.0));
+            assert_eq!(summary.sharpe, None);
+            assert!(summary.zero_volatility);
+        }
     }
 
     #[test]

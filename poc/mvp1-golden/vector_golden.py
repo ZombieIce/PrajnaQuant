@@ -588,6 +588,9 @@ def build_summary(vector, sessions_per_year):
     mean_return = math.fsum(returns) / n_returns if n_returns else None
     if insufficient_sessions:
         std_return = None
+    elif len(set(returns)) == 1:
+        # A rounded mean would turn identical returns into a tiny nonzero deviation.
+        std_return = 0.0
     else:
         std_return = math.sqrt(
             math.fsum((value - mean_return) ** 2 for value in returns)

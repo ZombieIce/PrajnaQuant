@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import math
 from pathlib import Path
@@ -131,6 +132,27 @@ class VectorGoldenTests(unittest.TestCase):
             summary["availability_assumption"],
             output["vector"]["availability_assumption"],
         )
+
+    def test_constant_returns_have_exact_zero_volatility_and_null_sharpe(self):
+        spec = importlib.util.spec_from_file_location("vector_golden", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for count in (3, 10):
+            sessions = [{"net_return": 0.0, "nav": 1.0, "session_date": "d0", "turnover": 0.0, "cost": 0.0}]
+            nav = 1.0
+            for index in range(count):
+                nav *= 1.1
+                sessions.append(
+                    {"net_return": 0.1, "nav": nav, "session_date": f"d{index + 1}", "turnover": 0.0, "cost": 0.0}
+                )
+            summary = module.build_summary(
+                {"sessions": sessions, "executions": [], "pending_at_end": None,
+                 "assumptions": [], "availability_assumption": "none"},
+                252,
+            )
+            self.assertEqual(summary["std_return"], 0.0)
+            self.assertIsNone(summary["sharpe"])
+            self.assertTrue(summary["zero_volatility"])
 
     def test_cli_output_is_byte_for_byte_deterministic(self):
         with tempfile.TemporaryDirectory() as directory:
