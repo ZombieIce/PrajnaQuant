@@ -323,6 +323,7 @@ impl Experiment {
         read_manifest(lake_root.as_ref(), &input.dsv)?;
         let universe = StaticUniverse::load(lake_root.as_ref(), &input.universe)?;
         universe.validate_against(lake_root.as_ref(), &input.dsv)?;
+        validate_universe_venue(&universe, &input.venue)?;
         let costs = Costs::parse(&input.costs)?;
         let parameter_space = parse_parameter_space(&input.parameter_space)?;
         let normalized = normalize_definition(&input, costs, &parameter_space);
@@ -454,6 +455,8 @@ impl Experiment {
         let lake_root = lake_root.as_ref();
         let universe = StaticUniverse::load(lake_root, &self.universe)?;
         let runs = self.expand_for_universe(&universe)?;
+        validate_universe_venue(&universe, &self.venue)
+            .map_err(|error| execution_error("validate Universe venue", error))?;
         let venue = self
             .venue
             .parse::<VenueId>()
@@ -1023,6 +1026,22 @@ const MAX_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
 fn invalid(message: impl Into<String>) -> ExperimentError {
     ExperimentError::InvalidDefinition(message.into())
 }
+
+fn validate_universe_venue(universe: &StaticUniverse, venue: &str) -> Result<(), ExperimentError> {
+    let venue = venue
+        .parse::<VenueId>()
+        .map_err(|_| invalid("venue is not a valid VenueId"))?;
+    if let Some(instrument) = universe
+        .members()
+        .iter()
+        .find(|instrument| instrument.venue() != &venue)
+    {
+        return Err(invalid(format!(
+            "Universe member {instrument} does not belong to experiment venue {venue}"
+        )));
+    }
+    Ok(())
+}
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -1122,6 +1141,25 @@ mod tests {
             manifest.dsv,
             universe.id().unwrap(),
         )
+    }
+
+    #[test]
+    fn universe_members_must_match_experiment_venue() {
+        let universe = StaticUniverse::new(
+            "mixed",
+            vec![
+                InstrumentId::new("AAA", VenueId::new("SYNTH").unwrap()).unwrap(),
+                InstrumentId::new("BBB", VenueId::new("OTHER").unwrap()).unwrap(),
+            ],
+        )
+        .unwrap();
+
+        assert!(
+            validate_universe_venue(&universe, "SYNTH")
+                .unwrap_err()
+                .to_string()
+                .contains("does not belong to experiment venue")
+        );
     }
 
     fn scale_definition(dsv: &str, universe: &str, space: Value) -> Value {
@@ -1477,15 +1515,9 @@ mod tests {
             assert_ne!(original_experiment, changed.id().unwrap());
         }
 
-        for (field, value) in [
-            ("venue", json!("OTHER")),
-            (
-                "availability_assumption",
-                json!("treat_unknown_as_ts_close"),
-            ),
-        ] {
+        {
             let mut changed = original_value.clone();
-            changed[field] = value;
+            changed["availability_assumption"] = json!("treat_unknown_as_ts_close");
             let changed = Experiment::parse(&changed.to_string(), &lake).unwrap();
             assert_ne!(
                 original_run,
