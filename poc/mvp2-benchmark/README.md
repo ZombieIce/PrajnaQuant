@@ -73,6 +73,69 @@ an incomplete record, and never produce a successful median report.
 
 ## Recorded results
 
-The raw measurements and numeric summaries are recorded alongside this README
-after executing the matrix from a clean committed source revision. Measurement
-revision refers to that source commit, not the later evidence-only commit.
+Measured 2026-10-09 10:29–10:38 UTC on **Apple M1, 8 physical/logical cores,
+16 GiB RAM, macOS 26.2**, rustc 1.98.1, native `aarch64-apple-darwin` release CLI.
+The Python 3.8.0 controller reports `x86_64` (Rosetta); that is the controller's
+architecture, not the Rust CLI's. Each Execution records `aarch64` separately.
+Machine load outside the runner was not controlled.
+
+Source revision: `153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9`;
+all **48** samples record **`reproducible: true`**, 288 successful Runs and newly
+created results. Measurement revision refers to this source commit, not the
+later evidence-only commit. See [raw measurements](raw-measurements.json) for
+all raw `time -l` output/provenance and [numeric summaries](medians.json) for all
+series, medians, ranges and nearest-rank p95.
+
+### Median measurements (3 samples per cell)
+
+Wall includes result persistence; factor/Run columns are the CLI's phase times.
+RSS is whole-process peak RSS in MiB (bytes / 1,048,576).
+
+| Threads | Factor cache | Level | Wall s | Factor ms | Run ms | Runs/s | RSS MiB |
+| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | cold | summary | 6.531 | 1685 | 4528 | 44.10 | 319.0 |
+| 1 | cold | full | 21.393 | 1683 | 4511 | 13.46 | 337.7 |
+| 1 | hot | summary | 4.932 | 114 | 4505 | 58.40 | 284.0 |
+| 1 | hot | full | 19.924 | 116 | 4566 | 14.46 | 399.2 |
+| 2 | cold | summary | 4.209 | 1115 | 2758 | 68.42 | 340.3 |
+| 2 | cold | full | 18.864 | 1153 | 2548 | 15.27 | 358.4 |
+| 2 | hot | summary | 2.974 | 73 | 2590 | 96.85 | 287.3 |
+| 2 | hot | full | 17.760 | 74 | 2650 | 16.22 | 403.5 |
+| 4 | cold | summary | 3.359 | 929 | 2080 | 85.73 | 370.5 |
+| 4 | cold | full | 17.969 | 905 | 2066 | 16.03 | 479.3 |
+| 4 | hot | summary | 2.424 | 41 | 2036 | 118.81 | 299.9 |
+| 4 | hot | full | 17.028 | 40 | 2214 | 16.91 | 415.5 |
+| 8 | cold | summary | 2.490 | 733 | 1431 | 115.64 | 425.2 |
+| 8 | cold | full | 17.022 | 687 | 1396 | 16.92 | 518.5 |
+| 8 | hot | summary | 1.535 | 28 | 1190 | 187.68 | 317.0 |
+| 8 | hot | full | 16.106 | 27 | 1145 | 17.88 | 433.2 |
+
+In this measured synthetic matrix:
+
+- Cold samples compute 32 factors and record 84 cache hits; hot samples compute
+  none and record 116 hits. Cold hits include dependency reuse within the same
+  process, not evidence of a preexisting cache.
+- Summary publishes 3 files, approximately 339,424–339,426 bytes; Full publishes
+  1,731 files, approximately 234,414,392–234,414,394 bytes. Exact values per
+  invocation are in the raw report; metadata timestamps/counter digit lengths
+  can change byte counts without changing result identity.
+- All 24 Summary samples pass the recorded absence-of-`runs/` assertion.
+  All 48 samples have the same Summary logical hash
+  `5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be`.
+- Across individual samples peak RSS ranges from 296,763,392 to 561,496,064
+  bytes. The table shows medians, not these extremes.
+- More Rayon threads reduce the measured factor/Run phase times; Full's total
+  wall time falls less than its Run phase time. Phase timing does not isolate
+  serialization, filesystem I/O or provenance capture; no causal attribution or
+  real-data scalability claim is made.
+
+The dependency guard excluded DuckDB and the legacy warehouse/research stack.
+Offline release build took 9m12s; building the fixture example took 1m59s on the
+new worktree's initially empty target. Available space was about 28.6 GiB before
+and 27.6 GiB after these builds; target was about 1.1 GiB. No shared target was
+cleaned and no cold-build comparison is claimed.
+
+An initial measurement attempt was aborted after one sample because the
+manifest's git revision retains a newline. The runner comparison was fixed to
+strip it; the complete matrix above was rerun from the new clean source commit,
+and the aborted sample is not included.

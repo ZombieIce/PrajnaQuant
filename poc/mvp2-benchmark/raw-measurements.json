@@ -1,0 +1,3569 @@
+{
+  "schema_version": "poc-mvp2-benchmark.v1",
+  "status": "measured",
+  "started_at_utc": "2026-10-09T10:29:05.732020+00:00",
+  "repeats": 3,
+  "scope": "synthetic 64 instruments x 252 sessions, 288 Vector Runs only",
+  "provenance": {
+    "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9",
+    "git_status_porcelain": "",
+    "reproducible": true,
+    "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "rustc_verbose": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: aarch64-apple-darwin\nrelease: 1.98.1\nLLVM version: 22.1.8",
+    "python_version": "3.8.0",
+    "operating_system": "macOS-26.2-x86_64-i386-64bit",
+    "architecture": "x86_64",
+    "cpu_model": "Apple M1",
+    "logical_cpu_count": 8,
+    "physical_cpu_count": 8,
+    "memory_bytes": 17179869184,
+    "binary_sha256": "d31f3b0b158234bcf8288b6d9af729bf7cec027c92151b19ab7b254d936ac0ee",
+    "prepare_binary_sha256": "eeb57da18c0f0df6e61318a063c0fd327027f5a1404a43e91e58400bc4b56729",
+    "cargo_lock_sha256": "54e0302bcae36ff8c0547ecb1f34aa564198153556b1f8b9fe30fc67696d1387",
+    "fixture_sha256": "c805d3ef0873171d89b4380ef593c5a032d9c302783ce620b11eb09a85d5c36e",
+    "build_command": "cargo build --release -p prajna-experiment --locked",
+    "build_profile": "release; default features",
+    "environment": {
+      "RAYON_NUM_THREADS": null,
+      "POLARS_MAX_THREADS": null,
+      "RUSTFLAGS": null,
+      "CARGO_BUILD_TARGET": null
+    },
+    "other_machine_load": "not controlled; serial samples, no concurrent build started by runner"
+  },
+  "rss_scope": "whole CLI process, macOS /usr/bin/time -l maximum resident set size in bytes",
+  "throughput_scope": "288 / wall_seconds, including process startup and result persistence",
+  "cache_scope": "Factor Cache only; OS page cache is not flushed",
+  "measurements": [
+    {
+      "threads": 1,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 1,
+      "started_at_utc": "2026-10-09T10:29:13.613514+00:00",
+      "finished_at_utc": "2026-10-09T10:29:20.208779+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-cold-summary-1.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-cold-summary-1",
+        "--level",
+        "summary",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 6.5952333329999995,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":8,\"factors\":1754,\"runs\":4528,\"total\":6547},\"written_bytes\":339426,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        6.56 real         5.91 user         0.83 sys\n           334446592  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               27530  page reclaims\n                  40  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 449  voluntary context switches\n              121323  involuntary context switches\n         51682716321  instructions retired\n         13053841679  cycles elapsed\n           296683328  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5076983,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 1,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 1754,
+          "runs": 4528,
+          "total": 6547
+        },
+        "written_bytes": 339426,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 1,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 2,
+      "started_at_utc": "2026-10-09T10:29:20.244251+00:00",
+      "finished_at_utc": "2026-10-09T10:29:26.774772+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-cold-summary-2.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-cold-summary-2",
+        "--level",
+        "summary",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 6.530540125000002,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":8,\"factors\":1684,\"runs\":4538,\"total\":6481},\"written_bytes\":339426,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        6.50 real         5.95 user         0.91 sys\n           335216640  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               27594  page reclaims\n                  40  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 440  voluntary context switches\n               91014  involuntary context switches\n         51680229842  instructions retired\n         13228128608  cycles elapsed\n           296765248  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5076983,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 1,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 1684,
+          "runs": 4538,
+          "total": 6481
+        },
+        "written_bytes": 339426,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 1,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 3,
+      "started_at_utc": "2026-10-09T10:29:26.810938+00:00",
+      "finished_at_utc": "2026-10-09T10:29:33.306526+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-cold-summary-3.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-cold-summary-3",
+        "--level",
+        "summary",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 6.495601541999999,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":8,\"factors\":1685,\"runs\":4491,\"total\":6445},\"written_bytes\":339426,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        6.46 real         5.92 user         0.91 sys\n           333791232  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               27481  page reclaims\n                  66  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 438  voluntary context switches\n               95301  involuntary context switches\n         51714586059  instructions retired\n         13239643644  cycles elapsed\n           295831360  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5076983,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 1,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 1685,
+          "runs": 4491,
+          "total": 6445
+        },
+        "written_bytes": 339426,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 1,
+      "cache_state": "cold",
+      "result_level": "full",
+      "repeat": 1,
+      "started_at_utc": "2026-10-09T10:29:33.342342+00:00",
+      "finished_at_utc": "2026-10-09T10:29:54.735563+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-cold-full-1.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-cold-full-1",
+        "--level",
+        "full",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 21.393383874999998,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":8,\"factors\":1683,\"runs\":4490,\"total\":21346},\"written_bytes\":234414394,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       21.36 real        13.01 user         1.93 sys\n           353746944  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               40030  page reclaims\n                  40  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                6025  voluntary context switches\n               96371  involuntary context switches\n        120811345976  instructions retired\n         29099729108  cycles elapsed\n           311707456  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 239151951,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 1,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 1683,
+          "runs": 4490,
+          "total": 21346
+        },
+        "written_bytes": 234414394,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 1,
+      "cache_state": "cold",
+      "result_level": "full",
+      "repeat": 2,
+      "started_at_utc": "2026-10-09T10:29:55.074327+00:00",
+      "finished_at_utc": "2026-10-09T10:30:16.341853+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-cold-full-2.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-cold-full-2",
+        "--level",
+        "full",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 21.267686209000004,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":8,\"factors\":1704,\"runs\":4511,\"total\":21218},\"written_bytes\":234414394,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       21.23 real        12.97 user         1.92 sys\n           354074624  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               39765  page reclaims\n                 349  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                5885  voluntary context switches\n               94032  involuntary context switches\n        120849180855  instructions retired\n         28980721520  cycles elapsed\n           311871296  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 239151951,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 1,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 1704,
+          "runs": 4511,
+          "total": 21218
+        },
+        "written_bytes": 234414394,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 1,
+      "cache_state": "cold",
+      "result_level": "full",
+      "repeat": 3,
+      "started_at_utc": "2026-10-09T10:30:16.668078+00:00",
+      "finished_at_utc": "2026-10-09T10:30:38.098428+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-cold-full-3.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-cold-full-3",
+        "--level",
+        "full",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 21.430507292,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":8,\"factors\":1667,\"runs\":4583,\"total\":21382},\"written_bytes\":234414394,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       21.40 real        13.08 user         1.88 sys\n           354418688  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               39750  page reclaims\n                 349  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                5856  voluntary context switches\n               98023  involuntary context switches\n        120833496071  instructions retired\n         28995985465  cycles elapsed\n           312805184  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 239151951,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 1,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 1667,
+          "runs": 4583,
+          "total": 21382
+        },
+        "written_bytes": 234414394,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 1,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 1,
+      "started_at_utc": "2026-10-09T10:30:38.477163+00:00",
+      "finished_at_utc": "2026-10-09T10:30:43.446245+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-hot-summary-1.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-hot-summary-1",
+        "--level",
+        "summary",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 4.969080458999997,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":8,\"factors\":117,\"runs\":4488,\"total\":4924},\"written_bytes\":339425,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        4.94 real         4.73 user         0.25 sys\n           297844736  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               25232  page reclaims\n                 349  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  37  voluntary context switches\n               20777  involuntary context switches\n         40308992445  instructions retired\n          9580199246  cycles elapsed\n           285918976  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5076982,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 1,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 117,
+          "runs": 4488,
+          "total": 4924
+        },
+        "written_bytes": 339425,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 1,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 2,
+      "started_at_utc": "2026-10-09T10:30:43.520879+00:00",
+      "finished_at_utc": "2026-10-09T10:30:48.447197+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-hot-summary-2.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-hot-summary-2",
+        "--level",
+        "summary",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 4.9263180420000054,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":8,\"factors\":114,\"runs\":4505,\"total\":4883},\"written_bytes\":339425,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        4.90 real         4.74 user         0.23 sys\n           297844736  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               25541  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  19  voluntary context switches\n               20282  involuntary context switches\n         40290596245  instructions retired\n          9565022054  cycles elapsed\n           285918976  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5076982,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 1,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 114,
+          "runs": 4505,
+          "total": 4883
+        },
+        "written_bytes": 339425,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 1,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 3,
+      "started_at_utc": "2026-10-09T10:30:48.522635+00:00",
+      "finished_at_utc": "2026-10-09T10:30:53.454404+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-hot-summary-3.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-hot-summary-3",
+        "--level",
+        "summary",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 4.9317726660000005,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":8,\"factors\":114,\"runs\":4513,\"total\":4889},\"written_bytes\":339425,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        4.90 real         4.73 user         0.23 sys\n           296763392  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               25489  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  19  voluntary context switches\n               18893  involuntary context switches\n         40292487116  instructions retired\n          9571761090  cycles elapsed\n           284837632  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5076982,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 1,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 114,
+          "runs": 4513,
+          "total": 4889
+        },
+        "written_bytes": 339425,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 1,
+      "cache_state": "hot",
+      "result_level": "full",
+      "repeat": 1,
+      "started_at_utc": "2026-10-09T10:30:53.525468+00:00",
+      "finished_at_utc": "2026-10-09T10:31:13.448857+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-hot-full-1.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-hot-full-1",
+        "--level",
+        "full",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 19.92352075000001,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":8,\"factors\":114,\"runs\":4486,\"total\":19875},\"written_bytes\":234414393,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       19.89 real        11.93 user         1.26 sys\n           418627584  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               33019  page reclaims\n                  41  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                5438  voluntary context switches\n               27306  involuntary context switches\n        109357546139  instructions retired\n         25488141037  cycles elapsed\n           364710208  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 239151950,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 1,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 114,
+          "runs": 4486,
+          "total": 19875
+        },
+        "written_bytes": 234414393,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 1,
+      "cache_state": "hot",
+      "result_level": "full",
+      "repeat": 2,
+      "started_at_utc": "2026-10-09T10:31:13.832478+00:00",
+      "finished_at_utc": "2026-10-09T10:31:33.933576+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-hot-full-2.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-hot-full-2",
+        "--level",
+        "full",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 20.101244374999993,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":8,\"factors\":117,\"runs\":4825,\"total\":20055},\"written_bytes\":234414393,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       20.07 real        12.13 user         1.25 sys\n           419971072  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               32804  page reclaims\n                 353  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                5426  voluntary context switches\n               29361  involuntary context switches\n        109343136886  instructions retired\n         25645791714  cycles elapsed\n           364202304  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 239151950,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 1,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 117,
+          "runs": 4825,
+          "total": 20055
+        },
+        "written_bytes": 234414393,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 1,
+      "cache_state": "hot",
+      "result_level": "full",
+      "repeat": 3,
+      "started_at_utc": "2026-10-09T10:31:34.305739+00:00",
+      "finished_at_utc": "2026-10-09T10:31:54.193127+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-hot-full-3.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/1-hot-full-3",
+        "--level",
+        "full",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 19.887129165999994,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":9,\"factors\":116,\"runs\":4566,\"total\":19839},\"written_bytes\":234414393,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       19.85 real        11.96 user         1.26 sys\n           416710656  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               32674  page reclaims\n                 275  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                5431  voluntary context switches\n               31369  involuntary context switches\n        109390839428  instructions retired\n         25615433219  cycles elapsed\n           363792704  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 239151950,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 1,
+        "timings_ms": {
+          "definition": 9,
+          "factors": 116,
+          "runs": 4566,
+          "total": 19839
+        },
+        "written_bytes": 234414393,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 2,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 1,
+      "started_at_utc": "2026-10-09T10:31:54.519828+00:00",
+      "finished_at_utc": "2026-10-09T10:31:58.734227+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-cold-summary-1.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-cold-summary-1",
+        "--level",
+        "summary",
+        "--threads",
+        "2"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 4.209439207999992,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":2,\"timings_ms\":{\"definition\":9,\"factors\":1098,\"runs\":2758,\"total\":4164},\"written_bytes\":339426,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        4.18 real         6.86 user         0.85 sys\n           356843520  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               30351  page reclaims\n                 349  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 501  voluntary context switches\n               92158  involuntary context switches\n         51619840294  instructions retired\n         14183448185  cycles elapsed\n           318457664  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5076983,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 2,
+        "timings_ms": {
+          "definition": 9,
+          "factors": 1098,
+          "runs": 2758,
+          "total": 4164
+        },
+        "written_bytes": 339426,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 2,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 2,
+      "started_at_utc": "2026-10-09T10:31:58.775997+00:00",
+      "finished_at_utc": "2026-10-09T10:32:03.105761+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-cold-summary-2.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-cold-summary-2",
+        "--level",
+        "summary",
+        "--threads",
+        "2"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 4.325902333000016,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":2,\"timings_ms\":{\"definition\":8,\"factors\":1142,\"runs\":2870,\"total\":4282},\"written_bytes\":339426,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        4.30 real         7.06 user         0.77 sys\n           358105088  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               30753  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 532  voluntary context switches\n               78265  involuntary context switches\n         51460647736  instructions retired\n         14069425138  cycles elapsed\n           319375168  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5076983,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 2,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 1142,
+          "runs": 2870,
+          "total": 4282
+        },
+        "written_bytes": 339426,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 2,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 3,
+      "started_at_utc": "2026-10-09T10:32:03.144707+00:00",
+      "finished_at_utc": "2026-10-09T10:32:07.145793+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-cold-summary-3.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-cold-summary-3",
+        "--level",
+        "summary",
+        "--threads",
+        "2"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 3.998358292000006,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":2,\"timings_ms\":{\"definition\":8,\"factors\":1115,\"runs\":2571,\"total\":3954},\"written_bytes\":339426,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        3.97 real         6.52 user         0.76 sys\n           356450304  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               30634  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 524  voluntary context switches\n               75888  involuntary context switches\n         51420758548  instructions retired\n         13910938442  cycles elapsed\n           318146368  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5076983,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 2,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 1115,
+          "runs": 2571,
+          "total": 3954
+        },
+        "written_bytes": 339426,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 2,
+      "cache_state": "cold",
+      "result_level": "full",
+      "repeat": 1,
+      "started_at_utc": "2026-10-09T10:32:07.184491+00:00",
+      "finished_at_utc": "2026-10-09T10:32:26.054453+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-cold-full-1.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-cold-full-1",
+        "--level",
+        "full",
+        "--threads",
+        "2"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 18.86358249999998,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":2,\"timings_ms\":{\"definition\":8,\"factors\":1150,\"runs\":2527,\"total\":18819},\"written_bytes\":234414394,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       18.84 real        13.57 user         1.80 sys\n           376324096  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               43592  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                5946  voluntary context switches\n               75367  involuntary context switches\n        120686619326  instructions retired\n         29929520625  cycles elapsed\n           322783104  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 239151951,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 2,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 1150,
+          "runs": 2527,
+          "total": 18819
+        },
+        "written_bytes": 234414394,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 2,
+      "cache_state": "cold",
+      "result_level": "full",
+      "repeat": 2,
+      "started_at_utc": "2026-10-09T10:32:26.382323+00:00",
+      "finished_at_utc": "2026-10-09T10:32:45.206848+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-cold-full-2.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-cold-full-2",
+        "--level",
+        "full",
+        "--threads",
+        "2"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 18.822737042,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":2,\"timings_ms\":{\"definition\":8,\"factors\":1153,\"runs\":2548,\"total\":18772},\"written_bytes\":234414394,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       18.79 real        13.61 user         1.86 sys\n           370606080  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               42355  page reclaims\n                 351  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                5967  voluntary context switches\n               83435  involuntary context switches\n        120652612652  instructions retired\n         29963494935  cycles elapsed\n           318523200  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 239151951,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 2,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 1153,
+          "runs": 2548,
+          "total": 18772
+        },
+        "written_bytes": 234414394,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 2,
+      "cache_state": "cold",
+      "result_level": "full",
+      "repeat": 3,
+      "started_at_utc": "2026-10-09T10:32:45.533609+00:00",
+      "finished_at_utc": "2026-10-09T10:33:04.670822+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-cold-full-3.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-cold-full-3",
+        "--level",
+        "full",
+        "--threads",
+        "2"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 19.136744375000006,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":2,\"timings_ms\":{\"definition\":8,\"factors\":1168,\"runs\":2749,\"total\":19087},\"written_bytes\":234414394,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       19.10 real        14.05 user         1.82 sys\n           375832576  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               43025  page reclaims\n                 349  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                5948  voluntary context switches\n               73274  involuntary context switches\n        120617849550  instructions retired\n         30066888214  cycles elapsed\n           322979712  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 239151951,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 2,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 1168,
+          "runs": 2749,
+          "total": 19087
+        },
+        "written_bytes": 234414394,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 2,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 1,
+      "started_at_utc": "2026-10-09T10:33:05.044011+00:00",
+      "finished_at_utc": "2026-10-09T10:33:08.093160+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-hot-summary-1.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-hot-summary-1",
+        "--level",
+        "summary",
+        "--threads",
+        "2"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 3.049082915999975,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":2,\"timings_ms\":{\"definition\":8,\"factors\":70,\"runs\":2624,\"total\":3004},\"written_bytes\":339424,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        3.02 real         5.40 user         0.23 sys\n           301498368  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               26323  page reclaims\n                 349  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  33  voluntary context switches\n               15018  involuntary context switches\n         40426123973  instructions retired\n         10509886157  cycles elapsed\n           289900288  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5076981,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 2,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 70,
+          "runs": 2624,
+          "total": 3004
+        },
+        "written_bytes": 339424,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 2,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 2,
+      "started_at_utc": "2026-10-09T10:33:08.167411+00:00",
+      "finished_at_utc": "2026-10-09T10:33:11.101687+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-hot-summary-2.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-hot-summary-2",
+        "--level",
+        "summary",
+        "--threads",
+        "2"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.934209999999979,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":2,\"timings_ms\":{\"definition\":8,\"factors\":73,\"runs\":2553,\"total\":2890},\"written_bytes\":339424,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        2.90 real         5.26 user         0.23 sys\n           301219840  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               26282  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  19  voluntary context switches\n               16634  involuntary context switches\n         40435337870  instructions retired\n         10545157129  cycles elapsed\n           289736448  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5076981,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 2,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 73,
+          "runs": 2553,
+          "total": 2890
+        },
+        "written_bytes": 339424,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 2,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 3,
+      "started_at_utc": "2026-10-09T10:33:11.177380+00:00",
+      "finished_at_utc": "2026-10-09T10:33:14.151155+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-hot-summary-3.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-hot-summary-3",
+        "--level",
+        "summary",
+        "--threads",
+        "2"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.9737183750000042,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":2,\"timings_ms\":{\"definition\":9,\"factors\":75,\"runs\":2590,\"total\":2931},\"written_bytes\":339424,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        2.94 real         5.33 user         0.23 sys\n           300744704  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               27036  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  19  voluntary context switches\n               16397  involuntary context switches\n         40515550625  instructions retired\n         10596556292  cycles elapsed\n           289195776  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5076981,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 2,
+        "timings_ms": {
+          "definition": 9,
+          "factors": 75,
+          "runs": 2590,
+          "total": 2931
+        },
+        "written_bytes": 339424,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 2,
+      "cache_state": "hot",
+      "result_level": "full",
+      "repeat": 1,
+      "started_at_utc": "2026-10-09T10:33:14.225811+00:00",
+      "finished_at_utc": "2026-10-09T10:33:31.937437+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-hot-full-1.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-hot-full-1",
+        "--level",
+        "full",
+        "--threads",
+        "2"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 17.711611000000033,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":2,\"timings_ms\":{\"definition\":8,\"factors\":74,\"runs\":2650,\"total\":17668},\"written_bytes\":234414392,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       17.68 real        12.56 user         1.19 sys\n           423133184  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               33958  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                5449  voluntary context switches\n               23483  involuntary context switches\n        109478877287  instructions retired\n         26339372791  cycles elapsed\n           361793856  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 239151949,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 2,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 74,
+          "runs": 2650,
+          "total": 17668
+        },
+        "written_bytes": 234414392,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 2,
+      "cache_state": "hot",
+      "result_level": "full",
+      "repeat": 2,
+      "started_at_utc": "2026-10-09T10:33:32.307586+00:00",
+      "finished_at_utc": "2026-10-09T10:33:50.067532+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-hot-full-2.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-hot-full-2",
+        "--level",
+        "full",
+        "--threads",
+        "2"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 17.759988999999962,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":2,\"timings_ms\":{\"definition\":8,\"factors\":70,\"runs\":2645,\"total\":17714},\"written_bytes\":234414392,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       17.73 real        12.57 user         1.21 sys\n           422952960  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               33961  page reclaims\n                  41  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                5448  voluntary context switches\n               23274  involuntary context switches\n        109502931965  instructions retired\n         26358026572  cycles elapsed\n           361761088  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 239151949,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 2,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 70,
+          "runs": 2645,
+          "total": 17714
+        },
+        "written_bytes": 234414392,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 2,
+      "cache_state": "hot",
+      "result_level": "full",
+      "repeat": 3,
+      "started_at_utc": "2026-10-09T10:33:50.427154+00:00",
+      "finished_at_utc": "2026-10-09T10:34:08.991228+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-hot-full-3.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/2-hot-full-3",
+        "--level",
+        "full",
+        "--threads",
+        "2"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 18.564141457999995,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":2,\"timings_ms\":{\"definition\":8,\"factors\":75,\"runs\":3388,\"total\":18519},\"written_bytes\":234414392,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       18.53 real        13.83 user         1.24 sys\n           427130880  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               34857  page reclaims\n                  41  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                5443  voluntary context switches\n               26406  involuntary context switches\n        109618579046  instructions retired\n         26844946552  cycles elapsed\n           365693248  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 239151949,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 2,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 75,
+          "runs": 3388,
+          "total": 18519
+        },
+        "written_bytes": 234414392,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 4,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 1,
+      "started_at_utc": "2026-10-09T10:34:09.315726+00:00",
+      "finished_at_utc": "2026-10-09T10:34:12.675038+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-cold-summary-1.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-cold-summary-1",
+        "--level",
+        "summary",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 3.3592847080000183,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":4,\"timings_ms\":{\"definition\":8,\"factors\":954,\"runs\":2042,\"total\":3312},\"written_bytes\":339425,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        3.33 real         9.82 user         1.07 sys\n           390021120  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               37061  page reclaims\n                 349  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 670  voluntary context switches\n               73650  involuntary context switches\n         51448822870  instructions retired\n         14727132603  cycles elapsed\n           294782912  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5076982,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 4,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 954,
+          "runs": 2042,
+          "total": 3312
+        },
+        "written_bytes": 339425,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 4,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 2,
+      "started_at_utc": "2026-10-09T10:34:12.714499+00:00",
+      "finished_at_utc": "2026-10-09T10:34:15.867820+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-cold-summary-2.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-cold-summary-2",
+        "--level",
+        "summary",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 3.15329570800003,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":4,\"timings_ms\":{\"definition\":8,\"factors\":736,\"runs\":2080,\"total\":3108},\"written_bytes\":339425,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        3.12 real         9.40 user         0.73 sys\n           386056192  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               36610  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 759  voluntary context switches\n               56509  involuntary context switches\n         51038553439  instructions retired\n         14841854410  cycles elapsed\n           294225792  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5076982,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 4,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 736,
+          "runs": 2080,
+          "total": 3108
+        },
+        "written_bytes": 339425,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 4,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 3,
+      "started_at_utc": "2026-10-09T10:34:15.914667+00:00",
+      "finished_at_utc": "2026-10-09T10:34:19.320016+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-cold-summary-3.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-cold-summary-3",
+        "--level",
+        "summary",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 3.4053207079999765,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":4,\"timings_ms\":{\"definition\":9,\"factors\":929,\"runs\":2138,\"total\":3355},\"written_bytes\":339425,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        3.37 real         9.99 user         0.87 sys\n           388497408  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               37057  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 643  voluntary context switches\n               68278  involuntary context switches\n         51251877144  instructions retired\n         14977827886  cycles elapsed\n           300124096  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5076982,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 4,
+        "timings_ms": {
+          "definition": 9,
+          "factors": 929,
+          "runs": 2138,
+          "total": 3355
+        },
+        "written_bytes": 339425,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 4,
+      "cache_state": "cold",
+      "result_level": "full",
+      "repeat": 1,
+      "started_at_utc": "2026-10-09T10:34:19.360196+00:00",
+      "finished_at_utc": "2026-10-09T10:34:37.169696+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-cold-full-1.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-cold-full-1",
+        "--level",
+        "full",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 17.809570416999975,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":4,\"timings_ms\":{\"definition\":8,\"factors\":729,\"runs\":2066,\"total\":17765},\"written_bytes\":234414393,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       17.78 real        16.44 user         1.69 sys\n           503431168  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               43615  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                6203  voluntary context switches\n               65286  involuntary context switches\n        120015592326  instructions retired\n         30479505267  cycles elapsed\n           412338624  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 239151950,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 4,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 729,
+          "runs": 2066,
+          "total": 17765
+        },
+        "written_bytes": 234414393,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 4,
+      "cache_state": "cold",
+      "result_level": "full",
+      "repeat": 2,
+      "started_at_utc": "2026-10-09T10:34:37.501099+00:00",
+      "finished_at_utc": "2026-10-09T10:34:55.925738+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-cold-full-2.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-cold-full-2",
+        "--level",
+        "full",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 18.424711375000015,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":4,\"timings_ms\":{\"definition\":8,\"factors\":1030,\"runs\":2231,\"total\":18371},\"written_bytes\":234414394,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       18.39 real        17.68 user         2.20 sys\n           500727808  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               42670  page reclaims\n                 373  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                6186  voluntary context switches\n              107262  involuntary context switches\n        120583549137  instructions retired\n         30523933379  cycles elapsed\n           415468032  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 239151951,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 4,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 1030,
+          "runs": 2231,
+          "total": 18371
+        },
+        "written_bytes": 234414394,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 4,
+      "cache_state": "cold",
+      "result_level": "full",
+      "repeat": 3,
+      "started_at_utc": "2026-10-09T10:34:56.257409+00:00",
+      "finished_at_utc": "2026-10-09T10:35:14.226449+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-cold-full-3.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-cold-full-3",
+        "--level",
+        "full",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 17.969111833,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":4,\"timings_ms\":{\"definition\":8,\"factors\":905,\"runs\":2029,\"total\":17920},\"written_bytes\":234414393,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       17.94 real        16.84 user         2.04 sys\n           502579200  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               42846  page reclaims\n                 375  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                6176  voluntary context switches\n               75206  involuntary context switches\n        120456728860  instructions retired\n         30589269943  cycles elapsed\n           418023872  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 239151950,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 4,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 905,
+          "runs": 2029,
+          "total": 17920
+        },
+        "written_bytes": 234414393,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 4,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 1,
+      "started_at_utc": "2026-10-09T10:35:14.606625+00:00",
+      "finished_at_utc": "2026-10-09T10:35:17.137110+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-hot-summary-1.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-hot-summary-1",
+        "--level",
+        "summary",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.530445334000035,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":4,\"timings_ms\":{\"definition\":9,\"factors\":44,\"runs\":2115,\"total\":2483},\"written_bytes\":339424,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        2.50 real         8.30 user         0.26 sys\n           315064320  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               28626  page reclaims\n                  41  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  20  voluntary context switches\n               14905  involuntary context switches\n         40322405952  instructions retired\n         11438732910  cycles elapsed\n           272779008  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5076981,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 4,
+        "timings_ms": {
+          "definition": 9,
+          "factors": 44,
+          "runs": 2115,
+          "total": 2483
+        },
+        "written_bytes": 339424,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 4,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 2,
+      "started_at_utc": "2026-10-09T10:35:17.227906+00:00",
+      "finished_at_utc": "2026-10-09T10:35:19.652047+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-hot-summary-2.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-hot-summary-2",
+        "--level",
+        "summary",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.424095832999967,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":4,\"timings_ms\":{\"definition\":9,\"factors\":40,\"runs\":2036,\"total\":2374},\"written_bytes\":339424,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        2.39 real         7.96 user         0.25 sys\n           314441728  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               28186  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  18  voluntary context switches\n               16249  involuntary context switches\n         40247002987  instructions retired\n         10853855824  cycles elapsed\n           276268800  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5076981,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 4,
+        "timings_ms": {
+          "definition": 9,
+          "factors": 40,
+          "runs": 2036,
+          "total": 2374
+        },
+        "written_bytes": 339424,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 4,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 3,
+      "started_at_utc": "2026-10-09T10:35:19.729872+00:00",
+      "finished_at_utc": "2026-10-09T10:35:22.065379+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-hot-summary-3.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-hot-summary-3",
+        "--level",
+        "summary",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.3354703329999893,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":4,\"timings_ms\":{\"definition\":8,\"factors\":41,\"runs\":1975,\"total\":2291},\"written_bytes\":339424,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        2.31 real         7.82 user         0.24 sys\n           314474496  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               28257  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  18  voluntary context switches\n               15057  involuntary context switches\n         40351134314  instructions retired\n         10881653504  cycles elapsed\n           274728704  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5076981,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 4,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 41,
+          "runs": 1975,
+          "total": 2291
+        },
+        "written_bytes": 339424,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 4,
+      "cache_state": "hot",
+      "result_level": "full",
+      "repeat": 1,
+      "started_at_utc": "2026-10-09T10:35:22.143824+00:00",
+      "finished_at_utc": "2026-10-09T10:35:39.042650+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-hot-full-1.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-hot-full-1",
+        "--level",
+        "full",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 16.89888695799999,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":4,\"timings_ms\":{\"definition\":8,\"factors\":38,\"runs\":1910,\"total\":16855},\"written_bytes\":234414392,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       16.87 real        14.75 user         1.20 sys\n           435634176  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               35287  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                5437  voluntary context switches\n               20116  involuntary context switches\n        109234542261  instructions retired\n         26221178734  cycles elapsed\n           394725760  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 239151949,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 4,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 38,
+          "runs": 1910,
+          "total": 16855
+        },
+        "written_bytes": 234414392,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 4,
+      "cache_state": "hot",
+      "result_level": "full",
+      "repeat": 2,
+      "started_at_utc": "2026-10-09T10:35:39.423703+00:00",
+      "finished_at_utc": "2026-10-09T10:35:56.452059+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-hot-full-2.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-hot-full-2",
+        "--level",
+        "full",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 17.02842016699998,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":4,\"timings_ms\":{\"definition\":9,\"factors\":40,\"runs\":2214,\"total\":16983},\"written_bytes\":234414392,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       17.00 real        15.86 user         1.20 sys\n           433340416  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               35282  page reclaims\n                  41  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                5431  voluntary context switches\n               21623  involuntary context switches\n        109339669159  instructions retired\n         26865976060  cycles elapsed\n           392939840  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 239151949,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 4,
+        "timings_ms": {
+          "definition": 9,
+          "factors": 40,
+          "runs": 2214,
+          "total": 16983
+        },
+        "written_bytes": 234414392,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 4,
+      "cache_state": "hot",
+      "result_level": "full",
+      "repeat": 3,
+      "started_at_utc": "2026-10-09T10:35:56.812533+00:00",
+      "finished_at_utc": "2026-10-09T10:36:14.393005+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-hot-full-3.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/4-hot-full-3",
+        "--level",
+        "full",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 17.58054116699998,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":4,\"timings_ms\":{\"definition\":8,\"factors\":40,\"runs\":2265,\"total\":17536},\"written_bytes\":234414392,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       17.55 real        16.16 user         1.23 sys\n           442138624  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               35545  page reclaims\n                  41  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                5424  voluntary context switches\n               22227  involuntary context switches\n        109308462166  instructions retired\n         27189554526  cycles elapsed\n           397773184  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 239151949,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 4,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 40,
+          "runs": 2265,
+          "total": 17536
+        },
+        "written_bytes": 234414392,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 8,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 1,
+      "started_at_utc": "2026-10-09T10:36:14.723620+00:00",
+      "finished_at_utc": "2026-10-09T10:36:17.268946+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-cold-summary-1.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-cold-summary-1",
+        "--level",
+        "summary",
+        "--threads",
+        "8"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.5452892079999856,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":8,\"timings_ms\":{\"definition\":9,\"factors\":633,\"runs\":1550,\"total\":2498},\"written_bytes\":339425,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        2.51 real        10.58 user         0.80 sys\n           445874176  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               45691  page reclaims\n                 333  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                1272  voluntary context switches\n               64049  involuntary context switches\n         51092568214  instructions retired\n         18840198932  cycles elapsed\n           293373952  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5076982,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 8,
+        "timings_ms": {
+          "definition": 9,
+          "factors": 633,
+          "runs": 1550,
+          "total": 2498
+        },
+        "written_bytes": 339425,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 8,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 2,
+      "started_at_utc": "2026-10-09T10:36:17.317244+00:00",
+      "finished_at_utc": "2026-10-09T10:36:19.797979+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-cold-summary-2.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-cold-summary-2",
+        "--level",
+        "summary",
+        "--threads",
+        "8"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.4806945419999806,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":8,\"timings_ms\":{\"definition\":8,\"factors\":768,\"runs\":1381,\"total\":2434},\"written_bytes\":339425,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        2.45 real        11.27 user         0.83 sys\n           446513152  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               43577  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 854  voluntary context switches\n               60516  involuntary context switches\n         50984487861  instructions retired\n         18882693902  cycles elapsed\n           292341760  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5076982,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 8,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 768,
+          "runs": 1381,
+          "total": 2434
+        },
+        "written_bytes": 339425,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 8,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 3,
+      "started_at_utc": "2026-10-09T10:36:19.845684+00:00",
+      "finished_at_utc": "2026-10-09T10:36:22.336132+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-cold-summary-3.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-cold-summary-3",
+        "--level",
+        "summary",
+        "--threads",
+        "8"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.490413125000032,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":8,\"timings_ms\":{\"definition\":8,\"factors\":733,\"runs\":1431,\"total\":2442},\"written_bytes\":339425,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        2.46 real        11.43 user         1.02 sys\n           445775872  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               44868  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 995  voluntary context switches\n               74531  involuntary context switches\n         51372740731  instructions retired\n         19293865922  cycles elapsed\n           319457216  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5076982,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 8,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 733,
+          "runs": 1431,
+          "total": 2442
+        },
+        "written_bytes": 339425,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 8,
+      "cache_state": "cold",
+      "result_level": "full",
+      "repeat": 1,
+      "started_at_utc": "2026-10-09T10:36:22.383565+00:00",
+      "finished_at_utc": "2026-10-09T10:36:39.405832+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-cold-full-1.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-cold-full-1",
+        "--level",
+        "full",
+        "--threads",
+        "8"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 17.022326541999973,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":8,\"timings_ms\":{\"definition\":8,\"factors\":722,\"runs\":1396,\"total\":16976},\"written_bytes\":234414393,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       16.99 real        18.56 user         1.89 sys\n           431538176  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               53039  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                6285  voluntary context switches\n               87428  involuntary context switches\n        120394069234  instructions retired\n         34945977509  cycles elapsed\n           338446272  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 239151950,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 8,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 722,
+          "runs": 1396,
+          "total": 16976
+        },
+        "written_bytes": 234414393,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 8,
+      "cache_state": "cold",
+      "result_level": "full",
+      "repeat": 2,
+      "started_at_utc": "2026-10-09T10:36:39.747453+00:00",
+      "finished_at_utc": "2026-10-09T10:36:56.811494+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-cold-full-2.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-cold-full-2",
+        "--level",
+        "full",
+        "--threads",
+        "8"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 17.064102624999975,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":8,\"timings_ms\":{\"definition\":8,\"factors\":626,\"runs\":1417,\"total\":17013},\"written_bytes\":234414393,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       17.03 real        17.91 user         1.79 sys\n           543735808  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               50816  page reclaims\n                 349  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                6602  voluntary context switches\n               91518  involuntary context switches\n        120230487384  instructions retired\n         34274580787  cycles elapsed\n           410520192  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 239151950,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 8,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 626,
+          "runs": 1417,
+          "total": 17013
+        },
+        "written_bytes": 234414393,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 8,
+      "cache_state": "cold",
+      "result_level": "full",
+      "repeat": 3,
+      "started_at_utc": "2026-10-09T10:36:57.139767+00:00",
+      "finished_at_utc": "2026-10-09T10:37:13.610885+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-cold-full-3.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-cold-full-3",
+        "--level",
+        "full",
+        "--threads",
+        "8"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 16.471179249999977,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":8,\"timings_ms\":{\"definition\":8,\"factors\":687,\"runs\":1181,\"total\":16426},\"written_bytes\":234414393,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       16.44 real        17.70 user         1.76 sys\n           561496064  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               51718  page reclaims\n                 229  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                6651  voluntary context switches\n               49124  involuntary context switches\n        120063960434  instructions retired\n         33519292288  cycles elapsed\n           409995840  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 239151950,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 8,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 687,
+          "runs": 1181,
+          "total": 16426
+        },
+        "written_bytes": 234414393,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 8,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 1,
+      "started_at_utc": "2026-10-09T10:37:13.973020+00:00",
+      "finished_at_utc": "2026-10-09T10:37:15.507597+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-hot-summary-1.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-hot-summary-1",
+        "--level",
+        "summary",
+        "--threads",
+        "8"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 1.534540125000035,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":8,\"timings_ms\":{\"definition\":8,\"factors\":27,\"runs\":1190,\"total\":1491},\"written_bytes\":339424,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        1.50 real         8.66 user         0.22 sys\n           326664192  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               29969  page reclaims\n                  41  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  19  voluntary context switches\n                6907  involuntary context switches\n         40256167436  instructions retired\n         13998616102  cycles elapsed\n           280446720  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5076981,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 8,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 27,
+          "runs": 1190,
+          "total": 1491
+        },
+        "written_bytes": 339424,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 8,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 2,
+      "started_at_utc": "2026-10-09T10:37:15.582655+00:00",
+      "finished_at_utc": "2026-10-09T10:37:17.180639+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-hot-summary-2.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-hot-summary-2",
+        "--level",
+        "summary",
+        "--threads",
+        "8"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 1.5979470000000333,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":8,\"timings_ms\":{\"definition\":10,\"factors\":35,\"runs\":1237,\"total\":1556},\"written_bytes\":339424,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        1.57 real         8.86 user         0.24 sys\n           332382208  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               30913  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  18  voluntary context switches\n                8071  involuntary context switches\n         40405680612  instructions retired\n         14396542906  cycles elapsed\n           285247232  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5076981,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 8,
+        "timings_ms": {
+          "definition": 10,
+          "factors": 35,
+          "runs": 1237,
+          "total": 1556
+        },
+        "written_bytes": 339424,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 8,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 3,
+      "started_at_utc": "2026-10-09T10:37:17.255994+00:00",
+      "finished_at_utc": "2026-10-09T10:37:18.772835+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-hot-summary-3.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-hot-summary-3",
+        "--level",
+        "summary",
+        "--threads",
+        "8"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 1.5168061249999596,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":8,\"timings_ms\":{\"definition\":8,\"factors\":28,\"runs\":1172,\"total\":1474},\"written_bytes\":339424,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        1.49 real         8.48 user         0.23 sys\n           332988416  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               31101  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  18  voluntary context switches\n                7691  involuntary context switches\n         40372117479  instructions retired\n         14234965975  cycles elapsed\n           281003776  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5076981,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 8,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 28,
+          "runs": 1172,
+          "total": 1474
+        },
+        "written_bytes": 339424,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": true
+    },
+    {
+      "threads": 8,
+      "cache_state": "hot",
+      "result_level": "full",
+      "repeat": 1,
+      "started_at_utc": "2026-10-09T10:37:18.849595+00:00",
+      "finished_at_utc": "2026-10-09T10:37:34.619353+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-hot-full-1.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-hot-full-1",
+        "--level",
+        "full",
+        "--threads",
+        "8"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 15.769811917000027,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":8,\"timings_ms\":{\"definition\":8,\"factors\":27,\"runs\":1145,\"total\":15727},\"written_bytes\":234414392,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       15.74 real        15.70 user         1.02 sys\n           455671808  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               38685  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                5584  voluntary context switches\n                7548  involuntary context switches\n        109350909557  instructions retired\n         29709421954  cycles elapsed\n           350620032  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 239151949,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 8,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 27,
+          "runs": 1145,
+          "total": 15727
+        },
+        "written_bytes": 234414392,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 8,
+      "cache_state": "hot",
+      "result_level": "full",
+      "repeat": 2,
+      "started_at_utc": "2026-10-09T10:37:34.979117+00:00",
+      "finished_at_utc": "2026-10-09T10:37:51.085240+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-hot-full-2.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-hot-full-2",
+        "--level",
+        "full",
+        "--threads",
+        "8"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 16.106179416999964,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":8,\"timings_ms\":{\"definition\":8,\"factors\":27,\"runs\":1195,\"total\":16058},\"written_bytes\":234414392,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       16.07 real        16.09 user         1.09 sys\n           445644800  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               37619  page reclaims\n                  41  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                5516  voluntary context switches\n                9200  involuntary context switches\n        109292765970  instructions retired\n         29981785270  cycles elapsed\n           343755136  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 239151949,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 8,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 27,
+          "runs": 1195,
+          "total": 16058
+        },
+        "written_bytes": 234414392,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    },
+    {
+      "threads": 8,
+      "cache_state": "hot",
+      "result_level": "full",
+      "repeat": 3,
+      "started_at_utc": "2026-10-09T10:37:51.458844+00:00",
+      "finished_at_utc": "2026-10-09T10:38:07.644034+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-hot-full-3.time.txt",
+        "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/8-hot-full-3",
+        "--level",
+        "full",
+        "--threads",
+        "8"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 16.185247624999988,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":8,\"timings_ms\":{\"definition\":8,\"factors\":28,\"runs\":1080,\"total\":16140},\"written_bytes\":234414392,\"written_files\":1731}\n",
+      "stderr": "",
+      "time_output": "       16.15 real        14.58 user         1.23 sys\n           454246400  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               38388  page reclaims\n                 349  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                5444  voluntary context switches\n               14852  involuntary context switches\n        109386987341  instructions retired\n         30072098923  cycles elapsed\n           352176512  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 239151949,
+        "files": 1805
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "exp": "exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 8,
+        "timings_ms": {
+          "definition": 8,
+          "factors": 28,
+          "runs": 1080,
+          "total": 16140
+        },
+        "written_bytes": 234414392,
+        "written_files": 1731
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f",
+        "reproducible": true,
+        "git_revision": "153f4b27af1ea1ced1d1f8c5671d0a0ab6c4def9\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "5ac6bee67549190bacbe2f6bfa8b402357030b0c1c5f50d90adafdbd1eace2be",
+      "summary_no_runs": null
+    }
+  ],
+  "experiment": {
+    "availability_assumption": "none",
+    "costs": {
+      "buy_slippage_bps": 10.0,
+      "buy_tax_rate": 0.0,
+      "commission_rate": 0.001,
+      "sell_slippage_bps": 10.0,
+      "sell_tax_rate": 0.0
+    },
+    "dsv": "dsv:sha256:80b804f22c01b7d0375ffd610e90dc73d401b82700d8edf57c3995bbd363186c",
+    "engine": "vector",
+    "experiment_version": 1,
+    "parameter_space": {
+      "grid": {
+        "short": [
+          5,
+          10,
+          20
+        ],
+        "long": [
+          40,
+          60
+        ],
+        "vol": [
+          10,
+          20
+        ],
+        "w_s": [
+          1.0
+        ],
+        "w_l": [
+          1.0
+        ],
+        "w_v": [
+          1.0
+        ],
+        "trend": [
+          null,
+          20
+        ],
+        "top_k": [
+          1,
+          3,
+          5
+        ],
+        "rebalance_every": [
+          1,
+          5,
+          10,
+          20
+        ]
+      }
+    },
+    "sessions_per_year": 252,
+    "strategy": "s2_rotation",
+    "universe": "uni:sha256:0666abb98c19a0e0ff2cf9e38091f70accaf1ac9ebccf6594b7bdcdd507323aa",
+    "venue": "SYNTH"
+  },
+  "warmup": {
+    "command": [
+      "/Users/yibinzhang/Documents/ChatGPT/prajna-104/target/release/prajna-experiment",
+      "run",
+      "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/experiment.json",
+      "--lake",
+      "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-1696m4u8/warm",
+      "--level",
+      "summary",
+      "--threads",
+      "1"
+    ],
+    "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:890d09ff9e64e08414706b7c4dd49416134aebdc8a1200a666f643339afa7d7f\",\"exp\":\"exp:sha256:6e5c3f7fba6b31143c2288258b8a31453b155caf4ba033ee386c8f29a4a41600\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":11,\"factors\":1970,\"runs\":4518,\"total\":6765},\"written_bytes\":339426,\"written_files\":3}\n",
+    "stderr": ""
+  },
+  "finished_at_utc": "2026-10-09T10:38:07.965314+00:00"
+}
