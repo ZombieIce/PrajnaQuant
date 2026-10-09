@@ -24,6 +24,9 @@ def measurements():
                         "time_output": "  123456 maximum resident set size\n",
                         "summary_no_runs": True if level == "summary" else None,
                         "summary_logical_hash": "same-result",
+                        "execution_provenance": {
+                            "git_revision": "a" * 40 + "\n", "reproducible": True,
+                        },
                         "cli": {
                             "run_count": 288, "failed_count": 0, "action": "created",
                             "reproducible": True, "threads": threads,
@@ -37,10 +40,13 @@ def measurements():
 
 
 class BenchmarkReportCliTests(unittest.TestCase):
-    def summarize(self, samples):
+    def summarize(self, samples, status="measured"):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "raw.json"
-            source.write_text(json.dumps({"repeats": 3, "measurements": samples}))
+            source.write_text(json.dumps({
+                "status": status, "repeats": 3, "measurements": samples,
+                "provenance": {"git_revision": "a" * 40, "reproducible": True},
+            }))
             return subprocess.run(
                 [sys.executable, str(SCRIPT), "summarize", str(source)],
                 capture_output=True, text=True, check=False,
@@ -91,6 +97,20 @@ class BenchmarkReportCliTests(unittest.TestCase):
         result = self.summarize(measurements()[1:])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("repeat", result.stderr)
+
+    def test_incomplete_or_changed_provenance_cannot_be_summarized(self):
+        result = self.summarize(measurements(), status="incomplete")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("incomplete", result.stderr)
+        for field, value in (("git_revision", "different"), ("reproducible", False)):
+            with self.subTest(field=field):
+                samples = measurements()
+                samples[-1]["execution_provenance"][field] = value
+                result = self.summarize(samples)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("provenance", result.stderr)
 
 
 if __name__ == "__main__":

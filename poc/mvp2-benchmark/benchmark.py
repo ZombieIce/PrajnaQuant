@@ -52,7 +52,17 @@ def workload(base):
     return base
 
 
+def validate_provenance(provenance, sample):
+    execution = sample["execution_provenance"]
+    if (not provenance["reproducible"] or not sample["cli"]["reproducible"]
+            or not execution["reproducible"]
+            or execution["git_revision"].strip() != provenance["git_revision"]):
+        raise ValueError("non-reproducible or changed execution provenance")
+
+
 def summarize(record):
+    if record["status"] != "measured":
+        raise ValueError("cannot summarize an incomplete measurement record")
     repeats = record["repeats"]
     if repeats < 3 or len(record["measurements"]) != 16 * repeats:
         raise ValueError("matrix must have every cell with at least 3 repeats")
@@ -75,6 +85,7 @@ def summarize(record):
                     "hit_count", "written_bytes", "written_files",
                 )}
                 for sample in samples:
+                    validate_provenance(record["provenance"], sample)
                     cli = sample["cli"]
                     if (cli["run_count"] != 288 or cli["failed_count"] != 0
                             or cli["action"] != "created" or cli["threads"] != threads):
@@ -253,11 +264,11 @@ def measure(args):
                         write_json(raw_path, record)
                         if level == "summary" and not sample["summary_no_runs"]:
                             raise ValueError("summary execution contains runs/: {}".format(name))
-                        if not cli["reproducible"] or manifest["execution"]["git_revision"].strip() != record["provenance"]["git_revision"]:
-                            raise ValueError("provenance changed during measurement")
+                        validate_provenance(record["provenance"], sample)
                         shutil.rmtree(lake)
-        report = summarize(record)
+        # Publish completion only after the full matrix passes report validation.
         record["status"] = "measured"
+        report = summarize(record)
         record["finished_at_utc"] = utc_now()
         write_json(raw_path, record)
         write_json(output / "medians.json", report)
