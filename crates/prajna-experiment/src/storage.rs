@@ -105,6 +105,59 @@ pub struct StoredRun {
 pub struct StoredExecution {
     pub manifest: ExecutionManifest,
     pub path: PathBuf,
+    /// Statistics for this invocation, including on replay; never part of identity.
+    pub statistics: InvocationStatistics,
+    pub action: StoreAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StoreAction {
+    Created,
+    Replayed,
+    Promoted,
+}
+
+/// Published experiment/result bytes and files only. Excludes Factor Cache,
+/// lock files, and temporary replay/staging writes. Replaced manifests count once.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct InvocationStatistics {
+    pub factor_time_ms: u128,
+    pub run_time_ms: u128,
+    pub compute_count: u64,
+    pub cache_hit_count: u64,
+    pub written_bytes: u64,
+    pub written_files: u64,
+}
+
+impl InvocationStatistics {
+    fn for_report(report: &ExecutionReport) -> Self {
+        Self {
+            factor_time_ms: report.factor_time_ms,
+            run_time_ms: report.run_time_ms,
+            compute_count: report.compute_count,
+            cache_hit_count: report.cache_hit_count,
+            ..Self::default()
+        }
+    }
+
+    fn record_file(&mut self, path: &Path) -> Result<(), ExperimentError> {
+        self.written_bytes += fs::metadata(path).map_err(io_error(path))?.len();
+        self.written_files += 1;
+        Ok(())
+    }
+
+    fn record_tree(&mut self, path: &Path) -> Result<(), ExperimentError> {
+        for entry in fs::read_dir(path).map_err(io_error(path))? {
+            let entry = entry.map_err(io_error(path))?;
+            if entry.file_type().map_err(io_error(&entry.path()))?.is_dir() {
+                self.record_tree(&entry.path())?;
+            } else {
+                self.record_file(&entry.path())?;
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -131,6 +184,7 @@ pub struct TableDifference {
 pub struct ExecutionDiff {
     pub left_execution_id: String,
     pub right_execution_id: String,
+    pub summary_changed: bool,
     pub only_left: Vec<String>,
     pub only_right: Vec<String>,
     pub runs: Vec<RunDifference>,
@@ -169,20 +223,29 @@ pub(super) fn store_execution(
     threads: usize,
     started_at: String,
 ) -> Result<StoredExecution, ExperimentError> {
+    let mut statistics = InvocationStatistics::for_report(report);
     let experiment_id = experiment.id()?;
     let experiment_root = experiment_root(lake_root, &experiment_id);
     fs::create_dir_all(&experiment_root).map_err(io_error(&experiment_root))?;
+    let definition_path = experiment_root.join("experiment.json");
+    let new_definition = !definition_path.exists();
     ensure_experiment_file(experiment, &experiment_root)?;
+    if new_definition {
+        statistics.record_file(&definition_path)?;
+    }
     let executions_root = experiment_root.join("executions");
     fs::create_dir_all(&executions_root).map_err(io_error(&executions_root))?;
     let destination = executions_root.join(identity_hex(&identity.id)?);
 
     if destination.exists() {
-        verify_existing(&destination, identity, experiment, report, level)?;
+        verify_existing(&destination, identity, experiment, report, level)
+            .map_err(|error| ExperimentError::ReplayMismatch(error.to_string()))?;
         let manifest = read_manifest_file(&destination.join("execution.json"))?;
         return Ok(StoredExecution {
             manifest,
             path: destination,
+            statistics,
+            action: StoreAction::Replayed,
         });
     }
 
@@ -224,6 +287,7 @@ pub(super) fn store_execution(
         };
         write_json_synced(&staging.join("execution.json"), &manifest)?;
         sync_tree(&staging)?;
+        statistics.record_tree(&staging)?;
         fs::rename(&staging, &destination).map_err(io_error(&destination))?;
         sync_dir(&executions_root)?;
         Ok(manifest)
@@ -235,6 +299,8 @@ pub(super) fn store_execution(
     Ok(StoredExecution {
         manifest,
         path: destination,
+        statistics,
+        action: StoreAction::Created,
     })
 }
 
@@ -254,7 +320,9 @@ pub(super) fn promote(
         )));
     }
     if run_ids.is_empty() {
-        return Err(err("promotion requires at least one Run identity"));
+        return Err(ExperimentError::InvalidDefinition(
+            "promotion requires at least one Run identity".into(),
+        ));
     }
     let experiment_id = experiment.id()?;
     let destination = execution_path(lake_root, &experiment_id, execution_id)?;
@@ -266,16 +334,22 @@ pub(super) fn promote(
         ));
     }
     let summary_path = destination.join("summary.parquet");
-    if read_summary_hash(&summary_path)? != manifest.summary_logical_hash {
-        return Err(err(
-            "promotion found a modified summary.parquet; stored files were not changed",
+    if read_summary_hash(&summary_path)
+        .map_err(|error| ExperimentError::ReplayMismatch(error.to_string()))?
+        != manifest.summary_logical_hash
+    {
+        return Err(ExperimentError::ReplayMismatch(
+            "promotion found a modified summary.parquet; stored files were not changed".into(),
         ));
     }
     let unique_ids = run_ids.iter().collect::<BTreeSet<_>>();
     if unique_ids.len() != run_ids.len() {
-        return Err(err("promotion contains a duplicate Run identity"));
+        return Err(ExperimentError::InvalidDefinition(
+            "promotion contains a duplicate Run identity".into(),
+        ));
     }
     let report = experiment.execute(lake_root, threads)?;
+    let mut statistics = InvocationStatistics::for_report(&report);
     let executions = report
         .runs
         .iter()
@@ -287,8 +361,9 @@ pub(super) fn promote(
         let (_, summary_hash) =
             write_summary(&staging.join("summary.parquet"), experiment, &report.runs)?;
         if summary_hash != manifest.summary_logical_hash {
-            return Err(err(
-                "promotion replay mismatch for summary.parquet; stored files were not changed",
+            return Err(ExperimentError::ReplayMismatch(
+                "promotion replay mismatch for summary.parquet; stored files were not changed"
+                    .into(),
             ));
         }
         let mut pending = Vec::new();
@@ -297,10 +372,14 @@ pub(super) fn promote(
                 .runs
                 .iter()
                 .position(|run| run.run_id == *run_id)
-                .ok_or_else(|| err(format!("Run {run_id} is not part of this Execution")))?;
+                .ok_or_else(|| {
+                    ExperimentError::InvalidDefinition(format!(
+                        "Run {run_id} is not part of this Execution"
+                    ))
+                })?;
             let old_level = manifest.runs[stored_index].result_level;
             if level <= old_level {
-                return Err(err(format!(
+                return Err(ExperimentError::InvalidDefinition(format!(
                     "Run {run_id} cannot be promoted from {old_level} to {level}"
                 )));
             }
@@ -327,9 +406,10 @@ pub(super) fn promote(
                     .join(format!("{table}.parquet"));
                 let computed_hash = row_hash(table, &rows)?;
                 if let Some(existing_hash) = existing_hashes.get(*table) {
-                    let actual_hash = read_rows_hash(&path, table)?;
+                    let actual_hash = read_rows_hash(&path, table)
+                        .map_err(|error| ExperimentError::ReplayMismatch(error.to_string()))?;
                     if &actual_hash != existing_hash || actual_hash != computed_hash {
-                        return Err(err(format!(
+                        return Err(ExperimentError::ReplayMismatch(format!(
                             "promotion replay mismatch for run {run_id}, table {table}"
                         )));
                     }
@@ -367,6 +447,10 @@ pub(super) fn promote(
         let staged_manifest = staging.join("execution.json");
         write_json_synced(&staged_manifest, &manifest)?;
         sync_dir(&staging)?;
+        statistics.record_file(&staged_manifest)?;
+        for (stage, _) in &pending {
+            statistics.record_file(stage)?;
+        }
         publish_promotion(&pending, || {
             fs::rename(&staged_manifest, destination.join("execution.json"))
                 .map_err(io_error(&destination))
@@ -388,6 +472,8 @@ pub(super) fn promote(
     Ok(StoredExecution {
         manifest,
         path: destination,
+        statistics,
+        action: StoreAction::Promoted,
     })
 }
 
@@ -400,7 +486,7 @@ pub fn diff_executions(
     let (left_dir, left) = find_execution(lake_root, left_execution_id)?;
     let (right_dir, right) = find_execution(lake_root, right_execution_id)?;
     if left.experiment_id != right.experiment_id {
-        return Err(err(format!(
+        return Err(ExperimentError::DifferentExperiments(format!(
             "cannot diff Executions from different Experiments ({} vs {})",
             left.experiment_id, right.experiment_id
         )));
@@ -497,6 +583,7 @@ pub fn diff_executions(
     Ok(ExecutionDiff {
         left_execution_id: left_execution_id.to_owned(),
         right_execution_id: right_execution_id.to_owned(),
+        summary_changed: left.summary_logical_hash != right.summary_logical_hash,
         only_left,
         only_right,
         runs,

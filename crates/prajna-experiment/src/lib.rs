@@ -34,7 +34,9 @@ use sha2::{Digest, Sha256};
 
 mod storage;
 mod summary;
-pub use storage::{ExecutionDiff, ResultLevel, StoredExecution, diff_executions};
+pub use storage::{
+    ExecutionDiff, InvocationStatistics, ResultLevel, StoreAction, StoredExecution, diff_executions,
+};
 pub use summary::{RunSummary, summarize};
 
 const PARAMETERS: [&str; 9] = [
@@ -59,6 +61,8 @@ pub enum ExperimentError {
     Io(std::io::Error),
     Git(String),
     Execution(String),
+    ReplayMismatch(String),
+    DifferentExperiments(String),
 }
 
 impl fmt::Display for ExperimentError {
@@ -73,7 +77,9 @@ impl fmt::Display for ExperimentError {
             }
             Self::Io(error) => write!(formatter, "experiment provenance I/O error: {error}"),
             Self::Git(message) => write!(formatter, "cannot capture git provenance: {message}"),
-            Self::Execution(message) => formatter.write_str(message),
+            Self::Execution(message)
+            | Self::ReplayMismatch(message)
+            | Self::DifferentExperiments(message) => formatter.write_str(message),
         }
     }
 }
@@ -85,9 +91,12 @@ impl Error for ExperimentError {
             Self::Manifest(error) => Some(error),
             Self::Universe(error) => Some(error),
             Self::Io(error) => Some(error),
-            Self::InvalidDefinition(_) | Self::Canonical(_) | Self::Git(_) | Self::Execution(_) => {
-                None
-            }
+            Self::InvalidDefinition(_)
+            | Self::Canonical(_)
+            | Self::Git(_)
+            | Self::Execution(_)
+            | Self::ReplayMismatch(_)
+            | Self::DifferentExperiments(_) => None,
         }
     }
 }
