@@ -8,7 +8,10 @@ license = "MIT"
 publish = false
 
 [dependencies]
-chrono = { version = "0.4", default-features = false, features = ["std"] }
+arrow-array = "=58.4.0"
+arrow-schema = "=58.4.0"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+parquet = { version = "=58.4.0", default-features = false, features = ["arrow", "zstd"] }
 prajna-domain = { path = "../prajna-domain" }
 prajna-data = { path = "../prajna-data" }
 prajna-research = { path = "../prajna-research" }

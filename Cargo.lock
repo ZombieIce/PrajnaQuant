@@ -2943,7 +2943,10 @@ dependencies = [
 name = "prajna-experiment"
 version = "0.1.0"
 dependencies = [
+ "arrow-array",
+ "arrow-schema",
  "chrono",
+ "parquet",
  "polars",
  "prajna-data",
  "prajna-domain",
