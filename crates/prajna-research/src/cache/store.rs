@@ -145,6 +145,7 @@ struct CacheMetadata {
 pub struct FactorCache {
     lake_root: PathBuf,
     compute_count: AtomicU64,
+    hit_count: AtomicU64,
 }
 
 impl FactorCache {
@@ -158,11 +159,17 @@ impl FactorCache {
         Ok(Self {
             lake_root,
             compute_count: AtomicU64::new(0),
+            hit_count: AtomicU64::new(0),
         })
     }
 
     pub fn compute_count(&self) -> u64 {
         self.compute_count.load(Ordering::Relaxed)
+    }
+
+    /// Number of Factor Values cache reads served by an existing entry.
+    pub fn hit_count(&self) -> u64 {
+        self.hit_count.load(Ordering::Relaxed)
     }
 
     pub fn get_or_compute(
@@ -241,7 +248,9 @@ impl FactorCache {
         let path = self.cache_path(key)?;
         match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.file_type().is_dir() => {
-                self.read_existing(key, &path).map(Some)
+                let values = self.read_existing(key, &path)?;
+                self.hit_count.fetch_add(1, Ordering::Relaxed);
+                Ok(Some(values))
             }
             Ok(_) => Err(integrity(&path, "cache entry is not a directory")),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
