@@ -5,7 +5,7 @@
 [`ADR 0010`](0010-portfolio-accounting-and-result-boundary.md) 要求 Fast Event 以 Order → Fill → Position → Account 更新账本并逐日核对恒等式，同时要求它与 Vector 在共同语义子集上对拍。MVP-3 确定以下边界：
 
 - **账本数值**：现金、数量、价格与费用使用 Domain 定点十进制（i128，scale 18），乘除结果按 half-even 舍入到 scale 18，暂不做货币单位舍入。"现金＋Σ数量×估值价＝权益"在 Virtual Portfolio 与 Trading Account 两层都要求精确相等。与 f64 金标准（POC-0、Vector、Python）对拍时使用登记的容差。
-- **Virtual Portfolio 是子账**：Run 开始时为各 Virtual Portfolio 分配固定资本，余额为 Unallocated Capital。每个 Virtual Portfolio 有独立现金与持仓，订单不跨 Virtual Portfolio 净额化，每个 Fill 只归属一个 Virtual Portfolio。账户现金、各标的数量与权益分别等于各 Virtual Portfolio 之和加 Unallocated Capital。MVP-3 中一个 Virtual Portfolio 只运行一个 Strategy。
+- **Virtual Portfolio 是子账**：Run 开始时为各 Virtual Portfolio 分配固定资本，余额为 Unallocated Capital。每个 Virtual Portfolio 有独立现金与持仓，订单不跨 Virtual Portfolio 净额化，每个 Fill 只归属一个 Virtual Portfolio。恒等式分三条：账户现金 = Σ Virtual Portfolio 现金 + Unallocated Capital；账户每个标的数量 = Σ Virtual Portfolio 该标的数量；账户权益 = Σ Virtual Portfolio 权益 + Unallocated Capital。MVP-3 中一个 Virtual Portfolio 只运行一个 Strategy。
 - **共用执行决策**：Fast Event 与 Vector 共用同一执行决策层（可交易性、[`ADR 0005`](0005-defer-rebalance-on-unavailable-exit.md) 整次延期、pending 替换），Fast Event 只在其后生成订单并记账。由于共享逻辑无法自证，对拍须有独立 Python 金标准作第三方裁判。
 - **口径差异显式化**：数量规则 `sizing`（`vector_parity` / `lot`）、调仓规则 `rebalance`（`full_target` / `entry_only`）与未成交买腿策略 `unfilled_entry`（`skip` / `retry`，默认 `skip`）都是 Run Spec 参数。`vector_parity` + `full_target` 精确复刻 [`ADR 0017`](0017-vector-engine-semantics.md) 的成本与权重口径：成本以 open 前权益 × 权重换手为基数，open 后持仓等于目标权重 × 扣费后权益，Fill 价为 raw open，滑点作为费用单列。这是与 Vector 对拍的唯一模式。`lot` 引入整手、最低佣金与含滑点的成交价。`entry_only` 只在 Fast Event 中实现，仅用于复现 POC-0 金标准，不作为通用调仓语义。
 

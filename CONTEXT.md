@@ -87,7 +87,7 @@ Order 实际成交的一次记录，包含数量、价格、时间与费用依�
 持有实际现金、负债和仓位，并作为成交与清算账本权威的账户。
 
 **Virtual Portfolio**:
-在 Trading Account 内分配给一个或多个策略的资本和风险视图；其合并不能重复计算账户资产。每个 Fill 只归属一个 Virtual Portfolio，各 Virtual Portfolio 的现金与持仓加上 Unallocated Capital 等于 Trading Account。
+在 Trading Account 内分配给一个或多个策略的资本和风险视图；其合并不能重复计算账户资产。每个 Fill 只归属一个 Virtual Portfolio，账户现金等于各 Virtual Portfolio 现金之和加 Unallocated Capital，账户每个标的数量等于各 Virtual Portfolio 该标的数量之和。
 _Avoid_: 把 Virtual Portfolio 当作独立账户或可单独清算的资产主体。
 
 **Unallocated Capital**:
