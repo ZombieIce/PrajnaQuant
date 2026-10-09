@@ -386,6 +386,7 @@ fn vector_strategy_grid_reuses_factor_values_across_all_six_runs() {
                 top_k,
                 rebalance_every,
                 weighting: Weighting::EqualWeight,
+                unfilled_entry: Default::default(),
                 capabilities: [StrategyCapability::Vectorizable].into(),
             };
             let decisions = strategy.decide(&values, &fixture.panel.sessions).unwrap();

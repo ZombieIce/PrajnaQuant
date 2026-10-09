@@ -30,6 +30,13 @@ pub enum Weighting {
     EqualWeight,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum UnfilledEntry {
+    #[default]
+    Skip,
+    Retry,
+}
+
 #[derive(Debug, Clone)]
 pub struct VectorStrategy {
     pub score: Factor,
@@ -37,6 +44,7 @@ pub struct VectorStrategy {
     pub top_k: u32,
     pub rebalance_every: u32,
     pub weighting: Weighting,
+    pub unfilled_entry: UnfilledEntry,
     pub capabilities: BTreeSet<StrategyCapability>,
 }
 
@@ -60,6 +68,13 @@ pub enum ExecutionEvent {
         applied: BTreeMap<InstrumentId, f64>,
         skipped_buys: BTreeSet<InstrumentId>,
     },
+    RetryableExecution {
+        decision_session: PanelSession,
+        attempt_session: PanelSession,
+        applied: BTreeMap<InstrumentId, f64>,
+        skipped_buys: BTreeSet<InstrumentId>,
+        is_retry: bool,
+    },
     PendingAtEnd {
         decision_session: PanelSession,
         targets: BTreeMap<InstrumentId, f64>,
@@ -71,12 +86,22 @@ pub fn execute(
     sessions: &[PanelSession],
     executable: impl Fn(&InstrumentId, &PanelSession) -> bool,
 ) -> Vec<ExecutionEvent> {
+    execute_with_policy(decisions, sessions, UnfilledEntry::Skip, executable)
+}
+
+pub fn execute_with_policy(
+    decisions: &[Decision],
+    sessions: &[PanelSession],
+    unfilled_entry: UnfilledEntry,
+    executable: impl Fn(&InstrumentId, &PanelSession) -> bool,
+) -> Vec<ExecutionEvent> {
     let decisions_by_session = decisions
         .iter()
         .map(|decision| (decision.decision_session.session_date, decision))
         .collect::<BTreeMap<_, _>>();
     let mut held = BTreeSet::new();
     let mut pending: Option<&Decision> = None;
+    let mut missing_entries: Option<BTreeMap<InstrumentId, f64>> = None;
     let mut events = Vec::new();
 
     for session in sessions {
@@ -89,25 +114,51 @@ pub fn execute(
             if blocked.is_empty() {
                 let mut applied = BTreeMap::new();
                 let mut skipped_buys = BTreeSet::new();
-                for (instrument, weight) in &decision.targets {
+                let is_retry = missing_entries.is_some();
+                let targets = missing_entries.as_ref().unwrap_or(&decision.targets);
+                for (instrument, weight) in targets {
                     if executable(instrument, session) {
                         applied.insert(instrument.clone(), *weight);
-                    } else {
+                    } else if *weight > 0.0 || unfilled_entry == UnfilledEntry::Skip {
                         skipped_buys.insert(instrument.clone());
                     }
                 }
-                held = applied
+                let applied_held = applied
                     .iter()
                     .filter(|(_, weight)| **weight > 0.0)
                     .map(|(instrument, _)| instrument.clone())
-                    .collect();
-                events.push(ExecutionEvent::Executed {
-                    decision_session: decision.decision_session.clone(),
-                    attempt_session: session.clone(),
-                    applied,
-                    skipped_buys,
-                });
-                pending = None;
+                    .collect::<BTreeSet<_>>();
+                if is_retry {
+                    held.extend(applied_held);
+                } else {
+                    held = applied_held;
+                }
+                if unfilled_entry == UnfilledEntry::Retry {
+                    let remaining = targets
+                        .iter()
+                        .filter(|(instrument, weight)| {
+                            **weight > 0.0 && skipped_buys.contains(*instrument)
+                        })
+                        .map(|(instrument, weight)| (instrument.clone(), *weight))
+                        .collect::<BTreeMap<_, _>>();
+                    events.push(ExecutionEvent::RetryableExecution {
+                        decision_session: decision.decision_session.clone(),
+                        attempt_session: session.clone(),
+                        applied,
+                        skipped_buys,
+                        is_retry,
+                    });
+                    pending = (!remaining.is_empty()).then_some(decision);
+                    missing_entries = pending.map(|_| remaining);
+                } else {
+                    events.push(ExecutionEvent::Executed {
+                        decision_session: decision.decision_session.clone(),
+                        attempt_session: session.clone(),
+                        applied,
+                        skipped_buys,
+                    });
+                    pending = None;
+                }
             } else {
                 events.push(ExecutionEvent::Deferred {
                     decision_session: decision.decision_session.clone(),
@@ -119,13 +170,14 @@ pub fn execute(
 
         if let Some(decision) = decisions_by_session.get(&session.session_date) {
             pending = Some(*decision);
+            missing_entries = None;
         }
     }
 
     if let Some(decision) = pending {
         events.push(ExecutionEvent::PendingAtEnd {
             decision_session: decision.decision_session.clone(),
-            targets: decision.targets.clone(),
+            targets: missing_entries.unwrap_or_else(|| decision.targets.clone()),
         });
     }
     events
@@ -189,6 +241,15 @@ impl VectorEngine {
 }
 
 impl VectorStrategy {
+    pub fn execute(
+        &self,
+        decisions: &[Decision],
+        sessions: &[PanelSession],
+        executable: impl Fn(&InstrumentId, &PanelSession) -> bool,
+    ) -> Vec<ExecutionEvent> {
+        execute_with_policy(decisions, sessions, self.unfilled_entry, executable)
+    }
+
     /// Rank available Factor Values at each scheduled Venue Session close.
     pub fn decide(
         &self,

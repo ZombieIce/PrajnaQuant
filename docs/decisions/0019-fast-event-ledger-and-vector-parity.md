@@ -20,4 +20,24 @@
 
 ## Consequences
 
+### 共用买腿重试（#116）
+
+`VectorStrategy.unfilled_entry` 声明 `UnfilledEntry::Skip`（默认）或 `Retry`；
+`VectorStrategy::execute` 将声明传给共用 `strategy::execute_with_policy`。
+原 `strategy::execute` 保留为默认 `skip` 入口，既有执行事件与结果 JSON 不变。
+Experiment 的 retry 参数及 Run Spec 接入仍由 #123 负责，目前 Experiment 构造的 S2 策略明确使用默认 skip。
+
+Retry 策略的首次完整调仓仍使用原有 full-target 成本与扣费后目标权重口径。
+其后只对因可交易性阻塞的正权重买腿重试：原目标权重乘以本次 open **扣费前权益**作为买入预算，
+费用另从剩余现金扣除，按 `instrument_id` 升序削减现金不足的预算；
+不卖出或重平衡已成交腿，也不因现金削减新增 pending。
+已成交腿在重试扣费后仅改变归一化权重，不改变数量。
+持仓阻塞仍按 ADR 0005 整次延期；open 尝试结束后才读取本 Session close 的新决策并替换 pending。
+
+共用事件 `RetryableExecution.is_retry` 区分首次调仓和缺失腿重试；
+`applied` 是本次可执行腿的原目标权重，`skipped_buys` 是仍因可交易性受阻的腿，
+不代表账本已实际成交的数量。`PendingAtEnd.targets` 在重试阶段仅含缺失腿。
+Vector 的 `entries_retried` / `retry_deferred` 轨迹与 `pending_at_end.retry_entries=true` 记录这一模式；
+默认 skip 不输出新增 pending 字段。Vector 仍是权重摘要，不是精确现金/持仓账本。
+
 `fast_event@1` 的语义由本 ADR 与 spec #112 固定，任何改变数量、调仓、估值或费用口径的修改都必须提升 Engine 语义版本。Vector 增加 `unfilled_entry` 与 `BuyAndHold`、`MaCrossover` 策略形态后，默认值下的现有 S2 Run Spec 身份不得改变，否则须提升 `vector@1`。T+1、涨跌停、货币单位舍入与跨 Virtual Portfolio 净额化属于后续阶段；在实现前，Fast Event 结果须声明这些规则未建模。

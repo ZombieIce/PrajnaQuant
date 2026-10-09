@@ -76,12 +76,16 @@ pub struct VectorExecution {
 pub enum VectorExecutionKind {
     Executed,
     Deferred,
+    EntriesRetried,
+    RetryDeferred,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VectorPending {
     pub decision_session: String,
     pub targets: BTreeMap<InstrumentId, f64>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub retry_entries: bool,
 }
 
 #[derive(Debug)]
@@ -160,6 +164,8 @@ pub fn run_vector(
     let (buy_rate, sell_rate) = costs.side_rates();
     let mut weights = BTreeMap::new();
     let mut pending_decision: Option<&Decision> = None;
+    let mut pending_targets = BTreeMap::new();
+    let mut retrying = false;
     let mut latest_target_weights = BTreeMap::new();
     let mut nav = 1.0;
     let mut result_sessions = Vec::with_capacity(panel.sessions.len());
@@ -186,7 +192,11 @@ pub fn run_vector(
                         }
                         result_executions.push(VectorExecution {
                             session_date: session.session_date.to_string(),
-                            kind: VectorExecutionKind::Deferred,
+                            kind: if retrying {
+                                VectorExecutionKind::RetryDeferred
+                            } else {
+                                VectorExecutionKind::Deferred
+                            },
                             blocked: blocked.clone(),
                             skipped_buys: BTreeSet::new(),
                         });
@@ -195,10 +205,37 @@ pub fn run_vector(
                         applied,
                         skipped_buys,
                         ..
+                    }
+                    | ExecutionEvent::RetryableExecution {
+                        applied,
+                        skipped_buys,
+                        ..
                     } => {
+                        let retains_entries =
+                            matches!(event, ExecutionEvent::RetryableExecution { .. });
+                        let is_retry = matches!(
+                            event,
+                            ExecutionEvent::RetryableExecution { is_retry: true, .. }
+                        );
+                        if is_retry != retrying {
+                            return Err(invalid_input(
+                                "execution mode does not match the pending target",
+                            ));
+                        }
                         validate_applied_weights(panel, applied)?;
-                        validate_skipped_buys(pending, applied, skipped_buys)?;
-                        for instrument in applied.keys().chain(weights.keys()) {
+                        validate_skipped_buys(&pending_targets, applied, skipped_buys)?;
+                        if is_retry
+                            && applied
+                                .keys()
+                                .any(|instrument| weights.contains_key(instrument))
+                        {
+                            return Err(invalid_input(
+                                "an entry retry cannot rebalance a held leg",
+                            ));
+                        }
+                        let required_prices =
+                            applied.keys().chain(weights.keys().filter(|_| !is_retry));
+                        for instrument in required_prices {
                             let instrument_index =
                                 panel.instruments.binary_search(instrument).map_err(|_| {
                                     invalid_input(format!("unknown held instrument {instrument}"))
@@ -210,30 +247,50 @@ pub fn run_vector(
                                 )));
                             }
                         }
-                        let mut buys = 0.0;
-                        let mut sells = 0.0;
-                        for instrument in &panel.instruments {
-                            let delta = applied.get(instrument).copied().unwrap_or(0.0)
-                                - weights.get(instrument).copied().unwrap_or(0.0);
-                            buys += delta.max(0.0);
-                            sells += (-delta).max(0.0);
+                        if is_retry {
+                            (turnover, cost) = apply_entry_retry(&mut weights, applied, buy_rate)?;
+                        } else {
+                            let mut buys = 0.0;
+                            let mut sells = 0.0;
+                            for instrument in &panel.instruments {
+                                let delta = applied.get(instrument).copied().unwrap_or(0.0)
+                                    - weights.get(instrument).copied().unwrap_or(0.0);
+                                buys += delta.max(0.0);
+                                sells += (-delta).max(0.0);
+                            }
+                            turnover = buys + sells;
+                            cost = buys * buy_rate + sells * sell_rate;
                         }
-                        turnover = buys + sells;
-                        cost = buys * buy_rate + sells * sell_rate;
                         if !turnover.is_finite() || !cost.is_finite() || cost >= 1.0 {
                             return Err(invalid_costs(
                                 "an execution must have finite turnover and cost below 100%",
                             ));
                         }
-                        weights = applied
-                            .iter()
-                            .filter(|(_, weight)| **weight > 0.0)
-                            .map(|(instrument, weight)| (instrument.clone(), *weight))
-                            .collect();
-                        pending_decision = None;
+                        if !is_retry {
+                            weights = applied
+                                .iter()
+                                .filter(|(_, weight)| **weight > 0.0)
+                                .map(|(instrument, weight)| (instrument.clone(), *weight))
+                                .collect();
+                        }
+                        validate_applied_weights(panel, &weights)?;
+                        pending_targets = if retains_entries {
+                            pending_targets
+                                .into_iter()
+                                .filter(|(instrument, _)| skipped_buys.contains(instrument))
+                                .collect()
+                        } else {
+                            BTreeMap::new()
+                        };
+                        retrying = !pending_targets.is_empty();
+                        pending_decision = retrying.then_some(pending);
                         result_executions.push(VectorExecution {
                             session_date: session.session_date.to_string(),
-                            kind: VectorExecutionKind::Executed,
+                            kind: if is_retry {
+                                VectorExecutionKind::EntriesRetried
+                            } else {
+                                VectorExecutionKind::Executed
+                            },
                             blocked: BTreeSet::new(),
                             skipped_buys: skipped_buys.clone(),
                         });
@@ -312,6 +369,8 @@ pub fn run_vector(
         if let Some(decision) = decisions_by_index.get(&session_index) {
             latest_target_weights = decision.targets.clone();
             pending_decision = Some(decision);
+            pending_targets = decision.targets.clone();
+            retrying = false;
         }
 
         result_sessions.push(VectorSession {
@@ -332,18 +391,21 @@ pub fn run_vector(
             decision_session,
             targets,
         } => Some((decision_session, targets)),
-        ExecutionEvent::Deferred { .. } | ExecutionEvent::Executed { .. } => None,
+        ExecutionEvent::Deferred { .. }
+        | ExecutionEvent::Executed { .. }
+        | ExecutionEvent::RetryableExecution { .. } => None,
     });
     let pending_at_end = match (pending_decision, pending_event) {
         (Some(pending), Some((event_session, targets))) => {
-            if pending.decision_session != *event_session || pending.targets != *targets {
+            if pending.decision_session != *event_session || pending_targets != *targets {
                 return Err(invalid_input(
                     "pending-at-end event does not match the latest target",
                 ));
             }
             Some(VectorPending {
                 decision_session: pending.decision_session.session_date.to_string(),
-                targets: pending.targets.clone(),
+                targets: pending_targets,
+                retry_entries: retrying,
             })
         }
         (Some(_), None) => return Err(invalid_input("missing pending-at-end event")),
@@ -538,6 +600,13 @@ fn index_events<'a>(
                 attempt_session,
                 applied,
                 skipped_buys,
+            }
+            | ExecutionEvent::RetryableExecution {
+                decision_session,
+                attempt_session,
+                applied,
+                skipped_buys,
+                ..
             } => {
                 validate_event_sessions(panel, decision_session, attempt_session)?;
                 let index = session_index(panel, attempt_session)?;
@@ -595,6 +664,9 @@ fn validate_event_decision(event: &ExecutionEvent, pending: &Decision) -> Result
         }
         | ExecutionEvent::Executed {
             decision_session, ..
+        }
+        | ExecutionEvent::RetryableExecution {
+            decision_session, ..
         } => decision_session,
         ExecutionEvent::PendingAtEnd { .. } => {
             return Err(invalid_input(
@@ -611,7 +683,7 @@ fn validate_event_decision(event: &ExecutionEvent, pending: &Decision) -> Result
 }
 
 fn validate_skipped_buys(
-    pending: &Decision,
+    targets: &BTreeMap<InstrumentId, f64>,
     applied: &BTreeMap<InstrumentId, f64>,
     skipped_buys: &BTreeSet<InstrumentId>,
 ) -> Result<(), VectorError> {
@@ -620,19 +692,16 @@ fn validate_skipped_buys(
         .any(|instrument| skipped_buys.contains(instrument))
         || applied
             .iter()
-            .any(|(instrument, weight)| pending.targets.get(instrument) != Some(weight))
-        || skipped_buys.iter().any(|instrument| {
-            pending
-                .targets
-                .get(instrument)
-                .is_none_or(|weight| *weight <= 0.0)
-        })
+            .any(|(instrument, weight)| targets.get(instrument) != Some(weight))
+        || skipped_buys
+            .iter()
+            .any(|instrument| targets.get(instrument).is_none_or(|weight| *weight <= 0.0))
     {
         return Err(invalid_input(
             "executed and skipped legs do not match the pending targets",
         ));
     }
-    for (instrument, weight) in &pending.targets {
+    for (instrument, weight) in targets {
         if *weight > 0.0 && !applied.contains_key(instrument) && !skipped_buys.contains(instrument)
         {
             return Err(invalid_input(
@@ -641,6 +710,37 @@ fn validate_skipped_buys(
         }
     }
     Ok(())
+}
+
+fn apply_entry_retry(
+    weights: &mut BTreeMap<InstrumentId, f64>,
+    applied: &BTreeMap<InstrumentId, f64>,
+    buy_rate: f64,
+) -> Result<(f64, f64), VectorError> {
+    let mut cash_weight = (1.0 - weights.values().sum::<f64>()).max(0.0);
+    let mut buys = BTreeMap::new();
+    let mut turnover = 0.0;
+    for (instrument, target) in applied {
+        // Retry budgets use current pre-fee equity; cash includes the buy fees.
+        let buy = target.min(cash_weight / (1.0 + buy_rate));
+        cash_weight = (cash_weight - buy * (1.0 + buy_rate)).max(0.0);
+        if buy > 0.0 {
+            buys.insert(instrument.clone(), buy);
+        }
+        turnover += buy;
+    }
+    let cost = turnover * buy_rate;
+    if !cost.is_finite() || cost >= 1.0 {
+        return Err(invalid_costs("an entry retry must have cost below 100%"));
+    }
+    // Only normalization changes held weights: held notional/quantity stays fixed.
+    for weight in weights.values_mut() {
+        *weight /= 1.0 - cost;
+    }
+    for (instrument, buy) in buys {
+        weights.insert(instrument, buy / (1.0 - cost));
+    }
+    Ok((turnover, cost))
 }
 
 fn validate_target_weights(

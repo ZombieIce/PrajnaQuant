@@ -21,9 +21,7 @@ use prajna_research::{
         canonical_float_bits,
     },
     load_execution_status, load_panel,
-    strategy::{
-        RankDirection, StrategyCapability, VectorEngine, VectorStrategy, Weighting, execute,
-    },
+    strategy::{RankDirection, StrategyCapability, VectorEngine, VectorStrategy, Weighting},
     vector::{VectorCosts, VectorResult, run_vector},
 };
 use rayon::ThreadPoolBuilder;
@@ -200,6 +198,7 @@ impl StrategyParameters {
             top_k,
             rebalance_every,
             weighting: Weighting::EqualWeight,
+            unfilled_entry: Default::default(),
             capabilities: BTreeSet::from([StrategyCapability::Vectorizable]),
         };
         VectorEngine::validate(&strategy)
@@ -725,7 +724,7 @@ fn execute_run(
         let decisions = strategy
             .decide(score, &panel.sessions)
             .map_err(|error| error.to_string())?;
-        let events = execute(&decisions, &panel.sessions, |instrument, session| {
+        let events = strategy.execute(&decisions, &panel.sessions, |instrument, session| {
             executable_by_key
                 .get(&(instrument.clone(), session.session_date))
                 .copied()
@@ -1542,6 +1541,10 @@ mod tests {
         let original_value = definition(&dsv, &universe);
         let original = Experiment::parse(&original_value.to_string(), &lake).unwrap();
         let original_run = original.run_id(run_parameters(&original)).unwrap();
+        assert_eq!(
+            original_run,
+            "run:sha256:46c604fb3758a042f0ade22841752c9be3573a5e54a6e7139621828489ed5e45"
+        );
         let original_experiment = original.id().unwrap();
         for (path, replacement) in [
             ("short", json!(3)),

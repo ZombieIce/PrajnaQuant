@@ -76,14 +76,22 @@ pub fn summarize(result: &VectorResult, sessions_per_year: u64) -> RunSummary {
             .executions
             .iter()
             .filter(|execution| {
-                execution.kind == prajna_research::vector::VectorExecutionKind::Executed
+                matches!(
+                    execution.kind,
+                    prajna_research::vector::VectorExecutionKind::Executed
+                        | prajna_research::vector::VectorExecutionKind::EntriesRetried
+                )
             })
             .count(),
         deferred_count: result
             .executions
             .iter()
             .filter(|execution| {
-                execution.kind == prajna_research::vector::VectorExecutionKind::Deferred
+                matches!(
+                    execution.kind,
+                    prajna_research::vector::VectorExecutionKind::Deferred
+                        | prajna_research::vector::VectorExecutionKind::RetryDeferred
+                )
             })
             .count(),
         skipped_buy_count: result
@@ -249,6 +257,7 @@ mod tests {
         vector.pending_at_end = Some(VectorPending {
             decision_session: "2026-01-03".into(),
             targets: BTreeMap::new(),
+            retry_entries: false,
         });
         let summary = summarize(&vector, 252);
         assert_eq!(summary.total_return, Some(0.0));
@@ -258,5 +267,24 @@ mod tests {
         assert!(summary.pending_at_end);
         assert_eq!(summary.sharpe, None);
         assert!(summary.zero_volatility);
+    }
+
+    #[test]
+    fn summary_counts_entry_retries_as_executions_and_retry_deferrals_as_deferrals() {
+        let mut vector = result(&[(1.0, 0.0), (1.0, 0.0)]);
+        for kind in [
+            VectorExecutionKind::EntriesRetried,
+            VectorExecutionKind::RetryDeferred,
+        ] {
+            vector.executions.push(VectorExecution {
+                session_date: "2026-01-02".into(),
+                kind,
+                blocked: BTreeSet::new(),
+                skipped_buys: BTreeSet::new(),
+            });
+        }
+        let summary = summarize(&vector, 252);
+        assert_eq!(summary.executed_count, 1);
+        assert_eq!(summary.deferred_count, 1);
     }
 }

@@ -3,14 +3,14 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{Datelike, NaiveDate, TimeZone, Utc};
-use polars::prelude::{DataFrame, DataType, NamedFrom, Series};
+use polars::prelude::{ChunkCompareIneq, DataFrame, DataType, NamedFrom, Series};
 use prajna_domain::{InstrumentId, TimestampNs, VenueId};
 use prajna_research::{
     Panel, PanelSession, executable,
     factor::AvailabilityAssumption,
     load_execution_status, load_panel,
-    strategy::{Decision, ExecutionEvent, execute},
-    vector::{VectorCosts, run_vector},
+    strategy::{Decision, ExecutionEvent, UnfilledEntry, execute, execute_with_policy},
+    vector::{VectorCosts, VectorExecutionKind, run_vector},
 };
 use serde_json::Value;
 
@@ -366,6 +366,136 @@ fn manual_panel() -> Panel {
         instruments,
         grid,
     }
+}
+
+#[test]
+fn retry_buys_original_weight_of_current_equity_without_rebalancing_filled_legs() {
+    let panel = manual_panel();
+    let decisions = [Decision {
+        decision_session: panel.sessions[0].clone(),
+        ranked: Vec::new(),
+        targets: weights(&[("X.SYNTH", 0.25), ("Y.SYNTH", 0.25)]),
+    }];
+    let can_trade = |id: &InstrumentId, day: &PanelSession| {
+        *id == instrument("X.SYNTH") || *day == panel.sessions[3]
+    };
+    let events = execute_with_policy(&decisions, &panel.sessions, UnfilledEntry::Retry, can_trade);
+    let costs = VectorCosts {
+        commission_rate: 0.01,
+        buy_slippage_bps: 0.0,
+        sell_slippage_bps: 0.0,
+        buy_tax_rate: 0.0,
+        sell_tax_rate: 0.0,
+    };
+    let result = run_vector(
+        &panel,
+        &decisions,
+        &events,
+        &costs,
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
+    // D2: X notional .249375, cash .748125. D3: X rises 10%, E0=1.0224375.
+    // D4: buy Y for .255609375, pay .00255609375, leave X at .2743125.
+    assert_close(result.sessions[1].cost, 0.0025);
+    assert_close(result.sessions[1].nav, 1.0224375);
+    assert_close(result.sessions[2].turnover, 0.0);
+    let last = &result.sessions[3];
+    assert_close(last.turnover, 0.25);
+    assert_close(last.cost, 0.0025);
+    assert_close(last.nav, 1.01988140625);
+    assert_close(
+        last.weights_after_execution[&instrument("X.SYNTH")] * last.nav,
+        0.2743125,
+    );
+    assert_close(
+        last.weights_after_execution[&instrument("Y.SYNTH")] * last.nav,
+        0.255609375,
+    );
+    assert_eq!(
+        result.executions[2].kind,
+        VectorExecutionKind::EntriesRetried
+    );
+    assert!(result.pending_at_end.is_none());
+
+    let events = execute_with_policy(
+        &decisions,
+        &panel.sessions[..3],
+        UnfilledEntry::Retry,
+        can_trade,
+    );
+    let partial = Panel {
+        sessions: panel.sessions[..3].to_vec(),
+        instruments: panel.instruments.clone(),
+        grid: panel
+            .grid
+            .filter(
+                &panel
+                    .grid
+                    .column("session_index")
+                    .unwrap()
+                    .u32()
+                    .unwrap()
+                    .lt(3),
+            )
+            .unwrap(),
+    };
+    let partial_result = run_vector(
+        &partial,
+        &decisions,
+        &events,
+        &costs,
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
+    let pending = partial_result.pending_at_end.unwrap();
+    assert_eq!(pending.targets, weights(&[("Y.SYNTH", 0.25)]));
+    assert!(pending.retry_entries);
+}
+
+#[test]
+fn cash_reduction_does_not_retry_or_sell_existing_holdings_to_fund_entries() {
+    let panel = manual_panel();
+    let decisions = [Decision {
+        decision_session: panel.sessions[0].clone(),
+        ranked: Vec::new(),
+        targets: weights(&[("X.SYNTH", 0.5), ("Y.SYNTH", 0.5)]),
+    }];
+    let events = execute_with_policy(
+        &decisions,
+        &panel.sessions,
+        UnfilledEntry::Retry,
+        |id, day| *id == instrument("X.SYNTH") || *day == panel.sessions[3],
+    );
+    let costs = VectorCosts {
+        commission_rate: 0.01,
+        buy_slippage_bps: 0.0,
+        sell_slippage_bps: 0.0,
+        buy_tax_rate: 0.0,
+        sell_tax_rate: 0.0,
+    };
+    let result = run_vector(
+        &panel,
+        &decisions,
+        &events,
+        &costs,
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
+    // Pre-retry: X=.54725, cash=.4975, equity=1.04475.
+    // Y receives only .4975/1.01=.49257425742574257; no cash remains.
+    let last = &result.sessions[3];
+    assert_close(last.nav, 1.0398242574257426);
+    assert_close(
+        last.weights_after_execution[&instrument("X.SYNTH")] * last.nav,
+        0.54725,
+    );
+    assert_close(
+        last.weights_after_execution[&instrument("Y.SYNTH")] * last.nav,
+        0.49257425742574257,
+    );
+    assert_close(last.weights_after_execution.values().sum(), 1.0);
+    assert!(result.pending_at_end.is_none());
 }
 
 #[test]
