@@ -94,6 +94,17 @@ macro_rules! rounding_and_range_tests {
 
             #[test]
             fn final_range_overflow_and_division_by_zero_are_explicit_errors() {
+                // Exact product is MAX + 0.99740666130458787 mantissa units.
+                let left =
+                    $decimal::from_mantissa(74_812_236_255_655_383_158_461_577_910_691_736_805)
+                        .unwrap();
+                let right = $decimal::from_mantissa(1_336_679_733_222_659_334).unwrap();
+                for sign in [-1, 1] {
+                    assert_eq!(
+                        left.checked_mul(sign).unwrap().checked_mul_decimal(right),
+                        Err(FixedPointError::Overflow)
+                    );
+                }
                 for extreme in [$decimal::MIN, $decimal::MAX] {
                     for multiplier in ["2", "-2", "1.000000000000000001"] {
                         assert_eq!(
