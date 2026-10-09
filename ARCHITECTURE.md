@@ -32,7 +32,7 @@ Rust 拥有数据写入、因子执行、回测、组合账户、成本、绩效
 
 `InstrumentId`、`VenueId`、symbol、currency、价格和数量精度是跨市场共享身份与基础属性。Equity/ETF、Spot、Perpetual、Future 等类型保留各自的交易日历、T+1、涨跌停、funding、杠杆和清算规则。当前 Crypto 范围优先 CEX 与订单簿 / 永续型 DEX/CLOB；AMM、MEV、链上交易模拟和完整 Blockchain Domain 不进入平台 MVP。
 
-Portfolio 是资金与风险管理的一等对象：Trading Account 可分配资本给多个 Virtual Portfolio 和 Strategy；实际现金、持仓、成交、费用及跨币种估值须可追溯。Fast/Accurate Engine 由成交驱动账户与组合。Vector Engine 可直接计算权重与收益，但其结果必须标出简化的成交、成本、现金、杠杆和再平衡假设；没有逐笔账本时不能声称通过账户守恒验证。跨引擎比较只在共同且显式的语义子集上做数值一致性检查。
+Portfolio 是资金与风险管理的一等对象：Trading Account 可分配资本给多个 Virtual Portfolio 和 Strategy；实际现金、持仓、成交、费用及跨币种估值须可追溯。Fast/Accurate Engine 由成交驱动账户与组合。Vector Engine 可直接计算权重与收益，但其结果必须标出简化的成交、成本、现金、杠杆和再平衡假设；没有逐笔账本时不能声称通过账户守恒验证。跨引擎比较只在共同且显式的语义子集上做数值一致性检查（Fast Event L1 的账本与对拍口径见 [ADR 0019](docs/decisions/0019-fast-event-ledger-and-vector-parity.md)）。
 
 ### 数据与研究对象
 
