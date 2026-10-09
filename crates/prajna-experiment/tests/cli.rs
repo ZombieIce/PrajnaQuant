@@ -411,3 +411,30 @@ fn full_new_execution_reports_failed_runs_without_failing_the_invocation() {
     assert_eq!(output["written_files"], 3);
     json_output(example.run(&["--level", "full"]), 0);
 }
+
+#[test]
+fn stored_definition_and_promotion_metadata_corruption_use_replay_inconsistency_code() {
+    let example = Example::new();
+    let result = json_output(example.run(&[]), 0);
+    let execution_directory = example.directory(&result);
+    let manifest_path = execution_directory.join("execution.json");
+    let original_manifest = fs::read(&manifest_path).unwrap();
+    let manifest: Value = serde_json::from_slice(&original_manifest).unwrap();
+    let run_id = manifest["runs"][0]["run_id"].as_str().unwrap();
+    let definition_path = execution_directory
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("experiment.json");
+    let original_definition = fs::read(&definition_path).unwrap();
+    fs::write(&definition_path, b"{}").unwrap();
+    status(&example.run(&[]), 3);
+    assert_eq!(fs::read(&definition_path).unwrap(), b"{}");
+    assert_eq!(fs::read(&manifest_path).unwrap(), original_manifest);
+    fs::write(&definition_path, original_definition).unwrap();
+    fs::write(&manifest_path, b"{bad metadata}").unwrap();
+    status(&example.run(&["--level", "full", "--promote", run_id]), 3);
+    assert_eq!(fs::read(&manifest_path).unwrap(), b"{bad metadata}");
+    assert!(!execution_directory.join("runs").exists());
+}

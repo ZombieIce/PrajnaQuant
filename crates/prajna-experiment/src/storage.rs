@@ -327,10 +327,17 @@ pub(super) fn promote(
     let experiment_id = experiment.id()?;
     let destination = execution_path(lake_root, &experiment_id, execution_id)?;
     let _promotion_lock = lock_promotion(&destination)?;
-    let mut manifest = read_manifest_file(&destination.join("execution.json"))?;
+    let manifest_path = destination.join("execution.json");
+    let mut manifest = read_manifest_file(&manifest_path).map_err(|error| {
+        if manifest_path.is_file() {
+            ExperimentError::ReplayMismatch(error.to_string())
+        } else {
+            error
+        }
+    })?;
     if manifest.experiment_id != experiment_id || manifest.execution.id != execution_id {
-        return Err(err(
-            "stored Execution identity does not match requested Experiment",
+        return Err(ExperimentError::ReplayMismatch(
+            "stored Execution identity does not match requested Experiment".into(),
         ));
     }
     let summary_path = destination.join("summary.parquet");
@@ -695,7 +702,7 @@ fn ensure_experiment_file(
     if path.exists() {
         let actual = fs::read(&path).map_err(io_error(&path))?;
         if actual != expected {
-            return Err(err(format!(
+            return Err(ExperimentError::ReplayMismatch(format!(
                 "stored experiment.json is inconsistent at {}",
                 path.display()
             )));
