@@ -78,7 +78,7 @@ M10 `strategy::VectorStrategy` 与 `VectorEngine::validate` 已实现：仅声�
 
 `prajna-research` 现提供 `StaticUniverse`：成员排序去重后以 restricted-JCS SHA-256 身份存储，原子发布、幂等复用并在读取时校验身份；可对照 DSV v1 instruments 表报告缺失成员。3×10 fixture 已验证 A/B/C 通过、含 D 失败。它是固定成员列表，不提供 point-in-time 成员可知性证明。
 
-MVP-2 的 `prajna-experiment`（Issue #99/#100/#101）可解析并校验 `experiment.json`，按固定字段顺序展开 grid/list 参数空间并按 Run 身份去重；无效组合整体拒绝。restricted-JCS 身份覆盖 Experiment、`vector@1` Run Spec 与含 git revision、tracked/untracked diff hash、rustc 版本和 target triple 的 Experiment Execution；脏工作树标为不可完全复现。两阶段 Rayon 路径先按 FactorKey 去重并分层计算因子，再并行执行 Vector Runs；单 Run 执行错误记录为 failed，其余继续，并返回进程内结果、阶段耗时和缓存计算/命中数。独立纯函数 Vector Summary Metrics 与 Python 标准库金标准已对照 3×10 和 64×252 S2 fixtures。64×252 v2 的 24-run 一线程/四线程结果字节一致，单 Run 与 MVP-1 golden 容差对拍通过。尚未持久化 ResultLevel/Execution；验证仅限合成 fixture。
+MVP-2 的 `prajna-experiment`（Issue #99–#102）可解析并校验 `experiment.json`，按固定字段顺序展开 grid/list 参数空间并按 Run 身份去重；无效组合整体拒绝。restricted-JCS 身份覆盖 Experiment、`vector@1` Run Spec 与含 git revision、tracked/untracked diff hash、rustc 版本和 target triple 的 Experiment Execution；脏工作树标为不可完全复现。两阶段 Rayon 路径先按 FactorKey 去重并分层计算因子，再并行执行 Vector Runs；单 Run 执行错误记录为 failed，其余继续，并返回进程内结果、阶段耗时和缓存计算/命中数。独立纯函数 Vector Summary Metrics 与 Python 标准库金标准已对照 3×10 和 64×252 S2 fixtures。Summary、Standard、Full 的 Parquet 结果存储、logical-hash 重放校验、单 Run 提升和同 Experiment diff 已实现；Summary 不创建 `runs/`，重放检测结果文件被改写，diff 可定位首个不同的 Session 字段。提升通过每 Execution 的非阻塞文件锁强制单写入者，并重算整个 Summary 比对 logical hash；随后完整暂存与校验，manifest 提交前失败会回滚本次新增表，保留原执行线程数、起止时间与阶段耗时；新 manifest 记录不进入身份的 OS、架构与可用并行度，旧 manifest 缺机器信息时读取为 Unknown。验证限于合成 fixture，不证明真实市场/PIT 或账本守恒。
 
 ## Batch 2 Integration Acceptance (2026-09-25)
 

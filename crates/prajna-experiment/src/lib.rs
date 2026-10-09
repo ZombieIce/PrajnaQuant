@@ -32,7 +32,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
+mod storage;
 mod summary;
+pub use storage::{ExecutionDiff, ResultLevel, StoredExecution, diff_executions};
 pub use summary::{RunSummary, summarize};
 
 const PARAMETERS: [&str; 9] = [
@@ -594,6 +596,57 @@ impl Experiment {
         })
     }
 
+    /// Executes and stores a Vector experiment at the requested result level.
+    /// If this Execution identity already exists, all saved logical hashes are verified.
+    pub fn execute_and_store(
+        &self,
+        lake_root: impl AsRef<Path>,
+        repository: impl AsRef<Path>,
+        result_level: ResultLevel,
+        threads: usize,
+    ) -> Result<StoredExecution, ExperimentError> {
+        let lake_root = lake_root.as_ref();
+        let started_at = storage::now_rfc3339();
+        let identity = ExecutionIdentity::capture(&self.id()?, repository)?;
+        let report = self.execute(lake_root, threads)?;
+        storage::store_execution(
+            self,
+            &identity,
+            &report,
+            lake_root,
+            result_level,
+            threads,
+            started_at,
+        )
+    }
+
+    /// Adds result tables for selected Runs without changing their Run identities.
+    /// Revalidates the entire Summary before publishing any detail. A concurrent
+    /// promotion of the same Execution returns a lock error; retry after it ends.
+    /// The OS lock uses a persistent `.promotion-<execution-hex>.lock` file in
+    /// the executions directory. All promotion writers must use this API.
+    pub fn promote(
+        &self,
+        lake_root: impl AsRef<Path>,
+        repository: impl AsRef<Path>,
+        execution_id: &str,
+        run_ids: &[String],
+        result_level: ResultLevel,
+        threads: usize,
+    ) -> Result<StoredExecution, ExperimentError> {
+        let lake_root = lake_root.as_ref();
+        let identity = ExecutionIdentity::capture(&self.id()?, repository)?;
+        storage::promote(
+            self,
+            &identity,
+            lake_root,
+            execution_id,
+            run_ids,
+            result_level,
+            threads,
+        )
+    }
+
     fn availability_assumption(&self) -> Result<AvailabilityAssumption, ExperimentError> {
         self.availability_assumption
             .parse()
@@ -619,7 +672,7 @@ pub struct ExpandedRun {
     factor: Factor,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
     Completed,
@@ -880,7 +933,7 @@ fn path_from_git_bytes(bytes: &[u8]) -> Result<std::path::PathBuf, ExperimentErr
         .map_err(|error| ExperimentError::Git(format!("git path is not UTF-8: {error}")))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionIdentity {
     pub id: String,
     pub reproducible: bool,
@@ -1648,6 +1701,464 @@ mod tests {
     #[test]
     fn float_bit_encoding_is_shared_with_factor_canonicalization() {
         assert_eq!(canonical_float_bits(0.1), "3fb999999999999a");
+    }
+
+    fn test_execution_identity(_experiment_id: &str, marker: char) -> ExecutionIdentity {
+        ExecutionIdentity {
+            id: format!("exe:sha256:{}", marker.to_string().repeat(64)),
+            reproducible: true,
+            git_revision: marker.to_string().repeat(40),
+            working_tree_diff_sha256: "0".repeat(64),
+            rustc_version: "rustc test".into(),
+            target_triple: "test-target".into(),
+        }
+    }
+
+    #[test]
+    fn summary_storage_has_no_runs_and_replay_preserves_files() {
+        let temp = TempDir::new().unwrap();
+        let (lake, dsv, universe) = scale_fixture(temp.path());
+        let experiment =
+            Experiment::parse(&definition(&dsv, &universe).to_string(), &lake).unwrap();
+        let report = experiment.execute(&lake, 1).unwrap();
+        let identity = test_execution_identity(&experiment.id().unwrap(), 'a');
+        let stored = storage::store_execution(
+            &experiment,
+            &identity,
+            &report,
+            Path::new(&lake),
+            ResultLevel::Summary,
+            1,
+            "2026-10-09T00:00:00Z".into(),
+        )
+        .unwrap();
+        assert!(!stored.path.join("runs").exists());
+        assert_eq!(stored.manifest.runs.len(), 1);
+        assert!(stored.manifest.runs[0].table_hashes.is_empty());
+        assert_eq!(stored.manifest.runs[0].not_saved.len(), 6);
+        assert_eq!(
+            stored.manifest.runs[0].not_produced_by_engine,
+            ["orders", "fills", "cash_ledger"]
+        );
+        let summary = stored.path.join("summary.parquet");
+        let summary_reader =
+            parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
+                fs::File::open(&summary).unwrap(),
+            )
+            .unwrap();
+        let summary_columns = summary_reader
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| field.name().as_str())
+            .collect::<Vec<_>>();
+        for expected in [
+            "run_id",
+            "short",
+            "w_s",
+            "status",
+            "error",
+            "total_return",
+            "insufficient_sessions",
+            "zero_volatility",
+        ] {
+            assert!(summary_columns.contains(&expected), "missing {expected}");
+        }
+        let original = fs::read(&summary).unwrap();
+        storage::store_execution(
+            &experiment,
+            &identity,
+            &report,
+            Path::new(&lake),
+            ResultLevel::Summary,
+            1,
+            "2026-10-09T00:01:00Z".into(),
+        )
+        .unwrap();
+        assert_eq!(fs::read(summary).unwrap(), original);
+        assert!(
+            !fs::read_dir(stored.path.parent().unwrap())
+                .unwrap()
+                .any(|entry| {
+                    entry
+                        .unwrap()
+                        .file_name()
+                        .to_string_lossy()
+                        .contains("staging")
+                })
+        );
+    }
+
+    #[test]
+    fn replay_detects_modified_parquet_without_overwriting_it() {
+        let temp = TempDir::new().unwrap();
+        let (lake, dsv, universe) = scale_fixture(temp.path());
+        let experiment =
+            Experiment::parse(&definition(&dsv, &universe).to_string(), &lake).unwrap();
+        let report = experiment.execute(&lake, 1).unwrap();
+        let identity = test_execution_identity(&experiment.id().unwrap(), 'b');
+        let stored = storage::store_execution(
+            &experiment,
+            &identity,
+            &report,
+            Path::new(&lake),
+            ResultLevel::Standard,
+            1,
+            "2026-10-09T00:00:00Z".into(),
+        )
+        .unwrap();
+        assert_eq!(stored.manifest.runs[0].not_saved.len(), 4);
+        let table = stored
+            .path
+            .join("runs")
+            .join(storage::run_hex(&report.runs[0].run_id).unwrap())
+            .join("sessions.parquet");
+        let sessions_reader =
+            parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
+                fs::File::open(&table).unwrap(),
+            )
+            .unwrap();
+        let session_columns = sessions_reader
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| field.name().as_str())
+            .collect::<Vec<_>>();
+        for expected in [
+            "session_date",
+            "nav",
+            "gross_return",
+            "net_return",
+            "turnover",
+            "cost",
+            "valuation_carried",
+        ] {
+            assert!(session_columns.contains(&expected), "missing {expected}");
+        }
+        let payload_index = sessions_reader.schema().index_of("payload").unwrap();
+        let mut sessions_batches = sessions_reader.build().unwrap();
+        let sessions_batch = sessions_batches.next().unwrap().unwrap();
+        let payloads = sessions_batch
+            .column(payload_index)
+            .as_any()
+            .downcast_ref::<arrow_array::StringArray>()
+            .unwrap();
+        let standard_session: Value = serde_json::from_str(payloads.value(0)).unwrap();
+        assert!(standard_session.get("target_weights").is_none());
+        assert!(standard_session.get("weights_after_execution").is_none());
+        fs::write(&table, b"corrupted parquet").unwrap();
+        let corrupted = fs::read(&table).unwrap();
+        let error = storage::store_execution(
+            &experiment,
+            &identity,
+            &report,
+            Path::new(&lake),
+            ResultLevel::Standard,
+            1,
+            "2026-10-09T00:01:00Z".into(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("sessions.parquet"));
+        assert_eq!(fs::read(table).unwrap(), corrupted);
+    }
+
+    #[test]
+    fn promotion_rejects_summary_replay_mismatch_without_changing_files() {
+        let temp = TempDir::new().unwrap();
+        let (lake, dsv, universe) = scale_fixture(temp.path());
+        let mut definition = definition(&dsv, &universe);
+        definition["parameter_space"]["list"] = json!([
+            {"short": 2, "long": 5, "vol": 3, "w_s": 0.1, "w_l": 1.0, "w_v": 0.2, "trend": 20, "top_k": 1, "rebalance_every": 1},
+            {"short": 2, "long": 5, "vol": 3, "w_s": 0.2, "w_l": 1.0, "w_v": 0.2, "trend": 20, "top_k": 1, "rebalance_every": 1}
+        ]);
+        let experiment = Experiment::parse(&definition.to_string(), &lake).unwrap();
+        // Store a coherent Summary and manifest for a different result under the
+        // same identity. This is not file corruption: replay must detect drift.
+        for changed_run in 0..2 {
+            let mut report = experiment.execute(&lake, 1).unwrap();
+            report.runs[changed_run]
+                .result
+                .as_mut()
+                .unwrap()
+                .sessions
+                .last_mut()
+                .unwrap()
+                .nav += 0.25;
+            let marker = if changed_run == 0 { 'a' } else { 'b' };
+            let identity = test_execution_identity(&experiment.id().unwrap(), marker);
+            let stored = storage::store_execution(
+                &experiment,
+                &identity,
+                &report,
+                Path::new(&lake),
+                ResultLevel::Summary,
+                1,
+                "2026-10-09T00:00:00Z".into(),
+            )
+            .unwrap();
+            let manifest_path = stored.path.join("execution.json");
+            let summary_path = stored.path.join("summary.parquet");
+            let original_manifest = fs::read(&manifest_path).unwrap();
+            let original_summary = fs::read(&summary_path).unwrap();
+            let error = storage::promote(
+                &experiment,
+                &identity,
+                Path::new(&lake),
+                &identity.id,
+                std::slice::from_ref(&report.runs[0].run_id),
+                ResultLevel::Full,
+                2,
+            )
+            .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("replay mismatch for summary.parquet")
+            );
+            assert_eq!(fs::read(manifest_path).unwrap(), original_manifest);
+            assert_eq!(fs::read(summary_path).unwrap(), original_summary);
+            assert!(!stored.path.join("runs").exists());
+            assert_eq!(fs::read_dir(&stored.path).unwrap().count(), 2);
+            assert!(storage::lock_promotion(&stored.path).is_ok());
+        }
+    }
+
+    #[test]
+    fn concurrent_promotion_is_rejected_and_retry_succeeds_after_unlock() {
+        let temp = TempDir::new().unwrap();
+        let (lake, dsv, universe) = scale_fixture(temp.path());
+        let experiment =
+            Experiment::parse(&definition(&dsv, &universe).to_string(), &lake).unwrap();
+        let report = experiment.execute(&lake, 1).unwrap();
+        let identity = test_execution_identity(&experiment.id().unwrap(), 'c');
+        let stored = storage::store_execution(
+            &experiment,
+            &identity,
+            &report,
+            Path::new(&lake),
+            ResultLevel::Summary,
+            1,
+            "2026-10-09T00:00:00Z".into(),
+        )
+        .unwrap();
+        let original_manifest = fs::read(stored.path.join("execution.json")).unwrap();
+        let lock = storage::lock_promotion(&stored.path).unwrap();
+        // A separate thread opens a second handle, as a competing writer would.
+        let error = std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    storage::promote(
+                        &experiment,
+                        &identity,
+                        Path::new(&lake),
+                        &identity.id,
+                        std::slice::from_ref(&report.runs[0].run_id),
+                        ResultLevel::Full,
+                        2,
+                    )
+                })
+                .join()
+                .unwrap()
+                .unwrap_err()
+        });
+        assert!(error.to_string().contains("cannot acquire promotion lock"));
+        assert_eq!(
+            fs::read(stored.path.join("execution.json")).unwrap(),
+            original_manifest
+        );
+        assert_eq!(fs::read_dir(&stored.path).unwrap().count(), 2);
+        drop(lock);
+        let promoted = storage::promote(
+            &experiment,
+            &identity,
+            Path::new(&lake),
+            &identity.id,
+            std::slice::from_ref(&report.runs[0].run_id),
+            ResultLevel::Full,
+            2,
+        )
+        .unwrap();
+        assert_eq!(promoted.manifest.runs[0].result_level, ResultLevel::Full);
+        assert!(storage::lock_promotion(&stored.path).is_ok());
+    }
+
+    #[test]
+    fn promotion_writes_full_tables_for_one_run_and_rejects_a_different_execution() {
+        let temp = TempDir::new().unwrap();
+        let (lake, dsv, universe) = scale_fixture(temp.path());
+        let mut definition = definition(&dsv, &universe);
+        definition["parameter_space"]["list"] = json!([
+            {"short": 2, "long": 5, "vol": 3, "w_s": 0.1, "w_l": 1.0, "w_v": 0.2, "trend": 20, "top_k": 1, "rebalance_every": 1},
+            {"short": 2, "long": 5, "vol": 3, "w_s": 0.2, "w_l": 1.0, "w_v": 0.2, "trend": 20, "top_k": 1, "rebalance_every": 1}
+        ]);
+        let experiment = Experiment::parse(&definition.to_string(), &lake).unwrap();
+        let report = experiment.execute(&lake, 1).unwrap();
+        assert_eq!(report.runs.len(), 2);
+        let identity = test_execution_identity(&experiment.id().unwrap(), 'c');
+        let stored = storage::store_execution(
+            &experiment,
+            &identity,
+            &report,
+            Path::new(&lake),
+            ResultLevel::Summary,
+            1,
+            "2026-10-09T00:00:00Z".into(),
+        )
+        .unwrap();
+        let target = &report.runs[0].run_id;
+        let original_manifest = fs::read(stored.path.join("execution.json")).unwrap();
+        // An invalid later Run must leave no published tables or staging residue.
+        storage::promote(
+            &experiment,
+            &identity,
+            Path::new(&lake),
+            &identity.id,
+            &[target.clone(), "invalid-run".into()],
+            ResultLevel::Full,
+            2,
+        )
+        .unwrap_err();
+        assert_eq!(
+            fs::read(stored.path.join("execution.json")).unwrap(),
+            original_manifest
+        );
+        assert!(!stored.path.join("runs").exists());
+        assert_eq!(fs::read_dir(&stored.path).unwrap().count(), 2);
+        let promoted = storage::promote(
+            &experiment,
+            &identity,
+            Path::new(&lake),
+            &identity.id,
+            std::slice::from_ref(target),
+            ResultLevel::Full,
+            2,
+        )
+        .unwrap();
+        let mut expected_manifest: Value = serde_json::from_slice(&original_manifest).unwrap();
+        let mut actual_manifest = serde_json::to_value(&promoted.manifest).unwrap();
+        // Only per-Run saved content may change, even when replay uses more threads.
+        expected_manifest.as_object_mut().unwrap().remove("runs");
+        actual_manifest.as_object_mut().unwrap().remove("runs");
+        assert_eq!(actual_manifest, expected_manifest);
+        let mut legacy_manifest = serde_json::to_value(&stored.manifest).unwrap();
+        legacy_manifest.as_object_mut().unwrap().remove("machine");
+        let legacy: storage::ExecutionManifest = serde_json::from_value(legacy_manifest).unwrap();
+        assert!(legacy.machine.is_none());
+        let machine = promoted.manifest.machine.as_ref().unwrap();
+        assert_eq!(machine.os, std::env::consts::OS);
+        assert_eq!(machine.architecture, std::env::consts::ARCH);
+        assert_eq!(fs::read_dir(&stored.path).unwrap().count(), 3);
+        let target_record = promoted
+            .manifest
+            .runs
+            .iter()
+            .find(|run| run.run_id == *target)
+            .unwrap();
+        let other_record = promoted
+            .manifest
+            .runs
+            .iter()
+            .find(|run| run.run_id != *target)
+            .unwrap();
+        assert_eq!(target_record.result_level, ResultLevel::Full);
+        assert_eq!(target_record.table_hashes.len(), 6);
+        assert!(target_record.not_saved.is_empty());
+        assert_eq!(other_record.result_level, ResultLevel::Summary);
+        assert!(other_record.table_hashes.is_empty());
+        let other_run_dir = stored
+            .path
+            .join("runs")
+            .join(storage::run_hex(&other_record.run_id).unwrap());
+        assert!(!other_run_dir.exists());
+
+        let wrong_identity = test_execution_identity(&experiment.id().unwrap(), 'd');
+        assert!(
+            storage::promote(
+                &experiment,
+                &wrong_identity,
+                Path::new(&lake),
+                &identity.id,
+                std::slice::from_ref(target),
+                ResultLevel::Full,
+                1,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn execution_diff_rejects_other_experiments_and_locates_metric_and_table_changes() {
+        let temp = TempDir::new().unwrap();
+        let (lake, dsv, universe) = scale_fixture(temp.path());
+        let definition = definition(&dsv, &universe);
+        let experiment = Experiment::parse(&definition.to_string(), &lake).unwrap();
+        let first_report = experiment.execute(&lake, 1).unwrap();
+        let left_identity = test_execution_identity(&experiment.id().unwrap(), 'e');
+        let left = storage::store_execution(
+            &experiment,
+            &left_identity,
+            &first_report,
+            Path::new(&lake),
+            ResultLevel::Full,
+            1,
+            "2026-10-09T00:00:00Z".into(),
+        )
+        .unwrap();
+
+        let mut changed_report = experiment.execute(&lake, 1).unwrap();
+        changed_report.runs[0]
+            .result
+            .as_mut()
+            .unwrap()
+            .sessions
+            .last_mut()
+            .unwrap()
+            .nav += 0.25;
+        let right_identity = test_execution_identity(&experiment.id().unwrap(), 'f');
+        let right = storage::store_execution(
+            &experiment,
+            &right_identity,
+            &changed_report,
+            Path::new(&lake),
+            ResultLevel::Full,
+            1,
+            "2026-10-09T00:02:00Z".into(),
+        )
+        .unwrap();
+        let difference = diff_executions(&lake, &left_identity.id, &right_identity.id).unwrap();
+        assert_eq!(difference.runs.len(), 1);
+        let run = &difference.runs[0];
+        assert_ne!(run.metric_deltas["total_return"], Some(0.0));
+        let sessions = run
+            .table_differences
+            .iter()
+            .find(|table| table.table == "sessions")
+            .unwrap();
+        assert_eq!(sessions.first_different_field.as_deref(), Some("nav"));
+        assert!(sessions.first_different_key.is_some());
+
+        let mut changed_definition = definition;
+        changed_definition["sessions_per_year"] = json!(365);
+        let other_experiment = Experiment::parse(&changed_definition.to_string(), &lake).unwrap();
+        let other_report = other_experiment.execute(&lake, 1).unwrap();
+        let other_identity = test_execution_identity(&other_experiment.id().unwrap(), '0');
+        storage::store_execution(
+            &other_experiment,
+            &other_identity,
+            &other_report,
+            Path::new(&lake),
+            ResultLevel::Summary,
+            1,
+            "2026-10-09T00:03:00Z".into(),
+        )
+        .unwrap();
+        assert!(
+            diff_executions(&lake, &left_identity.id, &other_identity.id)
+                .unwrap_err()
+                .to_string()
+                .contains("different Experiments")
+        );
+        assert!(left.path.exists() && right.path.exists());
     }
 
     fn assert_vector_matches(actual: &Value, expected: &Value, path: &str, tolerance: &Value) {
