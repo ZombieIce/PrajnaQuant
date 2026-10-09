@@ -253,7 +253,7 @@ def measure(args):
                         write_json(raw_path, record)
                         if level == "summary" and not sample["summary_no_runs"]:
                             raise ValueError("summary execution contains runs/: {}".format(name))
-                        if not cli["reproducible"] or manifest["execution"]["git_revision"] != record["provenance"]["git_revision"]:
+                        if not cli["reproducible"] or manifest["execution"]["git_revision"].strip() != record["provenance"]["git_revision"]:
                             raise ValueError("provenance changed during measurement")
                         shutil.rmtree(lake)
         report = summarize(record)
