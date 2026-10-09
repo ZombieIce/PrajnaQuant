@@ -8,6 +8,7 @@ license = "MIT"
 publish = false
 
 [dependencies]
+fs2 = "0.4"
 arrow-array = "=58.4.0"
 arrow-schema = "=58.4.0"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

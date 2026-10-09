@@ -2946,6 +2946,7 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "chrono",
+ "fs2",
  "parquet",
  "polars",
  "prajna-data",

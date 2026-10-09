@@ -621,6 +621,10 @@ impl Experiment {
     }
 
     /// Adds result tables for selected Runs without changing their Run identities.
+    /// Revalidates the entire Summary before publishing any detail. A concurrent
+    /// promotion of the same Execution returns a lock error; retry after it ends.
+    /// The OS lock uses a persistent `.promotion-<execution-hex>.lock` file in
+    /// the executions directory. All promotion writers must use this API.
     pub fn promote(
         &self,
         lake_root: impl AsRef<Path>,
@@ -1856,6 +1860,126 @@ mod tests {
         .unwrap_err();
         assert!(error.to_string().contains("sessions.parquet"));
         assert_eq!(fs::read(table).unwrap(), corrupted);
+    }
+
+    #[test]
+    fn promotion_rejects_summary_replay_mismatch_without_changing_files() {
+        let temp = TempDir::new().unwrap();
+        let (lake, dsv, universe) = scale_fixture(temp.path());
+        let mut definition = definition(&dsv, &universe);
+        definition["parameter_space"]["list"] = json!([
+            {"short": 2, "long": 5, "vol": 3, "w_s": 0.1, "w_l": 1.0, "w_v": 0.2, "trend": 20, "top_k": 1, "rebalance_every": 1},
+            {"short": 2, "long": 5, "vol": 3, "w_s": 0.2, "w_l": 1.0, "w_v": 0.2, "trend": 20, "top_k": 1, "rebalance_every": 1}
+        ]);
+        let experiment = Experiment::parse(&definition.to_string(), &lake).unwrap();
+        // Store a coherent Summary and manifest for a different result under the
+        // same identity. This is not file corruption: replay must detect drift.
+        for changed_run in 0..2 {
+            let mut report = experiment.execute(&lake, 1).unwrap();
+            report.runs[changed_run]
+                .result
+                .as_mut()
+                .unwrap()
+                .sessions
+                .last_mut()
+                .unwrap()
+                .nav += 0.25;
+            let marker = if changed_run == 0 { 'a' } else { 'b' };
+            let identity = test_execution_identity(&experiment.id().unwrap(), marker);
+            let stored = storage::store_execution(
+                &experiment,
+                &identity,
+                &report,
+                Path::new(&lake),
+                ResultLevel::Summary,
+                1,
+                "2026-10-09T00:00:00Z".into(),
+            )
+            .unwrap();
+            let manifest_path = stored.path.join("execution.json");
+            let summary_path = stored.path.join("summary.parquet");
+            let original_manifest = fs::read(&manifest_path).unwrap();
+            let original_summary = fs::read(&summary_path).unwrap();
+            let error = storage::promote(
+                &experiment,
+                &identity,
+                Path::new(&lake),
+                &identity.id,
+                std::slice::from_ref(&report.runs[0].run_id),
+                ResultLevel::Full,
+                2,
+            )
+            .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("replay mismatch for summary.parquet")
+            );
+            assert_eq!(fs::read(manifest_path).unwrap(), original_manifest);
+            assert_eq!(fs::read(summary_path).unwrap(), original_summary);
+            assert!(!stored.path.join("runs").exists());
+            assert_eq!(fs::read_dir(&stored.path).unwrap().count(), 2);
+            assert!(storage::lock_promotion(&stored.path).is_ok());
+        }
+    }
+
+    #[test]
+    fn concurrent_promotion_is_rejected_and_retry_succeeds_after_unlock() {
+        let temp = TempDir::new().unwrap();
+        let (lake, dsv, universe) = scale_fixture(temp.path());
+        let experiment =
+            Experiment::parse(&definition(&dsv, &universe).to_string(), &lake).unwrap();
+        let report = experiment.execute(&lake, 1).unwrap();
+        let identity = test_execution_identity(&experiment.id().unwrap(), 'c');
+        let stored = storage::store_execution(
+            &experiment,
+            &identity,
+            &report,
+            Path::new(&lake),
+            ResultLevel::Summary,
+            1,
+            "2026-10-09T00:00:00Z".into(),
+        )
+        .unwrap();
+        let original_manifest = fs::read(stored.path.join("execution.json")).unwrap();
+        let lock = storage::lock_promotion(&stored.path).unwrap();
+        // A separate thread opens a second handle, as a competing writer would.
+        let error = std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    storage::promote(
+                        &experiment,
+                        &identity,
+                        Path::new(&lake),
+                        &identity.id,
+                        std::slice::from_ref(&report.runs[0].run_id),
+                        ResultLevel::Full,
+                        2,
+                    )
+                })
+                .join()
+                .unwrap()
+                .unwrap_err()
+        });
+        assert!(error.to_string().contains("cannot acquire promotion lock"));
+        assert_eq!(
+            fs::read(stored.path.join("execution.json")).unwrap(),
+            original_manifest
+        );
+        assert_eq!(fs::read_dir(&stored.path).unwrap().count(), 2);
+        drop(lock);
+        let promoted = storage::promote(
+            &experiment,
+            &identity,
+            Path::new(&lake),
+            &identity.id,
+            std::slice::from_ref(&report.runs[0].run_id),
+            ResultLevel::Full,
+            2,
+        )
+        .unwrap();
+        assert_eq!(promoted.manifest.runs[0].result_level, ResultLevel::Full);
+        assert!(storage::lock_promotion(&stored.path).is_ok());
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
-    fs::{self, File},
+    fs::{self, File, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
     sync::Arc,
@@ -258,6 +258,7 @@ pub(super) fn promote(
     }
     let experiment_id = experiment.id()?;
     let destination = execution_path(lake_root, &experiment_id, execution_id)?;
+    let _promotion_lock = lock_promotion(&destination)?;
     let mut manifest = read_manifest_file(&destination.join("execution.json"))?;
     if manifest.experiment_id != experiment_id || manifest.execution.id != execution_id {
         return Err(err(
@@ -283,6 +284,13 @@ pub(super) fn promote(
     // Validate and stage every requested table before touching final paths.
     let staging = create_staging_dir(&destination)?;
     let result = (|| {
+        let (_, summary_hash) =
+            write_summary(&staging.join("summary.parquet"), experiment, &report.runs)?;
+        if summary_hash != manifest.summary_logical_hash {
+            return Err(err(
+                "promotion replay mismatch for summary.parquet; stored files were not changed",
+            ));
+        }
         let mut pending = Vec::new();
         for run_id in run_ids {
             let stored_index = manifest
@@ -545,6 +553,34 @@ fn sync_tree(root: &Path) -> Result<(), ExperimentError> {
         }
     }
     sync_dir(root)
+}
+
+/// Hold this file until publication and staging cleanup complete. Keep the lock
+/// inode in the executions directory permanently: unlinking it could let a new
+/// writer lock a different inode while another writer still holds the old one.
+/// Closing the file releases the OS lock, including after process termination.
+pub(super) fn lock_promotion(destination: &Path) -> Result<File, ExperimentError> {
+    let parent = destination
+        .parent()
+        .ok_or_else(|| err("invalid Execution path"))?;
+    let name = destination
+        .file_name()
+        .ok_or_else(|| err("invalid Execution path"))?;
+    let path = parent.join(format!(".promotion-{}.lock", name.to_string_lossy()));
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(io_error(&path))?;
+    fs2::FileExt::try_lock_exclusive(&file).map_err(|error| {
+        err(format!(
+            "cannot acquire promotion lock at {} (another promotion may be active): {error}",
+            path.display()
+        ))
+    })?;
+    Ok(file)
 }
 
 fn create_staging_dir(parent: &Path) -> Result<PathBuf, ExperimentError> {
