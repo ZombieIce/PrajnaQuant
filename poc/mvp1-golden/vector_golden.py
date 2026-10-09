@@ -579,6 +579,95 @@ def build_vector_result(fixture, calendar, bars_by_symbol, factors):
     }
 
 
+def build_summary(vector, sessions_per_year):
+    sessions = vector["sessions"]
+    session_count = len(sessions)
+    returns = [row["net_return"] for row in sessions[1:]]
+    n_returns = len(returns)
+    insufficient_sessions = n_returns < 2
+    mean_return = math.fsum(returns) / n_returns if n_returns else None
+    if insufficient_sessions:
+        std_return = None
+    elif len(set(returns)) == 1:
+        # A rounded mean would turn identical returns into a tiny nonzero deviation.
+        std_return = 0.0
+    else:
+        std_return = math.sqrt(
+            math.fsum((value - mean_return) ** 2 for value in returns)
+            / (n_returns - 1)
+        )
+    zero_volatility = std_return == 0
+    annualized_volatility = (
+        std_return * math.sqrt(sessions_per_year)
+        if std_return is not None
+        else None
+    )
+    sharpe = (
+        mean_return / std_return * math.sqrt(sessions_per_year)
+        if mean_return is not None and std_return not in (None, 0)
+        else None
+    )
+
+    if sessions:
+        nav_end = sessions[-1]["nav"]
+        total_return = nav_end - 1
+        annualized_return = (
+            nav_end ** (sessions_per_year / n_returns) - 1
+            if n_returns
+            else None
+        )
+        peak_nav = 1.0
+        peak_session = sessions[0]["session_date"]
+        max_drawdown = 0.0
+        drawdown_peak_session = None
+        drawdown_trough_session = None
+        for row in sessions:
+            if row["nav"] > peak_nav:
+                peak_nav = row["nav"]
+                peak_session = row["session_date"]
+            current_drawdown = row["nav"] / peak_nav - 1
+            if current_drawdown < max_drawdown:
+                max_drawdown = current_drawdown
+                drawdown_peak_session = peak_session
+                drawdown_trough_session = row["session_date"]
+    else:
+        total_return = None
+        annualized_return = None
+        max_drawdown = None
+        drawdown_peak_session = None
+        drawdown_trough_session = None
+
+    return {
+        "total_return": total_return,
+        "annualized_return": annualized_return,
+        "n_returns": n_returns,
+        "mean_return": mean_return,
+        "std_return": std_return,
+        "annualized_volatility": annualized_volatility,
+        "sharpe": sharpe,
+        "max_drawdown": max_drawdown,
+        "drawdown_peak_session": drawdown_peak_session,
+        "drawdown_trough_session": drawdown_trough_session,
+        "total_turnover": math.fsum(row["turnover"] for row in sessions),
+        "total_cost": math.fsum(row["cost"] for row in sessions),
+        "executed_count": sum(
+            event["kind"] == "executed" for event in vector["executions"]
+        ),
+        "deferred_count": sum(
+            event["kind"] == "deferred" for event in vector["executions"]
+        ),
+        "skipped_buy_count": sum(
+            len(event["skipped_buys"]) for event in vector["executions"]
+        ),
+        "session_count": session_count,
+        "pending_at_end": vector["pending_at_end"] is not None,
+        "insufficient_sessions": insufficient_sessions,
+        "zero_volatility": zero_volatility,
+        "assumptions": vector["assumptions"],
+        "availability_assumption": vector["availability_assumption"],
+    }
+
+
 def build_output(fixture_bytes, trend_window=None):
     fixture = json.loads(fixture_bytes)
     calendar, bars_by_symbol, parameters, configured_trend = build_inputs(fixture)
@@ -690,12 +779,15 @@ def build_output(fixture_bytes, trend_window=None):
                 }
             )
 
+    vector = build_vector_result(fixture, calendar, bars_by_symbol, factors)
+    sessions_per_year = 252
     return {
         "fixture_sha256": hashlib.sha256(fixture_bytes).hexdigest(),
         "parameters": parameters,
         "tolerance": {"factor_abs": 1e-12, "nav_abs": 1e-10},
         "factors": factors,
-        "vector": build_vector_result(fixture, calendar, bars_by_symbol, factors),
+        "vector": vector,
+        "summary": build_summary(vector, sessions_per_year),
     }
 
 

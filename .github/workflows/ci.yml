@@ -91,3 +91,6 @@ jobs:
       # Nautilus-dependent tests skip here by design; the Full workflow runs them and fails on skips.
       - name: POC Python tests (Nautilus not installed)
         run: python -m unittest discover -s poc/poc0-benchmark -p 'test*.py' -v
+
+      - name: MVP-1 Vector golden tests
+        run: python -m unittest tests.test_mvp1_vector_golden -v

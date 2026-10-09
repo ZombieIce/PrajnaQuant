@@ -32,6 +32,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
+mod summary;
+pub use summary::{RunSummary, summarize};
+
 const PARAMETERS: [&str; 9] = [
     "short",
     "long",

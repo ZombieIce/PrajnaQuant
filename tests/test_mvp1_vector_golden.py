@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import math
 from pathlib import Path
@@ -99,6 +100,59 @@ class VectorGoldenTests(unittest.TestCase):
                 ],
                 "missing_input",
             )
+
+    def test_3x10_summary_matches_hand_calculated_metrics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = json.loads(self.run_cli(Path(directory) / "golden.json"))
+
+        summary = output["summary"]
+        # Ten opens span nine returns. Two proportional costs of 0.002 and
+        # 0.004 leave NAV=0.998*0.996=0.994008; the final peak/trough is Jan 5/14.
+        self.assertEqual(summary["n_returns"], 9)
+        self.assertAlmostEqual(summary["total_return"], -0.005992, delta=1e-12)
+        self.assertAlmostEqual(
+            summary["annualized_return"], 0.994008 ** (252 / 9) - 1, delta=1e-12
+        )
+        self.assertAlmostEqual(summary["mean_return"], -0.006 / 9, delta=1e-12)
+        self.assertAlmostEqual(
+            summary["std_return"], math.sqrt(2e-6), delta=1e-12
+        )
+        self.assertAlmostEqual(summary["max_drawdown"], -0.005992, delta=1e-12)
+        self.assertEqual(summary["drawdown_peak_session"], "2026-01-05")
+        self.assertEqual(summary["drawdown_trough_session"], "2026-01-14")
+        self.assertEqual(summary["total_turnover"], 3.0)
+        self.assertAlmostEqual(summary["total_cost"], 0.006, delta=1e-12)
+        self.assertEqual(summary["executed_count"], 6)
+        self.assertEqual(summary["deferred_count"], 1)
+        self.assertEqual(summary["skipped_buy_count"], 1)
+        self.assertEqual(summary["session_count"], 10)
+        self.assertTrue(summary["pending_at_end"])
+        self.assertEqual(summary["assumptions"], output["vector"]["assumptions"])
+        self.assertEqual(
+            summary["availability_assumption"],
+            output["vector"]["availability_assumption"],
+        )
+
+    def test_constant_returns_have_exact_zero_volatility_and_null_sharpe(self):
+        spec = importlib.util.spec_from_file_location("vector_golden", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for count in (3, 10):
+            sessions = [{"net_return": 0.0, "nav": 1.0, "session_date": "d0", "turnover": 0.0, "cost": 0.0}]
+            nav = 1.0
+            for index in range(count):
+                nav *= 1.1
+                sessions.append(
+                    {"net_return": 0.1, "nav": nav, "session_date": f"d{index + 1}", "turnover": 0.0, "cost": 0.0}
+                )
+            summary = module.build_summary(
+                {"sessions": sessions, "executions": [], "pending_at_end": None,
+                 "assumptions": [], "availability_assumption": "none"},
+                252,
+            )
+            self.assertEqual(summary["std_return"], 0.0)
+            self.assertIsNone(summary["sharpe"])
+            self.assertTrue(summary["zero_volatility"])
 
     def test_cli_output_is_byte_for_byte_deterministic(self):
         with tempfile.TemporaryDirectory() as directory:
