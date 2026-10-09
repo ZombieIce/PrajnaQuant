@@ -314,7 +314,10 @@ pub(super) fn promote(
             let write_result = write_rows(&stage, table, &rows);
             match write_result {
                 Ok(hash) if hash == computed_hash => {
-                    fs::hard_link(&stage, &path).map_err(io_error(&path))?;
+                    if let Err(error) = fs::hard_link(&stage, &path) {
+                        let _ = fs::remove_file(&stage);
+                        return Err(io_error(&path)(error));
+                    }
                     fs::remove_file(&stage).map_err(io_error(&stage))?;
                     sync_dir(parent)?;
                     if let Some(runs_root) = parent.parent() {
