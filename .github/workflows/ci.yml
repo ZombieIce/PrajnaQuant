@@ -94,3 +94,6 @@ jobs:
 
       - name: MVP-1 Vector golden tests
         run: python -m unittest tests.test_mvp1_vector_golden -v
+
+      - name: MVP-2 benchmark report tests
+        run: python -m unittest tests.test_mvp2_benchmark -v
