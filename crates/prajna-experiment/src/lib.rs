@@ -1882,6 +1882,24 @@ mod tests {
         )
         .unwrap();
         let target = &report.runs[0].run_id;
+        let original_manifest = fs::read(stored.path.join("execution.json")).unwrap();
+        // An invalid later Run must leave no published tables or staging residue.
+        storage::promote(
+            &experiment,
+            &identity,
+            Path::new(&lake),
+            &identity.id,
+            &[target.clone(), "invalid-run".into()],
+            ResultLevel::Full,
+            2,
+        )
+        .unwrap_err();
+        assert_eq!(
+            fs::read(stored.path.join("execution.json")).unwrap(),
+            original_manifest
+        );
+        assert!(!stored.path.join("runs").exists());
+        assert_eq!(fs::read_dir(&stored.path).unwrap().count(), 2);
         let promoted = storage::promote(
             &experiment,
             &identity,
@@ -1889,9 +1907,23 @@ mod tests {
             &identity.id,
             std::slice::from_ref(target),
             ResultLevel::Full,
-            1,
+            2,
         )
         .unwrap();
+        let mut expected_manifest: Value = serde_json::from_slice(&original_manifest).unwrap();
+        let mut actual_manifest = serde_json::to_value(&promoted.manifest).unwrap();
+        // Only per-Run saved content may change, even when replay uses more threads.
+        expected_manifest.as_object_mut().unwrap().remove("runs");
+        actual_manifest.as_object_mut().unwrap().remove("runs");
+        assert_eq!(actual_manifest, expected_manifest);
+        let mut legacy_manifest = serde_json::to_value(&stored.manifest).unwrap();
+        legacy_manifest.as_object_mut().unwrap().remove("machine");
+        let legacy: storage::ExecutionManifest = serde_json::from_value(legacy_manifest).unwrap();
+        assert!(legacy.machine.is_none());
+        let machine = promoted.manifest.machine.as_ref().unwrap();
+        assert_eq!(machine.os, std::env::consts::OS);
+        assert_eq!(machine.architecture, std::env::consts::ARCH);
+        assert_eq!(fs::read_dir(&stored.path).unwrap().count(), 3);
         let target_record = promoted
             .manifest
             .runs

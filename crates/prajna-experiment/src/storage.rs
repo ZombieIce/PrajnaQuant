@@ -65,10 +65,30 @@ pub struct ExecutionManifest {
     pub summary_logical_hash: String,
     pub runs: Vec<StoredRun>,
     pub threads: usize,
+    #[serde(default)]
+    pub machine: Option<MachineInfo>,
     pub started_at: String,
     pub finished_at: String,
     pub factor_time_ms: u128,
     pub run_time_ms: u128,
+}
+
+/// Informational provenance; excluded from every content identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineInfo {
+    pub os: String,
+    pub architecture: String,
+    pub available_parallelism: Option<usize>,
+}
+
+impl MachineInfo {
+    fn current() -> Self {
+        Self {
+            os: std::env::consts::OS.into(),
+            architecture: std::env::consts::ARCH.into(),
+            available_parallelism: std::thread::available_parallelism().ok().map(usize::from),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,6 +216,7 @@ pub(super) fn store_execution(
             summary_logical_hash: summary_hash,
             runs: stored_runs,
             threads,
+            machine: Some(MachineInfo::current()),
             started_at,
             finished_at: now_rfc3339(),
             factor_time_ms: report.factor_time_ms,
@@ -259,100 +280,103 @@ pub(super) fn promote(
         .iter()
         .map(|run| (run.run_id.as_str(), run))
         .collect::<BTreeMap<_, _>>();
-    for run_id in run_ids {
-        let stored_index = manifest
-            .runs
-            .iter()
-            .position(|run| run.run_id == *run_id)
-            .ok_or_else(|| err(format!("Run {run_id} is not part of this Execution")))?;
-        let old_level = manifest.runs[stored_index].result_level;
-        if level <= old_level {
-            return Err(err(format!(
-                "Run {run_id} cannot be promoted from {old_level} to {level}"
-            )));
-        }
-        let run = executions
-            .get(run_id.as_str())
-            .ok_or_else(|| err(format!("current Experiment did not produce Run {run_id}")))?;
-        if run.status != RunStatus::Completed {
-            return Err(err(format!(
-                "Run {run_id} failed during promotion: {}",
-                run.error.as_deref().unwrap_or("unknown error")
-            )));
-        }
-        let vector = run
-            .result
-            .as_ref()
-            .ok_or_else(|| err(format!("Run {run_id} has no Vector result")))?;
-        let existing_hashes = manifest.runs[stored_index].table_hashes.clone();
-        let tables = level.tables();
-        for table in tables {
-            let rows = result_rows(vector, table)?;
-            let path = destination
-                .join("runs")
-                .join(run_hex(run_id)?)
-                .join(format!("{table}.parquet"));
-            let computed_hash = row_hash(table, &rows)?;
-            if let Some(existing_hash) = existing_hashes.get(*table) {
-                let actual_hash = read_rows_hash(&path, table)?;
-                if &actual_hash != existing_hash || actual_hash != computed_hash {
-                    return Err(err(format!(
-                        "promotion replay mismatch for run {run_id}, table {table}"
-                    )));
-                }
-                continue;
-            }
-            let parent = path.parent().ok_or_else(|| err("invalid Run table path"))?;
-            fs::create_dir_all(parent).map_err(io_error(parent))?;
-            if path.exists() {
+    // Validate and stage every requested table before touching final paths.
+    let staging = create_staging_dir(&destination)?;
+    let result = (|| {
+        let mut pending = Vec::new();
+        for run_id in run_ids {
+            let stored_index = manifest
+                .runs
+                .iter()
+                .position(|run| run.run_id == *run_id)
+                .ok_or_else(|| err(format!("Run {run_id} is not part of this Execution")))?;
+            let old_level = manifest.runs[stored_index].result_level;
+            if level <= old_level {
                 return Err(err(format!(
-                    "untracked table already exists at {}; refusing to overwrite it",
-                    path.display()
+                    "Run {run_id} cannot be promoted from {old_level} to {level}"
                 )));
             }
-            let stage = parent.join(format!(".{table}.staging-{}", next_stage_id()));
-            let write_result = write_rows(&stage, table, &rows);
-            match write_result {
-                Ok(hash) if hash == computed_hash => {
-                    if let Err(error) = fs::hard_link(&stage, &path) {
-                        let _ = fs::remove_file(&stage);
-                        return Err(io_error(&path)(error));
+            let run = executions
+                .get(run_id.as_str())
+                .ok_or_else(|| err(format!("current Experiment did not produce Run {run_id}")))?;
+            if run.status != RunStatus::Completed {
+                return Err(err(format!(
+                    "Run {run_id} failed during promotion: {}",
+                    run.error.as_deref().unwrap_or("unknown error")
+                )));
+            }
+            let vector = run
+                .result
+                .as_ref()
+                .ok_or_else(|| err(format!("Run {run_id} has no Vector result")))?;
+            let existing_hashes = manifest.runs[stored_index].table_hashes.clone();
+            let tables = level.tables();
+            for table in tables {
+                let rows = result_rows(vector, table)?;
+                let path = destination
+                    .join("runs")
+                    .join(run_hex(run_id)?)
+                    .join(format!("{table}.parquet"));
+                let computed_hash = row_hash(table, &rows)?;
+                if let Some(existing_hash) = existing_hashes.get(*table) {
+                    let actual_hash = read_rows_hash(&path, table)?;
+                    if &actual_hash != existing_hash || actual_hash != computed_hash {
+                        return Err(err(format!(
+                            "promotion replay mismatch for run {run_id}, table {table}"
+                        )));
                     }
-                    fs::remove_file(&stage).map_err(io_error(&stage))?;
-                    sync_dir(parent)?;
-                    if let Some(runs_root) = parent.parent() {
-                        sync_dir(runs_root)?;
-                    }
-                    manifest.runs[stored_index]
-                        .table_hashes
-                        .insert((*table).into(), hash);
+                    continue;
                 }
-                Ok(_) => {
-                    let _ = fs::remove_file(&stage);
+                if path.exists() {
+                    return Err(err(format!(
+                        "untracked table already exists at {}; refusing to overwrite it",
+                        path.display()
+                    )));
+                }
+                let stage = staging.join(format!("{}.parquet", pending.len()));
+                let hash = write_rows(&stage, table, &rows)?;
+                if hash != computed_hash {
                     return Err(err(format!(
                         "logical hash changed while writing run {run_id}, table {table}"
                     )));
                 }
-                Err(error) => {
-                    let _ = fs::remove_file(&stage);
-                    return Err(error);
-                }
-            }
-        }
-        manifest.runs[stored_index].result_level = level;
-        manifest.runs[stored_index].not_saved = FULL_TABLES
-            .iter()
-            .filter(|table| {
-                !manifest.runs[stored_index]
+                pending.push((stage, path));
+                manifest.runs[stored_index]
                     .table_hashes
-                    .contains_key(**table)
-            })
-            .map(|table| (*table).to_owned())
-            .collect();
+                    .insert((*table).into(), hash);
+            }
+            manifest.runs[stored_index].result_level = level;
+            manifest.runs[stored_index].not_saved = FULL_TABLES
+                .iter()
+                .filter(|table| {
+                    !manifest.runs[stored_index]
+                        .table_hashes
+                        .contains_key(**table)
+                })
+                .map(|table| (*table).to_owned())
+                .collect();
+        }
+        let staged_manifest = staging.join("execution.json");
+        write_json_synced(&staged_manifest, &manifest)?;
+        sync_dir(&staging)?;
+        publish_promotion(&pending, || {
+            fs::rename(&staged_manifest, destination.join("execution.json"))
+                .map_err(io_error(&destination))
+        })?;
+        // Rename is the commit point. A later sync error must not roll back
+        // tables referenced by the newly committed manifest.
+        sync_dir(&destination)
+    })();
+    let cleanup = fs::remove_dir_all(&staging).map_err(io_error(&staging));
+    if let Err(error) = result {
+        return match cleanup {
+            Ok(()) => Err(error),
+            Err(cleanup_error) => Err(err(format!(
+                "{error}; staging cleanup failed: {cleanup_error}"
+            ))),
+        };
     }
-    manifest.threads = threads;
-    manifest.finished_at = now_rfc3339();
-    replace_json_synced(&destination.join("execution.json"), &manifest)?;
+    cleanup?;
     Ok(StoredExecution {
         manifest,
         path: destination,
@@ -601,12 +625,61 @@ fn write_json_synced(path: &Path, value: &impl Serialize) -> Result<(), Experime
         .map_err(io_error(path))
 }
 
-fn replace_json_synced(path: &Path, value: &impl Serialize) -> Result<(), ExperimentError> {
-    let parent = path.parent().ok_or_else(|| err("invalid manifest path"))?;
-    let staging = parent.join(format!(".execution.json.staging-{}", next_stage_id()));
-    write_json_synced(&staging, value)?;
-    fs::rename(&staging, path).map_err(io_error(path))?;
-    sync_dir(parent)
+/// Publish immutable additions, rolling back only files/directories we created
+/// if publication or the manifest commit fails. Existing paths are never removed.
+fn publish_promotion(
+    pending: &[(PathBuf, PathBuf)],
+    commit: impl FnOnce() -> Result<(), ExperimentError>,
+) -> Result<(), ExperimentError> {
+    let mut published = Vec::new();
+    let mut created_dirs = Vec::new();
+    let result = (|| {
+        for (stage, path) in pending {
+            let parent = path.parent().ok_or_else(|| err("invalid Run table path"))?;
+            let mut missing = Vec::new();
+            let mut ancestor = parent;
+            while !ancestor.exists() {
+                missing.push(ancestor.to_path_buf());
+                ancestor = ancestor
+                    .parent()
+                    .ok_or_else(|| err("invalid Run directory"))?;
+            }
+            for directory in missing.into_iter().rev() {
+                fs::create_dir(&directory).map_err(io_error(&directory))?;
+                created_dirs.push(directory);
+            }
+            fs::hard_link(stage, path).map_err(io_error(path))?;
+            published.push(path.clone());
+            sync_dir(parent)?;
+        }
+        for directory in created_dirs.iter().rev() {
+            if let Some(parent) = directory.parent() {
+                sync_dir(parent)?;
+            }
+        }
+        commit()
+    })();
+    if let Err(error) = result {
+        let mut cleanup_errors = Vec::new();
+        for path in published.iter().rev() {
+            if let Err(cleanup) = fs::remove_file(path) {
+                cleanup_errors.push(format!("{}: {cleanup}", path.display()));
+            }
+        }
+        for directory in created_dirs.iter().rev() {
+            if let Err(cleanup) = fs::remove_dir(directory) {
+                cleanup_errors.push(format!("{}: {cleanup}", directory.display()));
+            }
+        }
+        if !cleanup_errors.is_empty() {
+            return Err(err(format!(
+                "{error}; rollback failed: {}",
+                cleanup_errors.join("; ")
+            )));
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn read_manifest_file(path: &Path) -> Result<ExecutionManifest, ExperimentError> {
@@ -659,7 +732,6 @@ fn write_summary(
     let mut rebalance = Vec::with_capacity(runs.len());
     let mut statuses = Vec::with_capacity(runs.len());
     let mut errors = Vec::with_capacity(runs.len());
-    let mut summaries = Vec::with_capacity(runs.len());
     let mut summary_json = Vec::with_capacity(runs.len());
     let mut stored = Vec::with_capacity(runs.len());
     for run in runs {
@@ -686,14 +758,13 @@ fn write_summary(
             .to_owned(),
         ));
         errors.push(run.error.clone());
-        summaries.push(
+        summary_json.push(
             summary
                 .as_ref()
                 .map(serde_json::to_string)
                 .transpose()
                 .map_err(|error| err(error.to_string()))?,
         );
-        summary_json.push(summaries.last().cloned().flatten());
         stored.push(StoredRow {
             run_id: run.run_id.clone(),
             summary,
@@ -714,33 +785,29 @@ fn write_summary(
         Arc::new(Int64Array::from(rebalance)),
         Arc::new(StringArray::from(statuses)),
         Arc::new(StringArray::from(errors)),
-        summary_float(runs, experiment, |summary| summary.total_return)?,
-        summary_float(runs, experiment, |summary| summary.annualized_return)?,
-        summary_integer(runs, experiment, |summary| summary.n_returns)?,
-        summary_float(runs, experiment, |summary| summary.mean_return)?,
-        summary_float(runs, experiment, |summary| summary.std_return)?,
-        summary_float(runs, experiment, |summary| summary.annualized_volatility)?,
-        summary_float(runs, experiment, |summary| summary.sharpe)?,
-        summary_float(runs, experiment, |summary| summary.max_drawdown)?,
-        summary_string(runs, experiment, |summary| {
-            summary.drawdown_peak_session.clone()
-        })?,
-        summary_string(runs, experiment, |summary| {
-            summary.drawdown_trough_session.clone()
-        })?,
-        summary_float(runs, experiment, |summary| Some(summary.total_turnover))?,
-        summary_float(runs, experiment, |summary| Some(summary.total_cost))?,
-        summary_integer(runs, experiment, |summary| summary.executed_count)?,
-        summary_integer(runs, experiment, |summary| summary.deferred_count)?,
-        summary_integer(runs, experiment, |summary| summary.skipped_buy_count)?,
-        summary_integer(runs, experiment, |summary| summary.session_count)?,
-        summary_bool(runs, experiment, |summary| summary.pending_at_end)?,
-        summary_bool(runs, experiment, |summary| summary.insufficient_sessions)?,
-        summary_bool(runs, experiment, |summary| summary.zero_volatility)?,
-        summary_string(runs, experiment, |summary| {
+        summary_float(&stored, |summary| summary.total_return)?,
+        summary_float(&stored, |summary| summary.annualized_return)?,
+        summary_integer(&stored, |summary| summary.n_returns)?,
+        summary_float(&stored, |summary| summary.mean_return)?,
+        summary_float(&stored, |summary| summary.std_return)?,
+        summary_float(&stored, |summary| summary.annualized_volatility)?,
+        summary_float(&stored, |summary| summary.sharpe)?,
+        summary_float(&stored, |summary| summary.max_drawdown)?,
+        summary_string(&stored, |summary| summary.drawdown_peak_session.clone())?,
+        summary_string(&stored, |summary| summary.drawdown_trough_session.clone())?,
+        summary_float(&stored, |summary| Some(summary.total_turnover))?,
+        summary_float(&stored, |summary| Some(summary.total_cost))?,
+        summary_integer(&stored, |summary| summary.executed_count)?,
+        summary_integer(&stored, |summary| summary.deferred_count)?,
+        summary_integer(&stored, |summary| summary.skipped_buy_count)?,
+        summary_integer(&stored, |summary| summary.session_count)?,
+        summary_bool(&stored, |summary| summary.pending_at_end)?,
+        summary_bool(&stored, |summary| summary.insufficient_sessions)?,
+        summary_bool(&stored, |summary| summary.zero_volatility)?,
+        summary_string(&stored, |summary| {
             Some(serde_json::to_string(&summary.assumptions).unwrap_or_default())
         })?,
-        summary_string(runs, experiment, |summary| {
+        summary_string(&stored, |summary| {
             Some(summary.availability_assumption.clone())
         })?,
         Arc::new(StringArray::from(summary_json)),
@@ -792,63 +859,47 @@ fn summary_schema() -> Arc<Schema> {
 }
 
 fn summary_float(
-    runs: &[RunExecution],
-    experiment: &Experiment,
+    runs: &[StoredRow],
     select: impl Fn(&RunSummary) -> Option<f64>,
 ) -> Result<ArrayRef, ExperimentError> {
     let values = runs
         .iter()
-        .map(|run| {
-            run.result
-                .as_ref()
-                .and_then(|result| select(&summarize(result, experiment.sessions_per_year())))
-        })
+        .map(|run| run.summary.as_ref().and_then(&select))
         .collect::<Vec<_>>();
     Ok(Arc::new(Float64Array::from(values)))
 }
 fn summary_integer(
-    runs: &[RunExecution],
-    experiment: &Experiment,
+    runs: &[StoredRow],
     select: impl Fn(&RunSummary) -> usize,
 ) -> Result<ArrayRef, ExperimentError> {
     let values = runs
         .iter()
         .map(|run| {
-            run.result
+            run.summary
                 .as_ref()
-                .map(|result| to_i64(select(&summarize(result, experiment.sessions_per_year()))))
+                .map(|result| to_i64(select(result)))
                 .transpose()
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Arc::new(Int64Array::from(values)))
 }
 fn summary_string(
-    runs: &[RunExecution],
-    experiment: &Experiment,
+    runs: &[StoredRow],
     select: impl Fn(&RunSummary) -> Option<String>,
 ) -> Result<ArrayRef, ExperimentError> {
     let values = runs
         .iter()
-        .map(|run| {
-            run.result
-                .as_ref()
-                .and_then(|result| select(&summarize(result, experiment.sessions_per_year())))
-        })
+        .map(|run| run.summary.as_ref().and_then(&select))
         .collect::<Vec<_>>();
     Ok(Arc::new(StringArray::from(values)))
 }
 fn summary_bool(
-    runs: &[RunExecution],
-    experiment: &Experiment,
+    runs: &[StoredRow],
     select: impl Fn(&RunSummary) -> bool,
 ) -> Result<ArrayRef, ExperimentError> {
     let values = runs
         .iter()
-        .map(|run| {
-            run.result
-                .as_ref()
-                .map(|result| select(&summarize(result, experiment.sessions_per_year())))
-        })
+        .map(|run| run.summary.as_ref().map(&select))
         .collect::<Vec<_>>();
     Ok(Arc::new(BooleanArray::from(values)))
 }
@@ -1632,5 +1683,51 @@ fn metric_value(summary: &RunSummary, name: &str) -> Option<f64> {
         "skipped_buy_count" => Some(summary.skipped_buy_count as f64),
         "session_count" => Some(summary.session_count as f64),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod promotion_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn later_publication_failure_rolls_back_additions_and_allows_retry() {
+        let temp = TempDir::new().unwrap();
+        let first_stage = temp.path().join("first.stage");
+        let second_stage = temp.path().join("second.stage");
+        fs::write(&first_stage, b"first").unwrap();
+        fs::write(&second_stage, b"second").unwrap();
+        let first = temp.path().join("runs/new/first.parquet");
+        let second = temp.path().join("runs/existing/second.parquet");
+        fs::create_dir_all(second.parent().unwrap()).unwrap();
+        fs::write(&second, b"preexisting").unwrap();
+        let pending = vec![(first_stage, first.clone()), (second_stage, second.clone())];
+        let error = publish_promotion(&pending, || panic!("must not commit")).unwrap_err();
+        assert!(error.to_string().contains("second.parquet"));
+        assert!(!first.exists());
+        assert!(!first.parent().unwrap().exists());
+        assert_eq!(fs::read(&second).unwrap(), b"preexisting");
+        fs::remove_file(&second).unwrap();
+        publish_promotion(&pending, || Ok(())).unwrap();
+        assert_eq!(fs::read(&first).unwrap(), b"first");
+        assert_eq!(fs::read(&second).unwrap(), b"second");
+    }
+
+    #[test]
+    fn manifest_commit_failure_rolls_back_every_published_table() {
+        let temp = TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        fs::write(&stage, b"table").unwrap();
+        let first = temp.path().join("runs/a/first.parquet");
+        let second = temp.path().join("runs/b/second.parquet");
+        let pending = vec![(stage.clone(), first.clone()), (stage, second.clone())];
+        publish_promotion(&pending, || {
+            assert!(first.exists() && second.exists());
+            Err(err("injected manifest rename failure"))
+        })
+        .unwrap_err();
+        assert!(!temp.path().join("runs").exists());
+        publish_promotion(&pending, || Ok(())).unwrap();
     }
 }
