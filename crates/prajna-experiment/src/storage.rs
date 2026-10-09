@@ -906,7 +906,19 @@ fn result_rows(
     match table {
         "sessions" => {
             for session in &result.sessions {
-                rows.push((session.session_date.clone(), json_payload(session)?));
+                let payload = serde_json::json!({
+                    "session_date": session.session_date,
+                    "nav": session.nav,
+                    "gross_return": session.gross_return,
+                    "net_return": session.net_return,
+                    "turnover": session.turnover,
+                    "cost": session.cost,
+                    "valuation_carried": session.valuation_carried,
+                });
+                rows.push((
+                    session.session_date.clone(),
+                    serde_json::to_string(&payload).map_err(|error| err(error.to_string()))?,
+                ));
             }
         }
         "executions" => {

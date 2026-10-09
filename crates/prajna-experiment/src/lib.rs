@@ -1831,6 +1831,17 @@ mod tests {
         ] {
             assert!(session_columns.contains(&expected), "missing {expected}");
         }
+        let payload_index = sessions_reader.schema().index_of("payload").unwrap();
+        let mut sessions_batches = sessions_reader.build().unwrap();
+        let sessions_batch = sessions_batches.next().unwrap().unwrap();
+        let payloads = sessions_batch
+            .column(payload_index)
+            .as_any()
+            .downcast_ref::<arrow_array::StringArray>()
+            .unwrap();
+        let standard_session: Value = serde_json::from_str(payloads.value(0)).unwrap();
+        assert!(standard_session.get("target_weights").is_none());
+        assert!(standard_session.get("weights_after_execution").is_none());
         fs::write(&table, b"corrupted parquet").unwrap();
         let corrupted = fs::read(&table).unwrap();
         let error = storage::store_execution(
