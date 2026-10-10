@@ -12,6 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 GOLDEN = ROOT / "poc/mvp3-golden"
 SCRIPT = GOLDEN / "fast_event_golden.py"
 HAND = GOLDEN / "fixtures/hand-v1.json"
+RETRY = GOLDEN / "fixtures/hand-retry-v1.json"
+REBALANCE = GOLDEN / "fixtures/hand-rebalance-v1.json"
 SMALL = ROOT / "poc/poc0-benchmark/fixtures/dataset-v1.json"
 MA = ROOT / "poc/poc0-benchmark/fixtures/b2-ma20-60-v1.json"
 
@@ -151,9 +153,13 @@ class FastEventGoldenTests(unittest.TestCase):
         self.assertEqual(result["executions"][1]["retry_only"], True)
         self.assertIsNone(result["pending_at_end"])
         self.assertEqual(result["sessions"][2]["open"]["holdings"]["A.SYNTH"]["quantity"], 50)
-        self.assertIn("vector_parity retry cash shortfall", self.run_cli(
-            fixture, sizing="vector_parity", expect_error=True,
-        ))
+        # ADR 0019: parity retry also cuts the budget to cash instead of failing.
+        cut = self.run_cli(fixture, sizing="vector_parity")
+        self.assertEqual(
+            [(fill["instrument_id"], fill["quantity"]) for fill in cut["fills"]],
+            [("A.SYNTH", 50), ("B.SYNTH", 50)],
+        )
+        self.assertAlmostEqual(cut["sessions"][-1]["close"]["cash"], 0, delta=1e-9)
         for sizing in ("lot", "vector_parity"):
             skipped = self.run_cli(fixture, sizing=sizing, retry="skip")
             self.assertEqual(len(skipped["fills"]), 1)
@@ -195,7 +201,9 @@ class FastEventGoldenTests(unittest.TestCase):
             self.assertTrue(all(order["status"] == "blocked" for order in result["orders"]))
 
     def test_committed_goldens_recompute_every_value_and_preserve_ledger(self):
-        cases = [(SMALL, strategy) for strategy in ("s1", "s2", "s3")] + [(MA, "s3"), (HAND, "s1")]
+        cases = [(SMALL, strategy) for strategy in ("s1", "s2", "s3")] + [
+            (MA, "s3"), (HAND, "s1"), (RETRY, "s1"), (REBALANCE, "s2"),
+        ]
         for fixture, strategy in cases:
             for sizing in ("lot", "vector_parity"):
                 with self.subTest(fixture=fixture.name, strategy=strategy, sizing=sizing):
@@ -347,3 +355,32 @@ class FastEventGoldenTests(unittest.TestCase):
         result = self.run_cli(fixture, strategy="s2")
         self.assertEqual(result["decisions"][0]["session_date"], fixture["calendar"][2])
         self.assertEqual(result["decisions"][0]["targets"], {"A.SYNTH": 1})
+
+    def test_costed_parity_retry_budget_uses_pre_fee_equity_and_cuts_to_cash(self):
+        result = self.run_cli(RETRY, sizing="vector_parity")
+        first, retry = result["fills"]
+        # D2: E0=1000, cost=5, A=0.5*995/10. D3: E0=497.5+49.75*10=995.
+        self.assertEqual(first["quantity"], 49.75)
+        self.assertEqual(result["executions"][1]["retry_only"], True)
+        # Budget 0.5*995 does not fit with 1% fee: buy = cash_weight/1.01.
+        budget = 995 * (497.5 / 995) / 1.01
+        self.assertAlmostEqual(retry["notional"], budget, delta=1e-9)
+        self.assertAlmostEqual(retry["commission"], budget * 0.01, delta=1e-9)
+        self.assertAlmostEqual(retry["quantity"], budget / 10, delta=1e-9)
+        self.assertAlmostEqual(result["sessions"][-1]["close"]["cash"], 0, delta=1e-9)
+        self.assertEqual(first["quantity"], result["sessions"][2]["open"]["holdings"]["A.SYNTH"]["quantity"])
+
+    def test_continuing_holdings_are_trimmed_and_topped_up_by_full_target(self):
+        result = self.run_cli(REBALANCE, strategy="s2", sizing="vector_parity")
+        trim, top_up = [fill for fill in result["fills"] if fill["session_date"] == "2026-01-09"]
+        # D5 open: A=49.5*15, B=49.5*10, E0=1237.5; each target 0.5 after 2.475 cost.
+        self.assertEqual((trim["instrument_id"], trim["side"]), ("A.SYNTH", "sell"))
+        self.assertAlmostEqual(trim["quantity"], 49.5 - 0.5 * 1235.025 / 15, delta=1e-9)
+        self.assertEqual((top_up["instrument_id"], top_up["side"]), ("B.SYNTH", "buy"))
+        self.assertAlmostEqual(top_up["quantity"], 0.5 * 1235.025 / 10 - 49.5, delta=1e-9)
+
+    def test_float_zero_weight_delta_is_no_trade_not_a_dust_fill(self):
+        result = self.run_cli(SMALL, strategy="s2", sizing="vector_parity")
+        self.assertTrue(all(fill["quantity"] > 1e-6 for fill in result["fills"]))
+        self.assertTrue(all(order["quantity"] is None or order["quantity"] > 1e-6
+                            for order in result["orders"]))

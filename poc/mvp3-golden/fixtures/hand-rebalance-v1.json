@@ -1,0 +1,87 @@
+{
+  "dataset_version": "mvp3.synthetic.hand-rebalance.v1",
+  "calendar": [
+    "2026-01-05",
+    "2026-01-06",
+    "2026-01-07",
+    "2026-01-08",
+    "2026-01-09",
+    "2026-01-12"
+  ],
+  "bar_defaults": {
+    "open": 10.0,
+    "open_available_at": "09:30:00+08:00",
+    "close_available_at": "15:00:00+08:00"
+  },
+  "instruments": [
+    {
+      "symbol": "A",
+      "lot_size": 1,
+      "opens": [
+        10,
+        10,
+        10,
+        10,
+        15,
+        15
+      ],
+      "closes": [
+        10,
+        10,
+        12,
+        15,
+        15,
+        15
+      ]
+    },
+    {
+      "symbol": "B",
+      "lot_size": 1,
+      "opens": [
+        10,
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "closes": [
+        10,
+        10,
+        10,
+        10,
+        10,
+        10
+      ]
+    }
+  ],
+  "execution_status_default": {
+    "trade_status": "TRADABLE",
+    "is_tradable": true,
+    "available_at": "08:50:00+08:00"
+  },
+  "account": {
+    "initial_cash": 1000.0
+  },
+  "costs": {
+    "commission_rate": 0.01,
+    "minimum_commission": 0.0,
+    "buy_tax_rate": 0.0,
+    "sell_tax_rate": 0.0,
+    "buy_slippage_bps": 0.0,
+    "sell_slippage_bps": 0.0
+  },
+  "strategy": {
+    "name": "Momentum Rotation",
+    "version": "hand-rebalance-v1",
+    "momentum_short_days": 1,
+    "momentum_long_days": 1,
+    "volatility_window": 2,
+    "short_momentum_weight": 1.0,
+    "long_momentum_weight": 0.0,
+    "volatility_weight": 0.0,
+    "trend_filter": false,
+    "top_n": 2,
+    "rebalance_every": 1
+  }
+}

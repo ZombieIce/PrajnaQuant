@@ -1,0 +1,61 @@
+{
+  "dataset_version": "mvp3.synthetic.hand-retry.v1",
+  "calendar": [
+    "2026-01-05",
+    "2026-01-06",
+    "2026-01-07",
+    "2026-01-08"
+  ],
+  "bar_defaults": {
+    "open": 10.0,
+    "open_available_at": "09:30:00+08:00",
+    "close_available_at": "15:00:00+08:00"
+  },
+  "instruments": [
+    {
+      "symbol": "A",
+      "lot_size": 1,
+      "closes": [
+        10.0,
+        10.0,
+        10.0,
+        10.0
+      ]
+    },
+    {
+      "symbol": "B",
+      "lot_size": 1,
+      "closes": [
+        10.0,
+        10.0,
+        10.0,
+        10.0
+      ]
+    }
+  ],
+  "execution_status_default": {
+    "trade_status": "TRADABLE",
+    "is_tradable": true,
+    "available_at": "08:50:00+08:00"
+  },
+  "account": {
+    "initial_cash": 1000.0
+  },
+  "costs": {
+    "commission_rate": 0.01,
+    "minimum_commission": 0.0,
+    "buy_tax_rate": 0.0,
+    "sell_tax_rate": 0.0,
+    "buy_slippage_bps": 0.0,
+    "sell_slippage_bps": 0.0
+  },
+  "execution_status_overrides": [
+    {
+      "symbol": "B",
+      "date": "2026-01-06",
+      "trade_status": "HALTED",
+      "is_tradable": false,
+      "available_at": "08:50:00+08:00"
+    }
+  ]
+}

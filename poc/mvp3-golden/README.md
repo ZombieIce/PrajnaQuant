@@ -17,6 +17,8 @@ Hashes are SHA-256 of the exact committed source bytes, also included as
 | [dataset-v1.json](../poc0-benchmark/fixtures/dataset-v1.json) | Hand-authored 3 instruments x 10 Sessions; S1/S2/S3, UNKNOWN C, HALTED B, missing B bar, nonzero costs | `9b9009b1586a6f271cd301042f97f2adf84146c870d72802682799d60352ed85` |
 | [b2-ma20-60-v1.json](../poc0-benchmark/fixtures/b2-ma20-60-v1.json) | Compressed 3 x 130; S3 | `953218548395293b07148554c57ddc64440f9feb2e7cf8fc37de4dec0c3ee49d` |
 | [hand-v1.json](fixtures/hand-v1.json) | New hand-authored 1 x 3; S1 fee/accounting example | `87acfaa5f180dc388b0643d9618e49332f44e1a6e35e4b49af588d7c07f94aa6` |
+| [hand-retry-v1.json](fixtures/hand-retry-v1.json) | Hand-authored 2 x 4; S1 costed retry of a HALTED leg, budget cut to cash | `18124241deea15d6e99feac4cbd544c2b612fa70e71ff407128888c39867065a` |
+| [hand-rebalance-v1.json](fixtures/hand-rebalance-v1.json) | Hand-authored 2 x 6; S2 `top_n=2` continuing holdings trimmed/topped up with costs | `4ea9162adbb0f8d0bbaa3eeda8f5c19d3fd79a032137884ede7195f86e13bcec` |
 
 The compressed MA fixture expands into weekdays from `start_date`, with
 60 flat, 20 high and 50 low closes for A; B/C remain flat. Opens are 100.
@@ -52,11 +54,19 @@ for sizing in lot vector_parity; do
     --fixture poc/mvp3-golden/fixtures/hand-v1.json \
     --strategy s1 --sizing "$sizing" \
     --out "poc/mvp3-golden/expected/hand-v1.s1.$sizing.json"
+  python3 poc/mvp3-golden/fast_event_golden.py \
+    --fixture poc/mvp3-golden/fixtures/hand-retry-v1.json \
+    --strategy s1 --sizing "$sizing" \
+    --out "poc/mvp3-golden/expected/hand-retry-v1.s1.$sizing.json"
+  python3 poc/mvp3-golden/fast_event_golden.py \
+    --fixture poc/mvp3-golden/fixtures/hand-rebalance-v1.json \
+    --strategy s2 --sizing "$sizing" \
+    --out "poc/mvp3-golden/expected/hand-rebalance-v1.s2.$sizing.json"
 done
 python3 -m unittest tests.test_mvp3_fast_event_golden -v
 ```
 
-The ten expected JSON files contain every open-after-execution and close
+The fourteen expected JSON files contain every open-after-execution and close
 cash/quantity/valuation/equity/NAV row, decisions, execution attempts,
 orders (including blocked/unaffordable attempts), Fills and fee components.
 All rows and numeric values are compared with CLI recomputation in CI,
@@ -122,8 +132,14 @@ use these bases. E1 = E0 - sum(costs); full_target quantities are
 target * E1 / raw open. Fills use raw open. A cost-induced reduction can
 sell a continuing holding with zero weight-delta fee basis; therefore
 `fee_side` records the basis direction separately from the actual Fill side.
-Minimum commission and lots do not apply. Retry leaves filled quantities
-unchanged and applies sizing only to missing legs.
+Minimum commission and lots do not apply. A leg whose absolute weight delta
+is <= 1e-12 is a no-trade: it has no Order, Fill or fee basis, so float
+residue never becomes a dust Fill. Retry leaves filled quantities unchanged
+and sizes only missing legs per ADR 0019 (#116): budget is the original
+target weight times pre-fee open equity, fees are paid from remaining cash,
+and budgets are cut in ascending `instrument_id` order to
+`cash_weight / (1 + buy_rate)` where `buy_rate` is commission + buy slippage
++ buy tax. Filled legs never change; a cash cut adds no new pending.
 
 Each Fill saves notional, fee basis, commission, minimum-commission top-up
 (already included in commission), tax, slippage, `cash_fees`, `total_cost`,
@@ -148,19 +164,6 @@ Python reproduces Rust scale-18 rounding. No extra fractional-quantity
 tolerance is authorized by this oracle. The same Python CLI replay checks
 every saved value exactly. Existing Vector S2 fixtures are independently
 checked for decisions/attempts and open NAV alignment.
-
-### Unresolved F5/F8 boundary
-
-When retry freezes an already filled leg, missing-leg target * current
-equity (and parity's E1 cost adjustment) can exceed remaining cash.
-Appreciation **or nonzero retry fees** can cause this. The owner approved
-explicit rejection of cash-insufficient parity retry instead of silently
-adding leverage, shrinking unrelated filled legs, or inventing a new
-fee/quantity rule. The CLI raises `vector_parity retry cash shortfall`,
-exits nonzero and emits no result. Cash-sufficient retry and lot cash
-reductions are tested. Follow-up must settle the F5/F8 contract before
-claiming unrestricted parity retry; this is not a change to other tickets'
-acceptance criteria.
 
 ## Line-by-line hand example (1 instrument x 3 Sessions)
 

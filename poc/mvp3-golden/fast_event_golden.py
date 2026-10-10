@@ -165,16 +165,49 @@ def lot_fill(instrument, side, quantity, raw, costs):
     }
 
 
-def parity_fills(quantities, targets, prices, equity, costs, retry_only):
+NO_TRADE_WEIGHT = 1e-12
+
+
+def parity_retry_fills(quantities, targets, prices, equity, cash, costs):
+    # ADR 0019 #116: pre-fee budget, fees paid from remaining cash, cut by ID order.
+    rate = costs["commission_rate"] + costs["buy_slippage_bps"] / 10000 + costs["buy_tax_rate"]
+    held = math.fsum(quantity * prices[i] for i, quantity in quantities.items() if quantity > 0)
+    cash_weight = max(1 - held / equity, 0.0) if equity > 0 else 0.0
+    cash_weight = min(cash_weight, max(cash, 0.0) / equity)
+    fills = []
+    for instrument in sorted(targets):
+        buy = min(targets[instrument], cash_weight / (1 + rate))
+        cash_weight = max(cash_weight - buy * (1 + rate), 0.0)
+        if buy <= 0:
+            continue
+        basis = equity * buy
+        fees = {
+            "fee_basis": basis, "fee_side": "buy",
+            "commission": basis * costs["commission_rate"],
+            "slippage": basis * costs["buy_slippage_bps"] / 10000,
+            "tax": basis * costs["buy_tax_rate"],
+        }
+        raw = prices[instrument]
+        fills.append({
+            "instrument_id": instrument, "side": "buy", "quantity": basis / raw,
+            "raw_open": raw, "price": raw, "notional": basis,
+            "minimum_commission_top_up": 0.0, **fees,
+            "cash_change": -basis - fees["commission"] - fees["slippage"] - fees["tax"],
+        })
+    return fills
+
+
+def parity_fills(quantities, targets, prices, equity, costs):
     weights = {
         instrument: quantity * prices[instrument] / equity
         for instrument, quantity in quantities.items() if quantity > 0
     }
     bases = {}
     for instrument in sorted(set(quantities) | set(targets)):
-        if retry_only and instrument not in targets:
-            continue
         delta = targets.get(instrument, 0) - weights.get(instrument, 0)
+        # Float-zero weight deltas are no-trade, not Orders/Fills of dust size.
+        if abs(delta) <= NO_TRADE_WEIGHT:
+            continue
         side = "buy" if delta >= 0 else "sell"
         basis = equity * abs(delta)
         bases[instrument] = {
@@ -192,8 +225,6 @@ def parity_fills(quantities, targets, prices, equity, costs, retry_only):
         target = targets.get(instrument, 0)
         desired = target * after / prices[instrument] if target else 0.0
         delta = desired - quantities[instrument]
-        if delta == 0 and fees["fee_basis"] == 0:
-            continue
         side = "buy" if delta >= 0 else "sell"
         quantity = abs(delta)
         raw = prices[instrument]
@@ -345,12 +376,13 @@ def run(fixture, strategy, sizing, unfilled_entry):
                     order(index, instrument, "buy", None, "blocked", gates[index][instrument])
                 effective = {instrument: weight for instrument, weight in targets.items() if instrument not in skipped}
                 if sizing == "vector_parity":
-                    for fill in parity_fills(quantities, effective, prices, before, costs, pending.get("retry_only")):
+                    if pending.get("retry_only"):
+                        fills = parity_retry_fills(quantities, effective, prices, before, cash, costs)
+                    else:
+                        fills = parity_fills(quantities, effective, prices, before, costs)
+                    for fill in fills:
                         if cash + fill["cash_change"] < -1e-6:
-                            raise ValueError(
-                                "vector_parity retry cash shortfall: F5/F8 sizing contract unresolved"
-                                if pending.get("retry_only") else "vector_parity buy exceeds available cash"
-                            )
+                            raise ValueError("vector_parity buy exceeds available cash")
                         apply(index, fill)
                 else:
                     desired = {

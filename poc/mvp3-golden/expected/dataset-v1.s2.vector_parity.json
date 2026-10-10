@@ -312,26 +312,6 @@
       "tax": 0.0,
       "total_cost": 199.6,
       "vp_id": "vp-1"
-    },
-    {
-      "cash_change": 1.1324540949431138e-11,
-      "cash_fees": 4.41428227304641e-14,
-      "commission": 2.207141136523205e-14,
-      "fee_basis": 2.207141136523205e-11,
-      "fee_side": "sell",
-      "instrument_id": "A.SYNTH",
-      "minimum_commission_top_up": 0.0,
-      "notional": 1.1368683772161603e-11,
-      "order_id": "order-6",
-      "price": 100.0,
-      "quantity": 1.1368683772161603e-13,
-      "raw_open": 100.0,
-      "session_date": "2026-01-15",
-      "side": "sell",
-      "slippage": 2.207141136523205e-14,
-      "tax": 0.0,
-      "total_cost": 4.41428227304641e-14,
-      "vp_id": "vp-1"
     }
   ],
   "fixture_sha256": "9b9009b1586a6f271cd301042f97f2adf84146c870d72802682799d60352ed85",
@@ -388,17 +368,6 @@
       "reason": null,
       "session_date": "2026-01-14",
       "side": "buy",
-      "status": "filled",
-      "vp_id": "vp-1"
-    },
-    {
-      "decision_session": "2026-01-14",
-      "instrument_id": "A.SYNTH",
-      "order_id": "order-6",
-      "quantity": 1.1368683772161603e-13,
-      "reason": null,
-      "session_date": "2026-01-15",
-      "side": "sell",
       "status": "filled",
       "vp_id": "vp-1"
     }
@@ -660,7 +629,7 @@
     },
     {
       "close": {
-        "cash": -3.2273742789357143e-12,
+        "cash": -1.4551915228366852e-11,
         "equity": 101388.81599999999,
         "holdings": {
           "A.SYNTH": {
@@ -670,14 +639,14 @@
               "kind": "raw",
               "session_date": "2026-01-15"
             },
-            "quantity": 994.0079999999999,
-            "value": 101388.81599999999
+            "quantity": 994.008,
+            "value": 101388.816
           }
         },
         "nav": 1.0138881599999998
       },
       "open": {
-        "cash": -3.2273742789357143e-12,
+        "cash": -1.4551915228366852e-11,
         "equity": 99400.79999999999,
         "holdings": {
           "A.SYNTH": {
@@ -687,8 +656,8 @@
               "kind": "raw",
               "session_date": "2026-01-15"
             },
-            "quantity": 994.0079999999999,
-            "value": 99400.79999999999
+            "quantity": 994.008,
+            "value": 99400.8
           }
         },
         "nav": 0.9940079999999999
@@ -697,7 +666,7 @@
     },
     {
       "close": {
-        "cash": -3.2273742789357143e-12,
+        "cash": -1.4551915228366852e-11,
         "equity": 102382.824,
         "holdings": {
           "A.SYNTH": {
@@ -707,14 +676,14 @@
               "kind": "raw",
               "session_date": "2026-01-16"
             },
-            "quantity": 994.0079999999999,
-            "value": 102382.824
+            "quantity": 994.008,
+            "value": 102382.82400000001
           }
         },
         "nav": 1.0238282399999998
       },
       "open": {
-        "cash": -3.2273742789357143e-12,
+        "cash": -1.4551915228366852e-11,
         "equity": 99400.79999999999,
         "holdings": {
           "A.SYNTH": {
@@ -724,8 +693,8 @@
               "kind": "raw",
               "session_date": "2026-01-16"
             },
-            "quantity": 994.0079999999999,
-            "value": 99400.79999999999
+            "quantity": 994.008,
+            "value": 99400.8
           }
         },
         "nav": 0.9940079999999999
