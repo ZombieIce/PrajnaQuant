@@ -55,24 +55,29 @@ raw_notional=1000、trade_notional=1010、slippage=10、total_fees=17、cash_del
 
 ## 两层精确估值
 
-每个 VP 逐标的做一次 scale-18 half-even 估值；账户逐标的汇总这些市值，
-**不对合并数量再次乘价舍入**。所有 VP 使用同一标的的同一估值价。
-账户 `MarkedPosition.quantity` 是聚合数量，`market_value` 是子账市值之和。
+每个 VP 与账户分别逐标的做一次 scale-18 half-even 估值。
+账户数量是各 VP 数量之和；账户市值由聚合数量独立乘价计算，
+必须同时等于该标的的 VP 市值之和，否则返回 `LedgerError::Invariant`。
+所有 VP 与账户使用同一标的的同一估值价。
 
 ```text
-VP equity          = VP cash + sum(round(quantity * price))
+VP mark            = round_half_even(VP quantity * price, 18)
+Account mark       = round_half_even(sum(VP quantity) * price, 18)
+                   = sum(VP marks)  // checked, failure is an error
+VP equity          = VP cash + sum(VP marks)
 Account cash       = sum(VP cash) + Unallocated Capital
 Account quantities = sum(VP quantities), per instrument
-Account mark       = sum(VP marks), per instrument
 Account equity     = Account cash + sum(Account marks)
                    = sum(VP equity) + Unallocated Capital
 ```
 
-这是一次舍入后合并的账本口径，避免十进制舍入不满足分配律：两个 VP 各持有
-`1e-18` 股、估值价 `0.5`，两个 half-even 市值各为 0；合并数量 `2e-18` 后
-乘价会得到 `1e-18`。不能同时把这两个数字作为同一个权威市值。
-`AccountValuation::validate` 检查 VP 数量/价格/市值/权益、账户现金/数量/价格/市值/权益，
-偏差即报错。该规则已记录于 ADR 0019，供后续 Engine 和独立 review 核查。
+half-even 不满足分配律：两个 VP 各持有 `1e-18` 股、估值价 `0.5`，
+两个 VP 市值各为 0；聚合数量 `2e-18` 的账户市值却为 `1e-18`。
+本 spec 要求两层恒等式精确成立，因此 `value` 拒绝该估值；不以容差放行，
+不改变 VP 市值或账户乘价口径。后续 Run 必须把该错误作为恒等式失败报告；
+若未来需要分摊舍入差额，须先作明确的 spec/ADR 决策。
+`AccountValuation::validate` 检查 VP 与账户数量/价格/市值/权益及两层聚合恒等式，
+偏差即报错。这一边界供后续 Engine 和独立 review 核查。
 
 ## 验证
 

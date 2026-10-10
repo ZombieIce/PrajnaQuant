@@ -20,7 +20,7 @@
 
 ## Consequences
 
-### 账本边界与 scale-18 合并（#119）
+### 账本边界与 scale-18 恒等式（#119）
 
 `prajna-account` 独立承载 Trading Account / Virtual Portfolio、Order / Fill 和估值快照，
 仅依赖 `prajna-domain` 与 Serde；不依赖 Research、Data、Experiment、旧量化引擎或 Nautilus。
@@ -28,10 +28,10 @@
 执行决策、Session 顺序、整手、费率、最低佣金计算与缺行情估值来源仍由后续 Engine 负责。
 crate 划分是 #112 Fog 的本票据提案，由 PR 独立 review 审核，不代表 Fast Event 已接通。
 
-舍入后市值在 VP 内计算，账户按标的汇总 VP 的已舍入市值，不对聚合数量再次乘价舍入。
-原因：half-even 不满足分配律，两个 VP 各 `1e-18` 数量 × `0.5` 价格的市值均为 0，
-合并数量再乘价却为 `1e-18`。账户数量仍严格等于 VP 数量之和，账户现金及权益也精确守恒；
-账户 `market_value` 是子账市值之和。这一明确的舍入顺序供后续 Engine 与独立 review 核查。
+VP 与账户均独立按数量 × 给定估值价做 scale-18 half-even 估值，并精确核对账户市值与 VP 市值之和。
+由于舍入不满足分配律，两个 VP 各 `1e-18` 数量 × `0.5` 价格的市值均为 0，
+聚合数量的账户市值为 `1e-18`，此时两层恒等式无法同时成立，账本返回恒等式错误。
+本实现不放宽原有精确契约；未来若需舍入差额分摊，应先作 spec/ADR 决策。
 
 Fill 记录 raw 成交额、实际成交额、比例佣金、最低佣金补足额、税与滑点。
 现金变动 = 有向 raw 成交额 −（比例佣金＋补足额＋税＋滑点）。

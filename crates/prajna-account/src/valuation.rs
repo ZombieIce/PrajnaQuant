@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 pub struct MarkedPosition {
     pub quantity: Quantity,
     pub price: Price,
-    /// Account marks sum the rounded VP marks, rather than rounding again.
+    /// Rounded quantity * price at this ledger level.
     pub market_value: Notional,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -74,7 +74,11 @@ impl TradingAccount {
             );
         }
         let mut equity = self.cash();
-        for position in account_positions.values() {
+        for position in account_positions.values_mut() {
+            // Independently value the aggregate quantity. Scale-18 rounding may
+            // disagree with the sum of VP marks; validation must reject that
+            // discrepancy instead of weakening either exact identity.
+            position.market_value = notional(position.price, position.quantity)?;
             equity = add(equity, position.market_value)?;
         }
         let result = AccountValuation {
@@ -144,6 +148,17 @@ impl AccountValuation {
         }
         let mut marked_equity = self.account.cash;
         for position in self.account.positions.values() {
+            if position.quantity <= Quantity::ZERO {
+                return Err(LedgerError::NonPositiveQuantity);
+            }
+            if position.price <= Price::ZERO {
+                return Err(LedgerError::NonPositivePrice);
+            }
+            if position.market_value != notional(position.price, position.quantity)? {
+                return Err(LedgerError::Invariant(
+                    "account market value != rounded quantity * price",
+                ));
+            }
             marked_equity = add(marked_equity, position.market_value)?;
         }
         if self.account.equity != equity || self.account.equity != marked_equity {

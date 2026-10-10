@@ -185,16 +185,41 @@ fn fractional_decimal_fills_and_valuation_match_hand_calculation() {
 }
 
 #[test]
-fn scale_18_half_even_marks_are_consolidated_without_rounding_again() {
+fn scale_18_half_even_disagreement_between_account_and_vps_is_an_error() {
     let mut a = account();
     settle(&mut a, raw_fill(order(1, 1, Side::Buy, "1e-18"), "1"));
     settle(&mut a, raw_fill(order(2, 2, Side::Buy, "1e-18"), "1"));
-    let value = a.value(&prices("0.5")).unwrap();
-    let mark = &value.account.positions[&"A.XSHG".parse().unwrap()];
-    assert_eq!(mark.quantity, q("2e-18"));
-    assert_eq!(mark.market_value, Notional::ZERO); // two half-even 0.5-unit marks round to zero.
-    assert_eq!(value.account.equity, n("9999.999999999999999998"));
+    // VP marks each round 0.5 mantissa units to zero, while aggregate mark
+    // rounds 2e-18 * 0.5 to 1e-18. Both exact identities cannot hold.
+    assert!(matches!(
+        a.value(&prices("0.5")),
+        Err(LedgerError::Invariant(_))
+    ));
+    let value = a.value(&prices("1")).unwrap();
+    assert_eq!(value.account.equity, n("10000"));
     value.validate().unwrap();
+    // Even a snapshot whose account marks equal the sum of VP marks must
+    // reject an incorrect aggregate quantity * price valuation.
+    let mut inconsistent = value.clone();
+    for portfolio in inconsistent.portfolios.values_mut() {
+        if let Some(mark) = portfolio.positions.get_mut(&"A.XSHG".parse().unwrap()) {
+            mark.price = p("0.5");
+            mark.market_value = Notional::ZERO;
+            portfolio.equity = portfolio.cash;
+        }
+    }
+    let mark = inconsistent
+        .account
+        .positions
+        .get_mut(&"A.XSHG".parse().unwrap())
+        .unwrap();
+    mark.price = p("0.5");
+    mark.market_value = Notional::ZERO;
+    inconsistent.account.equity = inconsistent.account.cash;
+    assert!(matches!(
+        inconsistent.validate(),
+        Err(LedgerError::Invariant(_))
+    ));
     // Embedded slippage is the difference of rounded notionals, preserving settlement.
     let f = fill(
         order(3, 1, Side::Buy, "1e-18"),
