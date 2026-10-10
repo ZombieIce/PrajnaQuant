@@ -1,0 +1,4464 @@
+{
+  "assumptions": [
+    "independent Python float64 oracle; Rust scale-18 ledger remains canonical",
+    "single Venue, single Trading Account, one VP; no leverage or partial fills",
+    "session close signals, next Session open execution; new decisions replace pending",
+    "conservative deferral if any held Instrument is not executable",
+    "raw open/close valuation even for HALTED/UNKNOWN valid bars; missing prices carry each field separately",
+    "Static Universe, synthetic availability; not PIT or real-market evidence",
+    "no T+1, price limits, currency-unit rounding, dividends, interest or funding",
+    "vector_parity cash-insufficient retry is unresolved and rejected explicitly"
+  ],
+  "decisions": [
+    {
+      "session_date": "2026-03-30",
+      "targets": {
+        "A.SYNTH": 0.3333333333333333
+      }
+    },
+    {
+      "session_date": "2026-05-04",
+      "targets": {}
+    }
+  ],
+  "executions": [
+    {
+      "blocked": [],
+      "decision_session": "2026-03-30",
+      "kind": "executed",
+      "retry_only": false,
+      "session_date": "2026-03-31",
+      "skipped_buys": []
+    },
+    {
+      "blocked": [],
+      "decision_session": "2026-05-04",
+      "kind": "executed",
+      "retry_only": false,
+      "session_date": "2026-05-05",
+      "skipped_buys": []
+    }
+  ],
+  "fills": [
+    {
+      "cash_change": -30130.0,
+      "cash_fees": 100.0,
+      "commission": 100.0,
+      "fee_basis": 30030.0,
+      "instrument_id": "A.SYNTH",
+      "minimum_commission_top_up": 69.97,
+      "notional": 30030.0,
+      "order_id": "order-1",
+      "price": 100.1,
+      "quantity": 300.0,
+      "raw_open": 100.0,
+      "session_date": "2026-03-31",
+      "side": "buy",
+      "slippage": 29.999999999998295,
+      "tax": 0.0,
+      "total_cost": 129.9999999999983,
+      "vp_id": "vp-1"
+    },
+    {
+      "cash_change": 29870.0,
+      "cash_fees": 100.0,
+      "commission": 100.0,
+      "fee_basis": 29970.0,
+      "instrument_id": "A.SYNTH",
+      "minimum_commission_top_up": 70.03,
+      "notional": 29970.0,
+      "order_id": "order-2",
+      "price": 99.9,
+      "quantity": 300.0,
+      "raw_open": 100.0,
+      "session_date": "2026-05-05",
+      "side": "sell",
+      "slippage": 29.999999999998295,
+      "tax": 0.0,
+      "total_cost": 129.9999999999983,
+      "vp_id": "vp-1"
+    }
+  ],
+  "fixture_sha256": "953218548395293b07148554c57ddc64440f9feb2e7cf8fc37de4dec0c3ee49d",
+  "orders": [
+    {
+      "decision_session": "2026-03-30",
+      "instrument_id": "A.SYNTH",
+      "order_id": "order-1",
+      "quantity": 300.0,
+      "reason": null,
+      "session_date": "2026-03-31",
+      "side": "buy",
+      "status": "filled",
+      "vp_id": "vp-1"
+    },
+    {
+      "decision_session": "2026-05-04",
+      "instrument_id": "A.SYNTH",
+      "order_id": "order-2",
+      "quantity": 300.0,
+      "reason": null,
+      "session_date": "2026-05-05",
+      "side": "sell",
+      "status": "filled",
+      "vp_id": "vp-1"
+    }
+  ],
+  "parameters": {
+    "capital_allocation": {
+      "vp-1": 100000.0
+    },
+    "costs": {
+      "buy_slippage_bps": 10.0,
+      "buy_tax_rate": 0.0,
+      "commission_rate": 0.001,
+      "minimum_commission": 100.0,
+      "sell_slippage_bps": 10.0,
+      "sell_tax_rate": 0.0
+    },
+    "initial_cash": 100000.0,
+    "lot_sizes": {
+      "A.SYNTH": 100.0,
+      "B.SYNTH": 100.0,
+      "C.SYNTH": 100.0
+    },
+    "rebalance": "full_target",
+    "sizing": "lot",
+    "strategy": "s3",
+    "strategy_parameters": {
+      "decision_rule": "target_set_changes",
+      "long_window": 60,
+      "short_window": 20
+    },
+    "unallocated_capital": 0.0,
+    "unfilled_entry": "skip"
+  },
+  "pending_at_end": null,
+  "schema_version": "mvp3.full_target.golden@1",
+  "sessions": [
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-05"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-06"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-07"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-08"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-09"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-12"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-13"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-14"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-15"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-16"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-19"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-20"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-21"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-22"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-23"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-26"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-27"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-28"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-29"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-30"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-02"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-03"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-04"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-05"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-06"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-09"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-10"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-11"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-12"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-13"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-16"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-17"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-18"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-19"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-20"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-23"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-24"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-25"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-26"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-02-27"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-02"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-03"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-04"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-05"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-06"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-09"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-10"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-11"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-12"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-13"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-16"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-17"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-18"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-19"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-20"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-23"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-24"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-25"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-26"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-27"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 0.3333333333333286,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-03-30"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-03-31"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 0.6666666666666714,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-03-31"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-03-31"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-01"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 1.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-01"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-01"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-02"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 1.3333333333333286,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-02"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-02"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-03"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 1.6666666666666714,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-03"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-03"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-06"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 2.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-06"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-06"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-07"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 2.3333333333333286,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-07"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-07"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-08"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 2.6666666666666714,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-08"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-08"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-09"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 3.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-09"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-09"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-10"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 3.3333333333333286,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-10"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-10"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-13"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 3.6666666666666714,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-13"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-13"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-14"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 4.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-14"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-14"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-15"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 4.333333333333329,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-15"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-15"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-16"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 4.666666666666671,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-16"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-16"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-17"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 5.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-17"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-17"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-20"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 5.333333333333329,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-20"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-20"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-21"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 5.666666666666671,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-21"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-21"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-22"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 6.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-22"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-22"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-23"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 6.333333333333329,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-23"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-23"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 102870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 110.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-24"
+            },
+            "quantity": 300.0,
+            "value": 33000.0
+          }
+        },
+        "nav": 1.0287
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 6.666666666666671,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-24"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-24"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 93870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 80.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-27"
+            },
+            "quantity": 300.0,
+            "value": 24000.0
+          }
+        },
+        "nav": 0.9387
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 5.5,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-27"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-27"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 93870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 80.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-28"
+            },
+            "quantity": 300.0,
+            "value": 24000.0
+          }
+        },
+        "nav": 0.9387
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 4.333333333333329,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-28"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-28"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 93870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 80.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-29"
+            },
+            "quantity": 300.0,
+            "value": 24000.0
+          }
+        },
+        "nav": 0.9387
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 3.1666666666666714,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-29"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-29"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 93870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 80.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-04-30"
+            },
+            "quantity": 300.0,
+            "value": 24000.0
+          }
+        },
+        "nav": 0.9387
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 2.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-04-30"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-04-30"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 93870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 80.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-05-01"
+            },
+            "quantity": 300.0,
+            "value": 24000.0
+          }
+        },
+        "nav": 0.9387
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": 0.8333333333333286,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-05-01"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-05-01"
+    },
+    {
+      "close": {
+        "cash": 69870.0,
+        "equity": 93870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 80.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-05-04"
+            },
+            "quantity": 300.0,
+            "value": 24000.0
+          }
+        },
+        "nav": 0.9387
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -0.3333333333333286,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 69870.0,
+        "equity": 99870.0,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 100.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-05-04"
+            },
+            "quantity": 300.0,
+            "value": 30000.0
+          }
+        },
+        "nav": 0.9987
+      },
+      "session_date": "2026-05-04"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -1.5,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-05"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -2.6666666666666714,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-06"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -3.8333333333333286,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-07"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -5.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-08"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -6.166666666666671,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-11"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -7.333333333333329,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-12"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -8.5,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-13"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -9.666666666666671,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-14"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -10.833333333333329,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-15"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -12.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-18"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -13.166666666666671,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-19"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -14.333333333333329,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-20"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -15.5,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-21"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -16.66666666666667,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-22"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -16.33333333333333,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-25"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -16.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-26"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -15.666666666666671,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-27"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -15.333333333333329,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-28"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -15.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-05-29"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -14.666666666666671,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-01"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -14.333333333333329,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-02"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -14.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-03"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -13.666666666666671,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-04"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -13.333333333333329,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-05"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -13.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-08"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -12.666666666666671,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-09"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -12.333333333333329,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-10"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -12.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-11"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -11.666666666666671,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-12"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -11.333333333333329,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-15"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -11.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-16"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -10.666666666666671,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-17"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -10.333333333333329,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-18"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -10.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-19"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -9.5,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-22"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -9.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-23"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -8.5,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-24"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -8.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-25"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -7.5,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-26"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -7.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-29"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -6.5,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-06-30"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -6.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-07-01"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -5.5,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-07-02"
+    },
+    {
+      "close": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": -5.0,
+          "status": "ok"
+        },
+        "B.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        },
+        "C.SYNTH": {
+          "gap": 0.0,
+          "status": "ok"
+        }
+      },
+      "open": {
+        "cash": 99740.0,
+        "equity": 99740.0,
+        "holdings": {},
+        "nav": 0.9974
+      },
+      "session_date": "2026-07-03"
+    }
+  ],
+  "tolerance": {
+    "cash_equity_fees_abs_cny": 1e-06,
+    "normalized_nav_rel": 1e-09
+  }
+}

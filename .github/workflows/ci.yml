@@ -97,3 +97,6 @@ jobs:
 
       - name: MVP-2 benchmark report tests
         run: python -m unittest tests.test_mvp2_benchmark -v
+
+      - name: MVP-3 independent Fast Event golden tests
+        run: python -m unittest tests.test_mvp3_fast_event_golden -v
