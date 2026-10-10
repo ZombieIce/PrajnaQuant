@@ -18,6 +18,7 @@ incremental = true
 [workspace]
 members = [
     "crates/prajna-domain",
+    "crates/prajna-account",
     "crates/prajna-data",
     "crates/prajna-research",
     "crates/prajna-experiment",

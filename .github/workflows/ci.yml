@@ -72,6 +72,17 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy -p quant-research --no-default-features --all-targets --locked -- -D warnings
       - run: cargo test -p quant-research --no-default-features --locked
+      - name: Guard - prajna-account must only use Domain and lightweight dependencies
+        run: |
+          set -euo pipefail
+          tree=$(cargo tree -p prajna-account -e normal,build,dev --prefix none --locked)
+          if grep -E '^(libduckdb-sys|duckdb|ashare-warehouse|quant-research|prajna-research|prajna-data|prajna-experiment|polars[^ ]*|nautilus[^ ]*) ' <<<"$tree"; then
+            echo "::error::prajna-account depends on a prohibited execution or data package"
+            exit 1
+          fi
+
+      - run: cargo clippy -p prajna-account --all-targets --locked -- -D warnings
+      - run: cargo test -p prajna-account --locked
       - run: cargo clippy -p prajna-domain --all-targets --locked -- -D warnings
       - run: cargo test -p prajna-domain --locked
       - run: cargo clippy -p prajna-data --all-targets --locked -- -D warnings

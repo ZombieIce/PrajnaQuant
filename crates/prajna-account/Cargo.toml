@@ -1,0 +1,18 @@
+[package]
+name = "prajna-account"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.1"
+description = "Fixed-point Trading Account and Virtual Portfolio ledger"
+license = "MIT"
+publish = false
+
+[dependencies]
+prajna-domain = { path = "../prajna-domain" }
+serde = { version = "1.0", features = ["derive"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

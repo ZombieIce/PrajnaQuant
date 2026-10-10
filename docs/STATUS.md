@@ -76,7 +76,7 @@ M9 Factor Cache 身份键由 `cache::key::FactorKey` 确定性生成；`cache::s
 
 M10 `strategy::VectorStrategy` 与 `VectorEngine::validate` 已实现：仅声明 `Vectorizable` 的策略可通过校验，`top_k` 和 `rebalance_every` 必须至少为 1。M11 `VectorStrategy::decide` 使用 Factor Values v1，在首个至少有一个 `ok` 且于该 Session 收盘前可用的 Session 开始，按 Venue Session 序号定期决策；排名平局按 `instrument_id` 字符串升序，targets 对 top-k 等权分配，无可用分数时为空目标。已用 3×10 合成 fixture 对照独立 golden，并覆盖 2、5、8 决策日序列及延迟可用分数。执行层新增 `panel::load_execution_status` 与 `executable`：旧版 DSV 缺少状态表时显式报错，缺状态记录、缺 bar、非可交易状态或 `available_at` 晚于开盘均 fail closed；`strategy::execute` 在下一 Session 开盘尝试 pending target，持仓任一不可执行时整次延期，延期后新决策替换旧目标，不能执行的目标买腿跳过且不归一，并记录执行/延期及最终 pending。v3 合成 3×10 手写事件序列覆盖 C UNKNOWN、B HALTED 与 B 缺 bar，另测持仓阻塞后的重试。Rust [`vector::run_vector`](../crates/prajna-research/src/vector.rs) 现实现漂移、比例成本、open-to-open 收益、估值延续与结果 JSON；手算 2×4 与独立 3×10 用例覆盖数值边界与 JSON 结构。Vector NAV 是权重收益摘要，不是现金/数量账户账本；以上验证仍限合成数据，不证明 PIT 或真实数据收益。
 
-共用执行层与 Vector 现支持 Strategy 声明 `unfilled_entry: retry | skip`（默认 skip）：可交易性阻塞的买腿按原权重与当时权益单独重试，已成交腿数量不重平衡；新决策替换 pending，持仓阻塞仍整次延期，现金削减不触发重试。合成手写事件与数值用例覆盖 HALTED 后成交、决策替换、重试同日持仓阻塞、最终缺失腿 pending、成本与现金削减；既有三份 S2 完整结果 SHA-256 与默认 Run 身份固定为 main 基线，`vector@1` 不变。Experiment retry 配置接入尚未实现（#123）；不表示 Fast Event 或精确账本已实现，详见 [ADR 0019](decisions/0019-fast-event-ledger-and-vector-parity.md)。
+共用执行层与 Vector 现支持 Strategy 声明 `unfilled_entry: retry | skip`（默认 skip）：可交易性阻塞的买腿按原权重与当时权益单独重试，已成交腿数量不重平衡；新决策替换 pending，持仓阻塞仍整次延期，现金削减不触发重试。合成手写事件与数值用例覆盖 HALTED 后成交、决策替换、重试同日持仓阻塞、最终缺失腿 pending、成本与现金削减；既有三份 S2 完整结果 SHA-256 与默认 Run 身份固定为 main 基线，`vector@1` 不变。Experiment retry 配置接入尚未实现（#123）；该 Vector 路径不构成 Fast Event 或精确账本，详见 [ADR 0019](decisions/0019-fast-event-ledger-and-vector-parity.md)。
 
 `prajna-research` 现提供 `StaticUniverse`：成员排序去重后以 restricted-JCS SHA-256 身份存储，原子发布、幂等复用并在读取时校验身份；可对照 DSV v1 instruments 表报告缺失成员。3×10 fixture 已验证 A/B/C 通过、含 D 失败。它是固定成员列表，不提供 point-in-time 成员可知性证明。
 
@@ -85,6 +85,10 @@ MVP-2 的 `prajna-experiment`（Issue #99–#104）可解析并校验 `experimen
 ### MVP-3 独立 full_target 金标准
 
 [`poc/mvp3-golden`](../poc/mvp3-golden/README.md) 提供不导入 Rust、共享执行代码或 Nautilus 的 Python 标准库参考：S1/S2/S3 在 `lot` 与 `vector_parity` 下的 3×10、S3 3×130 和 1×3、2×4、2×6 手算用例，保存两个估值点的现金、数量、权益与订单、Fill、费用分项；轻量 CI 逐值复算并核对现金/持仓与费用恒等式、时序、执行门禁、延期和 retry。仅为单 VP 合成数据的 float64 参考，不表示平台 Fast Event 或严格定点账本已实现；`vector_parity` retry 按 ADR 0019 以扣费前权益预算、费用另扣现金并按 ID 升序削减；权重差 ≤1e-12 仅归零费用基数，仍按扣费后权益调整持续持仓，只有零费用基数且数量变动的 open 权重 ≤1e-12 才不产生 Order/Fill；CLI 回归覆盖平开盘轮动中的零权重差持仓缩量，另含带成本 retry 与持续持仓调仓的 2×4、2×6 手算用例。口径、来源 hash、容差及负责人确认的 S3/估值约定见 README。
+
+### MVP-3 定点账户账本
+
+`prajna-account` 已提供只依赖 Domain / Serde 的 Trading Account、固定资本 Virtual Portfolio 子账、Order / 全额 Fill 与显式正价估值快照；账户现金/逐标的数量/权益与 VP + Unallocated 精确守恒，拒绝超额分配、负现金/持仓、缺失或非正估值价、重复成交及定点溢出，失败 Fill 原子回滚。Fill 拆分比例佣金、最低佣金补足、税与滑点，区分 raw 价单列滑点和成交价含滑点，避免重复扣款；账户市值合并 VP 已舍入值，舍入规则见 [ADR 0019](decisions/0019-fast-event-ledger-and-vector-parity.md) 与 [crate 契约](../crates/prajna-account/README.md)。13 项合成手算契约测试与本 crate Clippy 已通过，轻量 CI 新增依赖守卫与检查；尚未接入 Fast Event、Strategy、Run Spec / ResultLevel 或真实数据，不构成 S1/S2/S3 逐 Session 引擎验收、PIT 或总回报证明。
 
 ## Batch 2 Integration Acceptance (2026-09-25)
 
