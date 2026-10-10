@@ -84,7 +84,7 @@ MVP-2 的 `prajna-experiment`（Issue #99–#104）可解析并校验 `experimen
 
 ### MVP-3 独立 full_target 金标准
 
-[`poc/mvp3-golden`](../poc/mvp3-golden/README.md) 提供不导入 Rust、共享执行代码或 Nautilus 的 Python 标准库参考：S1/S2/S3 在 `lot` 与 `vector_parity` 下的 3×10、S3 3×130 和 1×3、2×4、2×6 手算用例，保存两个估值点的现金、数量、权益与订单、Fill、费用分项；轻量 CI 逐值复算并核对现金/持仓与费用恒等式、时序、执行门禁、延期和 retry。仅为单 VP 合成数据的 float64 参考，不表示平台 Fast Event 或严格定点账本已实现；`vector_parity` retry 按 ADR 0019 以扣费前权益预算、费用另扣现金并按 ID 升序削减；权重差 ≤1e-12 视为不交易，另含带成本 retry 与持续持仓调仓的 2×4、2×6 手算用例。口径、来源 hash、容差及负责人确认的 S3/估值约定见 README。
+[`poc/mvp3-golden`](../poc/mvp3-golden/README.md) 提供不导入 Rust、共享执行代码或 Nautilus 的 Python 标准库参考：S1/S2/S3 在 `lot` 与 `vector_parity` 下的 3×10、S3 3×130 和 1×3、2×4、2×6 手算用例，保存两个估值点的现金、数量、权益与订单、Fill、费用分项；轻量 CI 逐值复算并核对现金/持仓与费用恒等式、时序、执行门禁、延期和 retry。仅为单 VP 合成数据的 float64 参考，不表示平台 Fast Event 或严格定点账本已实现；`vector_parity` retry 按 ADR 0019 以扣费前权益预算、费用另扣现金并按 ID 升序削减；权重差 ≤1e-12 仅归零费用基数，仍按扣费后权益调整持续持仓，只有零费用基数且数量变动的 open 权重 ≤1e-12 才不产生 Order/Fill；CLI 回归覆盖平开盘轮动中的零权重差持仓缩量，另含带成本 retry 与持续持仓调仓的 2×4、2×6 手算用例。口径、来源 hash、容差及负责人确认的 S3/估值约定见 README。
 
 ## Batch 2 Integration Acceptance (2026-09-25)
 

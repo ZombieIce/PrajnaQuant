@@ -384,3 +384,59 @@ class FastEventGoldenTests(unittest.TestCase):
         self.assertTrue(all(fill["quantity"] > 1e-6 for fill in result["fills"]))
         self.assertTrue(all(order["quantity"] is None or order["quantity"] > 1e-6
                             for order in result["orders"]))
+
+    def test_flat_open_rotation_resizes_zero_delta_holding_after_costs(self):
+        fixture = json.loads(REBALANCE.read_text())
+        fixture["instruments"] = [
+            {"symbol": "A", "lot_size": 1, "opens": [10] * 6,
+             "closes": [10, 10, 12, 13, 14, 15]},
+            {"symbol": "B", "lot_size": 1, "opens": [10] * 6,
+             "closes": [10, 10, 11, 10, 10, 10]},
+            {"symbol": "C", "lot_size": 1, "opens": [10] * 6,
+             "closes": [10, 10, 10, 12, 12, 12]},
+        ]
+        result = self.run_cli(fixture, strategy="s2", sizing="vector_parity")
+        self.assertEqual(
+            [row["targets"] for row in result["decisions"][:3]],
+            [{"A.SYNTH": 0.5, "B.SYNTH": 0.5},
+             {"A.SYNTH": 0.5, "C.SYNTH": 0.5},
+             {"A.SYNTH": 0.5, "B.SYNTH": 0.5}],
+        )
+        # D4 buys 49.5 each of A/B. D5 E0=990; rotating B to C costs 9.9.
+        # E1=980.1 requires A to sell 0.495 despite its zero weight-delta basis.
+        rotation = [fill for fill in result["fills"] if fill["session_date"] == "2026-01-09"]
+        self.assertEqual(
+            [(fill["instrument_id"], fill["side"]) for fill in rotation],
+            [("A.SYNTH", "sell"), ("B.SYNTH", "sell"), ("C.SYNTH", "buy")],
+        )
+        for fill, quantity, basis, commission in zip(
+            rotation, (0.495, 49.5, 49.005), (0, 495, 495), (0, 4.95, 4.95),
+        ):
+            self.assertAlmostEqual(fill["quantity"], quantity, delta=1e-12)
+            self.assertEqual(fill["fee_basis"], basis)
+            self.assertEqual(fill["commission"], commission)
+            self.assertEqual(fill["tax"], 0)
+            self.assertEqual(fill["slippage"], 0)
+        for index, equity, holdings in (
+            (4, 980.1, {"A.SYNTH": 49.005, "C.SYNTH": 49.005}),
+            (5, 970.299, {"A.SYNTH": 48.51495, "B.SYNTH": 48.51495}),
+        ):
+            value = result["sessions"][index]["open"]
+            self.assertAlmostEqual(value["cash"], 0, delta=1e-9)
+            self.assertAlmostEqual(value["equity"], equity, delta=1e-9)
+            self.assertEqual(set(value["holdings"]), set(holdings))
+            for instrument, quantity in holdings.items():
+                self.assertAlmostEqual(value["holdings"][instrument]["quantity"], quantity, delta=1e-12)
+        cash = 1000
+        for session in result["sessions"]:
+            cash += math.fsum(fill["cash_change"] for fill in result["fills"]
+                              if fill["session_date"] == session["session_date"])
+            for point in ("open", "close"):
+                value = session[point]
+                self.assertAlmostEqual(value["cash"], cash, delta=1e-9)
+                self.assertGreaterEqual(value["cash"], -1e-9)
+                self.assertAlmostEqual(
+                    value["equity"], cash + math.fsum(
+                        row["quantity"] * row["price"] for row in value["holdings"].values()
+                    ), delta=1e-9,
+                )

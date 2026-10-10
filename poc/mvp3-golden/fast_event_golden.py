@@ -203,13 +203,10 @@ def parity_fills(quantities, targets, prices, equity, costs):
         for instrument, quantity in quantities.items() if quantity > 0
     }
     bases = {}
-    for instrument in sorted(set(quantities) | set(targets)):
+    for instrument in sorted(set(weights) | set(targets)):
         delta = targets.get(instrument, 0) - weights.get(instrument, 0)
-        # Float-zero weight deltas are no-trade, not Orders/Fills of dust size.
-        if abs(delta) <= NO_TRADE_WEIGHT:
-            continue
         side = "buy" if delta >= 0 else "sell"
-        basis = equity * abs(delta)
+        basis = 0.0 if abs(delta) <= NO_TRADE_WEIGHT else equity * abs(delta)
         bases[instrument] = {
             "fee_basis": basis, "fee_side": side,
             "commission": basis * costs["commission_rate"],
@@ -228,6 +225,9 @@ def parity_fills(quantities, targets, prices, equity, costs):
         side = "buy" if delta >= 0 else "sell"
         quantity = abs(delta)
         raw = prices[instrument]
+        # Zero fee basis still requires resizing to E1 when other legs incur costs.
+        if fees["fee_basis"] == 0 and quantity * raw / equity <= NO_TRADE_WEIGHT:
+            continue
         fills.append({
             "instrument_id": instrument, "side": side, "quantity": quantity,
             "raw_open": raw, "price": raw, "notional": quantity * raw,

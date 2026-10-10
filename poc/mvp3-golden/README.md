@@ -132,9 +132,15 @@ use these bases. E1 = E0 - sum(costs); full_target quantities are
 target * E1 / raw open. Fills use raw open. A cost-induced reduction can
 sell a continuing holding with zero weight-delta fee basis; therefore
 `fee_side` records the basis direction separately from the actual Fill side.
-Minimum commission and lots do not apply. A leg whose absolute weight delta
-is <= 1e-12 is a no-trade: it has no Order, Fill or fee basis, so float
-residue never becomes a dust Fill. Retry leaves filled quantities unchanged
+Minimum commission and lots do not apply. An absolute weight delta <= 1e-12
+zeros the fee basis, but every held or targeted instrument is still resized
+on E1. An Order/Fill is suppressed only when its fee basis is zero and
+abs(desired quantity - current quantity) * raw open / E0 <= 1e-12, so float
+residue never becomes a dust Fill without dropping cost-induced resizing.
+This absolute weight threshold is part of the oracle contract; Rust Fast
+Event must use a consistent no-trade rule for Order/Fill parity, while
+independently proving its scale-18 accounting.
+Retry leaves filled quantities unchanged
 and sizes only missing legs per ADR 0019 (#116): budget is the original
 target weight times pre-fee open equity, fees are paid from remaining cash,
 and budgets are cut in ascending `instrument_id` order to
