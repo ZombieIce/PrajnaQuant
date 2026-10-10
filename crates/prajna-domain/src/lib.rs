@@ -31,6 +31,7 @@ pub enum FixedPointError {
     OutOfRange,
     Overflow,
     ZeroIncrement,
+    DivisionByZero,
 }
 
 impl fmt::Display for FixedPointError {
@@ -41,6 +42,7 @@ impl fmt::Display for FixedPointError {
             Self::OutOfRange => "decimal mantissa must have absolute value below 10^38",
             Self::Overflow => "fixed-point operation overflowed",
             Self::ZeroIncrement => "increment must not be zero",
+            Self::DivisionByZero => "decimal divisor must not be zero",
         };
         formatter.write_str(message)
     }
@@ -93,6 +95,35 @@ macro_rules! fixed_decimal {
                     .checked_mul(multiplier)
                     .ok_or(FixedPointError::Overflow)?;
                 Self::from_mantissa(mantissa)
+            }
+
+            /// Multiplies two decimals, rounding to scale 18 with ties to even.
+            /// No currency-unit rounding or binary floating-point conversion is applied.
+            /// Returns `Overflow` if the rounded result is outside the domain range.
+            pub fn checked_mul_decimal(self, other: Self) -> Result<Self, FixedPointError> {
+                product_ratio(
+                    self.0.unsigned_abs(),
+                    other.0.unsigned_abs(),
+                    SCALE_FACTOR as u128,
+                    (self.0 < 0) != (other.0 < 0),
+                )
+                .map(Self)
+            }
+
+            /// Divides two decimals, rounding to scale 18 with ties to even.
+            /// Returns an error for a zero divisor; no currency-unit rounding is applied.
+            /// Returns `Overflow` if the rounded result is outside the domain range.
+            pub fn checked_div_decimal(self, other: Self) -> Result<Self, FixedPointError> {
+                if other.0 == 0 {
+                    return Err(FixedPointError::DivisionByZero);
+                }
+                product_ratio(
+                    self.0.unsigned_abs(),
+                    SCALE_FACTOR as u128,
+                    other.0.unsigned_abs(),
+                    (self.0 < 0) != (other.0 < 0),
+                )
+                .map(Self)
             }
 
             /// Compares two fixed-scale values, reporting an error if their difference
@@ -161,6 +192,48 @@ fixed_decimal!(
 
 /// Backwards-friendly spelling for a trade's notional amount.
 pub type Amount = Notional;
+
+fn product_ratio(
+    left: u128,
+    right: u128,
+    divisor: u128,
+    negative: bool,
+) -> Result<i128, FixedPointError> {
+    let (mut quotient, remainder) = if let Some(product) = left.checked_mul(right) {
+        (product / divisor, product % divisor)
+    } else {
+        // Four 64-bit limb products retain the full 256-bit intermediate.
+        let mask = u128::from(u64::MAX);
+        let low_product = (left & mask) * (right & mask);
+        let middle = (left >> 64) * (right & mask) + (low_product >> 64);
+        let upper = middle >> 64;
+        let middle = (left & mask) * (right >> 64) + (middle & mask);
+        let high = (left >> 64) * (right >> 64) + upper + (middle >> 64);
+        let low = (middle << 64) | (low_product & mask);
+        if high >= divisor {
+            return Err(FixedPointError::Overflow);
+        }
+        let mut quotient = 0_u128;
+        let mut remainder = high;
+        // Domain divisors are below 10^38 < 2^127, so doubling the remainder fits.
+        for bit in (0..128).rev() {
+            remainder = (remainder << 1) | ((low >> bit) & 1);
+            if remainder >= divisor {
+                remainder -= divisor;
+                quotient |= 1_u128 << bit;
+            }
+        }
+        (quotient, remainder)
+    };
+    if remainder > divisor - remainder || (remainder == divisor - remainder && quotient % 2 != 0) {
+        quotient = quotient.checked_add(1).ok_or(FixedPointError::Overflow)?;
+    }
+    if quotient >= MAX_MANTISSA as u128 {
+        return Err(FixedPointError::Overflow);
+    }
+    let mantissa = quotient as i128;
+    Ok(if negative { -mantissa } else { mantissa })
+}
 
 fn parse_mantissa(input: &str) -> Result<i128, FixedPointError> {
     let bytes = input.as_bytes();
