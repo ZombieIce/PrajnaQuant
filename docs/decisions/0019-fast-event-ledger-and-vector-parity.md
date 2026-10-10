@@ -20,6 +20,24 @@
 
 ## Consequences
 
+### 账本边界与 scale-18 恒等式（#119）
+
+`prajna-account` 独立承载 Trading Account / Virtual Portfolio、Order / Fill 和估值快照，
+仅依赖 `prajna-domain` 与 Serde；不依赖 Research、Data、Experiment、旧量化引擎或 Nautilus。
+它负责固定初始资本分配、唯一 Fill 归属、全额成交、长仓/非负现金、checked 定点核算与精确守恒。
+执行决策、Session 顺序、整手、费率、最低佣金计算与缺行情估值来源仍由后续 Engine 负责。
+crate 划分是 #112 Fog 的本票据提案，由 PR 独立 review 审核，不代表 Fast Event 已接通。
+
+VP 与账户均独立按数量 × 给定估值价做 scale-18 half-even 估值，并精确核对账户市值与 VP 市值之和。
+由于舍入不满足分配律，两个 VP 各 `1e-18` 数量 × `0.5` 价格的市值均为 0，
+聚合数量的账户市值为 `1e-18`，此时两层恒等式无法同时成立，账本返回恒等式错误。
+本实现不放宽原有精确契约；未来若需舍入差额分摊，应先作 spec/ADR 决策。
+
+Fill 记录 raw 成交额、实际成交额、比例佣金、最低佣金补足额、税与滑点。
+现金变动 = 有向 raw 成交额 −（比例佣金＋补足额＋税＋滑点）。
+`vector_parity` 滑点单列；`lot` 的滑点取两个已舍入成交额的差，保证与有向实际成交额
+减佣金/补足/税精确等价，不重复扣款；不做货币单位舍入。
+
 ### 共用买腿重试（#116）
 
 `VectorStrategy.unfilled_entry` 声明 `UnfilledEntry::Skip`（默认）或 `Retry`；
