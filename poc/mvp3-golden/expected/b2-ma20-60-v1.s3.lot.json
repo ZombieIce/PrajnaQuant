@@ -7,7 +7,7 @@
     "raw open/close valuation even for HALTED/UNKNOWN valid bars; missing prices carry each field separately",
     "Static Universe, synthetic availability; not PIT or real-market evidence",
     "no T+1, price limits, currency-unit rounding, dividends, interest or funding",
-    "vector_parity cash-insufficient retry is unresolved and rejected explicitly"
+    "vector_parity retry uses pre-fee equity budgets, fees paid from cash; cash-insufficient budgets cut in ascending instrument_id order"
   ],
   "decisions": [
     {

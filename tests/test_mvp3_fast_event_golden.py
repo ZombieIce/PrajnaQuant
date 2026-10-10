@@ -370,6 +370,15 @@ class FastEventGoldenTests(unittest.TestCase):
         self.assertAlmostEqual(result["sessions"][-1]["close"]["cash"], 0, delta=1e-9)
         self.assertEqual(first["quantity"], result["sessions"][2]["open"]["holdings"]["A.SYNTH"]["quantity"])
 
+    def test_retry_assumptions_describe_supported_cash_cut(self):
+        result = self.run_cli(RETRY, sizing="vector_parity")
+        self.assertIn(
+            "vector_parity retry uses pre-fee equity budgets, fees paid from cash; "
+            "cash-insufficient budgets cut in ascending instrument_id order",
+            result["assumptions"],
+        )
+        self.assertFalse(any("unresolved" in row or "rejected" in row for row in result["assumptions"]))
+
     def test_continuing_holdings_are_trimmed_and_topped_up_by_full_target(self):
         result = self.run_cli(REBALANCE, strategy="s2", sizing="vector_parity")
         trim, top_up = [fill for fill in result["fills"] if fill["session_date"] == "2026-01-09"]
