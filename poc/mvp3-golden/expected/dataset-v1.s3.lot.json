@@ -1,0 +1,344 @@
+{
+  "assumptions": [
+    "independent Python float64 oracle; Rust scale-18 ledger remains canonical",
+    "single Venue, single Trading Account, one VP; no leverage or partial fills",
+    "session close signals, next Session open execution; new decisions replace pending",
+    "conservative deferral if any held Instrument is not executable",
+    "raw open/close valuation even for HALTED/UNKNOWN valid bars; missing prices carry each field separately",
+    "Static Universe, synthetic availability; not PIT or real-market evidence",
+    "no T+1, price limits, currency-unit rounding, dividends, interest or funding",
+    "vector_parity retry uses pre-fee equity budgets, fees paid from cash; cash-insufficient budgets cut in ascending instrument_id order"
+  ],
+  "decisions": [],
+  "executions": [],
+  "fills": [],
+  "fixture_sha256": "9b9009b1586a6f271cd301042f97f2adf84146c870d72802682799d60352ed85",
+  "orders": [],
+  "parameters": {
+    "capital_allocation": {
+      "vp-1": 100000.0
+    },
+    "costs": {
+      "buy_slippage_bps": 10.0,
+      "buy_tax_rate": 0.0,
+      "commission_rate": 0.001,
+      "minimum_commission": 100.0,
+      "sell_slippage_bps": 10.0,
+      "sell_tax_rate": 0.0
+    },
+    "initial_cash": 100000.0,
+    "lot_sizes": {
+      "A.SYNTH": 100.0,
+      "B.SYNTH": 100.0,
+      "C.SYNTH": 100.0
+    },
+    "rebalance": "full_target",
+    "sizing": "lot",
+    "strategy": "s3",
+    "strategy_parameters": {
+      "decision_rule": "target_set_changes",
+      "long_window": 60,
+      "short_window": 20
+    },
+    "unallocated_capital": 0.0,
+    "unfilled_entry": "skip"
+  },
+  "pending_at_end": null,
+  "schema_version": "mvp3.full_target.golden@1",
+  "sessions": [
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-05"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-06"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-07"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-08"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-09"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-12"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-13"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-14"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-15"
+    },
+    {
+      "close": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "ma20_60": {
+        "A.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "B.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        },
+        "C.SYNTH": {
+          "gap": null,
+          "status": "insufficient_window"
+        }
+      },
+      "open": {
+        "cash": 100000.0,
+        "equity": 100000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-16"
+    }
+  ],
+  "tolerance": {
+    "cash_equity_fees_abs_cny": 1e-06,
+    "normalized_nav_rel": 1e-09
+  }
+}

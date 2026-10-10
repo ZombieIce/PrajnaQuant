@@ -1,0 +1,538 @@
+{
+  "assumptions": [
+    "independent Python float64 oracle; Rust scale-18 ledger remains canonical",
+    "single Venue, single Trading Account, one VP; no leverage or partial fills",
+    "session close signals, next Session open execution; new decisions replace pending",
+    "conservative deferral if any held Instrument is not executable",
+    "raw open/close valuation even for HALTED/UNKNOWN valid bars; missing prices carry each field separately",
+    "Static Universe, synthetic availability; not PIT or real-market evidence",
+    "no T+1, price limits, currency-unit rounding, dividends, interest or funding",
+    "vector_parity retry uses pre-fee equity budgets, fees paid from cash; cash-insufficient budgets cut in ascending instrument_id order"
+  ],
+  "decisions": [
+    {
+      "ranked": [
+        {
+          "instrument_id": "A.SYNTH",
+          "rank": 1,
+          "score": 0.19999999999999996
+        },
+        {
+          "instrument_id": "B.SYNTH",
+          "rank": 2,
+          "score": 0.0
+        }
+      ],
+      "session_date": "2026-01-07",
+      "targets": {
+        "A.SYNTH": 0.5,
+        "B.SYNTH": 0.5
+      }
+    },
+    {
+      "ranked": [
+        {
+          "instrument_id": "A.SYNTH",
+          "rank": 1,
+          "score": 0.25
+        },
+        {
+          "instrument_id": "B.SYNTH",
+          "rank": 2,
+          "score": 0.0
+        }
+      ],
+      "session_date": "2026-01-08",
+      "targets": {
+        "A.SYNTH": 0.5,
+        "B.SYNTH": 0.5
+      }
+    },
+    {
+      "ranked": [
+        {
+          "instrument_id": "A.SYNTH",
+          "rank": 1,
+          "score": 0.0
+        },
+        {
+          "instrument_id": "B.SYNTH",
+          "rank": 2,
+          "score": 0.0
+        }
+      ],
+      "session_date": "2026-01-09",
+      "targets": {
+        "A.SYNTH": 0.5,
+        "B.SYNTH": 0.5
+      }
+    },
+    {
+      "ranked": [
+        {
+          "instrument_id": "A.SYNTH",
+          "rank": 1,
+          "score": 0.0
+        },
+        {
+          "instrument_id": "B.SYNTH",
+          "rank": 2,
+          "score": 0.0
+        }
+      ],
+      "session_date": "2026-01-12",
+      "targets": {
+        "A.SYNTH": 0.5,
+        "B.SYNTH": 0.5
+      }
+    }
+  ],
+  "executions": [
+    {
+      "blocked": [],
+      "decision_session": "2026-01-07",
+      "kind": "executed",
+      "retry_only": false,
+      "session_date": "2026-01-08",
+      "skipped_buys": []
+    },
+    {
+      "blocked": [],
+      "decision_session": "2026-01-08",
+      "kind": "executed",
+      "retry_only": false,
+      "session_date": "2026-01-09",
+      "skipped_buys": []
+    },
+    {
+      "blocked": [],
+      "decision_session": "2026-01-09",
+      "kind": "executed",
+      "retry_only": false,
+      "session_date": "2026-01-12",
+      "skipped_buys": []
+    }
+  ],
+  "fills": [
+    {
+      "cash_change": -505.0,
+      "cash_fees": 5.0,
+      "commission": 5.0,
+      "fee_basis": 500.0,
+      "instrument_id": "A.SYNTH",
+      "minimum_commission_top_up": 0.0,
+      "notional": 500.0,
+      "order_id": "order-1",
+      "price": 10.0,
+      "quantity": 50.0,
+      "raw_open": 10.0,
+      "session_date": "2026-01-08",
+      "side": "buy",
+      "slippage": 0.0,
+      "tax": 0.0,
+      "total_cost": 5.0,
+      "vp_id": "vp-1"
+    },
+    {
+      "cash_change": -494.9,
+      "cash_fees": 4.9,
+      "commission": 4.9,
+      "fee_basis": 490.0,
+      "instrument_id": "B.SYNTH",
+      "minimum_commission_top_up": 0.0,
+      "notional": 490.0,
+      "order_id": "order-2",
+      "price": 10.0,
+      "quantity": 49.0,
+      "raw_open": 10.0,
+      "session_date": "2026-01-08",
+      "side": "buy",
+      "slippage": 0.0,
+      "tax": 0.0,
+      "total_cost": 4.9,
+      "vp_id": "vp-1"
+    },
+    {
+      "cash_change": 133.65,
+      "cash_fees": 1.35,
+      "commission": 1.35,
+      "fee_basis": 135.0,
+      "instrument_id": "A.SYNTH",
+      "minimum_commission_top_up": 0.0,
+      "notional": 135.0,
+      "order_id": "order-3",
+      "price": 15.0,
+      "quantity": 9.0,
+      "raw_open": 15.0,
+      "session_date": "2026-01-09",
+      "side": "sell",
+      "slippage": 0.0,
+      "tax": 0.0,
+      "total_cost": 1.35,
+      "vp_id": "vp-1"
+    },
+    {
+      "cash_change": -131.3,
+      "cash_fees": 1.3,
+      "commission": 1.3,
+      "fee_basis": 130.0,
+      "instrument_id": "B.SYNTH",
+      "minimum_commission_top_up": 0.0,
+      "notional": 130.0,
+      "order_id": "order-4",
+      "price": 10.0,
+      "quantity": 13.0,
+      "raw_open": 10.0,
+      "session_date": "2026-01-09",
+      "side": "buy",
+      "slippage": 0.0,
+      "tax": 0.0,
+      "total_cost": 1.3,
+      "vp_id": "vp-1"
+    },
+    {
+      "cash_change": 9.9,
+      "cash_fees": 0.1,
+      "commission": 0.1,
+      "fee_basis": 10.0,
+      "instrument_id": "B.SYNTH",
+      "minimum_commission_top_up": 0.0,
+      "notional": 10.0,
+      "order_id": "order-5",
+      "price": 10.0,
+      "quantity": 1.0,
+      "raw_open": 10.0,
+      "session_date": "2026-01-12",
+      "side": "sell",
+      "slippage": 0.0,
+      "tax": 0.0,
+      "total_cost": 0.1,
+      "vp_id": "vp-1"
+    }
+  ],
+  "fixture_sha256": "4ea9162adbb0f8d0bbaa3eeda8f5c19d3fd79a032137884ede7195f86e13bcec",
+  "orders": [
+    {
+      "decision_session": "2026-01-07",
+      "instrument_id": "A.SYNTH",
+      "order_id": "order-1",
+      "quantity": 50.0,
+      "reason": null,
+      "session_date": "2026-01-08",
+      "side": "buy",
+      "status": "filled",
+      "vp_id": "vp-1"
+    },
+    {
+      "decision_session": "2026-01-07",
+      "instrument_id": "B.SYNTH",
+      "order_id": "order-2",
+      "quantity": 49.0,
+      "reason": null,
+      "session_date": "2026-01-08",
+      "side": "buy",
+      "status": "filled",
+      "vp_id": "vp-1"
+    },
+    {
+      "decision_session": "2026-01-08",
+      "instrument_id": "A.SYNTH",
+      "order_id": "order-3",
+      "quantity": 9.0,
+      "reason": null,
+      "session_date": "2026-01-09",
+      "side": "sell",
+      "status": "filled",
+      "vp_id": "vp-1"
+    },
+    {
+      "decision_session": "2026-01-08",
+      "instrument_id": "B.SYNTH",
+      "order_id": "order-4",
+      "quantity": 13.0,
+      "reason": null,
+      "session_date": "2026-01-09",
+      "side": "buy",
+      "status": "filled",
+      "vp_id": "vp-1"
+    },
+    {
+      "decision_session": "2026-01-09",
+      "instrument_id": "B.SYNTH",
+      "order_id": "order-5",
+      "quantity": 1.0,
+      "reason": null,
+      "session_date": "2026-01-12",
+      "side": "sell",
+      "status": "filled",
+      "vp_id": "vp-1"
+    }
+  ],
+  "parameters": {
+    "capital_allocation": {
+      "vp-1": 1000.0
+    },
+    "costs": {
+      "buy_slippage_bps": 0.0,
+      "buy_tax_rate": 0.0,
+      "commission_rate": 0.01,
+      "minimum_commission": 0.0,
+      "sell_slippage_bps": 0.0,
+      "sell_tax_rate": 0.0
+    },
+    "initial_cash": 1000.0,
+    "lot_sizes": {
+      "A.SYNTH": 1.0,
+      "B.SYNTH": 1.0
+    },
+    "rebalance": "full_target",
+    "sizing": "lot",
+    "strategy": "s2",
+    "strategy_parameters": {
+      "long_momentum_weight": 0.0,
+      "momentum_long_days": 1,
+      "momentum_short_days": 1,
+      "name": "Momentum Rotation",
+      "rebalance_every": 1,
+      "short_momentum_weight": 1.0,
+      "top_n": 2,
+      "trend_filter": false,
+      "version": "hand-rebalance-v1",
+      "volatility_weight": 0.0,
+      "volatility_window": 2
+    },
+    "unallocated_capital": 0.0,
+    "unfilled_entry": "skip"
+  },
+  "pending_at_end": {
+    "decision_session": "2026-01-12",
+    "retry_only": false,
+    "targets": {
+      "A.SYNTH": 0.5,
+      "B.SYNTH": 0.5
+    }
+  },
+  "schema_version": "mvp3.full_target.golden@1",
+  "sessions": [
+    {
+      "close": {
+        "cash": 1000.0,
+        "equity": 1000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "open": {
+        "cash": 1000.0,
+        "equity": 1000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-05"
+    },
+    {
+      "close": {
+        "cash": 1000.0,
+        "equity": 1000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "open": {
+        "cash": 1000.0,
+        "equity": 1000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-06"
+    },
+    {
+      "close": {
+        "cash": 1000.0,
+        "equity": 1000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "open": {
+        "cash": 1000.0,
+        "equity": 1000.0,
+        "holdings": {},
+        "nav": 1.0
+      },
+      "session_date": "2026-01-07"
+    },
+    {
+      "close": {
+        "cash": 0.10000000000002274,
+        "equity": 1240.1,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 15.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-01-08"
+            },
+            "quantity": 50.0,
+            "value": 750.0
+          },
+          "B.SYNTH": {
+            "price": 10.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-01-08"
+            },
+            "quantity": 49.0,
+            "value": 490.0
+          }
+        },
+        "nav": 1.2401
+      },
+      "open": {
+        "cash": 0.10000000000002274,
+        "equity": 990.1,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 10.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-01-08"
+            },
+            "quantity": 50.0,
+            "value": 500.0
+          },
+          "B.SYNTH": {
+            "price": 10.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-01-08"
+            },
+            "quantity": 49.0,
+            "value": 490.0
+          }
+        },
+        "nav": 0.9901
+      },
+      "session_date": "2026-01-08"
+    },
+    {
+      "close": {
+        "cash": 2.450000000000017,
+        "equity": 1237.45,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 15.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-01-09"
+            },
+            "quantity": 41.0,
+            "value": 615.0
+          },
+          "B.SYNTH": {
+            "price": 10.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-01-09"
+            },
+            "quantity": 62.0,
+            "value": 620.0
+          }
+        },
+        "nav": 1.23745
+      },
+      "open": {
+        "cash": 2.450000000000017,
+        "equity": 1237.45,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 15.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-01-09"
+            },
+            "quantity": 41.0,
+            "value": 615.0
+          },
+          "B.SYNTH": {
+            "price": 10.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-01-09"
+            },
+            "quantity": 62.0,
+            "value": 620.0
+          }
+        },
+        "nav": 1.23745
+      },
+      "session_date": "2026-01-09"
+    },
+    {
+      "close": {
+        "cash": 12.350000000000017,
+        "equity": 1237.35,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 15.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-01-12"
+            },
+            "quantity": 41.0,
+            "value": 615.0
+          },
+          "B.SYNTH": {
+            "price": 10.0,
+            "price_source": {
+              "field": "close",
+              "kind": "raw",
+              "session_date": "2026-01-12"
+            },
+            "quantity": 61.0,
+            "value": 610.0
+          }
+        },
+        "nav": 1.23735
+      },
+      "open": {
+        "cash": 12.350000000000017,
+        "equity": 1237.35,
+        "holdings": {
+          "A.SYNTH": {
+            "price": 15.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-01-12"
+            },
+            "quantity": 41.0,
+            "value": 615.0
+          },
+          "B.SYNTH": {
+            "price": 10.0,
+            "price_source": {
+              "field": "open",
+              "kind": "raw",
+              "session_date": "2026-01-12"
+            },
+            "quantity": 61.0,
+            "value": 610.0
+          }
+        },
+        "nav": 1.23735
+      },
+      "session_date": "2026-01-12"
+    }
+  ],
+  "tolerance": {
+    "cash_equity_fees_abs_cny": 1e-06,
+    "normalized_nav_rel": 1e-09
+  }
+}
