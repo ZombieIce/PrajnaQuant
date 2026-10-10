@@ -24,6 +24,7 @@
 1. `Price`、`Quantity`、`Notional` 为 `i128` 尾数，scale 固定 18，要求 `|mantissa| < 10^38`；Arrow/Parquet 中为 `Decimal128(38,18)`，字段 metadata `prajna.decimal_scale=18`。
 2. Instrument increment 只用于 tick/size 对齐校验，不决定存储 scale。
 3. 转 `f64` 只能经显式 `to_f64()`；JSON 中十进制写成字符串（serde 只用字符串）；Raw JSON 的数字按字面量解析，不经过 `f64`（`serde_json` 启用 `arbitrary_precision`）。
+4. 依 [ADR 0019](0019-fast-event-ledger-and-vector-parity.md)，三种定点类型提供 `checked_mul_decimal(Self)` 与 `checked_div_decimal(Self)`：乘除结果按 half-even 舍入到 scale 18，不做货币单位舍入。使用整数宽中间值，舍入后超出上述范围返回 `FixedPointError::Overflow`，除零返回 `FixedPointError::DivisionByZero`；原有 `checked_mul(i128)` 的整数乘法行为不变。公开接口的手算、正负舍入边界与独立 Python Decimal 向量见 [乘除测试](../../crates/prajna-domain/tests/decimal_arithmetic.rs)。此数值原语不表示 Fast Event 账本已实现。
 
 实现：[`DECIMAL_SCALE`](../../crates/prajna-domain/src/lib.rs#L21)、[定点类型宏](../../crates/prajna-domain/src/lib.rs#L55)、[`to_f64`](../../crates/prajna-domain/src/lib.rs#L85)、[`decimal()` 字段构造与 metadata](../../crates/prajna-data/src/normalized.rs#L116)、[依赖配置](../../crates/prajna-data/Cargo.toml)。
 

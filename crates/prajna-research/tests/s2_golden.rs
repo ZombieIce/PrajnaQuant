@@ -12,10 +12,11 @@ use prajna_research::{
         AvailabilityAssumption, Factor, FactorGraph, FactorKind, FactorParams, RotationScoreParams,
     },
     load_execution_status, load_panel,
-    strategy::{RankDirection, StrategyCapability, VectorStrategy, Weighting, execute},
-    vector::{VectorCosts, run_vector},
+    strategy::{RankDirection, StrategyCapability, VectorStrategy, Weighting},
+    vector::{VectorCosts, run_vector, run_vector_with_policy},
 };
 use serde_json::{Map, Number, Value, json};
+use sha2::{Digest, Sha256};
 
 struct GoldenCase {
     name: &'static str,
@@ -23,6 +24,7 @@ struct GoldenCase {
     expected: &'static str,
     trend: Option<u32>,
     assert_three_by_ten_edges: bool,
+    skip_sha256: &'static str,
 }
 
 const CASES: [GoldenCase; 3] = [
@@ -32,6 +34,7 @@ const CASES: [GoldenCase; 3] = [
         expected: "dataset-v1.json",
         trend: None,
         assert_three_by_ten_edges: true,
+        skip_sha256: "bba42572d6b5952717b8613ae42079eb61270f428bdd0e2b684481820847bbad",
     },
     GoldenCase {
         name: "B2 S2 scale 64x252 v2",
@@ -39,6 +42,7 @@ const CASES: [GoldenCase; 3] = [
         expected: "b2-s2-scale-64x252-v2.json",
         trend: None,
         assert_three_by_ten_edges: false,
+        skip_sha256: "3f3f24924792abe58d0ac98d862cafdc8c819659dfe802544b582769de494dfe",
     },
     GoldenCase {
         name: "B2 S2 scale 64x252 v2 trend 20",
@@ -46,6 +50,7 @@ const CASES: [GoldenCase; 3] = [
         expected: "b2-s2-scale-64x252-v2.trend20.json",
         trend: Some(20),
         assert_three_by_ten_edges: false,
+        skip_sha256: "028167e845b74c4c07e82ac91e57273dbe7f7ad574b73da6e386afe96ed217fe",
     },
 ];
 
@@ -159,6 +164,7 @@ fn run_case(case: &GoldenCase) {
         top_k: u32_field(strategy_config, "top_n", case.name),
         rebalance_every: u32_field(strategy_config, "rebalance_every", case.name),
         weighting: Weighting::EqualWeight,
+        unfilled_entry: Default::default(),
         capabilities: BTreeSet::from([StrategyCapability::Vectorizable]),
     };
     let costs_config = fixture
@@ -223,7 +229,7 @@ fn run_case(case: &GoldenCase) {
     let decisions = strategy
         .decide(&root_values, &panel.sessions)
         .unwrap_or_else(|error| panic!("{}: decide: {error}", case.name));
-    let events = execute(&decisions, &panel.sessions, |instrument, session| {
+    let events = strategy.execute(&decisions, &panel.sessions, |instrument, session| {
         executable(&panel, &statuses, instrument, session)
             .unwrap_or_else(|error| panic!("{}: execution check: {error}", case.name))
     });
@@ -235,8 +241,31 @@ fn run_case(case: &GoldenCase) {
         AvailabilityAssumption::None,
     )
     .unwrap_or_else(|error| panic!("{}: run vector: {error}", case.name));
+    let live_result = run_vector_with_policy(
+        &panel,
+        &decisions,
+        strategy.unfilled_entry,
+        &costs,
+        AvailabilityAssumption::None,
+        |instrument, session| executable(&panel, &statuses, instrument, session).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::to_vec(&result).unwrap(),
+        serde_json::to_vec(&live_result).unwrap()
+    );
     let actual_vector = serde_json::to_value(result)
         .unwrap_or_else(|error| panic!("{}: serialize vector result: {error}", case.name));
+    // Captured from origin/main 7995b28, independently of this implementation.
+    assert_eq!(
+        format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&actual_vector).unwrap())
+        ),
+        case.skip_sha256,
+        "{}: default skip output changed",
+        case.name
+    );
 
     assert_json_matches(
         &Value::Object(actual_factors),

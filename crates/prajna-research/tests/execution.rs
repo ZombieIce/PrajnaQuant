@@ -5,8 +5,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use chrono::NaiveDate;
 use prajna_domain::{InstrumentId, TimestampNs, VenueId};
 use prajna_research::{
-    Panel, PanelError, PanelSession, executable, load_execution_status, load_panel,
-    strategy::{Decision, ExecutionEvent, execute},
+    Panel, PanelError, PanelSession, executable,
+    factor::AvailabilityAssumption,
+    load_execution_status, load_panel,
+    strategy::{Decision, ExecutionEvent, UnfilledEntry, execute, execute_with_policy},
+    vector::{VectorCosts, VectorExecutionKind, run_vector},
 };
 
 fn fixture_panel(lake_root: &std::path::Path) -> (Panel, String) {
@@ -57,6 +60,226 @@ fn ids(instruments: &[&str]) -> BTreeSet<InstrumentId> {
         .iter()
         .map(|instrument| instrument.parse().unwrap())
         .collect()
+}
+
+fn replay(
+    panel: &Panel,
+    decisions: &[Decision],
+    events: &[ExecutionEvent],
+) -> prajna_research::vector::VectorResult {
+    run_vector(
+        panel,
+        decisions,
+        events,
+        &VectorCosts {
+            commission_rate: 0.0,
+            buy_slippage_bps: 0.0,
+            sell_slippage_bps: 0.0,
+            buy_tax_rate: 0.0,
+            sell_tax_rate: 0.0,
+        },
+        AvailabilityAssumption::None,
+    )
+    .unwrap()
+}
+
+#[test]
+fn halted_entry_is_retried_next_session_and_only_missing_legs_remain_pending() {
+    let lake = tempfile::tempdir().unwrap();
+    let (panel, dsv) = fixture_panel(lake.path());
+    let statuses = load_execution_status(lake.path(), &dsv).unwrap();
+    let decisions = [decision(
+        &panel,
+        "2026-01-12",
+        &[("A.SYNTH", 0.5), ("B.SYNTH", 0.5)],
+    )];
+    let events = execute_with_policy(
+        &decisions,
+        &panel.sessions,
+        UnfilledEntry::Retry,
+        |instrument, session| executable(&panel, &statuses, instrument, session).unwrap(),
+    );
+
+    // B is HALTED Jan 13; A fills then, B fills Jan 14 without rebalancing A.
+    assert_eq!(events.len(), 2);
+    assert_eq!(
+        events,
+        [
+            ExecutionEvent::RetryableExecution {
+                decision_session: session(&panel, "2026-01-12"),
+                attempt_session: session(&panel, "2026-01-13"),
+                applied: weights(&[("A.SYNTH", 0.5)]),
+                skipped_buys: ids(&["B.SYNTH"]),
+                is_retry: false,
+            },
+            ExecutionEvent::RetryableExecution {
+                decision_session: session(&panel, "2026-01-12"),
+                attempt_session: session(&panel, "2026-01-14"),
+                applied: weights(&[("B.SYNTH", 0.5)]),
+                skipped_buys: BTreeSet::new(),
+                is_retry: true,
+            },
+        ]
+    );
+    let truncated = execute_with_policy(
+        &decisions,
+        &panel.sessions[..7],
+        UnfilledEntry::Retry,
+        |instrument, session| executable(&panel, &statuses, instrument, session).unwrap(),
+    );
+    assert!(matches!(
+        truncated.last(),
+        Some(ExecutionEvent::PendingAtEnd { decision_session, targets })
+            if *decision_session == session(&panel, "2026-01-12")
+                && *targets == weights(&[("B.SYNTH", 0.5)])
+    ));
+}
+
+#[test]
+fn new_close_decision_replaces_missing_entries_before_the_next_open() {
+    let lake = tempfile::tempdir().unwrap();
+    let (panel, dsv) = fixture_panel(lake.path());
+    let statuses = load_execution_status(lake.path(), &dsv).unwrap();
+    let decisions = [
+        decision(&panel, "2026-01-12", &[("A.SYNTH", 0.5), ("B.SYNTH", 0.5)]),
+        decision(&panel, "2026-01-13", &[("C.SYNTH", 1.0)]),
+    ];
+    let events = execute_with_policy(
+        &decisions,
+        &panel.sessions,
+        UnfilledEntry::Retry,
+        |instrument, session| executable(&panel, &statuses, instrument, session).unwrap(),
+    );
+    assert_eq!(events.len(), 2);
+    assert_eq!(
+        events[1],
+        ExecutionEvent::RetryableExecution {
+            decision_session: session(&panel, "2026-01-13"),
+            attempt_session: session(&panel, "2026-01-14"),
+            applied: weights(&[("C.SYNTH", 1.0)]),
+            skipped_buys: BTreeSet::new(),
+            is_retry: false,
+        }
+    );
+    let result = replay(&panel, &decisions, &events);
+    assert_eq!(
+        result.sessions[7].weights_after_execution,
+        weights(&[("C.SYNTH", 1.0)])
+    );
+    assert!(result.pending_at_end.is_none());
+}
+
+#[test]
+fn entry_retry_defers_as_a_whole_when_an_already_filled_holding_is_blocked() {
+    let lake = tempfile::tempdir().unwrap();
+    let (panel, _) = fixture_panel(lake.path());
+    let decisions = [decision(
+        &panel,
+        "2026-01-05",
+        &[("A.SYNTH", 0.5), ("B.SYNTH", 0.5)],
+    )];
+    let events = execute_with_policy(
+        &decisions,
+        &panel.sessions[..4],
+        UnfilledEntry::Retry,
+        |instrument, attempt| {
+            !((instrument.to_string() == "B.SYNTH"
+                && attempt.session_date == session(&panel, "2026-01-06").session_date)
+                || (instrument.to_string() == "A.SYNTH"
+                    && attempt.session_date == session(&panel, "2026-01-07").session_date))
+        },
+    );
+    assert_eq!(events.len(), 3);
+    assert_eq!(
+        events[1],
+        ExecutionEvent::Deferred {
+            decision_session: session(&panel, "2026-01-05"),
+            attempt_session: session(&panel, "2026-01-07"),
+            blocked: ids(&["A.SYNTH"]),
+        }
+    );
+    assert_eq!(
+        events[2],
+        ExecutionEvent::RetryableExecution {
+            decision_session: session(&panel, "2026-01-05"),
+            attempt_session: session(&panel, "2026-01-08"),
+            applied: weights(&[("B.SYNTH", 0.5)]),
+            skipped_buys: BTreeSet::new(),
+            is_retry: true,
+        }
+    );
+    // Continue with the full panel: only the first three sessions have events.
+    let result = replay(&panel, &decisions, &events);
+    assert_eq!(
+        result.executions[1].kind,
+        VectorExecutionKind::RetryDeferred
+    );
+    assert_eq!(
+        result.executions[2].kind,
+        VectorExecutionKind::EntriesRetried
+    );
+    assert_eq!(
+        result.sessions[3].weights_after_execution,
+        weights(&[("A.SYNTH", 0.5), ("B.SYNTH", 0.5)])
+    );
+    assert!(result.pending_at_end.is_none());
+    let truncated = execute_with_policy(
+        &decisions,
+        &panel.sessions[..3],
+        UnfilledEntry::Retry,
+        |instrument, attempt| {
+            (instrument.to_string() == "A.SYNTH"
+                && attempt.session_date == session(&panel, "2026-01-06").session_date)
+                || (instrument.to_string() == "B.SYNTH"
+                    && attempt.session_date == session(&panel, "2026-01-07").session_date)
+        },
+    );
+    assert_eq!(
+        truncated.last(),
+        Some(&ExecutionEvent::PendingAtEnd {
+            decision_session: session(&panel, "2026-01-05"),
+            targets: weights(&[("B.SYNTH", 0.5)]),
+        })
+    );
+}
+
+#[test]
+fn zero_weight_unavailable_targets_do_not_create_retry_entries() {
+    let lake = tempfile::tempdir().unwrap();
+    let (panel, dsv) = fixture_panel(lake.path());
+    let statuses = load_execution_status(lake.path(), &dsv).unwrap();
+    let decisions = [decision(
+        &panel,
+        "2026-01-12",
+        &[("A.SYNTH", 1.0), ("B.SYNTH", 0.0)],
+    )];
+    let events = execute_with_policy(
+        &decisions,
+        &panel.sessions,
+        UnfilledEntry::Retry,
+        |id, day| executable(&panel, &statuses, id, day).unwrap(),
+    );
+    assert_eq!(events.len(), 1);
+    assert!(replay(&panel, &decisions, &events).pending_at_end.is_none());
+}
+
+#[test]
+fn explicit_skip_and_default_policy_have_identical_event_traces() {
+    let lake = tempfile::tempdir().unwrap();
+    let (panel, dsv) = fixture_panel(lake.path());
+    let statuses = load_execution_status(lake.path(), &dsv).unwrap();
+    let decisions = [
+        decision(&panel, "2026-01-12", &[("A.SYNTH", 0.5), ("B.SYNTH", 0.5)]),
+        decision(&panel, "2026-01-16", &[("C.SYNTH", 1.0)]),
+    ];
+    let can_trade = |instrument: &InstrumentId, session: &PanelSession| {
+        executable(&panel, &statuses, instrument, session).unwrap()
+    };
+    assert_eq!(UnfilledEntry::default(), UnfilledEntry::Skip);
+    assert_eq!(
+        execute(&decisions, &panel.sessions, can_trade),
+        execute_with_policy(&decisions, &panel.sessions, UnfilledEntry::Skip, can_trade)
+    );
 }
 
 #[test]

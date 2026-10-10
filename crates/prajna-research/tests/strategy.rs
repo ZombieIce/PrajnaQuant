@@ -30,6 +30,7 @@ fn strategy(capabilities: BTreeSet<StrategyCapability>) -> VectorStrategy {
         top_k: 1,
         rebalance_every: 1,
         weighting: Weighting::EqualWeight,
+        unfilled_entry: Default::default(),
         capabilities,
     }
 }
