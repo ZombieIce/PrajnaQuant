@@ -326,7 +326,8 @@ def build_vector_inputs(fixture, calendar, bars_by_symbol):
     return instruments, open_times, statuses
 
 
-def build_vector_result(fixture, calendar, bars_by_symbol, factors):
+def build_vector_result(fixture, calendar, bars_by_symbol, factors, strategy_kind="top_k_rank"):
+    retry = strategy_kind == "buy_and_hold"
     instruments, open_times, statuses = build_vector_inputs(
         fixture, calendar, bars_by_symbol
     )
@@ -367,7 +368,7 @@ def build_vector_result(fixture, calendar, bars_by_symbol, factors):
     }
 
     scores_by_date = {}
-    for row in factors["rotation_score"]:
+    for row in factors.get("rotation_score", []):
         if row["status"] == "ok":
             scores_by_date.setdefault(row["session_date"], []).append(
                 (row["instrument_id"], finite_number(row["value"], "rotation_score"))
@@ -421,6 +422,38 @@ def build_vector_result(fixture, calendar, bars_by_symbol, factors):
         decision_rows.append(decision)
         decisions_by_index[index] = decision
 
+    if strategy_kind != "top_k_rank":
+        decision_rows = []
+        if strategy_kind == "buy_and_hold":
+            decision_rows = [{"decision_session": calendar[0], "ranked": [],
+                              "targets": {id: 1 / len(instrument_ids) for id in instrument_ids}}]
+        else:
+            held, previous = set(), {}
+            gaps_by_date = {}
+            for row in factors["ma_gap(20,60)"]:
+                gaps_by_date.setdefault(row["session_date"], []).append(row)
+            for index, date in enumerate(calendar):
+                old = held.copy()
+                for row in gaps_by_date[date]:
+                    id = row["instrument_id"]
+                    usable = row["status"] == "ok" and row["available_at"] <= timestamp_text(
+                        available_at_for_session(date, "15:00:00+08:00"))
+                    if not usable:
+                        previous.pop(id, None)
+                        continue
+                    gap = row["value"]
+                    prior = previous.get(id)
+                    if prior is not None:
+                        if prior <= 0 and gap > 0:
+                            held.add(id)
+                        if prior >= 0 and gap < 0:
+                            held.discard(id)
+                    previous[id] = gap
+                if old != held:
+                    decision_rows.append({"decision_session": date, "ranked": [],
+                                          "targets": {id: 1 / len(instrument_ids) for id in sorted(held)}})
+        decisions_by_index = {calendar.index(row["decision_session"]): row for row in decision_rows}
+
     marks_by_index = []
     carried_by_index = []
     last_prices = {}
@@ -444,6 +477,7 @@ def build_vector_result(fixture, calendar, bars_by_symbol, factors):
     target_weights = {}
     pending = None
     nav = 1.0
+    retry_entries = False
 
     for index, session_date in enumerate(calendar):
         marks = marks_by_index[index]
@@ -472,7 +506,7 @@ def build_vector_result(fixture, calendar, bars_by_symbol, factors):
                 executions.append(
                     {
                         "session_date": session_date,
-                        "kind": "deferred",
+                        "kind": "retry_deferred" if retry_entries else "deferred",
                         "blocked": blocked,
                         "skipped_buys": [],
                     }
@@ -488,27 +522,47 @@ def build_vector_result(fixture, calendar, bars_by_symbol, factors):
                     for instrument_id, weight in pending["targets"].items()
                     if executable[instrument_id]
                 }
+                if retry_entries:
+                    cash = max(0.0, 1 - math.fsum(weights.values()))
+                    buys = {}
+                    for id, target in sorted(next_weights.items()):
+                        amount = min(target, cash / (1 + buy_rate))
+                        cash = max(0.0, cash - amount * (1 + buy_rate))
+                        if amount > 0:
+                            buys[id] = amount
+                    turnover = math.fsum(buys.values())
+                    session_cost = turnover * buy_rate
+                    next_weights = {id: weight / (1 - session_cost) for id, weight in weights.items()}
+                    next_weights.update({id: amount / (1 - session_cost) for id, amount in buys.items()})
                 deltas = {
                     instrument_id: next_weights.get(instrument_id, 0.0)
                     - weights.get(instrument_id, 0.0)
                     for instrument_id in instrument_ids
                 }
-                buys = math.fsum(max(delta, 0.0) for delta in deltas.values())
-                sells = math.fsum(max(-delta, 0.0) for delta in deltas.values())
-                turnover = buys + sells
-                session_cost = buys * buy_rate + sells * sell_rate
+                if not retry_entries:
+                    buys = math.fsum(max(delta, 0.0) for delta in deltas.values())
+                    sells = math.fsum(max(-delta, 0.0) for delta in deltas.values())
+                    turnover = buys + sells
+                    session_cost = buys * buy_rate + sells * sell_rate
                 if session_cost >= 1:
                     raise ValueError("transaction costs must be less than 100% of NAV")
                 weights = next_weights
                 executions.append(
                     {
                         "session_date": session_date,
-                        "kind": "executed",
+                        "kind": "entries_retried" if retry_entries else "executed",
                         "blocked": [],
                         "skipped_buys": skipped_buys,
                     }
                 )
-                pending = None
+                remaining = {id: weight for id, weight in pending["targets"].items() if id in skipped_buys}
+                if retry and remaining:
+                    pending = {"decision_session": pending["decision_session"], "targets": remaining,
+                               "retry_entries": True}
+                    retry_entries = True
+                else:
+                    pending = None
+                    retry_entries = False
 
         weights_after_execution = weights.copy()
         gross_return = 0.0
@@ -543,6 +597,7 @@ def build_vector_result(fixture, calendar, bars_by_symbol, factors):
                 "targets": decision["targets"],
             }
             target_weights = decision["targets"]
+            retry_entries = False
 
         sessions.append(
             {
@@ -668,7 +723,9 @@ def build_summary(vector, sessions_per_year):
     }
 
 
-def build_output(fixture_bytes, trend_window=None):
+def build_output(fixture_bytes, trend_window=None, strategy_kind="top_k_rank"):
+    if strategy_kind not in ("top_k_rank", "buy_and_hold", "ma_crossover"):
+        raise ValueError("unsupported strategy")
     fixture = json.loads(fixture_bytes)
     calendar, bars_by_symbol, parameters, configured_trend = build_inputs(fixture)
     if trend_window is not None:
@@ -779,7 +836,29 @@ def build_output(fixture_bytes, trend_window=None):
                 }
             )
 
-    vector = build_vector_result(fixture, calendar, bars_by_symbol, factors)
+    if strategy_kind == "ma_crossover":
+        rows = []
+        for symbol, bars in sorted(bars_by_symbol.items()):
+            for index, date in enumerate(calendar):
+                value, time, status = None, None, "insufficient_window"
+                if index >= 59:
+                    window = bars[index - 59:index + 1]
+                    if any(bar is None for bar in window):
+                        status = "missing_input"
+                    elif any(bar["available_at"] is None for bar in window):
+                        status = "unknown_availability"
+                    else:
+                        status = "ok"
+                        value = math.fsum(bar["close"] for bar in window[-20:]) / 20 - math.fsum(bar["close"] for bar in window) / 60
+                        time = max(bar["available_at"] for bar in window)
+                rows.append({"instrument_id": f"{symbol}.SYNTH", "session_date": date,
+                             **factor_result(value, time, status)})
+        factors = {"ma_gap(20,60)": rows}
+        parameters = {"strategy": strategy_kind, "params_version": 1, "short_window": 20, "long_window": 60}
+    elif strategy_kind == "buy_and_hold":
+        factors = {}
+        parameters = {"strategy": strategy_kind, "params_version": 1, "unfilled_entry": "retry"}
+    vector = build_vector_result(fixture, calendar, bars_by_symbol, factors, strategy_kind)
     sessions_per_year = 252
     return {
         "fixture_sha256": hashlib.sha256(fixture_bytes).hexdigest(),
@@ -795,10 +874,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--fixture", type=Path, required=True)
     parser.add_argument("--trend", type=int)
+    parser.add_argument("--strategy", choices=("top_k_rank", "buy_and_hold", "ma_crossover"), default="top_k_rank")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     fixture_bytes = args.fixture.read_bytes()
-    output = build_output(fixture_bytes, args.trend)
+    output = build_output(fixture_bytes, args.trend, args.strategy)
     args.out.write_text(
         json.dumps(output, allow_nan=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

@@ -11,7 +11,8 @@ use prajna_research::{
     },
     load_panel,
     strategy::{
-        EngineError, RankDirection, StrategyCapability, VectorEngine, VectorStrategy, Weighting,
+        EngineError, RankDirection, StrategyCapability, TopKRank, VectorEngine, VectorStrategy,
+        Weighting,
     },
 };
 
@@ -23,8 +24,8 @@ fn fixture_panel() -> Panel {
     load_panel(lake.path(), &dsv, &VenueId::new("SYNTH").unwrap()).unwrap()
 }
 
-fn strategy(capabilities: BTreeSet<StrategyCapability>) -> VectorStrategy {
-    VectorStrategy {
+fn strategy(capabilities: BTreeSet<StrategyCapability>) -> TopKRank {
+    TopKRank {
         score: Factor::new(FactorKind::Momentum, MomentumParams { n: 1 }).unwrap(),
         direction: RankDirection::Descending,
         top_k: 1,
@@ -35,7 +36,7 @@ fn strategy(capabilities: BTreeSet<StrategyCapability>) -> VectorStrategy {
     }
 }
 
-fn configured_strategy(top_k: u32, rebalance_every: u32) -> VectorStrategy {
+fn configured_strategy(top_k: u32, rebalance_every: u32) -> TopKRank {
     let mut strategy = strategy(BTreeSet::from([StrategyCapability::Vectorizable]));
     strategy.top_k = top_k;
     strategy.rebalance_every = rebalance_every;
@@ -110,20 +111,23 @@ fn vector_engine_rejects_a_strategy_without_vectorizable_capability() {
     let strategy = strategy(BTreeSet::from([StrategyCapability::EventDriven]));
 
     assert_eq!(
-        VectorEngine::validate(&strategy),
+        VectorEngine::validate(&VectorStrategy::TopKRank(strategy.clone())),
         Err(EngineError::UnsupportedCapability)
     );
 }
 
 #[test]
 fn vector_engine_accepts_vectorizable_strategies_and_rejects_zero_parameters() {
-    assert_eq!(VectorEngine::validate(&configured_strategy(1, 1)), Ok(()));
     assert_eq!(
-        VectorEngine::validate(&configured_strategy(0, 1)),
+        VectorEngine::validate(&VectorStrategy::TopKRank(configured_strategy(1, 1))),
+        Ok(())
+    );
+    assert_eq!(
+        VectorEngine::validate(&VectorStrategy::TopKRank(configured_strategy(0, 1))),
         Err(EngineError::InvalidTopK)
     );
     assert_eq!(
-        VectorEngine::validate(&configured_strategy(1, 0)),
+        VectorEngine::validate(&VectorStrategy::TopKRank(configured_strategy(1, 0))),
         Err(EngineError::InvalidRebalanceEvery)
     );
 }

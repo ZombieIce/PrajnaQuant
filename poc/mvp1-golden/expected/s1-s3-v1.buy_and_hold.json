@@ -1,0 +1,2571 @@
+{
+  "factors": {},
+  "fixture_sha256": "5f4fdb84c9795366c0db81106feeea7bc420c1b72d6b308816ef4a46ecb8b111",
+  "parameters": {
+    "params_version": 1,
+    "strategy": "buy_and_hold",
+    "unfilled_entry": "retry"
+  },
+  "summary": {
+    "annualized_return": 0.021968106914525443,
+    "annualized_volatility": 0.40774014977418854,
+    "assumptions": [
+      "proportional transaction costs",
+      "no minimum commission or lot size",
+      "raw open-to-open returns",
+      "Static Universe is not point-in-time",
+      "conservative deferral when a held instrument is unavailable",
+      "weight-based Vector NAV is not a cash-and-quantity account ledger",
+      "long-only unlevered weights; residual cash earns zero return",
+      "availability assumption: none"
+    ],
+    "availability_assumption": "none",
+    "deferred_count": 0,
+    "drawdown_peak_session": "2026-01-14",
+    "drawdown_trough_session": "2026-06-29",
+    "executed_count": 1,
+    "insufficient_sessions": false,
+    "max_drawdown": -0.07407407407407729,
+    "mean_return": 0.0004281624049241164,
+    "n_returns": 129,
+    "pending_at_end": false,
+    "session_count": 130,
+    "sharpe": 0.26462178448855717,
+    "skipped_buy_count": 2,
+    "std_return": 0.025685215139017423,
+    "total_cost": 0.001990000455115827,
+    "total_return": 0.011185936158482068,
+    "total_turnover": 0.9950002275579135,
+    "zero_volatility": false
+  },
+  "tolerance": {
+    "factor_abs": 1e-12,
+    "nav_abs": 1e-10
+  },
+  "vector": {
+    "assumptions": [
+      "proportional transaction costs",
+      "no minimum commission or lot size",
+      "raw open-to-open returns",
+      "Static Universe is not point-in-time",
+      "conservative deferral when a held instrument is unavailable",
+      "weight-based Vector NAV is not a cash-and-quantity account ledger",
+      "long-only unlevered weights; residual cash earns zero return",
+      "availability assumption: none"
+    ],
+    "availability_assumption": "none",
+    "costs": {
+      "buy_slippage_bps": 10.0,
+      "buy_tax_rate": 0.0,
+      "commission_rate": 0.001,
+      "sell_slippage_bps": 10.0,
+      "sell_tax_rate": 0.0
+    },
+    "decisions": [
+      {
+        "decision_session": "2026-01-05",
+        "ranked": [],
+        "targets": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        }
+      }
+    ],
+    "executions": [
+      {
+        "blocked": [],
+        "kind": "executed",
+        "session_date": "2026-01-06",
+        "skipped_buys": [
+          "C.SYNTH"
+        ]
+      },
+      {
+        "blocked": [],
+        "kind": "entries_retried",
+        "session_date": "2026-01-07",
+        "skipped_buys": [
+          "C.SYNTH"
+        ]
+      },
+      {
+        "blocked": [],
+        "kind": "entries_retried",
+        "session_date": "2026-01-08",
+        "skipped_buys": []
+      }
+    ],
+    "pending_at_end": null,
+    "sessions": [
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-05",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0013333333333333333,
+        "gross_return": 0.006600660066006606,
+        "nav": 1.0052585258525855,
+        "net_return": 0.005258525852585461,
+        "session_date": "2026-01-06",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.6666666666666666,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.006557377049180304,
+        "nav": 1.0118503850385039,
+        "net_return": 0.006557377049180246,
+        "session_date": "2026-01-07",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33442622950819667,
+          "B.SYNTH": 0.33442622950819667
+        }
+      },
+      {
+        "cost": 0.0006566671217824938,
+        "gross_return": 0.009708737864077666,
+        "nav": 1.0210032753444909,
+        "net_return": 0.00904569533334576,
+        "session_date": "2026-01-08",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.3283335608912469,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3357253457900147,
+          "B.SYNTH": 0.3357253457900147,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009615384615384581,
+        "nav": 1.0308206145304954,
+        "net_return": 0.009615384615384581,
+        "session_date": "2026-01-09",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3357253457900147,
+          "B.SYNTH": 0.3357253457900147,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.00952380952380949,
+        "nav": 1.0406379537165,
+        "net_return": 0.00952380952380949,
+        "session_date": "2026-01-12",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3357253457900147,
+          "B.SYNTH": 0.3357253457900147,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009433962264151052,
+        "nav": 1.0504552929025048,
+        "net_return": 0.009433962264151052,
+        "session_date": "2026-01-13",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3357253457900147,
+          "B.SYNTH": 0.3357253457900147,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009345794392523255,
+        "nav": 1.0602726320885094,
+        "net_return": 0.009345794392523255,
+        "session_date": "2026-01-14",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3357253457900147,
+          "B.SYNTH": 0.3357253457900147,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": -0.07407407407407407,
+        "nav": 0.9817339186004717,
+        "net_return": -0.07407407407407407,
+        "session_date": "2026-01-15",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3357253457900147,
+          "B.SYNTH": 0.3357253457900147,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.010000000000000009,
+        "nav": 0.9915512577864763,
+        "net_return": 0.010000000000000009,
+        "session_date": "2026-01-16",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.00990099009900991,
+        "nav": 1.001368596972481,
+        "net_return": 0.00990099009900991,
+        "session_date": "2026-01-19",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009803921568627418,
+        "nav": 1.0111859361584856,
+        "net_return": 0.009803921568627416,
+        "session_date": "2026-01-20",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009708737864077667,
+        "nav": 1.0210032753444904,
+        "net_return": 0.009708737864077666,
+        "session_date": "2026-01-21",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009615384615384583,
+        "nav": 1.030820614530495,
+        "net_return": 0.009615384615384581,
+        "session_date": "2026-01-22",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009523809523809492,
+        "nav": 1.0406379537164996,
+        "net_return": 0.00952380952380949,
+        "session_date": "2026-01-23",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009433962264151052,
+        "nav": 1.0504552929025044,
+        "net_return": 0.009433962264151052,
+        "session_date": "2026-01-26",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009345794392523255,
+        "nav": 1.060272632088509,
+        "net_return": 0.009345794392523255,
+        "session_date": "2026-01-27",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": -0.07407407407407407,
+        "nav": 0.9817339186004713,
+        "net_return": -0.07407407407407407,
+        "session_date": "2026-01-28",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.010000000000000009,
+        "nav": 0.991551257786476,
+        "net_return": 0.010000000000000009,
+        "session_date": "2026-01-29",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.00990099009900991,
+        "nav": 1.0013685969724808,
+        "net_return": 0.00990099009900991,
+        "session_date": "2026-01-30",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009803921568627418,
+        "nav": 1.0111859361584854,
+        "net_return": 0.009803921568627416,
+        "session_date": "2026-02-02",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009708737864077667,
+        "nav": 1.0210032753444902,
+        "net_return": 0.009708737864077666,
+        "session_date": "2026-02-03",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009615384615384583,
+        "nav": 1.0308206145304948,
+        "net_return": 0.009615384615384581,
+        "session_date": "2026-02-04",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009523809523809492,
+        "nav": 1.0406379537164994,
+        "net_return": 0.00952380952380949,
+        "session_date": "2026-02-05",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009433962264151052,
+        "nav": 1.0504552929025042,
+        "net_return": 0.009433962264151052,
+        "session_date": "2026-02-06",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009345794392523255,
+        "nav": 1.0602726320885087,
+        "net_return": 0.009345794392523255,
+        "session_date": "2026-02-09",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": -0.07407407407407407,
+        "nav": 0.9817339186004711,
+        "net_return": -0.07407407407407407,
+        "session_date": "2026-02-10",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.010000000000000009,
+        "nav": 0.9915512577864758,
+        "net_return": 0.010000000000000009,
+        "session_date": "2026-02-11",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.00990099009900991,
+        "nav": 1.0013685969724806,
+        "net_return": 0.00990099009900991,
+        "session_date": "2026-02-12",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009803921568627418,
+        "nav": 1.0111859361584852,
+        "net_return": 0.009803921568627416,
+        "session_date": "2026-02-13",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009708737864077667,
+        "nav": 1.02100327534449,
+        "net_return": 0.009708737864077666,
+        "session_date": "2026-02-16",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009615384615384583,
+        "nav": 1.0308206145304946,
+        "net_return": 0.009615384615384581,
+        "session_date": "2026-02-17",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009523809523809492,
+        "nav": 1.0406379537164991,
+        "net_return": 0.00952380952380949,
+        "session_date": "2026-02-18",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009433962264151052,
+        "nav": 1.050455292902504,
+        "net_return": 0.009433962264151052,
+        "session_date": "2026-02-19",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009345794392523255,
+        "nav": 1.0602726320885085,
+        "net_return": 0.009345794392523255,
+        "session_date": "2026-02-20",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": -0.07407407407407407,
+        "nav": 0.9817339186004709,
+        "net_return": -0.07407407407407407,
+        "session_date": "2026-02-23",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.010000000000000009,
+        "nav": 0.9915512577864756,
+        "net_return": 0.010000000000000009,
+        "session_date": "2026-02-24",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.00990099009900991,
+        "nav": 1.0013685969724804,
+        "net_return": 0.00990099009900991,
+        "session_date": "2026-02-25",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009803921568627418,
+        "nav": 1.011185936158485,
+        "net_return": 0.009803921568627416,
+        "session_date": "2026-02-26",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009708737864077667,
+        "nav": 1.0210032753444898,
+        "net_return": 0.009708737864077666,
+        "session_date": "2026-02-27",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009615384615384583,
+        "nav": 1.0308206145304943,
+        "net_return": 0.009615384615384581,
+        "session_date": "2026-03-02",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009523809523809492,
+        "nav": 1.040637953716499,
+        "net_return": 0.00952380952380949,
+        "session_date": "2026-03-03",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009433962264151052,
+        "nav": 1.0504552929025037,
+        "net_return": 0.009433962264151052,
+        "session_date": "2026-03-04",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009345794392523255,
+        "nav": 1.0602726320885083,
+        "net_return": 0.009345794392523255,
+        "session_date": "2026-03-05",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": -0.07407407407407407,
+        "nav": 0.9817339186004707,
+        "net_return": -0.07407407407407407,
+        "session_date": "2026-03-06",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.010000000000000009,
+        "nav": 0.9915512577864753,
+        "net_return": 0.010000000000000009,
+        "session_date": "2026-03-09",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.00990099009900991,
+        "nav": 1.0013685969724802,
+        "net_return": 0.00990099009900991,
+        "session_date": "2026-03-10",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009803921568627418,
+        "nav": 1.0111859361584847,
+        "net_return": 0.009803921568627416,
+        "session_date": "2026-03-11",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009708737864077667,
+        "nav": 1.0210032753444895,
+        "net_return": 0.009708737864077666,
+        "session_date": "2026-03-12",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009615384615384583,
+        "nav": 1.0308206145304941,
+        "net_return": 0.009615384615384581,
+        "session_date": "2026-03-13",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009523809523809492,
+        "nav": 1.0406379537164987,
+        "net_return": 0.00952380952380949,
+        "session_date": "2026-03-16",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009433962264151052,
+        "nav": 1.0504552929025035,
+        "net_return": 0.009433962264151052,
+        "session_date": "2026-03-17",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009345794392523255,
+        "nav": 1.060272632088508,
+        "net_return": 0.009345794392523255,
+        "session_date": "2026-03-18",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": -0.07407407407407407,
+        "nav": 0.9817339186004704,
+        "net_return": -0.07407407407407407,
+        "session_date": "2026-03-19",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.010000000000000009,
+        "nav": 0.9915512577864751,
+        "net_return": 0.010000000000000009,
+        "session_date": "2026-03-20",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.00990099009900991,
+        "nav": 1.00136859697248,
+        "net_return": 0.00990099009900991,
+        "session_date": "2026-03-23",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009803921568627418,
+        "nav": 1.0111859361584845,
+        "net_return": 0.009803921568627416,
+        "session_date": "2026-03-24",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009708737864077667,
+        "nav": 1.0210032753444893,
+        "net_return": 0.009708737864077666,
+        "session_date": "2026-03-25",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009615384615384583,
+        "nav": 1.030820614530494,
+        "net_return": 0.009615384615384581,
+        "session_date": "2026-03-26",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009523809523809492,
+        "nav": 1.0406379537164985,
+        "net_return": 0.00952380952380949,
+        "session_date": "2026-03-27",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.006334440486604124,
+        "nav": 1.0472298129024171,
+        "net_return": 0.006334440486604143,
+        "session_date": "2026-03-30",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.012454591175114016,
+        "nav": 1.0602726320885079,
+        "net_return": 0.012454591175113938,
+        "session_date": "2026-03-31",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [
+          "C.SYNTH"
+        ],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3367593837585925,
+          "B.SYNTH": 0.3367593837585925,
+          "C.SYNTH": 0.3264812324828151
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": -0.07407407407407407,
+        "nav": 0.9817339186004702,
+        "net_return": -0.07407407407407407,
+        "session_date": "2026-04-01",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.010000000000000009,
+        "nav": 0.9915512577864749,
+        "net_return": 0.010000000000000009,
+        "session_date": "2026-04-02",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.00990099009900991,
+        "nav": 1.0013685969724797,
+        "net_return": 0.00990099009900991,
+        "session_date": "2026-04-03",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009803921568627418,
+        "nav": 1.0111859361584843,
+        "net_return": 0.009803921568627416,
+        "session_date": "2026-04-06",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009708737864077667,
+        "nav": 1.021003275344489,
+        "net_return": 0.009708737864077666,
+        "session_date": "2026-04-07",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009615384615384583,
+        "nav": 1.0308206145304937,
+        "net_return": 0.009615384615384581,
+        "session_date": "2026-04-08",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009523809523809492,
+        "nav": 1.0406379537164983,
+        "net_return": 0.00952380952380949,
+        "session_date": "2026-04-09",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009433962264151052,
+        "nav": 1.050455292902503,
+        "net_return": 0.009433962264151052,
+        "session_date": "2026-04-10",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009345794392523255,
+        "nav": 1.0602726320885076,
+        "net_return": 0.009345794392523255,
+        "session_date": "2026-04-13",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": -0.07407407407407407,
+        "nav": 0.98173391860047,
+        "net_return": -0.07407407407407407,
+        "session_date": "2026-04-14",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.010000000000000009,
+        "nav": 0.9915512577864747,
+        "net_return": 0.010000000000000009,
+        "session_date": "2026-04-15",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.00990099009900991,
+        "nav": 1.0013685969724795,
+        "net_return": 0.00990099009900991,
+        "session_date": "2026-04-16",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009803921568627418,
+        "nav": 1.011185936158484,
+        "net_return": 0.009803921568627416,
+        "session_date": "2026-04-17",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009708737864077667,
+        "nav": 1.0210032753444889,
+        "net_return": 0.009708737864077666,
+        "session_date": "2026-04-20",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009615384615384583,
+        "nav": 1.0308206145304935,
+        "net_return": 0.009615384615384581,
+        "session_date": "2026-04-21",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009523809523809492,
+        "nav": 1.040637953716498,
+        "net_return": 0.00952380952380949,
+        "session_date": "2026-04-22",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009433962264151052,
+        "nav": 1.0504552929025028,
+        "net_return": 0.009433962264151052,
+        "session_date": "2026-04-23",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009345794392523255,
+        "nav": 1.0602726320885074,
+        "net_return": 0.009345794392523255,
+        "session_date": "2026-04-24",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": -0.07407407407407407,
+        "nav": 0.9817339186004699,
+        "net_return": -0.07407407407407407,
+        "session_date": "2026-04-27",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.010000000000000009,
+        "nav": 0.9915512577864746,
+        "net_return": 0.010000000000000009,
+        "session_date": "2026-04-28",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.00990099009900991,
+        "nav": 1.0013685969724793,
+        "net_return": 0.00990099009900991,
+        "session_date": "2026-04-29",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009803921568627418,
+        "nav": 1.0111859361584838,
+        "net_return": 0.009803921568627416,
+        "session_date": "2026-04-30",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009708737864077667,
+        "nav": 1.0210032753444886,
+        "net_return": 0.009708737864077666,
+        "session_date": "2026-05-01",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009615384615384583,
+        "nav": 1.0308206145304932,
+        "net_return": 0.009615384615384581,
+        "session_date": "2026-05-04",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009523809523809492,
+        "nav": 1.0406379537164978,
+        "net_return": 0.00952380952380949,
+        "session_date": "2026-05-05",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009433962264151052,
+        "nav": 1.0504552929025026,
+        "net_return": 0.009433962264151052,
+        "session_date": "2026-05-06",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009345794392523255,
+        "nav": 1.0602726320885072,
+        "net_return": 0.009345794392523255,
+        "session_date": "2026-05-07",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": -0.04920552994148039,
+        "nav": 1.0081013553441438,
+        "net_return": -0.04920552994148042,
+        "session_date": "2026-05-08",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": -0.016417096822590564,
+        "nav": 0.9915512577864742,
+        "net_return": -0.016417096822590516,
+        "session_date": "2026-05-11",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [
+          "B.SYNTH"
+        ],
+        "weights_after_execution": {
+          "A.SYNTH": 0.32694426760631917,
+          "B.SYNTH": 0.3530998090148247,
+          "C.SYNTH": 0.31995592337885626
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.00990099009900991,
+        "nav": 1.001368596972479,
+        "net_return": 0.00990099009900991,
+        "session_date": "2026-05-12",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.3357253457900147,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009803921568627416,
+        "nav": 1.0111859361584836,
+        "net_return": 0.009803921568627416,
+        "session_date": "2026-05-13",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.3357253457900147,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009708737864077666,
+        "nav": 1.0210032753444882,
+        "net_return": 0.009708737864077666,
+        "session_date": "2026-05-14",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.3357253457900147,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009615384615384581,
+        "nav": 1.0308206145304928,
+        "net_return": 0.009615384615384581,
+        "session_date": "2026-05-15",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.3357253457900147,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.00952380952380949,
+        "nav": 1.0406379537164974,
+        "net_return": 0.00952380952380949,
+        "session_date": "2026-05-18",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.3357253457900147,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009433962264151052,
+        "nav": 1.0504552929025022,
+        "net_return": 0.009433962264151052,
+        "session_date": "2026-05-19",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.3357253457900147,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009345794392523255,
+        "nav": 1.0602726320885068,
+        "net_return": 0.009345794392523255,
+        "session_date": "2026-05-20",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.3357253457900147,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": -0.07407407407407407,
+        "nav": 0.9817339186004692,
+        "net_return": -0.07407407407407407,
+        "session_date": "2026-05-21",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.3357253457900147,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.010000000000000009,
+        "nav": 0.9915512577864739,
+        "net_return": 0.010000000000000009,
+        "session_date": "2026-05-22",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.00990099009900991,
+        "nav": 1.0013685969724786,
+        "net_return": 0.00990099009900991,
+        "session_date": "2026-05-25",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009803921568627418,
+        "nav": 1.0111859361584832,
+        "net_return": 0.009803921568627416,
+        "session_date": "2026-05-26",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009708737864077667,
+        "nav": 1.0210032753444878,
+        "net_return": 0.009708737864077666,
+        "session_date": "2026-05-27",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009615384615384583,
+        "nav": 1.0308206145304923,
+        "net_return": 0.009615384615384581,
+        "session_date": "2026-05-28",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009523809523809492,
+        "nav": 1.040637953716497,
+        "net_return": 0.00952380952380949,
+        "session_date": "2026-05-29",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009433962264151052,
+        "nav": 1.0504552929025017,
+        "net_return": 0.009433962264151052,
+        "session_date": "2026-06-01",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009345794392523255,
+        "nav": 1.0602726320885063,
+        "net_return": 0.009345794392523255,
+        "session_date": "2026-06-02",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": -0.07407407407407407,
+        "nav": 0.9817339186004688,
+        "net_return": -0.07407407407407407,
+        "session_date": "2026-06-03",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.010000000000000009,
+        "nav": 0.9915512577864735,
+        "net_return": 0.010000000000000009,
+        "session_date": "2026-06-04",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.00990099009900991,
+        "nav": 1.0013685969724782,
+        "net_return": 0.00990099009900991,
+        "session_date": "2026-06-05",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009803921568627418,
+        "nav": 1.0111859361584827,
+        "net_return": 0.009803921568627416,
+        "session_date": "2026-06-08",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009708737864077667,
+        "nav": 1.0210032753444873,
+        "net_return": 0.009708737864077666,
+        "session_date": "2026-06-09",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009615384615384583,
+        "nav": 1.030820614530492,
+        "net_return": 0.009615384615384581,
+        "session_date": "2026-06-10",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009523809523809492,
+        "nav": 1.0406379537164965,
+        "net_return": 0.00952380952380949,
+        "session_date": "2026-06-11",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009433962264151052,
+        "nav": 1.0504552929025013,
+        "net_return": 0.009433962264151052,
+        "session_date": "2026-06-12",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009345794392523255,
+        "nav": 1.0602726320885059,
+        "net_return": 0.009345794392523255,
+        "session_date": "2026-06-15",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": -0.07407407407407407,
+        "nav": 0.9817339186004684,
+        "net_return": -0.07407407407407407,
+        "session_date": "2026-06-16",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.010000000000000009,
+        "nav": 0.9915512577864731,
+        "net_return": 0.010000000000000009,
+        "session_date": "2026-06-17",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.00990099009900991,
+        "nav": 1.001368596972478,
+        "net_return": 0.00990099009900991,
+        "session_date": "2026-06-18",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009803921568627418,
+        "nav": 1.0111859361584825,
+        "net_return": 0.009803921568627416,
+        "session_date": "2026-06-19",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009708737864077667,
+        "nav": 1.021003275344487,
+        "net_return": 0.009708737864077666,
+        "session_date": "2026-06-22",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009615384615384583,
+        "nav": 1.0308206145304917,
+        "net_return": 0.009615384615384581,
+        "session_date": "2026-06-23",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009523809523809492,
+        "nav": 1.0406379537164963,
+        "net_return": 0.00952380952380949,
+        "session_date": "2026-06-24",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009433962264151052,
+        "nav": 1.050455292902501,
+        "net_return": 0.009433962264151052,
+        "session_date": "2026-06-25",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009345794392523255,
+        "nav": 1.0602726320885056,
+        "net_return": 0.009345794392523255,
+        "session_date": "2026-06-26",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": -0.07407407407407407,
+        "nav": 0.9817339186004682,
+        "net_return": -0.07407407407407407,
+        "session_date": "2026-06-29",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.010000000000000009,
+        "nav": 0.9915512577864729,
+        "net_return": 0.010000000000000009,
+        "session_date": "2026-06-30",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.00990099009900991,
+        "nav": 1.0013685969724775,
+        "net_return": 0.00990099009900991,
+        "session_date": "2026-07-01",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.009803921568627418,
+        "nav": 1.011185936158482,
+        "net_return": 0.009803921568627416,
+        "session_date": "2026-07-02",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.011185936158482,
+        "net_return": 0.0,
+        "session_date": "2026-07-03",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333,
+          "B.SYNTH": 0.3333333333333333,
+          "C.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33572534579001473,
+          "B.SYNTH": 0.33572534579001473,
+          "C.SYNTH": 0.32854930841997065
+        }
+      }
+    ]
+  }
+}
