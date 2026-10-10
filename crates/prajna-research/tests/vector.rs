@@ -10,7 +10,7 @@ use prajna_research::{
     factor::AvailabilityAssumption,
     load_execution_status, load_panel,
     strategy::{Decision, ExecutionEvent, UnfilledEntry, execute, execute_with_policy},
-    vector::{VectorCosts, VectorExecutionKind, run_vector},
+    vector::{VectorCosts, VectorExecutionKind, run_vector, run_vector_with_policy},
 };
 use serde_json::Value;
 
@@ -495,6 +495,88 @@ fn cash_reduction_does_not_retry_or_sell_existing_holdings_to_fund_entries() {
         0.49257425742574257,
     );
     assert_close(last.weights_after_execution.values().sum(), 1.0);
+    assert!(result.pending_at_end.is_none());
+}
+
+#[test]
+fn zero_cash_retry_leg_is_not_a_holding_for_the_next_decision() {
+    let mut panel = manual_panel();
+    // Build a third leg using the existing Y rows, with independent identity.
+    let mut z = panel.grid.slice(4, 4);
+    z.replace(
+        "instrument_id",
+        Series::new("instrument_id".into(), ["Z.SYNTH"; 4]).into(),
+    )
+    .unwrap();
+    panel.grid = panel.grid.slice(0, 8);
+    panel.grid.vstack_mut(&z).unwrap();
+    panel
+        .grid
+        .replace(
+            "open",
+            Series::new(
+                "open".into(),
+                [
+                    Some(100.0),
+                    Some(100.0),
+                    Some(300.0),
+                    Some(300.0),
+                    Some(100.0),
+                    Some(100.0),
+                    Some(100.0),
+                    Some(100.0),
+                    Some(100.0),
+                    Some(100.0),
+                    Some(100.0),
+                    Some(100.0),
+                ],
+            )
+            .into(),
+        )
+        .unwrap();
+    panel.instruments.push(instrument("Z.SYNTH"));
+    let decisions = [
+        Decision {
+            decision_session: panel.sessions[0].clone(),
+            ranked: Vec::new(),
+            targets: weights(&[("X.SYNTH", 0.5), ("Y.SYNTH", 0.25), ("Z.SYNTH", 0.25)]),
+        },
+        Decision {
+            decision_session: panel.sessions[2].clone(),
+            ranked: Vec::new(),
+            targets: weights(&[("X.SYNTH", 1.0)]),
+        },
+    ];
+    let costs = VectorCosts {
+        commission_rate: 0.0,
+        buy_slippage_bps: 0.0,
+        sell_slippage_bps: 0.0,
+        buy_tax_rate: 0.0,
+        sell_tax_rate: 0.0,
+    };
+    let result = run_vector_with_policy(
+        &panel,
+        &decisions,
+        UnfilledEntry::Retry,
+        &costs,
+        AvailabilityAssumption::None,
+        |id, day| {
+            *id == instrument("X.SYNTH")
+                || (*day == panel.sessions[2])
+                || (*id == instrument("Y.SYNTH") && *day == panel.sessions[3])
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        result.sessions[2].weights_after_execution,
+        weights(&[("X.SYNTH", 0.75), ("Y.SYNTH", 0.25)])
+    );
+    assert_eq!(result.executions[2].kind, VectorExecutionKind::Executed);
+    assert_eq!(
+        result.sessions[3].weights_after_execution,
+        weights(&[("X.SYNTH", 1.0)])
+    );
+    assert_eq!(result.sessions[3].nav, 2.0);
     assert!(result.pending_at_end.is_none());
 }
 

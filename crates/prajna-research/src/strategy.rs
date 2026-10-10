@@ -89,6 +89,7 @@ pub fn execute(
     execute_with_policy(decisions, sessions, UnfilledEntry::Skip, executable)
 }
 
+/// Target-level projection without cash sizing; engines use `ExecutionState` with realized holdings.
 pub fn execute_with_policy(
     decisions: &[Decision],
     sessions: &[PanelSession],
@@ -100,12 +101,72 @@ pub fn execute_with_policy(
         .map(|decision| (decision.decision_session.session_date, decision))
         .collect::<BTreeMap<_, _>>();
     let mut held = BTreeSet::new();
-    let mut pending: Option<&Decision> = None;
-    let mut missing_entries: Option<BTreeMap<InstrumentId, f64>> = None;
+    let mut state = ExecutionState::new(unfilled_entry);
     let mut events = Vec::new();
 
     for session in sessions {
-        if let Some(decision) = pending {
+        if let Some(event) = state.attempt(session, &held, &executable) {
+            match &event {
+                ExecutionEvent::Executed { applied, .. }
+                | ExecutionEvent::RetryableExecution {
+                    applied,
+                    is_retry: false,
+                    ..
+                } => {
+                    held = positive_legs(applied);
+                }
+                ExecutionEvent::RetryableExecution {
+                    applied,
+                    is_retry: true,
+                    ..
+                } => {
+                    held.extend(positive_legs(applied));
+                }
+                _ => {}
+            }
+            events.push(event);
+        }
+        if let Some(decision) = decisions_by_session.get(&session.session_date) {
+            state.decide(decision);
+        }
+    }
+    if let Some(event) = state.pending_at_end() {
+        events.push(event);
+    }
+    events
+}
+
+fn positive_legs(weights: &BTreeMap<InstrumentId, f64>) -> BTreeSet<InstrumentId> {
+    weights
+        .iter()
+        .filter(|(_, weight)| **weight > 0.0)
+        .map(|(instrument, _)| instrument.clone())
+        .collect()
+}
+
+/// Shared decision state. Engines supply realized holdings before each open attempt.
+pub struct ExecutionState {
+    unfilled_entry: UnfilledEntry,
+    pending: Option<Decision>,
+    missing_entries: Option<BTreeMap<InstrumentId, f64>>,
+}
+
+impl ExecutionState {
+    pub fn new(unfilled_entry: UnfilledEntry) -> Self {
+        Self {
+            unfilled_entry,
+            pending: None,
+            missing_entries: None,
+        }
+    }
+
+    pub fn attempt(
+        &mut self,
+        session: &PanelSession,
+        held: &BTreeSet<InstrumentId>,
+        executable: impl Fn(&InstrumentId, &PanelSession) -> bool,
+    ) -> Option<ExecutionEvent> {
+        if let Some(decision) = &self.pending {
             let blocked = held
                 .iter()
                 .filter(|instrument| !executable(instrument, session))
@@ -114,26 +175,16 @@ pub fn execute_with_policy(
             if blocked.is_empty() {
                 let mut applied = BTreeMap::new();
                 let mut skipped_buys = BTreeSet::new();
-                let is_retry = missing_entries.is_some();
-                let targets = missing_entries.as_ref().unwrap_or(&decision.targets);
+                let is_retry = self.missing_entries.is_some();
+                let targets = self.missing_entries.as_ref().unwrap_or(&decision.targets);
                 for (instrument, weight) in targets {
                     if executable(instrument, session) {
                         applied.insert(instrument.clone(), *weight);
-                    } else if *weight > 0.0 || unfilled_entry == UnfilledEntry::Skip {
+                    } else if *weight > 0.0 || self.unfilled_entry == UnfilledEntry::Skip {
                         skipped_buys.insert(instrument.clone());
                     }
                 }
-                let applied_held = applied
-                    .iter()
-                    .filter(|(_, weight)| **weight > 0.0)
-                    .map(|(instrument, _)| instrument.clone())
-                    .collect::<BTreeSet<_>>();
-                if is_retry {
-                    held.extend(applied_held);
-                } else {
-                    held = applied_held;
-                }
-                if unfilled_entry == UnfilledEntry::Retry {
+                if self.unfilled_entry == UnfilledEntry::Retry {
                     let remaining = targets
                         .iter()
                         .filter(|(instrument, weight)| {
@@ -141,46 +192,58 @@ pub fn execute_with_policy(
                         })
                         .map(|(instrument, weight)| (instrument.clone(), *weight))
                         .collect::<BTreeMap<_, _>>();
-                    events.push(ExecutionEvent::RetryableExecution {
+                    let event = ExecutionEvent::RetryableExecution {
                         decision_session: decision.decision_session.clone(),
                         attempt_session: session.clone(),
                         applied,
                         skipped_buys,
                         is_retry,
-                    });
-                    pending = (!remaining.is_empty()).then_some(decision);
-                    missing_entries = pending.map(|_| remaining);
+                    };
+                    if remaining.is_empty() {
+                        self.pending = None;
+                        self.missing_entries = None;
+                    } else {
+                        self.missing_entries = Some(remaining);
+                    }
+                    Some(event)
                 } else {
-                    events.push(ExecutionEvent::Executed {
+                    let event = ExecutionEvent::Executed {
                         decision_session: decision.decision_session.clone(),
                         attempt_session: session.clone(),
                         applied,
                         skipped_buys,
-                    });
-                    pending = None;
+                    };
+                    self.pending = None;
+                    Some(event)
                 }
             } else {
-                events.push(ExecutionEvent::Deferred {
+                Some(ExecutionEvent::Deferred {
                     decision_session: decision.decision_session.clone(),
                     attempt_session: session.clone(),
                     blocked,
-                });
+                })
             }
-        }
-
-        if let Some(decision) = decisions_by_session.get(&session.session_date) {
-            pending = Some(*decision);
-            missing_entries = None;
+        } else {
+            None
         }
     }
 
-    if let Some(decision) = pending {
-        events.push(ExecutionEvent::PendingAtEnd {
-            decision_session: decision.decision_session.clone(),
-            targets: missing_entries.unwrap_or_else(|| decision.targets.clone()),
-        });
+    pub fn decide(&mut self, decision: &Decision) {
+        self.pending = Some(decision.clone());
+        self.missing_entries = None;
     }
-    events
+
+    pub fn pending_at_end(&self) -> Option<ExecutionEvent> {
+        self.pending
+            .as_ref()
+            .map(|decision| ExecutionEvent::PendingAtEnd {
+                decision_session: decision.decision_session.clone(),
+                targets: self
+                    .missing_entries
+                    .clone()
+                    .unwrap_or_else(|| decision.targets.clone()),
+            })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

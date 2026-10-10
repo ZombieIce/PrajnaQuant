@@ -13,7 +13,7 @@ use prajna_research::{
     },
     load_execution_status, load_panel,
     strategy::{RankDirection, StrategyCapability, VectorStrategy, Weighting},
-    vector::{VectorCosts, run_vector},
+    vector::{VectorCosts, run_vector, run_vector_with_policy},
 };
 use serde_json::{Map, Number, Value, json};
 use sha2::{Digest, Sha256};
@@ -241,6 +241,19 @@ fn run_case(case: &GoldenCase) {
         AvailabilityAssumption::None,
     )
     .unwrap_or_else(|error| panic!("{}: run vector: {error}", case.name));
+    let live_result = run_vector_with_policy(
+        &panel,
+        &decisions,
+        strategy.unfilled_entry,
+        &costs,
+        AvailabilityAssumption::None,
+        |instrument, session| executable(&panel, &statuses, instrument, session).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::to_vec(&result).unwrap(),
+        serde_json::to_vec(&live_result).unwrap()
+    );
     let actual_vector = serde_json::to_value(result)
         .unwrap_or_else(|error| panic!("{}: serialize vector result: {error}", case.name));
     // Captured from origin/main 7995b28, independently of this implementation.

@@ -22,7 +22,7 @@ use prajna_research::{
     },
     load_execution_status, load_panel,
     strategy::{RankDirection, StrategyCapability, VectorEngine, VectorStrategy, Weighting},
-    vector::{VectorCosts, VectorResult, run_vector},
+    vector::{VectorCosts, VectorResult, run_vector_with_policy},
 };
 use rayon::ThreadPoolBuilder;
 use rayon::prelude::*;
@@ -724,13 +724,20 @@ fn execute_run(
         let decisions = strategy
             .decide(score, &panel.sessions)
             .map_err(|error| error.to_string())?;
-        let events = strategy.execute(&decisions, &panel.sessions, |instrument, session| {
-            executable_by_key
-                .get(&(instrument.clone(), session.session_date))
-                .copied()
-                .unwrap_or(false)
-        });
-        run_vector(panel, &decisions, &events, costs, assumption).map_err(|error| error.to_string())
+        run_vector_with_policy(
+            panel,
+            &decisions,
+            strategy.unfilled_entry,
+            costs,
+            assumption,
+            |instrument, session| {
+                executable_by_key
+                    .get(&(instrument.clone(), session.session_date))
+                    .copied()
+                    .unwrap_or(false)
+            },
+        )
+        .map_err(|error| error.to_string())
     })()
 }
 

@@ -27,6 +27,14 @@
 原 `strategy::execute` 保留为默认 `skip` 入口，既有执行事件与结果 JSON 不变。
 Experiment 的 retry 参数及 Run Spec 接入仍由 #123 负责，目前 Experiment 构造的 S2 策略明确使用默认 skip。
 
+实际引擎使用 `ExecutionState`：每个 open 向 `attempt` 提供**实际非零持仓**，
+执行/数量削减后更新引擎持仓，close 才调用 `decide`；最后取 `pending_at_end`。
+Vector 的 `run_vector_with_policy` 使用这一增量共用状态，并将现金削减后的持仓反馈到下一次尝试；
+Experiment 默认 skip 也走这一入口。
+批量 `execute_with_policy` / `VectorStrategy::execute` 仅提供未做现金/数量削减的目标层事件投影，
+不能代替账本反馈；`run_vector` 保留为已生成事件的校验/重放入口。
+零现金买腿不会成为持仓，不会错误阻塞后续决策。
+
 Retry 策略的首次完整调仓仍使用原有 full-target 成本与扣费后目标权重口径。
 其后只对因可交易性阻塞的正权重买腿重试：原目标权重乘以本次 open **扣费前权益**作为买入预算，
 费用另从剩余现金扣除，按 `instrument_id` 升序削减现金不足的预算；

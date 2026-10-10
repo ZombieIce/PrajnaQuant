@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     Panel, PanelSession,
     factor::AvailabilityAssumption,
-    strategy::{Decision, ExecutionEvent},
+    strategy::{Decision, ExecutionEvent, ExecutionState, UnfilledEntry},
 };
 
 const RETURN_TOLERANCE: f64 = 1e-12;
@@ -127,6 +127,59 @@ pub fn run_vector(
     costs: &VectorCosts,
     availability_assumption: AvailabilityAssumption,
 ) -> Result<VectorResult, VectorError> {
+    run_vector_inner(
+        panel,
+        decisions,
+        events,
+        costs,
+        availability_assumption,
+        None,
+    )
+}
+
+pub fn run_vector_with_policy(
+    panel: &Panel,
+    decisions: &[Decision],
+    unfilled_entry: UnfilledEntry,
+    costs: &VectorCosts,
+    availability_assumption: AvailabilityAssumption,
+    executable: impl Fn(&InstrumentId, &PanelSession) -> bool,
+) -> Result<VectorResult, VectorError> {
+    let mut state = ExecutionState::new(unfilled_entry);
+    let mut generate = |session: &PanelSession,
+                        held: &BTreeSet<InstrumentId>,
+                        decision: Option<&Decision>,
+                        at_end: bool| {
+        if let Some(decision) = decision {
+            state.decide(decision);
+            None
+        } else if at_end {
+            state.pending_at_end()
+        } else {
+            state.attempt(session, held, &executable)
+        }
+    };
+    run_vector_inner(
+        panel,
+        decisions,
+        &[],
+        costs,
+        availability_assumption,
+        Some(&mut generate),
+    )
+}
+
+type EventGenerator<'a> = dyn FnMut(&PanelSession, &BTreeSet<InstrumentId>, Option<&Decision>, bool) -> Option<ExecutionEvent>
+    + 'a;
+
+fn run_vector_inner(
+    panel: &Panel,
+    decisions: &[Decision],
+    events: &[ExecutionEvent],
+    costs: &VectorCosts,
+    availability_assumption: AvailabilityAssumption,
+    mut generate: Option<&mut EventGenerator<'_>>,
+) -> Result<VectorResult, VectorError> {
     validate_costs(costs)?;
     let prices = read_prices(panel)?;
     let decision_indices = index_decisions(panel, decisions)?;
@@ -172,7 +225,12 @@ pub fn run_vector(
     let mut result_executions = Vec::new();
 
     for (session_index, session) in panel.sessions.iter().enumerate() {
-        let event = events_by_index.get(&session_index).copied();
+        let generated = generate.as_mut().and_then(|generate| {
+            generate(session, &weights.keys().cloned().collect(), None, false)
+        });
+        let event = generated
+            .as_ref()
+            .or_else(|| events_by_index.get(&session_index).copied());
         let mut turnover = 0.0;
         let mut cost = 0.0;
 
@@ -371,6 +429,9 @@ pub fn run_vector(
             pending_decision = Some(decision);
             pending_targets = decision.targets.clone();
             retrying = false;
+            if let Some(generate) = &mut generate {
+                generate(session, &BTreeSet::new(), Some(decision), false);
+            }
         }
 
         result_sessions.push(VectorSession {
@@ -386,15 +447,25 @@ pub fn run_vector(
         });
     }
 
-    let pending_event = event_indices.iter().find_map(|(_, event)| match event {
-        ExecutionEvent::PendingAtEnd {
-            decision_session,
-            targets,
-        } => Some((decision_session, targets)),
-        ExecutionEvent::Deferred { .. }
-        | ExecutionEvent::Executed { .. }
-        | ExecutionEvent::RetryableExecution { .. } => None,
-    });
+    let generated_pending =
+        if let (Some(generate), Some(last)) = (&mut generate, panel.sessions.last()) {
+            generate(last, &BTreeSet::new(), None, true)
+        } else {
+            None
+        };
+    let pending_event = generated_pending
+        .as_ref()
+        .into_iter()
+        .chain(event_indices.iter().map(|(_, event)| *event))
+        .find_map(|event| match event {
+            ExecutionEvent::PendingAtEnd {
+                decision_session,
+                targets,
+            } => Some((decision_session, targets)),
+            ExecutionEvent::Deferred { .. }
+            | ExecutionEvent::Executed { .. }
+            | ExecutionEvent::RetryableExecution { .. } => None,
+        });
     let pending_at_end = match (pending_decision, pending_event) {
         (Some(pending), Some((event_session, targets))) => {
             if pending.decision_session != *event_session || pending_targets != *targets {
