@@ -74,7 +74,7 @@ A last-Session decision has no execution Session and remains pending.
   `unfilled_entry=retry`; no subsequent decisions.
 - **S2**: momentum uses closes at T and T-N; volatility uses N Session
   returns and sample standard deviation; optional trend requires current
-  close above the N-Session mean. Score is weighted short momentum plus
+  close at or above the N-Session mean. Score is weighted short momentum plus
   long momentum minus volatility. Even zero-weight dependencies require
   valid windows. Windows do not bridge absent bars. Every required close
   must have known availability no later than that Session's 15:00 close.

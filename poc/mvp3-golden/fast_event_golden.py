@@ -230,7 +230,7 @@ def s2_score(rows, index, config, cutoff):
     close = rows[index]["close"]
     if config["trend_filter"]:
         mean = statistics.mean(rows[i]["close"] for i in range(index - config["trend_window"] + 1, index + 1))
-        if close <= mean:
+        if close < mean:
             return None
     returns = [rows[i]["close"] / rows[i - 1]["close"] - 1 for i in range(index - window + 1, index + 1)]
     return (

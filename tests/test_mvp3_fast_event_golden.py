@@ -1,5 +1,6 @@
 import json
 import hashlib
+import math
 from pathlib import Path
 import subprocess
 import sys
@@ -99,7 +100,10 @@ class FastEventGoldenTests(unittest.TestCase):
         # Existing Vector session NAV includes the NEXT open's mark return;
         # constant raw opens here make it exactly this Session's post-fill NAV.
         for current, old in zip(result["sessions"], previous["sessions"]):
-            self.assertAlmostEqual(current["open"]["nav"], old["nav"], delta=1e-9)
+            self.assertTrue(
+                math.isclose(current["open"]["nav"], old["nav"], rel_tol=1e-9, abs_tol=0),
+                (current["session_date"], current["open"]["nav"], old["nav"]),
+            )
 
     def test_hand_vector_parity_charges_weight_cost_not_fill_notional(self):
         result = self.run_cli(sizing="vector_parity")
@@ -191,94 +195,95 @@ class FastEventGoldenTests(unittest.TestCase):
             self.assertTrue(all(order["status"] == "blocked" for order in result["orders"]))
 
     def test_committed_goldens_recompute_every_value_and_preserve_ledger(self):
-            cases = [(SMALL, strategy) for strategy in ("s1", "s2", "s3")] + [(MA, "s3"), (HAND, "s1")]
-            for fixture, strategy in cases:
-                for sizing in ("lot", "vector_parity"):
-                    with self.subTest(fixture=fixture.name, strategy=strategy, sizing=sizing):
-                        expected = json.loads(
-                            (GOLDEN / "expected" / f"{fixture.stem}.{strategy}.{sizing}.json").read_text()
-                        )
-                        actual = self.run_cli(fixture, strategy=strategy, sizing=sizing)
-                        self.assertEqual(actual, expected)
-                        self.assertEqual(actual["fixture_sha256"], hashlib.sha256(fixture.read_bytes()).hexdigest())
-                        previous_cash = actual["parameters"]["initial_cash"]
-                        previous_quantities = {}
-                        for session in actual["sessions"]:
-                            fills = [fill for fill in actual["fills"] if fill["session_date"] == session["session_date"]]
-                            for fill in fills:
-                                sign = 1 if fill["side"] == "buy" else -1
-                                previous_cash += fill["cash_change"]
-                                instrument = fill["instrument_id"]
-                                previous_quantities[instrument] = previous_quantities.get(instrument, 0) + sign * fill["quantity"]
-                                self.assertAlmostEqual(
-                                    fill["cash_change"], -sign * fill["notional"] - fill["cash_fees"], delta=1e-6,
-                                )
-                                self.assertAlmostEqual(
-                                    fill["total_cost"], fill["commission"] + fill["tax"] + fill["slippage"], delta=1e-6,
-                                )
-                                self.assertGreaterEqual(fill["minimum_commission_top_up"], 0)
-                            self.assertAlmostEqual(session["open"]["cash"], previous_cash, delta=1e-6)
-                            for point in ("open", "close"):
-                                value = session[point]
-                                self.assertGreaterEqual(value["cash"], -1e-6)
-                                self.assertAlmostEqual(
-                                    value["equity"], value["cash"] + sum(
-                                        row["quantity"] * row["price"] for row in value["holdings"].values()
-                                    ), delta=1e-6,
-                                )
-                                for instrument, quantity in previous_quantities.items():
-                                    self.assertAlmostEqual(
-                                        value["holdings"].get(instrument, {}).get("quantity", 0), quantity, delta=1e-12,
-                                    )
-                            self.assertEqual(session["open"]["cash"], session["close"]["cash"])
-                            filled_orders = [order for order in actual["orders"]
-                                             if order["session_date"] == session["session_date"] and order["status"] == "filled"]
-                            self.assertEqual([order["order_id"] for order in filled_orders], [fill["order_id"] for fill in fills])
-                            self.assertEqual(
-                                [(order["side"], order["instrument_id"]) for order in filled_orders],
-                                sorted([(order["side"], order["instrument_id"]) for order in filled_orders],
-                                       key=lambda item: (item[0] != "sell", item[1])),
+        cases = [(SMALL, strategy) for strategy in ("s1", "s2", "s3")] + [(MA, "s3"), (HAND, "s1")]
+        for fixture, strategy in cases:
+            for sizing in ("lot", "vector_parity"):
+                with self.subTest(fixture=fixture.name, strategy=strategy, sizing=sizing):
+                    expected = json.loads(
+                        (GOLDEN / "expected" / f"{fixture.stem}.{strategy}.{sizing}.json").read_text()
+                    )
+                    actual = self.run_cli(fixture, strategy=strategy, sizing=sizing)
+                    self.assertEqual(actual, expected)
+                    self.assertEqual(actual["fixture_sha256"], hashlib.sha256(fixture.read_bytes()).hexdigest())
+                    previous_cash = actual["parameters"]["initial_cash"]
+                    previous_quantities = {}
+                    for session in actual["sessions"]:
+                        fills = [fill for fill in actual["fills"] if fill["session_date"] == session["session_date"]]
+                        for fill in fills:
+                            sign = 1 if fill["side"] == "buy" else -1
+                            previous_cash += fill["cash_change"]
+                            instrument = fill["instrument_id"]
+                            previous_quantities[instrument] = previous_quantities.get(instrument, 0) + sign * fill["quantity"]
+                            self.assertAlmostEqual(
+                                fill["cash_change"], -sign * fill["notional"] - fill["cash_fees"], delta=1e-6,
                             )
+                            self.assertAlmostEqual(
+                                fill["total_cost"], fill["commission"] + fill["tax"] + fill["slippage"], delta=1e-6,
+                            )
+                            self.assertGreaterEqual(fill["minimum_commission_top_up"], 0)
+                        self.assertAlmostEqual(session["open"]["cash"], previous_cash, delta=1e-6)
+                        for point in ("open", "close"):
+                            value = session[point]
+                            self.assertGreaterEqual(value["cash"], -1e-6)
+                            self.assertAlmostEqual(
+                                value["equity"], value["cash"] + sum(
+                                    row["quantity"] * row["price"] for row in value["holdings"].values()
+                                ), delta=1e-6,
+                            )
+                            for instrument, quantity in previous_quantities.items():
+                                self.assertAlmostEqual(
+                                    value["holdings"].get(instrument, {}).get("quantity", 0), quantity, delta=1e-12,
+                                )
+                        self.assertEqual(session["open"]["cash"], session["close"]["cash"])
+                        filled_orders = [order for order in actual["orders"]
+                                         if order["session_date"] == session["session_date"] and order["status"] == "filled"]
+                        self.assertEqual([order["order_id"] for order in filled_orders], [fill["order_id"] for fill in fills])
+                        self.assertEqual(
+                            [(order["side"], order["instrument_id"]) for order in filled_orders],
+                            sorted([(order["side"], order["instrument_id"]) for order in filled_orders],
+                                   key=lambda item: (item[0] != "sell", item[1])),
+                        )
 
     def test_minimum_commission_top_up_and_both_directional_taxes(self):
-            fixture = json.loads(SMALL.read_text())
-            fixture["costs"]["buy_tax_rate"] = 0.002
-            fixture["costs"]["sell_tax_rate"] = 0.003
-            fixture["costs"]["sell_slippage_bps"] = 20
-            for sizing in ("lot", "vector_parity"):
-                result = self.run_cli(fixture, strategy="s2", sizing=sizing)
-                self.assertTrue(any(fill["side"] == "sell" for fill in result["fills"]))
-                for fill in result["fills"]:
-                    basis = fill["fee_basis"]
-                    side = fill.get("fee_side", fill["side"])
-                    self.assertAlmostEqual(fill["tax"], basis * fixture["costs"][f"{side}_tax_rate"])
-                    if sizing == "lot":
-                        self.assertAlmostEqual(fill["commission"], max(basis * 0.001, 100))
-                    else:
-                        self.assertAlmostEqual(fill["commission"], basis * 0.001)
+        fixture = json.loads(SMALL.read_text())
+        fixture["costs"]["buy_tax_rate"] = 0.002
+        fixture["costs"]["sell_tax_rate"] = 0.003
+        fixture["costs"]["sell_slippage_bps"] = 20
+        for sizing in ("lot", "vector_parity"):
+            result = self.run_cli(fixture, strategy="s2", sizing=sizing)
+            self.assertTrue(any(fill["side"] == "sell" for fill in result["fills"]))
+            for fill in result["fills"]:
+                basis = fill["fee_basis"]
+                side = fill.get("fee_side", fill["side"])
+                self.assertAlmostEqual(fill["tax"], basis * fixture["costs"][f"{side}_tax_rate"])
                 if sizing == "lot":
-                    self.assertTrue(any(fill["minimum_commission_top_up"] > 0 for fill in result["fills"]))
+                    self.assertAlmostEqual(fill["commission"], max(basis * 0.001, 100))
+                else:
+                    self.assertAlmostEqual(fill["commission"], basis * 0.001)
+            if sizing == "lot":
+                self.assertTrue(any(fill["minimum_commission_top_up"] > 0 for fill in result["fills"]))
 
     def test_pending_retry_can_defer_then_be_replaced_by_a_new_decision(self):
-            fixture = json.loads(SMALL.read_text())
-            fixture["strategy"]["top_n"] = 2
-            fixture["strategy"]["rebalance_every"] = 3
-            fixture["execution_status_overrides"] += [
-                {"symbol": "A", "date": "2026-01-09", "trade_status": "HALTED",
-                 "is_tradable": False, "available_at": "08:50:00+08:00"},
-                {"symbol": "C", "date": "2026-01-12", "trade_status": "UNKNOWN",
-                 "is_tradable": False, "available_at": "08:50:00+08:00"},
-            ]
-            result = self.run_cli(fixture, strategy="s2", sizing="lot", retry="retry")
-            # D3 targets A/C; D4 fills A but skips C. D5 retry is deferred by held A.
-            attempts = result["executions"]
-            self.assertEqual((attempts[0]["session_date"], attempts[0]["skipped_buys"]), ("2026-01-08", ["C.SYNTH"]))
-            self.assertEqual((attempts[1]["kind"], attempts[1]["retry_only"], attempts[1]["blocked"]),
-                             ("deferred", True, ["A.SYNTH"]))
-            self.assertEqual(attempts[2]["retry_only"], True)
-            # D6 close scheduled targets B/C replace pending; D7 uses that new decision.
-            self.assertEqual(attempts[3]["decision_session"], "2026-01-12")
-            self.assertFalse(attempts[3]["retry_only"])
+        fixture = json.loads(SMALL.read_text())
+        fixture["strategy"]["top_n"] = 2
+        fixture["strategy"]["rebalance_every"] = 3
+        fixture["execution_status_overrides"] += [
+            {"symbol": "A", "date": "2026-01-09", "trade_status": "HALTED",
+             "is_tradable": False, "available_at": "08:50:00+08:00"},
+            {"symbol": "C", "date": "2026-01-12", "trade_status": "UNKNOWN",
+             "is_tradable": False, "available_at": "08:50:00+08:00"},
+        ]
+        result = self.run_cli(fixture, strategy="s2", sizing="lot", retry="retry")
+        # D3 targets A/C; D4 fills A but skips C. D5 retry is deferred by held A.
+        attempts = result["executions"]
+        self.assertEqual((attempts[0]["session_date"], attempts[0]["skipped_buys"]), ("2026-01-08", ["C.SYNTH"]))
+        self.assertEqual((attempts[1]["kind"], attempts[1]["retry_only"], attempts[1]["blocked"]),
+                         ("deferred", True, ["A.SYNTH"]))
+        self.assertEqual(attempts[2]["retry_only"], True)
+        # D6 close scheduled targets B/C replace pending; D7 uses that new decision.
+        self.assertEqual(attempts[3]["decision_session"], "2026-01-12")
+        self.assertFalse(attempts[3]["retry_only"])
+
     def test_future_closes_do_not_change_earlier_signals_or_fills(self):
         fixture = json.loads(SMALL.read_text())
         original = self.run_cli(fixture, strategy="s2", sizing="vector_parity")
@@ -314,3 +319,31 @@ class FastEventGoldenTests(unittest.TestCase):
         self.assertEqual(result["sessions"][118]["ma20_60"]["A.SYNTH"]["status"], "missing_input")
         self.assertEqual(result["sessions"][119]["ma20_60"]["A.SYNTH"]["status"], "ok")
         self.assertFalse(result["fills"])
+
+    def test_unpriced_unheld_instrument_is_skipped_then_retried(self):
+        fixture = json.loads(HAND.read_text())
+        fixture["instruments"].append(
+            {"symbol": "B", "lot_size": 10, "closes": [None, None, 10]}
+        )
+        fixture["costs"] = {key: 0 for key in fixture["costs"]}
+        for sizing in ("lot", "vector_parity"):
+            result = self.run_cli(fixture, sizing=sizing)
+            self.assertEqual(
+                [(fill["session_date"], fill["instrument_id"], fill["quantity"])
+                 for fill in result["fills"]],
+                [("2026-01-06", "A.SYNTH", 50), ("2026-01-07", "B.SYNTH", 50)],
+            )
+            self.assertEqual(result["executions"][0]["skipped_buys"], ["B.SYNTH"])
+
+    def test_s2_equal_close_and_trend_mean_is_not_filtered(self):
+        fixture = json.loads(SMALL.read_text())
+        fixture["instruments"] = [
+            {"symbol": "A", "lot_size": 100, "closes": [100] * 10},
+        ]
+        fixture["missing_bars"] = []
+        fixture["execution_status_overrides"] = []
+        fixture["strategy"]["trend_filter"] = True
+        fixture["strategy"]["trend_window"] = 2
+        result = self.run_cli(fixture, strategy="s2")
+        self.assertEqual(result["decisions"][0]["session_date"], fixture["calendar"][2])
+        self.assertEqual(result["decisions"][0]["targets"], {"A.SYNTH": 1})
