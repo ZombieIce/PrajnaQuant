@@ -49,3 +49,13 @@ Vector 的 `entries_retried` / `retry_deferred` 轨迹与 `pending_at_end.retry_
 默认 skip 不输出新增 pending 字段。Vector 仍是权重摘要，不是精确现金/持仓账本。
 
 `fast_event@1` 的语义由本 ADR 与 spec #112 固定，任何改变数量、调仓、估值或费用口径的修改都必须提升 Engine 语义版本。Vector 增加 `unfilled_entry` 与 `BuyAndHold`、`MaCrossover` 策略形态后，默认值下的现有 S2 Run Spec 身份不得改变，否则须提升 `vector@1`。T+1、涨跌停、货币单位舍入与跨 Virtual Portfolio 净额化属于后续阶段；在实现前，Fast Event 结果须声明这些规则未建模。
+
+### Vector 封闭策略形态（#118）
+
+`VectorStrategy` 为 `TopKRank(TopKRank) | BuyAndHold(BuyAndHoldParams) | MaCrossover(MaCrossoverParams)`。
+TopKRank 保留原参数与计算，参数语义版本为 1；新参数有 `params_version=1`，未知版本拒绝。
+`decide_panel` 对指定 Universe 生成决策；BuyAndHold 首个 Session close 等权决策、固定 retry。
+MaCrossover 默认 20/60 Session raw close 均值差，每标的独立交叉状态，持有目标固定 1/N，默认 skip。
+只在目标状态改变时输出完整目标；缺失/未知/收盘后可用 gap 中断前后 gap 比较，保留既有目标状态，
+下一可用 gap 仅建立比较基点。`ma_crossover::gaps` 提供值、状态与最大输入可用时间诊断。
+Vector 的新参数接入 Experiment/Run Spec 仍由 #123 负责；现有 S2 canonical Run Spec 不新增字段，身份不变。

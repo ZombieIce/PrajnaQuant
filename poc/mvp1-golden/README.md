@@ -190,3 +190,40 @@ assertions fail if HALTED is ignored.
 
 The fixture is synthetic: it makes no point-in-time claim and is not
 validation against real-market data.
+
+## S1/S3 Vector strategy goldens (#118)
+
+`fixtures/s1-s3-v1.json` is a hand-authored 3×130 Session boundary fixture.
+Regenerate each output with `--strategy buy_and_hold` or `--strategy ma_crossover`:
+
+```sh
+python3 poc/mvp1-golden/vector_golden.py --fixture poc/mvp1-golden/fixtures/s1-s3-v1.json --strategy buy_and_hold --out poc/mvp1-golden/expected/s1-s3-v1.buy_and_hold.json
+python3 poc/mvp1-golden/vector_golden.py --fixture poc/mvp1-golden/fixtures/s1-s3-v1.json --strategy ma_crossover --out poc/mvp1-golden/expected/s1-s3-v1.ma_crossover.json
+```
+
+S1 decides at the first close, weights every Universe member 1/N and uses retry.
+C is blocked at opens 1 and 2, then bought at open 3 using its original target
+weight times current pre-fee equity, subject to residual cash including costs.
+A/B quantities remain fixed during retry; no later close makes a new decision.
+
+S3 params v1 defaults to MA20/60. Input is raw close; both trailing windows
+count Venue Sessions including the current close. The gap is short mean minus
+long mean, with availability equal to the latest input availability. Warm-up
+is `insufficient_window`; any missing bar in the long window is `missing_input`;
+otherwise unknown input availability is `unknown_availability`. A late value
+cannot be used at that close. Non-usable gaps reset the prior comparison and do
+not change the desired holding state. No crossing bridges missing data.
+From a prior gap <= 0 to > 0 enters; from >= 0 to < 0 exits. Zero alone does not
+trade. Each instrument keeps its own state; changed states emit the complete
+desired target with fixed weight 1/N per held name, leaving residual cash.
+Execution uses the shared next-Session-open path and default skip.
+
+A is flat for 60 Sessions (gap exactly zero at index 59), rises for 20, then
+falls for 50: entry at close 60 and a later down-cross exit. C's missing bar at
+index 61 invalidates gaps through index 120; its first recovered positive gap
+at 121 must not enter. B's missing bar at 90 tests window-local missing status.
+Opens vary, so return drift and S1 retry affect NAV. Rust compares all Session,
+decision, execution and pending fields against these independent Python outputs;
+gap values/status are also compared. Tolerances remain factor_abs=1e-12 and
+nav_abs=1e-10. Existing default S2 output files regenerate byte-for-byte.
+This remains synthetic weight-layer evidence, with no cash ledger/PIT claim.
