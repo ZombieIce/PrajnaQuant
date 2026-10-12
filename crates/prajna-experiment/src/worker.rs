@@ -13,7 +13,11 @@ use prajna_adapter::{
     protocol::{self, Request, Response, decode_line, encode_line},
 };
 use prajna_research::fast_event::{FastEventConfig, FastEventCosts};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use rustix::process::{Pid, Signal, WaitId, WaitIdOptions, kill_process_group, waitid};
 use serde_json::{Value, json};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use std::os::unix::process::CommandExt;
 use tempfile::TempDir;
 
 use crate::{BackendDiagnostics, BackendFactory, BackendIdentity, ExperimentBackend};
@@ -48,7 +52,8 @@ impl WorkerCommand {
             return Err(invalid("worker path must be a file"));
         }
         let python = if self.python.components().count() > 1 {
-            self.python.canonicalize()?
+            // Resolving the interpreter symlink would escape its virtual environment.
+            std::path::absolute(&self.python)?
         } else {
             self.python.clone()
         };
@@ -105,6 +110,8 @@ impl BackendFactory for WorkerCommand {
 
 struct Transport {
     child: Child,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    process_group: Pid,
     input: Option<SyncSender<WriteRequest>>,
     writer: Option<JoinHandle<()>>,
     output: Option<Receiver<Result<Option<String>, String>>>,
@@ -119,11 +126,20 @@ struct WriteRequest {
 
 impl Transport {
     fn spawn(command: &mut Command, timeout: Duration) -> Result<Self, AdapterError> {
+        if !cfg!(any(target_os = "macos", target_os = "linux")) {
+            return Err(invalid(
+                "worker process isolation requires Unix (macOS/Linux)",
+            ));
+        }
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        command.process_group(0);
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()?;
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let process_group = Pid::from_child(&child);
         let mut stdin = child
             .stdin
             .take()
@@ -163,6 +179,8 @@ impl Transport {
         });
         Ok(Self {
             child,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            process_group,
             input: Some(input),
             writer: Some(writer),
             output: Some(output),
@@ -212,9 +230,9 @@ impl Transport {
         self.input.take();
         let deadline = Instant::now() + self.timeout;
         loop {
-            if let Some(status) = self.child.try_wait()? {
-                if !status.success() {
-                    return Err(invalid(format!("worker exited with {status}")));
+            if let Some(success) = self.observe_exit()? {
+                if !success {
+                    return Err(invalid("worker exited with nonzero status or signal"));
                 }
                 let trailing = self
                     .output
@@ -237,40 +255,71 @@ impl Transport {
             thread::sleep(Duration::from_millis(10));
         }
     }
+
+    fn observe_exit(&self) -> Result<Option<bool>, AdapterError> {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            // Keep the leader unreaped, so its group ID cannot be reused before cleanup.
+            let status = waitid(
+                WaitId::Pid(self.process_group),
+                WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
+            )
+            .map_err(|error| AdapterError::Io(error.into()))?;
+            Ok(status.map(|status| status.exit_status() == Some(0)))
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        {
+            Err(invalid("worker process isolation requires macOS/Linux"))
+        }
+    }
 }
 
 impl Drop for Transport {
     fn drop(&mut self) {
         self.input.take();
         self.output.take();
-        let status = self.child.try_wait();
-        if let Err(error) = &status {
-            eprintln!("worker cleanup status failed: {error}");
-        }
-        match status {
-            Ok(Some(_)) => {}
-            _ => {
-                if let Err(error) = self.child.kill() {
-                    eprintln!("worker cleanup kill failed: {error}");
-                }
-                if let Err(error) = self.child.wait() {
-                    eprintln!("worker cleanup wait failed: {error}");
+        let deadline = Instant::now() + self.timeout;
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if !self.process_group.is_init() {
+            // A new group contains only this worker and its inherited descendants.
+            if let Err(error) = kill_process_group(self.process_group, Signal::KILL) {
+                if error != rustix::io::Errno::SRCH {
+                    eprintln!("worker process-group cleanup failed: {error}");
                 }
             }
         }
-        if self
-            .reader
-            .take()
-            .is_some_and(|reader| reader.join().is_err())
-        {
-            eprintln!("worker stdout reader panicked during cleanup");
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(_)) => break,
+                Err(error) => {
+                    eprintln!("worker cleanup status failed: {error}");
+                    break;
+                }
+                Ok(None) => {}
+            }
+            if Instant::now() >= deadline {
+                if let Err(error) = self.child.kill() {
+                    eprintln!("worker cleanup kill failed: {error}");
+                }
+                eprintln!("worker could not be reaped within cleanup deadline");
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
         }
-        if self
-            .writer
-            .take()
-            .is_some_and(|writer| writer.join().is_err())
-        {
-            eprintln!("worker stdin writer panicked during cleanup");
+        for (handle, name) in [
+            (self.reader.take(), "stdout reader"),
+            (self.writer.take(), "stdin writer"),
+        ] {
+            if let Some(handle) = handle {
+                while !handle.is_finished() && Instant::now() < deadline {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                if !handle.is_finished() {
+                    eprintln!("worker {name} did not stop within cleanup deadline");
+                } else if handle.join().is_err() {
+                    eprintln!("worker {name} panicked during cleanup");
+                }
+            }
         }
     }
 }

@@ -210,7 +210,11 @@ Summary assumptions 保留证据类型和未分类的账户差异；fake 永远�
 Rust 从实际 Backend Fill 入账后再计算后续订单，VP 订单不跨 VP 净额化。
 每次写入、响应和正常退出的 transport deadline 为 60 秒；API 可调整
 `WorkerCommand.timeout`，不进入身份。EOF、终止 error、非零退出、超时、缺少或
-无法映射的 diagnostics 都使 Run failed；关闭/回收子进程并释放临时数据包。
+无法映射的 diagnostics 都使 Run failed；每个 worker 置于独立 Unix 进程组，
+关闭/回收该 worker 与继承进程组的后代，管道线程回收同样有 deadline，并释放临时
+数据包。仅支持 macOS/Linux；不支持的平台显式报错，不退回无隔离进程。
+退出观察使用 non-reaping wait；先清理所属进程组再 reap leader，避免组 ID 被复用后
+误伤其他进程。清理失败或超出 deadline 会明确写 stderr，不无限等待管道线程。
 预检/初始化配置错误仍按 CLI 既有错误码报告；单 Run failed 保持既有 Execution
 报告/退出码契约，须查看 `failed_count`，不能把退出 0 当全部 Run 正确。
 

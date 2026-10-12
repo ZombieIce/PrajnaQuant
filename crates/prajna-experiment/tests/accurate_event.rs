@@ -127,6 +127,26 @@ fn accurate_run_identity_includes_backend_without_changing_legacy_specs() {
 #[derive(Debug)]
 struct FakeFactory;
 
+#[derive(Debug)]
+struct RunDeadlineFactory(WorkerCommand);
+
+impl BackendFactory for RunDeadlineFactory {
+    fn validate(&self, identity: &BackendIdentity) -> Result<(), AdapterError> {
+        let mut preflight = self.0.clone();
+        preflight.timeout = std::time::Duration::from_secs(60);
+        preflight.validate(identity)
+    }
+
+    fn create(
+        &self,
+        identity: &BackendIdentity,
+        config: &FastEventConfig,
+        dsv: &str,
+    ) -> Result<Box<dyn ExperimentBackend>, AdapterError> {
+        self.0.create(identity, config, dsv)
+    }
+}
+
 struct FakeRun(FakeBackend);
 
 impl BackendFactory for FakeFactory {
@@ -321,7 +341,7 @@ fn worker_transport_preserves_native_account_comparisons_and_rejects_wrong_versi
 
 #[test]
 fn worker_failures_are_failed_runs_not_empty_successful_results() {
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
     let original = include_str!("support/fake_worker.py");
     for (script, expected) in [
         ("import sys\nsys.exit(0)\n".to_string(), "EOF"),
@@ -337,13 +357,12 @@ fn worker_failures_are_failed_runs_not_empty_successful_results() {
         let temp = TempDir::new().unwrap();
         let (dsv, universe) = fixture(temp.path());
         let mut worker = scripted_worker(temp.path());
-        worker.timeout = Duration::from_millis(500);
+        worker.timeout = Duration::from_secs(2);
         std::fs::write(&worker.worker, script).unwrap();
         let experiment = Experiment::parse(&definition(&dsv, &universe).to_string(), temp.path())
             .unwrap()
-            .with_backend_factory(Arc::new(worker))
+            .with_backend_factory(Arc::new(RunDeadlineFactory(worker)))
             .unwrap();
-        let started = Instant::now();
         let report = experiment.execute(temp.path(), 1).unwrap();
         let run = &report.runs[0];
         assert_eq!(run.status, RunStatus::Failed, "{expected}: {run:?}");
@@ -351,7 +370,7 @@ fn worker_failures_are_failed_runs_not_empty_successful_results() {
         assert!(run.summary.is_none());
         assert!(run.fast_event_result.is_none());
         assert!(run.backend_diagnostics.is_none());
-        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(report.run_time_ms < 5000);
     }
 }
 
@@ -566,6 +585,111 @@ fn invalid_backend_identity_is_rejected_before_data_or_worker_execution() {
             .to_string();
         assert!(error.contains("only valid for accurate_event"), "{error}");
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn timed_out_worker_descendants_cannot_hold_pipes_or_outlive_the_run() {
+    use std::time::Duration;
+    let temp = TempDir::new().unwrap();
+    let (dsv, universe) = fixture(temp.path());
+    let mut worker = scripted_worker(temp.path());
+    worker.timeout = Duration::from_secs(2);
+    std::fs::write(
+        &worker.worker,
+        "import subprocess,sys,time\nsubprocess.Popen([sys.executable,'-c',\"import time,pathlib;time.sleep(5);pathlib.Path('leaked').write_text('descendant survived');time.sleep(1)\"])\ntime.sleep(60)\n",
+    )
+    .unwrap();
+    let experiment = Experiment::parse(&definition(&dsv, &universe).to_string(), temp.path())
+        .unwrap()
+        .with_backend_factory(Arc::new(RunDeadlineFactory(worker)))
+        .unwrap();
+    let report = experiment.execute(temp.path(), 1).unwrap();
+    assert_eq!(report.runs[0].status, RunStatus::Failed);
+    assert!(report.runs[0].error.as_ref().unwrap().contains("timeout"));
+    assert!(report.run_time_ms < 5000, "pipe cleanup exceeded deadline");
+    std::thread::sleep(Duration::from_millis(5200));
+    assert!(
+        !temp.path().join("leaked").exists(),
+        "owned descendant survived cleanup"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn worker_python_keeps_its_virtual_environment_when_worker_directory_changes() {
+    use std::process::Command;
+    let temp = TempDir::new().unwrap();
+    let venv = temp.path().join("venv");
+    let output = Command::new("python3")
+        .args(["-m", "venv", "--without-pip"])
+        .arg(&venv)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let python = venv.join("bin/python");
+    let output = Command::new(&python)
+        .args([
+            "-c",
+            "import sysconfig; print(sysconfig.get_path('purelib'))",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let packages = String::from_utf8(output.stdout).unwrap();
+    let metadata = Path::new(packages.trim()).join("nautilus_trader-fixture.dist-info");
+    std::fs::create_dir(&metadata).unwrap();
+    std::fs::write(
+        metadata.join("METADATA"),
+        "Metadata-Version: 2.1\nName: nautilus_trader\nVersion: venv-transport-fixture\n",
+    )
+    .unwrap();
+    let worker = temp.path().join("worker.py");
+    std::fs::write(&worker, "# transport path fixture\n").unwrap();
+    WorkerCommand::new(python, worker)
+        .validate(&BackendIdentity {
+            name: "nautilus_trader".into(),
+            version: "venv-transport-fixture".into(),
+        })
+        .unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn exited_worker_leader_retains_ownership_until_descendant_pipe_cleanup() {
+    use std::time::Duration;
+    let temp = TempDir::new().unwrap();
+    let (dsv, universe) = fixture(temp.path());
+    let mut worker = scripted_worker(temp.path());
+    worker.timeout = Duration::from_secs(2);
+    let script = include_str!("support/fake_worker.py").replace(
+        "                send({\"type\": \"done\"})",
+        "                import subprocess\n                subprocess.Popen([sys.executable,'-c',\"import time,pathlib;time.sleep(5);pathlib.Path('leaked').write_text('descendant survived');time.sleep(1)\"])\n                send({\"type\": \"done\"})",
+    );
+    std::fs::write(&worker.worker, script).unwrap();
+    let experiment = Experiment::parse(&definition(&dsv, &universe).to_string(), temp.path())
+        .unwrap()
+        .with_backend_factory(Arc::new(RunDeadlineFactory(worker)))
+        .unwrap();
+    let report = experiment.execute(temp.path(), 1).unwrap();
+    assert_eq!(report.runs[0].status, RunStatus::Failed);
+    assert!(
+        report.runs[0]
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("stdout completion")
+    );
+    assert!(report.run_time_ms < 5000);
+    std::thread::sleep(Duration::from_millis(5200));
+    assert!(
+        !temp.path().join("leaked").exists(),
+        "exited leader's descendant survived"
+    );
 }
 
 #[test]
