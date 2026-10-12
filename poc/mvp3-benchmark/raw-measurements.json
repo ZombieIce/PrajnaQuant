@@ -1,0 +1,1882 @@
+{
+  "schema_version": "poc-mvp3-fast-event-benchmark.v1",
+  "engine": "fast_event",
+  "status": "measured",
+  "started_at_utc": "2026-10-12T06:44:51.831579+00:00",
+  "repeats": 3,
+  "scope": "synthetic 64 instruments x 252 sessions, 288 fast_event Runs only",
+  "provenance": {
+    "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d",
+    "git_status_porcelain": "",
+    "reproducible": true,
+    "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "rustc_verbose": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: aarch64-apple-darwin\nrelease: 1.98.1\nLLVM version: 22.1.8",
+    "python_version": "3.12.2",
+    "operating_system": "macOS-26.2-arm64-arm-64bit",
+    "architecture": "arm64",
+    "cpu_model": "Apple M1",
+    "logical_cpu_count": 8,
+    "physical_cpu_count": 8,
+    "memory_bytes": 17179869184,
+    "binary_sha256": "c4ac78f46723df93d8ffcf1e330dae7fb8340bb0069bdbbb6801f8f2be1aea1d",
+    "prepare_binary_sha256": "496d9b905194167561f5367bfd89d80a6260d7d13c49b70951866a638e668455",
+    "cargo_lock_sha256": "b53253e891ac2a1f23cd8ff1ee875f764690c2c58a1973af5c011799a7bce8d4",
+    "fixture_sha256": "c805d3ef0873171d89b4380ef593c5a032d9c302783ce620b11eb09a85d5c36e",
+    "build_command": "cargo build --release -p prajna-experiment --locked",
+    "build_profile": "release; default features",
+    "environment": {
+      "RAYON_NUM_THREADS": null,
+      "POLARS_MAX_THREADS": null,
+      "RUSTFLAGS": null,
+      "CARGO_BUILD_TARGET": null
+    },
+    "other_machine_load": "not controlled; serial samples, no concurrent build started by runner"
+  },
+  "rss_scope": "whole CLI process, macOS /usr/bin/time -l maximum resident set size in bytes",
+  "throughput_scope": "288 / wall_seconds, including process startup and result persistence",
+  "cache_scope": "Factor Cache only; OS page cache is not flushed",
+  "measurements": [
+    {
+      "threads": 1,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 1,
+      "started_at_utc": "2026-10-12T06:45:04.911481+00:00",
+      "finished_at_utc": "2026-10-12T06:45:15.379528+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/1-cold-summary-1.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/1-cold-summary-1",
+        "--level",
+        "summary",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 10.468053916934878,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":13,\"factors\":1482,\"runs\":8794,\"total\":10455},\"written_bytes\":351123,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "       10.46 real         9.75 user         0.54 sys\n           131612672  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               15001  page reclaims\n                  40  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 465  voluntary context switches\n              163111  involuntary context switches\n        130395680532  instructions retired\n         31442158460  cycles elapsed\n            92325184  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5088680,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 1,
+        "timings_ms": {
+          "definition": 13,
+          "factors": 1482,
+          "runs": 8794,
+          "total": 10455
+        },
+        "written_bytes": 351123,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 1,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 2,
+      "started_at_utc": "2026-10-12T06:45:15.402876+00:00",
+      "finished_at_utc": "2026-10-12T06:45:26.011470+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/1-cold-summary-2.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/1-cold-summary-2",
+        "--level",
+        "summary",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 10.608608334325254,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":13,\"factors\":1555,\"runs\":8863,\"total\":10597},\"written_bytes\":351123,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "       10.60 real         9.72 user         0.54 sys\n           131858432  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               15019  page reclaims\n                  40  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 467  voluntary context switches\n              160172  involuntary context switches\n        130334450166  instructions retired\n         31312769117  cycles elapsed\n            92620096  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5088680,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 1,
+        "timings_ms": {
+          "definition": 13,
+          "factors": 1555,
+          "runs": 8863,
+          "total": 10597
+        },
+        "written_bytes": 351123,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 1,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 3,
+      "started_at_utc": "2026-10-12T06:45:26.034141+00:00",
+      "finished_at_utc": "2026-10-12T06:45:36.501256+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/1-cold-summary-3.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/1-cold-summary-3",
+        "--level",
+        "summary",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 10.467135207727551,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":12,\"factors\":1476,\"runs\":8819,\"total\":10455},\"written_bytes\":351123,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "       10.46 real         9.74 user         0.57 sys\n           133038080  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               15096  page reclaims\n                  59  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 515  voluntary context switches\n              157025  involuntary context switches\n        130453239746  instructions retired\n         31494401928  cycles elapsed\n            93766976  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5088680,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 1,
+        "timings_ms": {
+          "definition": 12,
+          "factors": 1476,
+          "runs": 8819,
+          "total": 10455
+        },
+        "written_bytes": 351123,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 1,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 1,
+      "started_at_utc": "2026-10-12T06:45:36.550921+00:00",
+      "finished_at_utc": "2026-10-12T06:45:45.576206+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/1-hot-summary-1.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/1-hot-summary-1",
+        "--level",
+        "summary",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 9.025295457802713,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":12,\"factors\":73,\"runs\":8770,\"total\":9015},\"written_bytes\":351121,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        9.02 real         8.90 user         0.14 sys\n            89751552  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               12771  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  18  voluntary context switches\n               33344  involuntary context switches\n        118921862979  instructions retired\n         28081112914  cycles elapsed\n            77628736  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5088678,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 1,
+        "timings_ms": {
+          "definition": 12,
+          "factors": 73,
+          "runs": 8770,
+          "total": 9015
+        },
+        "written_bytes": 351121,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 1,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 2,
+      "started_at_utc": "2026-10-12T06:45:45.620445+00:00",
+      "finished_at_utc": "2026-10-12T06:45:55.133758+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/1-hot-summary-2.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/1-hot-summary-2",
+        "--level",
+        "summary",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 9.513329959008843,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":12,\"factors\":75,\"runs\":9260,\"total\":9502},\"written_bytes\":351121,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        9.51 real         8.96 user         0.15 sys\n            88834048  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               12727  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  23  voluntary context switches\n               34681  involuntary context switches\n        118884805078  instructions retired\n         28203162341  cycles elapsed\n            76399936  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5088678,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 1,
+        "timings_ms": {
+          "definition": 12,
+          "factors": 75,
+          "runs": 9260,
+          "total": 9502
+        },
+        "written_bytes": 351121,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 1,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 3,
+      "started_at_utc": "2026-10-12T06:45:55.178681+00:00",
+      "finished_at_utc": "2026-10-12T06:46:04.303061+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/1-hot-summary-3.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/1-hot-summary-3",
+        "--level",
+        "summary",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 9.124390999786556,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":12,\"factors\":76,\"runs\":8867,\"total\":9112},\"written_bytes\":351121,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        9.12 real         8.99 user         0.14 sys\n            89669632  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               12764  page reclaims\n                  40  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  22  voluntary context switches\n               33964  involuntary context switches\n        118870845263  instructions retired\n         28368938122  cycles elapsed\n            77268288  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5088678,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 1,
+        "timings_ms": {
+          "definition": 12,
+          "factors": 76,
+          "runs": 8867,
+          "total": 9112
+        },
+        "written_bytes": 351121,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 2,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 1,
+      "started_at_utc": "2026-10-12T06:46:04.325175+00:00",
+      "finished_at_utc": "2026-10-12T06:46:10.104591+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/2-cold-summary-1.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/2-cold-summary-1",
+        "--level",
+        "summary",
+        "--threads",
+        "2"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 5.77942245779559,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":2,\"timings_ms\":{\"definition\":12,\"factors\":880,\"runs\":4733,\"total\":5767},\"written_bytes\":351122,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        5.77 real        10.31 user         0.46 sys\n           163741696  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               18485  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 528  voluntary context switches\n              134061  involuntary context switches\n        130014744341  instructions retired\n         32650976474  cycles elapsed\n           110069184  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5088679,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 2,
+        "timings_ms": {
+          "definition": 12,
+          "factors": 880,
+          "runs": 4733,
+          "total": 5767
+        },
+        "written_bytes": 351122,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 2,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 2,
+      "started_at_utc": "2026-10-12T06:46:10.124614+00:00",
+      "finished_at_utc": "2026-10-12T06:46:15.943432+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/2-cold-summary-2.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/2-cold-summary-2",
+        "--level",
+        "summary",
+        "--threads",
+        "2"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 5.818821792025119,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":2,\"timings_ms\":{\"definition\":12,\"factors\":888,\"runs\":4755,\"total\":5806},\"written_bytes\":351122,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        5.81 real        10.34 user         0.47 sys\n           154779648  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               17868  page reclaims\n                  42  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 547  voluntary context switches\n              134868  involuntary context switches\n        129916099352  instructions retired\n         32725665242  cycles elapsed\n           116180416  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5088679,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 2,
+        "timings_ms": {
+          "definition": 12,
+          "factors": 888,
+          "runs": 4755,
+          "total": 5806
+        },
+        "written_bytes": 351122,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 2,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 3,
+      "started_at_utc": "2026-10-12T06:46:15.964958+00:00",
+      "finished_at_utc": "2026-10-12T06:46:21.873901+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/2-cold-summary-3.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/2-cold-summary-3",
+        "--level",
+        "summary",
+        "--threads",
+        "2"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 5.908949959091842,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":2,\"timings_ms\":{\"definition\":12,\"factors\":967,\"runs\":4769,\"total\":5897},\"written_bytes\":351122,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        5.90 real        10.37 user         0.44 sys\n           153223168  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               17749  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 568  voluntary context switches\n              120955  involuntary context switches\n        129812370166  instructions retired\n         32727829790  cycles elapsed\n           114148800  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5088679,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 2,
+        "timings_ms": {
+          "definition": 12,
+          "factors": 967,
+          "runs": 4769,
+          "total": 5897
+        },
+        "written_bytes": 351122,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 2,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 1,
+      "started_at_utc": "2026-10-12T06:46:21.918404+00:00",
+      "finished_at_utc": "2026-10-12T06:46:27.170144+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/2-hot-summary-1.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/2-hot-summary-1",
+        "--level",
+        "summary",
+        "--threads",
+        "2"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 5.251742665655911,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":2,\"timings_ms\":{\"definition\":12,\"factors\":48,\"runs\":5020,\"total\":5241},\"written_bytes\":351121,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        5.24 real        10.12 user         0.13 sys\n           107380736  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               14210  page reclaims\n                  57  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  24  voluntary context switches\n               25973  involuntary context switches\n        119870457015  instructions retired\n         31287435973  cycles elapsed\n            83887360  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5088678,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 2,
+        "timings_ms": {
+          "definition": 12,
+          "factors": 48,
+          "runs": 5020,
+          "total": 5241
+        },
+        "written_bytes": 351121,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 2,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 2,
+      "started_at_utc": "2026-10-12T06:46:27.215365+00:00",
+      "finished_at_utc": "2026-10-12T06:46:32.126635+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/2-hot-summary-2.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/2-hot-summary-2",
+        "--level",
+        "summary",
+        "--threads",
+        "2"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 4.911270292010158,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":2,\"timings_ms\":{\"definition\":12,\"factors\":46,\"runs\":4691,\"total\":4901},\"written_bytes\":351121,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        4.90 real         9.46 user         0.12 sys\n           108937216  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               14290  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  18  voluntary context switches\n               25354  involuntary context switches\n        118790340593  instructions retired\n         29318582739  cycles elapsed\n            84444416  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5088678,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 2,
+        "timings_ms": {
+          "definition": 12,
+          "factors": 46,
+          "runs": 4691,
+          "total": 4901
+        },
+        "written_bytes": 351121,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 2,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 3,
+      "started_at_utc": "2026-10-12T06:46:32.172034+00:00",
+      "finished_at_utc": "2026-10-12T06:46:37.169611+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/2-hot-summary-3.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/2-hot-summary-3",
+        "--level",
+        "summary",
+        "--threads",
+        "2"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 4.997577541973442,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":2,\"timings_ms\":{\"definition\":12,\"factors\":46,\"runs\":4777,\"total\":4987},\"written_bytes\":351121,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        4.99 real         9.61 user         0.12 sys\n           105332736  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               14095  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  18  voluntary context switches\n               25605  involuntary context switches\n        118742762454  instructions retired\n         29741403037  cycles elapsed\n            82019584  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5088678,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 2,
+        "timings_ms": {
+          "definition": 12,
+          "factors": 46,
+          "runs": 4777,
+          "total": 4987
+        },
+        "written_bytes": 351121,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 4,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 1,
+      "started_at_utc": "2026-10-12T06:46:37.192872+00:00",
+      "finished_at_utc": "2026-10-12T06:46:40.949420+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/4-cold-summary-1.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/4-cold-summary-1",
+        "--level",
+        "summary",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 3.756545291747898,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":4,\"timings_ms\":{\"definition\":13,\"factors\":714,\"runs\":2855,\"total\":3744},\"written_bytes\":351122,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        3.75 real        11.44 user         0.50 sys\n           190595072  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               23969  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 959  voluntary context switches\n              116664  involuntary context switches\n        129518757587  instructions retired\n         34322758585  cycles elapsed\n           125568512  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5088679,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 4,
+        "timings_ms": {
+          "definition": 13,
+          "factors": 714,
+          "runs": 2855,
+          "total": 3744
+        },
+        "written_bytes": 351122,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 4,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 2,
+      "started_at_utc": "2026-10-12T06:46:40.972222+00:00",
+      "finished_at_utc": "2026-10-12T06:46:44.660454+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/4-cold-summary-2.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/4-cold-summary-2",
+        "--level",
+        "summary",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 3.6882263752631843,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":4,\"timings_ms\":{\"definition\":12,\"factors\":772,\"runs\":2738,\"total\":3676},\"written_bytes\":351122,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        3.68 real        11.02 user         0.47 sys\n           203816960  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               24484  page reclaims\n                  40  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 991  voluntary context switches\n               98252  involuntary context switches\n        129298037659  instructions retired\n         33381601096  cycles elapsed\n           122881536  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5088679,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 4,
+        "timings_ms": {
+          "definition": 12,
+          "factors": 772,
+          "runs": 2738,
+          "total": 3676
+        },
+        "written_bytes": 351122,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 4,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 3,
+      "started_at_utc": "2026-10-12T06:46:44.683997+00:00",
+      "finished_at_utc": "2026-10-12T06:46:48.217677+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/4-cold-summary-3.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/4-cold-summary-3",
+        "--level",
+        "summary",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 3.5336779160425067,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":4,\"timings_ms\":{\"definition\":13,\"factors\":730,\"runs\":2627,\"total\":3522},\"written_bytes\":351122,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        3.53 real        11.00 user         0.49 sys\n           202850304  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               24049  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 884  voluntary context switches\n              117561  involuntary context switches\n        129600186087  instructions retired\n         33457686299  cycles elapsed\n           123897344  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5088679,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 4,
+        "timings_ms": {
+          "definition": 13,
+          "factors": 730,
+          "runs": 2627,
+          "total": 3522
+        },
+        "written_bytes": 351122,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 4,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 1,
+      "started_at_utc": "2026-10-12T06:46:48.262652+00:00",
+      "finished_at_utc": "2026-10-12T06:46:51.112944+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/4-hot-summary-1.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/4-hot-summary-1",
+        "--level",
+        "summary",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.8502839589491487,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":4,\"timings_ms\":{\"definition\":12,\"factors\":33,\"runs\":2642,\"total\":2839},\"written_bytes\":351121,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        2.84 real        10.30 user         0.13 sys\n           130875392  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               15858  page reclaims\n                  40  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  18  voluntary context switches\n               17797  involuntary context switches\n        118397818740  instructions retired\n         30213500414  cycles elapsed\n           101434688  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5088678,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 4,
+        "timings_ms": {
+          "definition": 12,
+          "factors": 33,
+          "runs": 2642,
+          "total": 2839
+        },
+        "written_bytes": 351121,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 4,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 2,
+      "started_at_utc": "2026-10-12T06:46:51.157301+00:00",
+      "finished_at_utc": "2026-10-12T06:46:53.911870+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/4-hot-summary-2.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/4-hot-summary-2",
+        "--level",
+        "summary",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.7545592919923365,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":4,\"timings_ms\":{\"definition\":13,\"factors\":31,\"runs\":2544,\"total\":2742},\"written_bytes\":351121,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        2.75 real        10.06 user         0.13 sys\n           134676480  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               16374  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  19  voluntary context switches\n               17480  involuntary context switches\n        119223282775  instructions retired\n         29949840449  cycles elapsed\n           112379264  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5088678,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 4,
+        "timings_ms": {
+          "definition": 13,
+          "factors": 31,
+          "runs": 2544,
+          "total": 2742
+        },
+        "written_bytes": 351121,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 4,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 3,
+      "started_at_utc": "2026-10-12T06:46:53.957474+00:00",
+      "finished_at_utc": "2026-10-12T06:46:56.724500+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/4-hot-summary-3.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/4-hot-summary-3",
+        "--level",
+        "summary",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.7670149584300816,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":4,\"timings_ms\":{\"definition\":12,\"factors\":25,\"runs\":2567,\"total\":2756},\"written_bytes\":351121,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        2.76 real        10.09 user         0.11 sys\n           132988928  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               16244  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  18  voluntary context switches\n               11881  involuntary context switches\n        119192750027  instructions retired\n         29930392329  cycles elapsed\n           111265152  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5088678,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 4,
+        "timings_ms": {
+          "definition": 12,
+          "factors": 25,
+          "runs": 2567,
+          "total": 2756
+        },
+        "written_bytes": 351121,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 8,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 1,
+      "started_at_utc": "2026-10-12T06:46:56.750358+00:00",
+      "finished_at_utc": "2026-10-12T06:46:59.582253+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/8-cold-summary-1.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/8-cold-summary-1",
+        "--level",
+        "summary",
+        "--threads",
+        "8"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.8318886659108102,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":8,\"timings_ms\":{\"definition\":12,\"factors\":637,\"runs\":2030,\"total\":2819},\"written_bytes\":351122,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        2.82 real        14.49 user         0.47 sys\n           262324224  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               29459  page reclaims\n                  55  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                1279  voluntary context switches\n               72590  involuntary context switches\n        129058359969  instructions retired\n         38582793549  cycles elapsed\n           153257664  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5088679,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 8,
+        "timings_ms": {
+          "definition": 12,
+          "factors": 637,
+          "runs": 2030,
+          "total": 2819
+        },
+        "written_bytes": 351122,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 8,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 2,
+      "started_at_utc": "2026-10-12T06:46:59.605457+00:00",
+      "finished_at_utc": "2026-10-12T06:47:02.394662+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/8-cold-summary-2.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/8-cold-summary-2",
+        "--level",
+        "summary",
+        "--threads",
+        "8"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.7891948339529335,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":8,\"timings_ms\":{\"definition\":12,\"factors\":659,\"runs\":1957,\"total\":2776},\"written_bytes\":351122,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        2.78 real        14.83 user         0.48 sys\n           239960064  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               25911  page reclaims\n                  40  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                1012  voluntary context switches\n               94393  involuntary context switches\n        129348409713  instructions retired\n         39278551479  cycles elapsed\n           155747968  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5088679,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 8,
+        "timings_ms": {
+          "definition": 12,
+          "factors": 659,
+          "runs": 1957,
+          "total": 2776
+        },
+        "written_bytes": 351122,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 8,
+      "cache_state": "cold",
+      "result_level": "summary",
+      "repeat": 3,
+      "started_at_utc": "2026-10-12T06:47:02.419439+00:00",
+      "finished_at_utc": "2026-10-12T06:47:05.207044+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/8-cold-summary-3.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/8-cold-summary-3",
+        "--level",
+        "summary",
+        "--threads",
+        "8"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.7875998746603727,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":8,\"timings_ms\":{\"definition\":12,\"factors\":644,\"runs\":1978,\"total\":2774},\"written_bytes\":351122,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        2.78 real        14.81 user         0.47 sys\n           272318464  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               31611  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                1332  voluntary context switches\n               71096  involuntary context switches\n        129091110662  instructions retired\n         39277799238  cycles elapsed\n           161662656  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 618151,
+        "files": 10
+      },
+      "lake_after": {
+        "bytes": 5088679,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 32,
+          "hit_count": 84
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 8,
+        "timings_ms": {
+          "definition": 12,
+          "factors": 644,
+          "runs": 1978,
+          "total": 2774
+        },
+        "written_bytes": 351122,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 8,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 1,
+      "started_at_utc": "2026-10-12T06:47:05.254410+00:00",
+      "finished_at_utc": "2026-10-12T06:47:07.413701+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/8-hot-summary-1.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/8-hot-summary-1",
+        "--level",
+        "summary",
+        "--threads",
+        "8"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.1592756672762334,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":8,\"timings_ms\":{\"definition\":13,\"factors\":24,\"runs\":1950,\"total\":2145},\"written_bytes\":351121,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        2.15 real        13.96 user         0.17 sys\n           174702592  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               19566  page reclaims\n                  40  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  20  voluntary context switches\n               18668  involuntary context switches\n        119333211173  instructions retired\n         36191874995  cycles elapsed\n           136857088  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5088678,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 8,
+        "timings_ms": {
+          "definition": 13,
+          "factors": 24,
+          "runs": 1950,
+          "total": 2145
+        },
+        "written_bytes": 351121,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 8,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 2,
+      "started_at_utc": "2026-10-12T06:47:07.461410+00:00",
+      "finished_at_utc": "2026-10-12T06:47:09.634560+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/8-hot-summary-2.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/8-hot-summary-2",
+        "--level",
+        "summary",
+        "--threads",
+        "8"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.1731360000558197,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":8,\"timings_ms\":{\"definition\":12,\"factors\":32,\"runs\":1956,\"total\":2153},\"written_bytes\":351121,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        2.16 real        13.81 user         0.17 sys\n           170688512  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               19726  page reclaims\n                  55  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  19  voluntary context switches\n               17740  involuntary context switches\n        118516558066  instructions retired\n         35723265620  cycles elapsed\n           134776256  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5088678,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 8,
+        "timings_ms": {
+          "definition": 12,
+          "factors": 32,
+          "runs": 1956,
+          "total": 2153
+        },
+        "written_bytes": 351121,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    },
+    {
+      "threads": 8,
+      "cache_state": "hot",
+      "result_level": "summary",
+      "repeat": 3,
+      "started_at_utc": "2026-10-12T06:47:09.679389+00:00",
+      "finished_at_utc": "2026-10-12T06:47:11.828727+00:00",
+      "command": [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/8-hot-summary-3.time.txt",
+        "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+        "run",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+        "--lake",
+        "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/8-hot-summary-3",
+        "--level",
+        "summary",
+        "--threads",
+        "8"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.1493267500773072,
+      "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":0,\"hit_count\":116},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":8,\"timings_ms\":{\"definition\":12,\"factors\":23,\"runs\":1941,\"total\":2137},\"written_bytes\":351121,\"written_files\":3}\n",
+      "stderr": "",
+      "time_output": "        2.14 real        13.73 user         0.18 sys\n           176308224  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               20026  page reclaims\n                  29  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                  18  voluntary context switches\n               16542  involuntary context switches\n        118496496685  instructions retired\n         35540478969  cycles elapsed\n           114034048  peak memory footprint\n",
+      "lake_before": {
+        "bytes": 4737557,
+        "files": 74
+      },
+      "lake_after": {
+        "bytes": 5088678,
+        "files": 77
+      },
+      "cli": {
+        "action": "created",
+        "cache": {
+          "compute_count": 0,
+          "hit_count": 116
+        },
+        "exe": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "exp": "exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d",
+        "failed_count": 0,
+        "reproducible": true,
+        "run_count": 288,
+        "threads": 8,
+        "timings_ms": {
+          "definition": 12,
+          "factors": 23,
+          "runs": 1941,
+          "total": 2137
+        },
+        "written_bytes": 351121,
+        "written_files": 3
+      },
+      "execution_provenance": {
+        "id": "exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb",
+        "reproducible": true,
+        "git_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d\n",
+        "working_tree_diff_sha256": "bc8e05cadd5e6ea26e016fd4e35221aec8a4e9ecf8b65f2b16d96d711eaa1611",
+        "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "target_triple": "aarch64-apple-darwin"
+      },
+      "execution_machine": {
+        "os": "macos",
+        "architecture": "aarch64",
+        "available_parallelism": 8
+      },
+      "summary_logical_hash": "b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0",
+      "summary_no_runs": true,
+      "all_accounting_verified": true
+    }
+  ],
+  "experiment": {
+    "availability_assumption": "none",
+    "costs": {
+      "buy_slippage_bps": 10.0,
+      "buy_tax_rate": 0.0,
+      "commission_rate": 0.001,
+      "sell_slippage_bps": 10.0,
+      "sell_tax_rate": 0.0
+    },
+    "dsv": "dsv:sha256:80b804f22c01b7d0375ffd610e90dc73d401b82700d8edf57c3995bbd363186c",
+    "engine": "fast_event",
+    "experiment_version": 1,
+    "parameter_space": {
+      "grid": {
+        "short": [
+          5,
+          10,
+          20
+        ],
+        "long": [
+          40,
+          60
+        ],
+        "vol": [
+          10,
+          20
+        ],
+        "w_s": [
+          1.0
+        ],
+        "w_l": [
+          1.0
+        ],
+        "w_v": [
+          1.0
+        ],
+        "trend": [
+          null,
+          20
+        ],
+        "top_k": [
+          1,
+          3,
+          5
+        ],
+        "rebalance_every": [
+          1,
+          5,
+          10,
+          20
+        ]
+      }
+    },
+    "sessions_per_year": 252,
+    "strategy": "s2_rotation",
+    "universe": "uni:sha256:0666abb98c19a0e0ff2cf9e38091f70accaf1ac9ebccf6594b7bdcdd507323aa",
+    "venue": "SYNTH",
+    "fast_event": {
+      "currency": "CNY",
+      "initial_cash": "100000",
+      "sizing": "lot",
+      "rebalance": "full_target",
+      "minimum_commission": "100",
+      "portfolios": [
+        {
+          "id": 1,
+          "capital": "100000"
+        }
+      ],
+      "lot_size_source": {
+        "kind": "instrument"
+      }
+    }
+  },
+  "warmup": {
+    "command": [
+      "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A\u80a1\u91cf\u5316/target/release/prajna-experiment",
+      "run",
+      "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/experiment.json",
+      "--lake",
+      "/var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/prajna-mvp2-benchmark-8u28uald/warm",
+      "--level",
+      "summary",
+      "--threads",
+      "1"
+    ],
+    "stdout": "{\"action\":\"created\",\"cache\":{\"compute_count\":32,\"hit_count\":84},\"exe\":\"exe:sha256:08fcaab37130a12bfaff97b98c824acbef581a4ccfde2816076bb8c7cd71cfcb\",\"exp\":\"exp:sha256:2fbdc15568eecad1bd3474e115399aabde9c4ddae3ff5054d549880544ad8d2d\",\"failed_count\":0,\"reproducible\":true,\"run_count\":288,\"threads\":1,\"timings_ms\":{\"definition\":30,\"factors\":1657,\"runs\":8810,\"total\":10675},\"written_bytes\":351123,\"written_files\":3}\n",
+    "stderr": ""
+  },
+  "finished_at_utc": "2026-10-12T06:47:11.847491+00:00"
+}

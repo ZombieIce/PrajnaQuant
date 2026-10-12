@@ -158,6 +158,118 @@ fn drawdown(
     }
 }
 
+/// E11 metrics on daily close account NAV, normalized by initial account capital.
+/// Turnover and cost are fractions of raw-open pre-trade account equity.
+pub(crate) fn summarize_fast(
+    result: &prajna_research::fast_event::FastEventResult,
+    sessions_per_year: u64,
+    availability: &str,
+) -> Result<RunSummary, String> {
+    use prajna_research::{
+        strategy::ExecutionEvent,
+        vector::{VectorExecution, VectorExecutionKind, VectorSession},
+    };
+    use std::collections::{BTreeMap, BTreeSet};
+    let number = |v: prajna_domain::Notional| -> Result<f64, String> {
+        v.to_string().parse::<f64>().map_err(|e| e.to_string())
+    };
+    let initial = number(result.config.initial_cash)?;
+    let mut previous = initial;
+    let mut sessions = vec![];
+    let mut totals = BTreeMap::new();
+    for fill in &result.fills {
+        let entry = totals.entry(fill.fill.executed_at()).or_insert((0.0, 0.0));
+        entry.0 += number(fill.fill.total_fees())?;
+        entry.1 += number(fill.fill.raw_notional())?;
+    }
+    for fee in result.account.fee_settlements() {
+        let entry = totals.entry(fee.executed_at()).or_insert((0.0, 0.0));
+        entry.0 += number(fee.total_fees())?;
+        entry.1 += number(fee.fee_basis())?;
+    }
+    for s in &result.sessions {
+        // Revalidate the exported two-level snapshots before claiming verification.
+        s.open_after.validate().map_err(|e| e.to_string())?;
+        s.close.validate().map_err(|e| e.to_string())?;
+        let (fees, turnover) = totals
+            .get(&s.session.ts_open)
+            .copied()
+            .unwrap_or((0.0, 0.0));
+        let equity = number(s.close.account.equity)?;
+        let pre_open = number(s.open_after.account.equity)? + fees;
+        if previous <= 0.0 || pre_open <= 0.0 || !equity.is_finite() {
+            return Err("nonpositive equity or nonfinite metrics".into());
+        }
+        sessions.push(VectorSession {
+            session_date: s.session.session_date.to_string(),
+            nav: equity / initial,
+            net_return: equity / previous - 1.0,
+            gross_return: 0.0,
+            cost: fees / pre_open,
+            turnover: turnover / pre_open,
+            target_weights: BTreeMap::new(),
+            weights_after_execution: BTreeMap::new(),
+            valuation_carried: vec![],
+        });
+        previous = equity;
+    }
+    let mut executions = vec![];
+    let mut pending = false;
+    for attempt in &result.attempts {
+        let (kind, s, blocked, skipped) = match &attempt.event {
+            ExecutionEvent::Deferred {
+                attempt_session,
+                blocked,
+                ..
+            } => (
+                VectorExecutionKind::Deferred,
+                attempt_session,
+                blocked.clone(),
+                BTreeSet::new(),
+            ),
+            ExecutionEvent::Executed {
+                attempt_session,
+                skipped_buys,
+                ..
+            } => (
+                VectorExecutionKind::Executed,
+                attempt_session,
+                BTreeSet::new(),
+                skipped_buys.clone(),
+            ),
+            ExecutionEvent::RetryableExecution {
+                attempt_session,
+                skipped_buys,
+                is_retry,
+                ..
+            } => (
+                if *is_retry {
+                    VectorExecutionKind::EntriesRetried
+                } else {
+                    VectorExecutionKind::Executed
+                },
+                attempt_session,
+                BTreeSet::new(),
+                skipped_buys.clone(),
+            ),
+            ExecutionEvent::PendingAtEnd { .. } => {
+                pending = true;
+                continue;
+            }
+        };
+        executions.push(VectorExecution {
+            session_date: s.session_date.to_string(),
+            kind,
+            blocked,
+            skipped_buys: skipped,
+        });
+    }
+    let projection=VectorResult {sessions,executions,decisions:vec![],pending_at_end:None,assumptions:result.assumptions.iter().map(|s|s.to_string()).chain(["Account and VP identities verified at every Session open-after and close; exact scale-18 ledger.".into(), "Metrics use close account NAV; turnover/cost normalized by raw-open pre-trade account equity.".into()]).collect(),costs:prajna_research::vector::VectorCosts {commission_rate:0.0,buy_slippage_bps:0.0,sell_slippage_bps:0.0,buy_tax_rate:0.0,sell_tax_rate:0.0},availability_assumption:availability.into()};
+    let mut summary = summarize(&projection, sessions_per_year);
+    summary.pending_at_end = pending;
+    Ok(summary)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

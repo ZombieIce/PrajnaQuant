@@ -126,6 +126,32 @@ pub struct FastEventAttempt {
     pub event: ExecutionEvent,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuantityAdjustmentKind {
+    Target,
+    BuyOrder,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SizingAdjustmentReason {
+    LotRounding,
+    InsufficientCash,
+}
+
+/// Diagnostic only: explains target lot rounding and cash-limited order reductions.
+/// Zero actual quantity is an unsubmitted attempt, never a Domain Order or Fill.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FastEventSizingAdjustment {
+    pub portfolio_id: VirtualPortfolioId,
+    pub instrument_id: InstrumentId,
+    pub attempted_at: prajna_domain::TimestampNs,
+    pub quantity_kind: QuantityAdjustmentKind,
+    pub reason: SizingAdjustmentReason,
+    pub requested_quantity: Quantity,
+    pub actual_quantity: Quantity,
+}
+
 #[derive(Default)]
 struct PlannedExecution {
     fills: Vec<FastEventFill>,
@@ -139,6 +165,7 @@ pub struct FastEventResult {
     pub sessions: Vec<FastEventSession>,
     pub attempts: Vec<FastEventAttempt>,
     pub fills: Vec<FastEventFill>,
+    pub sizing_adjustments: Vec<FastEventSizingAdjustment>,
     pub account: TradingAccount,
     pub assumptions: Vec<&'static str>,
 }
@@ -291,6 +318,7 @@ pub fn run_fast_event(
     let mut sessions = Vec::with_capacity(panel.sessions.len());
     let mut attempts = Vec::new();
     let mut fills = Vec::new();
+    let mut sizing_adjustments = Vec::new();
     for (index, session) in panel.sessions.iter().enumerate() {
         open.update(panel, index, PriceField::Open)?;
         let gates = panel
@@ -343,6 +371,7 @@ pub fn run_fast_event(
                                 &open.prices,
                                 session,
                                 config,
+                                &mut sizing_adjustments,
                             )?,
                             fee_settlements: Vec::new(),
                         },
@@ -446,6 +475,7 @@ pub fn run_fast_event(
         sessions,
         attempts,
         fills,
+        sizing_adjustments,
         account,
         assumptions: vec![
             "Single Venue, single currency, long-only, unlevered; full market fills.",
@@ -554,6 +584,7 @@ fn lot_fills(
     prices: &BTreeMap<InstrumentId, Price>,
     session: &PanelSession,
     config: &FastEventConfig,
+    adjustments: &mut Vec<FastEventSizingAdjustment>,
 ) -> Result<Vec<FastEventFill>, FastEventError> {
     let portfolio = &account.portfolios()[&run.id];
     let mut desired = if attempt.retry && run.rebalance == Rebalance::FullTarget {
@@ -568,10 +599,18 @@ fn lot_fills(
                 .get(instrument)
                 .ok_or_else(|| LedgerError::MissingPrice(instrument.clone()))?;
             let quantity = quantity(weight(*target)?.checked_mul_decimal(equity)?, price)?;
-            desired.insert(
-                instrument.clone(),
-                floor_lot(quantity, config.lot_sizes[instrument])?,
+            let rounded = floor_lot(quantity, config.lot_sizes[instrument])?;
+            record_adjustment(
+                adjustments,
+                run.id,
+                instrument,
+                session,
+                QuantityAdjustmentKind::Target,
+                SizingAdjustmentReason::LotRounding,
+                quantity,
+                rounded,
             );
+            desired.insert(instrument.clone(), rounded);
         }
     } else {
         desired = portfolio
@@ -648,7 +687,18 @@ fn lot_fills(
                     let price = *prices
                         .get(instrument)
                         .ok_or_else(|| LedgerError::MissingPrice(instrument.clone()))?;
-                    target = floor_lot(quantity(budget, price)?, config.lot_sizes[instrument])?;
+                    let requested = quantity(budget, price)?;
+                    target = floor_lot(requested, config.lot_sizes[instrument])?;
+                    record_adjustment(
+                        adjustments,
+                        run.id,
+                        instrument,
+                        session,
+                        QuantityAdjustmentKind::Target,
+                        SizingAdjustmentReason::LotRounding,
+                        requested,
+                        target,
+                    );
                 }
             }
             let delta = target
@@ -659,6 +709,7 @@ fn lot_fills(
                 continue;
             }
             let mut q = Quantity::from_mantissa(delta.abs())?;
+            let requested = q;
             let price = *prices
                 .get(instrument)
                 .ok_or_else(|| LedgerError::MissingPrice(instrument.clone()))?;
@@ -688,9 +739,43 @@ fn lot_fills(
                         .ok_or(FixedPointError::Overflow)?,
                 )?;
             }
+            record_adjustment(
+                adjustments,
+                run.id,
+                instrument,
+                session,
+                QuantityAdjustmentKind::BuyOrder,
+                SizingAdjustmentReason::InsufficientCash,
+                requested,
+                q,
+            );
         }
     }
     Ok(fills)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_adjustment(
+    adjustments: &mut Vec<FastEventSizingAdjustment>,
+    portfolio_id: VirtualPortfolioId,
+    instrument: &InstrumentId,
+    session: &PanelSession,
+    quantity_kind: QuantityAdjustmentKind,
+    reason: SizingAdjustmentReason,
+    requested_quantity: Quantity,
+    actual_quantity: Quantity,
+) {
+    if requested_quantity != actual_quantity {
+        adjustments.push(FastEventSizingAdjustment {
+            portfolio_id,
+            instrument_id: instrument.clone(),
+            attempted_at: session.ts_open,
+            quantity_kind,
+            reason,
+            requested_quantity,
+            actual_quantity,
+        });
+    }
 }
 
 fn floor_lot(quantity: Quantity, lot: Quantity) -> Result<Quantity, FastEventError> {

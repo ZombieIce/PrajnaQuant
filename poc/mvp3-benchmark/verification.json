@@ -1,0 +1,130 @@
+{
+  "source_revision": "c85d4abd2394b1f7c092509a089eff0dd5bbad7d",
+  "base_revision": "fc43482",
+  "rust": {
+    "workspace_test": {
+      "passed": 307,
+      "failed": 0,
+      "ignored": 1,
+      "test_binaries": 41
+    },
+    "targeted_test": {
+      "passed": 126,
+      "failed": 0,
+      "ignored": 0,
+      "test_binaries": 22
+    },
+    "commands": [
+      {
+        "command": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "command": [
+          "cargo",
+          "test",
+          "--workspace",
+          "--locked",
+          "--offline"
+        ],
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "command": [
+          "cargo",
+          "clippy",
+          "--workspace",
+          "--all-targets",
+          "--locked",
+          "--offline",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "quant-research",
+          "--no-default-features",
+          "--locked",
+          "--offline"
+        ],
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "command": [
+          "cargo",
+          "clippy",
+          "-p",
+          "quant-research",
+          "--no-default-features",
+          "--all-targets",
+          "--locked",
+          "--offline",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "command": [
+          "cargo",
+          "check",
+          "-p",
+          "quant-research",
+          "--no-default-features",
+          "--features",
+          "b3-pyo3",
+          "--all-targets",
+          "--locked",
+          "--offline"
+        ],
+        "status": "passed",
+        "exit_code": 0
+      }
+    ]
+  },
+  "python": {
+    "interpreter": "/opt/homebrew/bin/python3.12",
+    "version": "Python 3.12.2",
+    "temporary_dependency": "duckdb==1.4.3 in /tmp/prajna123-python; user interpreter environment unchanged",
+    "command": "PYTHONPATH=/tmp/prajna123-python /opt/homebrew/bin/python3.12 -m unittest discover -s tests -v",
+    "tests": 76,
+    "passed": 74,
+    "failed": 2,
+    "baseline_reproduction": "Same two failures on git archive fc43482, same Python environment",
+    "failures": [
+      "tests.test_mvp1_vector_golden.VectorGoldenTests.test_scale_halted_golden_blocks_sells_and_skips_buys",
+      "tests.test_mvp1_vector_golden.VectorGoldenTests.test_scale_v2_expected_outputs_cover_structure_and_semantics"
+    ],
+    "scope_note": "Exact output bytes differ in pre-existing Python float tail; Rust S2 identity and independent summary/golden numerical regressions pass. No goldens rewritten.",
+    "targeted_command": "python3.12 -m unittest tests.test_mvp2_benchmark tests.test_mvp3_fast_event_golden -v",
+    "targeted_tests_passed": 39,
+    "default_python": "Python 3.8 lacks str.removesuffix used by existing MVP-3 goldens; not the verification interpreter"
+  },
+  "frontend": {
+    "commands": [
+      "cd apps/web && npm ci --offline",
+      "cd apps/web && npm run build"
+    ],
+    "status": "passed",
+    "advisory": "existing chunk size warning"
+  },
+  "measurement_scope": "synthetic only; no production market/PIT/total-return claim"
+}

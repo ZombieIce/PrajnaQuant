@@ -29,6 +29,14 @@ use prajna_research::vector::VectorResult;
 
 static NEXT_STAGE: AtomicU64 = AtomicU64::new(0);
 const NOT_PRODUCED_BY_ENGINE: [&str; 3] = ["orders", "fills", "cash_ledger"];
+const FAST_STANDARD: [&str; 2] = ["account_valuations", "portfolio_valuations"];
+const FAST_FULL: [&str; 5] = [
+    "account_valuations",
+    "portfolio_valuations",
+    "orders",
+    "fills",
+    "fee_settlements",
+];
 const STANDARD_TABLES: [&str; 2] = ["sessions", "executions"];
 const FULL_TABLES: [&str; 6] = [
     "sessions",
@@ -48,6 +56,18 @@ pub enum ResultLevel {
 }
 
 impl ResultLevel {
+    fn tables_for(self, run: &RunExecution) -> &'static [&'static str] {
+        if run.is_fast_event() {
+            match self {
+                Self::Summary => &[],
+                Self::Standard => &FAST_STANDARD,
+                Self::Full => &FAST_FULL,
+            }
+        } else {
+            self.tables()
+        }
+    }
+
     fn tables(self) -> &'static [&'static str] {
         match self {
             Self::Summary => &[],
@@ -99,6 +119,8 @@ pub struct StoredRun {
     pub table_hashes: BTreeMap<String, String>,
     pub not_saved: Vec<String>,
     pub not_produced_by_engine: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accounting_verified: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -256,9 +278,9 @@ pub(super) fn store_execution(
         let mut stored_runs = Vec::with_capacity(rows.len());
         for execution in &report.runs {
             let mut table_hashes = BTreeMap::new();
-            if let Some(result) = &execution.result {
-                for table in level.tables() {
-                    let table_rows = result_rows(result, table)?;
+            if execution.status == RunStatus::Completed {
+                for table in level.tables_for(execution) {
+                    let table_rows = execution_rows(execution, table)?;
                     let path = staging
                         .join("runs")
                         .join(run_hex(&execution.run_id)?)
@@ -399,14 +421,10 @@ pub(super) fn promote(
                     run.error.as_deref().unwrap_or("unknown error")
                 )));
             }
-            let vector = run
-                .result
-                .as_ref()
-                .ok_or_else(|| err(format!("Run {run_id} has no Vector result")))?;
             let existing_hashes = manifest.runs[stored_index].table_hashes.clone();
-            let tables = level.tables();
+            let tables = level.tables_for(run);
             for table in tables {
-                let rows = result_rows(vector, table)?;
+                let rows = execution_rows(run, table)?;
                 let path = destination
                     .join("runs")
                     .join(run_hex(run_id)?)
@@ -441,7 +459,8 @@ pub(super) fn promote(
                     .insert((*table).into(), hash);
             }
             manifest.runs[stored_index].result_level = level;
-            manifest.runs[stored_index].not_saved = FULL_TABLES
+            manifest.runs[stored_index].not_saved = ResultLevel::Full
+                .tables_for(run)
                 .iter()
                 .filter(|table| {
                     !manifest.runs[stored_index]
@@ -827,7 +846,8 @@ fn stored_run(
     level: ResultLevel,
     table_hashes: BTreeMap<String, String>,
 ) -> StoredRun {
-    let not_saved = FULL_TABLES
+    let not_saved = ResultLevel::Full
+        .tables_for(execution)
         .iter()
         .filter(|table| !table_hashes.contains_key(**table))
         .map(|table| (*table).to_owned())
@@ -838,10 +858,19 @@ fn stored_run(
         result_level: level,
         table_hashes,
         not_saved,
-        not_produced_by_engine: NOT_PRODUCED_BY_ENGINE
-            .iter()
-            .map(|name| (*name).into())
-            .collect(),
+        not_produced_by_engine: if execution.is_fast_event() {
+            vec![]
+        } else {
+            NOT_PRODUCED_BY_ENGINE
+                .iter()
+                .map(|name| (*name).into())
+                .collect()
+        },
+        accounting_verified: if execution.is_fast_event() {
+            Some(execution.status == RunStatus::Completed)
+        } else {
+            None
+        },
     }
 }
 
@@ -865,21 +894,37 @@ fn write_summary(
     let mut summary_json = Vec::with_capacity(runs.len());
     let mut stored = Vec::with_capacity(runs.len());
     for run in runs {
-        let parameters = parameters_from_spec(&run.run_spec)?;
-        let summary = run
-            .result
-            .as_ref()
-            .map(|result| summarize(result, experiment.sessions_per_year()));
+        let parameters = if run.run_spec["strategy"]["kind"] == "s2_rotation" {
+            Some(parameters_from_spec(&run.run_spec)?)
+        } else {
+            None
+        };
+        let summary = run.summary.clone().or_else(|| {
+            run.result
+                .as_ref()
+                .map(|result| summarize(result, experiment.sessions_per_year()))
+        });
         ids.push(Some(run.run_id.clone()));
-        short.push(Some(to_i64(parameters.short)?));
-        long.push(Some(to_i64(parameters.long)?));
-        vol.push(Some(to_i64(parameters.vol)?));
-        w_s.push(Some(parameters.w_s));
-        w_l.push(Some(parameters.w_l));
-        w_v.push(Some(parameters.w_v));
-        trend.push(parameters.trend.map(to_i64).transpose()?);
-        top_k.push(Some(to_i64(parameters.top_k)?));
-        rebalance.push(Some(to_i64(parameters.rebalance_every)?));
+        short.push(parameters.as_ref().map(|p| to_i64(p.short)).transpose()?);
+        long.push(parameters.as_ref().map(|p| to_i64(p.long)).transpose()?);
+        vol.push(parameters.as_ref().map(|p| to_i64(p.vol)).transpose()?);
+        w_s.push(parameters.as_ref().map(|p| p.w_s));
+        w_l.push(parameters.as_ref().map(|p| p.w_l));
+        w_v.push(parameters.as_ref().map(|p| p.w_v));
+        trend.push(
+            parameters
+                .as_ref()
+                .and_then(|p| p.trend)
+                .map(to_i64)
+                .transpose()?,
+        );
+        top_k.push(parameters.as_ref().map(|p| to_i64(p.top_k)).transpose()?);
+        rebalance.push(
+            parameters
+                .as_ref()
+                .map(|p| to_i64(p.rebalance_every))
+                .transpose()?,
+        );
         statuses.push(Some(
             match run.status {
                 RunStatus::Completed => "completed",
@@ -901,7 +946,7 @@ fn write_summary(
         });
     }
 
-    let schema = summary_schema();
+    let schema = summary_schema_for(experiment);
     let columns: Vec<ArrayRef> = vec![
         Arc::new(StringArray::from(ids)),
         Arc::new(Int64Array::from(short)),
@@ -946,6 +991,27 @@ fn write_summary(
         .map_err(|error| err(format!("invalid summary table: {error}")))?;
     let hash = write_batch(path, &schema, &batch, "summary", &["run_id"])?;
     Ok((stored, hash))
+}
+
+fn summary_schema_for(experiment: &Experiment) -> Arc<Schema> {
+    let schema = summary_schema();
+    if experiment.strategy_kind == "s2_rotation" {
+        return schema;
+    }
+    Arc::new(Schema::new(
+        schema
+            .fields()
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                if (1..=9).contains(&i) {
+                    f.as_ref().clone().with_nullable(true)
+                } else {
+                    f.as_ref().clone()
+                }
+            })
+            .collect::<Vec<_>>(),
+    ))
 }
 
 fn summary_schema() -> Arc<Schema> {
@@ -1195,6 +1261,22 @@ fn rows_batch(
     table: &str,
     rows: &[(String, String)],
 ) -> Result<(Arc<Schema>, RecordBatch), ExperimentError> {
+    if FAST_FULL.contains(&table) {
+        let schema = fast_table_schema();
+        let columns: Vec<ArrayRef> = vec![
+            Arc::new(StringArray::from(
+                rows.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
+            )),
+            Arc::new(StringArray::from(
+                rows.iter()
+                    .map(|(_, payload)| payload.as_str())
+                    .collect::<Vec<_>>(),
+            )),
+        ];
+        let batch =
+            RecordBatch::try_new(schema.clone(), columns).map_err(|e| err(e.to_string()))?;
+        return Ok((schema, batch));
+    }
     let schema = vector_table_schema();
     let mut row_ids = Vec::with_capacity(rows.len());
     let mut session_dates = Vec::with_capacity(rows.len());
@@ -1259,6 +1341,13 @@ fn rows_batch(
     let batch = RecordBatch::try_new(schema.clone(), columns)
         .map_err(|error| err(format!("invalid {table} Vector table: {error}")))?;
     Ok((schema, batch))
+}
+
+fn fast_table_schema() -> Arc<Schema> {
+    Arc::new(Schema::new(vec![
+        Field::new("row_id", DataType::Utf8, false),
+        Field::new("payload", DataType::Utf8, false),
+    ]))
 }
 
 fn vector_table_schema() -> Arc<Schema> {
@@ -1442,7 +1531,14 @@ fn read_table_batches(
         ))
     })?;
     let schema = builder.schema().clone();
-    if schema.as_ref() != vector_table_schema().as_ref() {
+    if schema.as_ref()
+        != if FAST_FULL.contains(&table) {
+            fast_table_schema()
+        } else {
+            vector_table_schema()
+        }
+        .as_ref()
+    {
         return Err(err(format!(
             "invalid {table} Parquet schema at {}",
             path.display()
@@ -1529,12 +1625,20 @@ fn verify_existing(
             let saved = saved_runs
                 .get(run_id)
                 .ok_or_else(|| err(format!("replay is missing Run {run_id}")))?;
+            if saved.accounting_verified
+                != stored_run(expected, saved.result_level, saved.table_hashes.clone())
+                    .accounting_verified
+            {
+                return Err(err(format!(
+                    "replay mismatch for run {run_id}, accounting verification marker"
+                )));
+            }
             if expected.status != saved.status {
                 return Err(err(format!("replay mismatch for run {run_id}, status")));
             }
-            if let Some(vector) = &expected.result {
+            if expected.status == RunStatus::Completed {
                 for (table, expected_hash) in &saved.table_hashes {
-                    let expected_rows = result_rows(vector, table)?;
+                    let expected_rows = execution_rows(expected, table)?;
                     let hash = row_hash(table, &expected_rows)?;
                     let actual_hash = read_rows_hash(
                         &directory
@@ -1814,6 +1918,175 @@ fn metric_value(summary: &RunSummary, name: &str) -> Option<f64> {
         "session_count" => Some(summary.session_count as f64),
         _ => None,
     }
+}
+
+pub(super) fn replay_level(
+    lake: &Path,
+    experiment_id: &str,
+    execution_id: &str,
+    requested: ResultLevel,
+) -> Result<ResultLevel, ExperimentError> {
+    let path = execution_path(lake, experiment_id, execution_id)?.join("execution.json");
+    if !path.exists() {
+        return Ok(requested);
+    }
+    let manifest: ExecutionManifest =
+        serde_json::from_slice(&fs::read(&path).map_err(io_error(&path))?)
+            .map_err(|e| err(e.to_string()))?;
+    Ok(manifest
+        .runs
+        .iter()
+        .map(|r| r.result_level)
+        .max()
+        .unwrap_or(requested)
+        .max(requested))
+}
+
+pub(super) fn execution_rows(
+    run: &RunExecution,
+    table: &str,
+) -> Result<Vec<(String, String)>, ExperimentError> {
+    if let Some(result) = &run.fast_event_result {
+        return fast_rows(result, table);
+    }
+    result_rows(
+        run.result
+            .as_ref()
+            .ok_or_else(|| err("completed Run has no detail result"))?,
+        table,
+    )
+}
+
+fn attempt_payload(attempt: &prajna_research::fast_event::FastEventAttempt) -> Value {
+    use prajna_research::strategy::ExecutionEvent;
+    let mut value =
+        serde_json::json!({"record_type":"attempt", "portfolio_id":attempt.portfolio_id.0});
+    let (decision, session) = match &attempt.event {
+        ExecutionEvent::Deferred {
+            decision_session,
+            attempt_session,
+            blocked,
+        } => {
+            value["kind"] = "deferred".into();
+            value["blocked"] = serde_json::json!(blocked);
+            value["reason"] = "held_instrument_not_executable".into();
+            (decision_session, Some(attempt_session))
+        }
+        ExecutionEvent::Executed {
+            decision_session,
+            attempt_session,
+            applied,
+            skipped_buys,
+        } => {
+            value["kind"] = "executed".into();
+            value["applied"] = serde_json::json!(applied);
+            value["skipped_buys"] = serde_json::json!(skipped_buys);
+            (decision_session, Some(attempt_session))
+        }
+        ExecutionEvent::RetryableExecution {
+            decision_session,
+            attempt_session,
+            applied,
+            skipped_buys,
+            is_retry,
+        } => {
+            value["kind"] = "retryable_execution".into();
+            value["is_retry"] = (*is_retry).into();
+            value["applied"] = serde_json::json!(applied);
+            value["skipped_buys"] = serde_json::json!(skipped_buys);
+            (decision_session, Some(attempt_session))
+        }
+        ExecutionEvent::PendingAtEnd {
+            decision_session,
+            targets,
+        } => {
+            value["kind"] = "pending_at_end".into();
+            value["targets"] = serde_json::json!(targets);
+            (decision_session, None)
+        }
+    };
+    value["decision_session"] = decision.session_date.to_string().into();
+    if let Some(session) = session {
+        value["session_date"] = session.session_date.to_string().into();
+        value["ts_open"] = serde_json::json!(session.ts_open);
+    }
+    value
+}
+fn fast_rows(
+    result: &prajna_research::fast_event::FastEventResult,
+    table: &str,
+) -> Result<Vec<(String, String)>, ExperimentError> {
+    use prajna_research::fast_event::PriceField;
+    let mut rows = vec![];
+    match table {
+        "account_valuations" | "portfolio_valuations" => {
+            for session in &result.sessions {
+                for (point, valuation, sources) in [
+                    ("open_after", &session.open_after, &session.open_sources),
+                    ("close", &session.close, &session.close_sources),
+                ] {
+                    let source=sources.iter().map(|(id,s)| (id.to_string(),serde_json::json!({"session_date":s.session_date.to_string(),"field":match s.field {PriceField::Open=>"open",PriceField::Close=>"close"}}))).collect::<serde_json::Map<_,_>>();
+                    let mut push = |scope: &str,
+                                    id: Option<u64>,
+                                    value: &prajna_account::PortfolioValuation|
+                     -> Result<(), ExperimentError> {
+                        let payload = serde_json::json!({"session_date":session.session.session_date.to_string(),"valuation_point":point,"scope":scope,"portfolio_id":id,"cash":value.cash,"positions":value.positions,"equity":value.equity,"price_sources":source,"unallocated_capital":if scope=="account" {Some(valuation.unallocated_capital)} else {None},"accounting_verified":true});
+                        rows.push((
+                            format!(
+                                "{}|{point}|{scope}|{}",
+                                session.session.session_date,
+                                id.map(|n| n.to_string()).unwrap_or_default()
+                            ),
+                            json_payload(&payload)?,
+                        ));
+                        Ok(())
+                    };
+                    if table == "account_valuations" {
+                        push("account", None, &valuation.account)?;
+                    } else {
+                        for (id, value) in &valuation.portfolios {
+                            push("vp", Some(id.0), value)?;
+                        }
+                    }
+                }
+            }
+        }
+        "orders" => {
+            for (id, order) in result.account.orders() {
+                rows.push((
+                    format!("order|{:020}", id.0),
+                    json_payload(&serde_json::json!({"record_type":"order","order":order}))?,
+                ));
+            }
+            for (index, adjustment) in result.sizing_adjustments.iter().enumerate() {
+                let mut payload =
+                    serde_json::to_value(adjustment).map_err(|e| err(e.to_string()))?;
+                payload["record_type"] = "sizing_adjustment".into();
+                rows.push((format!("sizing|{index:020}"), json_payload(&payload)?));
+            }
+            for (index, attempt) in result.attempts.iter().enumerate() {
+                let mut payload = attempt_payload(attempt);
+                if let Some(skipped) = payload.get("skipped_buys").cloned() {
+                    payload["blocked_entry_reason"] = "instrument_not_executable".into();
+                    payload["blocked_entries"] = skipped;
+                }
+                rows.push((format!("attempt|{index:020}"), json_payload(&payload)?));
+            }
+        }
+        "fills" => {
+            for (index, fill) in result.fills.iter().enumerate() {
+                rows.push((format!("{index:020}"),json_payload(&serde_json::json!({"fill":fill.fill,"fee_basis":fill.fee_basis,"fee_side":fill.fee_side}))?));
+            }
+        }
+        "fee_settlements" => {
+            for (index, fee) in result.account.fee_settlements().iter().enumerate() {
+                rows.push((format!("{index:020}"), json_payload(fee)?));
+            }
+        }
+        _ => return Err(err(format!("unknown Fast Event table {table}"))),
+    }
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(rows)
 }
 
 #[cfg(test)]

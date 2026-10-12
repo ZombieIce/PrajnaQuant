@@ -2958,6 +2958,7 @@ dependencies = [
  "fs2",
  "parquet",
  "polars",
+ "prajna-account",
  "prajna-data",
  "prajna-domain",
  "prajna-research",

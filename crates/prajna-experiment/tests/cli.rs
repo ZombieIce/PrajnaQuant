@@ -438,3 +438,43 @@ fn stored_definition_and_promotion_metadata_corruption_use_replay_inconsistency_
     assert_eq!(fs::read(&manifest_path).unwrap(), b"{bad metadata}");
     assert!(!execution_directory.join("runs").exists());
 }
+
+#[test]
+fn fast_event_cli_summary_promotes_and_verifies_saved_details_on_replay() {
+    let example = Example::new();
+    example.write_definition(|value| {
+        value["engine"]=json!("fast_event");
+        value["fast_event"]=json!({"currency":"CNY","initial_cash":"100000","sizing":"lot","rebalance":"full_target","minimum_commission":"100","portfolios":[{"id":1,"capital":"100000"}],"lot_size_source":{"kind":"instrument"}});
+    });
+    let first = json_output(example.run(&["--threads", "1"]), 0);
+    assert_eq!(first["failed_count"], 0);
+    let directory = example.directory(&first);
+    assert!(!directory.join("runs").exists());
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(directory.join("execution.json")).unwrap()).unwrap();
+    let id = manifest["runs"][0]["run_id"].as_str().unwrap();
+    assert!(
+        manifest["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["accounting_verified"] == true)
+    );
+    let promoted = json_output(
+        example.run(&["--level", "full", "--promote", id, "--threads", "4"]),
+        0,
+    );
+    assert_eq!(promoted["exe"], first["exe"]);
+    let replay = json_output(example.run(&["--threads", "2"]), 0);
+    assert_eq!(replay["action"], "replayed");
+    let fill_path = directory
+        .join("runs")
+        .join(id.rsplit(':').next().unwrap())
+        .join("fills.parquet");
+    let original = fs::read(&fill_path).unwrap();
+    fs::write(&fill_path, b"corrupt saved fills").unwrap();
+    status(&example.run(&["--threads", "4"]), 3);
+    assert_eq!(fs::read(&fill_path).unwrap(), b"corrupt saved fills");
+    fs::write(fill_path, original).unwrap();
+    json_output(example.run(&[]), 0);
+}

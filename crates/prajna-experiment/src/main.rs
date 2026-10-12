@@ -14,7 +14,7 @@ const EXIT_CODES: &str = "Exit codes: 0 success; 1 I/O, provenance or execution 
 recorded in the report and do not change exit code 0.";
 
 #[derive(Parser)]
-#[command(about = "Run, replay, promote and compare synthetic Vector experiments", after_help = EXIT_CODES)]
+#[command(about = "Run, replay, promote and compare synthetic Vector and Fast Event experiments", after_help = EXIT_CODES)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
