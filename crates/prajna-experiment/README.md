@@ -88,6 +88,19 @@ cargo test -p prajna-experiment --locked --offline
 `strategy` 接受 `s2_rotation`（TopKRank）、`buy_and_hold`、`ma_crossover`。
 S2 的九个参数及默认 Run Spec 字节保持不变；显式 `unfilled_entry: "skip"`
 与缺省同一身份，`retry` 进入身份。BuyAndHold 固定 retry；MA 默认 skip，也可显式 retry。
+运行前通过 `prajna-research::engine::Engine` 校验 Strategy × Engine × 模式：
+Vector 继续要求 `Vectorizable`；Fast Event 的封闭 Decision 策略族接受
+`Vectorizable` 或 `EventDriven`，声明 `OrderBookDriven`（即使同时声明前两者）
+或未声明 Decision 能力时拒绝。原生 BuyAndHold / MA 为内建 Vectorizable Decision
+策略。参数展开与每 Run 决策前均校验，不把不支持的组合送入成交/账本。
+
+`Engine::AccurateEvent` 仅登记 MVP-4 路由规则：相同 Decision 策略族、仅 `lot`，
+调仓为 `full_target` 或 `entry_only`；拒绝 `vector_parity` 和 `OrderBookDriven`。
+这不表示 Accurate Backend 已实现；CLI 的 `engine: "accurate_event"` 明确报
+`not implemented`，不创建 Run 或结果，也不新增 Accurate 配置 schema。
+Rust 调用者可用 `Engine::validate` / `decide` / `decide_panel` 在数据计算前校验；
+底层 `run_fast_event` 只消费已生成的 Decision tape，不携带策略能力声明。
+
 新策略同样支持 `parameter_space.list` 与 `grid`：
 
 ```json

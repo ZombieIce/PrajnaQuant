@@ -463,6 +463,10 @@ impl Experiment {
                 .strategy(factor.clone())
                 .map_err(|error| fail(error.to_string()))?;
             self.engine.set_policy(&mut strategy);
+            self.engine
+                .selection()
+                .validate(&strategy)
+                .map_err(|error| invalid(error.to_string()))?;
             let run_id = self.run_id(&parameters)?;
             runs.entry(run_id.clone()).or_insert_with(|| ExpandedRun {
                 run_spec: self.run_spec(&parameters),
