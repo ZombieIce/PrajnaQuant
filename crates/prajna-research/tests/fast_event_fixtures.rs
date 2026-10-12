@@ -281,6 +281,16 @@ fn full_target_matches_vector_and_independent_python_on_every_session_and_fill()
                         |id, session| executable(&panel, &statuses, id, session).unwrap(),
                     )
                     .unwrap();
+                    let vector_pending = vector.pending_at_end.as_ref().map(|pending| {
+                        json!({
+                            "decision_session": pending.decision_session,
+                            "targets": pending.targets,
+                        })
+                    });
+                    assert_eq!(
+                        vector_pending, expected_pending,
+                        "{context}: Vector pending"
+                    );
                     for (v, f) in vector.sessions.iter().zip(&fast.sessions) {
                         // Vector rows include the next open mark, but not its execution cost.
                         let aligned = v.nav / (1.0 + v.gross_return);
@@ -513,6 +523,20 @@ fn compare_fills(
 ) {
     let fills = expected["fills"].as_array().unwrap();
     assert_eq!(fast.fills.len(), fills.len(), "{context}: Fill count");
+    assert_eq!(
+        fast.account.fills().len(),
+        fast.fills.len(),
+        "{context}: account Fill count"
+    );
+    for (registered, returned) in fast.account.fills().iter().zip(&fast.fills) {
+        assert_eq!(
+            registered,
+            &returned.fill,
+            "{context}/{}/{}: account Fill history",
+            registered.executed_at(),
+            registered.order().instrument_id()
+        );
+    }
     let orders = expected["orders"]
         .as_array()
         .unwrap()
