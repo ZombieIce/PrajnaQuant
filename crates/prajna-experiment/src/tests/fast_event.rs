@@ -375,3 +375,44 @@ fn fast_invariant_failure_is_failed_while_other_runs_continue() {
         results[1].error
     );
 }
+
+#[test]
+fn full_orders_explain_zero_quantity_lot_and_cash_attempts() {
+    let temp = TempDir::new().unwrap();
+    let (lake, dsv, _) = fast_fixture(temp.path());
+    let universe = StaticUniverse::new("one", vec!["A.SYNTH".parse().unwrap()]).unwrap();
+    universe.store(&lake).unwrap();
+    for (cash, reason) in [("1", "lot_rounding"), ("10000", "insufficient_cash")] {
+        let mut value = fast_definition(&dsv, &universe.id().unwrap());
+        value["strategy"] = json!("buy_and_hold");
+        value["parameter_space"] = json!({"list":[{"params_version":1}]});
+        value["fast_event"]["sizing"] = json!("lot");
+        value["fast_event"]["initial_cash"] = json!(cash);
+        value["fast_event"]["portfolios"] = json!([{"id":1,"capital":cash}]);
+        // High minimum commission guarantees cash reduction independently of fixture prices.
+        if reason == "insufficient_cash" {
+            value["fast_event"]["minimum_commission"] = json!("10000");
+        }
+        let experiment = Experiment::parse(&value.to_string(), &lake).unwrap();
+        let report = experiment.execute(&lake, 2).unwrap();
+        let run = &report.runs[0];
+        assert_eq!(run.status, RunStatus::Completed, "{:?}", run.error);
+        let rows = storage::execution_rows(run, "orders").unwrap();
+        assert!(
+            rows.iter().any(|(_, payload)| {
+                let v: Value = serde_json::from_str(payload).unwrap();
+                v["record_type"] == "sizing_adjustment" && v["reason"] == reason
+            }),
+            "{reason}: {rows:?}"
+        );
+        assert!(
+            run.fast_event_result
+                .as_ref()
+                .unwrap()
+                .account
+                .orders()
+                .values()
+                .all(|o| o.quantity() > prajna_domain::Quantity::ZERO)
+        );
+    }
+}

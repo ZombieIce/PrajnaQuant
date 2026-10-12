@@ -176,44 +176,25 @@ pub(crate) fn summarize_fast(
     let initial = number(result.config.initial_cash)?;
     let mut previous = initial;
     let mut sessions = vec![];
+    let mut totals = BTreeMap::new();
+    for fill in &result.fills {
+        let entry = totals.entry(fill.fill.executed_at()).or_insert((0.0, 0.0));
+        entry.0 += number(fill.fill.total_fees())?;
+        entry.1 += number(fill.fill.raw_notional())?;
+    }
+    for fee in result.account.fee_settlements() {
+        let entry = totals.entry(fee.executed_at()).or_insert((0.0, 0.0));
+        entry.0 += number(fee.total_fees())?;
+        entry.1 += number(fee.fee_basis())?;
+    }
     for s in &result.sessions {
         // Revalidate the exported two-level snapshots before claiming verification.
         s.open_after.validate().map_err(|e| e.to_string())?;
         s.close.validate().map_err(|e| e.to_string())?;
-        let fees = result
-            .fills
-            .iter()
-            .filter(|f| f.fill.executed_at() == s.session.ts_open)
-            .map(|f| number(f.fill.total_fees()))
-            .collect::<Result<Vec<_>, _>>()?
-            .iter()
-            .sum::<f64>()
-            + result
-                .account
-                .fee_settlements()
-                .iter()
-                .filter(|f| f.executed_at() == s.session.ts_open)
-                .map(|f| number(f.total_fees()))
-                .collect::<Result<Vec<_>, _>>()?
-                .iter()
-                .sum::<f64>();
-        let turnover = result
-            .fills
-            .iter()
-            .filter(|f| f.fill.executed_at() == s.session.ts_open)
-            .map(|f| number(f.fill.raw_notional()))
-            .collect::<Result<Vec<_>, _>>()?
-            .iter()
-            .sum::<f64>()
-            + result
-                .account
-                .fee_settlements()
-                .iter()
-                .filter(|f| f.executed_at() == s.session.ts_open)
-                .map(|f| number(f.fee_basis()))
-                .collect::<Result<Vec<_>, _>>()?
-                .iter()
-                .sum::<f64>();
+        let (fees, turnover) = totals
+            .get(&s.session.ts_open)
+            .copied()
+            .unwrap_or((0.0, 0.0));
         let equity = number(s.close.account.equity)?;
         let pre_open = number(s.open_after.account.equity)? + fees;
         if previous <= 0.0 || pre_open <= 0.0 || !equity.is_finite() {

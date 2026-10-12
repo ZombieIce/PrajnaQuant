@@ -57,7 +57,7 @@ pub enum ResultLevel {
 
 impl ResultLevel {
     fn tables_for(self, run: &RunExecution) -> &'static [&'static str] {
-        if run.run_spec["engine"]["kind"] == "fast_event" {
+        if run.is_fast_event() {
             match self {
                 Self::Summary => &[],
                 Self::Standard => &FAST_STANDARD,
@@ -858,7 +858,7 @@ fn stored_run(
         result_level: level,
         table_hashes,
         not_saved,
-        not_produced_by_engine: if execution.run_spec["engine"]["kind"] == "fast_event" {
+        not_produced_by_engine: if execution.is_fast_event() {
             vec![]
         } else {
             NOT_PRODUCED_BY_ENGINE
@@ -866,7 +866,7 @@ fn stored_run(
                 .map(|name| (*name).into())
                 .collect()
         },
-        accounting_verified: if execution.run_spec["engine"]["kind"] == "fast_event" {
+        accounting_verified: if execution.is_fast_event() {
             Some(execution.status == RunStatus::Completed)
         } else {
             None
@@ -2057,6 +2057,12 @@ fn fast_rows(
                     format!("order|{:020}", id.0),
                     json_payload(&serde_json::json!({"record_type":"order","order":order}))?,
                 ));
+            }
+            for (index, adjustment) in result.sizing_adjustments.iter().enumerate() {
+                let mut payload =
+                    serde_json::to_value(adjustment).map_err(|e| err(e.to_string()))?;
+                payload["record_type"] = "sizing_adjustment".into();
+                rows.push((format!("sizing|{index:020}"), json_payload(&payload)?));
             }
             for (index, attempt) in result.attempts.iter().enumerate() {
                 let mut payload = attempt_payload(attempt);

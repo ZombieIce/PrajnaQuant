@@ -738,6 +738,13 @@ pub struct RunExecution {
     pub error: Option<String>,
 }
 
+impl RunExecution {
+    // Run Specs are created only after Definition/parameter validation.
+    pub(crate) fn is_fast_event(&self) -> bool {
+        self.run_spec["engine"]["kind"] == "fast_event"
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ExecutionReport {
     pub runs: Vec<RunExecution>,

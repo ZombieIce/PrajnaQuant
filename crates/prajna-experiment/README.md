@@ -139,8 +139,8 @@ lot 来源/解析值和最低佣金均进入 Run Spec；线程数及 ResultLevel
 
 Fast Event 表用稳定 `row_id` + JSON `payload` 的 Parquet schema：所有账本数字为精确
 scale-18 字符串；空表仍保存并登记 logical hash。Orders 中 `record_type=attempt`
-是执行诊断，不冒充正数量 Domain Order；不可交易的持仓/买腿明确标出原因，末日 pending
-保留原目标。成交前现金削减/整手裁减由引擎实现，attempt 的 applied 是执行决策目标，
+是执行诊断，不冒充正数量 Domain Order；`record_type=sizing_adjustment` 保存 lot_rounding / insufficient_cash 的请求及实际数量（可为零）；不可交易的持仓/买腿明确标出原因，末日 pending
+保留原目标。成交前现金削减/整手裁减另存原因和前后数量；attempt 的 applied 是执行决策目标，
 并非承诺的成交数量。完整现金重放需同时计入 Fill 与 fee-only settlement。
 
 Run manifest 的 `accounting_verified=true` 只表示成功 Run 已通过运行内两层、两点的
