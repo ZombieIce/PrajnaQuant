@@ -1,0 +1,1112 @@
+{
+  "scope": "Issue #137 synthetic feasibility only; not Accurate Engine integration",
+  "captured_at": "2026-10-12T08:14:50.106270+00:00",
+  "provenance": {
+    "base_revision": "039c19b61ade2512c895c27efdc67e63665cb2f9",
+    "working_tree_dirty": true,
+    "source_sha256": {
+      "capture.py": "96582e01237c960db86722638341ca7ecd2a906000f3fe470bb832f031785f89",
+      "controller.py": "94060f127d30bd70c26df4fc177eaeb0cdd0a11c093c0d377a62121bc790ce46",
+      "protocol.py": "813f5031589d154696dd9a42c2fd2acc3bce40b8b86299aa3c7398a627b42972",
+      "test_lockstep.py": "4b0d2bddf097445f78c9efa0a073802581f9d74ca5634a886d3143d23b6ebd34",
+      "worker.py": "3186b9521687a46ec6b9258a3df70df25088bf5978334dc878db234e8f74080d"
+    },
+    "requirements_sha256": "8036a6e59994e85749ac17c8d8f3e40531bf7994e65df7726662a6dd17ec2fb2",
+    "nautilus_trader": "2.0.0rc6",
+    "pyarrow": "21.0.0"
+  },
+  "observations": {
+    "lockstep": {
+      "status": "confirmed",
+      "selected": "synchronous_stdio_strategy_shim",
+      "multiple_run_end": "Unknown (not needed / not tested)"
+    },
+    "reset": {
+      "status": "confirmed",
+      "scope": "same loaded 3x3 fixture twice; no native error logs"
+    },
+    "halt": {
+      "status": "confirmed",
+      "scope": "three native OrderRejected; CLOSED reason"
+    },
+    "price_precision": {
+      "scale18": {
+        "status": "confirmed",
+        "price": "1.123456789012345678",
+        "raw": "1123456789012345678",
+        "equity_precision": "18",
+        "quote_ask": "1.123456789012345678"
+      },
+      "scale19": {
+        "status": "unsupported",
+        "requested": "1.1234567890123456789",
+        "error": "`precision` exceeded maximum `WEI_PRECISION` (18), was 19"
+      },
+      "synthetic_scale20": {
+        "status": "unsupported",
+        "requested": "1.13469135690246913478",
+        "error": "`precision` exceeded maximum `WEI_PRECISION` (18), was 20"
+      },
+      "instrument_tick_mismatch": {
+        "status": "unsupported",
+        "error": "price 10.01 is not aligned to tick 0.05"
+      }
+    }
+  },
+  "hand": {
+    "protocol": "mvp4-lockstep-spike@1",
+    "selected_lockstep": "synchronous_stdio_strategy_shim",
+    "python": "3.12.2",
+    "platform": "macOS-26.2-arm64-arm-64bit",
+    "events": [
+      {
+        "type": "ready",
+        "protocol": "mvp4-lockstep-spike@1",
+        "backend": {
+          "name": "nautilus_trader",
+          "version": "2.0.0rc6"
+        },
+        "decimal_probe": {
+          "packet": {
+            "price": "1.123456789012345678",
+            "quantity": "0.000000000000000001",
+            "fee": "99999999999999999999.999999999999999999"
+          },
+          "stdio": {
+            "price": "1.123456789012345678",
+            "quantity": "0.000000000000000001",
+            "fee": "99999999999999999999.999999999999999999"
+          }
+        }
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "A.SIM",
+        "action": "TRADING",
+        "ts_event": "1767756600000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "B.SIM",
+        "action": "TRADING",
+        "ts_event": "1767756600000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "C.SIM",
+        "action": "TRADING",
+        "ts_event": "1767756600000500000"
+      },
+      {
+        "type": "session_open",
+        "session_id": "s1",
+        "ts_event": "1767756600001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s1",
+        "order_id": "s1-a",
+        "virtual_portfolio_id": "alpha",
+        "instrument_id": "A.SIM",
+        "side": "BUY",
+        "quantity": "10",
+        "price": "10.10",
+        "backend_fee": "0.00",
+        "ts_event": "1767756600001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s1",
+        "order_id": "s1-b",
+        "virtual_portfolio_id": "beta",
+        "instrument_id": "B.SIM",
+        "side": "BUY",
+        "quantity": "5",
+        "price": "20.20",
+        "backend_fee": "0.00",
+        "ts_event": "1767756600001000000"
+      },
+      {
+        "type": "session_close",
+        "session_id": "s1",
+        "backend_cash": "798.00",
+        "backend_positions": {
+          "A.SIM": "10",
+          "B.SIM": "5"
+        },
+        "ts_event": "1767760200001000000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "A.SIM",
+        "action": "TRADING",
+        "ts_event": "1767843000000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "B.SIM",
+        "action": "TRADING",
+        "ts_event": "1767843000000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "C.SIM",
+        "action": "TRADING",
+        "ts_event": "1767843000000500000"
+      },
+      {
+        "type": "session_open",
+        "session_id": "s2",
+        "ts_event": "1767843000001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s2",
+        "order_id": "s2-a",
+        "virtual_portfolio_id": "alpha",
+        "instrument_id": "A.SIM",
+        "side": "SELL",
+        "quantity": "10",
+        "price": "11.88",
+        "backend_fee": "0.00",
+        "ts_event": "1767843000001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s2",
+        "order_id": "s2-c",
+        "virtual_portfolio_id": "alpha",
+        "instrument_id": "C.SIM",
+        "side": "BUY",
+        "quantity": "16",
+        "price": "30.30",
+        "backend_fee": "0.00",
+        "ts_event": "1767843000001000000"
+      },
+      {
+        "type": "session_close",
+        "session_id": "s2",
+        "backend_cash": "432.00",
+        "backend_positions": {
+          "B.SIM": "5",
+          "C.SIM": "16"
+        },
+        "ts_event": "1767846600001000000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "A.SIM",
+        "action": "TRADING",
+        "ts_event": "1767929400000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "B.SIM",
+        "action": "TRADING",
+        "ts_event": "1767929400000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "C.SIM",
+        "action": "TRADING",
+        "ts_event": "1767929400000500000"
+      },
+      {
+        "type": "session_open",
+        "session_id": "s3",
+        "ts_event": "1767929400001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s3",
+        "order_id": "s3-b",
+        "virtual_portfolio_id": "beta",
+        "instrument_id": "B.SIM",
+        "side": "SELL",
+        "quantity": "5",
+        "price": "17.82",
+        "backend_fee": "0.00",
+        "ts_event": "1767929400001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s3",
+        "order_id": "s3-c",
+        "virtual_portfolio_id": "alpha",
+        "instrument_id": "C.SIM",
+        "side": "SELL",
+        "quantity": "16",
+        "price": "31.68",
+        "backend_fee": "0.00",
+        "ts_event": "1767929400001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s3",
+        "order_id": "s3-a",
+        "virtual_portfolio_id": "alpha",
+        "instrument_id": "A.SIM",
+        "side": "BUY",
+        "quantity": "10",
+        "price": "13.13",
+        "backend_fee": "0.00",
+        "ts_event": "1767929400001000000"
+      },
+      {
+        "type": "session_close",
+        "session_id": "s3",
+        "backend_cash": "896.68",
+        "backend_positions": {
+          "A.SIM": "10"
+        },
+        "ts_event": "1767933000001000000"
+      },
+      {
+        "type": "done"
+      }
+    ],
+    "ledger": [
+      {
+        "session_id": "s1",
+        "cash": "798.00",
+        "positions": {
+          "A.SIM": "10",
+          "B.SIM": "5"
+        },
+        "nav": "1013.00",
+        "backend_cash": "798.00",
+        "virtual_portfolios": {
+          "alpha": {
+            "cash": "499.00",
+            "positions": {
+              "A.SIM": "10"
+            }
+          },
+          "beta": {
+            "cash": "299.00",
+            "positions": {
+              "B.SIM": "5"
+            }
+          }
+        }
+      },
+      {
+        "session_id": "s2",
+        "cash": "432.00",
+        "positions": {
+          "C.SIM": "16",
+          "B.SIM": "5"
+        },
+        "nav": "1023.00",
+        "backend_cash": "432.00",
+        "virtual_portfolios": {
+          "alpha": {
+            "cash": "133.00",
+            "positions": {
+              "C.SIM": "16"
+            }
+          },
+          "beta": {
+            "cash": "299.00",
+            "positions": {
+              "B.SIM": "5"
+            }
+          }
+        }
+      },
+      {
+        "session_id": "s3",
+        "cash": "896.68",
+        "positions": {
+          "A.SIM": "10"
+        },
+        "nav": "1036.68",
+        "backend_cash": "896.68",
+        "virtual_portfolios": {
+          "alpha": {
+            "cash": "508.58",
+            "positions": {
+              "A.SIM": "10"
+            }
+          },
+          "beta": {
+            "cash": "388.10",
+            "positions": {}
+          }
+        }
+      }
+    ],
+    "native_stderr": ""
+  },
+  "halted": {
+    "protocol": "mvp4-lockstep-spike@1",
+    "selected_lockstep": "synchronous_stdio_strategy_shim",
+    "python": "3.12.2",
+    "platform": "macOS-26.2-arm64-arm-64bit",
+    "events": [
+      {
+        "type": "ready",
+        "protocol": "mvp4-lockstep-spike@1",
+        "backend": {
+          "name": "nautilus_trader",
+          "version": "2.0.0rc6"
+        },
+        "decimal_probe": {
+          "packet": {
+            "price": "1.123456789012345678",
+            "quantity": "0.000000000000000001",
+            "fee": "99999999999999999999.999999999999999999"
+          },
+          "stdio": {
+            "price": "1.123456789012345678",
+            "quantity": "0.000000000000000001",
+            "fee": "99999999999999999999.999999999999999999"
+          }
+        }
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "A.SIM",
+        "action": "TRADING",
+        "ts_event": "1767756600000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "B.SIM",
+        "action": "TRADING",
+        "ts_event": "1767756600000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "C.SIM",
+        "action": "HALT",
+        "ts_event": "1767756600000500000"
+      },
+      {
+        "type": "session_open",
+        "session_id": "s1",
+        "ts_event": "1767756600001000000"
+      },
+      {
+        "type": "reject",
+        "session_id": "s1",
+        "order_id": "s1-halt",
+        "virtual_portfolio_id": "alpha",
+        "instrument_id": "C.SIM",
+        "side": "BUY",
+        "quantity": "1",
+        "reason": "Market C.SIM is CLOSED, cannot accept order s1-halt",
+        "ts_event": "1767756600001000000"
+      },
+      {
+        "type": "session_close",
+        "session_id": "s1",
+        "backend_cash": "1000.00",
+        "backend_positions": {},
+        "ts_event": "1767760200001000000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "A.SIM",
+        "action": "TRADING",
+        "ts_event": "1767843000000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "B.SIM",
+        "action": "TRADING",
+        "ts_event": "1767843000000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "C.SIM",
+        "action": "HALT",
+        "ts_event": "1767843000000500000"
+      },
+      {
+        "type": "session_open",
+        "session_id": "s2",
+        "ts_event": "1767843000001000000"
+      },
+      {
+        "type": "reject",
+        "session_id": "s2",
+        "order_id": "s2-halt",
+        "virtual_portfolio_id": "alpha",
+        "instrument_id": "C.SIM",
+        "side": "BUY",
+        "quantity": "1",
+        "reason": "Market C.SIM is CLOSED, cannot accept order s2-halt",
+        "ts_event": "1767843000001000000"
+      },
+      {
+        "type": "session_close",
+        "session_id": "s2",
+        "backend_cash": "1000.00",
+        "backend_positions": {},
+        "ts_event": "1767846600001000000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "A.SIM",
+        "action": "TRADING",
+        "ts_event": "1767929400000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "B.SIM",
+        "action": "TRADING",
+        "ts_event": "1767929400000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "C.SIM",
+        "action": "HALT",
+        "ts_event": "1767929400000500000"
+      },
+      {
+        "type": "session_open",
+        "session_id": "s3",
+        "ts_event": "1767929400001000000"
+      },
+      {
+        "type": "reject",
+        "session_id": "s3",
+        "order_id": "s3-halt",
+        "virtual_portfolio_id": "alpha",
+        "instrument_id": "C.SIM",
+        "side": "BUY",
+        "quantity": "1",
+        "reason": "Market C.SIM is CLOSED, cannot accept order s3-halt",
+        "ts_event": "1767929400001000000"
+      },
+      {
+        "type": "session_close",
+        "session_id": "s3",
+        "backend_cash": "1000.00",
+        "backend_positions": {},
+        "ts_event": "1767933000001000000"
+      },
+      {
+        "type": "done"
+      }
+    ],
+    "ledger": [
+      {
+        "session_id": "s1",
+        "cash": "1000.00",
+        "positions": {},
+        "nav": "1000.00",
+        "backend_cash": "1000.00",
+        "virtual_portfolios": {
+          "alpha": {
+            "cash": "600.00",
+            "positions": {}
+          },
+          "beta": {
+            "cash": "400.00",
+            "positions": {}
+          }
+        }
+      },
+      {
+        "session_id": "s2",
+        "cash": "1000.00",
+        "positions": {},
+        "nav": "1000.00",
+        "backend_cash": "1000.00",
+        "virtual_portfolios": {
+          "alpha": {
+            "cash": "600.00",
+            "positions": {}
+          },
+          "beta": {
+            "cash": "400.00",
+            "positions": {}
+          }
+        }
+      },
+      {
+        "session_id": "s3",
+        "cash": "1000.00",
+        "positions": {},
+        "nav": "1000.00",
+        "backend_cash": "1000.00",
+        "virtual_portfolios": {
+          "alpha": {
+            "cash": "600.00",
+            "positions": {}
+          },
+          "beta": {
+            "cash": "400.00",
+            "positions": {}
+          }
+        }
+      }
+    ],
+    "native_stderr": ""
+  },
+  "reset": {
+    "protocol": "mvp4-lockstep-spike@1",
+    "selected_lockstep": "synchronous_stdio_strategy_shim",
+    "python": "3.12.2",
+    "platform": "macOS-26.2-arm64-arm-64bit",
+    "events": [
+      {
+        "type": "ready",
+        "protocol": "mvp4-lockstep-spike@1",
+        "backend": {
+          "name": "nautilus_trader",
+          "version": "2.0.0rc6"
+        },
+        "decimal_probe": {
+          "packet": {
+            "price": "1.123456789012345678",
+            "quantity": "0.000000000000000001",
+            "fee": "99999999999999999999.999999999999999999"
+          },
+          "stdio": {
+            "price": "1.123456789012345678",
+            "quantity": "0.000000000000000001",
+            "fee": "99999999999999999999.999999999999999999"
+          }
+        }
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "A.SIM",
+        "action": "TRADING",
+        "ts_event": "1767756600000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "B.SIM",
+        "action": "TRADING",
+        "ts_event": "1767756600000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "C.SIM",
+        "action": "TRADING",
+        "ts_event": "1767756600000500000"
+      },
+      {
+        "type": "session_open",
+        "session_id": "s1",
+        "ts_event": "1767756600001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s1",
+        "order_id": "s1-a",
+        "virtual_portfolio_id": "alpha",
+        "instrument_id": "A.SIM",
+        "side": "BUY",
+        "quantity": "10",
+        "price": "10.10",
+        "backend_fee": "0.00",
+        "ts_event": "1767756600001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s1",
+        "order_id": "s1-b",
+        "virtual_portfolio_id": "beta",
+        "instrument_id": "B.SIM",
+        "side": "BUY",
+        "quantity": "5",
+        "price": "20.20",
+        "backend_fee": "0.00",
+        "ts_event": "1767756600001000000"
+      },
+      {
+        "type": "session_close",
+        "session_id": "s1",
+        "backend_cash": "798.00",
+        "backend_positions": {
+          "A.SIM": "10",
+          "B.SIM": "5"
+        },
+        "ts_event": "1767760200001000000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "A.SIM",
+        "action": "TRADING",
+        "ts_event": "1767843000000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "B.SIM",
+        "action": "TRADING",
+        "ts_event": "1767843000000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "C.SIM",
+        "action": "TRADING",
+        "ts_event": "1767843000000500000"
+      },
+      {
+        "type": "session_open",
+        "session_id": "s2",
+        "ts_event": "1767843000001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s2",
+        "order_id": "s2-a",
+        "virtual_portfolio_id": "alpha",
+        "instrument_id": "A.SIM",
+        "side": "SELL",
+        "quantity": "10",
+        "price": "11.88",
+        "backend_fee": "0.00",
+        "ts_event": "1767843000001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s2",
+        "order_id": "s2-c",
+        "virtual_portfolio_id": "alpha",
+        "instrument_id": "C.SIM",
+        "side": "BUY",
+        "quantity": "16",
+        "price": "30.30",
+        "backend_fee": "0.00",
+        "ts_event": "1767843000001000000"
+      },
+      {
+        "type": "session_close",
+        "session_id": "s2",
+        "backend_cash": "432.00",
+        "backend_positions": {
+          "B.SIM": "5",
+          "C.SIM": "16"
+        },
+        "ts_event": "1767846600001000000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "A.SIM",
+        "action": "TRADING",
+        "ts_event": "1767929400000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "B.SIM",
+        "action": "TRADING",
+        "ts_event": "1767929400000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "C.SIM",
+        "action": "TRADING",
+        "ts_event": "1767929400000500000"
+      },
+      {
+        "type": "session_open",
+        "session_id": "s3",
+        "ts_event": "1767929400001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s3",
+        "order_id": "s3-b",
+        "virtual_portfolio_id": "beta",
+        "instrument_id": "B.SIM",
+        "side": "SELL",
+        "quantity": "5",
+        "price": "17.82",
+        "backend_fee": "0.00",
+        "ts_event": "1767929400001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s3",
+        "order_id": "s3-c",
+        "virtual_portfolio_id": "alpha",
+        "instrument_id": "C.SIM",
+        "side": "SELL",
+        "quantity": "16",
+        "price": "31.68",
+        "backend_fee": "0.00",
+        "ts_event": "1767929400001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s3",
+        "order_id": "s3-a",
+        "virtual_portfolio_id": "alpha",
+        "instrument_id": "A.SIM",
+        "side": "BUY",
+        "quantity": "10",
+        "price": "13.13",
+        "backend_fee": "0.00",
+        "ts_event": "1767929400001000000"
+      },
+      {
+        "type": "session_close",
+        "session_id": "s3",
+        "backend_cash": "896.68",
+        "backend_positions": {
+          "A.SIM": "10"
+        },
+        "ts_event": "1767933000001000000"
+      },
+      {
+        "type": "reset"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "A.SIM",
+        "action": "TRADING",
+        "ts_event": "1767756600000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "B.SIM",
+        "action": "TRADING",
+        "ts_event": "1767756600000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "C.SIM",
+        "action": "TRADING",
+        "ts_event": "1767756600000500000"
+      },
+      {
+        "type": "session_open",
+        "session_id": "s1",
+        "ts_event": "1767756600001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s1",
+        "order_id": "s1-a",
+        "virtual_portfolio_id": "alpha",
+        "instrument_id": "A.SIM",
+        "side": "BUY",
+        "quantity": "10",
+        "price": "10.10",
+        "backend_fee": "0.00",
+        "ts_event": "1767756600001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s1",
+        "order_id": "s1-b",
+        "virtual_portfolio_id": "beta",
+        "instrument_id": "B.SIM",
+        "side": "BUY",
+        "quantity": "5",
+        "price": "20.20",
+        "backend_fee": "0.00",
+        "ts_event": "1767756600001000000"
+      },
+      {
+        "type": "session_close",
+        "session_id": "s1",
+        "backend_cash": "798.00",
+        "backend_positions": {
+          "A.SIM": "10",
+          "B.SIM": "5"
+        },
+        "ts_event": "1767760200001000000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "A.SIM",
+        "action": "TRADING",
+        "ts_event": "1767843000000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "B.SIM",
+        "action": "TRADING",
+        "ts_event": "1767843000000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "C.SIM",
+        "action": "TRADING",
+        "ts_event": "1767843000000500000"
+      },
+      {
+        "type": "session_open",
+        "session_id": "s2",
+        "ts_event": "1767843000001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s2",
+        "order_id": "s2-a",
+        "virtual_portfolio_id": "alpha",
+        "instrument_id": "A.SIM",
+        "side": "SELL",
+        "quantity": "10",
+        "price": "11.88",
+        "backend_fee": "0.00",
+        "ts_event": "1767843000001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s2",
+        "order_id": "s2-c",
+        "virtual_portfolio_id": "alpha",
+        "instrument_id": "C.SIM",
+        "side": "BUY",
+        "quantity": "16",
+        "price": "30.30",
+        "backend_fee": "0.00",
+        "ts_event": "1767843000001000000"
+      },
+      {
+        "type": "session_close",
+        "session_id": "s2",
+        "backend_cash": "432.00",
+        "backend_positions": {
+          "B.SIM": "5",
+          "C.SIM": "16"
+        },
+        "ts_event": "1767846600001000000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "A.SIM",
+        "action": "TRADING",
+        "ts_event": "1767929400000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "B.SIM",
+        "action": "TRADING",
+        "ts_event": "1767929400000500000"
+      },
+      {
+        "type": "backend_status",
+        "instrument_id": "C.SIM",
+        "action": "TRADING",
+        "ts_event": "1767929400000500000"
+      },
+      {
+        "type": "session_open",
+        "session_id": "s3",
+        "ts_event": "1767929400001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s3",
+        "order_id": "s3-b",
+        "virtual_portfolio_id": "beta",
+        "instrument_id": "B.SIM",
+        "side": "SELL",
+        "quantity": "5",
+        "price": "17.82",
+        "backend_fee": "0.00",
+        "ts_event": "1767929400001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s3",
+        "order_id": "s3-c",
+        "virtual_portfolio_id": "alpha",
+        "instrument_id": "C.SIM",
+        "side": "SELL",
+        "quantity": "16",
+        "price": "31.68",
+        "backend_fee": "0.00",
+        "ts_event": "1767929400001000000"
+      },
+      {
+        "type": "fill",
+        "session_id": "s3",
+        "order_id": "s3-a",
+        "virtual_portfolio_id": "alpha",
+        "instrument_id": "A.SIM",
+        "side": "BUY",
+        "quantity": "10",
+        "price": "13.13",
+        "backend_fee": "0.00",
+        "ts_event": "1767929400001000000"
+      },
+      {
+        "type": "session_close",
+        "session_id": "s3",
+        "backend_cash": "896.68",
+        "backend_positions": {
+          "A.SIM": "10"
+        },
+        "ts_event": "1767933000001000000"
+      },
+      {
+        "type": "done"
+      }
+    ],
+    "ledger": [
+      {
+        "session_id": "s1",
+        "cash": "798.00",
+        "positions": {
+          "A.SIM": "10",
+          "B.SIM": "5"
+        },
+        "nav": "1013.00",
+        "backend_cash": "798.00",
+        "virtual_portfolios": {
+          "alpha": {
+            "cash": "499.00",
+            "positions": {
+              "A.SIM": "10"
+            }
+          },
+          "beta": {
+            "cash": "299.00",
+            "positions": {
+              "B.SIM": "5"
+            }
+          }
+        }
+      },
+      {
+        "session_id": "s2",
+        "cash": "432.00",
+        "positions": {
+          "C.SIM": "16",
+          "B.SIM": "5"
+        },
+        "nav": "1023.00",
+        "backend_cash": "432.00",
+        "virtual_portfolios": {
+          "alpha": {
+            "cash": "133.00",
+            "positions": {
+              "C.SIM": "16"
+            }
+          },
+          "beta": {
+            "cash": "299.00",
+            "positions": {
+              "B.SIM": "5"
+            }
+          }
+        }
+      },
+      {
+        "session_id": "s3",
+        "cash": "896.68",
+        "positions": {
+          "A.SIM": "10"
+        },
+        "nav": "1036.68",
+        "backend_cash": "896.68",
+        "virtual_portfolios": {
+          "alpha": {
+            "cash": "508.58",
+            "positions": {
+              "A.SIM": "10"
+            }
+          },
+          "beta": {
+            "cash": "388.10",
+            "positions": {}
+          }
+        }
+      },
+      {
+        "session_id": "s1",
+        "cash": "798.00",
+        "positions": {
+          "A.SIM": "10",
+          "B.SIM": "5"
+        },
+        "nav": "1013.00",
+        "backend_cash": "798.00",
+        "virtual_portfolios": {
+          "alpha": {
+            "cash": "499.00",
+            "positions": {
+              "A.SIM": "10"
+            }
+          },
+          "beta": {
+            "cash": "299.00",
+            "positions": {
+              "B.SIM": "5"
+            }
+          }
+        }
+      },
+      {
+        "session_id": "s2",
+        "cash": "432.00",
+        "positions": {
+          "C.SIM": "16",
+          "B.SIM": "5"
+        },
+        "nav": "1023.00",
+        "backend_cash": "432.00",
+        "virtual_portfolios": {
+          "alpha": {
+            "cash": "133.00",
+            "positions": {
+              "C.SIM": "16"
+            }
+          },
+          "beta": {
+            "cash": "299.00",
+            "positions": {
+              "B.SIM": "5"
+            }
+          }
+        }
+      },
+      {
+        "session_id": "s3",
+        "cash": "896.68",
+        "positions": {
+          "A.SIM": "10"
+        },
+        "nav": "1036.68",
+        "backend_cash": "896.68",
+        "virtual_portfolios": {
+          "alpha": {
+            "cash": "508.58",
+            "positions": {
+              "A.SIM": "10"
+            }
+          },
+          "beta": {
+            "cash": "388.10",
+            "positions": {}
+          }
+        }
+      }
+    ],
+    "native_stderr": ""
+  },
+  "event_counts": {
+    "hand": {
+      "adapter_constructed": {
+        "open_quotes": "9",
+        "close_quotes": "9",
+        "instrument_status": "9"
+      },
+      "backend_native": {
+        "backend_status": "9",
+        "fill": "7"
+      }
+    },
+    "halted": {
+      "adapter_constructed": {
+        "open_quotes": "9",
+        "close_quotes": "9",
+        "instrument_status": "9"
+      },
+      "backend_native": {
+        "backend_status": "9",
+        "reject": "3"
+      }
+    }
+  }
+}
