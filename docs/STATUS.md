@@ -96,6 +96,8 @@ MVP-2 的 `prajna-experiment`（Issue #99–#104）可解析并校验 `experimen
 
 ### MVP-4 Accurate Backend 锁步可行性
 
+Rust [`prajna-adapter`](../crates/prajna-adapter/README.md) 已提供与进程模型无关的 D7 Parquet Run 数据包、scale-18 十进制字符串 JSON-lines Order / Fill / Reject 协议及进程内确定性 fake Backend；复用 Fast Event 数量/成本/共用执行状态与两层平台账本，不复制量化核心。合成 S1/S2/S3（3×10、S3 MA20/60 3×130）在 `lot + full_target` 下与 Fast Event 逐笔及双点逐日精确对齐，双 VP 同标的独立订单、拒买 Skip/Retry、entry-only retry 与拒卖延期/实际持仓重规划由 Rust 测试覆盖；Adapter 合成报价/门禁事件与 Backend Fill/Reject 分列。此为轻量 fake 契约证据，不表示 Python worker、Experiment 接入、真实 Nautilus 账本一致性或 #133 A15 验收完成。
+
 独立 [rc6 spike](../poc/mvp4-lockstep/README.md) 已在 macOS ARM64 / Python 3.12 验证 ADR 0020 允许的 stdio 同步策略 shim：3 instruments × 3 Sessions 的外部订单经真实 Nautilus 成交，Fill 反馈驱动下一 Session 数量，现金与持仓连续；HALT 原生拒单、同引擎 `reset()` 后重复手算轨迹及 Arrow/stdio scale-18 往返均通过真实集成测试。Price/Equity/QuoteTick 可精确表示 scale 18，但任意滑点乘积可能需要超过 18 位或不对齐 tick，原型显式报错，不决定舍入政策；多次 `run(end=…)` 形态未测，保持 Unknown。独立 requirements 锁定 `2.0.0rc6`，POC-0 的 rc5 锁定与归档不变；[原始证据](../poc/mvp4-lockstep/observations.json) 与独立 Full job 可复跑。此为 #137 合成协议/Backend 可行性，不表示 Rust Adapter、平台 ExecutionState/成本/账本、Experiment 接入或 #133 A15 验收完成。
 
 ## Batch 2 Integration Acceptance (2026-09-25)

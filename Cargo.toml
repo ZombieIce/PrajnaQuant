@@ -19,6 +19,7 @@ incremental = true
 members = [
     "crates/prajna-domain",
     "crates/prajna-account",
+    "crates/prajna-adapter",
     "crates/prajna-data",
     "crates/prajna-research",
     "crates/prajna-experiment",

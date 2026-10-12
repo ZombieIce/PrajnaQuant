@@ -83,6 +83,17 @@ jobs:
 
       - run: cargo clippy -p prajna-account --all-targets --locked -- -D warnings
       - run: cargo test -p prajna-account --locked
+      - name: Guard - prajna-adapter must remain Rust-only and lightweight
+        run: |
+          set -euo pipefail
+          tree=$(cargo tree -p prajna-adapter -e normal,build,dev --prefix none --locked)
+          if grep -E '^(libduckdb-sys|duckdb|ashare-warehouse|quant-research|pyo3[^ ]*|nautilus[^ ]*) ' <<<"$tree"; then
+            echo "::error::prajna-adapter depends on a prohibited legacy or Backend package"
+            exit 1
+          fi
+
+      - run: cargo clippy -p prajna-adapter --all-targets --locked -- -D warnings
+      - run: cargo test -p prajna-adapter --locked
       - run: cargo clippy -p prajna-domain --all-targets --locked -- -D warnings
       - run: cargo test -p prajna-domain --locked
       - run: cargo clippy -p prajna-data --all-targets --locked -- -D warnings

@@ -234,6 +234,21 @@ impl ExecutionState {
         self.missing_entries = None;
     }
 
+    /// A rejected exit defers the target; rejected entries obey Skip/Retry.
+    /// Realized holdings remain the engine's source of truth on the next attempt.
+    pub fn reject(&mut self, decision: &Decision, instrument: &InstrumentId, is_exit: bool) {
+        if is_exit {
+            self.decide(decision);
+        } else if self.unfilled_entry == UnfilledEntry::Retry {
+            if let Some(weight) = decision.targets.get(instrument).filter(|w| **w > 0.0) {
+                self.pending.get_or_insert_with(|| decision.clone());
+                self.missing_entries
+                    .get_or_insert_with(BTreeMap::new)
+                    .insert(instrument.clone(), *weight);
+            }
+        }
+    }
+
     /// POC entry-only variant: retain targets which have not acquired any quantity,
     /// including cash-limited entries. Full-target engines must not call this.
     pub fn retain_unentered(&mut self, decision: &Decision, held: &BTreeSet<InstrumentId>) {
