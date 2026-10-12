@@ -63,8 +63,12 @@ position mutation. Rejected buy legs follow the shared Skip/Retry policy; entry-
 also retains unentered targets. A rejected sell requeues the original target and
 suppresses the remaining orders for that VP in that Session, so provisional sell
 proceeds cannot fund buys. The next open replans from actual holdings. New close
-Decisions replace pending targets normally. Different Backend prices feed the next
-Session's ledger; any nonpositive/adversely-invalid price, negative cash or exact
+Decisions replace pending targets normally. All actual sell fills settle before buy planning. Full-target quantities retain
+Fast Event's pre-open-equity basis; entry-only budgets use actual post-sell cash.
+Each buy is lot-capped against cash after preceding actual Fill/Reject facts,
+including buys whose provisional budget would have been zero. Different Backend
+prices therefore feed both same-Session affordability and the next Session's ledger.
+Any nonpositive/adversely-invalid price, negative cash or exact
 two-layer rounding discrepancy aborts rather than fabricating a fill or balance.
 
 ## Events and evidence
@@ -79,7 +83,8 @@ Rust tests cover scale-18 JSON and Parquet round trips, immutable packet/status
 validation, S1/S2/S3 Decision tapes (3x10 and nonempty MA20/60 3x130 S3 fills),
 costed full-target parity with Fast Event, two independent VPs, exact daily
 two-layer identities, buy Skip/Retry, entry-only retry, rejected-exit replanning,
-canonical platform fees and malformed Backend responses.
+canonical platform fees, same-Session native-price/rejection-driven cash resizing,
+both entry-only budgets and malformed Backend responses.
 Existing Research tests retain independent Python golden comparison. Fake equality
 alone does not prove independent quantitative correctness, PIT, total return,
 native halt handling, worker transport or #133 A15 acceptance.

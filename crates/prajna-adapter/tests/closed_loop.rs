@@ -456,6 +456,7 @@ struct ChangedResponse {
     fake: FakeBackend,
     field: &'static str,
     value: serde_json::Value,
+    side: Option<&'static str>,
 }
 impl prajna_adapter::Backend for ChangedResponse {
     fn begin_run(
@@ -468,7 +469,7 @@ impl prajna_adapter::Backend for ChangedResponse {
     fn exchange(&mut self, request: &str) -> Result<String, prajna_adapter::AdapterError> {
         let line = prajna_adapter::Backend::exchange(&mut self.fake, request)?;
         let mut value: serde_json::Value = serde_json::from_str(&line)?;
-        if value["type"] == "fill" {
+        if value["type"] == "fill" && self.side.is_none_or(|side| value["side"] == side) {
             value[self.field] = self.value.clone();
         }
         prajna_adapter::protocol::encode_line(&value).map_err(Into::into)
@@ -489,6 +490,7 @@ fn backend_fee_is_diagnostic_and_invalid_fill_identity_quantity_or_time_aborts()
         fake: FakeBackend::default(),
         field: "fee",
         value: serde_json::json!("9999"),
+        side: None,
     };
     let result = run_adapter(
         &packet,
@@ -525,6 +527,7 @@ fn backend_fee_is_diagnostic_and_invalid_fill_identity_quantity_or_time_aborts()
             fake: FakeBackend::default(),
             field,
             value,
+            side: None,
         };
         assert!(
             run_adapter(
@@ -539,4 +542,146 @@ fn backend_fee_is_diagnostic_and_invalid_fill_identity_quantity_or_time_aborts()
             "{field}"
         );
     }
+}
+
+#[test]
+fn actual_sell_proceeds_resize_same_session_buy_before_submission() {
+    let lake = tempfile::tempdir().unwrap();
+    let dsv = common::publish_version(lake.path(), "3");
+    let panel = load_panel(lake.path(), &dsv, &VenueId::new("SYNTH").unwrap()).unwrap();
+    let statuses = load_execution_status(lake.path(), &dsv).unwrap();
+    let packet = RunPacket::from_dataset(lake.path(), &dsv).unwrap();
+    let config = config(&packet, "100000");
+    let run = run(
+        &panel,
+        UnfilledEntry::Skip,
+        &[(0, "A.SYNTH"), (1, "B.SYNTH")],
+    );
+    let mut backend = ChangedResponse {
+        fake: FakeBackend::default(),
+        field: "price",
+        value: serde_json::json!("99"),
+        side: Some("sell"),
+    };
+    let result = run_adapter(&packet, &panel, &statuses, &config, &[run], &mut backend).unwrap();
+    assert_eq!(result.execution.account.fills().len(), 3);
+    assert_eq!(
+        result.execution.account.fills()[2].order().quantity(),
+        "900".parse().unwrap()
+    );
+    assert_eq!(
+        result.execution.sessions[2].open_after.account.cash,
+        "9000".parse().unwrap()
+    );
+    exact_identities(&result.execution.sessions[2].open_after);
+}
+
+#[test]
+fn later_buys_use_cash_after_actual_fill_or_reject_instead_of_provisional_cash() {
+    let lake = tempfile::tempdir().unwrap();
+    let dsv = common::publish_version(lake.path(), "3");
+    let panel = load_panel(lake.path(), &dsv, &VenueId::new("SYNTH").unwrap()).unwrap();
+    let statuses = load_execution_status(lake.path(), &dsv).unwrap();
+    let packet = RunPacket::from_dataset(lake.path(), &dsv).unwrap();
+    let mut config = config(&packet, "100000");
+    let mut run = run(&panel, UnfilledEntry::Skip, &[(0, "A.SYNTH")]);
+    run.decisions[0].targets = BTreeMap::from([
+        ("A.SYNTH".parse().unwrap(), 0.5),
+        ("B.SYNTH".parse().unwrap(), 0.5),
+    ]);
+    let mut backend = ChangedResponse {
+        fake: FakeBackend::default(),
+        field: "price",
+        value: serde_json::json!("101"),
+        side: Some("buy"),
+    };
+    let result = run_adapter(
+        &packet,
+        &panel,
+        &statuses,
+        &config,
+        std::slice::from_ref(&run),
+        &mut backend,
+    )
+    .unwrap();
+    assert_eq!(
+        result.execution.account.fills()[0].order().quantity(),
+        "500".parse().unwrap()
+    );
+    assert_eq!(
+        result.execution.account.fills()[1].order().quantity(),
+        "400".parse().unwrap()
+    );
+    assert_eq!(
+        result.execution.sessions[1].open_after.account.cash,
+        "9100".parse().unwrap()
+    );
+
+    config.costs.minimum_commission = "1000".parse().unwrap();
+    let mut fake = FakeBackend::default();
+    fake.reject_orders.insert(prajna_account::OrderId(1));
+    let result = run_adapter(&packet, &panel, &statuses, &config, &[run], &mut fake).unwrap();
+    assert_eq!(result.execution.account.fills().len(), 1);
+    assert_eq!(
+        result.execution.account.fills()[0].order().quantity(),
+        "500".parse().unwrap()
+    );
+    assert_eq!(result.execution.account.cash(), "49000".parse().unwrap());
+}
+
+#[test]
+fn fake_preserves_both_entry_only_budget_variants_and_new_close_replaces_rejected_target() {
+    use prajna_research::fast_event::EntryBudget;
+    let lake = tempfile::tempdir().unwrap();
+    let dsv = common::publish_version(lake.path(), "3");
+    let panel = load_panel(lake.path(), &dsv, &VenueId::new("SYNTH").unwrap()).unwrap();
+    let statuses = load_execution_status(lake.path(), &dsv).unwrap();
+    let packet = RunPacket::from_dataset(lake.path(), &dsv).unwrap();
+    let mut config = config(&packet, "100000");
+    config.costs = FastEventCosts {
+        minimum_commission: "100".parse().unwrap(),
+        buy_slippage_rate: "0.001".parse().unwrap(),
+        sell_slippage_rate: "0.001".parse().unwrap(),
+        ..FastEventCosts::ZERO
+    };
+    for budget in [EntryBudget::FixedInitial, EntryBudget::RemainingCash] {
+        let mut run = run(
+            &panel,
+            UnfilledEntry::Retry,
+            &[(0, "A.SYNTH"), (1, "B.SYNTH")],
+        );
+        run.decisions[0]
+            .targets
+            .insert("B.SYNTH".parse().unwrap(), 0.5);
+        run.decisions[0]
+            .targets
+            .insert("A.SYNTH".parse().unwrap(), 0.5);
+        run.rebalance = Rebalance::EntryOnly(budget);
+        let fast = run_fast_event(&panel, &statuses, &config, std::slice::from_ref(&run)).unwrap();
+        let actual = run_adapter(
+            &packet,
+            &panel,
+            &statuses,
+            &config,
+            &[run],
+            &mut FakeBackend::default(),
+        )
+        .unwrap();
+        assert_eq!(actual.execution.account, fast.account);
+    }
+    config.costs = FastEventCosts::ZERO;
+    let run = run(
+        &panel,
+        UnfilledEntry::Skip,
+        &[(0, "A.SYNTH"), (1, "B.SYNTH"), (2, "A.SYNTH")],
+    );
+    let mut fake = FakeBackend::default();
+    fake.reject_orders.insert(prajna_account::OrderId(2));
+    let result = run_adapter(&packet, &panel, &statuses, &config, &[run], &mut fake).unwrap();
+    assert_eq!(result.execution.account.fills().len(), 1);
+    assert_eq!(
+        result.execution.account.positions()
+            [&"A.SYNTH".parse::<prajna_domain::InstrumentId>().unwrap()],
+        "1000".parse().unwrap()
+    );
 }
