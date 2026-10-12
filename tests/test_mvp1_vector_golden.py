@@ -39,6 +39,40 @@ class VectorGoldenTests(unittest.TestCase):
         subprocess.run(command, check=True, capture_output=True, text=True)
         return output_path.read_bytes()
 
+    def test_s1_s3_goldens_are_reproducible_and_cover_boundaries(self):
+        fixture = ROOT / "poc/mvp1-golden/fixtures/s1-s3-v1.json"
+        dates = json.loads(fixture.read_text())["calendar"]
+        with tempfile.TemporaryDirectory() as directory:
+            outputs = {}
+            for kind in ("buy_and_hold", "ma_crossover"):
+                path = Path(directory) / f"{kind}.json"
+                command = [sys.executable, str(SCRIPT), "--fixture", str(fixture),
+                           "--strategy", kind, "--out", str(path)]
+                subprocess.run(command, check=True, capture_output=True)
+                first = path.read_bytes()
+                subprocess.run(command, check=True, capture_output=True)
+                self.assertEqual(first, path.read_bytes())
+                self.assertEqual(first, (ROOT / f"poc/mvp1-golden/expected/s1-s3-v1.{kind}.json").read_bytes())
+                outputs[kind] = json.loads(first)
+        s1 = outputs["buy_and_hold"]["vector"]
+        self.assertEqual(len(s1["decisions"]), 1)
+        self.assertEqual(s1["decisions"][0]["decision_session"], dates[0])
+        self.assertEqual([e["session_date"] for e in s1["executions"]], dates[1:4])
+        self.assertEqual([e["kind"] for e in s1["executions"]], ["executed", "entries_retried", "entries_retried"])
+        self.assertEqual(s1["sessions"][2]["turnover"], 0)
+        self.assertLessEqual(s1["sessions"][3]["turnover"], 1/3)
+        s3 = outputs["ma_crossover"]
+        gaps = {(row["instrument_id"], row["session_date"]): row for row in s3["factors"]["ma_gap(20,60)"]}
+        self.assertEqual(gaps["A.SYNTH", dates[59]]["value"], 0)
+        self.assertGreater(gaps["A.SYNTH", dates[60]]["value"], 0)
+        decisions = s3["vector"]["decisions"]
+        self.assertEqual(decisions[0]["targets"], {"A.SYNTH": 1/3})
+        self.assertEqual(decisions[-1]["targets"], {})
+        for index in range(61, 121):
+            self.assertEqual(gaps["C.SYNTH", dates[index]]["status"], "missing_input")
+        self.assertEqual(gaps["C.SYNTH", dates[121]]["status"], "ok")
+        self.assertTrue(all("C.SYNTH" not in d["targets"] for d in decisions))
+
     def test_cli_emits_hand_checkable_factor_values_and_statuses(self):
         with tempfile.TemporaryDirectory() as directory:
             output_path = Path(directory) / "factors.json"

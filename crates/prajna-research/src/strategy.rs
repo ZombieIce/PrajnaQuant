@@ -9,7 +9,8 @@ use polars::prelude::{DataFrame, PolarsError};
 use prajna_domain::InstrumentId;
 
 use crate::{
-    PanelSession,
+    Panel, PanelSession,
+    factor::AvailabilityAssumption,
     factor::{Factor, FactorStatus, values_schema},
 };
 
@@ -38,7 +39,7 @@ pub enum UnfilledEntry {
 }
 
 #[derive(Debug, Clone)]
-pub struct VectorStrategy {
+pub struct TopKRank {
     pub score: Factor,
     pub direction: RankDirection,
     pub top_k: u32,
@@ -250,6 +251,7 @@ impl ExecutionState {
 pub enum EngineError {
     UnsupportedCapability,
     InvalidTopK,
+    InvalidParameters(String),
     InvalidRebalanceEvery,
     InvalidSessions(String),
     InvalidScoreValues(String),
@@ -260,6 +262,9 @@ impl fmt::Display for EngineError {
         match self {
             Self::UnsupportedCapability => {
                 formatter.write_str("strategy does not support the Vector Engine")
+            }
+            Self::InvalidParameters(message) => {
+                write!(formatter, "invalid strategy parameters: {message}")
             }
             Self::InvalidTopK => formatter.write_str("top_k must be at least 1"),
             Self::InvalidRebalanceEvery => {
@@ -286,7 +291,7 @@ impl From<PolarsError> for EngineError {
 pub struct VectorEngine;
 
 impl VectorEngine {
-    pub fn validate(strategy: &VectorStrategy) -> Result<(), EngineError> {
+    fn validate_top_k(strategy: &TopKRank) -> Result<(), EngineError> {
         if strategy.top_k == 0 {
             return Err(EngineError::InvalidTopK);
         }
@@ -303,7 +308,7 @@ impl VectorEngine {
     }
 }
 
-impl VectorStrategy {
+impl TopKRank {
     pub fn execute(
         &self,
         decisions: &[Decision],
@@ -319,7 +324,7 @@ impl VectorStrategy {
         score_values: &DataFrame,
         sessions: &[PanelSession],
     ) -> Result<Vec<Decision>, EngineError> {
-        VectorEngine::validate(self)?;
+        VectorEngine::validate_top_k(self)?;
         if score_values.schema().as_ref() != &values_schema().polars {
             return Err(EngineError::InvalidScoreValues(
                 "input must use the Factor Values v1 schema".into(),
@@ -462,4 +467,158 @@ fn date32(date: NaiveDate) -> Result<i32, EngineError> {
     i32::try_from((date - epoch).num_days()).map_err(|_| {
         EngineError::InvalidSessions(format!("session date {date} exceeds Date32 range"))
     })
+}
+
+/// Closed Vector strategy family. Experiment Run Spec integration is a separate contract.
+#[derive(Debug, Clone)]
+pub enum VectorStrategy {
+    TopKRank(TopKRank),
+    BuyAndHold(BuyAndHoldParams),
+    MaCrossover(MaCrossoverParams),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BuyAndHoldParams {
+    pub params_version: u32,
+}
+
+impl Default for BuyAndHoldParams {
+    fn default() -> Self {
+        Self { params_version: 1 }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MaCrossoverParams {
+    pub params_version: u32,
+    pub short_window: u32,
+    pub long_window: u32,
+}
+
+impl Default for MaCrossoverParams {
+    fn default() -> Self {
+        Self {
+            params_version: 1,
+            short_window: 20,
+            long_window: 60,
+        }
+    }
+}
+
+impl VectorEngine {
+    pub fn validate(strategy: &VectorStrategy) -> Result<(), EngineError> {
+        match strategy {
+            VectorStrategy::TopKRank(params) => Self::validate_top_k(params),
+            VectorStrategy::BuyAndHold(params) if params.params_version == 1 => Ok(()),
+            VectorStrategy::MaCrossover(params)
+                if params.params_version == 1
+                    && params.short_window > 0
+                    && params.short_window < params.long_window =>
+            {
+                Ok(())
+            }
+            _ => Err(EngineError::InvalidParameters(
+                "unsupported version or MA windows".into(),
+            )),
+        }
+    }
+}
+
+impl VectorStrategy {
+    pub fn params_version(&self) -> u32 {
+        match self {
+            Self::TopKRank(_) => 1,
+            Self::BuyAndHold(params) => params.params_version,
+            Self::MaCrossover(params) => params.params_version,
+        }
+    }
+
+    pub fn unfilled_entry(&self) -> UnfilledEntry {
+        match self {
+            Self::TopKRank(params) => params.unfilled_entry,
+            Self::BuyAndHold(_) => UnfilledEntry::Retry,
+            Self::MaCrossover(_) => UnfilledEntry::Skip,
+        }
+    }
+
+    pub fn decide(
+        &self,
+        scores: &DataFrame,
+        sessions: &[PanelSession],
+    ) -> Result<Vec<Decision>, EngineError> {
+        match self {
+            Self::TopKRank(params) => params.decide(scores, sessions),
+            _ => Err(EngineError::InvalidParameters(
+                "this strategy requires decide_panel".into(),
+            )),
+        }
+    }
+
+    /// Signals use only session-close inputs; execution remains next-session open.
+    pub fn decide_panel(
+        &self,
+        panel: &Panel,
+        members: &[InstrumentId],
+        assumption: AvailabilityAssumption,
+    ) -> Result<Vec<Decision>, EngineError> {
+        VectorEngine::validate(self)?;
+        validate_members(panel, members)?;
+        match self {
+            Self::TopKRank(params) => {
+                let scores = crate::compute(panel, members, &params.score, assumption)
+                    .map_err(|error| EngineError::InvalidScoreValues(error.to_string()))?;
+                params.decide(&scores, &panel.sessions)
+            }
+            Self::BuyAndHold(_) => Ok(panel
+                .sessions
+                .first()
+                .map(|session| Decision {
+                    decision_session: session.clone(),
+                    ranked: Vec::new(),
+                    targets: members
+                        .iter()
+                        .map(|id| (id.clone(), 1.0 / members.len() as f64))
+                        .collect(),
+                })
+                .into_iter()
+                .collect()),
+            Self::MaCrossover(params) => {
+                super::ma_crossover::decide(panel, members, params, assumption)
+            }
+        }
+    }
+
+    pub fn execute(
+        &self,
+        decisions: &[Decision],
+        sessions: &[PanelSession],
+        executable: impl Fn(&InstrumentId, &PanelSession) -> bool,
+    ) -> Vec<ExecutionEvent> {
+        execute_with_policy(decisions, sessions, self.unfilled_entry(), executable)
+    }
+}
+
+pub(crate) fn validate_members(panel: &Panel, members: &[InstrumentId]) -> Result<(), EngineError> {
+    if members.is_empty()
+        || members.iter().collect::<BTreeSet<_>>().len() != members.len()
+        || members.iter().any(|id| !panel.instruments.contains(id))
+    {
+        return Err(EngineError::InvalidParameters(
+            "Universe must be nonempty, unique and present in Panel".into(),
+        ));
+    }
+    let mut previous = None;
+    for session in &panel.sessions {
+        if session.ts_open >= session.ts_close
+            || previous.is_some_and(|date| date >= session.session_date)
+        {
+            return Err(EngineError::InvalidSessions(
+                "invalid or unordered Sessions".into(),
+            ));
+        }
+        previous = Some(session.session_date);
+    }
+    Ok(())
 }

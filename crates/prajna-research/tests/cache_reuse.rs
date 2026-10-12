@@ -9,7 +9,7 @@ use prajna_research::{
     executable,
     factor::{AvailabilityAssumption, Factor, FactorGraph, FactorKind, RotationScoreParams},
     load_execution_status, load_panel,
-    strategy::{RankDirection, StrategyCapability, VectorStrategy, Weighting, execute},
+    strategy::{RankDirection, StrategyCapability, TopKRank, Weighting, execute},
     vector::{VectorCosts, run_vector},
 };
 use serde_json::Value;
@@ -380,7 +380,7 @@ fn vector_strategy_grid_reuses_factor_values_across_all_six_runs() {
             };
             assert_eq!(cache.compute_count() - count_before, expected_increment);
 
-            let strategy = VectorStrategy {
+            let strategy = TopKRank {
                 score: fixture.score.clone(),
                 direction: RankDirection::Descending,
                 top_k,

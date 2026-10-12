@@ -21,7 +21,9 @@ use prajna_research::{
         canonical_float_bits,
     },
     load_execution_status, load_panel,
-    strategy::{RankDirection, StrategyCapability, VectorEngine, VectorStrategy, Weighting},
+    strategy::{
+        RankDirection, StrategyCapability, TopKRank, VectorEngine, VectorStrategy, Weighting,
+    },
     vector::{VectorCosts, VectorResult, run_vector_with_policy},
 };
 use rayon::ThreadPoolBuilder;
@@ -192,7 +194,7 @@ impl StrategyParameters {
     fn strategy(&self, score: Factor) -> Result<VectorStrategy, ExperimentError> {
         let top_k = u32_parameter(self.top_k, "top_k")?;
         let rebalance_every = u32_parameter(self.rebalance_every, "rebalance_every")?;
-        let strategy = VectorStrategy {
+        let strategy = VectorStrategy::TopKRank(TopKRank {
             score,
             direction: RankDirection::Descending,
             top_k,
@@ -200,7 +202,7 @@ impl StrategyParameters {
             weighting: Weighting::EqualWeight,
             unfilled_entry: Default::default(),
             capabilities: BTreeSet::from([StrategyCapability::Vectorizable]),
-        };
+        });
         VectorEngine::validate(&strategy)
             .map_err(|error| invalid(format!("invalid vector strategy: {error}")))?;
         Ok(strategy)
@@ -727,7 +729,7 @@ fn execute_run(
         run_vector_with_policy(
             panel,
             &decisions,
-            strategy.unfilled_entry,
+            strategy.unfilled_entry(),
             costs,
             assumption,
             |instrument, session| {
