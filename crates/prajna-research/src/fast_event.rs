@@ -177,6 +177,7 @@ pub enum FastEventError {
     Ledger(LedgerError),
     Panel(PanelError),
     Polars(polars::error::PolarsError),
+    Execution(String),
 }
 
 impl fmt::Display for FastEventError {
@@ -187,6 +188,7 @@ impl fmt::Display for FastEventError {
             Self::Ledger(error) => write!(f, "Fast Event ledger: {error}"),
             Self::Panel(error) => write!(f, "Fast Event panel: {error}"),
             Self::Polars(error) => write!(f, "Fast Event grid: {error}"),
+            Self::Execution(error) => write!(f, "market execution: {error}"),
         }
     }
 }
@@ -301,6 +303,49 @@ pub fn run_fast_event(
     config: &FastEventConfig,
     portfolios: &[PortfolioRun],
 ) -> Result<FastEventResult, FastEventError> {
+    run_with_execution(panel, statuses, config, portfolios, None)
+}
+
+/// A market-order boundary, not a second sizing or accounting implementation.
+/// None means an explicit Reject; errors abort the Run. Full fills only.
+pub trait MarketExecution {
+    fn open(
+        &mut self,
+        session: &PanelSession,
+        prices: &BTreeMap<InstrumentId, Price>,
+        gates: &BTreeMap<InstrumentId, bool>,
+        costs: FastEventCosts,
+    ) -> Result<(), FastEventError>;
+    fn execute(
+        &mut self,
+        order: &Order,
+        raw: Price,
+        costs: FastEventCosts,
+    ) -> Result<Option<Fill>, FastEventError>;
+    fn close(&mut self, session: &PanelSession) -> Result<(), FastEventError>;
+}
+
+/// Uses the same planner, ExecutionState and two-layer ledger as Fast Event.
+pub fn run_lot_with_execution(
+    panel: &Panel,
+    statuses: &ExecutionStatusMap,
+    config: &FastEventConfig,
+    portfolios: &[PortfolioRun],
+    execution: &mut dyn MarketExecution,
+) -> Result<FastEventResult, FastEventError> {
+    if config.sizing != Sizing::Lot {
+        return Err(invalid("external execution requires lot sizing"));
+    }
+    run_with_execution(panel, statuses, config, portfolios, Some(execution))
+}
+
+fn run_with_execution(
+    panel: &Panel,
+    statuses: &ExecutionStatusMap,
+    config: &FastEventConfig,
+    portfolios: &[PortfolioRun],
+    mut execution: Option<&mut dyn MarketExecution>,
+) -> Result<FastEventResult, FastEventError> {
     validate(panel, config, portfolios)?;
     let mut account = TradingAccount::new(
         config.currency.clone(),
@@ -326,6 +371,9 @@ pub fn run_fast_event(
             .iter()
             .map(|id| executable(panel, statuses, id, session).map(|yes| (id.clone(), yes)))
             .collect::<Result<BTreeMap<_, _>, _>>()?;
+        if let Some(market) = execution.as_deref_mut() {
+            market.open(session, &open.prices, &gates, config.costs)?;
+        }
         let mut session_fills = Vec::new();
         let mut session_fees = Vec::new();
         let mut entry_attempted = BTreeSet::new();
@@ -400,8 +448,12 @@ pub fn run_fast_event(
         });
         // Planners use provisional ID 0 and ledger fee arithmetic. Only this
         // account-wide settlement assigns IDs after sell/buy and Instrument sorting.
+        let mut rejected_exits = BTreeSet::new();
         for mut entry in session_fills {
             let previous = entry.fill.order();
+            if rejected_exits.contains(&previous.portfolio_id()) {
+                continue;
+            }
             let order = Order::new(
                 next_order(&account, 0)?,
                 previous.portfolio_id(),
@@ -418,6 +470,32 @@ pub fn run_fast_event(
                 entry.fill.costs(),
             )?;
             account.submit_order(entry.fill.order().clone())?;
+            if let Some(market) = execution.as_deref_mut() {
+                let Some(actual) =
+                    market.execute(entry.fill.order(), entry.fill.raw_price(), config.costs)?
+                else {
+                    let index = portfolios
+                        .iter()
+                        .position(|p| p.id == entry.fill.order().portfolio_id())
+                        .ok_or_else(|| invalid("unknown execution portfolio"))?;
+                    let decision = original_decisions[index]
+                        .ok_or_else(|| invalid("Reject without close Decision"))?;
+                    let is_exit = entry.fill.order().side() == Side::Sell;
+                    states[index].reject(decision, entry.fill.order().instrument_id(), is_exit);
+                    if is_exit {
+                        // Do not spend provisional proceeds from a rejected exit.
+                        rejected_exits.insert(entry.fill.order().portfolio_id());
+                    }
+                    continue;
+                };
+                if actual.order() != entry.fill.order() || actual.executed_at() != session.ts_open {
+                    return Err(FastEventError::Execution(
+                        "Fill does not match submitted Order/open".into(),
+                    ));
+                }
+                entry.fee_basis = actual.trade_notional();
+                entry.fill = actual;
+            }
             account.apply_fill(entry.fill.clone())?;
             fills.push(entry);
         }
@@ -442,6 +520,9 @@ pub fn run_fast_event(
         let open_after = account.value(&open.prices)?;
         close.update(panel, index, PriceField::Close)?;
         let close_value = account.value(&close.prices)?;
+        if let Some(market) = execution.as_deref_mut() {
+            market.close(session)?;
+        }
         sessions.push(FastEventSession {
             session: session.clone(),
             open_after,
@@ -798,8 +879,11 @@ fn next_order(account: &TradingAccount, offset: usize) -> Result<OrderId, FastEv
     ))
 }
 
-fn lot_fill(order: Order, raw: Price, costs: FastEventCosts) -> Result<Fill, FastEventError> {
-    let side = order.side();
+pub fn lot_execution_price(
+    raw: Price,
+    side: Side,
+    costs: FastEventCosts,
+) -> Result<Price, FastEventError> {
     let rate = match side {
         Side::Buy => costs.buy_slippage_rate,
         Side::Sell => costs.sell_slippage_rate,
@@ -810,11 +894,26 @@ fn lot_fill(order: Order, raw: Price, costs: FastEventCosts) -> Result<Fill, Fas
     } else {
         sub(one, rate)?
     };
-    let price = Price::from_mantissa(
+    Ok(Price::from_mantissa(
         decimal_price(raw)?
             .checked_mul_decimal(multiplier)?
             .mantissa(),
-    )?;
+    )?)
+}
+
+fn lot_fill(order: Order, raw: Price, costs: FastEventCosts) -> Result<Fill, FastEventError> {
+    let price = lot_execution_price(raw, order.side(), costs)?;
+    lot_fill_at_price(order, raw, price, costs)
+}
+
+/// Authoritative lot costs use actual execution notional; slippage is embedded once.
+pub fn lot_fill_at_price(
+    order: Order,
+    raw: Price,
+    price: Price,
+    costs: FastEventCosts,
+) -> Result<Fill, FastEventError> {
+    let side = order.side();
     let notional = value(order.quantity(), price)?;
     let (mut fees, _) = costs.fees(notional, side)?;
     fees.minimum_commission_top_up = if fees.commission < costs.minimum_commission {

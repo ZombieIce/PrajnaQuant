@@ -1,0 +1,26 @@
+[package]
+name = "prajna-adapter"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.1"
+description = "Backend-neutral closed-loop execution adapter contracts"
+license = "MIT"
+publish = false
+
+[dependencies]
+prajna-account = { path = "../prajna-account" }
+prajna-data = { path = "../prajna-data" }
+prajna-domain = { path = "../prajna-domain" }
+prajna-research = { path = "../prajna-research" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+tempfile = "3.14"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
