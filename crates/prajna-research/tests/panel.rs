@@ -39,7 +39,9 @@ fn loads_v1_as_a_complete_venue_session_grid_with_missing_bars_preserved() {
             "open",
             "close",
             "has_bar",
-            "close_available_at"
+            "close_available_at",
+            "open_decimal",
+            "close_decimal"
         ]
     );
 
@@ -48,12 +50,18 @@ fn loads_v1_as_a_complete_venue_session_grid_with_missing_bars_preserved() {
     let open = panel.grid.column("open").unwrap().f64().unwrap();
     let close = panel.grid.column("close").unwrap().f64().unwrap();
     let has_bar = panel.grid.column("has_bar").unwrap().bool().unwrap();
+    let open_decimal = panel.grid.column("open_decimal").unwrap().str().unwrap();
+    let close_decimal = panel.grid.column("close_decimal").unwrap().str().unwrap();
     let available_at = panel.grid.column("close_available_at").unwrap();
     let missing = (0..panel.grid.height())
         .find(|&row| {
             instrument_ids.get(row) == Some("B.SYNTH") && session_indices.get(row) == Some(9)
         })
         .unwrap();
+    assert_eq!(open_decimal.get(0), Some("100"));
+    assert_eq!(close_decimal.get(0), Some("100"));
+    assert_eq!(open_decimal.get(missing), None);
+    assert_eq!(close_decimal.get(missing), None);
 
     assert_eq!(
         panel.grid.column("session_date").unwrap().dtype(),

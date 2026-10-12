@@ -1,6 +1,6 @@
 # ADR 0019：Fast Event L1 以定点账本为权威，并在显式参数下与 Vector 对拍
 
-- 状态：Accepted，2026-10-09（MVP-3 设计，spec #112）；尚未实现
+- 状态：Accepted，2026-10-09（MVP-3 设计，spec #112）；账本与 L1 Run seam 已实现，完整 MVP-3 对拍和 Experiment 接入仍待后续票据验证
 
 [`ADR 0010`](0010-portfolio-accounting-and-result-boundary.md) 要求 Fast Event 以 Order → Fill → Position → Account 更新账本并逐日核对恒等式，同时要求它与 Vector 在共同语义子集上对拍。MVP-3 确定以下边界：
 
@@ -19,6 +19,44 @@
 - 订单在账户层跨 Virtual Portfolio 净额化：更贴近实盘，但会使 Fill 归属与费用分摊需要额外规则；留待后续阶段。
 
 ## Consequences
+
+### Fast Event L1 Run 边界（#120）
+
+`prajna_research::fast_event::run_fast_event` 消费 Panel、D7 execution_status 和各 VP
+的 close Decision、资本与规则；策略信号生成不属于此接口。它复用 `ExecutionState`，
+在每个 Session open 先规划各 VP 交易，再在账户范围按 sell / buy、InstrumentId、VP ID
+顺序结算，每笔 Fill 独立归属 VP；open 后及 close 两个快照都调用账本精确校验。
+`FastEventConfig` 保存定点成本和显式 Instrument lot size，结果声明未建模的市场规则。
+Run Spec / ResultLevel 的持久化仍由 #123 接入，不得把内存 Run seam 称为完整平台验收。
+
+Panel 保留原有 f64 `open` / `close` 研究列，并新增 `open_decimal` / `close_decimal`
+字符串列：从 D7 Decimal128 原值经 Domain Price 编码，不经 f64。Fast Event 只使用后者，
+缺列显式报错，不回退到浮点价。有效 raw bar 即使 HALTED / UNKNOWN 仍可估值，
+但不能因此成交；缺 bar 分别沿用最近有效 raw open / close，保存源 Session 和字段。
+这遵循 #117 已确认的估值约定，不以昨收代替当日缺失 open。
+
+`vector_parity` 仅接受 `full_target`，数量与费用按 F8；retry 按 F5 只买缺失腿，
+不足现金时按 ID 削减预算。舍入后仍超现金的 retry 数量用有界整数搜索削减，
+不改变费用口径或放宽账本非负现金/精确恒等式；full-target 不作隐式舍入差额补偿。
+无法满足 Domain 范围、Fill 正数量、非负现金或两层精确估值的输入返回错误。
+
+项目负责人在 #120 自查后确认：F8 不使用绝对权重 no-trade 阈值，所有可表示的非零
+权重差都参与费用及目标数量计算。#117 oracle 的 `1e-12` 抑制规则与严格 F8 不一致，
+须在 #122 对拍中显式统一；本票据不改写已提交的 oracle goldens 或声称完整对拍通过。
+若某腿 F8 费用为正而扣费后目标数量恰好不变，用 `ParityFeeSettlement` 可追溯地扣费，
+不伪造零数量 Order / Fill。它保存 VP / 标的 / open 时间、费用基数与方向及分项，
+在全部实际 Fill 后、open 快照前原子结算；账户对同一 VP / 标的 / 时间拒绝重复。
+完整现金重放为初始现金 + Σ Fill cash_delta + Σ Fee-only Settlement cash_delta。
+例：初始 1000、raw open=1、佣金 1%；先持 A 权重 0.4975，再调 A=0.5/B=0.4975，
+E0=995.025、E1=990.049875，A 数量仍 495.0249375，但需独立支付 0.024875625 佣金。
+单纯跳过该费用会违反 F8；拒绝整个合法调仓或伪造零数量成交也不被采用。
+
+项目负责人在 #120 实施中确认 F5/F9 的显式区分：`lot` 的 POC 专用
+`EntryOnly(FixedInitial | RemainingCash)` 分别使用初始 VP 资本均分预算（S1）与
+卖出后现金按尚未持有目标数均分预算（S2）；继续持有数量不变，未入场目标（含现金受限）
+仍 pending。此规则通过 `ExecutionState::retain_unentered` 保留缺失腿，close 新决策照常
+替换；`full_target` 不调用该扩展，现金削减仍不重试。POC 逐笔复现由 #121 验证，
+不能仅凭规则实现声称旧金标准已完全复现。
 
 ### 账本边界与 scale-18 恒等式（#119）
 

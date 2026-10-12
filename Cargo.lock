@@ -2978,6 +2978,7 @@ dependencies = [
  "fs2",
  "polars",
  "polars-io",
+ "prajna-account",
  "prajna-data",
  "prajna-domain",
  "serde",

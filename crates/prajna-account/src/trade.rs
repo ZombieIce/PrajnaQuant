@@ -90,6 +90,83 @@ impl FillCosts {
     }
 }
 
+/// F8 turnover can charge a leg whose after-cost target quantity is unchanged.
+/// This is a fee-only cash event, not a zero-quantity market order or Fill.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ParityFeeSettlement {
+    portfolio_id: VirtualPortfolioId,
+    instrument_id: InstrumentId,
+    executed_at: TimestampNs,
+    fee_basis: Notional,
+    fee_side: Side,
+    costs: FillCosts,
+    slippage: Notional,
+    total_fees: Notional,
+    cash_delta: Notional,
+}
+impl ParityFeeSettlement {
+    pub fn new(
+        portfolio_id: VirtualPortfolioId,
+        instrument_id: InstrumentId,
+        executed_at: TimestampNs,
+        fee_basis: Notional,
+        fee_side: Side,
+        costs: FillCosts,
+        slippage: Notional,
+    ) -> Result<Self, LedgerError> {
+        costs.validate()?;
+        if fee_basis <= Notional::ZERO
+            || slippage < Notional::ZERO
+            || costs.minimum_commission_top_up != Notional::ZERO
+        {
+            return Err(LedgerError::InvalidFeeSettlement);
+        }
+        let total_fees = add(add(costs.commission, costs.tax)?, slippage)?;
+        if total_fees <= Notional::ZERO {
+            return Err(LedgerError::InvalidFeeSettlement);
+        }
+        let cash_delta = total_fees.checked_mul(-1)?;
+        Ok(Self {
+            portfolio_id,
+            instrument_id,
+            executed_at,
+            fee_basis,
+            fee_side,
+            costs,
+            slippage,
+            total_fees,
+            cash_delta,
+        })
+    }
+    pub fn portfolio_id(&self) -> VirtualPortfolioId {
+        self.portfolio_id
+    }
+    pub fn instrument_id(&self) -> &InstrumentId {
+        &self.instrument_id
+    }
+    pub fn executed_at(&self) -> TimestampNs {
+        self.executed_at
+    }
+    pub fn fee_basis(&self) -> Notional {
+        self.fee_basis
+    }
+    pub fn fee_side(&self) -> Side {
+        self.fee_side
+    }
+    pub fn costs(&self) -> FillCosts {
+        self.costs
+    }
+    pub fn slippage(&self) -> Notional {
+        self.slippage
+    }
+    pub fn total_fees(&self) -> Notional {
+        self.total_fees
+    }
+    pub fn cash_delta(&self) -> Notional {
+        self.cash_delta
+    }
+}
+
 /// Explicitly distinguishes raw-price fills from fills whose price embeds slippage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum FillPricing {

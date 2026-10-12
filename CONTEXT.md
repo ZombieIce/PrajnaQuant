@@ -81,6 +81,10 @@ _Avoid_: 把计算结果直接称为 Factor。
 **Fill**:
 Order 实际成交的一次记录，包含数量、价格、时间与费用依据。
 
+**Fee-only Settlement**:
+只有费用现金变化、没有成交或持仓数量变化的可追溯结算事件。
+_Avoid_: 为了记费用而伪造零数量的 Order 或 Fill。
+
 ## Capital and experiments
 
 **Trading Account**:

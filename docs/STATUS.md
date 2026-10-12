@@ -88,7 +88,7 @@ MVP-2 的 `prajna-experiment`（Issue #99–#104）可解析并校验 `experimen
 
 ### MVP-3 定点账户账本
 
-`prajna-account` 已提供只依赖 Domain / Serde 的 Trading Account、固定资本 Virtual Portfolio 子账、Order / 全额 Fill 与显式正价估值快照；账户现金/逐标的数量/权益与 VP + Unallocated 精确守恒，拒绝超额分配、负现金/持仓、缺失或非正估值价、重复成交及定点溢出，失败 Fill 原子回滚。Fill 拆分比例佣金、最低佣金补足、税与滑点，区分 raw 价单列滑点和成交价含滑点，避免重复扣款；VP 与账户独立乘价估值，舍入造成两层不一致时显式报错，规则见 [ADR 0019](decisions/0019-fast-event-ledger-and-vector-parity.md) 与 [crate 契约](../crates/prajna-account/README.md)。13 项合成手算契约测试与本 crate Clippy 已通过，轻量 CI 新增依赖守卫与检查；尚未接入 Fast Event、Strategy、Run Spec / ResultLevel 或真实数据，不构成 S1/S2/S3 逐 Session 引擎验收、PIT 或总回报证明。
+`prajna-account` 已提供只依赖 Domain / Serde 的 Trading Account、固定资本 Virtual Portfolio 子账、Order / 全额 Fill 与显式正价估值快照；账户现金/逐标的数量/权益与 VP + Unallocated 精确守恒，拒绝超额分配、负现金/持仓、缺失或非正估值价、重复成交及定点溢出，失败 Fill 原子回滚。Fill 拆分比例佣金、最低佣金补足、税与滑点，区分 raw 价单列滑点和成交价含滑点，避免重复扣款；VP 与账户独立乘价估值，舍入造成两层不一致时显式报错，规则见 [ADR 0019](decisions/0019-fast-event-ledger-and-vector-parity.md) 与 [crate 契约](../crates/prajna-account/README.md)。[`fast_event::run_fast_event`](../crates/prajna-research/src/fast_event.rs) 现已消费 D7 定点价、执行状态及各 VP 的 close Decision，复用共用执行层，在账户范围先卖后买、按 ID 排序，全额独立 Fill；支持 `vector_parity + full_target`、`lot + full_target` 与显式 POC `entry_only` 预算变体，每 Session 保存 open 后及 close 两层精确快照与同字段 carry 来源。严格 F8 不抑制可表示的微小权重差；费用为正但数量不变的腿通过独立 `ParityFeeSettlement` 原子扣费，不伪造零数量成交，现金重放需计入此事件；#117 oracle 的 1e-12 阈值契约与 F8 的统一仍待 #122。手算测试覆盖 F8 E1、fee-only、整手/最低佣金/现金削减、retry、极小价有界现金削减、双 VP 不重复记账；S1/S2/S3 Decision tape 在 3×10 / 3×130、两种 sizing 下逐点精确恒等式通过，另覆盖 HALTED 整次延期、缺 bar 非零估值与 scale-18 原价保留。信号生成、旧 POC 逐笔复现、完整 Vector/第三方对拍、Run Spec / ResultLevel 与真实数据仍由后续票据验证；不构成完整 MVP-3、PIT、总回报或实盘证明。
 
 ## Batch 2 Integration Acceptance (2026-09-25)
 

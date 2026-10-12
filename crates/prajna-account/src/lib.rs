@@ -4,13 +4,17 @@
 mod trade;
 mod valuation;
 
-pub use trade::{Fill, FillCosts, FillPricing, Order, OrderId, Side, VirtualPortfolioId};
+pub use trade::{
+    Fill, FillCosts, FillPricing, Order, OrderId, ParityFeeSettlement, Side, VirtualPortfolioId,
+};
 pub use valuation::{AccountValuation, MarkedPosition, PortfolioValuation};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use prajna_domain::{Currency, FixedPointError, InstrumentId, Notional, Quantity, VenueId};
+use prajna_domain::{
+    Currency, FixedPointError, InstrumentId, Notional, Quantity, TimestampNs, VenueId,
+};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +36,8 @@ pub enum LedgerError {
     AlreadyFilled(OrderId),
     FillBeforeOrder,
     MissingPrice(InstrumentId),
+    InvalidFeeSettlement,
+    DuplicateFeeSettlement,
     Invariant(&'static str),
 }
 
@@ -104,6 +110,8 @@ pub struct TradingAccount {
     orders: BTreeMap<OrderId, Order>,
     filled: BTreeSet<OrderId>,
     fills: Vec<Fill>,
+    settled_fees: BTreeSet<(VirtualPortfolioId, InstrumentId, TimestampNs)>,
+    fee_settlements: Vec<ParityFeeSettlement>,
 }
 
 impl TradingAccount {
@@ -150,6 +158,8 @@ impl TradingAccount {
             orders: BTreeMap::new(),
             filled: BTreeSet::new(),
             fills: Vec::new(),
+            settled_fees: BTreeSet::new(),
+            fee_settlements: Vec::new(),
         };
         account.validate_balances()?;
         Ok(account)
@@ -180,6 +190,48 @@ impl TradingAccount {
     }
     pub fn fills(&self) -> &[Fill] {
         &self.fills
+    }
+    pub fn fee_settlements(&self) -> &[ParityFeeSettlement] {
+        &self.fee_settlements
+    }
+
+    /// Atomically charge an F8 fee-only leg. Quantities, Orders and Fills do not change.
+    /// A VP/instrument/open key may be settled once; retries cannot double-charge it.
+    pub fn apply_fee_settlement(
+        &mut self,
+        settlement: ParityFeeSettlement,
+    ) -> Result<(), LedgerError> {
+        let id = settlement.portfolio_id();
+        let mut portfolio = self
+            .portfolios
+            .get(&id)
+            .ok_or(LedgerError::UnknownPortfolio(id))?
+            .clone();
+        if settlement.instrument_id().venue() != &self.venue {
+            return Err(LedgerError::WrongVenue);
+        }
+        let key = (
+            id,
+            settlement.instrument_id().clone(),
+            settlement.executed_at(),
+        );
+        if self.settled_fees.contains(&key) {
+            return Err(LedgerError::DuplicateFeeSettlement);
+        }
+        self.validate_balances()?;
+        let cash = add(self.cash, settlement.cash_delta())?;
+        portfolio.cash = add(portfolio.cash, settlement.cash_delta())?;
+        if cash < Notional::ZERO || portfolio.cash < Notional::ZERO {
+            return Err(LedgerError::NegativeCash);
+        }
+        let mut portfolios = self.portfolios.clone();
+        portfolios.insert(id, portfolio);
+        reconcile(cash, &self.positions, self.unallocated, &portfolios)?;
+        self.cash = cash;
+        self.portfolios = portfolios;
+        self.settled_fees.insert(key);
+        self.fee_settlements.push(settlement);
+        Ok(())
     }
 
     /// Register one market order owned by exactly one VP. No cross-VP netting.

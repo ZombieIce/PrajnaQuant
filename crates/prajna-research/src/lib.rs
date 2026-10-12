@@ -7,6 +7,7 @@ mod compute;
 pub use compute::compute;
 mod dsv;
 pub mod factor;
+pub mod fast_event;
 mod panel;
 pub mod strategy;
 mod universe;

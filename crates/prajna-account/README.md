@@ -2,7 +2,8 @@
 
 MVP-3 的单 Venue、单记账币种、长仓、无杠杆、全额成交账本。只依赖
 `prajna-domain` 与 Serde，不读取行情、不生成信号、不决定可交易性、数量或费率。
-这不是已接通的 Fast Event Engine；Run Spec、ResultLevel 和调仓由后续票据实现。
+现由 [`fast_event::run_fast_event`](../prajna-research/src/fast_event.rs) 接入；
+Run Spec 与 ResultLevel 的持久化仍由后续票据实现。
 
 ## 使用契约
 
@@ -10,6 +11,7 @@ MVP-3 的单 Venue、单记账币种、长仓、无杠杆、全额成交账本�
 TradingAccount::new(currency, venue, initial_cash, VP allocations)
   submit_order(Order::new(id, VP, instrument, side, quantity, submitted_at))
   apply_fill(Fill::new(order, executed_at, raw_price, pricing, costs))
+  apply_fee_settlement(ParityFeeSettlement::new(...))  # fee-only F8 leg, no trade
   value(explicit valuation prices) -> AccountValuation
   AccountValuation::validate() -> exact reconciliation
 ```
@@ -29,7 +31,17 @@ TradingAccount::new(currency, venue, initial_cash, VP allocations)
   该 crate 不校验 Instrument 的报价币种，调用方必须先确认与账户记账币种一致；
   不支持 FX、乘数、衍生品结算或杠杆。
 - 账本余额只读；快照字段可读写并可 `validate`，修改快照不回写账本。
-  Order / Fill / VP 和估值快照可 Serialize；不提供绕过校验的 Deserialize。
+  Order / Fill / Fee-only Settlement / VP 和估值快照可 Serialize；不提供绕过校验的 Deserialize。
+
+## Parity Fee-only Settlement
+
+F8 的成本基于扣费前权益与权重差，数量基于扣费后权益：一条腿可能有正费用，
+但目标数量恰好等于原数量。`ParityFeeSettlement` 单独记录 VP、标的、open 时间、
+费用基数/方向、佣金/税/滑点及 `cash_delta = -total_fees`，不伪造零数量 Order / Fill。
+构造拒绝非正费用基数、零总费用、负费用及最低佣金补足（parity 不适用）。
+账户按 `(VP, Instrument, timestamp)` 拒绝重复结算，原子扣减 VP 与账户现金并重验恒等式，
+不改变任何数量、Order 或 Fill；现金不足、错误 VP / Venue 或溢出时不保留结算键和记录。
+完整现金重放需要同时包含 Fills 和 `fee_settlements()`，不能只累加 Fill。
 
 ## Fill 现金与费用
 

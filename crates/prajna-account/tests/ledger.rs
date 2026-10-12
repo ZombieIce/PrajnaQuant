@@ -1,6 +1,6 @@
 use prajna_account::{
-    Fill, FillCosts, FillPricing, LedgerError, Order, OrderId, Side, TradingAccount,
-    VirtualPortfolioId,
+    Fill, FillCosts, FillPricing, LedgerError, Order, OrderId, ParityFeeSettlement, Side,
+    TradingAccount, VirtualPortfolioId,
 };
 use prajna_domain::{Notional, Price, Quantity, TimestampNs};
 use std::collections::BTreeMap;
@@ -63,6 +63,141 @@ fn settle(account: &mut TradingAccount, fill: Fill) {
 }
 fn prices(price: &str) -> BTreeMap<prajna_domain::InstrumentId, Price> {
     BTreeMap::from([("A.XSHG".parse().unwrap(), p(price))])
+}
+
+#[test]
+fn parity_fee_only_settlement_preserves_quantities_and_reconciles_both_cash_levels() {
+    let mut a = account();
+    let event = ParityFeeSettlement::new(
+        VirtualPortfolioId(1),
+        "A.XSHG".parse().unwrap(),
+        TimestampNs::from_unix_nanos(20),
+        n("1000"),
+        Side::Buy,
+        FillCosts {
+            commission: n("10"),
+            tax: n("3"),
+            ..FillCosts::ZERO
+        },
+        n("2"),
+    )
+    .unwrap();
+    a.apply_fee_settlement(event.clone()).unwrap();
+    assert_eq!(a.cash(), n("9985"));
+    assert_eq!(a.portfolios()[&VirtualPortfolioId(1)].cash(), n("3985"));
+    assert_eq!(a.portfolios()[&VirtualPortfolioId(2)].cash(), n("5000"));
+    assert_eq!(a.unallocated_capital(), n("1000"));
+    assert_eq!(a.fee_settlements(), std::slice::from_ref(&event));
+    assert!(a.positions().is_empty() && a.orders().is_empty() && a.fills().is_empty());
+    let before = a.clone();
+    assert_eq!(
+        a.apply_fee_settlement(event),
+        Err(LedgerError::DuplicateFeeSettlement)
+    );
+    assert_eq!(a, before);
+    a.value(&BTreeMap::new()).unwrap().validate().unwrap();
+}
+
+#[test]
+fn rejected_fee_settlements_are_atomic_and_do_not_reserve_the_key() {
+    let mut a = account();
+    for (vp, instrument, commission, expected) in [
+        (1, "A.XSHG", "4001", LedgerError::NegativeCash),
+        (
+            3,
+            "A.XSHG",
+            "1",
+            LedgerError::UnknownPortfolio(VirtualPortfolioId(3)),
+        ),
+        (1, "A.XSHE", "1", LedgerError::WrongVenue),
+    ] {
+        let before = a.clone();
+        let event = ParityFeeSettlement::new(
+            VirtualPortfolioId(vp),
+            instrument.parse().unwrap(),
+            TimestampNs::from_unix_nanos(20),
+            n("10000"),
+            Side::Sell,
+            FillCosts {
+                commission: n(commission),
+                ..FillCosts::ZERO
+            },
+            n("0"),
+        )
+        .unwrap();
+        assert_eq!(a.apply_fee_settlement(event), Err(expected));
+        assert_eq!(a, before);
+    }
+    a.apply_fee_settlement(
+        ParityFeeSettlement::new(
+            VirtualPortfolioId(1),
+            "A.XSHG".parse().unwrap(),
+            TimestampNs::from_unix_nanos(20),
+            n("100"),
+            Side::Sell,
+            FillCosts {
+                commission: n("1"),
+                ..FillCosts::ZERO
+            },
+            n("0"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(a.cash(), n("9999"));
+}
+
+#[test]
+fn parity_fee_settlement_rejects_negative_zero_and_minimum_commission_costs() {
+    for (basis, costs, slippage, expected) in [
+        (
+            "1",
+            FillCosts {
+                commission: n("-1"),
+                ..FillCosts::ZERO
+            },
+            "0",
+            LedgerError::NegativeFee,
+        ),
+        (
+            "0",
+            FillCosts {
+                commission: n("1"),
+                ..FillCosts::ZERO
+            },
+            "0",
+            LedgerError::InvalidFeeSettlement,
+        ),
+        ("1", FillCosts::ZERO, "0", LedgerError::InvalidFeeSettlement),
+        (
+            "1",
+            FillCosts::ZERO,
+            "-1",
+            LedgerError::InvalidFeeSettlement,
+        ),
+        (
+            "1",
+            FillCosts {
+                minimum_commission_top_up: n("1"),
+                ..FillCosts::ZERO
+            },
+            "0",
+            LedgerError::InvalidFeeSettlement,
+        ),
+    ] {
+        assert_eq!(
+            ParityFeeSettlement::new(
+                VirtualPortfolioId(1),
+                "A.XSHG".parse().unwrap(),
+                TimestampNs::from_unix_nanos(20),
+                n(basis),
+                Side::Buy,
+                costs,
+                n(slippage),
+            ),
+            Err(expected)
+        );
+    }
 }
 
 #[test]

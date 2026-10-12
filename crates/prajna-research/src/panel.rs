@@ -294,8 +294,8 @@ fn read_sessions(
 
 #[derive(Clone, Copy)]
 struct BarValues {
-    open: f64,
-    close: f64,
+    open: Price,
+    close: Price,
     available_at: Option<i64>,
 }
 
@@ -338,8 +338,10 @@ fn read_bars(
                     format!("bar for {id} references unknown session {session_date}"),
                 ));
             }
-            let open = decimal_38_18_to_f64(required_decimal(opens, row, "bars", "open")?)?;
-            let close = decimal_38_18_to_f64(required_decimal(closes, row, "bars", "close")?)?;
+            let open = Price::from_mantissa(required_decimal(opens, row, "bars", "open")?)
+                .map_err(|error| invalid_table("bars", error.to_string()))?;
+            let close = Price::from_mantissa(required_decimal(closes, row, "bars", "close")?)
+                .map_err(|error| invalid_table("bars", error.to_string()))?;
             let available_at = (!available_at.is_null(row)).then(|| available_at.value(row));
             if bars
                 .insert(
@@ -376,6 +378,8 @@ fn build_grid(
     let mut session_indices = Vec::with_capacity(rows);
     let mut opens = Vec::with_capacity(rows);
     let mut closes = Vec::with_capacity(rows);
+    let mut open_decimals = Vec::with_capacity(rows);
+    let mut close_decimals = Vec::with_capacity(rows);
     let mut has_bars = Vec::with_capacity(rows);
     let mut close_available_at = Vec::with_capacity(rows);
 
@@ -387,8 +391,16 @@ fn build_grid(
             instrument_ids.push(instrument.to_string());
             session_dates.push(naive_date_to_date32(session.session_date)?);
             session_indices.push(index);
-            opens.push(bar.map(|bar| bar.open));
-            closes.push(bar.map(|bar| bar.close));
+            opens.push(
+                bar.map(|bar| decimal_38_18_to_f64(bar.open.mantissa()))
+                    .transpose()?,
+            );
+            closes.push(
+                bar.map(|bar| decimal_38_18_to_f64(bar.close.mantissa()))
+                    .transpose()?,
+            );
+            open_decimals.push(bar.map(|bar| bar.open.to_string()));
+            close_decimals.push(bar.map(|bar| bar.close.to_string()));
             has_bars.push(bar.is_some());
             close_available_at.push(bar.and_then(|bar| bar.available_at));
         }
@@ -408,6 +420,8 @@ fn build_grid(
             Series::new("close".into(), closes).into(),
             Series::new("has_bar".into(), has_bars).into(),
             close_available_at.into(),
+            Series::new("open_decimal".into(), open_decimals).into(),
+            Series::new("close_decimal".into(), close_decimals).into(),
         ],
     )?)
 }
