@@ -75,6 +75,16 @@ _Avoid_: 把计算结果直接称为 Factor。
 **Engine**:
 按明确时间、成本和成交语义执行 Strategy 并产生结果的计算层；Vector、Fast Event 与 Accurate Event 是不同层级。
 
+**Accurate Event Engine**:
+借助外部 Backend 复核其他 Engine 结果的事件层级；其账户与组合仍由平台账本记账并作为权威，Backend 自身的账户只作对照。
+_Avoid_: 把 Accurate Event 等同于 NautilusTrader，或把 Backend 账户当作结果权威。
+
+**Backend**:
+在某个 Engine 之后实际执行撮合等计算的外部实现，例如 NautilusTrader；其类型不进入平台公共 Domain，其身份与锁定版本属于 Run 输入。
+
+**Adapter**:
+Domain 对象与 Backend 对象之间的转换边界；负责双向映射，并显式报告无法映射或由 Adapter 自行合成的事件，不得将其冒充为 Backend 原生行为。
+
 **Order**:
 请求按指定方向和数量交易 Instrument 的意图；提交不保证成交。
 
@@ -108,7 +118,7 @@ _Avoid_: 把每次执行当作新的 Experiment。
 Experiment 中允许变化的 Strategy 参数组合，以网格或显式列表给出并按规范化后的组合去重；成本、数据、Universe 与 Engine 不属于 Parameter Space。
 
 **Run Spec**:
-决定一个 Run 输入的规范化描述：Dataset Version、Universe、Strategy 及参数、成本、Availability Assumption、Engine 及其语义版本，以及仅当 Engine 使用随机性时的随机种子；相同 Run Spec 在相同代码上必须得到相同结果。
+决定一个 Run 输入的规范化描述：Dataset Version、Universe、Strategy 及参数、成本、Availability Assumption、Engine 及其语义版本、使用 Backend 时的 Backend 身份与锁定版本，以及仅当 Engine 使用随机性时的随机种子；相同 Run Spec 在相同代码上必须得到相同结果。
 _Avoid_: 把代码修订当成 Run Spec 的一部分；为不使用随机性的 Engine 填写种子。
 
 **Run**:
