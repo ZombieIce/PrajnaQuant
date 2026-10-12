@@ -264,6 +264,7 @@ impl ExecutionState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EngineError {
+    UnsupportedCombination(String),
     UnsupportedCapability,
     InvalidTopK,
     InvalidParameters(String),
@@ -275,6 +276,7 @@ pub enum EngineError {
 impl fmt::Display for EngineError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnsupportedCombination(message) => formatter.write_str(message),
             Self::UnsupportedCapability => {
                 formatter.write_str("strategy does not support the Vector Engine")
             }
@@ -307,17 +309,24 @@ pub struct VectorEngine;
 
 impl VectorEngine {
     fn validate_top_k(strategy: &TopKRank) -> Result<(), EngineError> {
-        if strategy.top_k == 0 {
-            return Err(EngineError::InvalidTopK);
-        }
-        if strategy.rebalance_every == 0 {
-            return Err(EngineError::InvalidRebalanceEvery);
-        }
+        strategy.validate_parameters()?;
         if !strategy
             .capabilities
             .contains(&StrategyCapability::Vectorizable)
         {
             return Err(EngineError::UnsupportedCapability);
+        }
+        Ok(())
+    }
+}
+
+impl TopKRank {
+    fn validate_parameters(&self) -> Result<(), EngineError> {
+        if self.top_k == 0 {
+            return Err(EngineError::InvalidTopK);
+        }
+        if self.rebalance_every == 0 {
+            return Err(EngineError::InvalidRebalanceEvery);
         }
         Ok(())
     }
@@ -340,6 +349,14 @@ impl TopKRank {
         sessions: &[PanelSession],
     ) -> Result<Vec<Decision>, EngineError> {
         VectorEngine::validate_top_k(self)?;
+        self.decide_validated(score_values, sessions)
+    }
+
+    fn decide_validated(
+        &self,
+        score_values: &DataFrame,
+        sessions: &[PanelSession],
+    ) -> Result<Vec<Decision>, EngineError> {
         if score_values.schema().as_ref() != &values_schema().polars {
             return Err(EngineError::InvalidScoreValues(
                 "input must use the Factor Values v1 schema".into(),
@@ -484,7 +501,7 @@ fn date32(date: NaiveDate) -> Result<i32, EngineError> {
     })
 }
 
-/// Closed Vector strategy family. Experiment Run Spec integration is a separate contract.
+/// Closed Decision strategy family; the existing name is retained for Vector callers.
 #[derive(Debug, Clone)]
 pub enum VectorStrategy {
     TopKRank(TopKRank),
@@ -524,8 +541,17 @@ impl Default for MaCrossoverParams {
 
 impl VectorEngine {
     pub fn validate(strategy: &VectorStrategy) -> Result<(), EngineError> {
-        match strategy {
-            VectorStrategy::TopKRank(params) => Self::validate_top_k(params),
+        if let VectorStrategy::TopKRank(params) = strategy {
+            return Self::validate_top_k(params);
+        }
+        strategy.validate_parameters()
+    }
+}
+
+impl VectorStrategy {
+    pub(crate) fn validate_parameters(&self) -> Result<(), EngineError> {
+        match self {
+            VectorStrategy::TopKRank(params) => params.validate_parameters(),
             VectorStrategy::BuyAndHold(params) if params.params_version == 1 => Ok(()),
             VectorStrategy::MaCrossover(params)
                 if params.params_version == 1
@@ -539,9 +565,14 @@ impl VectorEngine {
             )),
         }
     }
-}
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::TopKRank(_) => "top_k_rank",
+            Self::BuyAndHold(_) => "buy_and_hold",
+            Self::MaCrossover(_) => "ma_crossover",
+        }
+    }
 
-impl VectorStrategy {
     pub fn params_version(&self) -> u32 {
         match self {
             Self::TopKRank(_) => 1,
@@ -571,6 +602,19 @@ impl VectorStrategy {
         }
     }
 
+    pub(crate) fn decide_validated(
+        &self,
+        scores: &DataFrame,
+        sessions: &[PanelSession],
+    ) -> Result<Vec<Decision>, EngineError> {
+        match self {
+            Self::TopKRank(params) => params.decide_validated(scores, sessions),
+            _ => Err(EngineError::InvalidParameters(
+                "this strategy requires decide_panel".into(),
+            )),
+        }
+    }
+
     /// Signals use only session-close inputs; execution remains next-session open.
     pub fn decide_panel(
         &self,
@@ -578,13 +622,21 @@ impl VectorStrategy {
         members: &[InstrumentId],
         assumption: AvailabilityAssumption,
     ) -> Result<Vec<Decision>, EngineError> {
-        VectorEngine::validate(self)?;
+        crate::engine::Engine::Vector.decide_panel(self, panel, members, assumption)
+    }
+
+    pub(crate) fn decide_panel_validated(
+        &self,
+        panel: &Panel,
+        members: &[InstrumentId],
+        assumption: AvailabilityAssumption,
+    ) -> Result<Vec<Decision>, EngineError> {
         validate_members(panel, members)?;
         match self {
             Self::TopKRank(params) => {
                 let scores = crate::compute(panel, members, &params.score, assumption)
                     .map_err(|error| EngineError::InvalidScoreValues(error.to_string()))?;
-                params.decide(&scores, &panel.sessions)
+                params.decide_validated(&scores, &panel.sessions)
             }
             Self::BuyAndHold(_) => Ok(panel
                 .sessions

@@ -4,6 +4,7 @@ use prajna_account::VirtualPortfolioId;
 use prajna_domain::{Currency, Notional, Quantity};
 use prajna_research::{
     ExecutionStatusMap,
+    engine::Engine,
     fast_event::{
         self, EntryBudget, FastEventConfig, FastEventCosts, PortfolioRun, Rebalance, Sizing,
     },
@@ -78,6 +79,12 @@ impl EngineSettings {
             }
             return Ok(result);
         }
+        if input.engine == "accurate_event" {
+            return Err(invalid(format!(
+                "accurate_event × {}: Accurate Event execution is not implemented; routing rules are registered in prajna-research",
+                input.strategy
+            )));
+        }
         if input.engine != "fast_event" {
             return Err(invalid("engine must be vector or fast_event"));
         }
@@ -116,12 +123,19 @@ impl EngineSettings {
                 ));
             }
         };
-        if result.rebalance != Rebalance::FullTarget
-            && (sizing != Sizing::Lot || policy != UnfilledEntry::Retry)
-        {
-            return Err(invalid(
-                "entry_only requires lot and explicit/effective unfilled_entry=retry",
-            ));
+        Engine::FastEvent {
+            sizing,
+            rebalance: result.rebalance,
+        }
+        .validate_mode(&input.strategy)
+        .map_err(|error| invalid(error.to_string()))?;
+        if result.rebalance != Rebalance::FullTarget && policy != UnfilledEntry::Retry {
+            return Err(invalid(format!(
+                "fast_event × {} × sizing={}, rebalance=entry_only, unfilled_entry={}: entry_only requires unfilled_entry=retry",
+                input.strategy,
+                settings.sizing,
+                result.policy_name()
+            )));
         }
         let mut total = 0i128;
         for capital in &settings.portfolios {
@@ -273,6 +287,15 @@ impl EngineSettings {
             "retry"
         }
     }
+    pub(super) fn selection(&self) -> Engine {
+        match &self.fast {
+            Some(config) => Engine::FastEvent {
+                sizing: config.sizing,
+                rebalance: self.rebalance,
+            },
+            None => Engine::Vector,
+        }
+    }
     pub(super) fn normalize_definition(&self, value: &mut Value, strategy: &str) {
         if self.fast.is_some() || self.policy != UnfilledEntry::Skip || strategy != "s2_rotation" {
             value["unfilled_entry"] = self.policy_name().into();
@@ -379,6 +402,11 @@ pub(super) fn expand_native(
     let mut runs = BTreeMap::new();
     for params in parameters {
         let strategy = native_strategy(&experiment.strategy_kind, params)?;
+        experiment
+            .engine
+            .selection()
+            .validate(&strategy)
+            .map_err(|error| invalid(error.to_string()))?;
         let mut spec = serde_json::json!({"dsv":experiment.dsv,"universe":experiment.universe,"venue":experiment.venue,
             "strategy":{"kind":experiment.strategy_kind,"parameters":params}, "costs":experiment.costs.normalized(),
             "availability_assumption":experiment.availability_assumption,"engine":{"kind":"vector","semantic_version":"vector@1"},"seed":null});
@@ -401,6 +429,7 @@ pub(super) fn expand_native(
     Ok(runs.into_values().collect())
 }
 pub(super) fn decisions(
+    engine: Engine,
     run: &ExpandedRun,
     values: &HashMap<String, DataFrame>,
     panel: &Panel,
@@ -411,12 +440,12 @@ pub(super) fn decisions(
         let score = values
             .get(&factor.canonical_json().to_string())
             .ok_or("stage 1 did not produce this Run's score Factor Values")?;
-        run.strategy
-            .decide(score, &panel.sessions)
+        engine
+            .decide(&run.strategy, score, &panel.sessions)
             .map_err(|e| e.to_string())
     } else {
-        run.strategy
-            .decide_panel(panel, members, assumption)
+        engine
+            .decide_panel(&run.strategy, panel, members, assumption)
             .map_err(|e| e.to_string())
     }
 }
@@ -443,8 +472,12 @@ pub(super) fn execute(
         error: None,
     };
     let result = (|| -> Result<(), String> {
+        let engine = experiment.engine.selection();
+        engine
+            .validate(&run.strategy)
+            .map_err(|error| error.to_string())?;
         if let Some(config) = &experiment.engine.fast {
-            let decisions = decisions(run, factors, panel, members, assumption)?;
+            let decisions = decisions(engine, run, factors, panel, members, assumption)?;
             let portfolios = experiment
                 .engine
                 .capitals
@@ -469,7 +502,7 @@ pub(super) fn execute(
             }
         } else {
             // Native strategy membership is the declared Universe, never all dataset instruments.
-            let decisions = decisions(run, factors, panel, members, assumption)?;
+            let decisions = decisions(engine, run, factors, panel, members, assumption)?;
             execution.result = Some(
                 run_vector_with_policy(
                     panel,

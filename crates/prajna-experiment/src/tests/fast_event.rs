@@ -51,6 +51,27 @@ fn fast_definition(dsv: &str, universe: &str) -> Value {
 }
 
 #[test]
+fn unsupported_engine_modes_are_rejected_before_loading_data() {
+    let temp = TempDir::new().unwrap();
+    let mut value = fast_definition("missing-dataset", "missing-universe");
+    value["fast_event"]["rebalance"] = json!("entry_only");
+    value["fast_event"]["entry_budget"] = json!("remaining_cash");
+    value["unfilled_entry"] = json!("retry");
+    let error = Experiment::parse(&value.to_string(), temp.path())
+        .unwrap_err()
+        .to_string();
+    for part in ["fast_event", "s2_rotation", "vector_parity", "entry_only"] {
+        assert!(error.contains(part), "{error}");
+    }
+    value["engine"] = json!("accurate_event");
+    let error = Experiment::parse(&value.to_string(), temp.path())
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("accurate_event"), "{error}");
+    assert!(error.contains("not implemented"), "{error}");
+}
+
+#[test]
 fn fast_identity_covers_execution_semantics_and_legacy_s2_stays_fixed() {
     let temp = TempDir::new().unwrap();
     let (lake, dsv, universe) = fast_fixture(temp.path());
