@@ -19,7 +19,10 @@ MA = ROOT / "poc/poc0-benchmark/fixtures/b2-ma20-60-v1.json"
 
 
 class FastEventGoldenTests(unittest.TestCase):
-    def run_cli(self, fixture=HAND, strategy="s1", sizing="lot", retry=None, expect_error=False):
+    def run_cli(
+        self, fixture=HAND, strategy="s1", sizing="lot", retry=None,
+        rebalance="full_target", expect_error=False,
+    ):
         with tempfile.TemporaryDirectory() as directory:
             directory = Path(directory)
             if isinstance(fixture, dict):
@@ -32,6 +35,7 @@ class FastEventGoldenTests(unittest.TestCase):
                 sys.executable, str(SCRIPT), "--fixture", str(path),
                 "--strategy", strategy, "--sizing", sizing, "--out", str(out),
             ]
+            command.extend(["--rebalance", rebalance])
             if retry is not None:
                 command.extend(["--unfilled-entry", retry])
             completed = subprocess.run(command, check=False, capture_output=True, text=True)
@@ -67,6 +71,55 @@ class FastEventGoldenTests(unittest.TestCase):
         self.assertAlmostEqual(sessions[2]["open"]["equity"], 963.73)
         self.assertAlmostEqual(sessions[2]["close"]["equity"], 1143.73)
         self.assertEqual(len(result["fills"]), 1)
+
+    def test_entry_only_retries_cash_limited_s1_targets(self):
+        fixture = json.loads(HAND.read_text())
+        fixture["calendar"] += ["2026-01-08"]
+        fixture["instruments"] = [
+            {"symbol": "A", "lot_size": 1, "opens": [10, 10, 20, 20],
+             "closes": [10, 20, 20, 20]},
+            {"symbol": "B", "lot_size": 1, "opens": [10, 10, 10, 10],
+             "closes": [10, 10, 10, 10]},
+        ]
+        fixture["costs"] = {key: 0 for key in fixture["costs"]}
+        fixture["execution_status_overrides"] = [
+            {"symbol": "B", "date": "2026-01-06", "trade_status": "HALTED",
+             "is_tradable": False, "available_at": "08:50:00+08:00"},
+        ]
+        result = self.run_cli(
+            fixture, strategy="s1", sizing="lot", rebalance="entry_only",
+        )
+        self.assertEqual(
+            [(fill["session_date"], fill["instrument_id"], fill["quantity"])
+             for fill in result["fills"]],
+            [("2026-01-06", "A.SYNTH", 50), ("2026-01-07", "B.SYNTH", 50)],
+        )
+        self.assertEqual(result["parameters"]["rebalance"], "entry_only")
+        self.assertEqual(result["pending_at_end"], None)
+
+    def test_entry_only_s2_preserves_existing_quantity_and_retries_missing_target(self):
+        fixture = json.loads(SMALL.read_text())
+        fixture["costs"] = {key: 0 for key in fixture["costs"]}
+        fixture["strategy"].update({
+            "momentum_short_days": 1, "momentum_long_days": 1,
+            "volatility_window": 2, "rebalance_every": 1, "top_n": 2,
+            "short_momentum_weight": 1, "long_momentum_weight": 0,
+            "volatility_weight": 0, "trend_filter": False,
+        })
+        result = self.run_cli(
+            fixture, strategy="s2", sizing="lot", rebalance="entry_only",
+        )
+        self.assertEqual(result["parameters"]["rebalance"], "entry_only")
+        self.assertTrue(all(fill["quantity"] > 0 for fill in result["fills"]))
+
+    def test_entry_only_rejects_vector_parity_and_s3(self):
+        for strategy, sizing in (("s1", "vector_parity"), ("s3", "lot")):
+            stderr = self.run_cli(
+                HAND if strategy == "s1" else MA,
+                strategy=strategy, sizing=sizing, rebalance="entry_only",
+                expect_error=True,
+            )
+            self.assertIn("entry_only", stderr)
 
     def test_ma20_60_crosses_only_after_warmup_and_executes_next_open(self):
         for sizing in ("lot", "vector_parity"):
@@ -230,6 +283,7 @@ class FastEventGoldenTests(unittest.TestCase):
                             )
                             self.assertGreaterEqual(fill["minimum_commission_top_up"], 0)
                         self.assertAlmostEqual(session["open"]["cash"], previous_cash, delta=1e-6)
+
                         for point in ("open", "close"):
                             value = session[point]
                             self.assertGreaterEqual(value["cash"], -1e-6)
@@ -251,6 +305,24 @@ class FastEventGoldenTests(unittest.TestCase):
                             sorted([(order["side"], order["instrument_id"]) for order in filled_orders],
                                    key=lambda item: (item[0] != "sell", item[1])),
                         )
+
+    def test_entry_only_goldens_recompute_every_value(self):
+        cases = [
+            (SMALL, "s1", "FixedInitial"),
+            (SMALL, "s2", "RemainingCash"),
+        ]
+        for fixture, strategy, _budget in cases:
+            with self.subTest(fixture=fixture.name, strategy=strategy):
+                expected = json.loads(
+                    (GOLDEN / "expected" /
+                     f"{fixture.stem}.{strategy}.entry_only.lot.json").read_text()
+                )
+                actual = self.run_cli(
+                    fixture, strategy=strategy, sizing="lot", rebalance="entry_only",
+                )
+                self.assertEqual(actual, expected)
+                self.assertEqual(actual["parameters"]["rebalance"], "entry_only")
+                self.assertEqual(actual["parameters"]["sizing"], "lot")
 
     def test_minimum_commission_top_up_and_both_directional_taxes(self):
         fixture = json.loads(SMALL.read_text())

@@ -1,8 +1,9 @@
-# MVP-3 independent full_target golden
+# MVP-3 independent Fast Event golden
 
 This Python-standard-library oracle implements the synthetic `full_target`
 subset of [spec #112](https://github.com/ZombieIce/PrajnaQuant/issues/112)
-F8-F10/F13.4 for [ticket #117](https://github.com/ZombieIce/PrajnaQuant/issues/117).
+F8-F10/F13.4 for [ticket #117](https://github.com/ZombieIce/PrajnaQuant/issues/117),
+plus the POC-only `lot` + `entry_only` variant for ticket #121.
 It imports neither Rust artifacts, the MVP-1 Python oracle, POC execution
 code, nor Nautilus. It is a third-party reference, not a second production
 quant core and not evidence that the platform Fast Event engine exists.
@@ -66,12 +67,23 @@ done
 python3 -m unittest tests.test_mvp3_fast_event_golden -v
 ```
 
-The fourteen expected JSON files contain every open-after-execution and close
+The sixteen expected JSON files contain every open-after-execution and close
 cash/quantity/valuation/equity/NAV row, decisions, execution attempts,
 orders (including blocked/unaffordable attempts), Fills and fee components.
 All rows and numeric values are compared with CLI recomputation in CI,
 not merely final NAV. Tests use temporary paths and do not require a
 specific working directory or locally built binaries.
+
+The two `entry_only` expected files are `dataset-v1.s1.entry_only.lot.json`
+and `dataset-v1.s2.entry_only.lot.json`. S1 uses `FixedInitial`: initial
+capital is divided by the number of positive target entries. S2 uses
+`RemainingCash`: after sells, remaining cash is divided by the number of
+targets not yet entered. Both variants keep continuing quantities unchanged,
+reduce buys one lot at a time when cash is insufficient, and retain every
+unentered target as pending for retry. `entry_only` is rejected for
+`vector_parity` and is not used for S3; S3 remains the `full_target` MA20/60
+case. The expected projections include blocked and unfilled order attempts,
+reasons, all fills, fees, cash, NAV, and both valuation points.
 
 ## Time, decisions and execution
 

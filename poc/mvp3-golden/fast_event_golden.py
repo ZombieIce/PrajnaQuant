@@ -271,9 +271,15 @@ def s2_score(rows, index, config, cutoff):
     )
 
 
-def run(fixture, strategy, sizing, unfilled_entry):
+def run(fixture, strategy, sizing, unfilled_entry, rebalance="full_target"):
     fixture = expand_ma(fixture)
     calendar, bars, lots, gates, costs, initial, closes_at = inputs(fixture)
+    if rebalance not in ("full_target", "entry_only"):
+        raise ValueError("rebalance must be full_target or entry_only")
+    if rebalance == "entry_only" and sizing != "lot":
+        raise ValueError("entry_only is a lot-only POC variant")
+    if rebalance == "entry_only" and strategy == "s3":
+        raise ValueError("entry_only is only defined for S1 and S2")
     if strategy == "s2":
         config = fixture["strategy"]
         for key in ("momentum_short_days", "momentum_long_days", "rebalance_every", "top_n"):
@@ -385,17 +391,44 @@ def run(fixture, strategy, sizing, unfilled_entry):
                             raise ValueError("vector_parity buy exceeds available cash")
                         apply(index, fill)
                 else:
-                    desired = {
-                        instrument: math.floor(
-                            effective.get(instrument, 0) * before / prices[instrument] / lots[instrument]
-                        ) * lots[instrument]
-                        for instrument in ids if instrument in prices
-                    }
-                    if pending.get("retry_only"):
-                        desired = {instrument: quantities[instrument] for instrument in ids} | {
-                            instrument: desired[instrument] for instrument in effective
+                    if rebalance == "entry_only":
+                        desired = {
+                            instrument: (
+                                quantities[instrument]
+                                if effective.get(instrument, 0) > 0 and quantities[instrument] > 0
+                                else 0
+                            )
+                            for instrument in ids
                         }
+                    else:
+                        desired = {
+                            instrument: math.floor(
+                                effective.get(instrument, 0) * before / prices[instrument] / lots[instrument]
+                            ) * lots[instrument]
+                            for instrument in ids if instrument in prices
+                        }
+                        if pending.get("retry_only"):
+                            desired = {instrument: quantities[instrument] for instrument in ids} | {
+                                instrument: desired[instrument] for instrument in effective
+                            }
                     for side in ("sell", "buy"):
+                        if side == "buy" and rebalance == "entry_only":
+                            count = sum(
+                                weight > 0 and (
+                                    strategy == "s1" or quantities[instrument] == 0
+                                )
+                                for instrument, weight in targets.items()
+                            )
+                            if count:
+                                base = initial if strategy == "s1" else cash
+                                budget = base / count
+                                desired.update({
+                                    instrument: math.floor(
+                                        budget / prices[instrument] / lots[instrument]
+                                    ) * lots[instrument]
+                                    for instrument, weight in effective.items()
+                                    if weight > 0 and quantities[instrument] == 0
+                                })
                         for instrument in ids:
                             delta = desired.get(instrument, 0) - quantities[instrument]
                             if (side == "buy" and delta <= 0) or (side == "sell" and delta >= 0):
@@ -411,12 +444,24 @@ def run(fixture, strategy, sizing, unfilled_entry):
                                     order(index, instrument, side, 0, "unfilled", "insufficient_cash")
                                     continue
                             apply(index, fill)
-                pending = (
-                    {"decision_session": pending["decision_session"],
-                     "targets": {instrument: targets[instrument] for instrument in skipped},
-                     "retry_only": True}
-                    if skipped and unfilled_entry == "retry" else None
-                )
+                if rebalance == "entry_only":
+                    missing = {
+                        instrument: targets[instrument]
+                        for instrument in targets
+                        if targets[instrument] > 0 and quantities[instrument] == 0
+                    }
+                    pending = (
+                        {"decision_session": pending["decision_session"],
+                         "targets": targets, "retry_only": True}
+                        if missing and unfilled_entry == "retry" else None
+                    )
+                else:
+                    pending = (
+                        {"decision_session": pending["decision_session"],
+                         "targets": {instrument: targets[instrument] for instrument in skipped},
+                         "retry_only": True}
+                        if skipped and unfilled_entry == "retry" else None
+                    )
         open_value = valuation(prices, sources)
         close_prices, close_sources = marks(index, "close")
         close_value = valuation(close_prices, close_sources)
@@ -478,7 +523,7 @@ def run(fixture, strategy, sizing, unfilled_entry):
                 pending = {"decision_session": day, "targets": targets, "retry_only": False}
     result["pending_at_end"] = pending
     result["parameters"] = {
-        "strategy": strategy, "sizing": sizing, "rebalance": "full_target",
+        "strategy": strategy, "sizing": sizing, "rebalance": rebalance,
         "unfilled_entry": unfilled_entry, "costs": costs, "lot_sizes": lots,
         "initial_cash": initial,
         "strategy_parameters": (
@@ -500,6 +545,12 @@ def run(fixture, strategy, sizing, unfilled_entry):
         "vector_parity retry uses pre-fee equity budgets, fees paid from cash; "
         "cash-insufficient budgets cut in ascending instrument_id order",
     ]
+    if rebalance == "entry_only":
+        result["assumptions"].append(
+            "entry_only is a POC-only lot variant: S1 uses initial capital divided "
+            "by target count; S2 uses remaining cash divided by unentered target count; "
+            "unentered targets remain pending after cash-limited attempts"
+        )
     return result
 
 
@@ -508,6 +559,7 @@ def main():
     parser.add_argument("--fixture", type=Path, required=True)
     parser.add_argument("--strategy", choices=("s1", "s2", "s3"), required=True)
     parser.add_argument("--sizing", choices=("lot", "vector_parity"), required=True)
+    parser.add_argument("--rebalance", choices=("full_target", "entry_only"), default="full_target")
     parser.add_argument("--unfilled-entry", choices=("skip", "retry"), default=None)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
@@ -515,8 +567,9 @@ def main():
     result = run(
         json.loads(raw), args.strategy, args.sizing,
         args.unfilled_entry or ("retry" if args.strategy == "s1" else "skip"),
+        args.rebalance,
     )
-    result["schema_version"] = "mvp3.full_target.golden@1"
+    result["schema_version"] = f"mvp3.{args.rebalance}.golden@1"
     result["fixture_sha256"] = hashlib.sha256(raw).hexdigest()
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
