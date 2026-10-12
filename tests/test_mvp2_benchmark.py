@@ -136,6 +136,20 @@ class BenchmarkReportCliTests(unittest.TestCase):
         self.assertEqual(float(definition["fast_event"]["minimum_commission"]), fixture["costs"]["minimum_commission"])
         self.assertEqual(definition["parameter_space"], json.loads((SCRIPT.parent / "experiment.json").read_text())["parameter_space"])
 
+    def test_committed_fast_event_measurements_reproduce_report(self):
+        directory = ROOT / "poc/mvp3-benchmark"
+        raw = directory / "raw-measurements.json"
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "summarize", str(raw)],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads((directory / "medians.json").read_text()))
+        record = json.loads(raw.read_text())
+        self.assertEqual(record["engine"], "fast_event")
+        self.assertEqual(len(record["measurements"]), 24)
+        self.assertTrue(all(sample["all_accounting_verified"] for sample in record["measurements"]))
+
 
 if __name__ == "__main__":
     unittest.main()

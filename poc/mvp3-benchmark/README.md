@@ -50,3 +50,50 @@ status, Execution diff identity/reproducibility, lockfile/fixture/binary hashes,
 thread environment, cache and published bytes/files. The medians preserve every
 numeric series, median/min/max/nearest-rank p95; three-sample p95 is the maximum.
 Build resources are separately recorded and are not mixed with runtime throughput.
+
+## Recorded results
+
+Measured on 2026-10-12 (UTC timestamps in raw data), Apple M1, 8 logical/physical
+cores, 16 GiB RAM, macOS 26.2; rustc 1.98.1, native aarch64-apple-darwin release,
+Python 3.12.2 arm64 controller. Source revision:
+`c85d4abd2394b1f7c092509a089eff0dd5bbad7d` (the later evidence commit does not
+change the measured runtime). All 24 CLI samples have clean reproducible
+provenance, 288 completed Runs, all account/VP invariant flags true, and no `runs/`.
+All eight cells share Summary logical hash
+`b0f6e0f8c0893299ed604e60a552e8519734279620c2694b6332cb5c243b87b0`.
+
+| Rayon threads | Cold median Run/s | Hot median Run/s | Cold median RSS MiB | Hot median RSS MiB |
+| --- | --- | --- | --- | --- |
+| 1 | 27.51 | 31.56 | 125.75 | 85.52 |
+| 2 | 49.49 | 57.63 | 147.61 | 102.41 |
+| 4 | 78.09 | 104.08 | 193.45 | 126.83 |
+| 8 | 103.26 | 133.38 | 250.17 | 166.61 |
+
+[Raw measurements](raw-measurements.json) retain all samples and
+[medians](medians.json) retain the numeric series, ranges and p95. Recomputing
+medians with the public summarize command exactly matches the committed report.
+There is no adoption/rejection verdict or performance threshold.
+
+[Build resources](build-resources.json) contain the exact formal release command
+(including `--bin`, `--example` and `--offline`) and clean source identity; the raw
+runner's inherited `build_command` is the generic reference CLI command. The
+formal warm rebuild took 16.049 s. The initial dependency bootstrap is explicitly
+non-reproducible because source work continued during that build; it is not the
+measured binary. No cold-build cost is claimed.
+
+[Verification](verification.json), [resource attempts](verification-resources.json)
+and [dependency graph](dependency-tree.txt) record the workspace/CI boundaries.
+Workspace tests: 307 passed, one pre-existing audited-local-snapshot test ignored.
+Workspace Clippy first stopped at the disk guard, then passed after scoped removal
+of this worktree's completed test executables and incremental cache; each command,
+space sample and removed object is retained. No user cache/other worktree was removed.
+The release/Experiment dependency graph excludes DuckDB and legacy execution stacks.
+
+Python 3.12 with isolated temporary DuckDB: 74/76 tests pass; two pre-existing
+MVP-1 scale Vector byte-golden float-tail failures reproduce on untouched base
+`fc43482` in the same environment. See [current output](python-results.log) and
+[baseline reproduction](python-baseline-failures.log). These goldens were not
+rewritten. The targeted benchmark + independent Fast Event suite passes 39/39
+([output](targeted-python.log)). Frontend offline install/build passes. The ignored
+real-snapshot test and baseline Python failures are limitations, not synthetic
+accounting/performance acceptance passes.

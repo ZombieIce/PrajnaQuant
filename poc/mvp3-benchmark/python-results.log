@@ -1,0 +1,97 @@
+test_conflict_preserves_all_facts_and_marks_conflict (test_etf_status_audit.StatusAuditTests.test_conflict_preserves_all_facts_and_marks_conflict) ... ok
+test_current_only_query_never_fills_historical_dates (test_etf_status_audit.StatusAuditTests.test_current_only_query_never_fills_historical_dates) ... ok
+test_current_query_and_event_list_have_distinct_unknown_reasons (test_etf_status_audit.StatusAuditTests.test_current_query_and_event_list_have_distinct_unknown_reasons) ... ok
+test_event_list_fact_with_inadequate_semantics_does_not_prove_silence (test_etf_status_audit.StatusAuditTests.test_event_list_fact_with_inadequate_semantics_does_not_prove_silence) ... ok
+test_exact_duplicate_is_deduped_but_audited (test_etf_status_audit.StatusAuditTests.test_exact_duplicate_is_deduped_but_audited) ... ok
+test_full_day_state_without_historical_available_at_stays_unknown (test_etf_status_audit.StatusAuditTests.test_full_day_state_without_historical_available_at_stays_unknown) ... ok
+test_half_open_halt_and_resume_boundary (test_etf_status_audit.StatusAuditTests.test_half_open_halt_and_resume_boundary) ... ok
+test_intraday_halt_is_preserved_but_daily_status_stays_unknown (test_etf_status_audit.StatusAuditTests.test_intraday_halt_is_preserved_but_daily_status_stays_unknown) ... ok
+test_invalid_scope_is_reported_and_cannot_become_tradable (test_etf_status_audit.StatusAuditTests.test_invalid_scope_is_reported_and_cannot_become_tradable) ... ok
+test_late_announcement_does_not_backfill_available_at (test_etf_status_audit.StatusAuditTests.test_late_announcement_does_not_backfill_available_at) ... ok
+test_missing_source_cells_remain_unknown_and_fail_closed (test_etf_status_audit.StatusAuditTests.test_missing_source_cells_remain_unknown_and_fail_closed) ... ok
+test_no_unknown_rows_still_needs_coverage_attestation (test_etf_status_audit.StatusAuditTests.test_no_unknown_rows_still_needs_coverage_attestation) ... ok
+test_absent_state_and_event_list_silence_are_unknown (test_execution_status_audit.ExecutionStatusAuditTests.test_absent_state_and_event_list_silence_are_unknown) ... ok
+test_conflicting_sources_and_same_source_conflicts_block (test_execution_status_audit.ExecutionStatusAuditTests.test_conflicting_sources_and_same_source_conflicts_block) ... ok
+test_exact_duplicate_collapses_but_incomplete_coverage_blocks_execution (test_execution_status_audit.ExecutionStatusAuditTests.test_exact_duplicate_collapses_but_incomplete_coverage_blocks_execution) ... ok
+test_explicit_unknown_source_does_not_get_overridden_by_tradable_source (test_execution_status_audit.ExecutionStatusAuditTests.test_explicit_unknown_source_does_not_get_overridden_by_tradable_source) ... ok
+test_halt_interval_is_half_open_and_resume_needs_positive_evidence (test_execution_status_audit.ExecutionStatusAuditTests.test_halt_interval_is_half_open_and_resume_needs_positive_evidence) ... ok
+test_intraday_halt_is_preserved_but_not_promoted_to_daily_status (test_execution_status_audit.ExecutionStatusAuditTests.test_intraday_halt_is_preserved_but_not_promoted_to_daily_status) ... ok
+test_late_or_unknown_available_time_blocks_execution_readiness (test_execution_status_audit.ExecutionStatusAuditTests.test_late_or_unknown_available_time_blocks_execution_readiness) ... ok
+test_missing_original_hash_blocks_execution_readiness (test_execution_status_audit.ExecutionStatusAuditTests.test_missing_original_hash_blocks_execution_readiness) ... ok
+test_unknown_publication_and_availability_are_not_filled_from_observed_at (test_execution_status_audit.ExecutionStatusAuditTests.test_unknown_publication_and_availability_are_not_filled_from_observed_at) ... ok
+test_3x10_summary_matches_hand_calculated_metrics (test_mvp1_vector_golden.VectorGoldenTests.test_3x10_summary_matches_hand_calculated_metrics) ... ok
+test_cli_applies_trend_filter_and_preserves_its_availability (test_mvp1_vector_golden.VectorGoldenTests.test_cli_applies_trend_filter_and_preserves_its_availability) ... ok
+test_cli_emits_hand_checkable_factor_values_and_statuses (test_mvp1_vector_golden.VectorGoldenTests.test_cli_emits_hand_checkable_factor_values_and_statuses) ... ok
+test_cli_output_is_byte_for_byte_deterministic (test_mvp1_vector_golden.VectorGoldenTests.test_cli_output_is_byte_for_byte_deterministic) ... ok
+test_cli_propagates_status_precedence_and_unknown_availability (test_mvp1_vector_golden.VectorGoldenTests.test_cli_propagates_status_precedence_and_unknown_availability) ... ok
+test_committed_expected_output_matches_the_cli (test_mvp1_vector_golden.VectorGoldenTests.test_committed_expected_output_matches_the_cli) ... ok
+test_constant_returns_have_exact_zero_volatility_and_null_sharpe (test_mvp1_vector_golden.VectorGoldenTests.test_constant_returns_have_exact_zero_volatility_and_null_sharpe) ... ok
+test_s1_s3_goldens_are_reproducible_and_cover_boundaries (test_mvp1_vector_golden.VectorGoldenTests.test_s1_s3_goldens_are_reproducible_and_cover_boundaries) ... ok
+test_scale_halted_golden_blocks_sells_and_skips_buys (test_mvp1_vector_golden.VectorGoldenTests.test_scale_halted_golden_blocks_sells_and_skips_buys) ... FAIL
+test_scale_v2_expected_outputs_cover_structure_and_semantics (test_mvp1_vector_golden.VectorGoldenTests.test_scale_v2_expected_outputs_cover_structure_and_semantics) ... FAIL
+test_vector_matches_hand_derived_execution_costs_and_nav (test_mvp1_vector_golden.VectorGoldenTests.test_vector_matches_hand_derived_execution_costs_and_nav) ... ok
+test_checked_in_workload_is_the_registered_288_run_fixture_grid (test_mvp2_benchmark.BenchmarkReportCliTests.test_checked_in_workload_is_the_registered_288_run_fixture_grid) ... ok
+test_committed_fast_event_measurements_reproduce_report (test_mvp2_benchmark.BenchmarkReportCliTests.test_committed_fast_event_measurements_reproduce_report) ... ok
+test_complete_matrix_reports_medians_without_dropping_raw_values (test_mvp2_benchmark.BenchmarkReportCliTests.test_complete_matrix_reports_medians_without_dropping_raw_values) ... ok
+test_fast_event_summary_matrix_requires_all_run_accounting_checks (test_mvp2_benchmark.BenchmarkReportCliTests.test_fast_event_summary_matrix_requires_all_run_accounting_checks) ... ok
+test_fast_event_workload_records_lot_costs_and_capital (test_mvp2_benchmark.BenchmarkReportCliTests.test_fast_event_workload_records_lot_costs_and_capital) ... ok
+test_incomplete_or_changed_provenance_cannot_be_summarized (test_mvp2_benchmark.BenchmarkReportCliTests.test_incomplete_or_changed_provenance_cannot_be_summarized) ... ok
+test_incomplete_or_invalid_measurements_are_not_success_reports (test_mvp2_benchmark.BenchmarkReportCliTests.test_incomplete_or_invalid_measurements_are_not_success_reports) ... ok
+test_committed_goldens_recompute_every_value_and_preserve_ledger (test_mvp3_fast_event_golden.FastEventGoldenTests.test_committed_goldens_recompute_every_value_and_preserve_ledger) ... ok
+test_continuing_holdings_are_trimmed_and_topped_up_by_full_target (test_mvp3_fast_event_golden.FastEventGoldenTests.test_continuing_holdings_are_trimmed_and_topped_up_by_full_target) ... ok
+test_costed_parity_retry_budget_uses_pre_fee_equity_and_cuts_to_cash (test_mvp3_fast_event_golden.FastEventGoldenTests.test_costed_parity_retry_budget_uses_pre_fee_equity_and_cuts_to_cash) ... ok
+test_entry_only_divides_budget_by_slipped_fill_price_like_poc (test_mvp3_fast_event_golden.FastEventGoldenTests.test_entry_only_divides_budget_by_slipped_fill_price_like_poc) ... ok
+test_entry_only_goldens_recompute_every_value (test_mvp3_fast_event_golden.FastEventGoldenTests.test_entry_only_goldens_recompute_every_value) ... ok
+test_entry_only_rejects_skip_instead_of_recording_an_ignored_policy (test_mvp3_fast_event_golden.FastEventGoldenTests.test_entry_only_rejects_skip_instead_of_recording_an_ignored_policy) ... ok
+test_entry_only_rejects_vector_parity (test_mvp3_fast_event_golden.FastEventGoldenTests.test_entry_only_rejects_vector_parity) ... ok
+test_entry_only_retries_cash_limited_s1_target_without_resizing_held_leg (test_mvp3_fast_event_golden.FastEventGoldenTests.test_entry_only_retries_cash_limited_s1_target_without_resizing_held_leg) ... ok
+test_entry_only_retries_halted_s1_target_with_fixed_initial_budget (test_mvp3_fast_event_golden.FastEventGoldenTests.test_entry_only_retries_halted_s1_target_with_fixed_initial_budget) ... ok
+test_entry_only_s1_s2_s3_match_committed_poc_fills_and_daily_close_ledger (test_mvp3_fast_event_golden.FastEventGoldenTests.test_entry_only_s1_s2_s3_match_committed_poc_fills_and_daily_close_ledger) ... ok
+test_entry_only_s2_preserves_existing_quantity_and_retries_missing_target (test_mvp3_fast_event_golden.FastEventGoldenTests.test_entry_only_s2_preserves_existing_quantity_and_retries_missing_target) ... ok
+test_entry_only_s3_matches_independent_poc_orders_and_ledger_checkpoints (test_mvp3_fast_event_golden.FastEventGoldenTests.test_entry_only_s3_matches_independent_poc_orders_and_ledger_checkpoints) ... ok
+test_flat_open_rotation_resizes_zero_delta_holding_after_costs (test_mvp3_fast_event_golden.FastEventGoldenTests.test_flat_open_rotation_resizes_zero_delta_holding_after_costs) ... ok
+test_float_zero_weight_delta_is_no_trade_not_a_dust_fill (test_mvp3_fast_event_golden.FastEventGoldenTests.test_float_zero_weight_delta_is_no_trade_not_a_dust_fill) ... ok
+test_future_closes_do_not_change_earlier_signals_or_fills (test_mvp3_fast_event_golden.FastEventGoldenTests.test_future_closes_do_not_change_earlier_signals_or_fills) ... ok
+test_halted_and_missing_price_do_not_mean_zero_valuation (test_mvp3_fast_event_golden.FastEventGoldenTests.test_halted_and_missing_price_do_not_mean_zero_valuation) ... ok
+test_hand_buy_and_hold_lot_cash_and_fees (test_mvp3_fast_event_golden.FastEventGoldenTests.test_hand_buy_and_hold_lot_cash_and_fees) ... ok
+test_hand_vector_parity_charges_weight_cost_not_fill_notional (test_mvp3_fast_event_golden.FastEventGoldenTests.test_hand_vector_parity_charges_weight_cost_not_fill_notional) ... ok
+test_ma20_60_crosses_only_after_warmup_and_executes_next_open (test_mvp3_fast_event_golden.FastEventGoldenTests.test_ma20_60_crosses_only_after_warmup_and_executes_next_open) ... ok
+test_ma_window_does_not_bridge_missing_close (test_mvp3_fast_event_golden.FastEventGoldenTests.test_ma_window_does_not_bridge_missing_close) ... ok
+test_minimum_commission_top_up_and_both_directional_taxes (test_mvp3_fast_event_golden.FastEventGoldenTests.test_minimum_commission_top_up_and_both_directional_taxes) ... ok
+test_parity_charges_representable_weight_deltas_below_one_e_minus_twelve (test_mvp3_fast_event_golden.FastEventGoldenTests.test_parity_charges_representable_weight_deltas_below_one_e_minus_twelve) ... ok
+test_parity_exact_quantity_strings_replay_without_a_tolerance (test_mvp3_fast_event_golden.FastEventGoldenTests.test_parity_exact_quantity_strings_replay_without_a_tolerance) ... ok
+test_parity_fee_only_leg_charges_cash_without_a_zero_quantity_order (test_mvp3_fast_event_golden.FastEventGoldenTests.test_parity_fee_only_leg_charges_cash_without_a_zero_quantity_order) ... ok
+test_pending_retry_can_defer_then_be_replaced_by_a_new_decision (test_mvp3_fast_event_golden.FastEventGoldenTests.test_pending_retry_can_defer_then_be_replaced_by_a_new_decision) ... ok
+test_poc_s1_timing_is_rejected_outside_s1_entry_only (test_mvp3_fast_event_golden.FastEventGoldenTests.test_poc_s1_timing_is_rejected_outside_s1_entry_only) ... ok
+test_retry_assumptions_describe_supported_cash_cut (test_mvp3_fast_event_golden.FastEventGoldenTests.test_retry_assumptions_describe_supported_cash_cut) ... ok
+test_retry_buys_only_missing_leg_at_current_equity (test_mvp3_fast_event_golden.FastEventGoldenTests.test_retry_buys_only_missing_leg_at_current_equity) ... ok
+test_s2_equal_close_and_trend_mean_is_not_filtered (test_mvp3_fast_event_golden.FastEventGoldenTests.test_s2_equal_close_and_trend_mean_is_not_filtered) ... ok
+test_s2_matches_existing_independent_vector_decisions_and_opens (test_mvp3_fast_event_golden.FastEventGoldenTests.test_s2_matches_existing_independent_vector_decisions_and_opens) ... ok
+test_unknown_or_late_execution_status_fails_closed (test_mvp3_fast_event_golden.FastEventGoldenTests.test_unknown_or_late_execution_status_fails_closed) ... ok
+test_unpriced_unheld_instrument_is_skipped_then_retried (test_mvp3_fast_event_golden.FastEventGoldenTests.test_unpriced_unheld_instrument_is_skipped_then_retried) ... ok
+test_explicit_symbol (test_warehouse.WarehouseTests.test_explicit_symbol) ... ok
+test_invalid_and_duplicate (test_warehouse.WarehouseTests.test_invalid_and_duplicate) ... ok
+test_no_adjusted_substitution (test_warehouse.WarehouseTests.test_no_adjusted_substitution) ... ok
+test_revisions_idempotence_reversion_and_export (test_warehouse.WarehouseTests.test_revisions_idempotence_reversion_and_export) ... ok
+test_unit_and_ohlc (test_warehouse.WarehouseTests.test_unit_and_ohlc) ... ok
+
+======================================================================
+FAIL: test_scale_halted_golden_blocks_sells_and_skips_buys (test_mvp1_vector_golden.VectorGoldenTests.test_scale_halted_golden_blocks_sells_and_skips_buys)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A股量化/tests/test_mvp1_vector_golden.py", line 354, in test_scale_halted_golden_blocks_sells_and_skips_buys
+    self.assertEqual(generated, HALTED_EXPECTED.read_bytes())
+AssertionError: b'{\n[10595023 chars]275942\n      },\n      {\n        "available_[3495476 chars]n}\n' != b'{\n[10595023 chars]275946\n      },\n      {\n        "available_[3495476 chars]n}\n'
+
+======================================================================
+FAIL: test_scale_v2_expected_outputs_cover_structure_and_semantics (test_mvp1_vector_golden.VectorGoldenTests.test_scale_v2_expected_outputs_cover_structure_and_semantics)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yibinzhang/.codex/worktrees/123-fast-event-experiment/A股量化/tests/test_mvp1_vector_golden.py", line 233, in test_scale_v2_expected_outputs_cover_structure_and_semantics
+    self.assertEqual(generated, SCALE_EXPECTED[trend].read_bytes())
+AssertionError: b'{\n[10595023 chars]275942\n      },\n      {\n        "available_[3495438 chars]n}\n' != b'{\n[10595023 chars]275946\n      },\n      {\n        "available_[3495438 chars]n}\n'
+
+----------------------------------------------------------------------
+Ran 76 tests in 8.162s
+
+FAILED (failures=2)
