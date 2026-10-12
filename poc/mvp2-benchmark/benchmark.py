@@ -39,7 +39,7 @@ def file_totals(directory):
     return {"bytes": sum(path.stat().st_size for path in files), "files": len(files)}
 
 
-def workload(base):
+def workload(base, engine="vector"):
     fixture = json.loads(FIXTURE.read_text())
     base["parameter_space"] = {"grid": {
         "short": [5, 10, 20], "long": [40, 60], "vol": [10, 20],
@@ -49,7 +49,24 @@ def workload(base):
         "trend": [None, 20], "top_k": [1, 3, 5],
         "rebalance_every": [1, 5, 10, 20],
     }}
+    if engine == "fast_event":
+        base["engine"] = "fast_event"
+        base["fast_event"] = {
+            "currency": "CNY", "initial_cash": str(int(fixture["account"]["initial_cash"])),
+            "sizing": "lot", "rebalance": "full_target",
+            "minimum_commission": str(int(fixture["costs"]["minimum_commission"])),
+            "portfolios": [{"id": 1, "capital": str(int(fixture["account"]["initial_cash"]))}],
+            "lot_size_source": {"kind": "instrument"},
+        }
     return base
+
+
+def matrix(engine):
+    if engine not in ("vector", "fast_event"):
+        raise ValueError("unknown benchmark engine")
+    return [(threads, cache, level) for threads in (1, 2, 4, 8)
+            for cache in ("cold", "hot")
+            for level in (("summary",) if engine == "fast_event" else ("summary", "full"))]
 
 
 def validate_provenance(provenance, sample):
@@ -64,72 +81,73 @@ def summarize(record):
     if record["status"] != "measured":
         raise ValueError("cannot summarize an incomplete measurement record")
     repeats = record["repeats"]
-    if repeats < 3 or len(record["measurements"]) != 16 * repeats:
+    cells_spec = matrix(record.get("engine", "vector"))
+    if repeats < 3 or len(record["measurements"]) != len(cells_spec) * repeats:
         raise ValueError("matrix must have every cell with at least 3 repeats")
     if len({sample["summary_logical_hash"] for sample in record["measurements"]}) != 1:
         raise ValueError("Summary logical hash differs across measurements")
     cells = []
-    for threads in (1, 2, 4, 8):
-        for cache in ("cold", "hot"):
-            for level in ("summary", "full"):
-                samples = [
-                    sample for sample in record["measurements"]
-                    if (sample["threads"], sample["cache_state"], sample["result_level"])
-                    == (threads, cache, level)
-                ]
-                if sorted(sample["repeat"] for sample in samples) != list(range(1, repeats + 1)):
-                    raise ValueError("missing or duplicate repeat in matrix cell")
-                raw = {name: [] for name in (
-                    "wall_seconds", "total_ms", "factors_ms", "runs_ms",
-                    "runs_per_second", "peak_rss_bytes", "compute_count",
-                    "hit_count", "written_bytes", "written_files",
-                )}
-                for sample in samples:
-                    validate_provenance(record["provenance"], sample)
-                    cli = sample["cli"]
-                    if (cli["run_count"] != 288 or cli["failed_count"] != 0
-                            or cli["action"] != "created" or cli["threads"] != threads):
-                        raise ValueError("expected a newly created, successful 288-Run execution")
-                    if level == "summary" and sample["summary_no_runs"] is not True:
-                        raise ValueError("summary execution unexpectedly contains runs/")
-                    if (cache == "hot" and (cli["cache"]["compute_count"] != 0
-                                           or cli["cache"]["hit_count"] <= 0)):
-                        raise ValueError("hot factors must be cache hits with zero computes")
-                    if cache == "cold" and cli["cache"]["compute_count"] <= 0:
-                        raise ValueError("cold factors must be computed")
-                    if not math.isfinite(sample["wall_seconds"]) or sample["wall_seconds"] <= 0:
-                        raise ValueError("wall time must be positive and finite")
-                    rss = re.search(
-                        r"^\s*(\d+)\s+maximum resident set size\s*$",
-                        sample["time_output"], re.MULTILINE,
-                    )
-                    if rss is None or int(rss.group(1)) <= 0:
-                        raise ValueError("missing or invalid macOS time peak RSS")
-                    values = {
-                        "wall_seconds": sample["wall_seconds"],
-                        "total_ms": cli["timings_ms"]["total"],
-                        "factors_ms": cli["timings_ms"]["factors"],
-                        "runs_ms": cli["timings_ms"]["runs"],
-                        "runs_per_second": cli["run_count"] / sample["wall_seconds"],
-                        "peak_rss_bytes": int(rss.group(1)),
-                        "compute_count": cli["cache"]["compute_count"],
-                        "hit_count": cli["cache"]["hit_count"],
-                        "written_bytes": cli["written_bytes"],
-                        "written_files": cli["written_files"],
-                    }
-                    for name, value in values.items():
-                        raw[name].append(value)
-                cells.append({
-                    "threads": threads, "cache_state": cache, "result_level": level,
-                    "sample_count": len(samples), "raw": raw,
-                    "median": {name: statistics.median(values) for name, values in raw.items()},
-                    "min": {name: min(values) for name, values in raw.items()},
-                    "max": {name: max(values) for name, values in raw.items()},
-                    "p95_nearest_rank": {
-                        name: sorted(values)[math.ceil(0.95 * len(values)) - 1]
-                        for name, values in raw.items()
-                    },
-                })
+    for threads, cache, level in cells_spec:
+        samples = [
+            sample for sample in record["measurements"]
+            if (sample["threads"], sample["cache_state"], sample["result_level"])
+            == (threads, cache, level)
+        ]
+        if sorted(sample["repeat"] for sample in samples) != list(range(1, repeats + 1)):
+            raise ValueError("missing or duplicate repeat in matrix cell")
+        raw = {name: [] for name in (
+            "wall_seconds", "total_ms", "factors_ms", "runs_ms",
+            "runs_per_second", "peak_rss_bytes", "compute_count",
+            "hit_count", "written_bytes", "written_files",
+        )}
+        for sample in samples:
+            validate_provenance(record["provenance"], sample)
+            cli = sample["cli"]
+            if record.get("engine") == "fast_event" and sample.get("all_accounting_verified") is not True:
+                raise ValueError("Fast Event accounting must be verified in every Run")
+            if (cli["run_count"] != 288 or cli["failed_count"] != 0
+                    or cli["action"] != "created" or cli["threads"] != threads):
+                raise ValueError("expected a newly created, successful 288-Run execution")
+            if level == "summary" and sample["summary_no_runs"] is not True:
+                raise ValueError("summary execution unexpectedly contains runs/")
+            if (cache == "hot" and (cli["cache"]["compute_count"] != 0
+                                   or cli["cache"]["hit_count"] <= 0)):
+                raise ValueError("hot factors must be cache hits with zero computes")
+            if cache == "cold" and cli["cache"]["compute_count"] <= 0:
+                raise ValueError("cold factors must be computed")
+            if not math.isfinite(sample["wall_seconds"]) or sample["wall_seconds"] <= 0:
+                raise ValueError("wall time must be positive and finite")
+            rss = re.search(
+                r"^\s*(\d+)\s+maximum resident set size\s*$",
+                sample["time_output"], re.MULTILINE,
+            )
+            if rss is None or int(rss.group(1)) <= 0:
+                raise ValueError("missing or invalid macOS time peak RSS")
+            values = {
+                "wall_seconds": sample["wall_seconds"],
+                "total_ms": cli["timings_ms"]["total"],
+                "factors_ms": cli["timings_ms"]["factors"],
+                "runs_ms": cli["timings_ms"]["runs"],
+                "runs_per_second": cli["run_count"] / sample["wall_seconds"],
+                "peak_rss_bytes": int(rss.group(1)),
+                "compute_count": cli["cache"]["compute_count"],
+                "hit_count": cli["cache"]["hit_count"],
+                "written_bytes": cli["written_bytes"],
+                "written_files": cli["written_files"],
+            }
+            for name, value in values.items():
+                raw[name].append(value)
+        cells.append({
+            "threads": threads, "cache_state": cache, "result_level": level,
+            "sample_count": len(samples), "raw": raw,
+            "median": {name: statistics.median(values) for name, values in raw.items()},
+            "min": {name: min(values) for name, values in raw.items()},
+            "max": {name: max(values) for name, values in raw.items()},
+            "p95_nearest_rank": {
+                name: sorted(values)[math.ceil(0.95 * len(values)) - 1]
+                for name, values in raw.items()
+            },
+        })
     return {
         "cells": cells,
         "all_reproducible": all(sample["cli"]["reproducible"] for sample in record["measurements"]),
@@ -142,6 +160,7 @@ def measure(args):
         raise ValueError("measurement requires macOS /usr/bin/time -l (RSS is bytes)")
     if args.repeats < 3:
         raise ValueError("at least 3 repeats per cell are required")
+    engine = getattr(args, "engine", "vector")
     output = args.output.resolve()
     if output == ROOT or ROOT in output.parents:
         raise ValueError("measurement output must be outside the worktree to keep provenance clean")
@@ -158,9 +177,10 @@ def measure(args):
             raise ValueError("missing release executable: {}".format(executable))
     output.mkdir(parents=True)
     record = {
-        "schema_version": "poc-mvp2-benchmark.v1",
+        "schema_version": "poc-mvp3-fast-event-benchmark.v1" if engine == "fast_event" else "poc-mvp2-benchmark.v1",
+        "engine": engine,
         "status": "incomplete", "started_at_utc": utc_now(), "repeats": args.repeats,
-        "scope": "synthetic 64 instruments x 252 sessions, 288 Vector Runs only",
+        "scope": "synthetic 64 instruments x 252 sessions, 288 {} Runs only".format(engine),
         "provenance": {
             "git_revision": command_text(["git", "rev-parse", "HEAD"]),
             "git_status_porcelain": status,
@@ -198,8 +218,9 @@ def measure(args):
         base_path = temporary / "base.json"
         subprocess.run([str(prepare), str(seed), str(base_path)], cwd=ROOT,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-        definition = workload(json.loads(base_path.read_text()))
-        if definition != json.loads(DEFINITION.read_text()):
+        definition = workload(json.loads(base_path.read_text()), engine)
+        checked_definition = ROOT / "poc/mvp3-benchmark/experiment.json" if engine == "fast_event" else DEFINITION
+        if definition != json.loads(checked_definition.read_text()):
             raise ValueError("published fixture definition differs from checked-in experiment.json")
         definition_path = temporary / "experiment.json"
         write_json(definition_path, definition)
@@ -214,58 +235,57 @@ def measure(args):
             "command": warm_command, "stdout": warm_result.stdout, "stderr": warm_result.stderr,
         }
         write_json(raw_path, record)
-        for threads in (1, 2, 4, 8):
-            for cache in ("cold", "hot"):
-                for level in ("summary", "full"):
-                    for repeat in range(1, args.repeats + 1):
-                        name = "{}-{}-{}-{}".format(threads, cache, level, repeat)
-                        lake = temporary / name
-                        shutil.copytree(seed, lake)
-                        if cache == "hot":
-                            shutil.copytree(warm / "features", lake / "features")
-                        if (lake / "experiments").exists() or (cache == "cold" and (lake / "features").exists()):
-                            raise ValueError("measurement lake is not initially data/Universe only")
-                        before = file_totals(lake)
-                        timing_path = temporary / (name + ".time.txt")
-                        command = [
-                            "/usr/bin/time", "-l", "-o", str(timing_path), str(binary),
-                            "run", str(definition_path), "--lake", str(lake),
-                            "--level", level, "--threads", str(threads),
-                        ]
-                        started_at = utc_now()
-                        started = time.perf_counter()
-                        result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
-                        wall_seconds = time.perf_counter() - started
-                        sample = {
-                            "threads": threads, "cache_state": cache, "result_level": level,
-                            "repeat": repeat, "started_at_utc": started_at,
-                            "finished_at_utc": utc_now(), "command": command,
-                            "exit_code": result.returncode, "wall_seconds": wall_seconds,
-                            "stdout": result.stdout, "stderr": result.stderr,
-                            "time_output": timing_path.read_text(),
-                            "lake_before": before, "lake_after": file_totals(lake),
-                        }
-                        record["measurements"].append(sample)
-                        write_json(raw_path, record)
-                        if result.returncode != 0:
-                            raise ValueError("CLI failed for {}; see {}".format(name, raw_path))
-                        cli = json.loads(result.stdout)
-                        execution = (
-                            lake / "experiments" / cli["exp"].split(":")[-1]
-                            / "executions" / cli["exe"].split(":")[-1]
-                        )
-                        manifest = json.loads((execution / "execution.json").read_text())
-                        sample.update({
-                            "cli": cli, "execution_provenance": manifest["execution"],
-                            "execution_machine": manifest["machine"],
-                            "summary_logical_hash": manifest["summary_logical_hash"],
-                            "summary_no_runs": not (execution / "runs").exists() if level == "summary" else None,
-                        })
-                        write_json(raw_path, record)
-                        if level == "summary" and not sample["summary_no_runs"]:
-                            raise ValueError("summary execution contains runs/: {}".format(name))
-                        validate_provenance(record["provenance"], sample)
-                        shutil.rmtree(lake)
+        for threads, cache, level in matrix(engine):
+            for repeat in range(1, args.repeats + 1):
+                name = "{}-{}-{}-{}".format(threads, cache, level, repeat)
+                lake = temporary / name
+                shutil.copytree(seed, lake)
+                if cache == "hot":
+                    shutil.copytree(warm / "features", lake / "features")
+                if (lake / "experiments").exists() or (cache == "cold" and (lake / "features").exists()):
+                    raise ValueError("measurement lake is not initially data/Universe only")
+                before = file_totals(lake)
+                timing_path = temporary / (name + ".time.txt")
+                command = [
+                    "/usr/bin/time", "-l", "-o", str(timing_path), str(binary),
+                    "run", str(definition_path), "--lake", str(lake),
+                    "--level", level, "--threads", str(threads),
+                ]
+                started_at = utc_now()
+                started = time.perf_counter()
+                result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
+                wall_seconds = time.perf_counter() - started
+                sample = {
+                    "threads": threads, "cache_state": cache, "result_level": level,
+                    "repeat": repeat, "started_at_utc": started_at,
+                    "finished_at_utc": utc_now(), "command": command,
+                    "exit_code": result.returncode, "wall_seconds": wall_seconds,
+                    "stdout": result.stdout, "stderr": result.stderr,
+                    "time_output": timing_path.read_text(),
+                    "lake_before": before, "lake_after": file_totals(lake),
+                }
+                record["measurements"].append(sample)
+                write_json(raw_path, record)
+                if result.returncode != 0:
+                    raise ValueError("CLI failed for {}; see {}".format(name, raw_path))
+                cli = json.loads(result.stdout)
+                execution = (
+                    lake / "experiments" / cli["exp"].split(":")[-1]
+                    / "executions" / cli["exe"].split(":")[-1]
+                )
+                manifest = json.loads((execution / "execution.json").read_text())
+                sample.update({
+                    "cli": cli, "execution_provenance": manifest["execution"],
+                    "execution_machine": manifest["machine"],
+                    "summary_logical_hash": manifest["summary_logical_hash"],
+                    "summary_no_runs": not (execution / "runs").exists() if level == "summary" else None,
+                    "all_accounting_verified": all(run.get("accounting_verified") is True for run in manifest["runs"]) if engine == "fast_event" else None,
+                })
+                write_json(raw_path, record)
+                if level == "summary" and not sample["summary_no_runs"]:
+                    raise ValueError("summary execution contains runs/: {}".format(name))
+                validate_provenance(record["provenance"], sample)
+                shutil.rmtree(lake)
         # Publish completion only after the full matrix passes report validation.
         record["status"] = "measured"
         report = summarize(record)
@@ -284,6 +304,7 @@ def main():
     run = commands.add_parser("run")
     run.add_argument("--output", type=Path, required=True)
     run.add_argument("--repeats", type=int, default=3)
+    run.add_argument("--engine", choices=("vector", "fast_event"), default="vector")
     args = parser.parse_args()
     if args.command == "run":
         measure(args)

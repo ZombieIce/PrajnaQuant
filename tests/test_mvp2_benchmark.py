@@ -40,11 +40,11 @@ def measurements():
 
 
 class BenchmarkReportCliTests(unittest.TestCase):
-    def summarize(self, samples, status="measured"):
+    def summarize(self, samples, status="measured", engine="vector"):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "raw.json"
             source.write_text(json.dumps({
-                "status": status, "repeats": 3, "measurements": samples,
+                "status": status, "repeats": 3, "measurements": samples, "engine": engine,
                 "provenance": {"git_revision": "a" * 40, "reproducible": True},
             }))
             return subprocess.run(
@@ -111,6 +111,30 @@ class BenchmarkReportCliTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stdout, "")
                 self.assertIn("provenance", result.stderr)
+
+    def test_fast_event_summary_matrix_requires_all_run_accounting_checks(self):
+        samples = [s for s in measurements() if s["result_level"] == "summary"]
+        for sample in samples:
+            sample["all_accounting_verified"] = True
+        result = self.summarize(samples, engine="fast_event")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(json.loads(result.stdout)["cells"]), 8)
+        for invalid in (False, None):
+            samples[0]["all_accounting_verified"] = invalid
+            result = self.summarize(samples, engine="fast_event")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("accounting", result.stderr)
+
+    def test_fast_event_workload_records_lot_costs_and_capital(self):
+        definition = json.loads((ROOT / "poc/mvp3-benchmark/experiment.json").read_text())
+        fixture = json.loads((ROOT / "poc/poc0-benchmark/fixtures/b2-s2-scale-64x252-v2.json").read_text())
+        self.assertEqual(definition["engine"], "fast_event")
+        self.assertEqual(definition["fast_event"]["sizing"], "lot")
+        self.assertEqual(definition["fast_event"]["rebalance"], "full_target")
+        self.assertEqual(definition["fast_event"]["lot_size_source"], {"kind": "instrument"})
+        self.assertEqual(float(definition["fast_event"]["initial_cash"]), fixture["account"]["initial_cash"])
+        self.assertEqual(float(definition["fast_event"]["minimum_commission"]), fixture["costs"]["minimum_commission"])
+        self.assertEqual(definition["parameter_space"], json.loads((SCRIPT.parent / "experiment.json").read_text())["parameter_space"])
 
 
 if __name__ == "__main__":

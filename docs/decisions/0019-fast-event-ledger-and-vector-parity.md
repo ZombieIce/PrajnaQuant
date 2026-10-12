@@ -122,3 +122,20 @@ MaCrossover 默认 20/60 Session raw close 均值差，每标的独立交叉状�
 只在目标状态改变时输出完整目标；缺失/未知/收盘后可用 gap 中断前后 gap 比较，保留既有目标状态，
 下一可用 gap 仅建立比较基点。`ma_crossover::gaps` 提供值、状态与最大输入可用时间诊断。
 Vector 的新参数接入 Experiment/Run Spec 仍由 #123 负责；现有 S2 canonical Run Spec 不新增字段，身份不变。
+
+### Fast Event Experiment / ResultLevel 接入（#123）
+
+Experiment 接受 `fast_event@1` 与三种封闭策略；旧 `s2_rotation` / `vector@1`
+默认 skip 的 Run Spec 不变，显式 skip 不追加身份字段，retry 则显式进入身份。
+Fast Event Run Spec 追加规范化账户币种/初始资本、VP ID/固定资本分配、sizing、rebalance、
+POC entry budget、lot size 来源及 DSV/显式解析值、最低佣金；线程数与 ResultLevel 不入身份。
+此 CLI 的多个 VP 使用同一 Run 策略/参数，不提供异构 VP 策略定义。
+
+Summary 内仍验证每 Session 两点/两层恒等式，失败 Run 中止并标 failed，其他 Run 继续；
+成功 manifest 标记 accounting_verified，摘要后释放 Run 明细。
+Standard 保存账户和 VP 双估值点（含 exact decimal、估值价来源）；Full 保存提交 Order、
+阻塞/跳过尝试、Fill 全部费用分项，并额外保存 `fee_settlements` 以保证 F8 fee-only 现金可重放。
+JSON payload 封装为 row_id 寻址的 Parquet 表，logical hash、等级提升与已有结果重放沿用 ADR 0018。
+Fast Event E11 使用账户 daily close NAV，turnover/cost 按 raw-open pre-trade equity 归一；
+Vector 保持 open NAV，跨引擎数值比较仍须按前文对齐估值点。
+具体输入、表映射与局限见 [Experiment 契约](../../crates/prajna-experiment/README.md)。

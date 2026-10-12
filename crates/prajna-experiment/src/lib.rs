@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
+mod engine;
 mod storage;
 mod summary;
 pub use storage::{
@@ -213,6 +214,10 @@ impl StrategyParameters {
 pub enum ParameterSpace {
     Grid(BTreeMap<String, Vec<Value>>),
     List(Vec<StrategyParameters>),
+    Native {
+        combinations: Vec<Value>,
+        normalized: Value,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -283,6 +288,8 @@ pub struct Experiment {
     sessions_per_year: u64,
     parameter_space: ParameterSpace,
     normalized: Value,
+    engine: engine::EngineSettings,
+    strategy_kind: String,
 }
 
 #[derive(Deserialize)]
@@ -300,6 +307,10 @@ struct DefinitionInput {
     #[serde(default)]
     seed: Option<Value>,
     parameter_space: Value,
+    #[serde(default)]
+    unfilled_entry: Option<String>,
+    #[serde(default)]
+    fast_event: Option<engine::FastSettingsInput>,
 }
 
 impl Experiment {
@@ -314,14 +325,9 @@ impl Experiment {
                 "sessions_per_year must be a positive integer no greater than 2^53 - 1",
             ));
         }
-        if input.strategy != "s2_rotation" {
-            return Err(invalid("strategy must be s2_rotation"));
-        }
-        if input.engine != "vector" {
-            return Err(invalid("engine must be vector"));
-        }
+        let engine = engine::EngineSettings::parse(&input, lake_root.as_ref())?;
         if input.seed.as_ref().is_some_and(|seed| !seed.is_null()) {
-            return Err(invalid("Vector engine seed must be omitted or null"));
+            return Err(invalid("deterministic engine seed must be omitted or null"));
         }
         input
             .venue
@@ -340,8 +346,9 @@ impl Experiment {
         universe.validate_against(lake_root.as_ref(), &input.dsv)?;
         validate_universe_venue(&universe, &input.venue)?;
         let costs = Costs::parse(&input.costs)?;
-        let parameter_space = parse_parameter_space(&input.parameter_space)?;
-        let normalized = normalize_definition(&input, costs, &parameter_space);
+        let parameter_space = engine::parse_space(&input.strategy, &input.parameter_space)?;
+        let mut normalized = normalize_definition(&input, costs, &parameter_space);
+        engine.normalize_definition(&mut normalized, &input.strategy);
         Ok(Self {
             dsv: input.dsv,
             universe: input.universe,
@@ -351,6 +358,8 @@ impl Experiment {
             sessions_per_year: input.sessions_per_year,
             parameter_space,
             normalized,
+            engine,
+            strategy_kind: input.strategy,
         })
     }
 
@@ -391,7 +400,7 @@ impl Experiment {
 
     /// Canonical Run Spec JSON, including its identity-bearing semantics.
     pub fn run_spec(&self, parameters: &StrategyParameters) -> Value {
-        serde_json::json!({
+        let mut spec = serde_json::json!({
             "dsv": self.dsv,
             "universe": self.universe,
             "venue": self.venue,
@@ -400,7 +409,9 @@ impl Experiment {
             "availability_assumption": self.availability_assumption,
             "engine": { "kind": "vector", "semantic_version": "vector@1" },
             "seed": Value::Null,
-        })
+        });
+        self.engine.normalize_spec(&mut spec);
+        spec
     }
 
     /// Expands and validates every parameter combination before returning any Runs.
@@ -413,9 +424,13 @@ impl Experiment {
         &self,
         universe: &StaticUniverse,
     ) -> Result<Vec<ExpandedRun>, ExperimentError> {
+        if let ParameterSpace::Native { combinations, .. } = &self.parameter_space {
+            return engine::expand_native(self, combinations);
+        }
         let candidates = match &self.parameter_space {
             ParameterSpace::Grid(axes) => expand_grid(axes)?,
             ParameterSpace::List(values) => values.clone(),
+            ParameterSpace::Native { .. } => unreachable!(),
         };
         let mut runs = BTreeMap::new();
         for (index, parameters) in candidates.into_iter().enumerate() {
@@ -444,15 +459,17 @@ impl Experiment {
             let factor = parameters
                 .factor()
                 .map_err(|error| fail(error.to_string()))?;
-            parameters
+            let mut strategy = parameters
                 .strategy(factor.clone())
                 .map_err(|error| fail(error.to_string()))?;
+            self.engine.set_policy(&mut strategy);
             let run_id = self.run_id(&parameters)?;
             runs.entry(run_id.clone()).or_insert_with(|| ExpandedRun {
                 run_spec: self.run_spec(&parameters),
                 run_id,
-                parameters,
-                factor,
+                parameters: Some(parameters),
+                factor: Some(factor),
+                strategy,
             });
         }
         Ok(runs.into_values().collect())
@@ -464,10 +481,18 @@ impl Experiment {
         lake_root: impl AsRef<Path>,
         threads: usize,
     ) -> Result<ExecutionReport, ExperimentError> {
+        self.execute_level(lake_root.as_ref(), threads, ResultLevel::Full)
+    }
+
+    fn execute_level(
+        &self,
+        lake_root: &Path,
+        threads: usize,
+        level: ResultLevel,
+    ) -> Result<ExecutionReport, ExperimentError> {
         if threads == 0 {
             return Err(invalid("threads must be greater than zero"));
         }
-        let lake_root = lake_root.as_ref();
         let universe = StaticUniverse::load(lake_root, &self.universe)?;
         let runs = self.expand_for_universe(&universe)?;
         validate_universe_venue(&universe, &self.venue)
@@ -496,7 +521,10 @@ impl Experiment {
 
         let mut factor_nodes = BTreeMap::new();
         for run in &runs {
-            for factor in FactorGraph::resolve(run.factor.clone())
+            let Some(root_factor) = &run.factor else {
+                continue;
+            };
+            for factor in FactorGraph::resolve(root_factor.clone())
                 .map_err(|error| execution_error("resolve factor graph", error))?
             {
                 factor_nodes
@@ -583,16 +611,22 @@ impl Experiment {
         let costs = self.vector_costs();
         let run_started = Instant::now();
         let results = pool.install(|| {
-            execute_runs(&runs, |run| {
-                execute_run(
-                    run,
-                    &factor_values,
-                    &panel,
-                    &executable_by_key,
-                    &costs,
-                    assumption,
-                )
-            })
+            runs.par_iter()
+                .map(|run| {
+                    engine::execute(
+                        self,
+                        run,
+                        &factor_values,
+                        &panel,
+                        &statuses,
+                        &executable_by_key,
+                        &costs,
+                        assumption,
+                        universe.members(),
+                        level,
+                    )
+                })
+                .collect()
         });
         let run_time_ms = run_started.elapsed().as_millis();
         let compute_count = cache.compute_count();
@@ -618,7 +652,9 @@ impl Experiment {
         let lake_root = lake_root.as_ref();
         let started_at = storage::now_rfc3339();
         let identity = ExecutionIdentity::capture(&self.id()?, repository)?;
-        let report = self.execute(lake_root, threads)?;
+        let effective_level =
+            storage::replay_level(lake_root, &self.id()?, &identity.id, result_level)?;
+        let report = self.execute_level(lake_root, threads, effective_level)?;
         storage::store_execution(
             self,
             &identity,
@@ -678,8 +714,9 @@ impl Experiment {
 pub struct ExpandedRun {
     pub run_spec: Value,
     pub run_id: String,
-    pub parameters: StrategyParameters,
-    factor: Factor,
+    pub parameters: Option<StrategyParameters>,
+    factor: Option<Factor>,
+    strategy: VectorStrategy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -695,6 +732,9 @@ pub struct RunExecution {
     pub run_id: String,
     pub status: RunStatus,
     pub result: Option<VectorResult>,
+    #[serde(skip)]
+    pub fast_event_result: Option<prajna_research::fast_event::FastEventResult>,
+    pub summary: Option<RunSummary>,
     pub error: Option<String>,
 }
 
@@ -707,42 +747,7 @@ pub struct ExecutionReport {
     pub cache_hit_count: u64,
 }
 
-fn execute_run(
-    run: &ExpandedRun,
-    factor_values: &HashMap<String, DataFrame>,
-    panel: &Panel,
-    executable_by_key: &HashMap<(InstrumentId, chrono::NaiveDate), bool>,
-    costs: &VectorCosts,
-    assumption: AvailabilityAssumption,
-) -> Result<VectorResult, String> {
-    (|| {
-        let score = factor_values
-            .get(&run.factor.canonical_json().to_string())
-            .ok_or_else(|| "stage 1 did not produce this Run's score Factor Values".to_owned())?;
-        let strategy = run
-            .parameters
-            .strategy(run.factor.clone())
-            .map_err(|error| error.to_string())?;
-        let decisions = strategy
-            .decide(score, &panel.sessions)
-            .map_err(|error| error.to_string())?;
-        run_vector_with_policy(
-            panel,
-            &decisions,
-            strategy.unfilled_entry(),
-            costs,
-            assumption,
-            |instrument, session| {
-                executable_by_key
-                    .get(&(instrument.clone(), session.session_date))
-                    .copied()
-                    .unwrap_or(false)
-            },
-        )
-        .map_err(|error| error.to_string())
-    })()
-}
-
+#[cfg(test)]
 fn execute_runs(
     runs: &[ExpandedRun],
     execute_one: impl Fn(&ExpandedRun) -> Result<VectorResult, String> + Sync,
@@ -754,6 +759,8 @@ fn execute_runs(
                 run_id: run.run_id.clone(),
                 status: RunStatus::Completed,
                 result: Some(result),
+                fast_event_result: None,
+                summary: None,
                 error: None,
             },
             Err(error) => RunExecution {
@@ -761,6 +768,8 @@ fn execute_runs(
                 run_id: run.run_id.clone(),
                 status: RunStatus::Failed,
                 result: None,
+                fast_event_result: None,
+                summary: None,
                 error: Some(error),
             },
         })
@@ -906,6 +915,7 @@ fn normalize_definition(input: &DefinitionInput, costs: Costs, space: &Parameter
                 .collect::<Map<_, _>>();
             serde_json::json!({ "grid": normalized })
         }
+        ParameterSpace::Native { normalized, .. } => normalized.clone(),
         ParameterSpace::List(values) => {
             serde_json::json!({ "list": values.iter().map(StrategyParameters::normalized).collect::<Vec<_>>() })
         }
@@ -915,8 +925,8 @@ fn normalize_definition(input: &DefinitionInput, costs: Costs, space: &Parameter
         "dsv": input.dsv,
         "universe": input.universe,
         "venue": input.venue,
-        "strategy": "s2_rotation",
-        "engine": "vector",
+        "strategy": input.strategy,
+        "engine": input.engine,
         "availability_assumption": input.availability_assumption,
         "costs": costs.normalized(),
         "sessions_per_year": input.sessions_per_year,
@@ -1284,7 +1294,9 @@ mod tests {
     fn run_parameters(experiment: &Experiment) -> &StrategyParameters {
         match experiment.parameter_space() {
             ParameterSpace::List(parameters) => &parameters[0],
-            ParameterSpace::Grid(_) => panic!("expected list parameter space"),
+            ParameterSpace::Native { .. } | ParameterSpace::Grid(_) => {
+                panic!("expected list parameter space")
+            }
         }
     }
 
@@ -1438,7 +1450,7 @@ mod tests {
         let expanded = experiment.expand(&lake).unwrap();
         let expected_keys = expanded
             .iter()
-            .flat_map(|run| FactorGraph::resolve(run.factor.clone()).unwrap())
+            .flat_map(|run| FactorGraph::resolve(run.factor.clone().unwrap()).unwrap())
             .map(|factor| {
                 FactorKey::for_tree(&factor, &dsv, &universe, AvailabilityAssumption::None)
                     .as_str()
@@ -2224,4 +2236,5 @@ mod tests {
             _ => assert_eq!(actual, expected, "{path}"),
         }
     }
+    mod fast_event;
 }
