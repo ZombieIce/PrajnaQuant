@@ -6,7 +6,8 @@ F8-F10/F13.4 for [ticket #117](https://github.com/ZombieIce/PrajnaQuant/issues/1
 plus the POC-only `lot` + `entry_only` variant for ticket #121.
 It imports neither Rust artifacts, the MVP-1 Python oracle, POC execution
 code, nor Nautilus. It is a third-party reference, not a second production
-quant core and not evidence that the platform Fast Event engine exists.
+quant core. The Rust differential test below supplies the platform evidence
+for this synthetic subset; the oracle alone does not.
 
 ## Inputs and provenance
 
@@ -20,6 +21,7 @@ Hashes are SHA-256 of the exact committed source bytes, also included as
 | [hand-v1.json](fixtures/hand-v1.json) | New hand-authored 1 x 3; S1 fee/accounting example | `87acfaa5f180dc388b0643d9618e49332f44e1a6e35e4b49af588d7c07f94aa6` |
 | [hand-retry-v1.json](fixtures/hand-retry-v1.json) | Hand-authored 2 x 4; S1 costed retry of a HALTED leg, budget cut to cash | `18124241deea15d6e99feac4cbd544c2b612fa70e71ff407128888c39867065a` |
 | [hand-rebalance-v1.json](fixtures/hand-rebalance-v1.json) | Hand-authored 2 x 6; S2 `top_n=2` continuing holdings trimmed/topped up with costs | `4ea9162adbb0f8d0bbaa3eeda8f5c19d3fd79a032137884ede7195f86e13bcec` |
+| [hand-fee-only-v1.json](fixtures/hand-fee-only-v1.json) | Hand-authored 2 x 5; S2 exact zero-quantity F8 fee settlement | `17930d0f7f439167fb16087107539854c3055ff02db86265c40a52aabd33bf34` |
 
 The compressed MA fixture expands into weekdays from `start_date`, with
 60 flat, 20 high and 50 low closes for A; B/C remain flat. Opens are 100.
@@ -65,15 +67,27 @@ for sizing in lot vector_parity; do
     --fixture poc/mvp3-golden/fixtures/hand-rebalance-v1.json \
     --strategy s2 --sizing "$sizing" \
     --out "poc/mvp3-golden/expected/hand-rebalance-v1.s2.$sizing.json"
+  python3 poc/mvp3-golden/fast_event_golden.py \
+    --fixture poc/mvp3-golden/fixtures/hand-fee-only-v1.json \
+    --strategy s2 --sizing "$sizing" \
+    --out "poc/mvp3-golden/expected/hand-fee-only-v1.s2.$sizing.json"
 done
 python3 -m unittest tests.test_mvp3_fast_event_golden -v
 ```
 
-The fourteen `full_target` expected JSON files contain every open-after-execution and close
+The sixteen `full_target` expected JSON files contain every open-after-execution and close
 cash/quantity/valuation/equity/NAV row, decisions, execution attempts,
 orders (including blocked/unaffordable attempts), Fills and fee components.
 All rows and numeric values are compared with CLI recomputation in CI,
-not merely final NAV. Tests use temporary paths and do not require a
+not merely final NAV. The eight `vector_parity` results use schema
+`mvp3.full_target.golden@2`: ledger arithmetic is independent stdlib Decimal,
+scale 18 with half-even multiplication/division, and every Order, Fill and
+holding includes a canonical `quantity_decimal` string. Numeric projections
+remain available for cash/equity/fee and NAV comparisons. `fee_settlements`
+records positive F8 fees when the exact desired quantity is unchanged,
+without fabricating zero-quantity Orders/Fills. Lot and POC `entry_only`
+goldens retain schema v1 and float64 arithmetic.
+Tests use temporary paths and do not require a
 specific working directory or locally built binaries.
 
 The four `entry_only` expected files are:
@@ -163,7 +177,8 @@ Registered differences (not claims of byte-for-byte legacy compatibility):
 
 No POC code or fixture is modified, and these oracle checks do not establish
 that the new Rust scale-18 Fast Event implementation reproduces all legacy
-orders. Platform/oracle comparison remains the separate #122 scope.
+orders. The #122 `full_target` differential coverage is described below;
+it does not extend the POC `entry_only` comparison.
 
 ## Time, decisions and execution
 
@@ -226,14 +241,14 @@ use these bases. E1 = E0 - sum(costs); full_target quantities are
 target * E1 / raw open. Fills use raw open. A cost-induced reduction can
 sell a continuing holding with zero weight-delta fee basis; therefore
 `fee_side` records the basis direction separately from the actual Fill side.
-Minimum commission and lots do not apply. An absolute weight delta <= 1e-12
-zeros the fee basis, but every held or targeted instrument is still resized
-on E1. An Order/Fill is suppressed only when its fee basis is zero and
-abs(desired quantity - current quantity) * raw open / E0 <= 1e-12, so float
-residue never becomes a dust Fill without dropping cost-induced resizing.
-This absolute weight threshold is part of the oracle contract; Rust Fast
-Event must use a consistent no-trade rule for Order/Fill parity, while
-independently proving its scale-18 accounting.
+Minimum commission and lots do not apply. There is **no absolute weight
+no-trade threshold**: every scale-18-representable nonzero difference contributes
+to F8 fees and quantity changes. A zero quantity delta never produces an
+Order/Fill; positive fees in that case are fee-only settlements. Signals
+and target weights remain float64; their shortest decimal representation
+enters the Decimal ledger. This replaces the old oracle's 1e-12 suppression,
+with owner approval recorded on #122. It also removes float residue such
+as `41.167500000000004` without relaxing quantity equality.
 Retry leaves filled quantities unchanged
 and sizes only missing legs per ADR 0019 (#116): budget is the original
 target weight times pre-fee open equity, fees are paid from remaining cash,
@@ -252,16 +267,15 @@ top-up or embedded lot slippage.
 This ticket uses one VP allocated all account capital, unallocated=0:
 Session cash/holdings/equity are both that VP's and the account's ledger.
 Multi-VP aggregation is not implemented or claimed here. Replay checks
-cash from all Fills and both valuation identities. Python float64 only
-proves conservation within tolerance; Rust scale-18 accounting must still
-prove exact conservation independently.
+cash from all Fills (and parity fee-only settlements) and both valuation
+identities. Rust independently checks exact two-level scale-18 conservation;
+the float64 lot reference only proves conservation within tolerance.
 
 F7 comparison requires cash/equity/fees absolute error <= 1e-6 CNY and
 normalized Vector NAV relative error <= 1e-9. Order/Fill identities,
 directions and lot quantities must match exactly; fractional quantities
-are the F8 analytical values recorded as float64, not an assertion that
-Python reproduces Rust scale-18 rounding. No extra fractional-quantity
-tolerance is authorized by this oracle. The same Python CLI replay checks
+must match the canonical scale-18 `quantity_decimal` strings exactly.
+No fractional-quantity tolerance is authorized. The same Python CLI replay checks
 every saved value exactly. Existing Vector S2 fixtures are independently
 checked for decisions/attempts and open NAV alignment.
 
@@ -283,3 +297,52 @@ commission 1%, minimum 2, buy slip 1%, buy tax 2%.
 
 L1 does not model T+1, price limits, currency-unit rounding, interest,
 funding or corporate actions. These results prove synthetic semantics only.
+
+## Platform differential acceptance (#122)
+
+```sh
+cargo test -p prajna-research --test fast_event_fixtures \
+  full_target_matches_vector_and_independent_python_on_every_session_and_fill \
+  --locked --offline
+```
+
+The test publishes D7 v3 inputs into a temporary lake, generates decisions
+through the real `VectorStrategy::decide_panel` interface (never reads the
+oracle decision tape as engine input), then runs `run_fast_event` and
+`run_vector_with_policy`. It covers S1/S2/S3 3x10, S3 3x130, the 1x3
+fee example, costed blocked-leg retry 2x4, and continuing-holding
+rebalance 2x6 and the fee-only 2x5 example, in both sizing modes
+(16 Fast Event runs). Hand inputs receive
+only the normalizer's required synthetic metadata; prices, calendars,
+availability, costs, per-instrument lots and strategy parameters are preserved.
+
+Checks include decision dates/targets/ranks, executed/deferred/retry traces
+and final pending targets; both valuation points, exact account/VP
+identities, prices and raw/carried sources; submitted Orders and Fills in
+sequence, exact quantities, fee bases/directions and every cost component.
+Oracle blocked/unaffordable `orders` are diagnostics, not submitted Domain
+Orders. Blocked targets are compared through execution traces; submitted
+Orders are the `status=filled` projection, with engine-local order IDs
+normalized by sequence and independently checked against the account.
+An unaffordable zero-quantity diagnostic must not create a Fill.
+
+Vector row NAV includes the transition to the **next** open but excludes
+that next open's execution cost. Therefore the same-Session post-fill
+comparison is `vector.nav / (1 + vector.gross_return)` versus Fast Event
+open-after equity / initial capital. The changing-open 2x6 case guards this
+alignment; comparing unaligned rows only on flat opens would be insufficient.
+Every comparison uses the original F7 thresholds, and failures identify
+fixture/strategy/sizing, Session, Instrument and field. The CLI regression
+also proves a weight delta below 1e-12 is charged rather than suppressed.
+
+The fee-only hand case uses a deliberately large 40% commission for exact
+human-checkable arithmetic: D4 skips halted B, buys A=40 at 10, and leaves
+cash=400. At D5 raw open A=6/B=10, E0=640 and A drift=.375.
+Targets .5/.5 cost `(.125 + .5) * 640 * .4 = 160`, so E1=480.
+A's desired quantity remains `.5 * 480 / 6 = 40`, but its fee is 32.
+B buys 24 and pays 128; final cash is zero. Both engines and the oracle
+must retain A's quantity, record the fee-only cash delta and never submit
+a zero-quantity Order/Fill.
+
+This is synthetic single-VP `full_target` evidence, not real-market/PIT,
+dividend-total-return, Experiment integration or performance acceptance.

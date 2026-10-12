@@ -1,6 +1,6 @@
 {
   "assumptions": [
-    "independent Python float64 oracle; Rust scale-18 ledger remains canonical",
+    "independent Python oracle; vector_parity uses scale-18 Decimal half-even ledger, signals use float64; Rust ledger remains canonical",
     "single Venue, single Trading Account, one VP; no leverage or partial fills",
     "session close signals, next Session open execution; new decisions replace pending",
     "conservative deferral if any held Instrument is not executable",
@@ -27,6 +27,7 @@
       "skipped_buys": []
     }
   ],
+  "fee_settlements": [],
   "fills": [
     {
       "cash_change": -1000.0,
@@ -40,6 +41,7 @@
       "order_id": "order-1",
       "price": 10.0,
       "quantity": 96.0,
+      "quantity_decimal": "96",
       "raw_open": 10.0,
       "session_date": "2026-01-06",
       "side": "buy",
@@ -56,6 +58,7 @@
       "instrument_id": "A.SYNTH",
       "order_id": "order-1",
       "quantity": 96.0,
+      "quantity_decimal": "96",
       "reason": null,
       "session_date": "2026-01-06",
       "side": "buy",
@@ -89,7 +92,7 @@
     "unfilled_entry": "retry"
   },
   "pending_at_end": null,
-  "schema_version": "mvp3.full_target.golden@1",
+  "schema_version": "mvp3.full_target.golden@2",
   "sessions": [
     {
       "close": {
@@ -119,6 +122,7 @@
               "session_date": "2026-01-06"
             },
             "quantity": 96.0,
+            "quantity_decimal": "96",
             "value": 1152.0
           }
         },
@@ -136,6 +140,7 @@
               "session_date": "2026-01-06"
             },
             "quantity": 96.0,
+            "quantity_decimal": "96",
             "value": 960.0
           }
         },
@@ -156,6 +161,7 @@
               "session_date": "2026-01-07"
             },
             "quantity": 96.0,
+            "quantity_decimal": "96",
             "value": 1152.0
           }
         },
@@ -173,6 +179,7 @@
               "session_date": "2026-01-07"
             },
             "quantity": 96.0,
+            "quantity_decimal": "96",
             "value": 960.0
           }
         },

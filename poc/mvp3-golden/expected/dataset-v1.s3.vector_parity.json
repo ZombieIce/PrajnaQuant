@@ -1,6 +1,6 @@
 {
   "assumptions": [
-    "independent Python float64 oracle; Rust scale-18 ledger remains canonical",
+    "independent Python oracle; vector_parity uses scale-18 Decimal half-even ledger, signals use float64; Rust ledger remains canonical",
     "single Venue, single Trading Account, one VP; no leverage or partial fills",
     "session close signals, next Session open execution; new decisions replace pending",
     "conservative deferral if any held Instrument is not executable",
@@ -11,6 +11,7 @@
   ],
   "decisions": [],
   "executions": [],
+  "fee_settlements": [],
   "fills": [],
   "fixture_sha256": "9b9009b1586a6f271cd301042f97f2adf84146c870d72802682799d60352ed85",
   "orders": [],
@@ -44,7 +45,7 @@
     "unfilled_entry": "skip"
   },
   "pending_at_end": null,
-  "schema_version": "mvp3.full_target.golden@1",
+  "schema_version": "mvp3.full_target.golden@2",
   "sessions": [
     {
       "close": {

@@ -1,6 +1,7 @@
 import json
 import hashlib
 import math
+from decimal import Decimal
 from pathlib import Path
 import subprocess
 import sys
@@ -14,6 +15,7 @@ SCRIPT = GOLDEN / "fast_event_golden.py"
 HAND = GOLDEN / "fixtures/hand-v1.json"
 RETRY = GOLDEN / "fixtures/hand-retry-v1.json"
 REBALANCE = GOLDEN / "fixtures/hand-rebalance-v1.json"
+FEE_ONLY = GOLDEN / "fixtures/hand-fee-only-v1.json"
 SMALL = ROOT / "poc/poc0-benchmark/fixtures/dataset-v1.json"
 MA = ROOT / "poc/poc0-benchmark/fixtures/b2-ma20-60-v1.json"
 POC_PREFLIGHT = ROOT / "poc/poc0-benchmark/results/b2-matched-decision-loads-reset-selected-2026-09-28.preflight.json"
@@ -353,6 +355,18 @@ class FastEventGoldenTests(unittest.TestCase):
         self.assertEqual(result["sessions"][2]["close"]["equity"], 1152)
         self.assertEqual(len(result["fills"]), 1)
 
+    def test_parity_charges_representable_weight_deltas_below_one_e_minus_twelve(self):
+        fixture = json.loads(REBALANCE.read_text())
+        fixture["instruments"][0]["opens"] = [10, 10, 10, 10, 10.00000000001, 10]
+        result = self.run_cli(fixture, strategy="s2", sizing="vector_parity")
+        fills = [row for row in result["fills"]
+                 if row["session_date"] == fixture["calendar"][4]]
+        self.assertEqual(len(fills), 2)
+        for fill in fills:
+            self.assertGreater(fill["fee_basis"], 0)
+            self.assertGreater(fill["commission"], 0)
+            self.assertGreater(fill["quantity"], 0)
+
     def test_retry_buys_only_missing_leg_at_current_equity(self):
         fixture = json.loads(HAND.read_text())
         fixture["calendar"] += ["2026-01-08"]
@@ -425,7 +439,7 @@ class FastEventGoldenTests(unittest.TestCase):
 
     def test_committed_goldens_recompute_every_value_and_preserve_ledger(self):
         cases = [(SMALL, strategy) for strategy in ("s1", "s2", "s3")] + [
-            (MA, "s3"), (HAND, "s1"), (RETRY, "s1"), (REBALANCE, "s2"),
+            (MA, "s3"), (HAND, "s1"), (RETRY, "s1"), (REBALANCE, "s2"), (FEE_ONLY, "s2"),
         ]
         for fixture, strategy in cases:
             for sizing in ("lot", "vector_parity"):
@@ -452,6 +466,9 @@ class FastEventGoldenTests(unittest.TestCase):
                                 fill["total_cost"], fill["commission"] + fill["tax"] + fill["slippage"], delta=1e-6,
                             )
                             self.assertGreaterEqual(fill["minimum_commission_top_up"], 0)
+                        for settlement in actual.get("fee_settlements", []):
+                            if settlement["session_date"] == session["session_date"]:
+                                previous_cash += settlement["cash_change"]
                         self.assertAlmostEqual(session["open"]["cash"], previous_cash, delta=1e-6)
                         for point in ("open", "close"):
                             value = session[point]
@@ -665,6 +682,63 @@ class FastEventGoldenTests(unittest.TestCase):
         self.assertAlmostEqual(trim["quantity"], 49.5 - 0.5 * 1235.025 / 15, delta=1e-9)
         self.assertEqual((top_up["instrument_id"], top_up["side"]), ("B.SYNTH", "buy"))
         self.assertAlmostEqual(top_up["quantity"], 0.5 * 1235.025 / 10 - 49.5, delta=1e-9)
+        self.assertEqual(trim["quantity_decimal"], "8.3325")
+        self.assertEqual(top_up["quantity_decimal"], "12.25125")
+        self.assertEqual(
+            result["sessions"][4]["open"]["holdings"]["A.SYNTH"]["quantity_decimal"],
+            "41.1675",
+        )
+
+    def test_parity_exact_quantity_strings_replay_without_a_tolerance(self):
+        cases = [(SMALL, strategy) for strategy in ("s1", "s2", "s3")] + [
+            (MA, "s3"), (HAND, "s1"), (RETRY, "s1"), (REBALANCE, "s2"), (FEE_ONLY, "s2"),
+        ]
+        for fixture, strategy in cases:
+            with self.subTest(fixture=fixture.name, strategy=strategy):
+                result = self.run_cli(fixture, strategy=strategy, sizing="vector_parity")
+                self.assertEqual(result["schema_version"], "mvp3.full_target.golden@2")
+                quantities = {}
+                orders = {row["order_id"]: row for row in result["orders"]}
+                for session in result["sessions"]:
+                    for fill in result["fills"]:
+                        if fill["session_date"] != session["session_date"]:
+                            continue
+                        quantity = Decimal(fill["quantity_decimal"])
+                        self.assertGreater(quantity, 0)
+                        self.assertEqual(float(quantity), fill["quantity"])
+                        self.assertEqual(
+                            fill["quantity_decimal"],
+                            orders[fill["order_id"]]["quantity_decimal"],
+                        )
+                        instrument = fill["instrument_id"]
+                        quantities[instrument] = quantities.get(instrument, Decimal(0)) + (
+                            quantity if fill["side"] == "buy" else -quantity
+                        )
+                    for point in ("open", "close"):
+                        holdings = session[point]["holdings"]
+                        for instrument, quantity in quantities.items():
+                            self.assertEqual(
+                                quantity,
+                                Decimal(holdings.get(instrument, {}).get("quantity_decimal", "0")),
+                                (session["session_date"], instrument, point),
+                            )
+
+    def test_parity_fee_only_leg_charges_cash_without_a_zero_quantity_order(self):
+        result = self.run_cli(FEE_ONLY, strategy="s2", sizing="vector_parity")
+        # D4: B is halted; A buys .5*(1000-200)/10=40, cash=400.
+        # D5: A opens at 6: E0=640, drift A=.375, targets A=B=.5.
+        # C=(.125+.5)*640*.4=160; E1=480; desired A=.5*480/6=40.
+        # A has no quantity delta but pays .125*640*.4=32; B buys 24, fee=128.
+        self.assertEqual([row["quantity_decimal"] for row in result["fills"]], ["40", "24"])
+        self.assertEqual(result["fee_settlements"], [{
+            "session_date": "2026-01-09", "instrument_id": "A.SYNTH",
+            "vp_id": "vp-1", "fee_basis": 80, "fee_side": "buy",
+            "commission": 32, "tax": 0, "slippage": 0, "cash_change": -32,
+        }])
+        self.assertEqual(result["sessions"][4]["open"]["cash"], 0)
+        self.assertEqual(result["sessions"][4]["open"]["equity"], 480)
+        self.assertTrue(all(row["quantity"] is None or row["quantity"] > 0
+                            for row in result["orders"]))
 
     def test_float_zero_weight_delta_is_no_trade_not_a_dust_fill(self):
         result = self.run_cli(SMALL, strategy="s2", sizing="vector_parity")

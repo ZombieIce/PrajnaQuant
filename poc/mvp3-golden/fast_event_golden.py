@@ -3,11 +3,37 @@
 
 import argparse
 from datetime import date, datetime, timedelta
+from decimal import Decimal, ROUND_HALF_EVEN, getcontext
 import hashlib
 import json
 import math
 from pathlib import Path
 import statistics
+
+getcontext().prec = 100
+QUANTUM = Decimal("1e-18")
+
+
+def fixed(value):
+    return Decimal(str(value)).quantize(QUANTUM, rounding=ROUND_HALF_EVEN)
+
+
+def multiply(left, right):
+    return (left * right).quantize(QUANTUM, rounding=ROUND_HALF_EVEN)
+
+
+def divide(left, right):
+    return (left / right).quantize(QUANTUM, rounding=ROUND_HALF_EVEN)
+
+
+def exact_quantity(value):
+    return format(value, "f").rstrip("0").rstrip(".") if value else "0"
+
+
+def json_decimal(value):
+    if isinstance(value, Decimal):
+        return float(value)
+    raise TypeError(f"unsupported JSON value: {type(value).__name__}")
 
 
 def number(value, name, positive=False):
@@ -165,74 +191,83 @@ def lot_fill(instrument, side, quantity, raw, costs):
     }
 
 
-NO_TRADE_WEIGHT = 1e-12
-
-
 def parity_retry_fills(quantities, targets, prices, equity, cash, costs):
     # ADR 0019 #116: pre-fee budget, fees paid from remaining cash, cut by ID order.
     rate = costs["commission_rate"] + costs["buy_slippage_bps"] / 10000 + costs["buy_tax_rate"]
-    held = math.fsum(quantity * prices[i] for i, quantity in quantities.items() if quantity > 0)
-    cash_weight = max(1 - held / equity, 0.0) if equity > 0 else 0.0
-    cash_weight = min(cash_weight, max(cash, 0.0) / equity)
     fills = []
     for instrument in sorted(targets):
-        buy = min(targets[instrument], cash_weight / (1 + rate))
-        cash_weight = max(cash_weight - buy * (1 + rate), 0.0)
-        if buy <= 0:
+        basis = min(multiply(fixed(targets[instrument]), equity), divide(cash, 1 + rate))
+        if basis <= 0:
             continue
-        basis = equity * buy
         fees = {
             "fee_basis": basis, "fee_side": "buy",
-            "commission": basis * costs["commission_rate"],
-            "slippage": basis * costs["buy_slippage_bps"] / 10000,
-            "tax": basis * costs["buy_tax_rate"],
+            "commission": multiply(basis, costs["commission_rate"]),
+            "slippage": multiply(basis, costs["buy_slippage_bps"] / 10000),
+            "tax": multiply(basis, costs["buy_tax_rate"]),
         }
         raw = prices[instrument]
+        available = cash - fees["commission"] - fees["slippage"] - fees["tax"]
+        quantity = divide(basis, raw)
+        if multiply(quantity, raw) > available:
+            low, high = 0, int(quantity / QUANTUM)
+            while low < high:
+                mid = (low + high + 1) // 2
+                if multiply(mid * QUANTUM, raw) <= available:
+                    low = mid
+                else:
+                    high = mid - 1
+            quantity = low * QUANTUM
+        if quantity == 0:
+            continue
+        notional = multiply(quantity, raw)
+        change = -notional - fees["commission"] - fees["slippage"] - fees["tax"]
+        cash += change
         fills.append({
-            "instrument_id": instrument, "side": "buy", "quantity": basis / raw,
-            "raw_open": raw, "price": raw, "notional": basis,
+            "instrument_id": instrument, "side": "buy", "quantity": quantity,
+            "raw_open": raw, "price": raw, "notional": notional,
             "minimum_commission_top_up": 0.0, **fees,
-            "cash_change": -basis - fees["commission"] - fees["slippage"] - fees["tax"],
+            "cash_change": change,
         })
     return fills
 
 
 def parity_fills(quantities, targets, prices, equity, costs):
     weights = {
-        instrument: quantity * prices[instrument] / equity
+        instrument: divide(multiply(quantity, prices[instrument]), equity)
         for instrument, quantity in quantities.items() if quantity > 0
     }
     bases = {}
     for instrument in sorted(set(weights) | set(targets)):
-        delta = targets.get(instrument, 0) - weights.get(instrument, 0)
+        delta = fixed(targets.get(instrument, 0)) - weights.get(instrument, 0)
         side = "buy" if delta >= 0 else "sell"
-        basis = 0.0 if abs(delta) <= NO_TRADE_WEIGHT else equity * abs(delta)
+        basis = multiply(equity, abs(delta))
         bases[instrument] = {
             "fee_basis": basis, "fee_side": side,
-            "commission": basis * costs["commission_rate"],
-            "slippage": basis * costs[f"{side}_slippage_bps"] / 10000,
-            "tax": basis * costs[f"{side}_tax_rate"],
+            "commission": multiply(basis, costs["commission_rate"]),
+            "slippage": multiply(basis, costs[f"{side}_slippage_bps"] / 10000),
+            "tax": multiply(basis, costs[f"{side}_tax_rate"]),
         }
-    cost = math.fsum(row["commission"] + row["slippage"] + row["tax"] for row in bases.values())
+    cost = sum(row["commission"] + row["slippage"] + row["tax"] for row in bases.values())
     after = equity - cost
     if after <= 0:
         raise ValueError("costs exhaust pre-open equity")
     fills = []
     for instrument, fees in bases.items():
-        target = targets.get(instrument, 0)
-        desired = target * after / prices[instrument] if target else 0.0
+        target = fixed(targets.get(instrument, 0))
+        desired = divide(multiply(target, after), prices[instrument]) if target else fixed(0)
         delta = desired - quantities[instrument]
         side = "buy" if delta >= 0 else "sell"
         quantity = abs(delta)
         raw = prices[instrument]
         # Zero fee basis still requires resizing to E1 when other legs incur costs.
-        if fees["fee_basis"] == 0 and quantity * raw / equity <= NO_TRADE_WEIGHT:
+        total_fees = fees["commission"] + fees["slippage"] + fees["tax"]
+        if quantity == 0 and total_fees == 0:
             continue
         fills.append({
             "instrument_id": instrument, "side": side, "quantity": quantity,
-            "raw_open": raw, "price": raw, "notional": quantity * raw,
+            "raw_open": raw, "price": raw, "notional": multiply(quantity, raw),
             "minimum_commission_top_up": 0.0, **fees,
-            "cash_change": -delta * raw - fees["commission"] - fees["slippage"] - fees["tax"],
+            "cash_change": -multiply(delta, raw) - total_fees,
         })
     return sorted(fills, key=lambda row: (row["side"] != "sell", row["instrument_id"]))
 
@@ -274,6 +309,9 @@ def s2_score(rows, index, config, cutoff):
 def run(fixture, strategy, sizing, unfilled_entry, rebalance="full_target", poc0_s1_timing=False):
     fixture = expand_ma(fixture)
     calendar, bars, lots, gates, costs, initial, closes_at = inputs(fixture)
+    if sizing == "vector_parity":
+        costs = {key: fixed(value) for key, value in costs.items()}
+        initial = fixed(initial)
     if rebalance not in ("full_target", "entry_only"):
         raise ValueError("rebalance must be full_target or entry_only")
     if rebalance == "entry_only" and sizing != "lot":
@@ -301,19 +339,23 @@ def run(fixture, strategy, sizing, unfilled_entry, rebalance="full_target", poc0
     if any(instrument not in bars for instrument in signal_ids):
         raise ValueError("POC S3 entry_only requires Instrument A.SYNTH")
     cash = initial
-    quantities = {instrument: 0.0 for instrument in ids}
+    quantities = {instrument: fixed(0) if sizing == "vector_parity" else 0.0 for instrument in ids}
     last_marks = {"open": {}, "close": {}}
     pending = None
     first_s2 = None
     previous_gaps = {instrument: None for instrument in ids}
     ma_held = set()
     result = {"sessions": [], "decisions": [], "executions": [], "orders": [], "fills": []}
+    if sizing == "vector_parity":
+        result["fee_settlements"] = []
 
     def marks(index, point):
         prices = {}
         sources = {}
         for instrument in ids:
             raw = bars[instrument][index][point]
+            if raw is not None and sizing == "vector_parity":
+                raw = fixed(raw)
             if raw is not None:
                 last_marks[point][instrument] = (raw, calendar[index])
             previous = last_marks[point].get(instrument)
@@ -331,13 +373,19 @@ def run(fixture, strategy, sizing, unfilled_entry, rebalance="full_target", poc0
         holdings = {
             instrument: {
                 "quantity": quantities[instrument], "price": prices[instrument],
-                "value": quantities[instrument] * prices[instrument],
+                "value": multiply(quantities[instrument], prices[instrument])
+                if sizing == "vector_parity" else quantities[instrument] * prices[instrument],
+                **({"quantity_decimal": exact_quantity(quantities[instrument])}
+                   if sizing == "vector_parity" else {}),
                 "price_source": sources[instrument],
             }
             for instrument in ids if quantities[instrument] > 0
         }
-        equity = cash + math.fsum(row["value"] for row in holdings.values())
-        if cash < -1e-6 or any(value < 0 for value in quantities.values()):
+        equity = cash + (
+            sum(row["value"] for row in holdings.values())
+            if sizing == "vector_parity" else math.fsum(row["value"] for row in holdings.values())
+        )
+        if cash < (0 if sizing == "vector_parity" else -1e-6) or any(value < 0 for value in quantities.values()):
             raise ValueError("long-only unlevered ledger violated")
         return {"cash": cash, "holdings": holdings, "equity": equity, "nav": equity / initial}
 
@@ -349,11 +397,25 @@ def run(fixture, strategy, sizing, unfilled_entry, rebalance="full_target", poc0
             "status": status, "reason": reason, "vp_id": "vp-1",
         }
         result["orders"].append(row)
+        if sizing == "vector_parity" and quantity is not None:
+            row["quantity_decimal"] = exact_quantity(quantity)
         return row
 
     def apply(index, fill):
         nonlocal cash
         instrument = fill["instrument_id"]
+        if sizing == "vector_parity":
+            fill["quantity_decimal"] = exact_quantity(fill["quantity"])
+            if fill["quantity"] == 0:
+                cash += fill["cash_change"]
+                result["fee_settlements"].append({
+                    "session_date": calendar[index], "instrument_id": instrument,
+                    "vp_id": "vp-1", "fee_basis": fill["fee_basis"],
+                    "fee_side": fill["fee_side"], "commission": fill["commission"],
+                    "tax": fill["tax"], "slippage": fill["slippage"],
+                    "cash_change": fill["cash_change"],
+                })
+                return
         row = order(index, instrument, fill["side"], fill["quantity"], "filled")
         fill.update({
             "order_id": row["order_id"], "session_date": calendar[index], "vp_id": "vp-1",
@@ -393,7 +455,7 @@ def run(fixture, strategy, sizing, unfilled_entry, rebalance="full_target", poc0
                     else:
                         fills = parity_fills(quantities, effective, prices, before, costs)
                     for fill in fills:
-                        if cash + fill["cash_change"] < -1e-6:
+                        if cash + fill["cash_change"] < 0:
                             raise ValueError("vector_parity buy exceeds available cash")
                         apply(index, fill)
                 else:
@@ -547,7 +609,12 @@ def run(fixture, strategy, sizing, unfilled_entry, rebalance="full_target", poc0
     }
     result["tolerance"] = {"cash_equity_fees_abs_cny": 1e-6, "normalized_nav_rel": 1e-9}
     result["assumptions"] = [
-        "independent Python float64 oracle; Rust scale-18 ledger remains canonical",
+        (
+            "independent Python oracle; vector_parity uses scale-18 Decimal half-even ledger, "
+            "signals use float64; Rust ledger remains canonical"
+            if sizing == "vector_parity" else
+            "independent Python float64 oracle; Rust scale-18 ledger remains canonical"
+        ),
         "single Venue, single Trading Account, one VP; no leverage or partial fills",
         "session close signals, next Session open execution; new decisions replace pending",
         "conservative deferral if any held Instrument is not executable",
@@ -591,10 +658,12 @@ def main():
         ),
         args.rebalance, args.poc0_s1_timing,
     )
-    result["schema_version"] = f"mvp3.{args.rebalance}.golden@1"
+    result["schema_version"] = f"mvp3.{args.rebalance}.golden@{2 if args.sizing == 'vector_parity' else 1}"
     result["fixture_sha256"] = hashlib.sha256(raw).hexdigest()
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+    args.out.write_text(json.dumps(
+        result, indent=2, sort_keys=True, allow_nan=False, default=json_decimal,
+    ) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":
