@@ -1,10 +1,11 @@
 //! CLI adapter for the canonical Experiment execution and storage APIs.
 
-use std::{fs, num::NonZeroUsize, path::PathBuf, process::ExitCode, time::Instant};
+use std::{fs, num::NonZeroUsize, path::PathBuf, process::ExitCode, sync::Arc, time::Instant};
 
 use clap::{Parser, Subcommand};
 use prajna_experiment::{
-    ExecutionIdentity, Experiment, ExperimentError, ResultLevel, RunStatus, diff_executions,
+    ExecutionIdentity, Experiment, ExperimentError, ResultLevel, RunStatus, WorkerCommand,
+    diff_executions,
 };
 use serde_json::json;
 
@@ -14,7 +15,7 @@ const EXIT_CODES: &str = "Exit codes: 0 success; 1 I/O, provenance or execution 
 recorded in the report and do not change exit code 0.";
 
 #[derive(Parser)]
-#[command(about = "Run, replay, promote and compare synthetic Vector and Fast Event experiments", after_help = EXIT_CODES)]
+#[command(about = "Run, replay, promote and compare synthetic Vector, Fast Event and Accurate Event experiments", after_help = EXIT_CODES)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -34,9 +35,15 @@ enum Commands {
         /// Promote only; never creates a missing Execution. Accepts multiple Run IDs.
         #[arg(long, num_args = 1..)]
         promote: Vec<String>,
-        /// Rayon default if omitted; recorded but excluded from identity.
+        /// Rayon threads, or Accurate worker-process slots; excluded from identity.
         #[arg(long)]
         threads: Option<NonZeroUsize>,
+        /// Python executable for Accurate Event; no implicit/fake fallback.
+        #[arg(long, requires = "backend_worker")]
+        backend_python: Option<PathBuf>,
+        /// #139 stdio worker script; runtime path is excluded from Run identity.
+        #[arg(long, requires = "backend_python")]
+        backend_worker: Option<PathBuf>,
     },
     /// Compare two Executions from the same Experiment, aligned by Run Spec.
     #[command(after_help = EXIT_CODES)]
@@ -78,12 +85,19 @@ fn run(cli: Cli) -> Result<u8, (u8, String)> {
             level,
             promote,
             threads,
+            backend_python,
+            backend_worker,
         } => {
             let started = Instant::now();
             let definition =
                 fs::read_to_string(experiment).map_err(|error| (1, error.to_string()))?;
-            let experiment = Experiment::parse(&definition, &lake)
+            let mut experiment = Experiment::parse(&definition, &lake)
                 .map_err(|error| (error_code(&error), error.to_string()))?;
+            if let (Some(python), Some(worker)) = (backend_python, backend_worker) {
+                experiment = experiment
+                    .with_backend_factory(Arc::new(WorkerCommand::new(python, worker)))
+                    .map_err(|error| (error_code(&error), error.to_string()))?;
+            }
             // Expansion errors reject the entire definition before any execution writes.
             experiment
                 .expand(&lake)

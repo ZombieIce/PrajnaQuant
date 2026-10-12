@@ -37,6 +37,16 @@ const FAST_FULL: [&str; 5] = [
     "fills",
     "fee_settlements",
 ];
+const ACCURATE_FULL: [&str; 8] = [
+    "account_valuations",
+    "portfolio_valuations",
+    "orders",
+    "fills",
+    "fee_settlements",
+    "adapter_events",
+    "backend_events",
+    "backend_comparisons",
+];
 const STANDARD_TABLES: [&str; 2] = ["sessions", "executions"];
 const FULL_TABLES: [&str; 6] = [
     "sessions",
@@ -57,10 +67,11 @@ pub enum ResultLevel {
 
 impl ResultLevel {
     fn tables_for(self, run: &RunExecution) -> &'static [&'static str] {
-        if run.is_fast_event() {
+        if run.is_event() {
             match self {
                 Self::Summary => &[],
                 Self::Standard => &FAST_STANDARD,
+                Self::Full if run.run_spec["engine"]["kind"] == "accurate_event" => &ACCURATE_FULL,
                 Self::Full => &FAST_FULL,
             }
         } else {
@@ -858,7 +869,7 @@ fn stored_run(
         result_level: level,
         table_hashes,
         not_saved,
-        not_produced_by_engine: if execution.is_fast_event() {
+        not_produced_by_engine: if execution.is_event() {
             vec![]
         } else {
             NOT_PRODUCED_BY_ENGINE
@@ -866,7 +877,7 @@ fn stored_run(
                 .map(|name| (*name).into())
                 .collect()
         },
-        accounting_verified: if execution.is_fast_event() {
+        accounting_verified: if execution.is_event() {
             Some(execution.status == RunStatus::Completed)
         } else {
             None
@@ -1261,7 +1272,7 @@ fn rows_batch(
     table: &str,
     rows: &[(String, String)],
 ) -> Result<(Arc<Schema>, RecordBatch), ExperimentError> {
-    if FAST_FULL.contains(&table) {
+    if ACCURATE_FULL.contains(&table) {
         let schema = fast_table_schema();
         let columns: Vec<ArrayRef> = vec![
             Arc::new(StringArray::from(
@@ -1532,7 +1543,7 @@ fn read_table_batches(
     })?;
     let schema = builder.schema().clone();
     if schema.as_ref()
-        != if FAST_FULL.contains(&table) {
+        != if ACCURATE_FULL.contains(&table) {
             fast_table_schema()
         } else {
             vector_table_schema()
@@ -1946,8 +1957,85 @@ pub(super) fn execution_rows(
     run: &RunExecution,
     table: &str,
 ) -> Result<Vec<(String, String)>, ExperimentError> {
+    if matches!(
+        table,
+        "adapter_events" | "backend_events" | "backend_comparisons"
+    ) {
+        return accurate_rows(run, table);
+    }
     if let Some(result) = &run.fast_event_result {
         return fast_rows(result, table);
+    }
+
+    fn accurate_rows(
+        run: &RunExecution,
+        table: &str,
+    ) -> Result<Vec<(String, String)>, ExperimentError> {
+        use prajna_adapter::AdapterEvent;
+        let diagnostics = run
+            .backend_diagnostics
+            .as_ref()
+            .ok_or_else(|| err("completed Accurate Run has no Backend diagnostics"))?;
+        let mut rows = vec![];
+        let mut push = |prefix: &str, index: usize, payload: Value| {
+            rows.push((format!("{prefix}|{index:020}"), json_payload(&payload)?));
+            Ok::<_, ExperimentError>(())
+        };
+        match table {
+            "adapter_events" => {
+                for (index, event) in run.adapter_events.iter().enumerate() {
+                    let payload = match event {
+                        AdapterEvent::SyntheticOpen {
+                            session_date,
+                            quotes,
+                        } => {
+                            serde_json::json!({"event":"synthetic_open","session_date":session_date,"quotes":quotes})
+                        }
+                        AdapterEvent::PlatformGate {
+                            session_date,
+                            instrument_id,
+                        } => {
+                            serde_json::json!({"event":"platform_gate","session_date":session_date,"instrument_id":instrument_id})
+                        }
+                    };
+                    push("platform_adapter", index, payload)?;
+                }
+                for (index, event) in diagnostics.adapter_constructions.iter().enumerate() {
+                    push("worker_adapter", index, event.clone())?;
+                }
+            }
+            "backend_events" => {
+                for (index, event) in run.backend_events.iter().enumerate() {
+                    push(
+                        "mapped_response",
+                        index,
+                        serde_json::json!({
+                            "evidence": diagnostics.evidence, "response": event
+                        }),
+                    )?;
+                }
+                for (index, event) in diagnostics.native_events.iter().enumerate() {
+                    push("backend_native", index, event.clone())?;
+                }
+            }
+            "backend_comparisons" => {
+                push(
+                    "evidence",
+                    0,
+                    serde_json::json!({
+                        "evidence":diagnostics.evidence,
+                        "native_account_available":diagnostics.evidence != "fake_backend",
+                        "authority":"prajna-account"
+                    }),
+                )?;
+                for (index, comparison) in diagnostics.comparisons.iter().enumerate() {
+                    push("comparison", index, comparison.clone())?;
+                }
+            }
+            _ => return Err(err(format!("unknown Accurate table {table}"))),
+        }
+        rows.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(rows)
     }
     result_rows(
         run.result

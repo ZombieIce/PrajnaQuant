@@ -2973,6 +2973,7 @@ dependencies = [
  "parquet",
  "polars",
  "prajna-account",
+ "prajna-adapter",
  "prajna-data",
  "prajna-domain",
  "prajna-research",

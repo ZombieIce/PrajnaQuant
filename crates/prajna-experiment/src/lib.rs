@@ -6,6 +6,7 @@ use std::{
     fmt, fs,
     path::Path,
     process::Command,
+    sync::Arc,
     time::Instant,
 };
 
@@ -32,13 +33,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
+mod accurate;
 mod engine;
 mod storage;
 mod summary;
+mod worker;
+pub use accurate::{BackendDiagnostics, BackendFactory, ExperimentBackend};
+pub use engine::{ACCURATE_SEMANTIC_VERSION, BackendIdentity};
 pub use storage::{
     ExecutionDiff, InvocationStatistics, ResultLevel, StoreAction, StoredExecution, diff_executions,
 };
 pub use summary::{RunSummary, summarize};
+pub use worker::WorkerCommand;
 
 const PARAMETERS: [&str; 9] = [
     "short",
@@ -290,6 +296,7 @@ pub struct Experiment {
     normalized: Value,
     engine: engine::EngineSettings,
     strategy_kind: String,
+    backend_factory: Option<Arc<dyn BackendFactory>>,
 }
 
 #[derive(Deserialize)]
@@ -311,6 +318,8 @@ struct DefinitionInput {
     unfilled_entry: Option<String>,
     #[serde(default)]
     fast_event: Option<engine::FastSettingsInput>,
+    #[serde(default)]
+    backend: Option<engine::BackendIdentity>,
 }
 
 impl Experiment {
@@ -360,7 +369,20 @@ impl Experiment {
             normalized,
             engine,
             strategy_kind: input.strategy,
+            backend_factory: None,
         })
+    }
+
+    /// Runtime transport is excluded from content identity; Backend identity is not.
+    pub fn with_backend_factory(
+        mut self,
+        factory: Arc<dyn BackendFactory>,
+    ) -> Result<Self, ExperimentError> {
+        if self.engine.backend.is_none() {
+            return Err(invalid("worker Backend is only valid for accurate_event"));
+        }
+        self.backend_factory = Some(factory);
+        Ok(self)
     }
 
     pub fn dsv(&self) -> &str {
@@ -497,6 +519,17 @@ impl Experiment {
         if threads == 0 {
             return Err(invalid("threads must be greater than zero"));
         }
+        let packet = if let Some(identity) = &self.engine.backend {
+            let factory = self.backend_factory.as_ref().ok_or_else(|| {
+                invalid("accurate_event requires an explicitly configured worker Backend")
+            })?;
+            factory
+                .validate(identity)
+                .map_err(|error| execution_error("validate Backend identity", error))?;
+            Some(self.engine.packet(lake_root, &self.dsv)?)
+        } else {
+            None
+        };
         let universe = StaticUniverse::load(lake_root, &self.universe)?;
         let runs = self.expand_for_universe(&universe)?;
         validate_universe_venue(&universe, &self.venue)
@@ -614,24 +647,26 @@ impl Experiment {
 
         let costs = self.vector_costs();
         let run_started = Instant::now();
-        let results = pool.install(|| {
-            runs.par_iter()
-                .map(|run| {
-                    engine::execute(
-                        self,
-                        run,
-                        &factor_values,
-                        &panel,
-                        &statuses,
-                        &executable_by_key,
-                        &costs,
-                        assumption,
-                        universe.members(),
-                        level,
-                    )
-                })
-                .collect()
-        });
+        let execute_one = |run: &ExpandedRun| {
+            engine::execute(
+                self,
+                run,
+                &factor_values,
+                &panel,
+                &statuses,
+                &executable_by_key,
+                &costs,
+                assumption,
+                universe.members(),
+                level,
+                packet.as_ref(),
+            )
+        };
+        let results = if packet.is_some() {
+            accurate::run_pool(&runs, threads, execute_one)?
+        } else {
+            pool.install(|| runs.par_iter().map(execute_one).collect())
+        };
         let run_time_ms = run_started.elapsed().as_millis();
         let compute_count = cache.compute_count();
         let cache_hit_count = cache.hit_count();
@@ -738,14 +773,23 @@ pub struct RunExecution {
     pub result: Option<VectorResult>,
     #[serde(skip)]
     pub fast_event_result: Option<prajna_research::fast_event::FastEventResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend_diagnostics: Option<BackendDiagnostics>,
+    #[serde(skip)]
+    pub adapter_events: Vec<prajna_adapter::AdapterEvent>,
+    #[serde(skip)]
+    pub backend_events: Vec<prajna_adapter::protocol::Response>,
     pub summary: Option<RunSummary>,
     pub error: Option<String>,
 }
 
 impl RunExecution {
     // Run Specs are created only after Definition/parameter validation.
-    pub(crate) fn is_fast_event(&self) -> bool {
-        self.run_spec["engine"]["kind"] == "fast_event"
+    pub(crate) fn is_event(&self) -> bool {
+        matches!(
+            self.run_spec["engine"]["kind"].as_str(),
+            Some("fast_event" | "accurate_event")
+        )
     }
 }
 
@@ -771,6 +815,9 @@ fn execute_runs(
                 status: RunStatus::Completed,
                 result: Some(result),
                 fast_event_result: None,
+                backend_diagnostics: None,
+                adapter_events: vec![],
+                backend_events: vec![],
                 summary: None,
                 error: None,
             },
@@ -780,6 +827,9 @@ fn execute_runs(
                 status: RunStatus::Failed,
                 result: None,
                 fast_event_result: None,
+                backend_diagnostics: None,
+                adapter_events: vec![],
+                backend_events: vec![],
                 summary: None,
                 error: Some(error),
             },

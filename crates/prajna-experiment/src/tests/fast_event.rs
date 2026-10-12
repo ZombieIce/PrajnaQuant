@@ -64,11 +64,12 @@ fn unsupported_engine_modes_are_rejected_before_loading_data() {
         assert!(error.contains(part), "{error}");
     }
     value["engine"] = json!("accurate_event");
+    value["backend"] = json!({"name":"nautilus_trader","version":"2.0.0rc6"});
     let error = Experiment::parse(&value.to_string(), temp.path())
         .unwrap_err()
         .to_string();
     assert!(error.contains("accurate_event"), "{error}");
-    assert!(error.contains("not implemented"), "{error}");
+    assert!(error.contains("vector_parity"), "{error}");
 }
 
 #[test]
@@ -378,6 +379,7 @@ fn fast_invariant_failure_is_failed_while_other_runs_continue() {
                     AvailabilityAssumption::None,
                     only.members(),
                     ResultLevel::Summary,
+                    None,
                 )
             })
             .collect::<Vec<_>>()

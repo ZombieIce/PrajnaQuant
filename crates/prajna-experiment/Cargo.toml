@@ -15,6 +15,7 @@ arrow-schema = "=58.4.0"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 parquet = { version = "=58.4.0", default-features = false, features = ["arrow", "zstd"] }
 prajna-account = { path = "../prajna-account" }
+prajna-adapter = { path = "../prajna-adapter" }
 prajna-domain = { path = "../prajna-domain" }
 prajna-data = { path = "../prajna-data" }
 prajna-research = { path = "../prajna-research" }
@@ -23,8 +24,6 @@ rayon = "1.11"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["arbitrary_precision"] }
 sha2 = "0.10"
-
-[dev-dependencies]
 tempfile = "3.14"
 
 [lints.rust]

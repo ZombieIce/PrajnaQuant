@@ -30,6 +30,11 @@ status. MVP-4 is single Venue, single currency, long-only and full market fills.
 missing specifications/statuses. Packet prices, Sessions, status and lot sizes must
 match the platform execution inputs before a Backend starts.
 
+`from_dataset_with_lots` resolves the complete Run's identity-bearing lot-size map
+before packet validation, including explicit overrides of absent DSV lot sizes.
+It changes only the effective packet's Instrument lot field, not the immutable DSV.
+Experiment records both the source kind and resolved values in the Run Spec.
+
 ## Session protocol (`prajna-adapter@1`)
 
 `Backend::begin_run` receives the packet and the registered platform cost table once.
