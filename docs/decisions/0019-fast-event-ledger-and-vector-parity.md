@@ -1,6 +1,6 @@
 # ADR 0019：Fast Event L1 以定点账本为权威，并在显式参数下与 Vector 对拍
 
-- 状态：Accepted，2026-10-09（MVP-3 设计，spec #112）；账本与 L1 Run seam 已实现，完整 MVP-3 对拍和 Experiment 接入仍待后续票据验证
+- 状态：Accepted，2026-10-09（MVP-3 设计，spec #112）；账本与 L1 Run seam、#122 合成 full_target 对拍已实现，Experiment 接入仍待后续票据验证
 
 [`ADR 0010`](0010-portfolio-accounting-and-result-boundary.md) 要求 Fast Event 以 Order → Fill → Position → Account 更新账本并逐日核对恒等式，同时要求它与 Vector 在共同语义子集上对拍。MVP-3 确定以下边界：
 
@@ -42,7 +42,14 @@ Panel 保留原有 f64 `open` / `close` 研究列，并新增 `open_decimal` / `
 
 项目负责人在 #120 自查后确认：F8 不使用绝对权重 no-trade 阈值，所有可表示的非零
 权重差都参与费用及目标数量计算。#117 oracle 的 `1e-12` 抑制规则与严格 F8 不一致，
-须在 #122 对拍中显式统一；本票据不改写已提交的 oracle goldens 或声称完整对拍通过。
+已在 #122 经负责人批准统一：oracle 的 vector_parity 账本改用独立标准库 Decimal，
+scale 18 / half-even，信号仍为 f64；schema v2 保存数量精确字符串，七份对应 goldens
+显式重算，不放宽 F7 的金额/NAV 容差。所有可表示的非零差都计费，不使用 no-trade 阈值。
+Rust 用真实策略生成 Decision，再对照第三方输出的逐 Session 估值、执行轨迹、
+订单/Fill 数量和费用，覆盖 S1/S2/S3 3×10、S3 3×130 与四个手算场景，
+包括不伪造零数量订单/成交的 fee-only 2×5 用例（新增两份对应 golden）。
+Vector 行含下一 open 的估值收益，对齐本 Session open 后权益时用
+`nav / (1 + gross_return)`，不把不同估值时点误当引擎差异。
 若某腿 F8 费用为正而扣费后目标数量恰好不变，用 `ParityFeeSettlement` 可追溯地扣费，
 不伪造零数量 Order / Fill。它保存 VP / 标的 / open 时间、费用基数与方向及分项，
 在全部实际 Fill 后、open 快照前原子结算；账户对同一 VP / 标的 / 时间拒绝重复。

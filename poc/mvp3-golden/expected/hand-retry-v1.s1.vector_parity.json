@@ -1,6 +1,6 @@
 {
   "assumptions": [
-    "independent Python float64 oracle; Rust scale-18 ledger remains canonical",
+    "independent Python oracle; vector_parity uses scale-18 Decimal half-even ledger, signals use float64; Rust ledger remains canonical",
     "single Venue, single Trading Account, one VP; no leverage or partial fills",
     "session close signals, next Session open execution; new decisions replace pending",
     "conservative deferral if any held Instrument is not executable",
@@ -38,6 +38,7 @@
       "skipped_buys": []
     }
   ],
+  "fee_settlements": [],
   "fills": [
     {
       "cash_change": -502.5,
@@ -51,6 +52,7 @@
       "order_id": "order-2",
       "price": 10.0,
       "quantity": 49.75,
+      "quantity_decimal": "49.75",
       "raw_open": 10.0,
       "session_date": "2026-01-06",
       "side": "buy",
@@ -71,6 +73,7 @@
       "order_id": "order-3",
       "price": 10.0,
       "quantity": 49.257425742574256,
+      "quantity_decimal": "49.257425742574257425",
       "raw_open": 10.0,
       "session_date": "2026-01-07",
       "side": "buy",
@@ -98,6 +101,7 @@
       "instrument_id": "A.SYNTH",
       "order_id": "order-2",
       "quantity": 49.75,
+      "quantity_decimal": "49.75",
       "reason": null,
       "session_date": "2026-01-06",
       "side": "buy",
@@ -109,6 +113,7 @@
       "instrument_id": "B.SYNTH",
       "order_id": "order-3",
       "quantity": 49.257425742574256,
+      "quantity_decimal": "49.257425742574257425",
       "reason": null,
       "session_date": "2026-01-07",
       "side": "buy",
@@ -143,7 +148,7 @@
     "unfilled_entry": "retry"
   },
   "pending_at_end": null,
-  "schema_version": "mvp3.full_target.golden@1",
+  "schema_version": "mvp3.full_target.golden@2",
   "sessions": [
     {
       "close": {
@@ -173,6 +178,7 @@
               "session_date": "2026-01-06"
             },
             "quantity": 49.75,
+            "quantity_decimal": "49.75",
             "value": 497.5
           }
         },
@@ -190,6 +196,7 @@
               "session_date": "2026-01-06"
             },
             "quantity": 49.75,
+            "quantity_decimal": "49.75",
             "value": 497.5
           }
         },
@@ -199,7 +206,7 @@
     },
     {
       "close": {
-        "cash": 0.0,
+        "cash": 7e-18,
         "equity": 990.0742574257425,
         "holdings": {
           "A.SYNTH": {
@@ -210,6 +217,7 @@
               "session_date": "2026-01-07"
             },
             "quantity": 49.75,
+            "quantity_decimal": "49.75",
             "value": 497.5
           },
           "B.SYNTH": {
@@ -220,13 +228,14 @@
               "session_date": "2026-01-07"
             },
             "quantity": 49.257425742574256,
-            "value": 492.57425742574253
+            "quantity_decimal": "49.257425742574257425",
+            "value": 492.5742574257426
           }
         },
-        "nav": 0.9900742574257425
+        "nav": 0.9900742574257426
       },
       "open": {
-        "cash": 0.0,
+        "cash": 7e-18,
         "equity": 990.0742574257425,
         "holdings": {
           "A.SYNTH": {
@@ -237,6 +246,7 @@
               "session_date": "2026-01-07"
             },
             "quantity": 49.75,
+            "quantity_decimal": "49.75",
             "value": 497.5
           },
           "B.SYNTH": {
@@ -247,16 +257,17 @@
               "session_date": "2026-01-07"
             },
             "quantity": 49.257425742574256,
-            "value": 492.57425742574253
+            "quantity_decimal": "49.257425742574257425",
+            "value": 492.5742574257426
           }
         },
-        "nav": 0.9900742574257425
+        "nav": 0.9900742574257426
       },
       "session_date": "2026-01-07"
     },
     {
       "close": {
-        "cash": 0.0,
+        "cash": 7e-18,
         "equity": 990.0742574257425,
         "holdings": {
           "A.SYNTH": {
@@ -267,6 +278,7 @@
               "session_date": "2026-01-08"
             },
             "quantity": 49.75,
+            "quantity_decimal": "49.75",
             "value": 497.5
           },
           "B.SYNTH": {
@@ -277,13 +289,14 @@
               "session_date": "2026-01-08"
             },
             "quantity": 49.257425742574256,
-            "value": 492.57425742574253
+            "quantity_decimal": "49.257425742574257425",
+            "value": 492.5742574257426
           }
         },
-        "nav": 0.9900742574257425
+        "nav": 0.9900742574257426
       },
       "open": {
-        "cash": 0.0,
+        "cash": 7e-18,
         "equity": 990.0742574257425,
         "holdings": {
           "A.SYNTH": {
@@ -294,6 +307,7 @@
               "session_date": "2026-01-08"
             },
             "quantity": 49.75,
+            "quantity_decimal": "49.75",
             "value": 497.5
           },
           "B.SYNTH": {
@@ -304,10 +318,11 @@
               "session_date": "2026-01-08"
             },
             "quantity": 49.257425742574256,
-            "value": 492.57425742574253
+            "quantity_decimal": "49.257425742574257425",
+            "value": 492.5742574257426
           }
         },
-        "nav": 0.9900742574257425
+        "nav": 0.9900742574257426
       },
       "session_date": "2026-01-08"
     }

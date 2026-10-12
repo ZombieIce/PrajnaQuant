@@ -86,7 +86,7 @@ MVP-2 的 `prajna-experiment`（Issue #99–#104）可解析并校验 `experimen
 
 独立 Python oracle 另保存 `lot + entry_only` 的 S1/S2 3×10 与 S3 3×130 投影：S1 默认首 Session 信号与显式 POC `calendar.len()-5` 时点各一份，S3 显式策略 Universe `{A}`、使用卖出后现金预算；S1/S2/S3 与已提交 Rust POC preflight 的 Fill 日期/方向/数量、逐日 close 持仓/价格、现金/权益及费用总额对照通过（金额容差 1e-6 CNY）。S3 A 原 fixture 无缺口，无 fixture 引起的 ADR 0017 差异；合成缺口测试不跨缺口。订单诊断 schema/顺序与旧 POC、共享 any-held 阻塞及可用时间门禁差异显式登记在 README，不能宣称旧订单逐字节一致或新 Rust Engine 全面对拍通过；所有新投影核对两个估值点的现金/持仓恒等式，`entry_only + skip` 显式拒绝，平台/第三方对拍仍待 #122。
 
-[`poc/mvp3-golden`](../poc/mvp3-golden/README.md) 提供不导入 Rust、共享执行代码或 Nautilus 的 Python 标准库参考：S1/S2/S3 在 `lot` 与 `vector_parity` 下的 3×10、S3 3×130 和 1×3、2×4、2×6 手算用例，保存两个估值点的现金、数量、权益与订单、Fill、费用分项；轻量 CI 逐值复算并核对现金/持仓与费用恒等式、时序、执行门禁、延期和 retry。仅为单 VP 合成数据的 float64 参考，不表示平台 Fast Event 或严格定点账本已实现；`vector_parity` retry 按 ADR 0019 以扣费前权益预算、费用另扣现金并按 ID 升序削减；权重差 ≤1e-12 仅归零费用基数，仍按扣费后权益调整持续持仓，只有零费用基数且数量变动的 open 权重 ≤1e-12 才不产生 Order/Fill；CLI 回归覆盖平开盘轮动中的零权重差持仓缩量，另含带成本 retry 与持续持仓调仓的 2×4、2×6 手算用例。口径、来源 hash、容差及负责人确认的 S3/估值约定见 README。
+[`poc/mvp3-golden`](../poc/mvp3-golden/README.md) 提供不导入 Rust、共享执行代码或 Nautilus 的 Python 标准库参考：S1/S2/S3 在 `lot` 与 `vector_parity` 下的 3×10、S3 3×130 和 1×3、2×4、2×6、fee-only 2×5 手算用例，保存两个估值点的现金、数量、权益与订单、Fill、费用分项；轻量 CI 逐值复算并核对现金/持仓与费用恒等式、时序、执行门禁、延期和 retry。#122 经负责人批准将 parity 账本改为独立 Decimal scale-18 / half-even，schema v2 保存精确数量字符串，移除 1e-12 no-trade 阈值；信号与 lot 参考仍用 float64。真实 Rust 策略生成决策后，16 组 full_target Fast Event runs 与独立 Python 的两个估值点、提交订单/Fill 数量及费用通过逐字段对拍，账户/VP 恒等式精确成立；八组 parity runs 的执行/延期/retry 轨迹及正确对齐的 Vector open NAV 按原 1e-9 相对误差对照。金额仍为原 1e-6 CNY 容差，数量不放宽；blocked/unaffordable oracle 订单诊断不冒充提交的 Domain Order。验证限单 VP 合成数据，不构成真实市场/PIT、总回报或 Experiment 接入验收；口径、来源 hash、容差及 S3/估值约定见 README。
 
 ### MVP-3 定点账户账本
 
