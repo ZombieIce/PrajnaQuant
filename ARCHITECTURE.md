@@ -14,7 +14,7 @@
 
 Rust 拥有数据写入、因子执行、回测、组合账户、成本、绩效、实验和并行运行时，并保留未来 Live Runtime 的计算核心。Python 负责研究、Notebook、因子/策略/实验定义、优化和可视化；Python 逐 bar 回调可作为 MVP 能力，其吞吐边界由 POC 测量。Rust 是账户、成本和绩效报告的权威。现有 [`ADR 0001`](docs/decisions/0001-computation-ownership.md) 仍描述当前实现。
 
-平台维护自己的 Domain Core。NautilusTrader 是 Accurate Event Engine 和未来 Live 的首个 Backend 候选，由 Adapter 接入；Barter、LEAN、WonderTrader、VeighNa 是特定领域的参考，不决定平台 Domain。Arrow、Parquet、Polars、Rayon、Tokio、PyO3 是目标技术角色或待评估依赖，不等于当前仓库已接入。
+平台维护自己的 Domain Core。NautilusTrader 是 Accurate Event Engine 和未来 Live 的首个 Backend 候选，由 Adapter 接入；Accurate 的闭环 Order / Fill / Reject 边界、平台账本与成本权威、worker 和 Backend 身份见 [ADR 0020](docs/decisions/0020-accurate-event-adapter-and-ledger-authority.md)。Barter、LEAN、WonderTrader、VeighNa 是特定领域的参考，不决定平台 Domain。Arrow、Parquet、Polars、Rayon、Tokio、PyO3 是目标技术角色或待评估依赖，不等于当前仓库已接入。
 
 ### 三级引擎与能力路由
 
@@ -22,7 +22,7 @@ Rust 拥有数据写入、因子执行、回测、组合账户、成本、绩效
 | --- | --- | --- | --- |
 | Vector | 因子研究、ETF 轮动、股票截面、参数扫描 | 价格/因子/信号/权重/收益矩阵；不要求订单和逐笔成交对象 | `Vectorizable` |
 | Fast Event | 保留交易语义的高吞吐验证 | Rust bar → 决策 → 市价单 → L1 模拟成交 → 持仓/账户 | `Vectorizable`、`EventDriven` |
-| Accurate Event | 高精度模拟与未来 Live 过渡 | 通过 Adapter 使用 Accurate Backend，首选候选为 NautilusTrader | 支持该 Backend 的能力，包括 `OrderBookDriven` |
+| Accurate Event | 高精度模拟与未来 Live 过渡 | 通过 Adapter 使用 Accurate Backend，首选候选为 NautilusTrader；MVP-4 闭环与账本权威见 [ADR 0020](docs/decisions/0020-accurate-event-adapter-and-ledger-authority.md) | 目标支持该 Backend 的能力，包括 `OrderBookDriven`；MVP-4 仅复核与 Fast Event 相同的 Decision 策略，不新增策略能力 |
 
 策略声明所需能力；路由在运行前拒绝不支持的引擎组合。`Vectorizable` 表示策略可表达为矩阵式信号/权重；`EventDriven` 需要逐事件状态和订单；`OrderBookDriven` 需要订单簿语义。一个策略可声明多个能力，但不要求每个策略都运行在所有引擎。典型研究漏斗为大量参数先经 Vector，少量候选经 Fast Event，再由 Accurate 验证；100,000 → 1,000 → 50 → 5 只是容量示例，不是吞吐承诺。
 
