@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independent stdlib oracle for spec #112 full_target (not a production engine)."""
+"""Independent stdlib oracle for spec #112 and POC entry_only (not a production engine)."""
 
 import argparse
 from datetime import date, datetime, timedelta
@@ -271,15 +271,18 @@ def s2_score(rows, index, config, cutoff):
     )
 
 
-def run(fixture, strategy, sizing, unfilled_entry, rebalance="full_target"):
+def run(fixture, strategy, sizing, unfilled_entry, rebalance="full_target", poc0_s1_timing=False):
     fixture = expand_ma(fixture)
     calendar, bars, lots, gates, costs, initial, closes_at = inputs(fixture)
     if rebalance not in ("full_target", "entry_only"):
         raise ValueError("rebalance must be full_target or entry_only")
     if rebalance == "entry_only" and sizing != "lot":
         raise ValueError("entry_only is a lot-only POC variant")
-    if rebalance == "entry_only" and strategy == "s3":
-        raise ValueError("entry_only is only defined for S1 and S2")
+    if rebalance == "entry_only" and unfilled_entry != "retry":
+        raise ValueError("entry_only requires unfilled_entry=retry")
+    if poc0_s1_timing and (strategy != "s1" or rebalance != "entry_only"):
+        raise ValueError("poc0_s1_timing requires S1 lot + entry_only")
+    s1_decision_index = max(len(calendar) - 5, 0) if poc0_s1_timing else 0
     if strategy == "s2":
         config = fixture["strategy"]
         for key in ("momentum_short_days", "momentum_long_days", "rebalance_every", "top_n"):
@@ -294,6 +297,9 @@ def run(fixture, strategy, sizing, unfilled_entry, rebalance="full_target"):
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise ValueError(f"{key} must be finite")
     ids = sorted(bars)
+    signal_ids = ["A.SYNTH"] if strategy == "s3" and rebalance == "entry_only" else ids
+    if any(instrument not in bars for instrument in signal_ids):
+        raise ValueError("POC S3 entry_only requires Instrument A.SYNTH")
     cash = initial
     quantities = {instrument: 0.0 for instrument in ids}
     last_marks = {"open": {}, "close": {}}
@@ -424,7 +430,9 @@ def run(fixture, strategy, sizing, unfilled_entry, rebalance="full_target"):
                                 budget = base / count
                                 desired.update({
                                     instrument: math.floor(
-                                        budget / prices[instrument] / lots[instrument]
+                                        budget / (
+                                            prices[instrument] * (1 + costs["buy_slippage_bps"] / 10000)
+                                        ) / lots[instrument]
                                     ) * lots[instrument]
                                     for instrument, weight in effective.items()
                                     if weight > 0 and quantities[instrument] == 0
@@ -466,7 +474,7 @@ def run(fixture, strategy, sizing, unfilled_entry, rebalance="full_target"):
         close_prices, close_sources = marks(index, "close")
         close_value = valuation(close_prices, close_sources)
         result["sessions"].append({"session_date": day, "open": open_value, "close": close_value})
-        if strategy == "s1" and index == 0:
+        if strategy == "s1" and index == s1_decision_index:
             decision = {"session_date": day, "targets": {instrument: 1 / len(ids) for instrument in ids}}
             result["decisions"].append(decision)
             pending = {"decision_session": day, "targets": decision["targets"], "retry_only": False}
@@ -494,7 +502,7 @@ def run(fixture, strategy, sizing, unfilled_entry, rebalance="full_target"):
         elif strategy == "s3":
             changed = False
             diagnostics = {}
-            for instrument in ids:
+            for instrument in signal_ids:
                 rows = bars[instrument]
                 window = rows[max(0, index - 59):index + 1]
                 status = (
@@ -518,7 +526,7 @@ def run(fixture, strategy, sizing, unfilled_entry, rebalance="full_target"):
                 diagnostics[instrument] = {"status": status, "gap": gap}
             result["sessions"][-1]["ma20_60"] = diagnostics
             if changed:
-                targets = {instrument: 1 / len(ids) for instrument in sorted(ma_held)}
+                targets = {instrument: 1 / len(signal_ids) for instrument in sorted(ma_held)}
                 result["decisions"].append({"session_date": day, "targets": targets})
                 pending = {"decision_session": day, "targets": targets, "retry_only": False}
     result["pending_at_end"] = pending
@@ -528,8 +536,12 @@ def run(fixture, strategy, sizing, unfilled_entry, rebalance="full_target"):
         "initial_cash": initial,
         "strategy_parameters": (
             fixture["strategy"] if strategy == "s2" else
-            {"short_window": 20, "long_window": 60, "decision_rule": "target_set_changes"}
-            if strategy == "s3" else {"decision_rule": "first_session_only"}
+            ({"short_window": 20, "long_window": 60, "decision_rule": "target_set_changes"} | (
+                {"universe": signal_ids} if rebalance == "entry_only" else {}
+            ))
+            if strategy == "s3" else {
+                "decision_rule": "poc0_calendar_len_minus_five" if poc0_s1_timing else "first_session_only"
+            }
         ),
         "capital_allocation": {"vp-1": initial}, "unallocated_capital": 0.0,
     }
@@ -546,11 +558,17 @@ def run(fixture, strategy, sizing, unfilled_entry, rebalance="full_target"):
         "cash-insufficient budgets cut in ascending instrument_id order",
     ]
     if rebalance == "entry_only":
+        result["parameters"]["entry_budget"] = "FixedInitial" if strategy == "s1" else "RemainingCash"
         result["assumptions"].append(
             "entry_only is a POC-only lot variant: S1 uses initial capital divided "
-            "by target count; S2 uses remaining cash divided by unentered target count; "
+            "by target count; S2/S3 use remaining cash divided by unentered target count; "
             "unentered targets remain pending after cash-limited attempts"
         )
+        if strategy == "s3":
+            result["assumptions"].append(
+                "POC S3 variant: strategy Universe is {A}; B/C fixture bars are not strategy inputs; "
+                "Session-counted MA windows follow ADR 0017 without bridging gaps"
+            )
     return result
 
 
@@ -561,13 +579,17 @@ def main():
     parser.add_argument("--sizing", choices=("lot", "vector_parity"), required=True)
     parser.add_argument("--rebalance", choices=("full_target", "entry_only"), default="full_target")
     parser.add_argument("--unfilled-entry", choices=("skip", "retry"), default=None)
+    parser.add_argument("--poc0-s1-timing", action="store_true",
+                        help="S1 entry_only: decide at max(calendar length - 5, 0), like the POC harness")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     raw = args.fixture.read_bytes()
     result = run(
         json.loads(raw), args.strategy, args.sizing,
-        args.unfilled_entry or ("retry" if args.strategy == "s1" else "skip"),
-        args.rebalance,
+        args.unfilled_entry or (
+            "retry" if args.strategy == "s1" or args.rebalance == "entry_only" else "skip"
+        ),
+        args.rebalance, args.poc0_s1_timing,
     )
     result["schema_version"] = f"mvp3.{args.rebalance}.golden@1"
     result["fixture_sha256"] = hashlib.sha256(raw).hexdigest()

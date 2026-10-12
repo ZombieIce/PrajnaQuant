@@ -16,12 +16,13 @@ RETRY = GOLDEN / "fixtures/hand-retry-v1.json"
 REBALANCE = GOLDEN / "fixtures/hand-rebalance-v1.json"
 SMALL = ROOT / "poc/poc0-benchmark/fixtures/dataset-v1.json"
 MA = ROOT / "poc/poc0-benchmark/fixtures/b2-ma20-60-v1.json"
+POC_PREFLIGHT = ROOT / "poc/poc0-benchmark/results/b2-matched-decision-loads-reset-selected-2026-09-28.preflight.json"
 
 
 class FastEventGoldenTests(unittest.TestCase):
     def run_cli(
         self, fixture=HAND, strategy="s1", sizing="lot", retry=None,
-        rebalance="full_target", expect_error=False,
+        rebalance="full_target", expect_error=False, poc0_s1_timing=False,
     ):
         with tempfile.TemporaryDirectory() as directory:
             directory = Path(directory)
@@ -38,6 +39,8 @@ class FastEventGoldenTests(unittest.TestCase):
             command.extend(["--rebalance", rebalance])
             if retry is not None:
                 command.extend(["--unfilled-entry", retry])
+            if poc0_s1_timing:
+                command.append("--poc0-s1-timing")
             completed = subprocess.run(command, check=False, capture_output=True, text=True)
             if expect_error:
                 self.assertNotEqual(completed.returncode, 0)
@@ -72,7 +75,7 @@ class FastEventGoldenTests(unittest.TestCase):
         self.assertAlmostEqual(sessions[2]["close"]["equity"], 1143.73)
         self.assertEqual(len(result["fills"]), 1)
 
-    def test_entry_only_retries_cash_limited_s1_targets(self):
+    def test_entry_only_retries_halted_s1_target_with_fixed_initial_budget(self):
         fixture = json.loads(HAND.read_text())
         fixture["calendar"] += ["2026-01-08"]
         fixture["instruments"] = [
@@ -95,52 +98,198 @@ class FastEventGoldenTests(unittest.TestCase):
             [("2026-01-06", "A.SYNTH", 50), ("2026-01-07", "B.SYNTH", 50)],
         )
         self.assertEqual(result["parameters"]["rebalance"], "entry_only")
+        self.assertEqual(
+            [(row["session_date"], row["instrument_id"], row["status"], row["reason"])
+             for row in result["orders"]],
+            [("2026-01-06", "B.SYNTH", "blocked", "halted"),
+             ("2026-01-06", "A.SYNTH", "filled", None),
+             ("2026-01-07", "B.SYNTH", "filled", None)],
+        )
+        self.assertTrue(result["executions"][1]["retry_only"])
+        self.assertEqual(result["sessions"][2]["open"]["holdings"]["A.SYNTH"]["quantity"], 50)
+        self.assertEqual(result["sessions"][2]["open"]["cash"], 0)
+        self.assertEqual(result["sessions"][2]["open"]["equity"], 1500)
         self.assertEqual(result["pending_at_end"], None)
 
-    def test_entry_only_retains_cash_limited_target_even_when_skip_is_requested(self):
+    def test_entry_only_retries_cash_limited_s1_target_without_resizing_held_leg(self):
         fixture = json.loads(HAND.read_text())
-        fixture["calendar"] += ["2026-01-08"]
         fixture["instruments"] = [
-            {"symbol": "A", "lot_size": 1, "opens": [10, 10, 20, 20],
-             "closes": [10, 20, 20, 20]},
-            {"symbol": "B", "lot_size": 1, "opens": [10, 10, 10, 10],
-             "closes": [10, 10, 10, 10]},
+            {"symbol": "A", "lot_size": 50, "closes": [10, 10, 10]},
+            {"symbol": "B", "lot_size": 50, "opens": [10, 10, 5],
+             "closes": [10, 10, 5]},
         ]
         fixture["costs"] = {key: 0 for key in fixture["costs"]}
+        fixture["costs"]["minimum_commission"] = 100
+        result = self.run_cli(fixture, rebalance="entry_only")
+        self.assertEqual(
+            [(row["session_date"], row["instrument_id"], row["quantity"],
+              row["status"], row["reason"]) for row in result["orders"]],
+            [("2026-01-06", "A.SYNTH", 50, "filled", None),
+             ("2026-01-06", "B.SYNTH", 0, "unfilled", "insufficient_cash"),
+             ("2026-01-07", "B.SYNTH", 50, "filled", None)],
+        )
+        self.assertEqual([row["commission"] for row in result["fills"]], [100, 100])
+        self.assertTrue(result["executions"][1]["retry_only"])
+        self.assertEqual(result["sessions"][1]["open"]["cash"], 400)
+        self.assertEqual(result["sessions"][2]["open"]["cash"], 50)
+        self.assertEqual(result["sessions"][2]["open"]["equity"], 800)
+        self.assertEqual(result["sessions"][2]["open"]["holdings"]["A.SYNTH"]["quantity"], 50)
+        self.assertIsNone(result["pending_at_end"])
+
+    def test_entry_only_rejects_skip_instead_of_recording_an_ignored_policy(self):
+        for strategy, fixture in (("s1", HAND), ("s2", SMALL), ("s3", MA)):
+            stderr = self.run_cli(
+                fixture, strategy=strategy, retry="skip", rebalance="entry_only",
+                expect_error=True,
+            )
+            self.assertIn("entry_only requires unfilled_entry=retry", stderr)
+
+    def test_entry_only_divides_budget_by_slipped_fill_price_like_poc(self):
+        fixture = json.loads(HAND.read_text())
+        fixture["instruments"] = [
+            {"symbol": symbol, "lot_size": 1, "closes": [10, 10, 10]}
+            for symbol in ("A", "B")
+        ]
+        fixture["costs"] = {key: 0 for key in fixture["costs"]}
+        fixture["costs"]["buy_slippage_bps"] = 1000
+        result = self.run_cli(fixture, rebalance="entry_only")
+        # Each fixed 500 budget buys floor(500/11)=45, not floor(500/10)=50.
+        self.assertEqual([row["quantity"] for row in result["fills"]], [45, 45])
+        self.assertEqual([row["price"] for row in result["fills"]], [11, 11])
+        self.assertEqual(result["sessions"][1]["open"]["cash"], 10)
+        self.assertEqual(result["sessions"][1]["open"]["equity"], 910)
+
+    def test_entry_only_s2_preserves_existing_quantity_and_retries_missing_target(self):
+        fixture = json.loads(REBALANCE.read_text())
+        fixture["costs"] = {key: 0 for key in fixture["costs"]}
+        fixture["strategy"]["rebalance_every"] = 10
         fixture["execution_status_overrides"] = [
-            {"symbol": "B", "date": "2026-01-06", "trade_status": "HALTED",
+            {"symbol": "B", "date": "2026-01-08", "trade_status": "HALTED",
              "is_tradable": False, "available_at": "08:50:00+08:00"},
         ]
         result = self.run_cli(
-            fixture, strategy="s1", sizing="lot", retry="skip", rebalance="entry_only",
-        )
-        self.assertEqual(result["executions"][0]["skipped_buys"], ["B.SYNTH"])
-        self.assertEqual(result["fills"][-1]["instrument_id"], "B.SYNTH")
-        self.assertIsNone(result["pending_at_end"])
-
-    def test_entry_only_s2_preserves_existing_quantity_and_retries_missing_target(self):
-        fixture = json.loads(SMALL.read_text())
-        fixture["costs"] = {key: 0 for key in fixture["costs"]}
-        fixture["strategy"].update({
-            "momentum_short_days": 1, "momentum_long_days": 1,
-            "volatility_window": 2, "rebalance_every": 1, "top_n": 2,
-            "short_momentum_weight": 1, "long_momentum_weight": 0,
-            "volatility_weight": 0, "trend_filter": False,
-        })
-        result = self.run_cli(
             fixture, strategy="s2", sizing="lot", rebalance="entry_only",
         )
-        self.assertEqual(result["parameters"]["rebalance"], "entry_only")
-        self.assertTrue(all(fill["quantity"] > 0 for fill in result["fills"]))
+        # D4 buys A with 1000/2=500; D5 buys B with remaining 500/1=500.
+        self.assertEqual(
+            [(row["session_date"], row["instrument_id"], row["quantity"])
+             for row in result["fills"]],
+            [("2026-01-08", "A.SYNTH", 50), ("2026-01-09", "B.SYNTH", 50)],
+        )
+        self.assertEqual(
+            [(row["session_date"], row["instrument_id"], row["status"], row["reason"])
+             for row in result["orders"]],
+            [("2026-01-08", "B.SYNTH", "blocked", "halted"),
+             ("2026-01-08", "A.SYNTH", "filled", None),
+             ("2026-01-09", "B.SYNTH", "filled", None)],
+        )
+        self.assertEqual(len(result["decisions"]), 1)
+        self.assertTrue(result["executions"][1]["retry_only"])
+        self.assertEqual(result["sessions"][4]["open"]["holdings"]["A.SYNTH"]["quantity"], 50)
+        self.assertEqual(result["sessions"][4]["open"]["cash"], 0)
+        self.assertEqual(result["sessions"][4]["open"]["equity"], 1250)
+        self.assertIsNone(result["pending_at_end"])
 
-    def test_entry_only_rejects_vector_parity_and_s3(self):
-        for strategy, sizing in (("s1", "vector_parity"), ("s3", "lot")):
+    def test_entry_only_rejects_vector_parity(self):
+        for strategy in ("s1", "s2", "s3"):
             stderr = self.run_cli(
-                HAND if strategy == "s1" else MA,
-                strategy=strategy, sizing=sizing, rebalance="entry_only",
+                {"s1": HAND, "s2": SMALL, "s3": MA}[strategy],
+                strategy=strategy, sizing="vector_parity", rebalance="entry_only",
                 expect_error=True,
             )
             self.assertIn("entry_only", stderr)
+
+    def test_entry_only_s3_matches_independent_poc_orders_and_ledger_checkpoints(self):
+        result = self.run_cli(MA, strategy="s3", rebalance="entry_only")
+        expected = json.loads(
+            (ROOT / "poc/poc0-benchmark/fixtures/b2-ma20-60-expected-v1.json").read_text()
+        )
+        dates = [row["session_date"] for row in result["sessions"]]
+        self.assertEqual(len(dates), 130)
+        self.assertEqual(result["parameters"]["strategy_parameters"]["universe"], ["A.SYNTH"])
+        self.assertEqual(result["parameters"]["unfilled_entry"], "retry")
+        self.assertEqual(
+            [{"session_index": dates.index(row["session_date"]),
+              "target_symbols": [key.removesuffix(".SYNTH") for key in row["targets"]]}
+             for row in result["decisions"]],
+            expected["signals"],
+        )
+        self.assertEqual(
+            [{"session_index": dates.index(row["session_date"]),
+              "symbol": row["instrument_id"].removesuffix(".SYNTH"),
+              "side": row["side"].upper(), "quantity": row["quantity"],
+              "fill_price": row["price"], "commission": row["commission"]}
+             for row in result["fills"]],
+            expected["orders"],
+        )
+        self.assertEqual(len(result["orders"]), len(expected["orders"]))
+        self.assertTrue(all(row["status"] == "filled" and row["reason"] is None
+                            for row in result["orders"]))
+        for checkpoint in expected["ledger_checkpoints"]:
+            close = result["sessions"][checkpoint["session_index"]]["close"]
+            self.assertAlmostEqual(close["cash"], checkpoint["cash"], delta=1e-6)
+            self.assertAlmostEqual(close["equity"], checkpoint["nav"], delta=1e-6)
+            self.assertEqual(
+                close["holdings"].get("A.SYNTH", {}).get("quantity", 0),
+                checkpoint["quantity"],
+            )
+        for field, total in (("commission", "total_commission"), ("slippage", "total_slippage"),
+                             ("total_cost", "total_cost")):
+            self.assertAlmostEqual(sum(row[field] for row in result["fills"]),
+                                   expected[total], delta=1e-6)
+        self.assertAlmostEqual(result["sessions"][-1]["close"]["equity"],
+                               expected["final_equity"], delta=1e-6)
+        # The expanded A fixture has no missing close in any complete MA window.
+        self.assertTrue(all(row["ma20_60"]["A.SYNTH"]["status"] == "ok"
+                            for row in result["sessions"][59:]))
+        self.assertIsNone(result["pending_at_end"])
+
+    def test_entry_only_s1_s2_s3_match_committed_poc_fills_and_daily_close_ledger(self):
+        preflight = json.loads(POC_PREFLIGHT.read_text())
+        for strategy, key in (("s1", "buy_hold"), ("s2", "momentum_rotation"), ("s3", "ma20_60")):
+            with self.subTest(strategy=strategy):
+                result = self.run_cli(
+                    MA if strategy == "s3" else SMALL, strategy=strategy, rebalance="entry_only",
+                    poc0_s1_timing=strategy == "s1",
+                )
+                expected = preflight[f"b2_fast_event_{key}"]["projection"]
+                self.assertEqual(len(result["fills"]), len(expected["fills"]))
+                self.assertEqual(len(result["orders"]), len(expected["orders"]))
+                for actual, reference in zip(result["fills"], expected["fills"]):
+                    self.assertEqual(actual["session_date"], reference["date"])
+                    self.assertEqual(actual["instrument_id"], reference["symbol"] + ".SYNTH")
+                    self.assertEqual(actual["side"], reference["side"].lower())
+                    self.assertEqual(actual["quantity"], reference["quantity"])
+                    for actual_key, reference_key in (
+                        ("raw_open", "reference_price"), ("price", "fill_price"),
+                        ("notional", "gross_value"), ("commission", "commission"),
+                        ("tax", "tax"), ("slippage", "slippage_cost"),
+                    ):
+                        self.assertAlmostEqual(actual[actual_key], reference[reference_key], delta=1e-6)
+                self.assertEqual(len(result["sessions"]), len(expected["ledger"]))
+                for session, reference in zip(result["sessions"], expected["ledger"]):
+                    self.assertEqual(session["session_date"], reference["date"])
+                    close = session["close"]
+                    self.assertAlmostEqual(close["cash"], reference["cash"], delta=1e-6)
+                    self.assertAlmostEqual(close["equity"], reference["nav"], delta=1e-6)
+                    self.assertEqual(
+                        {key: row["quantity"] for key, row in close["holdings"].items()},
+                        {row["symbol"] + ".SYNTH": row["quantity"] for row in reference["holdings"]},
+                    )
+                    for holding in reference["holdings"]:
+                        self.assertEqual(close["holdings"][holding["symbol"] + ".SYNTH"]["price"],
+                                         holding["mark_price"])
+                for field, total in (("commission", "commission"), ("tax", "tax"),
+                                     ("slippage", "slippage_cost"), ("total_cost", "total_cost")):
+                    self.assertAlmostEqual(sum(row[field] for row in result["fills"]),
+                                           expected["summary"][total], delta=1e-6)
+                # Blocked diagnostics use the MVP-3 schema, not the legacy side/quantity encoding.
+                self.assertEqual(
+                    sorted((row["session_date"], row["instrument_id"], row["reason"])
+                           for row in result["orders"] if row["status"] == "blocked"),
+                    sorted((row["attempt_date"], row["symbol"] + ".SYNTH", row["reason"].lower())
+                           for row in expected["orders"] if row["reason"]),
+                )
 
     def test_ma20_60_crosses_only_after_warmup_and_executes_next_open(self):
         for sizing in ("lot", "vector_parity"):
@@ -329,21 +478,57 @@ class FastEventGoldenTests(unittest.TestCase):
 
     def test_entry_only_goldens_recompute_every_value(self):
         cases = [
-            (SMALL, "s1", "FixedInitial"),
-            (SMALL, "s2", "RemainingCash"),
+            (SMALL, "s1", "FixedInitial", False),
+            (SMALL, "s1", "FixedInitial", True),
+            (SMALL, "s2", "RemainingCash", False),
+            (MA, "s3", "RemainingCash", False),
         ]
-        for fixture, strategy, _budget in cases:
-            with self.subTest(fixture=fixture.name, strategy=strategy):
+        for fixture, strategy, budget, poc0_s1_timing in cases:
+            with self.subTest(fixture=fixture.name, strategy=strategy, poc0=poc0_s1_timing):
+                variant = ".poc0" if poc0_s1_timing else ""
                 expected = json.loads(
                     (GOLDEN / "expected" /
-                     f"{fixture.stem}.{strategy}.entry_only.lot.json").read_text()
+                     f"{fixture.stem}.{strategy}{variant}.entry_only.lot.json").read_text()
                 )
                 actual = self.run_cli(
                     fixture, strategy=strategy, sizing="lot", rebalance="entry_only",
+                    poc0_s1_timing=poc0_s1_timing,
                 )
                 self.assertEqual(actual, expected)
                 self.assertEqual(actual["parameters"]["rebalance"], "entry_only")
                 self.assertEqual(actual["parameters"]["sizing"], "lot")
+                self.assertEqual(actual["parameters"]["entry_budget"], budget)
+                self.assertEqual(actual["parameters"]["unfilled_entry"], "retry")
+                cash = actual["parameters"]["initial_cash"]
+                quantities = {}
+                for session in actual["sessions"]:
+                    for fill in actual["fills"]:
+                        if fill["session_date"] == session["session_date"]:
+                            cash += fill["cash_change"]
+                            instrument = fill["instrument_id"]
+                            sign = 1 if fill["side"] == "buy" else -1
+                            quantities[instrument] = quantities.get(instrument, 0) + sign * fill["quantity"]
+                            self.assertAlmostEqual(fill["cash_change"],
+                                                   -sign * fill["notional"] - fill["cash_fees"], delta=1e-6)
+                    for point in ("open", "close"):
+                        value = session[point]
+                        self.assertAlmostEqual(value["cash"], cash, delta=1e-6)
+                        self.assertGreaterEqual(value["cash"], 0)
+                        self.assertAlmostEqual(
+                            value["equity"], cash + sum(row["quantity"] * row["price"]
+                                                       for row in value["holdings"].values()), delta=1e-6,
+                        )
+                        for instrument, quantity in quantities.items():
+                            self.assertEqual(value["holdings"].get(instrument, {}).get("quantity", 0),
+                                             quantity)
+
+    def test_poc_s1_timing_is_rejected_outside_s1_entry_only(self):
+        for strategy, rebalance in (("s1", "full_target"), ("s2", "entry_only"), ("s3", "entry_only")):
+            stderr = self.run_cli(
+                MA if strategy == "s3" else SMALL, strategy=strategy, rebalance=rebalance,
+                poc0_s1_timing=True, expect_error=True,
+            )
+            self.assertIn("poc0_s1_timing requires S1 lot + entry_only", stderr)
 
     def test_minimum_commission_top_up_and_both_directional_taxes(self):
         fixture = json.loads(SMALL.read_text())
@@ -415,11 +600,12 @@ class FastEventGoldenTests(unittest.TestCase):
             "execution_status_default": {"trade_status": "TRADABLE", "is_tradable": True, "available_at": "08:50:00+08:00"},
         }
         fixture["instruments"][0]["closes"][59] = None
-        result = self.run_cli(fixture, strategy="s3")
-        self.assertEqual(result["sessions"][60]["ma20_60"]["A.SYNTH"]["status"], "missing_input")
-        self.assertEqual(result["sessions"][118]["ma20_60"]["A.SYNTH"]["status"], "missing_input")
-        self.assertEqual(result["sessions"][119]["ma20_60"]["A.SYNTH"]["status"], "ok")
-        self.assertFalse(result["fills"])
+        for rebalance in ("full_target", "entry_only"):
+            result = self.run_cli(fixture, strategy="s3", rebalance=rebalance)
+            self.assertEqual(result["sessions"][60]["ma20_60"]["A.SYNTH"]["status"], "missing_input")
+            self.assertEqual(result["sessions"][118]["ma20_60"]["A.SYNTH"]["status"], "missing_input")
+            self.assertEqual(result["sessions"][119]["ma20_60"]["A.SYNTH"]["status"], "ok")
+            self.assertFalse(result["fills"])
 
     def test_unpriced_unheld_instrument_is_skipped_then_retried(self):
         fixture = json.loads(HAND.read_text())

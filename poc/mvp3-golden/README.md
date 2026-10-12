@@ -25,9 +25,11 @@ The compressed MA fixture expands into weekdays from `start_date`, with
 60 flat, 20 high and 50 low closes for A; B/C remain flat. Opens are 100.
 All execution statuses are explicitly synthetic TRADABLE, available at
 08:50 +08:00; opens are at 09:30, closes at 15:00. Expansion is independent
-Python, not imported from the POC harness. A is weighted at 1/3, unlike
-the earlier POC S3 single-instrument Universe. No old `entry_only` golden
-is overwritten or claimed to match `full_target`.
+Python, not imported from the POC harness. `full_target` weights A at 1/3;
+the explicitly recorded S3 `entry_only` variant uses strategy Universe
+`{A}` and weight 1, matching the earlier POC. B/C remain in the 3x130 input
+but are not strategy inputs in that variant. Existing `full_target`
+goldens are unchanged.
 
 Instrument IDs are `{symbol}.SYNTH` and sort lexically. `lot_size` is read
 from each instrument, falling back to the legacy source fixture's explicit
@@ -67,23 +69,101 @@ done
 python3 -m unittest tests.test_mvp3_fast_event_golden -v
 ```
 
-The sixteen expected JSON files contain every open-after-execution and close
+The fourteen `full_target` expected JSON files contain every open-after-execution and close
 cash/quantity/valuation/equity/NAV row, decisions, execution attempts,
 orders (including blocked/unaffordable attempts), Fills and fee components.
 All rows and numeric values are compared with CLI recomputation in CI,
 not merely final NAV. Tests use temporary paths and do not require a
 specific working directory or locally built binaries.
 
-The two `entry_only` expected files are `dataset-v1.s1.entry_only.lot.json`
-and `dataset-v1.s2.entry_only.lot.json`. S1 uses `FixedInitial`: initial
+The four `entry_only` expected files are:
+
+- `dataset-v1.s1.entry_only.lot.json`: spec F10 first-Session S1 decision.
+- `dataset-v1.s1.poc0.entry_only.lot.json`: explicit POC S1 decision timing.
+- `dataset-v1.s2.entry_only.lot.json`: S2, ADR 0017 Session windows.
+- `b2-ma20-60-v1.s3.entry_only.lot.json`: POC S3, strategy Universe `{A}`.
+
+S1 uses `FixedInitial`: initial
 capital is divided by the number of positive target entries. S2 uses
 `RemainingCash`: after sells, remaining cash is divided by the number of
-targets not yet entered. Both variants keep continuing quantities unchanged,
+targets not yet entered. S3 uses the same `RemainingCash` execution rule.
+All variants keep continuing quantities unchanged,
 reduce buys one lot at a time when cash is insufficient, and retain every
-unentered target as pending for retry. `entry_only` is rejected for
-`vector_parity` and is not used for S3; S3 remains the `full_target` MA20/60
-case. The expected projections include blocked and unfilled order attempts,
+unentered target as pending for retry. Budget quantities divide by the
+slippage-adjusted buy Fill price, not the raw open. `entry_only` defaults
+to `unfilled_entry=retry`; explicit `skip` and `vector_parity` are rejected,
+so saved parameters never describe an ignored policy.
+The expected projections include blocked and unfilled order attempts,
 reasons, all fills, fees, cash, NAV, and both valuation points.
+
+```sh
+for strategy in s1 s2; do
+  python3 poc/mvp3-golden/fast_event_golden.py \
+    --fixture poc/poc0-benchmark/fixtures/dataset-v1.json \
+    --strategy "$strategy" --sizing lot --rebalance entry_only \
+    --out "poc/mvp3-golden/expected/dataset-v1.$strategy.entry_only.lot.json"
+done
+python3 poc/mvp3-golden/fast_event_golden.py \
+  --fixture poc/poc0-benchmark/fixtures/dataset-v1.json \
+  --strategy s1 --sizing lot --rebalance entry_only --poc0-s1-timing \
+  --out poc/mvp3-golden/expected/dataset-v1.s1.poc0.entry_only.lot.json
+python3 poc/mvp3-golden/fast_event_golden.py \
+  --fixture poc/poc0-benchmark/fixtures/b2-ma20-60-v1.json \
+  --strategy s3 --sizing lot --rebalance entry_only \
+  --out poc/mvp3-golden/expected/b2-ma20-60-v1.s3.entry_only.lot.json
+```
+
+## POC source extraction and explicit variants (#121)
+
+Rules were extracted from
+[`poc0_benchmark.rs`](../../crates/quant-research/src/poc0_benchmark.rs),
+not inferred from the new oracle outputs:
+
+| Source function / lines | Actual POC rule | Oracle mapping |
+| --- | --- | --- |
+| `run_fast_event`, 1452-1453 | S1 decision at `calendar.len().saturating_sub(5)`, despite the first-close comment above it | `--poc0-s1-timing`, recorded as `poc0_calendar_len_minus_five`; default S1 remains spec F10 first-Session close |
+| `run_fast_event_with_targets`, 1475-1479, 1503-1506, 1543-1558 | Fixed initial capital / target count; skip already held targets; floor budget / slipped Fill price to lots; reduce until cash covers notional + commission + tax | `entry_budget=FixedInitial`; blocked/cash-limited targets remain pending |
+| `replay_event_targets`, 1808-1813, 1880-1891, 1921-1938, 1967-1969 | Sell exits only; cash after sells / unentered count; continuing holdings unchanged; same slipped-price sizing; retain pending until all targets entered | `entry_budget=RemainingCash` for S2/S3 |
+| `run_ma_event`, 1728-1780 | Only A is a strategy input; MA20/60 Session slices, crossing at 60/85; next-open execution through `replay_event_targets` | S3 `entry_only` records Universe `{A}`; `full_target` retains all three strategy instruments |
+| `make_ma_dataset`, 1685-1686, 1707-1719 | Clear missing bars/status overrides; expand all 130 A closes from flat/high/low segments | No A gap in this fixture; all complete MA windows are `ok` |
+
+The CLI regression suite compares S1 (explicit POC timing), S2 and S3
+against the **previously committed Rust POC preflight**
+[`b2-matched-decision-loads-reset-selected-2026-09-28.preflight.json`](../poc0-benchmark/results/b2-matched-decision-loads-reset-selected-2026-09-28.preflight.json):
+exact Fill dates, sides, Instruments and quantities, every daily close
+holding/mark, cash/equity and fee totals within 1e-6 CNY. S3 also compares
+to the separate hand-authored
+[`b2-ma20-60-expected-v1.json`](../poc0-benchmark/fixtures/b2-ma20-60-expected-v1.json).
+This is independent prior evidence, not merely oracle self-recomputation.
+Tests additionally replay cash/quantities and check both valuation-point
+identities for all four new projections.
+
+Registered differences (not claims of byte-for-byte legacy compatibility):
+
+- **S1 signal timing:** spec F10 first-Session S1 is distinct from the
+  POC timing flag above. Both expected files are retained.
+- **Order diagnostics:** legacy blocked orders encode quantity 0, uppercase
+  reason and BUY/SELL; MVP-3 uses null quantity, lowercase gate reason and
+  `rebalance` for whole-attempt deferral. Blocked rows precede filled rows
+  in the oracle, unlike the legacy per-Instrument attempt order. Tests
+  compare blocked attempt date/Instrument/reason after explicit lowercase
+  normalization; hand tests assert the exact MVP-3 order list including
+  `halted` and `insufficient_cash`. Literal legacy order schemas differ.
+- **Execution gates:** legacy S1 checks unentered targets independently;
+  legacy S2/S3 defer for blocked exits only. The oracle retains shared
+  conservative any-held deferral and explicit availability checks.
+  These differences do not change the registered POC-timed S1/S2/S3
+  fills or close ledgers, but are not general POC equivalence.
+- **ADR 0017 windows:** S2 does not bridge B's missing final Session;
+  rankings can differ from POC observed-bar windows, though target sets
+  and execution ledgers match here. S3 A has no gap, so there is **no
+  fixture-induced ADR 0017 difference**. A synthetic gap regression runs
+  both S3 variants and verifies `missing_input` through index 118, with
+  index 119 establishing a baseline rather than fabricating a crossing.
+
+No POC code or fixture is modified, and these oracle checks do not establish
+that the new Rust scale-18 Fast Event implementation reproduces all legacy
+orders. Platform/oracle comparison remains the separate #122 scope.
 
 ## Time, decisions and execution
 
@@ -103,7 +183,8 @@ A last-Session decision has no execution Session and remains pending.
   Start at the first valid score; repeat every `rebalance_every` Sessions,
   rank descending then ID ascending, equal-weight the selected `top_n`.
   Empty rankings on a scheduled decision produce an empty target.
-  Default `unfilled_entry=skip` preserves the existing S2 convention.
+  Default `unfilled_entry=skip` in `full_target` preserves the existing S2
+  convention; `entry_only` requires retry.
 - **S3**: each instrument independently enters on previous MA20/60 gap
   <= 0 and current gap > 0; exits on previous gap >= 0 and current gap < 0.
   Held targets have fixed weight 1/N, never renormalized. **Owner-confirmed
@@ -112,13 +193,14 @@ A last-Session decision has no execution Session and remains pending.
   existing strategy state. The first subsequent valid gap establishes a
   baseline, not a crossing. The 3x10 S3 results prove warmup/no-trade behavior;
   3x130 proves entry at index 60, next-open buy at 61, exit at 85 and sell at 86.
+  S3 `entry_only` is the explicit POC Universe `{A}` variant above.
 
 Execution requires a raw open plus TRADABLE/is_tradable=true status whose
 known availability is at or before that open. No status record means
 UNKNOWN. If **any held instrument** is unavailable, defer the entire
 attempt, matching the current conservative `strategy::execute` convention.
 Otherwise unavailable buy targets are skipped without renormalization.
-`--unfilled-entry retry` keeps only blocked legs with their original weights;
+In `full_target`, `--unfilled-entry retry` keeps only blocked legs with their original weights;
 filled legs are not rebalanced during retry. Cash-based lot reductions do
 not create a retry. A new decision replaces even deferred/retry pending.
 

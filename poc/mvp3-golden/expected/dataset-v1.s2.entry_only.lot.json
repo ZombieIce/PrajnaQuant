@@ -8,7 +8,7 @@
     "Static Universe, synthetic availability; not PIT or real-market evidence",
     "no T+1, price limits, currency-unit rounding, dividends, interest or funding",
     "vector_parity retry uses pre-fee equity budgets, fees paid from cash; cash-insufficient budgets cut in ascending instrument_id order",
-    "entry_only is a POC-only lot variant: S1 uses initial capital divided by target count; S2 uses remaining cash divided by unentered target count; unentered targets remain pending after cash-limited attempts"
+    "entry_only is a POC-only lot variant: S1 uses initial capital divided by target count; S2/S3 use remaining cash divided by unentered target count; unentered targets remain pending after cash-limited attempts"
   ],
   "decisions": [
     {
@@ -382,6 +382,7 @@
       "sell_slippage_bps": 10.0,
       "sell_tax_rate": 0.0
     },
+    "entry_budget": "RemainingCash",
     "initial_cash": 100000.0,
     "lot_sizes": {
       "A.SYNTH": 100.0,
@@ -406,7 +407,7 @@
       "volatility_window": 2
     },
     "unallocated_capital": 0.0,
-    "unfilled_entry": "skip"
+    "unfilled_entry": "retry"
   },
   "pending_at_end": {
     "decision_session": "2026-01-16",
