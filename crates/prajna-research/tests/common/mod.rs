@@ -9,10 +9,14 @@ pub fn publish_v1(lake_root: &Path) -> String {
 }
 
 pub fn publish_version(lake_root: &Path, version: &str) -> String {
+    publish_fixture(lake_root, FIXTURE, version)
+}
+
+pub fn publish_fixture(lake_root: &Path, fixture: &[u8], version: &str) -> String {
     let store = RawStore::open(lake_root).unwrap();
     let raw_hash = store
         .put(
-            FIXTURE,
+            fixture,
             SourceRecordInput {
                 content_type: "application/json".into(),
                 source_kind: SourceKind::Fixture,

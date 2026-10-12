@@ -233,6 +233,21 @@ impl ExecutionState {
         self.missing_entries = None;
     }
 
+    /// POC entry-only variant: retain targets which have not acquired any quantity,
+    /// including cash-limited entries. Full-target engines must not call this.
+    pub fn retain_unentered(&mut self, decision: &Decision, held: &BTreeSet<InstrumentId>) {
+        let missing = decision
+            .targets
+            .iter()
+            .filter(|(id, weight)| **weight > 0.0 && !held.contains(*id))
+            .map(|(id, weight)| (id.clone(), *weight))
+            .collect::<BTreeMap<_, _>>();
+        if !missing.is_empty() {
+            self.pending = Some(decision.clone());
+            self.missing_entries = Some(missing);
+        }
+    }
+
     pub fn pending_at_end(&self) -> Option<ExecutionEvent> {
         self.pending
             .as_ref()

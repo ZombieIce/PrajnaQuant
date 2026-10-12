@@ -15,6 +15,7 @@ fs2 = "=0.4.3"
 polars = { version = "=0.55.2", default-features = false, features = ["lazy", "dtype-date", "dtype-datetime"] }
 polars-io = { version = "=0.55.2", default-features = false, features = ["parquet"] }
 prajna-data = { path = "../prajna-data" }
+prajna-account = { path = "../prajna-account" }
 prajna-domain = { path = "../prajna-domain" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
