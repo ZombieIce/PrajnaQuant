@@ -12,7 +12,7 @@ use prajna_research::{
         AvailabilityAssumption, Factor, FactorGraph, FactorKind, FactorParams, RotationScoreParams,
     },
     load_execution_status, load_panel,
-    strategy::{RankDirection, StrategyCapability, VectorStrategy, Weighting},
+    strategy::{RankDirection, StrategyCapability, TopKRank, Weighting},
     vector::{VectorCosts, run_vector, run_vector_with_policy},
 };
 use serde_json::{Map, Number, Value, json};
@@ -158,7 +158,7 @@ fn run_case(case: &GoldenCase) {
         },
     )
     .unwrap_or_else(|error| panic!("{}: invalid rotation score factor: {error}", case.name));
-    let strategy = VectorStrategy {
+    let strategy = TopKRank {
         score: score.clone(),
         direction: RankDirection::Descending,
         top_k: u32_field(strategy_config, "top_n", case.name),

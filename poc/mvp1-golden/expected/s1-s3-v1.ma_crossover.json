@@ -1,0 +1,4364 @@
+{
+  "factors": {
+    "ma_gap(20,60)": [
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-05",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-06",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-07",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-08",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-09",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-12",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-13",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-14",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-15",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-16",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-19",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-20",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-21",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-22",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-23",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-26",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-27",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-28",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-29",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-01-30",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-02",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-03",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-04",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-05",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-06",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-09",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-10",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-11",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-12",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-13",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-16",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-17",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-18",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-19",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-20",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-23",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-24",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-25",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-26",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-02-27",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-02",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-03",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-04",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-05",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-06",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-09",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-10",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-11",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-12",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-13",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-16",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-17",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-18",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-19",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-20",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-23",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-24",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-25",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-26",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": "2026-03-27T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-27",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-03-30T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-30",
+        "status": "ok",
+        "value": 0.3333333333333286
+      },
+      {
+        "available_at": "2026-03-31T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-03-31",
+        "status": "ok",
+        "value": 0.6666666666666714
+      },
+      {
+        "available_at": "2026-04-01T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-01",
+        "status": "ok",
+        "value": 1.0
+      },
+      {
+        "available_at": "2026-04-02T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-02",
+        "status": "ok",
+        "value": 1.3333333333333286
+      },
+      {
+        "available_at": "2026-04-03T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-03",
+        "status": "ok",
+        "value": 1.6666666666666714
+      },
+      {
+        "available_at": "2026-04-06T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-06",
+        "status": "ok",
+        "value": 2.0
+      },
+      {
+        "available_at": "2026-04-07T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-07",
+        "status": "ok",
+        "value": 2.3333333333333286
+      },
+      {
+        "available_at": "2026-04-08T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-08",
+        "status": "ok",
+        "value": 2.6666666666666714
+      },
+      {
+        "available_at": "2026-04-09T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-09",
+        "status": "ok",
+        "value": 3.0
+      },
+      {
+        "available_at": "2026-04-10T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-10",
+        "status": "ok",
+        "value": 3.3333333333333286
+      },
+      {
+        "available_at": "2026-04-13T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-13",
+        "status": "ok",
+        "value": 3.6666666666666714
+      },
+      {
+        "available_at": "2026-04-14T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-14",
+        "status": "ok",
+        "value": 4.0
+      },
+      {
+        "available_at": "2026-04-15T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-15",
+        "status": "ok",
+        "value": 4.333333333333329
+      },
+      {
+        "available_at": "2026-04-16T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-16",
+        "status": "ok",
+        "value": 4.666666666666671
+      },
+      {
+        "available_at": "2026-04-17T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-17",
+        "status": "ok",
+        "value": 5.0
+      },
+      {
+        "available_at": "2026-04-20T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-20",
+        "status": "ok",
+        "value": 5.333333333333329
+      },
+      {
+        "available_at": "2026-04-21T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-21",
+        "status": "ok",
+        "value": 5.666666666666671
+      },
+      {
+        "available_at": "2026-04-22T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-22",
+        "status": "ok",
+        "value": 6.0
+      },
+      {
+        "available_at": "2026-04-23T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-23",
+        "status": "ok",
+        "value": 6.333333333333329
+      },
+      {
+        "available_at": "2026-04-24T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-24",
+        "status": "ok",
+        "value": 6.666666666666671
+      },
+      {
+        "available_at": "2026-04-27T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-27",
+        "status": "ok",
+        "value": 5.5
+      },
+      {
+        "available_at": "2026-04-28T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-28",
+        "status": "ok",
+        "value": 4.333333333333329
+      },
+      {
+        "available_at": "2026-04-29T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-29",
+        "status": "ok",
+        "value": 3.1666666666666714
+      },
+      {
+        "available_at": "2026-04-30T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-04-30",
+        "status": "ok",
+        "value": 2.0
+      },
+      {
+        "available_at": "2026-05-01T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-01",
+        "status": "ok",
+        "value": 0.8333333333333286
+      },
+      {
+        "available_at": "2026-05-04T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-04",
+        "status": "ok",
+        "value": -0.3333333333333286
+      },
+      {
+        "available_at": "2026-05-05T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-05",
+        "status": "ok",
+        "value": -1.5
+      },
+      {
+        "available_at": "2026-05-06T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-06",
+        "status": "ok",
+        "value": -2.6666666666666714
+      },
+      {
+        "available_at": "2026-05-07T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-07",
+        "status": "ok",
+        "value": -3.8333333333333286
+      },
+      {
+        "available_at": "2026-05-08T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-08",
+        "status": "ok",
+        "value": -5.0
+      },
+      {
+        "available_at": "2026-05-11T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-11",
+        "status": "ok",
+        "value": -6.166666666666671
+      },
+      {
+        "available_at": "2026-05-12T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-12",
+        "status": "ok",
+        "value": -7.333333333333329
+      },
+      {
+        "available_at": "2026-05-13T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-13",
+        "status": "ok",
+        "value": -8.5
+      },
+      {
+        "available_at": "2026-05-14T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-14",
+        "status": "ok",
+        "value": -9.666666666666671
+      },
+      {
+        "available_at": "2026-05-15T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-15",
+        "status": "ok",
+        "value": -10.833333333333329
+      },
+      {
+        "available_at": "2026-05-18T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-18",
+        "status": "ok",
+        "value": -12.0
+      },
+      {
+        "available_at": "2026-05-19T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-19",
+        "status": "ok",
+        "value": -13.166666666666671
+      },
+      {
+        "available_at": "2026-05-20T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-20",
+        "status": "ok",
+        "value": -14.333333333333329
+      },
+      {
+        "available_at": "2026-05-21T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-21",
+        "status": "ok",
+        "value": -15.5
+      },
+      {
+        "available_at": "2026-05-22T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-22",
+        "status": "ok",
+        "value": -16.66666666666667
+      },
+      {
+        "available_at": "2026-05-25T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-25",
+        "status": "ok",
+        "value": -16.33333333333333
+      },
+      {
+        "available_at": "2026-05-26T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-26",
+        "status": "ok",
+        "value": -16.0
+      },
+      {
+        "available_at": "2026-05-27T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-27",
+        "status": "ok",
+        "value": -15.666666666666671
+      },
+      {
+        "available_at": "2026-05-28T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-28",
+        "status": "ok",
+        "value": -15.333333333333329
+      },
+      {
+        "available_at": "2026-05-29T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-05-29",
+        "status": "ok",
+        "value": -15.0
+      },
+      {
+        "available_at": "2026-06-01T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-01",
+        "status": "ok",
+        "value": -14.666666666666671
+      },
+      {
+        "available_at": "2026-06-02T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-02",
+        "status": "ok",
+        "value": -14.333333333333329
+      },
+      {
+        "available_at": "2026-06-03T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-03",
+        "status": "ok",
+        "value": -14.0
+      },
+      {
+        "available_at": "2026-06-04T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-04",
+        "status": "ok",
+        "value": -13.666666666666671
+      },
+      {
+        "available_at": "2026-06-05T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-05",
+        "status": "ok",
+        "value": -13.333333333333329
+      },
+      {
+        "available_at": "2026-06-08T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-08",
+        "status": "ok",
+        "value": -13.0
+      },
+      {
+        "available_at": "2026-06-09T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-09",
+        "status": "ok",
+        "value": -12.666666666666671
+      },
+      {
+        "available_at": "2026-06-10T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-10",
+        "status": "ok",
+        "value": -12.333333333333329
+      },
+      {
+        "available_at": "2026-06-11T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-11",
+        "status": "ok",
+        "value": -12.0
+      },
+      {
+        "available_at": "2026-06-12T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-12",
+        "status": "ok",
+        "value": -11.666666666666671
+      },
+      {
+        "available_at": "2026-06-15T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-15",
+        "status": "ok",
+        "value": -11.333333333333329
+      },
+      {
+        "available_at": "2026-06-16T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-16",
+        "status": "ok",
+        "value": -11.0
+      },
+      {
+        "available_at": "2026-06-17T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-17",
+        "status": "ok",
+        "value": -10.666666666666671
+      },
+      {
+        "available_at": "2026-06-18T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-18",
+        "status": "ok",
+        "value": -10.333333333333329
+      },
+      {
+        "available_at": "2026-06-19T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-19",
+        "status": "ok",
+        "value": -10.0
+      },
+      {
+        "available_at": "2026-06-22T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-22",
+        "status": "ok",
+        "value": -9.5
+      },
+      {
+        "available_at": "2026-06-23T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-23",
+        "status": "ok",
+        "value": -9.0
+      },
+      {
+        "available_at": "2026-06-24T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-24",
+        "status": "ok",
+        "value": -8.5
+      },
+      {
+        "available_at": "2026-06-25T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-25",
+        "status": "ok",
+        "value": -8.0
+      },
+      {
+        "available_at": "2026-06-26T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-26",
+        "status": "ok",
+        "value": -7.5
+      },
+      {
+        "available_at": "2026-06-29T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-29",
+        "status": "ok",
+        "value": -7.0
+      },
+      {
+        "available_at": "2026-06-30T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-06-30",
+        "status": "ok",
+        "value": -6.5
+      },
+      {
+        "available_at": "2026-07-01T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-07-01",
+        "status": "ok",
+        "value": -6.0
+      },
+      {
+        "available_at": "2026-07-02T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-07-02",
+        "status": "ok",
+        "value": -5.5
+      },
+      {
+        "available_at": "2026-07-03T07:00:00Z",
+        "instrument_id": "A.SYNTH",
+        "session_date": "2026-07-03",
+        "status": "ok",
+        "value": -5.0
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-05",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-06",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-07",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-08",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-09",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-12",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-13",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-14",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-15",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-16",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-19",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-20",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-21",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-22",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-23",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-26",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-27",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-28",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-29",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-01-30",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-02",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-03",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-04",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-05",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-06",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-09",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-10",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-11",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-12",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-13",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-16",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-17",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-18",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-19",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-20",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-23",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-24",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-25",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-26",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-02-27",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-02",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-03",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-04",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-05",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-06",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-09",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-10",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-11",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-12",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-13",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-16",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-17",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-18",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-19",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-20",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-23",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-24",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-25",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-26",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": "2026-03-27T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-27",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-03-30T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-30",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-03-31T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-03-31",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-01T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-01",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-02T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-02",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-03T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-03",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-06T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-06",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-07T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-07",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-08T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-08",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-09T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-09",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-10T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-10",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-13T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-13",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-14T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-14",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-15T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-15",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-16T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-16",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-17T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-17",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-20T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-20",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-21T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-21",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-22T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-22",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-23T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-23",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-24T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-24",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-27T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-27",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-28T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-28",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-29T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-29",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-04-30T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-04-30",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-05-01T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-01",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-05-04T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-04",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-05-05T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-05",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-05-06T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-06",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-05-07T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-07",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-05-08T07:00:00Z",
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-08",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-11",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-12",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-13",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-14",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-15",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-18",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-19",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-20",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-21",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-22",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-25",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-26",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-27",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-28",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-05-29",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-01",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-02",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-03",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-04",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-05",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-08",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-09",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-10",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-11",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-12",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-15",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-16",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-17",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-18",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-19",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-22",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-23",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-24",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-25",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-26",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-29",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-06-30",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-07-01",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-07-02",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "B.SYNTH",
+        "session_date": "2026-07-03",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-05",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-06",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-07",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-08",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-09",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-12",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-13",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-14",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-15",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-16",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-19",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-20",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-21",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-22",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-23",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-26",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-27",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-28",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-29",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-01-30",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-02",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-03",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-04",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-05",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-06",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-09",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-10",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-11",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-12",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-13",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-16",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-17",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-18",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-19",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-20",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-23",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-24",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-25",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-26",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-02-27",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-02",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-03",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-04",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-05",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-06",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-09",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-10",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-11",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-12",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-13",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-16",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-17",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-18",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-19",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-20",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-23",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-24",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-25",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-26",
+        "status": "insufficient_window",
+        "value": null
+      },
+      {
+        "available_at": "2026-03-27T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-27",
+        "status": "ok",
+        "value": 0.0
+      },
+      {
+        "available_at": "2026-03-30T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-30",
+        "status": "ok",
+        "value": -0.3333333333333286
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-03-31",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-01",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-02",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-03",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-06",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-07",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-08",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-09",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-10",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-13",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-14",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-15",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-16",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-17",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-20",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-21",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-22",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-23",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-24",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-27",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-28",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-29",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-04-30",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-01",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-04",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-05",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-06",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-07",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-08",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-11",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-12",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-13",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-14",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-15",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-18",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-19",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-20",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-21",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-22",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-25",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-26",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-27",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-28",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-05-29",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-01",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-02",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-03",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-04",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-05",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-08",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-09",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-10",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-11",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-12",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-15",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-16",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-17",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-18",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-19",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": null,
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-22",
+        "status": "missing_input",
+        "value": null
+      },
+      {
+        "available_at": "2026-06-23T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-23",
+        "status": "ok",
+        "value": 9.0
+      },
+      {
+        "available_at": "2026-06-24T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-24",
+        "status": "ok",
+        "value": 8.5
+      },
+      {
+        "available_at": "2026-06-25T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-25",
+        "status": "ok",
+        "value": 8.0
+      },
+      {
+        "available_at": "2026-06-26T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-26",
+        "status": "ok",
+        "value": 7.5
+      },
+      {
+        "available_at": "2026-06-29T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-29",
+        "status": "ok",
+        "value": 7.0
+      },
+      {
+        "available_at": "2026-06-30T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-06-30",
+        "status": "ok",
+        "value": 6.5
+      },
+      {
+        "available_at": "2026-07-01T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-07-01",
+        "status": "ok",
+        "value": 6.0
+      },
+      {
+        "available_at": "2026-07-02T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-07-02",
+        "status": "ok",
+        "value": 5.5
+      },
+      {
+        "available_at": "2026-07-03T07:00:00Z",
+        "instrument_id": "C.SYNTH",
+        "session_date": "2026-07-03",
+        "status": "ok",
+        "value": 5.0
+      }
+    ]
+  },
+  "fixture_sha256": "5f4fdb84c9795366c0db81106feeea7bc420c1b72d6b308816ef4a46ecb8b111",
+  "parameters": {
+    "long_window": 60,
+    "params_version": 1,
+    "short_window": 20,
+    "strategy": "ma_crossover"
+  },
+  "summary": {
+    "annualized_return": -0.014689560942310442,
+    "annualized_volatility": 0.06378710307747387,
+    "assumptions": [
+      "proportional transaction costs",
+      "no minimum commission or lot size",
+      "raw open-to-open returns",
+      "Static Universe is not point-in-time",
+      "conservative deferral when a held instrument is unavailable",
+      "weight-based Vector NAV is not a cash-and-quantity account ledger",
+      "long-only unlevered weights; residual cash earns zero return",
+      "availability assumption: none"
+    ],
+    "availability_assumption": "none",
+    "deferred_count": 0,
+    "drawdown_peak_session": "2026-03-31",
+    "drawdown_trough_session": "2026-04-01",
+    "executed_count": 2,
+    "insufficient_sessions": false,
+    "max_drawdown": -0.024844720496894457,
+    "mean_return": -5.059317940051656e-05,
+    "n_returns": 129,
+    "pending_at_end": false,
+    "session_count": 130,
+    "sharpe": -0.1998755327302612,
+    "skipped_buy_count": 0,
+    "std_return": 0.004018209799910444,
+    "total_cost": 0.0013249738766980147,
+    "total_return": -0.007546812045690632,
+    "total_turnover": 0.6624869383490073,
+    "zero_volatility": false
+  },
+  "tolerance": {
+    "factor_abs": 1e-12,
+    "nav_abs": 1e-10
+  },
+  "vector": {
+    "assumptions": [
+      "proportional transaction costs",
+      "no minimum commission or lot size",
+      "raw open-to-open returns",
+      "Static Universe is not point-in-time",
+      "conservative deferral when a held instrument is unavailable",
+      "weight-based Vector NAV is not a cash-and-quantity account ledger",
+      "long-only unlevered weights; residual cash earns zero return",
+      "availability assumption: none"
+    ],
+    "availability_assumption": "none",
+    "costs": {
+      "buy_slippage_bps": 10.0,
+      "buy_tax_rate": 0.0,
+      "commission_rate": 0.001,
+      "sell_slippage_bps": 10.0,
+      "sell_tax_rate": 0.0
+    },
+    "decisions": [
+      {
+        "decision_session": "2026-03-30",
+        "ranked": [],
+        "targets": {
+          "A.SYNTH": 0.3333333333333333
+        }
+      },
+      {
+        "decision_session": "2026-05-04",
+        "ranked": [],
+        "targets": {}
+      }
+    ],
+    "executions": [
+      {
+        "blocked": [],
+        "kind": "executed",
+        "session_date": "2026-03-31",
+        "skipped_buys": []
+      },
+      {
+        "blocked": [],
+        "kind": "executed",
+        "session_date": "2026-05-05",
+        "skipped_buys": []
+      }
+    ],
+    "pending_at_end": null,
+    "sessions": [
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-05",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-06",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-07",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-08",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-09",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-12",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-13",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-14",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-15",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-16",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-19",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-20",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-21",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-22",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-23",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-26",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-27",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-28",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-29",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-01-30",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-02",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-03",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-04",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-05",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-06",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-09",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-10",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-11",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-12",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-13",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-16",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-17",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-18",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-19",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-20",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-23",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-24",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-25",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-26",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-02-27",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-02",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-03",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-04",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-05",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-06",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-09",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-10",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-11",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-12",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-13",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-16",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-17",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-18",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-19",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-20",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-23",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-24",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-25",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-26",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-27",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 1.0,
+        "net_return": 0.0,
+        "session_date": "2026-03-30",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0006666666666666666,
+        "gross_return": 0.003115264797507751,
+        "nav": 1.0024465212876426,
+        "net_return": 0.0024465212876425557,
+        "session_date": "2026-03-31",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.3333333333333333,
+        "valuation_carried": [
+          "C.SYNTH"
+        ],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3333333333333333
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": -0.024844720496894405,
+        "nav": 0.9775410176531669,
+        "net_return": -0.024844720496894457,
+        "session_date": "2026-04-01",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3354037267080745
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.003184713375796181,
+        "nav": 0.9806542056074765,
+        "net_return": 0.0031847133757962887,
+        "session_date": "2026-04-02",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3184713375796178
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.003174603174603177,
+        "nav": 0.983767393561786,
+        "net_return": 0.0031746031746031633,
+        "session_date": "2026-04-03",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3206349206349206
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0031645569620253047,
+        "nav": 0.9868805815160955,
+        "net_return": 0.0031645569620253333,
+        "session_date": "2026-04-06",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3227848101265822
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0031545741324921113,
+        "nav": 0.989993769470405,
+        "net_return": 0.003154574132492094,
+        "session_date": "2026-04-07",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3249211356466876
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0031446540880503025,
+        "nav": 0.9931069574247143,
+        "net_return": 0.0031446540880502027,
+        "session_date": "2026-04-08",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.32704402515723263
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0031347962382445023,
+        "nav": 0.9962201453790237,
+        "net_return": 0.0031347962382444194,
+        "session_date": "2026-04-09",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3291536050156739
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0031250000000000353,
+        "nav": 0.9993333333333332,
+        "net_return": 0.0031250000000000444,
+        "session_date": "2026-04-10",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33124999999999993
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.003115264797507751,
+        "nav": 1.0024465212876426,
+        "net_return": 0.0031152647975076775,
+        "session_date": "2026-04-13",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3333333333333333
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": -0.024844720496894405,
+        "nav": 0.9775410176531669,
+        "net_return": -0.024844720496894457,
+        "session_date": "2026-04-14",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3354037267080745
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.003184713375796181,
+        "nav": 0.9806542056074765,
+        "net_return": 0.0031847133757962887,
+        "session_date": "2026-04-15",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3184713375796178
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.003174603174603177,
+        "nav": 0.983767393561786,
+        "net_return": 0.0031746031746031633,
+        "session_date": "2026-04-16",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3206349206349206
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0031645569620253047,
+        "nav": 0.9868805815160955,
+        "net_return": 0.0031645569620253333,
+        "session_date": "2026-04-17",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3227848101265822
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0031545741324921113,
+        "nav": 0.989993769470405,
+        "net_return": 0.003154574132492094,
+        "session_date": "2026-04-20",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3249211356466876
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0031446540880503025,
+        "nav": 0.9931069574247143,
+        "net_return": 0.0031446540880502027,
+        "session_date": "2026-04-21",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.32704402515723263
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0031347962382445023,
+        "nav": 0.9962201453790237,
+        "net_return": 0.0031347962382444194,
+        "session_date": "2026-04-22",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3291536050156739
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0031250000000000353,
+        "nav": 0.9993333333333332,
+        "net_return": 0.0031250000000000444,
+        "session_date": "2026-04-23",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.33124999999999993
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.003115264797507751,
+        "nav": 1.0024465212876426,
+        "net_return": 0.0031152647975076775,
+        "session_date": "2026-04-24",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3333333333333333
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": -0.024844720496894405,
+        "nav": 0.9775410176531669,
+        "net_return": -0.024844720496894457,
+        "session_date": "2026-04-27",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3354037267080745
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.003184713375796181,
+        "nav": 0.9806542056074765,
+        "net_return": 0.0031847133757962887,
+        "session_date": "2026-04-28",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3184713375796178
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.003174603174603177,
+        "nav": 0.983767393561786,
+        "net_return": 0.0031746031746031633,
+        "session_date": "2026-04-29",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3206349206349206
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0031645569620253047,
+        "nav": 0.9868805815160955,
+        "net_return": 0.0031645569620253333,
+        "session_date": "2026-04-30",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3227848101265822
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0031545741324921113,
+        "nav": 0.989993769470405,
+        "net_return": 0.003154574132492094,
+        "session_date": "2026-05-01",
+        "target_weights": {
+          "A.SYNTH": 0.3333333333333333
+        },
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.3249211356466876
+        }
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0031446540880503025,
+        "nav": 0.9931069574247143,
+        "net_return": 0.0031446540880502027,
+        "session_date": "2026-05-04",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {
+          "A.SYNTH": 0.32704402515723263
+        }
+      },
+      {
+        "cost": 0.0006583072100313479,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": -0.0006583072100313503,
+        "session_date": "2026-05-05",
+        "target_weights": {},
+        "turnover": 0.3291536050156739,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-05-06",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-05-07",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-05-08",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-05-11",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [
+          "B.SYNTH"
+        ],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-05-12",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-05-13",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-05-14",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-05-15",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-05-18",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-05-19",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-05-20",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-05-21",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-05-22",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-05-25",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-05-26",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-05-27",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-05-28",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-05-29",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-01",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-02",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-03",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-04",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-05",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-08",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-09",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-10",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-11",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-12",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-15",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-16",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-17",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-18",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-19",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-22",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-23",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-24",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-25",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-26",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-29",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-06-30",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-07-01",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-07-02",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      },
+      {
+        "cost": 0.0,
+        "gross_return": 0.0,
+        "nav": 0.9924531879543094,
+        "net_return": 0.0,
+        "session_date": "2026-07-03",
+        "target_weights": {},
+        "turnover": 0.0,
+        "valuation_carried": [],
+        "weights_after_execution": {}
+      }
+    ]
+  }
+}
