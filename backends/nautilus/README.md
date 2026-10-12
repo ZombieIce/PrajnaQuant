@@ -86,6 +86,8 @@ The protocol `executed_at` maps native callback time to the requested Session
 open. Both times and the mapping are recorded, not presented as native same-open
 timestamps. Sessions must have more than 2 ms duration and separation. No
 strategy decision is computed from close data in Python.
+Missing current bars send native HALT even if the status table says tradable,
+so a protocol probe cannot fill using a prior Session's cached quote.
 
 ## Precision and verified limits
 

@@ -96,6 +96,24 @@ def execute(messages):
 
 
 class WorkerTests(unittest.TestCase):
+    def test_missing_current_bar_cannot_fill_from_cached_previous_quote(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            messages = packet(path)
+            bars = pq.read_table(path / "bars.parquet")
+            pq.write_table(bars.slice(0, 1), path / "bars.parquet")
+            messages[4]["quotes"] = []
+            result = execute(messages)
+            diagnostics = [json.loads(line) for line in (path / "backend-diagnostics.jsonl").read_text().splitlines()]
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        events = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(len([e for e in events if e["type"] == "fill"]), 1)
+        rejects = [e for e in events if e["type"] == "reject"]
+        self.assertEqual(len(rejects), 1)
+        self.assertIn("Market A.PRAJNA is CLOSED", rejects[0]["reason"])
+        self.assertEqual([e["cash"] for e in diagnostics if e["event"] == "account_balance"],
+                         ["896.90", "896.90"])
+
     def test_scale_18_instrument_is_rejected_before_native_position_panics(self):
         with tempfile.TemporaryDirectory() as directory:
             result = execute(packet(Path(directory), precise=True))

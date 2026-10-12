@@ -260,6 +260,9 @@ class Shim(Strategy):
         self.command()
 
     def on_instrument_status(self, event) -> None:
+        self.guarded(self.status, event)
+
+    def status(self, event) -> None:
         self.diagnostics.record(
             "backend_native", "instrument_status", instrument_id=str(event.instrument_id),
             action=event.action.name, ts_event=str(event.ts_event),
@@ -363,7 +366,7 @@ def run(request: dict) -> None:
                             exact_price(ask_value, instrument.price_increment.as_decimal()),
                             Quantity.from_int(1_000_000_000), Quantity.from_int(1_000_000_000), ts, ts,
                         ))
-                action = (MarketStatusAction.TRADING if statuses[key]["is_tradable"]
+                action = (MarketStatusAction.TRADING if bar is not None and statuses[key]["is_tradable"]
                           else MarketStatusAction.HALT)
                 ts = session["ts_open"] + 500_000
                 data.append(InstrumentStatus(instrument.id, action, ts, ts))
