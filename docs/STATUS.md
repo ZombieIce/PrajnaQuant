@@ -94,6 +94,10 @@ MVP-2 的 `prajna-experiment`（Issue #99–#104）可解析并校验 `experimen
 
 `prajna-research::engine::Engine` 已提供运行前能力/模式路由，Experiment 在参数展开与每 Run 决策前接入：Vector 的 `Vectorizable` 门槛不变；Fast Event 仅接受封闭 Decision 策略族的 `Vectorizable` / `EventDriven` 声明，拒绝空能力及任何 `OrderBookDriven` 声明，并校验数量/调仓组合。Accurate 仅登记相同策略族、`lot` 和 `full_target` / `entry_only` 规则；CLI 明确报尚未实现，不代表 Backend 接通。Rust research/experiment 全部测试在默认及串行测试调度下通过，含既有 Vector / Fast Event 金标准与 Run 身份回归；all-targets clippy 通过。独立 Python Fast Event 金标准通过；本机 Vector 的两个 64×252 JSON 字节金标准失败在未改动 main 同样复现，尚未解决，不宣称本机所有验证通过。
 
+### MVP-4 Accurate Backend 锁步可行性
+
+独立 [rc6 spike](../poc/mvp4-lockstep/README.md) 已在 macOS ARM64 / Python 3.12 验证 ADR 0020 允许的 stdio 同步策略 shim：3 instruments × 3 Sessions 的外部订单经真实 Nautilus 成交，Fill 反馈驱动下一 Session 数量，现金与持仓连续；HALT 原生拒单、同引擎 `reset()` 后重复手算轨迹及 Arrow/stdio scale-18 往返均通过真实集成测试。Price/Equity/QuoteTick 可精确表示 scale 18，但任意滑点乘积可能需要超过 18 位或不对齐 tick，原型显式报错，不决定舍入政策；多次 `run(end=…)` 形态未测，保持 Unknown。独立 requirements 锁定 `2.0.0rc6`，POC-0 的 rc5 锁定与归档不变；[原始证据](../poc/mvp4-lockstep/observations.json) 与独立 Full job 可复跑。此为 #137 合成协议/Backend 可行性，不表示 Rust Adapter、平台 ExecutionState/成本/账本、Experiment 接入或 #133 A15 验收完成。
+
 ## Batch 2 Integration Acceptance (2026-09-25)
 
 总评**部分通过**；要求、代码/测试/真实样本/浏览器证据及限制见 [`handoffs/batch2-integration-acceptance.md`](handoffs/batch2-integration-acceptance.md)。A：241×5 状态格全 UNKNOWN，只有一条无交易所原文的盘中限制二级消息；同价面板/Universe 复跑 0 成交、24 个 unknown 拒单，只验证缺证拒单。B：仓库迁移 007 和 `sync-daily`/`publish-sync` 支持显式证券增量、修订回看、重试/断点、审计和不可变快照；隔离真实样本重复同步不增有效修订，生产状态 Unknown。C：新增 `/api/v1/instruments` 通用发布快照搜索、`/api/v1/daily-bars` 分页与 `/market` 页面；B 格式的发布指针与 C 只读 API 已接通并测试固定版本。B 真实小样本证券目录缺身份/分类，因此生产股票/ETF 行情页面仍未验。调度脚本未安装/启用。
