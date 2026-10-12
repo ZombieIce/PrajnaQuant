@@ -97,6 +97,27 @@ class FastEventGoldenTests(unittest.TestCase):
         self.assertEqual(result["parameters"]["rebalance"], "entry_only")
         self.assertEqual(result["pending_at_end"], None)
 
+    def test_entry_only_retains_cash_limited_target_even_when_skip_is_requested(self):
+        fixture = json.loads(HAND.read_text())
+        fixture["calendar"] += ["2026-01-08"]
+        fixture["instruments"] = [
+            {"symbol": "A", "lot_size": 1, "opens": [10, 10, 20, 20],
+             "closes": [10, 20, 20, 20]},
+            {"symbol": "B", "lot_size": 1, "opens": [10, 10, 10, 10],
+             "closes": [10, 10, 10, 10]},
+        ]
+        fixture["costs"] = {key: 0 for key in fixture["costs"]}
+        fixture["execution_status_overrides"] = [
+            {"symbol": "B", "date": "2026-01-06", "trade_status": "HALTED",
+             "is_tradable": False, "available_at": "08:50:00+08:00"},
+        ]
+        result = self.run_cli(
+            fixture, strategy="s1", sizing="lot", retry="skip", rebalance="entry_only",
+        )
+        self.assertEqual(result["executions"][0]["skipped_buys"], ["B.SYNTH"])
+        self.assertEqual(result["fills"][-1]["instrument_id"], "B.SYNTH")
+        self.assertIsNone(result["pending_at_end"])
+
     def test_entry_only_s2_preserves_existing_quantity_and_retries_missing_target(self):
         fixture = json.loads(SMALL.read_text())
         fixture["costs"] = {key: 0 for key in fixture["costs"]}

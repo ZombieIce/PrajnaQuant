@@ -453,7 +453,7 @@ def run(fixture, strategy, sizing, unfilled_entry, rebalance="full_target"):
                     pending = (
                         {"decision_session": pending["decision_session"],
                          "targets": targets, "retry_only": True}
-                        if missing and unfilled_entry == "retry" else None
+                        if missing else None
                     )
                 else:
                     pending = (
