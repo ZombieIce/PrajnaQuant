@@ -277,6 +277,109 @@ fn missing_marks_carry_same_field_and_halted_holdings_defer_the_whole_attempt() 
 }
 
 #[test]
+fn f8_fee_only_leg_preserves_quantity_and_charges_exact_turnover_cost() {
+    let lake = tempfile::tempdir().unwrap();
+    let mut fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    fixture["bar_defaults"]["open"] = json!(1);
+    let dsv = common::publish_fixture(lake.path(), &serde_json::to_vec(&fixture).unwrap(), "3");
+    let panel = load_panel(lake.path(), &dsv, &VenueId::new("SYNTH").unwrap()).unwrap();
+    let statuses = load_execution_status(lake.path(), &dsv).unwrap();
+    let mut parameters = config(&panel, Sizing::VectorParity);
+    parameters.initial_cash = "1000".parse().unwrap();
+    parameters.costs = FastEventCosts {
+        commission_rate: "0.01".parse().unwrap(),
+        ..FastEventCosts::ZERO
+    };
+    let a: InstrumentId = "A.SYNTH".parse().unwrap();
+    let result = run_fast_event(
+        &panel,
+        &statuses,
+        &parameters,
+        &[PortfolioRun {
+            id: VirtualPortfolioId(1),
+            capital: "1000".parse().unwrap(),
+            decisions: vec![
+                decision(&panel, 0, BTreeMap::from([(a.clone(), 0.4975)])),
+                decision(
+                    &panel,
+                    1,
+                    BTreeMap::from([(a.clone(), 0.5), ("B.SYNTH".parse().unwrap(), 0.4975)]),
+                ),
+            ],
+            unfilled_entry: UnfilledEntry::Skip,
+            rebalance: Rebalance::FullTarget,
+        }],
+    )
+    .unwrap();
+    assert_eq!(
+        result.sessions[1].open_after.account.equity,
+        "995.025".parse().unwrap()
+    );
+    assert_eq!(
+        result.sessions[2].open_after.account.equity,
+        "990.049875".parse().unwrap()
+    );
+    assert_eq!(
+        result.sessions[2].open_after.account.positions[&a].quantity,
+        "495.0249375".parse().unwrap()
+    );
+    assert_eq!(result.fills.len(), 2);
+    assert_eq!(result.account.fee_settlements().len(), 1);
+    let settlement = &result.account.fee_settlements()[0];
+    assert_eq!(settlement.instrument_id(), &a);
+    assert_eq!(settlement.total_fees(), "0.024875625".parse().unwrap());
+    assert!(
+        result
+            .account
+            .orders()
+            .values()
+            .all(|o| o.quantity() > prajna_domain::Quantity::ZERO)
+    );
+}
+
+#[test]
+fn representable_tiny_target_is_not_suppressed_by_an_absolute_weight_threshold() {
+    let lake = tempfile::tempdir().unwrap();
+    let mut fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    fixture["bar_defaults"]["open"] = json!(1);
+    let dsv = common::publish_fixture(lake.path(), &serde_json::to_vec(&fixture).unwrap(), "3");
+    let panel = load_panel(lake.path(), &dsv, &VenueId::new("SYNTH").unwrap()).unwrap();
+    let statuses = load_execution_status(lake.path(), &dsv).unwrap();
+    let mut parameters = config(&panel, Sizing::VectorParity);
+    parameters.initial_cash = "1000000000".parse().unwrap();
+    parameters.costs = FastEventCosts {
+        commission_rate: "0.01".parse().unwrap(),
+        ..FastEventCosts::ZERO
+    };
+    let result = run_fast_event(
+        &panel,
+        &statuses,
+        &parameters,
+        &[PortfolioRun {
+            id: VirtualPortfolioId(1),
+            capital: "1000000000".parse().unwrap(),
+            decisions: vec![decision(
+                &panel,
+                0,
+                BTreeMap::from([("A.SYNTH".parse().unwrap(), 1e-12)]),
+            )],
+            unfilled_entry: UnfilledEntry::Skip,
+            rebalance: Rebalance::FullTarget,
+        }],
+    )
+    .unwrap();
+    assert_eq!(result.fills.len(), 1);
+    assert_eq!(
+        result.fills[0].fill.total_fees(),
+        "0.00001".parse().unwrap()
+    );
+    assert_eq!(
+        result.fills[0].fill.order().quantity(),
+        "0.00099999999999999".parse().unwrap()
+    );
+}
+
+#[test]
 fn panel_preserves_scale_18_source_prices_which_f64_cannot_represent() {
     let lake = tempfile::tempdir().unwrap();
     let dsv = common::publish_v1(lake.path());

@@ -4,8 +4,8 @@ use std::fmt;
 
 use chrono::NaiveDate;
 use prajna_account::{
-    AccountValuation, Fill, FillCosts, FillPricing, LedgerError, Order, OrderId, Side,
-    TradingAccount, VirtualPortfolioId,
+    AccountValuation, Fill, FillCosts, FillPricing, LedgerError, Order, OrderId,
+    ParityFeeSettlement, Side, TradingAccount, VirtualPortfolioId,
 };
 use prajna_domain::{Currency, FixedPointError, InstrumentId, Notional, Price, Quantity, VenueId};
 
@@ -124,6 +124,12 @@ pub struct FastEventFill {
 pub struct FastEventAttempt {
     pub portfolio_id: VirtualPortfolioId,
     pub event: ExecutionEvent,
+}
+
+#[derive(Default)]
+struct PlannedExecution {
+    fills: Vec<FastEventFill>,
+    fee_settlements: Vec<ParityFeeSettlement>,
 }
 
 #[derive(Debug, Clone)]
@@ -293,6 +299,7 @@ pub fn run_fast_event(
             .map(|id| executable(panel, statuses, id, session).map(|yes| (id.clone(), yes)))
             .collect::<Result<BTreeMap<_, _>, _>>()?;
         let mut session_fills = Vec::new();
+        let mut session_fees = Vec::new();
         let mut entry_attempted = BTreeSet::new();
         for (portfolio_index, (portfolio, state)) in portfolios.iter().zip(&mut states).enumerate()
         {
@@ -320,24 +327,28 @@ pub fn run_fast_event(
                             config.costs,
                             retry,
                         )?,
-                        Sizing::Lot => lot_fills(
-                            &account,
-                            portfolio,
-                            TargetAttempt {
-                                applied: targets,
-                                original: &original_decisions[portfolio_index]
-                                    .ok_or_else(|| {
-                                        invalid("execution without prior close decision")
-                                    })?
-                                    .targets,
-                                retry,
-                            },
-                            &open.prices,
-                            session,
-                            config,
-                        )?,
+                        Sizing::Lot => PlannedExecution {
+                            fills: lot_fills(
+                                &account,
+                                portfolio,
+                                TargetAttempt {
+                                    applied: targets,
+                                    original: &original_decisions[portfolio_index]
+                                        .ok_or_else(|| {
+                                            invalid("execution without prior close decision")
+                                        })?
+                                        .targets,
+                                    retry,
+                                },
+                                &open.prices,
+                                session,
+                                config,
+                            )?,
+                            fee_settlements: Vec::new(),
+                        },
                     };
-                    session_fills.extend(planned);
+                    session_fills.extend(planned.fills);
+                    session_fees.extend(planned.fee_settlements);
                     if matches!(portfolio.rebalance, Rebalance::EntryOnly(_)) {
                         entry_attempted.insert(portfolio_index);
                     }
@@ -358,6 +369,8 @@ pub fn run_fast_event(
             };
             key(a).cmp(&key(b))
         });
+        // Planners use provisional ID 0 and ledger fee arithmetic. Only this
+        // account-wide settlement assigns IDs after sell/buy and Instrument sorting.
         for mut entry in session_fills {
             let previous = entry.fill.order();
             let order = Order::new(
@@ -378,6 +391,12 @@ pub fn run_fast_event(
             account.submit_order(entry.fill.order().clone())?;
             account.apply_fill(entry.fill.clone())?;
             fills.push(entry);
+        }
+        session_fees.sort_by(|a: &ParityFeeSettlement, b: &ParityFeeSettlement| {
+            (a.instrument_id(), a.portfolio_id()).cmp(&(b.instrument_id(), b.portfolio_id()))
+        });
+        for settlement in session_fees {
+            account.apply_fee_settlement(settlement)?;
         }
         for index in entry_attempted {
             let held = account.portfolios()[&portfolios[index].id]
@@ -537,23 +556,24 @@ fn lot_fills(
     config: &FastEventConfig,
 ) -> Result<Vec<FastEventFill>, FastEventError> {
     let portfolio = &account.portfolios()[&run.id];
-    let equity = account.value(prices)?.portfolios[&run.id].equity;
-    let mut desired = if attempt.retry || matches!(run.rebalance, Rebalance::EntryOnly(_)) {
+    let mut desired = if attempt.retry && run.rebalance == Rebalance::FullTarget {
         portfolio.positions().clone()
     } else {
         BTreeMap::new()
     };
-    for (instrument, target) in attempt.applied {
-        let price = *prices
-            .get(instrument)
-            .ok_or_else(|| LedgerError::MissingPrice(instrument.clone()))?;
-        let quantity = quantity(weight(*target)?.checked_mul_decimal(equity)?, price)?;
-        desired.insert(
-            instrument.clone(),
-            floor_lot(quantity, config.lot_sizes[instrument])?,
-        );
-    }
-    if matches!(run.rebalance, Rebalance::EntryOnly(_)) {
+    if run.rebalance == Rebalance::FullTarget {
+        let equity = account.value(prices)?.portfolios[&run.id].equity;
+        for (instrument, target) in attempt.applied {
+            let price = *prices
+                .get(instrument)
+                .ok_or_else(|| LedgerError::MissingPrice(instrument.clone()))?;
+            let quantity = quantity(weight(*target)?.checked_mul_decimal(equity)?, price)?;
+            desired.insert(
+                instrument.clone(),
+                floor_lot(quantity, config.lot_sizes[instrument])?,
+            );
+        }
+    } else {
         desired = portfolio
             .positions()
             .iter()
@@ -605,16 +625,9 @@ fn lot_fills(
                         } else {
                             cash
                         };
-                        Some(
-                            base.checked_div_decimal(Notional::from_mantissa(
-                                Notional::parse("1")?
-                                    .checked_mul(
-                                        i128::try_from(count)
-                                            .map_err(|_| invalid("too many targets"))?,
-                                    )?
-                                    .mantissa(),
-                            )?)?,
-                        )
+                        Some(base.checked_div_decimal(Notional::parse("1")?.checked_mul(
+                            i128::try_from(count).map_err(|_| invalid("too many targets"))?,
+                        )?)?)
                     }
                 }
             }
@@ -651,7 +664,7 @@ fn lot_fills(
                 .ok_or_else(|| LedgerError::MissingPrice(instrument.clone()))?;
             while q > Quantity::ZERO {
                 let order = Order::new(
-                    next_order(account, fills.len())?,
+                    OrderId(0),
                     run.id,
                     instrument.clone(),
                     side,
@@ -742,14 +755,17 @@ fn parity_fills(
     session: &PanelSession,
     costs: FastEventCosts,
     retry: bool,
-) -> Result<Vec<FastEventFill>, FastEventError> {
+) -> Result<PlannedExecution, FastEventError> {
     if retry {
-        return parity_retry_fills(account, id, targets, prices, session, costs);
+        return Ok(PlannedExecution {
+            fills: parity_retry_fills(account, id, targets, prices, session, costs)?,
+            fee_settlements: Vec::new(),
+        });
     }
     let portfolio = &account.portfolios()[&id];
     let equity = account.value(prices)?.portfolios[&id].equity;
     if equity == Notional::ZERO {
-        return Ok(Vec::new());
+        return Ok(PlannedExecution::default());
     }
     let instruments = portfolio
         .positions()
@@ -759,7 +775,6 @@ fn parity_fills(
         .collect::<BTreeSet<_>>();
     let mut plans = Vec::new();
     let mut total = Notional::ZERO;
-    let threshold: Notional = "0.000000000001".parse()?;
     for instrument in instruments {
         let price = *prices
             .get(&instrument)
@@ -778,11 +793,7 @@ fn parity_fills(
             Side::Sell
         };
         let abs = Notional::from_mantissa(delta.mantissa().abs())?;
-        let basis = if abs <= threshold {
-            Notional::ZERO
-        } else {
-            equity.checked_mul_decimal(abs)?
-        };
+        let basis = equity.checked_mul_decimal(abs)?;
         let (fees, slip) = costs.fees(basis, side)?;
         total = add(total, add(add(fees.commission, fees.tax)?, slip)?)?;
         plans.push((instrument, price, current, target, basis, side, fees, slip));
@@ -791,7 +802,7 @@ fn parity_fills(
     if after <= Notional::ZERO {
         return Err(invalid("costs exhaust pre-open equity"));
     }
-    let mut fills = Vec::new();
+    let mut planned = PlannedExecution::default();
     for (instrument, price, current, target, basis, fee_side, fees, slip) in plans {
         let desired = quantity(target.checked_mul_decimal(after)?, price)?;
         let delta = desired
@@ -799,12 +810,23 @@ fn parity_fills(
             .checked_sub(current.mantissa())
             .ok_or(FixedPointError::Overflow)?;
         let q = Quantity::from_mantissa(delta.abs())?;
-        if basis == Notional::ZERO && value(q, price)?.checked_div_decimal(equity)? <= threshold {
+        if q == Quantity::ZERO {
+            if add(add(fees.commission, fees.tax)?, slip)? > Notional::ZERO {
+                planned.fee_settlements.push(ParityFeeSettlement::new(
+                    id,
+                    instrument,
+                    session.ts_open,
+                    basis,
+                    fee_side,
+                    fees,
+                    slip,
+                )?);
+            }
             continue;
         }
         let side = if delta > 0 { Side::Buy } else { Side::Sell };
         let order = Order::new(OrderId(0), id, instrument, side, q, session.ts_open)?;
-        fills.push(FastEventFill {
+        planned.fills.push(FastEventFill {
             fill: Fill::new(
                 order,
                 session.ts_open,
@@ -816,42 +838,7 @@ fn parity_fills(
             fee_side,
         });
     }
-    fills.sort_by(|a, b| {
-        (
-            a.fill.order().side() != Side::Sell,
-            a.fill.order().instrument_id(),
-        )
-            .cmp(&(
-                b.fill.order().side() != Side::Sell,
-                b.fill.order().instrument_id(),
-            ))
-    });
-    let start = u64::try_from(account.orders().len()).map_err(|_| invalid("too many orders"))?;
-    for (index, entry) in fills.iter_mut().enumerate() {
-        let order = entry.fill.order();
-        let index = u64::try_from(index).map_err(|_| invalid("too many orders"))?;
-        let order = Order::new(
-            OrderId(
-                start
-                    .checked_add(index)
-                    .and_then(|n| n.checked_add(1))
-                    .ok_or(FixedPointError::Overflow)?,
-            ),
-            id,
-            order.instrument_id().clone(),
-            order.side(),
-            order.quantity(),
-            session.ts_open,
-        )?;
-        entry.fill = Fill::new(
-            order,
-            session.ts_open,
-            entry.fill.raw_price(),
-            entry.fill.pricing(),
-            entry.fill.costs(),
-        )?;
-    }
-    Ok(fills)
+    Ok(planned)
 }
 
 fn parity_retry_fills(
@@ -889,7 +876,7 @@ fn parity_retry_fills(
         let q = affordable_quantity(quantity(budget, price)?, price, available)?;
         if q > Quantity::ZERO {
             let order = Order::new(
-                next_order(account, fills.len())?,
+                OrderId(0),
                 id,
                 instrument.clone(),
                 Side::Buy,
