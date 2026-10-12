@@ -453,7 +453,6 @@ class FastEventGoldenTests(unittest.TestCase):
                             )
                             self.assertGreaterEqual(fill["minimum_commission_top_up"], 0)
                         self.assertAlmostEqual(session["open"]["cash"], previous_cash, delta=1e-6)
-
                         for point in ("open", "close"):
                             value = session[point]
                             self.assertGreaterEqual(value["cash"], -1e-6)
