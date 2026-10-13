@@ -138,6 +138,8 @@ jobs:
             echo "::error::Accurate correctness tests were skipped"
             exit 1
           fi
+      - name: A16 per-Run research timing regression
+        run: cargo test -p prajna-experiment --features nautilus-integration --example measure_accurate --locked
       - name: Preserve classified correctness evidence
         if: always()
         uses: actions/upload-artifact@v4

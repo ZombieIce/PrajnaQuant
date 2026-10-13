@@ -4,6 +4,15 @@ Issue #142 / #133 A16. **Record only, no thresholds.** These synthetic execution
 measurements do not select a production Engine, establish real-market performance,
 prove PIT/total return, or replace the independent A15 correctness acceptance.
 
+**Timing correction (#152):** the evidence below is archived `mvp4.cost@1`,
+the narrower precomputed-Decision execution boundary. It does **not** satisfy
+ADR 0013's full A16 main boundary. The current tool produces `mvp4.cost@2`
+with actual Rust research and fresh strategy creation inside every timed Run;
+see the [corrected report and boundary mapping](adr0013/README.md).
+All original raw samples, summaries and logs remain unchanged. Corrected
+latency/throughput/RSS series replace the old series for A16, not the historical
+execution-only claim; never pool the two protocols.
+
 ## Reproduce
 
 Use a dedicated Python 3.12 environment with the existing
@@ -11,10 +20,10 @@ Use a dedicated Python 3.12 environment with the existing
 POC-0 rc5 environment or clear shared caches. From a committed checkout:
 
 ```sh
-python poc/mvp4-cost/measure.py run --out /tmp/prajna-mvp4-cost/raw-measurements.json
+python poc/mvp4-cost/measure.py run --out /tmp/prajna-mvp4-cost-adr0013/raw-measurements.json
 python poc/mvp4-cost/measure.py summarize \
-  --input /tmp/prajna-mvp4-cost/raw-measurements.json \
-  --out /tmp/prajna-mvp4-cost/recomputed-summary.json
+  --input /tmp/prajna-mvp4-cost-adr0013/raw-measurements.json \
+  --out /tmp/prajna-mvp4-cost-adr0013/recomputed-summary.json
 python -m unittest tests.test_mvp4_cost tests.test_mvp4_fixture_prepare -v
 python -m unittest discover -s poc/mvp4-cost -v
 ```
@@ -33,7 +42,7 @@ Blocked or aborted measurements are **missing**, never estimated. No cache is
 removed, and warm build time is not cold-build cost. The initial development
 bootstrap is not a formal cold-build measurement.
 
-## Measurement boundary
+## Archived v1 measurement boundary
 
 The Rust harness uses the public `run_adapter` with the real pinned worker,
 not a Python execution rewrite or pre-generated Fast order/fill replay. Rust
@@ -135,7 +144,9 @@ independent correctness evidence. No estimate fills the S2 gap and no conclusion
 is extrapolated to it.
 
 Linux runtime, cold build cost, reset throughput, production per-Run process
-startup cost, full strategy-generation cost and real-market performance remain
+startup cost and real-market performance remain
 Unknown. Existing process-group cleanup warnings in the separate A15 rerun are
 preserved, not suppressed. Verification results and environment limits belong
 in the PR Handoff and review conclusions in PR comments.
+Full strategy-generation cost was excluded from these archived v1 samples;
+only the separately recorded v2 report measures that work.

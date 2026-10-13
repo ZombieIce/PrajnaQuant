@@ -58,6 +58,13 @@ def summarize_cell(cell):
         samples += [s for w in group["workers"] for s in w["samples"]]
     if len({s["checksum"] for s in samples}) != 1:
         raise ValueError("result checksum changed")
+    if "research" in cell:
+        if any(s.get("research_invocations") != 1 or
+               not 0 < s.get("research_ns", 0) <= s["wall_ns"] for s in samples):
+            raise ValueError("every Run requires one timed Rust research invocation")
+        if any(not s.get("decision_checksum") for s in samples) or len({
+                s["decision_checksum"] for s in samples}) != 1:
+            raise ValueError("independent Decision checksum changed or missing")
     peaks = [max(s["usage"]["rss_bytes"] for s in w["samples"])
              for group in cell["parallel"] for w in group["workers"]]
     baselines = [w["baseline"]["rss_bytes"] for group in cell["parallel"] for w in group["workers"]]
@@ -74,6 +81,13 @@ def summarize_cell(cell):
     }
     if all("backend_conversion" in s for s in cell["end_to_end"]):
         result["backend_conversion_ns"] = series([s["backend_conversion"]["conversion_ns"] for s in cell["end_to_end"]])
+    if "research" in cell:
+        result.update(
+            main_research_ns=series([s["research_ns"] for s in cell["main"]]),
+            end_to_end_research_ns=series([s["research_ns"] for s in cell["end_to_end"]]),
+            parallel_wall_ns=series([g["wall_ns"] for g in cell["parallel"]]),
+            decision_checksum=samples[0]["decision_checksum"],
+        )
     return result
 
 
@@ -186,11 +200,15 @@ def main(argv=None):
         report = json.loads(args.input.read_text())
         if report["status"] not in ("measured", "measured_with_missing"):
             raise ValueError("cannot summarize missing or failed measurements")
+        if report["schema_version"] == "mvp4.cost@2" and any(
+                c.get("status") != "missing" and "research" not in c
+                for c in report["measurements"].values()):
+            raise ValueError("corrected boundary requires per-Run research evidence")
         write(args.out, {key: summarize_cell(cell) for key, cell in report["measurements"].items()})
         return 0
     free = shutil.disk_usage(ROOT)[2]
     report = {
-        "schema_version": "mvp4.cost@1",
+        "schema_version": "mvp4.cost@2",
         "recorded_at": datetime.now(timezone.utc).isoformat(),
         "thresholds": None,
         "scope": "synthetic cost only; not production Engine selection or real-market performance",
@@ -224,6 +242,8 @@ def main(argv=None):
         "poc/mvp4-cost/measure.py", "poc/mvp4-cost/prepared_worker.py",
         "poc/mvp3-golden/fast_event_golden.py", "poc/mvp4-correctness/prepare_fixture.py",
     ]
+    source_paths += [str(p.relative_to(ROOT)) for p in sorted(
+        (ROOT / "crates/prajna-research/src").glob("*.rs"))]
     report["identity"]["source_sha256"] = {p: sha(ROOT / p) for p in source_paths}
     if report["identity"]["backend"]["version"] != "2.0.0rc6":
         raise ValueError("real pinned rc6 required; no fallback")
@@ -231,9 +251,11 @@ def main(argv=None):
     report["boundary"] = {
         "mode": "cached_conversion_new_engine",
         "reason": "production lifecycle is new engine per Run; reset not certified by this ticket",
-        "main": "prepared canonical packet + cached Backend instruments/quotes/status; clone Decision tape, new engine, Rust closed-loop ledger, Domain Fill/results",
-        "end_to_end": "canonical in-memory RunPacket -> Parquet + config -> Backend objects -> new engine -> Rust closed-loop -> Domain Fill/results",
-        "excluded": "source fixture/golden generation, dataset publication/loading, process-pool startup, result serialization/checksum; factors/signals precomputed Decision tape",
+        "main": "prepared canonical bars/config + cached Backend instruments/quotes/status; fresh Rust strategy + actual factor/signal/Decision computation every Run -> new engine -> Rust closed-loop ledger -> Domain Fill/results",
+        "end_to_end": "canonical in-memory bars/RunPacket -> fresh Rust strategy + factor/signal/Decision computation -> Parquet + config -> Backend objects -> new engine -> Rust closed-loop -> Domain Fill/results",
+        "excluded": "independent oracle generation, normalization/publication/loading, process-pool startup, result serialization/equality/checksum; no factor/signal computation excluded or cached",
+        "research": "Rust VectorStrategy::decide_panel, including uncached RotationScore DAG or MA gaps; S1 only creates first-session equal-weight targets (no rolling factor load); hand S2 also computes actual factors",
+        "supersedes": "mvp4.cost@1 execution-only latency/throughput/RSS series for identical cells; archived samples retained separately and never pooled",
         "rss": "ru_maxrss whole Python worker incl imports and conversion; sum of two peaks is an upper bound; Rust controller excluded",
         "repeats": {"warmup": 2, "serial_main": 20, "serial_end_to_end": 20, "parallel_groups": 5, "workers": 2, "runs_per_worker": 6},
         "comparison": "no Fast speed ratio, adoption threshold or correctness claim for 64x252",

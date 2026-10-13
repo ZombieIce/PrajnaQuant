@@ -7,6 +7,7 @@ mod exact_execution;
 use exact_execution::exact_projection as projection;
 
 use std::{
+    collections::BTreeSet,
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
@@ -19,11 +20,15 @@ use prajna_adapter::{AdapterError, Backend, RunPacket, run_adapter};
 use prajna_domain::{Currency, Notional, VenueId};
 use prajna_research::{
     ExecutionStatusMap, Panel,
+    factor::{AvailabilityAssumption, Factor, FactorKind, RotationScoreParams},
     fast_event::{
         FastEventConfig, FastEventCosts, PortfolioRun, Rebalance, Sizing, run_fast_event,
     },
     load_execution_status, load_panel,
-    strategy::{Decision, UnfilledEntry},
+    strategy::{
+        BuyAndHoldParams, Decision, MaCrossoverParams, RankDirection, StrategyCapability, TopKRank,
+        UnfilledEntry, VectorStrategy, Weighting,
+    },
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -127,9 +132,129 @@ struct Workload {
     panel: Panel,
     statuses: ExecutionStatusMap,
     config: FastEventConfig,
-    portfolios: Vec<PortfolioRun>,
+    parameters: Value,
+    expected_decisions: Vec<Decision>,
     expected: Value,
     dsv: String,
+}
+
+#[cfg(test)]
+thread_local! {
+    static RESEARCH_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl Workload {
+    fn portfolios(&self) -> Vec<PortfolioRun> {
+        let strategy = match self.parameters["strategy"].as_str().unwrap() {
+            "s1" => VectorStrategy::BuyAndHold(BuyAndHoldParams::default()),
+            "s2" => {
+                let p = &self.parameters["strategy_parameters"];
+                let integer = |key: &str| u32::try_from(p[key].as_u64().unwrap()).unwrap();
+                assert_eq!(
+                    p["trend_filter"], false,
+                    "fixture requires explicit trend mapping"
+                );
+                VectorStrategy::TopKRank(TopKRank {
+                    score: Factor::new(
+                        FactorKind::RotationScore,
+                        RotationScoreParams {
+                            short: integer("momentum_short_days"),
+                            long: integer("momentum_long_days"),
+                            vol: integer("volatility_window"),
+                            w_s: p["short_momentum_weight"].as_f64().unwrap(),
+                            w_l: p["long_momentum_weight"].as_f64().unwrap(),
+                            w_v: p["volatility_weight"].as_f64().unwrap(),
+                            trend: None,
+                        },
+                    )
+                    .unwrap(),
+                    direction: RankDirection::Descending,
+                    top_k: integer("top_n"),
+                    rebalance_every: integer("rebalance_every"),
+                    weighting: Weighting::EqualWeight,
+                    unfilled_entry: self.policy(),
+                    capabilities: BTreeSet::from([StrategyCapability::Vectorizable]),
+                })
+            }
+            "s3" => VectorStrategy::MaCrossover(MaCrossoverParams {
+                params_version: 1,
+                short_window: 20,
+                long_window: 60,
+            }),
+            strategy => panic!("unsupported measured strategy: {strategy}"),
+        };
+        #[cfg(test)]
+        RESEARCH_CALLS.with(|calls| calls.set(calls.get() + 1));
+        let decisions = strategy
+            .decide_panel(
+                &self.panel,
+                &self.panel.instruments,
+                AvailabilityAssumption::None,
+            )
+            .unwrap();
+        vec![PortfolioRun {
+            id: VirtualPortfolioId(1),
+            capital: self.config.initial_cash,
+            rebalance: Rebalance::FullTarget,
+            unfilled_entry: self.policy(),
+            decisions,
+        }]
+    }
+
+    fn policy(&self) -> UnfilledEntry {
+        match self.parameters["unfilled_entry"].as_str().unwrap() {
+            "retry" => UnfilledEntry::Retry,
+            "skip" => UnfilledEntry::Skip,
+            policy => panic!("unsupported unfilled_entry: {policy}"),
+        }
+    }
+}
+
+struct Timed<T> {
+    wall_ns: u128,
+    research_ns: u128,
+    portfolios: Vec<PortfolioRun>,
+    result: T,
+}
+
+fn timed_run<T>(
+    workload: &Workload,
+    clock: &mut impl FnMut() -> u128,
+    run: impl FnOnce(&[PortfolioRun]) -> T,
+) -> Timed<T> {
+    let start = clock();
+    let portfolios = workload.portfolios();
+    let research_end = clock();
+    let result = run(&portfolios);
+    let end = clock();
+    Timed {
+        wall_ns: end - start,
+        research_ns: research_end - start,
+        portfolios,
+        result,
+    }
+}
+
+fn assert_decisions(actual: &[Decision], expected: &[Decision]) {
+    assert_eq!(actual.len(), expected.len(), "independent Decision count");
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert_eq!(actual.decision_session, expected.decision_session);
+        assert_eq!(
+            actual.targets, expected.targets,
+            "independent target weights"
+        );
+        assert_eq!(actual.ranked.len(), expected.ranked.len());
+        for ((id, score, rank), (expected_id, expected_score, expected_rank)) in
+            actual.ranked.iter().zip(&expected.ranked)
+        {
+            assert_eq!(id, expected_id);
+            assert_eq!(rank, expected_rank);
+            assert!(
+                (score - expected_score).abs() <= 1e-12,
+                "independent score differs: {score} vs {expected_score}"
+            );
+        }
+    }
 }
 
 fn write_packet(workload: &Workload, path: &Path) {
@@ -155,57 +280,67 @@ fn execute(
     workload: &Workload,
     worker: &mut Worker,
     end_to_end: bool,
-) -> (u128, prajna_adapter::AdapterResult, Option<Value>, Value) {
-    let start = Instant::now();
-    let conversion = if end_to_end {
-        write_packet(workload, &worker.packet);
-        Some(worker.prepare())
-    } else {
-        None
-    };
-    let portfolios = workload.portfolios.clone();
-    let actual = run_adapter(
-        &workload.packet,
-        &workload.panel,
-        &workload.statuses,
-        &workload.config,
-        &portfolios,
-        worker,
-    )
-    .unwrap();
-    let usage = worker.usage();
-    let ns = start.elapsed().as_nanos();
-    (ns, actual, conversion, usage)
+) -> Timed<(prajna_adapter::AdapterResult, Option<Value>, Value)> {
+    let epoch = Instant::now();
+    timed_run(workload, &mut || epoch.elapsed().as_nanos(), |portfolios| {
+        let conversion = if end_to_end {
+            write_packet(workload, &worker.packet);
+            Some(worker.prepare())
+        } else {
+            None
+        };
+        let actual = run_adapter(
+            &workload.packet,
+            &workload.panel,
+            &workload.statuses,
+            &workload.config,
+            portfolios,
+            worker,
+        )
+        .unwrap();
+        let usage = worker.usage();
+        (actual, conversion, usage)
+    })
 }
 
 fn measurement(
     workload: &Workload,
-    (ns, actual, conversion, usage): (u128, prajna_adapter::AdapterResult, Option<Value>, Value),
+    timed: Timed<(prajna_adapter::AdapterResult, Option<Value>, Value)>,
 ) -> Value {
+    assert_decisions(&timed.portfolios[0].decisions, &workload.expected_decisions);
+    let (actual, conversion, usage) = timed.result;
     let result = projection(&actual.execution);
     assert_eq!(
         result, workload.expected,
         "cached/fresh Accurate differs from Fast at scale 18"
     );
     let checksum = format!("{:x}", Sha256::digest(serde_json::to_vec(&result).unwrap()));
-    json!({"wall_ns":ns,"backend_conversion":conversion,"usage":usage,"checksum":checksum})
+    let decisions = timed.portfolios[0]
+        .decisions
+        .iter()
+        .map(|d| json!({"session_date":d.decision_session.session_date,"targets":d.targets}))
+        .collect::<Vec<_>>();
+    let decision_checksum = format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&decisions).unwrap())
+    );
+    json!({
+        "wall_ns":timed.wall_ns,"research_ns":timed.research_ns,
+        "research_invocations":1,"decision_checksum":decision_checksum,
+        "backend_conversion":conversion,"usage":usage,"checksum":checksum
+    })
 }
 
 fn sample(workload: &Workload, worker: &mut Worker, end_to_end: bool) -> Value {
     measurement(workload, execute(workload, worker, end_to_end))
 }
-fn main() {
-    let args = std::env::args().skip(1).collect::<Vec<_>>();
-    assert_eq!(args.len(), 4, "python normalized-fixture golden output");
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let python = Path::new(&args[0]);
-    let temp = tempfile::tempdir().unwrap();
-    let dsv = common::publish_fixture(temp.path(), &std::fs::read(&args[1]).unwrap(), "3");
+fn load_workload(fixture: &Path, golden_path: &Path, lake: &Path) -> Workload {
+    let dsv = common::publish_fixture(lake, &std::fs::read(fixture).unwrap(), "3");
     let venue = VenueId::new("SYNTH").unwrap();
-    let panel = load_panel(temp.path(), &dsv, &venue).unwrap();
-    let statuses = load_execution_status(temp.path(), &dsv).unwrap();
-    let packet = RunPacket::from_dataset(temp.path(), &dsv).unwrap();
-    let golden: Value = serde_json::from_slice(&std::fs::read(&args[2]).unwrap()).unwrap();
+    let panel = load_panel(lake, &dsv, &venue).unwrap();
+    let statuses = load_execution_status(lake, &dsv).unwrap();
+    let packet = RunPacket::from_dataset(lake, &dsv).unwrap();
+    let golden: Value = serde_json::from_slice(&std::fs::read(golden_path).unwrap()).unwrap();
     let parameters = &golden["parameters"];
     let costs = &parameters["costs"];
     let decimal = |value: &Value| value.to_string().parse::<Notional>().unwrap();
@@ -254,7 +389,18 @@ fn main() {
                     .find(|s| s.session_date.to_string() == row["session_date"].as_str().unwrap())
                     .unwrap()
                     .clone(),
-                ranked: vec![],
+                ranked: row["ranked"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|r| {
+                        (
+                            r["instrument_id"].as_str().unwrap().parse().unwrap(),
+                            r["score"].as_f64().unwrap(),
+                            u32::try_from(r["rank"].as_u64().unwrap()).unwrap(),
+                        )
+                    })
+                    .collect(),
                 targets: row["targets"]
                     .as_object()
                     .unwrap()
@@ -265,15 +411,25 @@ fn main() {
             .collect(),
     }];
     let expected = projection(&run_fast_event(&panel, &statuses, &config, &portfolios).unwrap());
-    let workload = Workload {
+    Workload {
         packet,
         panel,
         statuses,
         config,
-        portfolios,
+        parameters: parameters.clone(),
+        expected_decisions: portfolios[0].decisions.clone(),
         expected,
         dsv,
-    };
+    }
+}
+
+fn main() {
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    assert_eq!(args.len(), 4, "python normalized-fixture golden output");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let python = Path::new(&args[0]);
+    let temp = tempfile::tempdir().unwrap();
+    let workload = load_workload(Path::new(&args[1]), Path::new(&args[2]), temp.path());
     let path = temp.path().join("packet-serial");
     write_packet(&workload, &path);
     let mut worker = Worker::new(python, &root, path);
@@ -339,10 +495,83 @@ fn main() {
             "dsv":workload.dsv, "bars":workload.packet.bars.len(),
             "sessions":workload.panel.sessions.len(),"instruments":workload.panel.instruments.len(),
             "baseline":serial_baseline,"preparation":preparation,
+            "research":{
+                "implementation":"Rust VectorStrategy::decide_panel; fresh strategy and factor DAG per Run; no FactorCache",
+                "strategy":workload.parameters["strategy"],
+                "parameters":workload.parameters["strategy_parameters"],
+                "work":if workload.parameters["strategy"] == "s1" {
+                    "first-session equal-weight allocation only; no rolling factor workload, including hand S1 fixtures"
+                } else {
+                    "actual rolling factors/signals and Decisions, including hand S2 fixtures"
+                },
+                "decision_parity":"every timed Run matches independent oracle: exact sessions/targets/rank order; absolute score tolerance 1e-12"
+            },
             "main":main_samples,"end_to_end":end_to_end_samples,"parallel":parallel,
             "parity":"exact Fast projection; robustness only, not independent correctness evidence",
         }))
         .unwrap(),
     )
     .unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_run_computes_rust_signals_between_timer_reads() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let lake = tempfile::tempdir().unwrap();
+        let workload = load_workload(
+            &root.join("poc/poc0-benchmark/fixtures/dataset-v1.json"),
+            &root.join("poc/mvp3-golden/expected/dataset-v1.s2.lot.json"),
+            lake.path(),
+        );
+        RESEARCH_CALLS.with(|calls| calls.set(0));
+        for run in 0..2 {
+            let mut reads = 0;
+            let mut clock = || {
+                RESEARCH_CALLS.with(|calls| {
+                    assert_eq!(calls.get(), run + usize::from(reads > 0));
+                });
+                reads += 1;
+                reads * 10
+            };
+            let timed = timed_run(&workload, &mut clock, |portfolios| {
+                assert_decisions(&portfolios[0].decisions, &workload.expected_decisions);
+            });
+            assert_eq!(timed.wall_ns, 20);
+            assert_eq!(timed.research_ns, 10);
+            assert_eq!(reads, 3);
+        }
+    }
+
+    #[test]
+    fn a_new_run_uses_current_factor_parameters_not_cached_decisions() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let lake = tempfile::tempdir().unwrap();
+        let mut workload = load_workload(
+            &root.join("poc/poc0-benchmark/fixtures/dataset-v1.json"),
+            &root.join("poc/mvp3-golden/expected/dataset-v1.s2.lot.json"),
+            lake.path(),
+        );
+        let mut tick = 0;
+        let mut clock = || {
+            tick += 1;
+            tick
+        };
+        let first = timed_run(&workload, &mut clock, |_| ());
+        assert_eq!(
+            first.portfolios[0].decisions[0].targets,
+            [("C.SYNTH".parse().unwrap(), 1.0)].into()
+        );
+        workload.parameters["strategy_parameters"]["short_momentum_weight"] = json!(-1.0);
+        workload.parameters["strategy_parameters"]["long_momentum_weight"] = json!(-1.0);
+        let next = timed_run(&workload, &mut clock, |_| ());
+        // Negating momentum reverses this independently known three-Instrument ranking.
+        assert_eq!(
+            next.portfolios[0].decisions[0].targets,
+            [("B.SYNTH".parse().unwrap(), 1.0)].into()
+        );
+    }
 }
