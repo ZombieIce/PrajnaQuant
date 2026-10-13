@@ -111,6 +111,49 @@ real-market execution, PIT and total return remain Unknown/unverified.
 
 ## Recorded outcome
 
-The corrected raw measurements, summary, A15 rerun and command logs will be
-recorded here after the guarded protocol completes. Missing measurements are
-never estimated.
+The [raw measurements](raw-measurements.json.gz),
+[recomputable summary](summary.json), [real A15 rerun](correctness.json.gz)
+and [command logs](command-logs.tar.gz) preserve the corrected evidence.
+Measured source is clean revision
+`59ea2ff1dff5aeb0e56673cd834c306a352cecfc`; later evidence/documentation commits
+do not change measured runtime. Machine: Apple M1, 8 logical cores, 16 GiB,
+macOS 26.2 ARM64; Python 3.12.2, Rust 1.98.1, rc6, release profile.
+Exact source/binary/lock/fixture hashes, effective parameters, DSV, command
+identities, space snapshots and raw units are in the record.
+
+A15 passed before any cost sample: 13 fixed Runs, no Adapter defect or
+unclassified difference; its two Rust test functions passed with zero ignored.
+Every successful timed Run reproduced the independently expected Decisions
+and exact Fast execution projection. The 64x252 check remains weaker
+robustness evidence, not a hand gold standard.
+
+| Fixture / strategy | Main median ms | Research median ms (within main) | Secondary median ms | Backend conversion median ms (within secondary) | 2-worker median Runs/s | Worker RSS sum upper bound MiB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| hand-v1 / S1 | 1.156 | 0.001 | 6.050 | 3.067 | 1426.97 | 195.64 |
+| hand-retry-v1 / S1 | 1.703 | 0.001 | 7.013 | 3.445 | 1000.49 | 196.72 |
+| hand-rebalance-v1 / S2 | 4.553 | 2.089 | 10.068 | 3.480 | 391.29 | 197.52 |
+| hand-fee-only-v1 / S2 | 3.998 | 1.892 | 9.410 | 3.430 | 429.65 | 197.08 |
+| dataset-v1 / S1 | 2.617 | 0.001 | 8.742 | 3.915 | 595.86 | 198.27 |
+| dataset-v1 / S2 | 5.383 | 2.170 | 11.202 | 3.931 | 337.83 | 198.06 |
+| dataset-v1 / S3 | 2.093 | 0.010 | 8.069 | 4.090 | 752.64 | 195.20 |
+| b2-ma20-60-v1 / S3 | 25.784 | 1.565 | 41.274 | 13.039 | 72.10 | 207.39 |
+| 64x252 / S3 | 622.153 | 112.697 | 1051.449 | 395.009 | 2.89 | 422.22 |
+| 64x252 / S2 | Missing | Missing | Missing | Missing | Missing | Missing |
+
+The full summary also retains median, nearest-rank p95, minimum/maximum and
+all serial latency, research segment and parallel group wall/throughput values.
+Worker empty baseline sums range from 138.73 to 138.94 MiB, without subtraction
+from peaks. Maintenance proxies are unchanged in their recorded scopes:
+Rust 1144 / Python 486 non-test LOC, 27 Rust / 8 Python test definitions,
+6 direct + 189 transitive Rust crate/version dependencies, and 2 direct +
+0 active transitive Python packages. No timing conclusions are drawn from
+these proxies.
+
+The guarded warm release build took 215.389 s and honored the existing shared
+`CARGO_TARGET_DIR`; no cache was cleared. Minimum protocol free space was
+30.597 GiB. The expected S2 mapping failure is preserved in `command-29.log`
+as missing, not counted as measured or estimated. No other formal command
+failed. Public `summarize` reproduced this summary byte-for-byte and also
+reproduced the immutable v1 summary. Different host load/cache states and
+different boundaries prohibit interpreting old/new latency changes as a
+performance improvement.
