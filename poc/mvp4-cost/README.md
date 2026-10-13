@@ -101,6 +101,30 @@ Rust 1.98.1, `nautilus_trader==2.0.0rc6`, release profile. Exact source identity
 and all numeric series are in the raw record; evidence commits do not alter the
 measured runtime.
 
+Measured source: `ca9a233a19290b20276b4ba0381479e97efc8412` (clean).
+Formal warm release build: 0.509 s; cold build remains Unknown.
+Minimum free space during the cost protocol: 34.866 GiB.
+
+| Fixture / strategy | Main median ms | Secondary median ms | Backend conversion median ms | 2-worker median Runs/s | Worker RSS sum upper bound MiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| hand-v1 / S1 | 1.177 | 5.935 | 3.113 | 1286.57 | 196.11 |
+| hand-retry-v1 / S1 | 1.514 | 6.629 | 3.257 | 1003.51 | 196.78 |
+| hand-rebalance-v1 / S2 | 1.981 | 7.438 | 3.361 | 780.93 | 197.72 |
+| hand-fee-only-v1 / S2 | 1.623 | 6.682 | 3.263 | 963.58 | 196.91 |
+| dataset-v1 / S1 | 2.615 | 8.745 | 3.905 | 597.82 | 198.27 |
+| dataset-v1 / S2 | 2.562 | 8.456 | 3.825 | 620.29 | 198.36 |
+| dataset-v1 / S3 | 2.084 | 7.896 | 3.834 | 740.82 | 194.98 |
+| b2-ma20-60-v1 / S3 | 23.587 | 39.094 | 12.812 | 78.02 | 207.67 |
+| 64x252 / S3 | 499.560 | 924.019 | 386.603 | 3.52 | 422.59 |
+| 64x252 / S2 | Missing | Missing | Missing | Missing | Missing |
+
+The two-worker empty baseline sums are 138.73–139.20 MiB; every individual
+baseline/peak is retained. Maintenance proxies: Rust 1144 / Python 486 LOC;
+27 Rust test definitions / 8 Python tests; Rust 6 direct + 189 transitive
+crate/version dependencies, Python 2 direct + 0 active transitive packages.
+LOC, tests and dependency scopes follow the rules above, not arbitrary whole
+workspace counts. RSS is not corrected by subtracting the baseline.
+
 Eight fixed cases and S3 64x252 are measured. **S2 64x252 is missing:** the
 original Instrument tick is 0.01, while its 10 bps synthetic prices are not
 always tick-aligned. The real worker reports `unrepresentable price`; prices,
