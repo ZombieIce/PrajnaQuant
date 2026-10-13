@@ -84,7 +84,7 @@ MVP-2 的 `prajna-experiment`（Issue #99–#104）可解析并校验 `experimen
 
 ### MVP-5 Python 入口
 
-`prajna-py` / `python/prajna` 现提供本地 Python 宿主扩展骨架：PyO3 0.29.0、maturin 1.15.0 与 abi3-py312，仅暴露 Rust 版本和释放 GIL 的冒烟调用。Python 3.12 全新 venv 已通过安装、真实扩展调用及 Rust 等待期间 Python 线程进展测试；轻量 CI 新增依赖图守卫、扩展构建与 Python 测试。尚无 Experiment/Decision、As-of View、Factor 或结果读取 API，不表示 MVP-5 或生产 Python 策略入口已完成；构建与测试见 [`prajna-py`](../crates/prajna-py/README.md)。
+`prajna-py` / `python/prajna` 现提供本地 Python 宿主扩展与类型化 Experiment API：PyO3 0.29.0、maturin 1.15.0、abi3-py312；复用 Rust 的解析、规范化身份、执行与 ResultLevel 存储，真实调用期间释放 GIL。Python 3.12 全新 venv、S1/S2/S3 Grid/List 在 64×252 合成 fixture 上的 Python/CLI Experiment 与 Run 身份、Vector 和 Fast Event `lot + full_target` Full 表逐值 logical-hash 重放、三种 ResultLevel 与线程进展测试通过；既有 CLI 身份/金标准回归通过。Python `strategy_id@version` 引用可序列化与生成身份，但 CLI/Python `run` 显式报错 `requires Python host`；源码/环境来源仍待两阶段执行。轻量 CI 保留依赖图守卫并构建真实 CLI/fixture 后测试绑定。尚无 Python Decision 执行、As-of View、Factor 或 Arrow 结果读取 API，不表示 MVP-5、PIT/总回报或生产 Python 策略入口已完成；构建与测试见 [`prajna-py`](../crates/prajna-py/README.md)。
 
 ### MVP-3 独立 full_target / POC entry_only 金标准
 

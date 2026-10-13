@@ -62,9 +62,10 @@ impl EngineSettings {
         if !matches!(
             input.strategy.as_str(),
             "s2_rotation" | "buy_and_hold" | "ma_crossover"
-        ) {
+        ) && !is_python_strategy(&input.strategy)
+        {
             return Err(invalid(
-                "strategy must be s2_rotation, buy_and_hold or ma_crossover",
+                "strategy must be s2_rotation, buy_and_hold, ma_crossover or strategy_id@version",
             ));
         }
         let policy = match input.unfilled_entry.as_deref() {
@@ -380,6 +381,7 @@ pub(super) fn parse_space(kind: &str, space: &Value) -> Result<ParameterSpace, E
     if kind == "s2_rotation" {
         return parse_parameter_space(space);
     }
+    let python = is_python_strategy(kind);
     let object = space
         .as_object()
         .ok_or_else(|| invalid("parameter_space must be object"))?;
@@ -403,13 +405,19 @@ pub(super) fn parse_space(kind: &str, space: &Value) -> Result<ParameterSpace, E
         } else {
             vec!["params_version", "short_window", "long_window"]
         };
-        exact_keys(axes, &expected, "strategy grid")?;
+        if !python {
+            exact_keys(axes, &expected, "strategy grid")?;
+        }
         combinations.push(serde_json::json!({}));
         for (name, values) in axes {
             let values = values
                 .as_array()
                 .filter(|v| !v.is_empty())
                 .ok_or_else(|| invalid("grid axis must be nonempty array"))?;
+            combinations
+                .len()
+                .checked_mul(values.len())
+                .ok_or_else(|| invalid("parameter grid size exceeds addressable memory"))?;
             combinations = combinations
                 .into_iter()
                 .flat_map(|combo| {
@@ -428,12 +436,87 @@ pub(super) fn parse_space(kind: &str, space: &Value) -> Result<ParameterSpace, E
         return Err(invalid("parameter list must not be empty"));
     }
     for parameters in &combinations {
-        native_strategy(kind, parameters)?;
+        if python {
+            if !parameters.is_object() {
+                return Err(invalid("Python strategy parameters must be JSON objects"));
+            }
+            normalize_python_parameters(parameters)?;
+        } else {
+            native_strategy(kind, parameters)?;
+        }
     }
     Ok(ParameterSpace::Native {
         combinations,
-        normalized: space.clone(),
+        normalized: if python {
+            normalize_python_parameters(space)?
+        } else {
+            space.clone()
+        },
     })
+}
+
+pub(super) fn is_python_strategy(kind: &str) -> bool {
+    kind.split_once('@').is_some_and(|(id, version)| {
+        !id.is_empty()
+            && !version.is_empty()
+            && !version.contains('@')
+            && !kind.chars().any(char::is_whitespace)
+    })
+}
+
+fn normalize_python_parameters(value: &Value) -> Result<Value, ExperimentError> {
+    // Tag floats and strings so arbitrary dictionaries cannot alias float bit strings.
+    match value {
+        Value::Number(number) if number.is_f64() => Ok(serde_json::json!({
+            "f64": canonical_float_bits(finite_number(value, "Python parameter")?)
+        })),
+        Value::Number(_) => {
+            // Reuse the identity contract's safe-integer validation.
+            restricted_jcs(value).map_err(|error| invalid(error.to_string()))?;
+            Ok(value.clone())
+        }
+        Value::Array(values) => values
+            .iter()
+            .map(normalize_python_parameters)
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        Value::Object(values) => values
+            .iter()
+            .map(|(key, value)| Ok((key.clone(), normalize_python_parameters(value)?)))
+            .collect::<Result<Map<_, _>, ExperimentError>>()
+            .map(Value::Object),
+        Value::String(text) => Ok(serde_json::json!({"string": text})),
+        _ => Ok(value.clone()),
+    }
+}
+
+pub(super) fn python_run_specs(
+    experiment: &Experiment,
+    combinations: &[Value],
+) -> Result<Vec<RunDefinition>, ExperimentError> {
+    let mut runs = BTreeMap::new();
+    for parameters in combinations {
+        let mut spec = serde_json::json!({
+            "dsv": experiment.dsv, "universe": experiment.universe, "venue": experiment.venue,
+            "strategy": {"kind": experiment.strategy_kind, "parameters": normalize_python_parameters(parameters)?},
+            "costs": experiment.costs.normalized(),
+            "availability_assumption": experiment.availability_assumption,
+            "engine": {"kind": "vector", "semantic_version": "vector@1"}, "seed": null,
+        });
+        experiment.engine.normalize_spec(&mut spec);
+        let run_id = identity(
+            "run",
+            &restricted_jcs(&spec).map_err(|error| invalid(error.to_string()))?,
+        );
+        runs.insert(
+            run_id.clone(),
+            RunDefinition {
+                run_id,
+                run_spec: spec,
+            },
+        );
+    }
+    Ok(runs.into_values().collect())
 }
 fn native_strategy(kind: &str, value: &Value) -> Result<VectorStrategy, ExperimentError> {
     let strategy = match kind {

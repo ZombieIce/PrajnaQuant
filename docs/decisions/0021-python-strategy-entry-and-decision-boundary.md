@@ -56,6 +56,17 @@ Python 不写 Lake。只读研究 API 可读取明确选择的历史面板，但
 
 Notebook 内定义、没有可追溯源文件的函数使 Execution 标为“不可完全复现”，处理同脏工作树。含 Python 策略的 Experiment 由 CLI 运行时，显式报错 `requires Python host`，不静默跳过。ADR 0018 的 Engine 随机性身份规则继续保留，本期 Python 策略自身不引入随机性或 seed。
 
+Experiment 定义的 Python 引用 wire 格式为 `"strategy": "strategy_id@version"`：
+两部分非空、不含空白和额外 `@`；内置 Rust 策略字符串、参数规范化与身份不变。
+Python 参数为 JSON object，Grid/List 展开后按 Run Spec 身份排序去重。任意嵌套
+参数中的有限浮点在 canonical JSON 中编码为 `{"f64":"<16 位 IEEE-754 bits>"}`，
+字符串编码为 `{"string":"<原文>"}`；object/array 递归保留结构，null/bool 与
+安全整数保持 JSON 类型。这样浮点不会与恰好包含 bits 的字符串或同名 object
+碰撞，且 `0.0` / `-0.0` 保持不同身份。整数仍受 restricted-JCS 的 ±(2^53−1)
+约束。原始输入 JSON 与 canonical 身份 JSON 分开，后者不是解析器的输入格式。
+#158 仅实现定义、身份与 Rust 策略执行；Python 引用的执行及源码/环境 Execution
+来源由 #160 落实，不因为能构造引用而宣称完成 P10 的 Python 策略复现。
+
 ### 两阶段并行与确定性（P12、P13）
 
 1. 在 GIL 下串行计算所有参数组合的 Decision 序列。

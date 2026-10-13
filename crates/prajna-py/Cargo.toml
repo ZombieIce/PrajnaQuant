@@ -12,7 +12,10 @@ name = "_native"
 crate-type = ["cdylib"]
 
 [dependencies]
+prajna-experiment = { path = "../prajna-experiment" }
 pyo3 = { version = "=0.29.0", features = ["abi3-py312"] }
+rayon = "1.11"
+serde_json = { version = "1.0", features = ["arbitrary_precision"] }
 
 [lints.rust]
 unsafe_code = "forbid"
