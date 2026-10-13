@@ -24,6 +24,8 @@
 
 ## Target Architecture Baseline (2026-09-26)
 
+- **Python 研究数据读取（Implemented，合成数据验证）**：`prajna` 本地扩展提供 DSV/Static Universe 面板筛选、已注册 Rust Factor 声明及 Cache 读取/计算、显式 Experiment/Execution/Run 的已保存结果读取，统一返回 Arrow PyCapsule 交换的 `pyarrow.Table`，不依赖 Python Polars。Factor 可用时刻与缓存身份沿用 Rust/CLI；未保存与 Engine 不产生分开报错，缓存和结果损坏不静默重算或返回空表。接口与复验命令见 [`prajna-py`](../crates/prajna-py/README.md)。完整面板先加载后筛选，非 out-of-core/PIT 或策略 As-of View；Python Experiment、Decision 和两阶段执行尚未实现。
+
 2026-09-28 B2 票据 08 归因（Issue #3 完成前的中间状态，已由顶部正式结论取代）：固定 64×252 S2 首差附近的 10 只 ETF / 68 session 缩减用例，独立手算 04-08 现金 48350、NAV 99560、ETF038 当日买入 100 股；Rust 与修复后 Adapter 均通过。根因是 Adapter 逐证券开盘 Quote 顺序使买入早于卖出；修复后双方各 351 个订单/Fill，全部计入字段对齐，无剩余独立差异类别。[诊断票据](../.scratch/poc-0-b2-matched-remeasure/issues/08-s2-64x252-parity-diagnosis.md)与[原协议重测](../poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.json)记录 S2/S3 correctness 与数值门槛通过。按 ADR 0014，故障属 Adapter，不触发 Fast Event `reject`；当时 reset parity 尚未验证，fallback 性能仅 exploratory，整体 B2 当时为 `unresolved`，ADR 0012 原生停牌生命周期继续排除。下方票据 04 的 351/348 数据是修正前归档，不代表当前状态。
 
 2026-09-28 POC-0 票据 14 单 instrument 隔离实验：固定 Nautilus 2.0.0rc5 的公开 BacktestEngine 收到 QuoteTick、HALT 后，在两组同一后续时刻由策略直接提交的市价单触发原生 `on_order_rejected`（`Market PROBE.SIM is CLOSED`），引擎订单状态 `REJECTED`；无 HALT 对照在同一报价成交、状态 `FILLED`。[证据与复跑入口](../poc/poc0-benchmark/results/nautilus-halt-native-probe-2026-09-28.md)。MVP-4 可考虑由 Nautilus 原生状态处理停牌，但当前 Adapter 未改变，B2 判定范围及旧 A 股/ETF 执行时序均不变。
@@ -84,7 +86,7 @@ MVP-2 的 `prajna-experiment`（Issue #99–#104）可解析并校验 `experimen
 
 ### MVP-5 Python 入口
 
-`prajna-py` / `python/prajna` 现提供本地 Python 宿主扩展与类型化 Experiment API：PyO3 0.29.0、maturin 1.15.0、abi3-py312；复用 Rust 的解析、规范化身份、执行与 ResultLevel 存储，真实调用期间释放 GIL。Python 3.12 全新 venv、S1/S2/S3 Grid/List 在 64×252 合成 fixture 上的 Python/CLI Experiment 与 Run 身份、Vector 和 Fast Event `lot + full_target` Full 表逐值 logical-hash 重放、三种 ResultLevel 与线程进展测试通过；既有 CLI 身份/金标准回归通过。Python `strategy_id@version` 引用可序列化与生成身份，但 CLI/Python `run` 显式报错 `requires Python host`；源码/环境来源仍待两阶段执行。轻量 CI 保留依赖图守卫并构建真实 CLI/fixture 后测试绑定。尚无 Python Decision 执行、As-of View、Factor 或 Arrow 结果读取 API，不表示 MVP-5、PIT/总回报或生产 Python 策略入口已完成；构建与测试见 [`prajna-py`](../crates/prajna-py/README.md)。
+`prajna-py` / `python/prajna` 现提供本地 Python 宿主扩展与类型化 Experiment API：PyO3 0.29.0、maturin 1.15.0、abi3-py312；复用 Rust 的解析、规范化身份、执行与 ResultLevel 存储，真实调用期间释放 GIL。Python 3.12 全新 venv、S1/S2/S3 Grid/List 在 64×252 合成 fixture 上的 Python/CLI Experiment 与 Run 身份、Vector 和 Fast Event `lot + full_target` Full 表逐值 logical-hash 重放、三种 ResultLevel 与线程进展测试通过；既有 CLI 身份/金标准回归通过。Python `strategy_id@version` 引用可序列化与生成身份，但 CLI/Python `run` 显式报错 `requires Python host`；源码/环境来源仍待两阶段执行。轻量 CI 保留依赖图守卫并构建真实 CLI/fixture 后测试绑定。已合并的只读研究数据 API 与 Experiment API 共存；尚无 Python Decision 执行或 As-of View，不表示 MVP-5、PIT/总回报或生产 Python 策略入口已完成；构建与测试见 [`prajna-py`](../crates/prajna-py/README.md)。
 
 ### MVP-3 独立 full_target / POC entry_only 金标准
 
