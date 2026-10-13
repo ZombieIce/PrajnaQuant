@@ -4,8 +4,9 @@
 ([#138](https://github.com/ZombieIce/PrajnaQuant/issues/138),
 [ADR 0020](../../docs/decisions/0020-accurate-event-adapter-and-ledger-authority.md)).
 Its deterministic in-process fake is **not** Nautilus or #133 A15 evidence.
-The Python worker, Experiment integration and real-Backend difference classification
-remain separate tickets.
+The [pinned Python worker](../../backends/nautilus/README.md) implements this
+protocol and runs the shared parity/2-VP suite in Full. Experiment integration
+and complete real-Backend difference classification remain separate tickets.
 
 ## Ownership and crate boundary
 

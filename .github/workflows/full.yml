@@ -90,6 +90,36 @@ jobs:
             exit 1
           fi
 
+  nautilus-worker:
+    name: nautilus-rc6-worker
+    # macOS ARM64 is verified locally; Linux x86_64 remains unverified.
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: nautilus-worker
+      - run: python -m pip install -r backends/nautilus/requirements.txt
+      - name: Real worker tests (no skips allowed)
+        run: |
+          set -o pipefail
+          python -m unittest discover -s backends/nautilus -v 2>&1 | tee worker-unittest.log
+          if grep -q "skipped" worker-unittest.log; then
+            echo "::error::Nautilus worker tests were skipped"
+            exit 1
+          fi
+      - name: Shared fake / real Backend protocol and ledger suite
+        env:
+          PRAJNA_NAUTILUS_PYTHON: python
+        run: cargo test -p prajna-adapter --locked
+
   pyarrow-interop:
     name: pyarrow-interop
     runs-on: ubuntu-latest
