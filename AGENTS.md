@@ -51,6 +51,8 @@ POC-0 与新平台实现按当前任务的 spec/ADR 确定时间语义；修改�
 
 CI（`.github/workflows/`）分两条：`CI` 的 `lightweight` job 是合并必需检查，只跑不含 DuckDB 的轻量路径：依赖图守卫、`cargo fmt --all -- --check`、`cargo clippy -p quant-research --no-default-features --all-targets --locked -- -D warnings`、`cargo test -p quant-research --no-default-features --locked`，以及不装 Nautilus 的 POC Python 测试。本地复现时加 `--offline`。`Full` workflow 由手动或每晚触发，跑 `--workspace`（bundled DuckDB）、`b3-pyo3`、Nautilus 集成（出现跳过即失败）与前端构建，不阻塞合并。只能在 `app` 下编译的测试与 example 必须加 feature gate；测试不得依赖未入库的本地产物或特定工作目录。
 
+修改 `prajna-py` 或 `python/prajna` 时，先按 [`crates/prajna-py/README.md`](crates/prajna-py/README.md) 激活 Python 3.12 venv 并安装 maturin，再跑 `cargo test -p prajna-py --locked --offline`、`cargo clippy -p prajna-py --all-targets --locked --offline -- -D warnings`、`maturin develop --locked --offline` 与 `python -m unittest discover -s python/tests -v`。全 workspace Cargo 验证也需 Python >= 3.12（或显式设置 `PYO3_PYTHON`），避免 PyO3 选到旧系统 Python。轻量 CI 包含上述绑定测试与 DuckDB / `quant-research` 依赖图守卫。
+
 仓库缺少独立端到端的 3 ETF / 10 日金标准用例。每次相关变更需检查 look-ahead、日期对齐、现金持仓恒等式与成本。不要把编译通过当量化正确性证明。
 
 ## New Agent Startup
