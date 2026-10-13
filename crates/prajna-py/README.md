@@ -2,12 +2,13 @@
 
 Local Python-hosted PyO3 extension for [ADR 0021](../../docs/decisions/0021-python-strategy-entry-and-decision-boundary.md).
 Typed Experiment definitions invoke the existing Rust parser, identity,
-execution and ResultLevel storage APIs. Rust remains the only execution and
-performance authority. Python strategy references can be defined and identified,
-but their execution and Decision/As-of View callbacks are not implemented here.
-Read APIs reuse Rust's research panel, registered Factor definitions, persistent
-Factor Cache, and Experiment result storage, returning `pyarrow.Table`.
-This is not a second research or execution engine.
+execution and ResultLevel storage APIs. The single-Run strategy API generates
+and validates close-session Decisions using restricted As-of Views and Rust
+Factors. Python strategy references can be defined and identified, but their
+Decision sequences are not yet connected to Engine execution or Execution
+provenance. Read APIs reuse Rust's research panel, registered Factor definitions,
+persistent Factor Cache and Experiment result storage, returning `pyarrow.Table`.
+Rust remains the only execution and performance authority.
 
 ## Environment and build
 
@@ -37,6 +38,7 @@ The crate deliberately omits PyO3's `extension-module` feature: maturin sets
 `PYO3_BUILD_EXTENSION_MODULE` for extension builds, while ordinary Cargo
 tests and the existing `quant-research/b3-pyo3` embedding path retain libpython
 linking. B3's source, feature declaration and dependency declaration are unchanged.
+PyArrow is a runtime dependency (`>=18,<24`); Polars is not a Python dependency.
 
 ## Public smoke API
 
@@ -123,6 +125,120 @@ with `requires Python host` until the two-stage Python Decision execution ticket
 is complete. Defining a reference does not run Python code or capture Python
 strategy source/environment provenance.
 
+## Single-Run strategy API
+
+```python
+import prajna
+
+strategy = prajna.Strategy(
+    strategy_id="research_example",
+    version="1",
+    bar_columns=("close",),
+    factors=(prajna.FactorDependency("momentum", "momentum", {"n": 5}),),
+    lookback_sessions=6,
+    rebalance_every=2,
+)
+
+def decide(view, params, prev_decision):
+    # Example: remain in cash. This is a full Decision, not a skipped call.
+    return prajna.Decision({})
+
+decisions = prajna.generate_decisions(
+    lake_root="/path/to/lake",
+    dsv="dsv:sha256:<manifest hash>",
+    venue="SYNTH",
+    members=("A.SYNTH", "B.SYNTH"),
+    strategy=strategy,
+    decide=decide,
+    params={},
+    availability_assumption="none",
+)
+```
+
+`Strategy.identity` is `strategy_id@version`; components must be nonempty ASCII
+letters/digits/`._-`. Capability must be `Vectorizable`. Bar columns are a unique
+subset of `open`, `high`, `low`, `close`, `volume`, `amount`. Factor dependencies
+use `FactorDependency(name, kind, params)` with unique nonempty aliases and
+strictly checked Rust parameters. The existing read-only API retains
+`Factor(kind, params)`; both share the Rust definition parser.
+
+| Kind | Parameters | Rust definition version |
+| --- | --- | --- |
+| `momentum` | `n >= 1` | 1 |
+| `volatility` | `n >= 2` | 1 |
+| `trend_filter` | `n >= 1` | 1 |
+| `rotation_score` | `short`, `long`, `vol`, `w_s`, `w_l`, `w_v`, optional `trend` | 2 |
+
+Windows, input `close`, availability propagation, missing/status rules and
+direction are the registered [Rust Factor contract](../prajna-research/src/factor.rs),
+not Python implementations. Temporary callback calculations do not become Factor
+Values or enter Factor Cache. This entry computes in Rust without persistent
+Factor Cache; cached read APIs are outside this ticket.
+
+Rust starts at the first full `lookback_sessions` window where **each** declared
+Factor has at least one member's current `ok` value available by that close. With
+no Factor dependencies, the first full window is sufficient. It then calls every
+`rebalance_every` Venue Sessions, including later missing-data sessions; it does
+not restart the clock or skip an empty view. Both intervals must be positive.
+If warm-up never completes, the sequence is empty and no callback runs.
+
+Every invocation must return `Decision(targets, ranked=None)`:
+
+- `targets`: canonical instrument ID to finite, nonnegative binary64 weight;
+  sum must be **strictly <= 1**, without clipping, normalization or epsilon.
+- `ranked`: optional `(instrument_id, finite_score, positive_rank)` tuples;
+  IDs and ranks must be unique. Ranking may include unselected Universe members.
+- Every target/ranked ID must belong to this Run's Session Universe, including
+  zero-weight entries. Invalid outputs raise a dated `ValueError`; `None` or a
+  different return type raises `TypeError`. Python callback exceptions propagate.
+- Output `session_date` is assigned by Rust. Getters return defensive copies.
+  `prev_decision` is the previous validated intent, **not holdings or fills**.
+  Params must be a finite JSON object, canonicalized in Rust and decoded afresh
+  each call; mutations cannot carry through params/previous Decision.
+
+## As-of View and trust boundary
+
+The frozen Rust `AsOfView` exposes only:
+
+- `session_date`, `ts_close` (UTC nanoseconds), `universe`, and
+  `availability_assumption`;
+- `sessions`: exactly `lookback_sessions` Venue Session dates/close times;
+- `bars`: keys `instrument_id`, `session_date`, `available_at` plus declared
+  Bar columns, as `pyarrow.Table`; D7 prices/quantities retain Decimal128 scale 18;
+- `factors`: alias to the declared Rust Values `pyarrow.Table`s (keys, `value`,
+  `available_at`, `status`);
+- `execution_status`: known D7 status rows in the same window.
+
+Rows must be in the window, in the current Universe, and have
+`available_at <= decision close`. Late historical rows only enter after they
+become known. Unknown availability is excluded by default. The explicit
+`treat_unknown_as_ts_close` Run assumption permits it and is visible on the view;
+raw unknown timestamps remain null rather than inventing publication evidence.
+D7 Bar availability applies to the whole row, not separately timed open/close
+fields. Non-ok Factor values remain null; nothing is filled from future rows.
+Missing bars remain absent, not zero-priced or executable. The DSV must provide
+an execution_status table; a missing table is an explicit error.
+
+This implementation supports **Static Universe only**: explicit members validated
+against the Venue's DSV instruments. It does not establish historical membership,
+real-market PIT, corporate actions or dividend total returns.
+
+**Safe buffers, zero-copy export:** slicing the original Arrow panel would retain
+full buffers, allowing Python `buffers()` to read excluded future/out-of-window
+rows. Rust therefore projects and compacts only authorized rows/columns first.
+The resulting compact buffers are exported without copying through Arrow
+PyCapsule/`RecordBatchReader`, and are read-only in PyArrow. The source-panel
+boundary is **not** zero-copy; this owner-approved safety copy is intentional and
+must be included in future throughput measurements.
+
+Callbacks run serially under the GIL and must be deterministic pure functions,
+without random sources or cross-call mutable state. This is a data/argument
+boundary, **not a Python sandbox or purity detector**: arbitrary trusted Python
+can still access its globals, files or independently loaded data. No account,
+holdings, orders or fills are passed. The final close may generate a Decision;
+next-session open execution, cash sizing, costs and pending state belong to the
+future Python strategy Engine integration, not this single-Run API.
+
 ## Validation
 
 With the above venv active, from the repository root:
@@ -146,6 +262,14 @@ real Rust experiment execution as well as the smoke wait. Exact replay uses the
 existing Rust scalar-level logical-hash checks, not approximate metric comparisons.
 Fast Event manifests verify cash/quantity accounting; Vector remains a simplified
 weight-return model. No real-market, PIT or total-return claim follows.
+
+They also cover strategy declaration/scheduling, Rust Factor warm-up, invalid Decision rejection,
+as-of availability, undeclared/future indexing and compact Arrow buffer checks.
+`strategy_fixture` is a test-only example that publishes immutable synthetic
+DSVs with explicit delayed/unknown Bar/status availability overrides. It is not
+a production ingestion API or a Python Lake writer. Tests resolve their fixture
+paths from the checkout, not the caller's current directory.
+Cargo tests build the Rust test harness; behavioral binding coverage is in Python.
 The required `CI / lightweight` job also guards normal/build/dev dependencies
 against DuckDB, the legacy warehouse and `quant-research`, builds the extension
 in a fresh Python 3.12 venv, and runs these Python tests.

@@ -92,6 +92,7 @@ fn _run_experiment(
 mod arrow;
 mod factor;
 mod read;
+mod strategy;
 
 #[pyfunction]
 #[pyo3(signature = (duration_ms = 0))]
@@ -108,6 +109,7 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(smoke_test, module)?)?;
     module.add_function(wrap_pyfunction!(_describe_experiment, module)?)?;
     module.add_function(wrap_pyfunction!(_run_experiment, module)?)?;
+    strategy::register(module)?;
     module.add_function(wrap_pyfunction!(read::read_dataset, module)?)?;
     module.add_function(wrap_pyfunction!(read::read_factor, module)?)?;
     module.add_class::<factor::FactorDeclaration>()?;

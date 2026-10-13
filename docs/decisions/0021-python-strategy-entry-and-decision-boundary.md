@@ -32,6 +32,12 @@ Rust 在执行前校验 Decision：每个权重有限且非负，权重总和 �
 
 时序沿用现有执行契约：T 日 close 依据当时可用信息产生 Decision → 下一可用 Session open 由共用执行层执行。延期、pending、数量、账本与成本仍属 Engine；`prev_decision` 不因尚未成交而变成实际仓位。本文不变更执行时序。
 
+#### #159 已确认的 As-of 实现边界
+
+项目负责人在 #159 实现中确认：源 Arrow 面板的直接切片保留完整底层 buffer，Python `buffers()` 可读到被排除的数据；因此 Rust 先将允许的行/列裁剪到独立紧凑 buffer，再经 PyCapsule 零拷贝导出到 PyArrow。**源面板裁剪有复制成本**，不是整条路径零拷贝；后续 #162 计时必须包含该成本。此边界限制交给策略的 Arrow 数据，不是禁止受信 Python 自行访问 globals/文件的 sandbox，也不是纯函数检测器。
+
+Python 声明没有唯一 score，故先等到完整 `lookback_sessions` 窗口，且每个声明 Factor 在当前 Session 至少有一个 close 前可用的 `ok` 值；无 Factor 时只需完整窗口。从首个满足条件的 Session 按 Venue Session 下标固定间隔调用，之后即使数据缺失也不跳过；warm-up 未完成则不调用。#159 只生成单 Run Decision 序列，尚不改变任何 Engine 执行、账户或复现身份契约。
+
 ### Factor 与只读数据（P9、P14）
 
 Python 只能声明和参数化已注册的 Rust `FactorKind`；Factor Values 只由 Rust 计算。决策函数内的临时指标不是 Factor Values，不进入 Factor Cache。
