@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
 };
 
@@ -9,7 +9,7 @@ use prajna_data::{
     instruments_from_record_batch, instruments_to_record_batch, read_manifest, read_parquet,
     sessions_from_record_batch, sessions_to_record_batch, write_parquet,
 };
-use prajna_domain::{Bar, InstrumentSpec, Session};
+use prajna_domain::{Bar, InstrumentId, InstrumentSpec, InstrumentSpecData, Quantity, Session};
 use serde::{Deserialize, Serialize};
 
 use crate::{AdapterError, invalid, protocol::VERSION};
@@ -31,6 +31,23 @@ struct Header {
 
 impl RunPacket {
     pub fn from_dataset(root: &Path, dsv: &str) -> Result<Self, AdapterError> {
+        Self::load_dataset(root, dsv, None)
+    }
+
+    /// Resolve identity-bearing Run lot overrides before validating the neutral packet.
+    pub fn from_dataset_with_lots(
+        root: &Path,
+        dsv: &str,
+        lots: &BTreeMap<InstrumentId, Quantity>,
+    ) -> Result<Self, AdapterError> {
+        Self::load_dataset(root, dsv, Some(lots))
+    }
+
+    fn load_dataset(
+        root: &Path,
+        dsv: &str,
+        lots: Option<&BTreeMap<InstrumentId, Quantity>>,
+    ) -> Result<Self, AdapterError> {
         let manifest = read_manifest(root, dsv)?;
         let hex = manifest
             .dsv
@@ -44,6 +61,7 @@ impl RunPacket {
                     .join("part-00000.parquet")
             },
             dsv,
+            lots,
         )
     }
 
@@ -52,10 +70,18 @@ impl RunPacket {
         if header.protocol != VERSION {
             return Err(invalid("unsupported Run packet protocol"));
         }
-        Self::read_tables(|table| path.join(format!("{table}.parquet")), &header.dsv)
+        Self::read_tables(
+            |table| path.join(format!("{table}.parquet")),
+            &header.dsv,
+            None,
+        )
     }
 
-    fn read_tables(path: impl Fn(&str) -> PathBuf, dsv: &str) -> Result<Self, AdapterError> {
+    fn read_tables(
+        path: impl Fn(&str) -> PathBuf,
+        dsv: &str,
+        lots: Option<&BTreeMap<InstrumentId, Quantity>>,
+    ) -> Result<Self, AdapterError> {
         let mut packet = Self {
             instruments: vec![],
             sessions: vec![],
@@ -86,6 +112,18 @@ impl RunPacket {
                         .extend(execution_status_from_record_batch(&batch)?),
                     _ => unreachable!(),
                 }
+            }
+        }
+        if let Some(lots) = lots {
+            for instrument in &mut packet.instruments {
+                let mut data: InstrumentSpecData =
+                    serde_json::from_value(serde_json::to_value(&*instrument)?)?;
+                data.lot_size =
+                    Some(*lots.get(instrument.id()).ok_or_else(|| {
+                        invalid("Run packet Instrument has no resolved lot size")
+                    })?);
+                *instrument =
+                    InstrumentSpec::new(data).map_err(|error| invalid(error.to_string()))?;
             }
         }
         packet.validate()?;

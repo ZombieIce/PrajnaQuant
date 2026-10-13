@@ -11,6 +11,15 @@ use prajna_research::{
     strategy::{BuyAndHoldParams, Decision, MaCrossoverParams, UnfilledEntry},
 };
 
+pub const ACCURATE_SEMANTIC_VERSION: &str = "accurate_event@1";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackendIdentity {
+    pub name: String,
+    pub version: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct FastSettingsInput {
@@ -42,6 +51,7 @@ enum LotSource {
 #[derive(Debug, Clone)]
 pub(super) struct EngineSettings {
     fast: Option<FastEventConfig>,
+    pub(super) backend: Option<BackendIdentity>,
     capitals: BTreeMap<VirtualPortfolioId, Notional>,
     rebalance: Rebalance,
     policy: UnfilledEntry,
@@ -68,25 +78,37 @@ impl EngineSettings {
         }
         let mut result = Self {
             fast: None,
+            backend: input.backend.clone(),
             capitals: BTreeMap::new(),
             rebalance: Rebalance::FullTarget,
             policy,
             normalized: None,
         };
+        if input.engine != "accurate_event" && input.backend.is_some() {
+            return Err(invalid("Backend identity is only valid for accurate_event"));
+        }
         if input.engine == "vector" {
             if input.fast_event.is_some() {
                 return Err(invalid("vector cannot accept fast_event settings"));
             }
             return Ok(result);
         }
-        if input.engine == "accurate_event" {
-            return Err(invalid(format!(
-                "accurate_event × {}: Accurate Event execution is not implemented; routing rules are registered in prajna-research",
-                input.strategy
-            )));
+        if !matches!(input.engine.as_str(), "fast_event" | "accurate_event") {
+            return Err(invalid(
+                "engine must be vector, fast_event or accurate_event",
+            ));
         }
-        if input.engine != "fast_event" {
-            return Err(invalid("engine must be vector or fast_event"));
+        if input.engine == "accurate_event"
+            && input.backend.as_ref().is_none_or(|backend| {
+                backend.name.trim().is_empty()
+                    || backend.version.trim().is_empty()
+                    || backend.name.trim() != backend.name
+                    || backend.version.trim() != backend.version
+            })
+        {
+            return Err(invalid(
+                "accurate_event requires Backend identity with nonempty, trimmed name and version",
+            ));
         }
         let settings = input
             .fast_event
@@ -123,15 +145,14 @@ impl EngineSettings {
                 ));
             }
         };
-        Engine::FastEvent {
-            sizing,
-            rebalance: result.rebalance,
-        }
-        .validate_mode(&input.strategy)
-        .map_err(|error| invalid(error.to_string()))?;
+        result
+            .selection_for(sizing)
+            .validate_mode(&input.strategy)
+            .map_err(|error| invalid(error.to_string()))?;
         if result.rebalance != Rebalance::FullTarget && policy != UnfilledEntry::Retry {
             return Err(invalid(format!(
-                "fast_event × {} × sizing={}, rebalance=entry_only, unfilled_entry={}: entry_only requires unfilled_entry=retry",
+                "{} × {} × sizing={}, rebalance=entry_only, unfilled_entry={}: entry_only requires unfilled_entry=retry",
+                input.engine,
                 input.strategy,
                 settings.sizing,
                 result.policy_name()
@@ -287,13 +308,35 @@ impl EngineSettings {
             "retry"
         }
     }
+    pub(super) fn packet(
+        &self,
+        lake: &Path,
+        dsv: &str,
+    ) -> Result<prajna_adapter::RunPacket, ExperimentError> {
+        let config = self
+            .fast
+            .as_ref()
+            .ok_or_else(|| invalid("missing lot configuration"))?;
+        prajna_adapter::RunPacket::from_dataset_with_lots(lake, dsv, &config.lot_sizes)
+            .map_err(|error| execution_error("load effective Run packet", error))
+    }
     pub(super) fn selection(&self) -> Engine {
         match &self.fast {
-            Some(config) => Engine::FastEvent {
-                sizing: config.sizing,
-                rebalance: self.rebalance,
-            },
+            Some(config) => self.selection_for(config.sizing),
             None => Engine::Vector,
+        }
+    }
+    fn selection_for(&self, sizing: Sizing) -> Engine {
+        if self.backend.is_some() {
+            Engine::AccurateEvent {
+                sizing,
+                rebalance: self.rebalance,
+            }
+        } else {
+            Engine::FastEvent {
+                sizing,
+                rebalance: self.rebalance,
+            }
         }
     }
     pub(super) fn normalize_definition(&self, value: &mut Value, strategy: &str) {
@@ -302,6 +345,9 @@ impl EngineSettings {
         }
         if let Some(settings) = &self.normalized {
             value["fast_event"] = settings.clone();
+        }
+        if let Some(backend) = &self.backend {
+            value["backend"] = serde_json::json!(backend);
         }
     }
     pub(super) fn normalize_spec(&self, value: &mut Value) {
@@ -312,8 +358,15 @@ impl EngineSettings {
             value["strategy"]["unfilled_entry"] = self.policy_name().into();
         }
         if let Some(settings) = &self.normalized {
-            value["engine"] = serde_json::json!({"kind":"fast_event", "semantic_version":fast_event::SEMANTIC_VERSION});
+            value["engine"] = if self.backend.is_some() {
+                serde_json::json!({"kind":"accurate_event", "semantic_version":ACCURATE_SEMANTIC_VERSION})
+            } else {
+                serde_json::json!({"kind":"fast_event", "semantic_version":fast_event::SEMANTIC_VERSION})
+            };
             value["fast_event"] = settings.clone();
+        }
+        if let Some(backend) = &self.backend {
+            value["backend"] = serde_json::json!(backend);
         }
     }
     pub(super) fn set_policy(&self, strategy: &mut VectorStrategy) {
@@ -461,6 +514,7 @@ pub(super) fn execute(
     assumption: AvailabilityAssumption,
     members: &[InstrumentId],
     level: ResultLevel,
+    packet: Option<&prajna_adapter::RunPacket>,
 ) -> RunExecution {
     let mut execution = RunExecution {
         run_spec: run.run_spec.clone(),
@@ -468,6 +522,9 @@ pub(super) fn execute(
         status: RunStatus::Completed,
         result: None,
         fast_event_result: None,
+        backend_diagnostics: None,
+        adapter_events: vec![],
+        backend_events: vec![],
         summary: None,
         error: None,
     };
@@ -490,13 +547,66 @@ pub(super) fn execute(
                     rebalance: experiment.engine.rebalance,
                 })
                 .collect::<Vec<_>>();
-            let result = fast_event::run_fast_event(panel, statuses, config, &portfolios)
+            let result = if let Some(identity) = &experiment.engine.backend {
+                let factory = experiment
+                    .backend_factory
+                    .as_ref()
+                    .ok_or("missing worker Backend")?;
+                let mut backend = factory
+                    .create(identity, config, &experiment.dsv)
+                    .map_err(|e| e.to_string())?;
+                let result = prajna_adapter::run_adapter(
+                    packet.ok_or("missing Run packet")?,
+                    panel,
+                    statuses,
+                    config,
+                    &portfolios,
+                    backend.as_mut(),
+                )
                 .map_err(|e| e.to_string())?;
+                let mut diagnostics = backend.finish().map_err(|e| e.to_string())?;
+                diagnostics
+                    .compare_accounts(&result.execution, &result.backend_events, config)
+                    .map_err(|e| e.to_string())?;
+                if level == ResultLevel::Full {
+                    execution.adapter_events = result.adapter_events;
+                    execution.backend_events = result.backend_events;
+                }
+                execution.backend_diagnostics = Some(diagnostics);
+                result.execution
+            } else {
+                fast_event::run_fast_event(panel, statuses, config, &portfolios)
+                    .map_err(|e| e.to_string())?
+            };
             execution.summary = Some(crate::summary::summarize_fast(
                 &result,
                 experiment.sessions_per_year,
                 &experiment.availability_assumption,
             )?);
+            if let Some(diagnostics) = &execution.backend_diagnostics {
+                execution
+                    .summary
+                    .as_mut()
+                    .ok_or("missing summary")?
+                    .assumptions
+                    .push(format!(
+                        "accurate_event@1 Backend evidence: {}; not #133 A15 acceptance",
+                        diagnostics.evidence
+                    ));
+                let unclassified = diagnostics
+                    .comparisons
+                    .iter()
+                    .filter(|comparison| comparison["difference_class"] == "unclassified")
+                    .count();
+                if unclassified > 0 {
+                    execution.summary.as_mut().ok_or("missing summary")?.assumptions.push(
+                        format!("{unclassified} unclassified Backend account differences; #133 A15 would not pass")
+                    );
+                }
+            }
+            if level != ResultLevel::Full {
+                execution.backend_diagnostics = None;
+            }
             if level != ResultLevel::Summary {
                 execution.fast_event_result = Some(result);
             }
@@ -527,6 +637,9 @@ pub(super) fn execute(
         execution.error = Some(error);
         execution.result = None;
         execution.fast_event_result = None;
+        execution.backend_diagnostics = None;
+        execution.adapter_events.clear();
+        execution.backend_events.clear();
         execution.summary = None;
     }
     execution

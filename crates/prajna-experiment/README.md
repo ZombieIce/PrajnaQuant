@@ -1,14 +1,15 @@
 # prajna-experiment
 
-合成数据 Vector / Fast Event Experiment CLI，复用 Rust 策略、指标与 ResultLevel 存储契约（ADR 0017/0018/0019）。Fast Event 提供运行内精确账本验证；不建立真实市场/PIT 结论。
+合成数据 Vector / Fast Event / Accurate Event Experiment CLI，复用 Rust 策略、指标与 ResultLevel 存储契约（ADR 0017/0018/0019/0020）。事件路径提供运行内精确账本验证；不建立真实市场/PIT 结论。
 
 ```text
 prajna-experiment run <experiment.json> --lake <dir> [--level summary|standard|full]
                       [--promote <run-id>...] [--threads N]
+                      [--backend-python <python> --backend-worker <worker.py>]
 prajna-experiment diff <exe-a> <exe-b> --lake <dir>
 ```
 
-`--level` 默认 `summary`；省略 `--threads` 时使用 Rayon 默认线程数（包括 `RAYON_NUM_THREADS`），显式值必须大于零。线程数、ResultLevel 不进入身份。CLI 从当前 Git 工作树捕获代码来源；lake 和定义可以用任意绝对路径。脏工作树照常运行，`reproducible=false`。
+`--level` 默认 `summary`；省略 `--threads` 时使用 Rayon 默认线程数（包括 `RAYON_NUM_THREADS`），显式值必须大于零。Accurate 中该数值表示 worker 进程池槽位；Backend 不在 Rayon 线程上执行。线程数、ResultLevel 和 worker 路径不进入身份。CLI 从当前 Git 工作树捕获代码来源；lake 和定义可以用任意绝对路径。脏工作树照常运行，`reproducible=false`。
 
 不传 `--promote` 时，新建或重放当前 Execution。传入 `--promote` 时只提升已存在的当前 Execution，不先新建；须同时指定高于各选中 Run 现有等级的 `--level standard|full`。缺失 Execution、未知/重复 Run 或未提高等级均报错；未选中的 Run 不受影响。提升验证 Summary 和已有明细表，补写缺失表。
 
@@ -84,7 +85,7 @@ cargo test -p prajna-experiment --locked --offline
 
 ## Fast Event 与三种策略（MVP-3）
 
-`engine` 接受 `vector` / `fast_event`（语义版本 `vector@1` / `fast_event@1`）。
+`engine` 接受 `vector` / `fast_event` / `accurate_event`（语义版本 `vector@1` / `fast_event@1` / `accurate_event@1`）。
 `strategy` 接受 `s2_rotation`（TopKRank）、`buy_and_hold`、`ma_crossover`。
 S2 的九个参数及默认 Run Spec 字节保持不变；显式 `unfilled_entry: "skip"`
 与缺省同一身份，`retry` 进入身份。BuyAndHold 固定 retry；MA 默认 skip，也可显式 retry。
@@ -94,10 +95,10 @@ Vector 继续要求 `Vectorizable`；Fast Event 的封闭 Decision 策略族接�
 或未声明 Decision 能力时拒绝。原生 BuyAndHold / MA 为内建 Vectorizable Decision
 策略。参数展开与每 Run 决策前均校验，不把不支持的组合送入成交/账本。
 
-`Engine::AccurateEvent` 仅登记 MVP-4 路由规则：相同 Decision 策略族、仅 `lot`，
+`Engine::AccurateEvent` 使用 MVP-4 路由规则：相同 Decision 策略族、仅 `lot`，
 调仓为 `full_target` 或 `entry_only`；拒绝 `vector_parity` 和 `OrderBookDriven`。
-这不表示 Accurate Backend 已实现；CLI 的 `engine: "accurate_event"` 明确报
-`not implemented`，不创建 Run 或结果，也不新增 Accurate 配置 schema。
+Experiment 通过 Backend 中立的 Order / Fill / Reject 闭环接入；真实 Python worker
+由 #139 提供，fake 契约/transport 测试不证明真实 Nautilus 或 #133 A15 验收完成。
 Rust 调用者可用 `Engine::validate` / `decide` / `decide_panel` 在数据计算前校验；
 底层 `run_fast_event` 只消费已生成的 Decision tape，不携带策略能力声明。
 
@@ -172,3 +173,69 @@ Fast Event E11 以**账户每日 close 权益 / 初始账户资本**为 NAV，�
 open NAV；两者估值点不同，不能直接用 Summary Sharpe 当作引擎对拍。
 仅验证合成数据，不建立真实市场、PIT、分红总回报、T+1/涨跌停或实盘结论。
 吞吐/RSS 原始证据和复跑命令见 [`poc/mvp3-benchmark`](../../poc/mvp3-benchmark/README.md)。
+
+## Accurate Event 与 Backend 身份（MVP-4）
+
+Accurate 复用上面的 `fast_event` 配置块，含 lot、成本、VP 资本与调仓语义；这是共用
+执行配置，不表示调用 Fast Event 模拟成交。另外必须写明 Backend 身份：
+
+```json
+{
+  "engine": "accurate_event",
+  "backend": {"name": "nautilus_trader", "version": "2.0.0rc6"}
+}
+```
+
+名称/版本为非空、无首尾空白的字符串，整个对象同时进入 Experiment 与 Run Spec；
+任何名称或版本变化都改变 Run 身份。旧 Vector / Fast Event 不新增 `backend` 字段，
+拒绝提供 Backend 配置，规范化 Run Spec 保持原字节。seed 仍必须缺省或 null。
+Python transport 只支持 `nautilus_trader`，运行前通过指定 Python 的包 metadata
+核对版本，不能用另一版本生成成功结果。路径必须显式给出且成对出现，例如：
+
+```sh
+prajna-experiment run experiment.json --lake /absolute/lake --level full --threads 2 \
+  --backend-python /absolute/rc6-venv/bin/python \
+  --backend-worker /absolute/checkout/backends/nautilus/worker.py
+```
+
+调用者须使用记录代码来源的 checkout 中的 worker；外部脚本路径不是代码来源证明。
+API 调用者可用 `with_backend_factory(Arc<dyn BackendFactory>)` 注入系统边界：
+每个 Run 创建一个 `ExperimentBackend`，结束时收集 `BackendDiagnostics`。
+`BackendDiagnostics::fake()` 明确标记 fake，CLI 没有 fake 开关，不会静默回退。
+Summary assumptions 保留证据类型和未分类的账户差异；fake 永远不构成 Nautilus 验收。
+
+控制器为每个 Run 写一次不可覆盖的中立 Parquet 包，lot 字段使用已进入 Run Spec
+的有效解析值（可显式覆盖 DSV 的 lot 字段，不改写 DSV）。旁边的 `worker.json` 含
+账户初始现金和与平台相同的六项十进制成本。随后一个新 worker 进程处理整个 Run，
+Rust 从实际 Backend Fill 入账后再计算后续订单，VP 订单不跨 VP 净额化。
+每次写入、响应和正常退出的 transport deadline 为 60 秒；API 可调整
+`WorkerCommand.timeout`，不进入身份。EOF、终止 error、非零退出、超时、缺少或
+无法映射的 diagnostics 都使 Run failed；每个 worker 置于独立 Unix 进程组，
+关闭/回收该 worker 与继承进程组的后代，管道线程回收同样有 deadline，并释放临时
+数据包。仅支持 macOS/Linux；不支持的平台显式报错，不退回无隔离进程。
+退出观察使用 non-reaping wait；先清理所属进程组再 reap leader，避免组 ID 被复用后
+误伤其他进程。清理失败或超出 deadline 会明确写 stderr，不无限等待管道线程。
+预检/初始化配置错误仍按 CLI 既有错误码报告；单 Run failed 保持既有 Execution
+报告/退出码契约，须查看 `failed_count`，不能把退出 0 当全部 Run 正确。
+
+| ResultLevel | Accurate Event 保存内容 |
+| --- | --- |
+| Summary | 同 Fast Event E11 与运行内账户/VP 两点恒等式；无明细表 |
+| Standard | 加逐 Session `account_valuations` / `portfolio_valuations`，含估值来源 |
+| Full | 加 orders / fills / fee_settlements，以及下列三个分列诊断表 |
+
+`adapter_events` 分开保存平台合成 open/门禁与 worker `adapter_construction`；
+`backend_events` 分开保存 mapped Fill/Reject 响应与 `backend_native` 原生事件，
+映射后的 Session-open 时间不冒充原生事件时间。
+`backend_comparisons` 保存 evidence、费用对照、每 Session 原生 CASH/持仓与平台
+close 现金/持仓/权益（权威仍为 `prajna-account`）。现金差异用返回 Fill 的原生费用
+与平台佣金/税之差逐笔核对；持仓差异或无法由费用解释的现金差异明确为
+`unclassified`，不是自动认定为 Backend 原生差异，也不宣称 #133 A15 通过。
+真实 transport 必须返回每 Session 的唯一账户快照；缺失即失败。
+fake 的原生账户显式为 unavailable，不伪造原生快照。
+
+三张诊断表沿用精确字符串 JSON payload 的 Parquet logical hash；Full 的空表仍保存，
+较低等级只在 `not_saved` 中声明省略，不能解释为零事件。重放/提升会校验 Summary
+和全部已存明细，包括诊断；证据变化或诊断不一致不能覆盖原 Execution。
+这里只验证合成 fake 与脚本 transport，真实 worker 对拍、差异分类验收与转换成本
+仍须另按 #133 A14–A16 执行，不设扫描吞吐门槛。
