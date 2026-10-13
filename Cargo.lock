@@ -2986,6 +2986,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "prajna-py"
+version = "0.1.0"
+dependencies = [
+ "pyo3",
+]
+
+[[package]]
 name = "prajna-research"
 version = "0.1.0"
 dependencies = [

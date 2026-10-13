@@ -69,6 +69,15 @@ jobs:
             exit 1
           fi
 
+      - name: Guard - prajna-py must not depend on DuckDB or quant-research
+        run: |
+          set -euo pipefail
+          tree=$(cargo tree -p prajna-py -e normal,build,dev --prefix none --locked)
+          if grep -E '^(libduckdb-sys|duckdb|ashare-warehouse|quant-research) ' <<<"$tree"; then
+            echo "::error::prajna-py depends on a prohibited legacy package"
+            exit 1
+          fi
+
       - run: cargo fmt --all -- --check
       - run: cargo clippy -p quant-research --no-default-features --all-targets --locked -- -D warnings
       - run: cargo test -p quant-research --no-default-features --locked
@@ -108,6 +117,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - run: cargo clippy -p prajna-py --all-targets --locked -- -D warnings
+      - run: cargo test -p prajna-py --locked
+
+      - name: Build prajna extension in a fresh Python 3.12 venv
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install 'maturin==1.15.0'
+          maturin develop --locked
+
+      - name: Prajna Python tests
+        run: .venv/bin/python -m unittest discover -s python/tests -v
 
       # Feature-only code (b3-pyo3) must still type-check when shared signatures change.
       - run: cargo check -p quant-research --no-default-features --features b3-pyo3 --all-targets --locked

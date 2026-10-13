@@ -1,6 +1,8 @@
 .venv/
 .venv-mvp4/
 __pycache__/
+python/prajna/*.so
+python/prajna/*.pyd
 data/
 data-core/
 target/

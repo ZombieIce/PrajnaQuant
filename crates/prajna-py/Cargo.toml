@@ -1,0 +1,21 @@
+[package]
+name = "prajna-py"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.1"
+description = "Python-hosted bindings for the Prajna research platform"
+license = "MIT"
+publish = false
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "=0.29.0", features = ["abi3-py312"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
