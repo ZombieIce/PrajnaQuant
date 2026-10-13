@@ -23,4 +23,4 @@
 
 ## Status
 
-Accepted as current implementation boundary, 2026-09-23；若未来改职责，须审议替代 ADR。
+Accepted as current implementation boundary, 2026-09-23；若未来改职责，须审议替代 ADR。Python 入口由 [ADR 0021](0021-python-strategy-entry-and-decision-boundary.md) 细化。

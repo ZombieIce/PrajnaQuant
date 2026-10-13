@@ -69,6 +69,14 @@ _Avoid_: 把计算结果直接称为 Factor。
 **Strategy**:
 依据可用信息产生目标权重或交易意图的版本化规则；其所需数据与执行能力由 Strategy Capability 声明。
 
+**Decision**:
+Strategy 在一个决策 Session 收盘时依据当时可用信息给出的目标权重集合；之后在下一可用时刻由 Engine 执行，本身不含订单、成交或账户状态，是各 Engine 共同消费的策略输出。
+_Avoid_: 把 Decision 当作已成交的仓位或订单。
+
+**As-of View**:
+为一个决策 Session 提供给 Strategy 的只读信息集，只含在该 Session 收盘时已可用的数据与 Factor Values，以及 Universe 在该时点的成员；不含账户状态，也不含此后才可用的任何值。
+_Avoid_: 把截至某日期的数据切片等同于 As-of View，而忽略可用时刻与 Universe 可知性。
+
 **Strategy Capability**:
 策略运行所需的输入粒度与交互语义，用于判断其能在哪类 Engine 上执行。
 

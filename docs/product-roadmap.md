@@ -16,7 +16,7 @@
 | MVP-2 | Experiment、Run 身份、ResultLevel、Rayon 参数扫描 | 固定代码/数据/配置/seed 可重放；Summary 扫描不写完整事件，吞吐和资源有实测 |
 | MVP-3 | Portfolio、Virtual Portfolio、Fast Event L1 | 开工前由项目负责人审阅 POC-0 B2 正式结论与适用范围；实现验收为 S1/S2/S3 逐日现金＋持仓＝权益、费用可追溯，并与 Vector 在共同语义下对拍。B2 `adopt` 仅适用于登记合成负载，不等于生产 Engine 选型。 |
 | MVP-4 | Nautilus Adapter 与 Accurate Backend | Backend 隔离于自有 Domain；固定金标准与 Fast Event 的差异可解释，转换成本实测 |
-| MVP-5 | Python 研究/策略入口与 PyO3 | Python 定义可驱动 Rust 执行；逐 bar callback 的适用规模由 B3 结果约束 |
+| MVP-5 | Python 研究/策略入口与 PyO3 | Python 定义可驱动 Rust 执行；逐 bar callback 的适用规模由 B3 结果约束。逐 bar callback 依 [ADR 0021](decisions/0021-python-strategy-entry-and-decision-boundary.md) 推迟；验收见 [#154 P16](https://github.com/ZombieIce/PrajnaQuant/issues/154)。 |
 | MVP-6 | 真实 ETF Rotation 纵向验收 | 历史 Universe、分红/价格口径、交易状态可知性与逐日账本证据满足当前 P0 门槛，结果可重放 |
 | 后续 | Crypto/Cross Venue、美国市场；再到 Paper/Live | 各 Venue 的数据、执行、风险和账户契约单独验收 |
 
