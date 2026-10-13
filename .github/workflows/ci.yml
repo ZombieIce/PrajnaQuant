@@ -102,6 +102,8 @@ jobs:
       - run: cargo test -p prajna-research --locked
       - run: cargo clippy -p prajna-experiment --all-targets --locked -- -D warnings
       - run: cargo test -p prajna-experiment --locked
+      - name: A16 per-Run research timing regression (no Nautilus required)
+        run: cargo test -p prajna-experiment --features nautilus-integration --example measure_accurate --locked
 
       - uses: actions/setup-python@v5
         with:
