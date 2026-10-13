@@ -44,6 +44,10 @@ class MeasurementCliTests(unittest.TestCase):
         self.assertEqual(summary["main_ns"]["p95"], 19)
         self.assertEqual(summary["rss_worker_peak_sum_upper_bound_bytes"], 300)
         self.assertEqual(summary["rss_baseline_sum_bytes"], 70)
+        cell["parallel"][0]["wall_ns"] = 50
+        with self.assertRaisesRegex(ValueError, "enclose"):
+            cost.summarize_cell(cell)
+        cell["parallel"][0]["wall_ns"] = 100
         cell["main"][0]["checksum"] = "different"
         with self.assertRaisesRegex(ValueError, "checksum"):
             cost.summarize_cell(cell)

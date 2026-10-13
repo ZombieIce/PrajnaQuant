@@ -307,6 +307,8 @@ fn main() {
                         sample(workload, &mut worker, false);
                     }
                     barrier.wait();
+                    // Ready workers wait again until the controller has started its timer.
+                    barrier.wait();
                     let results = (0..6)
                         .map(|_| execute(workload, &mut worker, false))
                         .collect::<Vec<_>>();
@@ -321,6 +323,7 @@ fn main() {
             }
             barrier.wait();
             let start = Instant::now();
+            barrier.wait();
             barrier.wait();
             let ns = start.elapsed().as_nanos();
             let workers = handles

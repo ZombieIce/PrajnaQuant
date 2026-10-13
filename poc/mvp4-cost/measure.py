@@ -53,6 +53,8 @@ def summarize_cell(cell):
     for group in cell["parallel"]:
         if len(group["workers"]) != 2 or any(len(w["samples"]) != 6 for w in group["workers"]):
             raise ValueError("parallel requires two workers with six Runs each")
+        if group["wall_ns"] < max(sum(s["wall_ns"] for s in w["samples"]) for w in group["workers"]):
+            raise ValueError("parallel wall time must enclose every worker's timed execution")
         samples += [s for w in group["workers"] for s in w["samples"]]
     if len({s["checksum"] for s in samples}) != 1:
         raise ValueError("result checksum changed")
