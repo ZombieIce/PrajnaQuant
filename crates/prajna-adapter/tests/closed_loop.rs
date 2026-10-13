@@ -1,6 +1,7 @@
 #[path = "../../prajna-research/tests/common/mod.rs"]
 #[allow(dead_code)]
 mod common;
+mod support;
 
 use prajna_account::VirtualPortfolioId;
 use prajna_adapter::{FakeBackend, RunPacket, run_adapter};
@@ -247,13 +248,14 @@ fn s1_s2_s3_full_target_fake_matches_fast_event_every_fill_and_both_daily_marks(
                 })
                 .collect();
             let fast = run_fast_event(&panel, &statuses, &config, &[run.clone()]).unwrap();
+            let mut backend = support::backend(&config);
             let result = run_adapter(
                 &packet,
                 &panel,
                 &statuses,
                 &config,
                 &[run],
-                &mut FakeBackend::default(),
+                backend.as_mut(),
             )
             .unwrap();
             assert_eq!(result.execution.account, fast.account, "{name}/{label}");
@@ -411,15 +413,8 @@ fn two_portfolios_receive_independent_fills_and_exact_daily_fast_event_balances(
         rebalance: Rebalance::FullTarget,
     });
     let fast = run_fast_event(&panel, &statuses, &config, &runs).unwrap();
-    let actual = run_adapter(
-        &packet,
-        &panel,
-        &statuses,
-        &config,
-        &runs,
-        &mut FakeBackend::default(),
-    )
-    .unwrap();
+    let mut backend = support::backend(&config);
+    let actual = run_adapter(&packet, &panel, &statuses, &config, &runs, backend.as_mut()).unwrap();
     assert_eq!(actual.execution.account, fast.account);
     assert_eq!(
         actual
