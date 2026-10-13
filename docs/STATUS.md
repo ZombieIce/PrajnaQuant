@@ -84,7 +84,7 @@ MVP-2 的 `prajna-experiment`（Issue #99–#104）可解析并校验 `experimen
 
 ### MVP-5 Python 入口
 
-`prajna-py` / `python/prajna` 现提供本地 Python 宿主扩展骨架：PyO3 0.29.0、maturin 1.15.0 与 abi3-py312，仅暴露 Rust 版本和释放 GIL 的冒烟调用。Python 3.12 全新 venv 已通过安装、真实扩展调用及 Rust 等待期间 Python 线程进展测试；轻量 CI 新增依赖图守卫、扩展构建与 Python 测试。尚无 Experiment/Decision、As-of View、Factor 或结果读取 API，不表示 MVP-5 或生产 Python 策略入口已完成；构建与测试见 [`prajna-py`](../crates/prajna-py/README.md)。
+`prajna-py` / `python/prajna` 现提供本地 Python 宿主扩展（PyO3 0.29.0、maturin 1.15.0、abi3-py312）及单 Run `generate_decisions`：策略声明版本、Bar 列、Rust Factor 依赖、完整 lookback 窗口和再平衡间隔；Rust 构造按 close 可用时刻与 Static Universe 限制的 As-of View，串行调用纯 Decision 函数并严格校验权重、Universe 与可选排序。安全裁剪复制受限窗口，Arrow PyCapsule 到 PyArrow 为零拷贝，不声称源面板切片零拷贝；真实扩展的合成 DSV 测试覆盖未知/延迟可用时刻、未来/未声明字段及底层 buffer 对抗、调度和非法输出。未知可用时刻须显式声明 assumption，Static Universe 不构成历史 PIT；纯函数是受信 Python 的使用契约而非 sandbox 保证。尚未接入 Engine、Experiment/Execution 身份与复现或只读结果 API，不表示 MVP-5、真实市场或生产策略入口已完成；构建与测试见 [`prajna-py`](../crates/prajna-py/README.md)。
 
 ### MVP-3 独立 full_target / POC entry_only 金标准
 

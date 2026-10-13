@@ -1,6 +1,8 @@
 use pyo3::prelude::*;
 use std::time::Duration;
 
+mod strategy;
+
 #[pyfunction]
 #[pyo3(signature = (duration_ms = 0))]
 fn smoke_test(py: Python<'_>, duration_ms: u64) -> &'static str {
@@ -14,5 +16,6 @@ fn smoke_test(py: Python<'_>, duration_ms: u64) -> &'static str {
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("__version__", env!("CARGO_PKG_VERSION"))?;
     module.add_function(wrap_pyfunction!(smoke_test, module)?)?;
+    strategy::register(module)?;
     Ok(())
 }

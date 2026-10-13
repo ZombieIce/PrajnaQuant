@@ -2989,7 +2989,17 @@ dependencies = [
 name = "prajna-py"
 version = "0.1.0"
 dependencies = [
+ "arrow-array",
+ "arrow-schema",
+ "arrow-select",
+ "chrono",
+ "polars",
+ "prajna-data",
+ "prajna-domain",
+ "prajna-research",
  "pyo3",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
