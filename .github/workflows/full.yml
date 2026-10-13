@@ -119,6 +119,26 @@ jobs:
         env:
           PRAJNA_NAUTILUS_PYTHON: python
         run: cargo test -p prajna-adapter --locked
+      - name: A15 independent golden / Fast / real Accurate correctness (no fake or skips)
+        env:
+          PRAJNA_NAUTILUS_PYTHON: python
+          PRAJNA_CORRECTNESS_REPORT: accurate-correctness.json
+        run: |
+          set -o pipefail
+          cargo test -p prajna-experiment --features nautilus-integration --test accurate_correctness --locked 2>&1 | tee accurate-correctness.log
+          if grep -Eq '[1-9][0-9]* ignored|skipped' accurate-correctness.log; then
+            echo "::error::Accurate correctness tests were skipped"
+            exit 1
+          fi
+      - name: Preserve classified correctness evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: accurate-correctness
+          path: |
+            accurate-correctness.json
+            accurate-correctness.log
+          if-no-files-found: error
 
   pyarrow-interop:
     name: pyarrow-interop

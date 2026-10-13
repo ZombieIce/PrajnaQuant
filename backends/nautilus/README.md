@@ -2,7 +2,7 @@
 
 This is the MVP-4 [#139](https://github.com/ZombieIce/PrajnaQuant/issues/139)
 worker for the [Rust adapter contract](../../crates/prajna-adapter/README.md),
-not an Experiment Engine or #133 A15 acceptance report. Python does not plan
+not itself an Experiment Engine or #133 A15 acceptance report. Python does not plan
 orders, size positions, apply platform gates or maintain the authoritative ledger.
 Rust sends each Order after incorporating the preceding Fill / Reject.
 POC-0 continues to use its separate `2.0.0rc5` pin.
@@ -117,7 +117,10 @@ The shared Rust S1/S2/S3 and nonempty B2 MA20/60 tests plus the 2-VP case run wi
 the fake by default and the real worker when the required executable is set.
 They compare every platform fill, execution-state trace and daily two-layer mark
 to Fast Event, using existing independent golden Decision tapes; this is not the
-complete #133 A15 differential classification/Experiment acceptance.
+complete #133 A15 differential classification/Experiment acceptance. The separate
+[#141 real correctness suite](../../poc/mvp4-correctness/README.md) now compares
+the public adapter boundary directly with independent Python goldens, Fast Event
+and the archived POC B2 results; it records every non-equal field with evidence.
 Worker tests separately verify hand-calculated native fees/cash, HALT rejection,
 numeric-token rejection and preflight precision failures. Dependencies are
 required, with no skip paths. Full adds `nautilus-rc6-worker` on macOS ARM64 /
