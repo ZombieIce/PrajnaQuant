@@ -291,10 +291,9 @@ def synthetic_prices(raw: Decimal, costs: dict) -> tuple[Decimal, Decimal]:
         return prices
 
 
-def run(request: dict) -> None:
+def prepare(path: Path) -> dict:
     if importlib.metadata.version("nautilus_trader") != PINNED_VERSION:
         raise RuntimeError(f"worker requires nautilus_trader=={PINNED_VERSION}")
-    path = Path(request["packet"])
     specs, sessions, bars, statuses = read_packet(path)
     config = json.loads((path / "worker.json").read_text())
     initial_cash = decimal_value(config["initial_cash"])
@@ -306,85 +305,104 @@ def run(request: dict) -> None:
         raise ValueError("positive initial_cash and nonnegative costs required")
     if any(costs[name] >= 1 for name in costs if name != "minimum_commission"):
         raise ValueError("cost rates must be less than one")
+    # SYNTH is a reserved Nautilus synthetic Venue, not an execution Venue.
+    venue = Venue("PRAJNA")
+    currency = Currency.from_str(specs[0]["quote_currency"])
+    cash = Money.from_str(f"{encode(initial_cash)} {currency}")
+    if cash.as_decimal() != initial_cash:
+        raise ValueError("initial_cash cannot be represented by native currency precision")
+    instruments = {}
+    records = []
+
+    def record(category, event, **fields):
+        records.append({"category": category, "event": event, **fields})
+
+    for spec in specs:
+        instrument_id = InstrumentId.from_str(spec["instrument_id"])
+        native_id = InstrumentId.from_str(f"{spec['native_symbol']}.{venue}")
+        if any(i.id == native_id for i in instruments.values()):
+            raise ValueError("native Instrument mapping is not one-to-one")
+        increment = exact_price(spec["price_increment"], spec["price_increment"])
+        if increment.precision > 16:
+            raise ValueError(
+                f"instrument precision {increment.precision} exceeds rc6 Position maximum 16 "
+                f"(price_increment={spec['price_increment']}); no rounding permitted"
+            )
+        instrument = Equity(
+            instrument_id=native_id, raw_symbol=Symbol(spec["native_symbol"]),
+            currency=currency, price_precision=increment.precision, price_increment=increment,
+            lot_size=Quantity.from_str(encode(spec["lot_size"])), ts_event=0, ts_init=0,
+        )
+        instruments[instrument_id] = instrument
+        record(
+            "adapter_construction", "instrument_mapping",
+            instrument_id=str(instrument_id), native_instrument_id=str(native_id),
+        )
+    data = []
+    for session in sessions:
+        day = session["session_date"].isoformat()
+        for instrument_id, instrument in instruments.items():
+            key = (str(instrument_id), day)
+            bar = bars.get(key)
+            if bar is not None:
+                bid, ask = synthetic_prices(bar["open"], costs)
+                record(
+                    "adapter_construction", "synthetic_bid_ask", session_date=day,
+                    instrument_id=str(instrument_id), raw_open=encode(bar["open"]),
+                    bid=encode(bid), ask=encode(ask),
+                )
+                for ts, bid_value, ask_value in (
+                    (session["ts_open"], bid, ask),
+                    (session["ts_close"], bar["close"], bar["close"]),
+                ):
+                    data.append(QuoteTick(
+                        instrument.id,
+                        exact_price(bid_value, instrument.price_increment.as_decimal()),
+                        exact_price(ask_value, instrument.price_increment.as_decimal()),
+                        Quantity.from_int(1_000_000_000), Quantity.from_int(1_000_000_000), ts, ts,
+                    ))
+            action = (MarketStatusAction.TRADING if bar is not None and statuses[key]["is_tradable"]
+                      else MarketStatusAction.HALT)
+            ts = session["ts_open"] + 500_000
+            data.append(InstrumentStatus(instrument.id, action, ts, ts))
+            record(
+                "adapter_construction", "instrument_status", session_date=day,
+                instrument_id=str(instrument_id), action=action.name, ts_event=str(ts),
+            )
+    record(
+        "adapter_construction", "lockstep_barrier", offset_ns="1000000",
+        executed_at_mapping="native callback time -> requested Session open",
+        fee_model="proportional + minimum commission + side tax; comparison only",
+        backend={"name": "nautilus_trader", "version": PINNED_VERSION},
+        lifecycle="new engine per Run",
+    )
+    return {
+        "venue": venue, "currency": currency, "cash": cash, "instruments": instruments,
+        "sessions": sessions, "bars": bars, "statuses": statuses, "costs": costs,
+        "data": sorted(data, key=lambda item: item.ts_event), "records": records,
+    }
+
+
+def run(request: dict, prepared: dict | None = None) -> None:
+    path = Path(request["packet"])
+    prepared = prepare(path) if prepared is None else prepared
     diagnostics = Diagnostics(path / "backend-diagnostics.jsonl")
     engine = BacktestEngine(BacktestEngineConfig(logging=LoggerConfig(stdout_level=LogLevel.ERROR)))
     try:
-        # SYNTH is a reserved Nautilus synthetic Venue, not an execution Venue.
-        venue = Venue("PRAJNA")
-        currency = Currency.from_str(specs[0]["quote_currency"])
-        cash = Money.from_str(f"{encode(initial_cash)} {currency}")
-        if cash.as_decimal() != initial_cash:
-            raise ValueError("initial_cash cannot be represented by native currency precision")
+        for row in prepared["records"]:
+            diagnostics.record(**row)
         engine.add_venue(
-            venue=venue, oms_type=OmsType.NETTING, account_type=AccountType.CASH,
-            starting_balances=[cash], base_currency=currency,
-            fee_model=ComparisonFees(costs, diagnostics),
+            venue=prepared["venue"], oms_type=OmsType.NETTING, account_type=AccountType.CASH,
+            starting_balances=[prepared["cash"]], base_currency=prepared["currency"],
+            fee_model=ComparisonFees(prepared["costs"], diagnostics),
         )
-        instruments = {}
-        for spec in specs:
-            instrument_id = InstrumentId.from_str(spec["instrument_id"])
-            native_id = InstrumentId.from_str(f"{spec['native_symbol']}.{venue}")
-            if any(i.id == native_id for i in instruments.values()):
-                raise ValueError("native Instrument mapping is not one-to-one")
-            increment = exact_price(spec["price_increment"], spec["price_increment"])
-            if increment.precision > 16:
-                raise ValueError(
-                    f"instrument precision {increment.precision} exceeds rc6 Position maximum 16 "
-                    f"(price_increment={spec['price_increment']}); no rounding permitted"
-                )
-            instrument = Equity(
-                instrument_id=native_id, raw_symbol=Symbol(spec["native_symbol"]),
-                currency=currency, price_precision=increment.precision, price_increment=increment,
-                lot_size=Quantity.from_str(encode(spec["lot_size"])), ts_event=0, ts_init=0,
-            )
-            instruments[instrument_id] = instrument
+        for instrument in prepared["instruments"].values():
             engine.add_instrument(instrument)
-            diagnostics.record(
-                "adapter_construction", "instrument_mapping",
-                instrument_id=str(instrument_id), native_instrument_id=str(native_id),
-            )
-        data = []
-        for session in sessions:
-            day = session["session_date"].isoformat()
-            for instrument_id, instrument in instruments.items():
-                key = (str(instrument_id), day)
-                bar = bars.get(key)
-                if bar is not None:
-                    bid, ask = synthetic_prices(bar["open"], costs)
-                    diagnostics.record(
-                        "adapter_construction", "synthetic_bid_ask", session_date=day,
-                        instrument_id=str(instrument_id), raw_open=encode(bar["open"]),
-                        bid=encode(bid), ask=encode(ask),
-                    )
-                    for ts, bid_value, ask_value in (
-                        (session["ts_open"], bid, ask),
-                        (session["ts_close"], bar["close"], bar["close"]),
-                    ):
-                        data.append(QuoteTick(
-                            instrument.id,
-                            exact_price(bid_value, instrument.price_increment.as_decimal()),
-                            exact_price(ask_value, instrument.price_increment.as_decimal()),
-                            Quantity.from_int(1_000_000_000), Quantity.from_int(1_000_000_000), ts, ts,
-                        ))
-                action = (MarketStatusAction.TRADING if bar is not None and statuses[key]["is_tradable"]
-                          else MarketStatusAction.HALT)
-                ts = session["ts_open"] + 500_000
-                data.append(InstrumentStatus(instrument.id, action, ts, ts))
-                diagnostics.record(
-                    "adapter_construction", "instrument_status", session_date=day,
-                    instrument_id=str(instrument_id), action=action.name, ts_event=str(ts),
-                )
-        diagnostics.record(
-            "adapter_construction", "lockstep_barrier", offset_ns="1000000",
-            executed_at_mapping="native callback time -> requested Session open",
-            fee_model="proportional + minimum commission + side tax; comparison only",
-            backend={"name": "nautilus_trader", "version": PINNED_VERSION},
-            lifecycle="new engine per Run",
-        )
-        engine.add_data(sorted(data, key=lambda item: item.ts_event))
+        engine.add_data(prepared["data"])
+        sessions = prepared["sessions"]
         shim = Shim(ShimConfig(
-            sessions=sessions, instruments=instruments, bars=bars,
-            statuses=statuses, costs=costs, diagnostics=diagnostics,
+            sessions=sessions, instruments=prepared["instruments"], bars=prepared["bars"],
+            statuses=prepared["statuses"], costs=prepared["costs"], diagnostics=diagnostics,
         ))
         engine.add_strategy(shim)
         send({"type": "ready", "protocol": VERSION})

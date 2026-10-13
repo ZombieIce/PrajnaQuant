@@ -102,6 +102,10 @@ is a reported Backend limit, not reduced Domain precision.
 
 The worker uses a new engine per Run; reset is not needed for this lifecycle.
 The unchanged #137 probe independently verifies rc6 reset on its hand fixture.
+Preparation and execution now share explicit `prepare` / `run` helpers.
+The [cost harness](../../poc/mvp4-cost/README.md) reuses converted objects in a
+benchmark-only persistent process; the production CLI and protocol still serve
+one fresh engine in one process per Run.
 Native L1 quote sizes are synthetic 1,000,000,000 units with liquidity consumption
 disabled; unsupported partial fills are fatal rather than fabricated full fills.
 These are synthetic checks, not market-liquidity, PIT or total-return evidence.
