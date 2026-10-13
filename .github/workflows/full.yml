@@ -119,6 +119,14 @@ jobs:
         env:
           PRAJNA_NAUTILUS_PYTHON: python
         run: cargo test -p prajna-adapter --locked
+      - name: Cached / fresh real worker Run parity (no skips)
+        run: |
+          set -o pipefail
+          python -m unittest discover -s poc/mvp4-cost -v 2>&1 | tee prepared-worker.log
+          if grep -q "skipped" prepared-worker.log; then
+            echo "::error::Prepared worker tests were skipped"
+            exit 1
+          fi
       - name: A15 independent golden / Fast / real Accurate correctness (no fake or skips)
         env:
           PRAJNA_NAUTILUS_PYTHON: python

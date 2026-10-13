@@ -127,7 +127,6 @@ def maintenance():
     tree = text(["cargo", "tree", "-p", "prajna-adapter", "--edges", "normal", "--prefix", "depth",
                  "--no-dedupe", "--locked", "--offline"])
     packages = set(re.findall(r"^\d+(\S+ v\S+)", tree, re.M))
-    package_names = {p.split(" v")[0] for p in packages}
     direct = tomllib.loads((ROOT / "crates/prajna-adapter/Cargo.toml").read_text())["dependencies"]
     requirements = [line for line in (ROOT / "backends/nautilus/requirements.txt").read_text().splitlines()
                     if line and not line.startswith("#")]
@@ -164,7 +163,8 @@ def maintenance():
         "rust_dependency_scope": "prajna-adapter normal edges only; process host experiment dependencies excluded",
         "rust_direct_dependencies": sorted(direct), "rust_direct_count": len(direct),
         "rust_reachable_count_excluding_root": len(packages) - 1,
-        "rust_transitive_count_excluding_direct_and_root": len(package_names - set(direct) - {"prajna-adapter"}),
+        "rust_transitive_count_excluding_direct_and_root": sum(
+            p.split(" v")[0] not in set(direct) | {"prajna-adapter"} for p in packages),
         "rust_dependency_tree": tree,
         "python_direct_requirements": requirements, "python_direct_count": len(requirements),
         "python_resolved_count_including_direct": len(discovered), "python_dependency_snapshot": discovered,
@@ -276,8 +276,10 @@ def main(argv=None):
                 [target / "release/examples/measure_accurate", sys.executable, normalized, golden, measured],
             ]:
                 if not guarded(command, report, args.out):
-                    log = args.out.parent / report["commands"][-1]["log"]
-                    if "64x252" in name and "unrepresentable price" in log.read_text():
+                    failure = report["commands"][-1]
+                    log = args.out.parent / failure["log"] if "log" in failure else None
+                    if ("64x252" in name and failure["status"] == "failed" and log is not None
+                            and "unrepresentable price" in log.read_text()):
                         report["measurements"][f"{name}.{strategy}"] = {
                             "status": "missing", "reason": "Backend mapping limitation: original Instrument increment rejects synthetic slippage price",
                             "metrics": None, "fixture_sha256": sha(fixture),

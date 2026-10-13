@@ -125,3 +125,6 @@ jobs:
 
       - name: MVP-4 synthetic fixture preparation (no Nautilus required)
         run: python -m unittest tests.test_mvp4_fixture_prepare -v
+
+      - name: MVP-4 cost report and resource gate (no Nautilus required)
+        run: python -m unittest tests.test_mvp4_cost -v
