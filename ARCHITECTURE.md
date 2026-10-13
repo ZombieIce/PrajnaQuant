@@ -12,7 +12,7 @@
 
 ### 计算所有权
 
-Rust 拥有数据写入、因子执行、回测、组合账户、成本、绩效、实验和并行运行时，并保留未来 Live Runtime 的计算核心。Python 负责研究、Notebook、因子/策略/实验定义、优化和可视化；Python 逐 bar 回调可作为 MVP 能力，其吞吐边界由 POC 测量。Rust 是账户、成本和绩效报告的权威。现有 [`ADR 0001`](docs/decisions/0001-computation-ownership.md) 仍描述当前实现。
+Rust 拥有数据写入、因子执行、回测、组合账户、成本、绩效、实验和并行运行时，并保留未来 Live Runtime 的计算核心。Python 负责研究、Notebook、因子/策略/实验定义、优化和可视化；Python 策略入口采用 Python 宿主调用 Rust 扩展、每个决策 Session 一次的纯 Decision 函数；逐 bar 回调依 [ADR 0021](docs/decisions/0021-python-strategy-entry-and-decision-boundary.md) 推迟。Rust 是账户、成本和绩效报告的权威。现有 [`ADR 0001`](docs/decisions/0001-computation-ownership.md) 仍描述当前实现。
 
 平台维护自己的 Domain Core。NautilusTrader 是 Accurate Event Engine 和未来 Live 的首个 Backend 候选，由 Adapter 接入；Accurate 的闭环 Order / Fill / Reject 边界、平台账本与成本权威、worker 和 Backend 身份见 [ADR 0020](docs/decisions/0020-accurate-event-adapter-and-ledger-authority.md)。Barter、LEAN、WonderTrader、VeighNa 是特定领域的参考，不决定平台 Domain。Arrow、Parquet、Polars、Rayon、Tokio、PyO3 是目标技术角色或待评估依赖，不等于当前仓库已接入。
 
@@ -46,7 +46,7 @@ Experiment 包含策略与版本、Universe、数据版本、参数空间、成�
 
 ## 暂定方案
 
-- Python MVP 同时允许 Python `on_bar()` 与 Rust Native Strategy；有限 DSL/Strategy IR 在后续版本仅覆盖真实需要的 Factor、Rank、Filter、TopK、Rebalance、Weight 与简单风险操作。
+- Python MVP 策略通过 As-of View 产生 Decision，与 Rust 内置策略共用执行层；Python `on_bar()` 逐 bar 回调推迟，入口与状态边界见 [ADR 0021](docs/decisions/0021-python-strategy-entry-and-decision-boundary.md)。有限 DSL/Strategy IR 在后续版本仅覆盖真实需要的 Factor、Rank、Filter、TopK、Rebalance、Weight 与简单风险操作。
 - NautilusTrader 是 Accurate/Live Backend 第一候选；其 Adapter 的映射成本、版本锁定和语义覆盖由 POC 验证。Barter 是否成为直接依赖同样待源码与基准证明。
 - Custom SoA 仅在目标热路径实测有净收益且维护成本合理时采用；Arrow 仍是交换契约。
 - Hyperliquid、Aster、edgeX 的具体 Connector、交易规则和数据许可均需逐 Venue 验证。
