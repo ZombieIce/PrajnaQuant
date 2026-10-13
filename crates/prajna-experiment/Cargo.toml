@@ -14,6 +14,10 @@ nautilus-integration = []
 name = "accurate_correctness"
 required-features = ["nautilus-integration"]
 
+[[example]]
+name = "measure_accurate"
+required-features = ["nautilus-integration"]
+
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 fs2 = "0.4"

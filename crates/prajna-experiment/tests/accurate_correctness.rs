@@ -2,6 +2,10 @@
 #[allow(dead_code)]
 mod common;
 
+#[path = "support/exact_execution.rs"]
+mod exact_execution;
+use exact_execution::exact_projection;
+
 use std::{collections::BTreeMap, path::Path, process::Command};
 
 use prajna_account::{Side, VirtualPortfolioId};
@@ -456,21 +460,6 @@ fn golden_projection(golden: &Value) -> Value {
             .retain(|key, _| ["session_date", "open", "close"].contains(&key.as_str()));
     }
     value
-}
-
-fn exact_projection(result: &FastEventResult) -> Value {
-    json!({
-        "orders":result.account.orders(),
-        "fills":result.account.fills(),
-        "attempts":result.attempts.iter().map(|a| json!({
-            "portfolio_id":a.portfolio_id,"event":format!("{:?}",a.event)
-        })).collect::<Vec<_>>(),
-        "sessions":result.sessions.iter().map(|s| json!({
-            "session_date":s.session.session_date.to_string(),"open":s.open_after,"close":s.close,
-            "open_sources":s.open_sources.iter().map(|(id,p)|(id.to_string(),format!("{p:?}"))).collect::<BTreeMap<_,_>>(),
-            "close_sources":s.close_sources.iter().map(|(id,p)|(id.to_string(),format!("{p:?}"))).collect::<BTreeMap<_,_>>(),
-        })).collect::<Vec<_>>()
-    })
 }
 
 fn rounded_cny(value: Notional) -> Notional {
