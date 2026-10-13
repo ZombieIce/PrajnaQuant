@@ -1,6 +1,9 @@
 use pyo3::prelude::*;
 use std::time::Duration;
 
+mod arrow;
+mod factor;
+mod read;
 mod strategy;
 
 #[pyfunction]
@@ -17,5 +20,17 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("__version__", env!("CARGO_PKG_VERSION"))?;
     module.add_function(wrap_pyfunction!(smoke_test, module)?)?;
     strategy::register(module)?;
+    module.add_function(wrap_pyfunction!(read::read_dataset, module)?)?;
+    module.add_function(wrap_pyfunction!(read::read_factor, module)?)?;
+    module.add_class::<factor::FactorDeclaration>()?;
+    module.add_function(wrap_pyfunction!(read::read_run, module)?)?;
+    module.add(
+        "ResultNotSavedError",
+        module.py().get_type::<read::ResultNotSavedError>(),
+    )?;
+    module.add(
+        "EngineNotProducedError",
+        module.py().get_type::<read::EngineNotProducedError>(),
+    )?;
     Ok(())
 }

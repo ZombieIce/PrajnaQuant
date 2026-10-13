@@ -24,6 +24,8 @@
 
 ## Target Architecture Baseline (2026-09-26)
 
+- **Python 研究数据读取（Implemented，合成数据验证）**：`prajna` 本地扩展提供 DSV/Static Universe 面板筛选、已注册 Rust Factor 声明及 Cache 读取/计算、显式 Experiment/Execution/Run 的已保存结果读取，统一返回 Arrow PyCapsule 交换的 `pyarrow.Table`，不依赖 Python Polars。Factor 可用时刻与缓存身份沿用 Rust/CLI；未保存与 Engine 不产生分开报错，缓存和结果损坏不静默重算或返回空表。接口与复验命令见 [`prajna-py`](../crates/prajna-py/README.md)。完整面板先加载后筛选，非 out-of-core/PIT 或策略 As-of View；Python Experiment、Decision 和两阶段执行尚未实现。
+
 2026-09-28 B2 票据 08 归因（Issue #3 完成前的中间状态，已由顶部正式结论取代）：固定 64×252 S2 首差附近的 10 只 ETF / 68 session 缩减用例，独立手算 04-08 现金 48350、NAV 99560、ETF038 当日买入 100 股；Rust 与修复后 Adapter 均通过。根因是 Adapter 逐证券开盘 Quote 顺序使买入早于卖出；修复后双方各 351 个订单/Fill，全部计入字段对齐，无剩余独立差异类别。[诊断票据](../.scratch/poc-0-b2-matched-remeasure/issues/08-s2-64x252-parity-diagnosis.md)与[原协议重测](../poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.json)记录 S2/S3 correctness 与数值门槛通过。按 ADR 0014，故障属 Adapter，不触发 Fast Event `reject`；当时 reset parity 尚未验证，fallback 性能仅 exploratory，整体 B2 当时为 `unresolved`，ADR 0012 原生停牌生命周期继续排除。下方票据 04 的 351/348 数据是修正前归档，不代表当前状态。
 
 2026-09-28 POC-0 票据 14 单 instrument 隔离实验：固定 Nautilus 2.0.0rc5 的公开 BacktestEngine 收到 QuoteTick、HALT 后，在两组同一后续时刻由策略直接提交的市价单触发原生 `on_order_rejected`（`Market PROBE.SIM is CLOSED`），引擎订单状态 `REJECTED`；无 HALT 对照在同一报价成交、状态 `FILLED`。[证据与复跑入口](../poc/poc0-benchmark/results/nautilus-halt-native-probe-2026-09-28.md)。MVP-4 可考虑由 Nautilus 原生状态处理停牌，但当前 Adapter 未改变，B2 判定范围及旧 A 股/ETF 执行时序均不变。
@@ -84,7 +86,7 @@ MVP-2 的 `prajna-experiment`（Issue #99–#104）可解析并校验 `experimen
 
 ### MVP-5 Python 入口
 
-`prajna-py` / `python/prajna` 现提供本地 Python 宿主扩展（PyO3 0.29.0、maturin 1.15.0、abi3-py312）及单 Run `generate_decisions`：策略声明版本、Bar 列、Rust Factor 依赖、完整 lookback 窗口和再平衡间隔；Rust 构造按 close 可用时刻与 Static Universe 限制的 As-of View，串行调用纯 Decision 函数并严格校验权重、Universe 与可选排序。安全裁剪复制受限窗口，Arrow PyCapsule 到 PyArrow 为零拷贝，不声称源面板切片零拷贝；真实扩展的合成 DSV 测试覆盖未知/延迟可用时刻、未来/未声明字段及底层 buffer 对抗、调度和非法输出。未知可用时刻须显式声明 assumption，Static Universe 不构成历史 PIT；纯函数是受信 Python 的使用契约而非 sandbox 保证。尚未接入 Engine、Experiment/Execution 身份与复现或只读结果 API，不表示 MVP-5、真实市场或生产策略入口已完成；构建与测试见 [`prajna-py`](../crates/prajna-py/README.md)。
+`prajna-py` / `python/prajna` 现提供本地 Python 宿主扩展（PyO3 0.29.0、maturin 1.15.0、abi3-py312）及单 Run `generate_decisions`：策略声明版本、Bar 列、Rust Factor 依赖、完整 lookback 窗口和再平衡间隔；Rust 构造按 close 可用时刻与 Static Universe 限制的 As-of View，串行调用纯 Decision 函数并严格校验权重、Universe 与可选排序。安全裁剪复制受限窗口，Arrow PyCapsule 到 PyArrow 为零拷贝，不声称源面板切片零拷贝；真实扩展的合成 DSV 测试覆盖未知/延迟可用时刻、未来/未声明字段及底层 buffer 对抗、调度和非法输出。未知可用时刻须显式声明 assumption，Static Universe 不构成历史 PIT；纯函数是受信 Python 的使用契约而非 sandbox 保证。main 的 `read_dataset` / `read_factor` / `read_run` 只读 API 与 `Factor(kind, params)` 保留，策略的命名依赖使用 `FactorDependency(name, kind, params)`，共用 Rust 定义解析与 Arrow 导出；完整研究面板不等于策略安全 View。尚未接入 Python 策略的 Engine 执行、Experiment/Execution 身份与复现，不表示 MVP-5、真实市场或生产策略入口已完成；构建与测试见 [`prajna-py`](../crates/prajna-py/README.md)。
 
 ### MVP-3 独立 full_target / POC entry_only 金标准
 

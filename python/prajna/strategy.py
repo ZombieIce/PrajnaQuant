@@ -9,7 +9,7 @@ from ._native import AsOfView, Decision, _generate_decisions
 
 
 @dataclass(frozen=True)
-class Factor:
+class FactorDependency:
     """A named dependency on a registered Rust FactorKind and its parameters."""
 
     name: str
@@ -22,7 +22,7 @@ class Strategy:
     strategy_id: str
     version: str
     bar_columns: Sequence[str] = ("close",)
-    factors: Sequence[Factor] = field(default_factory=tuple)
+    factors: Sequence[FactorDependency] = field(default_factory=tuple)
     lookback_sessions: int = 1
     rebalance_every: int = 1
     capability: str = "Vectorizable"

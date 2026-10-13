@@ -41,7 +41,8 @@ mod worker;
 pub use accurate::{BackendDiagnostics, BackendFactory, ExperimentBackend};
 pub use engine::{ACCURATE_SEMANTIC_VERSION, BackendIdentity};
 pub use storage::{
-    ExecutionDiff, InvocationStatistics, ResultLevel, StoreAction, StoredExecution, diff_executions,
+    ExecutionDiff, InvocationStatistics, ResultLevel, ResultReadError, StoreAction,
+    StoredExecution, diff_executions, read_run_table,
 };
 pub use summary::{RunSummary, summarize};
 pub use worker::WorkerCommand;

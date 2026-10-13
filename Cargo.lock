@@ -2967,6 +2967,7 @@ version = "0.1.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
+ "arrow-select",
  "chrono",
  "clap",
  "fs2",
@@ -2994,8 +2995,10 @@ dependencies = [
  "arrow-select",
  "chrono",
  "polars",
+ "polars-io",
  "prajna-data",
  "prajna-domain",
+ "prajna-experiment",
  "prajna-research",
  "pyo3",
  "serde",

@@ -78,7 +78,136 @@ impl ResultLevel {
             self.tables()
         }
     }
+}
 
+#[derive(Debug)]
+pub enum ResultReadError {
+    NotSaved(String),
+    NotProducedByEngine(String),
+    Storage(ExperimentError),
+}
+
+impl fmt::Display for ResultReadError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotSaved(message) => write!(formatter, "result not saved: {message}"),
+            Self::NotProducedByEngine(message) => {
+                write!(formatter, "result not produced by engine: {message}")
+            }
+            Self::Storage(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for ResultReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Storage(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl From<ExperimentError> for ResultReadError {
+    fn from(error: ExperimentError) -> Self {
+        Self::Storage(error)
+    }
+}
+
+/// Read a persisted Run without execution or promotion. `level` is the minimum
+/// required retention level; a saved table is returned with its original schema.
+pub fn read_run_table(
+    lake_root: impl AsRef<Path>,
+    experiment_id: &str,
+    execution_id: &str,
+    run_id: &str,
+    level: ResultLevel,
+    table: &str,
+) -> Result<(Arc<Schema>, Vec<RecordBatch>), ResultReadError> {
+    for (identity, prefix) in [
+        (experiment_id, "exp:sha256:"),
+        (execution_id, "exe:sha256:"),
+        (run_id, "run:sha256:"),
+    ] {
+        if !identity.starts_with(prefix) {
+            return Err(err(format!("expected {prefix} identity, got {identity}")).into());
+        }
+        identity_hex(identity)?;
+    }
+    if table != "summary"
+        && !FULL_TABLES.contains(&table)
+        && !ACCURATE_FULL.contains(&table)
+        && !NOT_PRODUCED_BY_ENGINE.contains(&table)
+    {
+        return Err(err(format!("unknown result table {table}")).into());
+    }
+    let directory = execution_path(lake_root.as_ref(), experiment_id, execution_id)?;
+    let manifest = read_manifest_file(&directory.join("execution.json"))?;
+    if manifest.experiment_id != experiment_id || manifest.execution.id != execution_id {
+        return Err(err("stored Execution identity does not match the request").into());
+    }
+    let run = manifest
+        .runs
+        .iter()
+        .find(|run| run.run_id == run_id)
+        .ok_or_else(|| err(format!("Run {run_id} is not in Execution {execution_id}")))?;
+    if table != "summary"
+        && (run.not_produced_by_engine.iter().any(|name| name == table)
+            || (!run.table_hashes.contains_key(table)
+                && !run.not_saved.iter().any(|name| name == table)))
+    {
+        return Err(ResultReadError::NotProducedByEngine(format!(
+            "{run_id}/{table}"
+        )));
+    }
+    if level > run.result_level {
+        return Err(ResultReadError::NotSaved(format!(
+            "Run {run_id} retained {}, requested {level}",
+            run.result_level
+        )));
+    }
+    if table == "summary" {
+        let (schema, batches) = read_summary_batches(&directory.join("summary.parquet"))?;
+        let hash = logical_hash("summary", &schema, &batches, &["run_id"])
+            .map_err(|error| err(error.to_string()))?;
+        if hash != manifest.summary_logical_hash {
+            return Err(err("stored summary logical hash mismatch").into());
+        }
+        let mut selected = Vec::with_capacity(batches.len());
+        for batch in batches {
+            let ids = batch
+                .column_by_name("run_id")
+                .and_then(|array| array.as_any().downcast_ref::<StringArray>())
+                .ok_or_else(|| err("summary run_id is not Utf8"))?;
+            let mask = BooleanArray::from_iter(ids.iter().map(|id| Some(id == Some(run_id))));
+            selected.push(
+                arrow_select::filter::filter_record_batch(&batch, &mask)
+                    .map_err(|error| err(error.to_string()))?,
+            );
+        }
+        if selected.iter().map(RecordBatch::num_rows).sum::<usize>() != 1 {
+            return Err(err("stored summary must contain exactly one row for the Run").into());
+        }
+        return Ok((schema, selected));
+    }
+    let expected = run
+        .table_hashes
+        .get(table)
+        .ok_or_else(|| ResultReadError::NotSaved(format!("{run_id}/{table}")))?;
+    let path = directory
+        .join("runs")
+        .join(run_hex(run_id)?)
+        .join(format!("{table}.parquet"));
+    let (schema, batches) = read_table_batches(&path, table)?;
+    let actual = logical_hash(table, &schema, &batches, &["row_id"])
+        .map_err(|error| err(error.to_string()))?;
+    if &actual != expected {
+        return Err(err(format!("stored {table} logical hash mismatch")).into());
+    }
+    Ok((schema, batches))
+}
+
+impl ResultLevel {
     fn tables(self) -> &'static [&'static str] {
         match self {
             Self::Summary => &[],
@@ -1678,6 +1807,12 @@ fn verify_existing(
 }
 
 fn read_summary_hash(path: &Path) -> Result<String, ExperimentError> {
+    let (schema, batches) = read_summary_batches(path)?;
+    logical_hash("summary", &schema, &batches, &["run_id"])
+        .map_err(|error| err(format!("could not hash saved summary: {error}")))
+}
+
+fn read_summary_batches(path: &Path) -> Result<(Arc<Schema>, Vec<RecordBatch>), ExperimentError> {
     let file = File::open(path).map_err(io_error(path))?;
     let builder = ParquetRecordBatchReaderBuilder::try_new(file).map_err(|error| {
         err(format!(
@@ -1701,8 +1836,7 @@ fn read_summary_hash(path: &Path) -> Result<String, ExperimentError> {
             ))
         })?);
     }
-    logical_hash("summary", &schema, &batches, &["run_id"])
-        .map_err(|error| err(format!("could not hash saved summary: {error}")))
+    Ok((schema, batches))
 }
 
 fn read_summary(path: &Path) -> Result<Vec<StoredRow>, ExperimentError> {

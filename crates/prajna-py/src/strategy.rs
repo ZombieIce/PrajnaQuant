@@ -5,8 +5,8 @@ use std::{
 };
 
 use arrow_array::{
-    Array, Date32Array, Float64Array, RecordBatch, RecordBatchIterator, StringArray,
-    TimestampNanosecondArray, UInt32Array, ffi_stream::FFI_ArrowArrayStream,
+    Array, Date32Array, Float64Array, RecordBatch, StringArray, TimestampNanosecondArray,
+    UInt32Array,
 };
 use arrow_schema::{DataType, Field, Schema};
 use arrow_select::{concat::concat_batches, take::take};
@@ -15,19 +15,14 @@ use prajna_data::{Manifest, read_manifest, read_parquet};
 use prajna_domain::{InstrumentId, VenueId};
 use prajna_research::{
     PanelSession, compute,
-    factor::{
-        AvailabilityAssumption, Factor, FactorKind, MomentumParams, RotationScoreParams,
-        TrendFilterParams, VolatilityParams, values_schema,
-    },
+    factor::{AvailabilityAssumption, Factor, values_schema},
     load_panel,
 };
-use pyo3::{exceptions::PyValueError, prelude::*, types::PyCapsule};
+use pyo3::prelude::*;
 use serde::Deserialize;
 use serde_json::Value;
 
-fn invalid(error: impl std::fmt::Display) -> PyErr {
-    PyValueError::new_err(error.to_string())
-}
+use crate::arrow::value_error as invalid;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -92,54 +87,12 @@ struct FactorDeclaration {
     params: Value,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WindowParams {
-    n: u32,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RotationParams {
-    short: u32,
-    long: u32,
-    vol: u32,
-    w_s: f64,
-    w_l: f64,
-    w_v: f64,
-    trend: Option<u32>,
-}
-
 impl FactorDeclaration {
     fn definition(&self) -> PyResult<Factor> {
-        let kind: FactorKind = self.kind.parse().map_err(invalid)?;
-        if kind == FactorKind::RotationScore {
-            let params: RotationParams =
-                serde_json::from_value(self.params.clone()).map_err(invalid)?;
-            Factor::new(
-                kind,
-                RotationScoreParams {
-                    short: params.short,
-                    long: params.long,
-                    vol: params.vol,
-                    w_s: params.w_s,
-                    w_l: params.w_l,
-                    w_v: params.w_v,
-                    trend: params.trend,
-                },
-            )
-            .map_err(invalid)
-        } else {
-            let params: WindowParams =
-                serde_json::from_value(self.params.clone()).map_err(invalid)?;
-            match kind {
-                FactorKind::Momentum => Factor::new(kind, MomentumParams { n: params.n }),
-                FactorKind::Volatility => Factor::new(kind, VolatilityParams { n: params.n }),
-                FactorKind::TrendFilter => Factor::new(kind, TrendFilterParams { n: params.n }),
-                FactorKind::RotationScore => unreachable!("handled above"),
-            }
-            .map_err(invalid)
-        }
+        crate::factor::definition(
+            &self.kind,
+            &serde_json::to_string(&self.params).map_err(invalid)?,
+        )
     }
 }
 
@@ -251,55 +204,8 @@ impl AsOfView {
 }
 
 fn factor_batch(values: &polars::prelude::DataFrame) -> PyResult<RecordBatch> {
-    let ids = values
-        .column("instrument_id")
-        .map_err(invalid)?
-        .str()
-        .map_err(invalid)?;
-    let dates = values
-        .column("session_date")
-        .map_err(invalid)?
-        .date()
-        .map_err(invalid)?;
-    let numbers = values
-        .column("value")
-        .map_err(invalid)?
-        .f64()
-        .map_err(invalid)?;
-    let times = values
-        .column("available_at")
-        .map_err(invalid)?
-        .datetime()
-        .map_err(invalid)?;
-    let statuses = values
-        .column("status")
-        .map_err(invalid)?
-        .str()
-        .map_err(invalid)?;
-    RecordBatch::try_new(
-        values_schema().arrow,
-        vec![
-            Arc::new(StringArray::from_iter(
-                (0..values.height()).map(|row| ids.get(row)),
-            )),
-            Arc::new(Date32Array::from_iter(
-                (0..values.height()).map(|row| dates.physical().get(row)),
-            )),
-            Arc::new(Float64Array::from_iter(
-                (0..values.height()).map(|row| numbers.get(row)),
-            )),
-            Arc::new(
-                TimestampNanosecondArray::from_iter(
-                    (0..values.height()).map(|row| times.physical().get(row)),
-                )
-                .with_timezone("UTC"),
-            ),
-            Arc::new(StringArray::from_iter(
-                (0..values.height()).map(|row| statuses.get(row)),
-            )),
-        ],
-    )
-    .map_err(invalid)
+    let batch = crate::arrow::dataframe_batch(values)?;
+    RecordBatch::try_new(values_schema().arrow, batch.columns().to_vec()).map_err(invalid)
 }
 
 fn usable_factor(batch: &RecordBatch, session: &PanelSession) -> PyResult<bool> {
@@ -318,17 +224,7 @@ fn usable_factor(batch: &RecordBatch, session: &PanelSession) -> PyResult<bool> 
 }
 
 fn export(py: Python<'_>, batch: RecordBatch) -> PyResult<Py<PyAny>> {
-    let reader = RecordBatchIterator::new(vec![Ok(batch.clone())], batch.schema());
-    let capsule = PyCapsule::new_with_value(
-        py,
-        FFI_ArrowArrayStream::new(Box::new(reader)),
-        c"arrow_array_stream",
-    )?;
-    let reader = py
-        .import("pyarrow")?
-        .getattr("RecordBatchReader")?
-        .call_method1("_import_from_c_capsule", (capsule,))?;
-    Ok(reader.call_method0("read_all")?.unbind())
+    crate::arrow::table(py, batch.schema(), vec![batch])
 }
 
 fn date32(date: NaiveDate) -> PyResult<i32> {

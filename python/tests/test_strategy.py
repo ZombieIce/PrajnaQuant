@@ -99,8 +99,8 @@ class StrategyTests(unittest.TestCase):
         strategy = prajna.Strategy(
             "factors", "1", bar_columns=(),
             factors=(
-                prajna.Factor("momentum", "momentum", {"n": 1}),
-                prajna.Factor("volatility", "volatility", {"n": 2}),
+                prajna.FactorDependency("momentum", "momentum", {"n": 1}),
+                prajna.FactorDependency("volatility", "volatility", {"n": 2}),
             ),
             lookback_sessions=2, rebalance_every=3,
         )
@@ -154,7 +154,7 @@ class StrategyTests(unittest.TestCase):
 
         strategy = prajna.Strategy(
             "boundary", "1", lookback_sessions=3, rebalance_every=2,
-            factors=(prajna.Factor("momentum", "momentum", {"n": 1}),),
+            factors=(prajna.FactorDependency("momentum", "momentum", {"n": 1}),),
         )
         self.run_strategy(decide, dsv=dsv, strategy=strategy)
         first_keys = {
@@ -238,9 +238,9 @@ class StrategyTests(unittest.TestCase):
             ({"bar_columns": ("forward_return",)}, "Bar column"),
             ({"bar_columns": ("close", "close")}, "duplicate"),
             ({"strategy_id": ""}, "identity component"),
-            ({"factors": (prajna.Factor("bad", "python_factor", {}),)}, "factor kind"),
-            ({"factors": (prajna.Factor("bad", "momentum", {"n": 0}),)}, "at least 1"),
-            ({"factors": (prajna.Factor("bad", "momentum", {"n": 1, "extra": 1}),)}, "unknown field"),
+            ({"factors": (prajna.FactorDependency("bad", "python_factor", {}),)}, "factor kind"),
+            ({"factors": (prajna.FactorDependency("bad", "momentum", {"n": 0}),)}, "at least 1"),
+            ({"factors": (prajna.FactorDependency("bad", "momentum", {"n": 1, "extra": 1}),)}, "unknown field"),
         ]:
             with self.subTest(kwargs=kwargs):
                 values = {"strategy_id": "test", "version": "1"} | kwargs
@@ -272,7 +272,7 @@ class StrategyTests(unittest.TestCase):
             prajna.Strategy("long_window", "1", lookback_sessions=11),
             prajna.Strategy(
                 "long_factor", "1",
-                factors=(prajna.Factor("momentum", "momentum", {"n": 10}),),
+                factors=(prajna.FactorDependency("momentum", "momentum", {"n": 10}),),
             ),
         ]:
             with self.subTest(strategy=strategy):
