@@ -4,6 +4,7 @@ use std::time::Duration;
 mod arrow;
 mod factor;
 mod read;
+mod strategy;
 
 #[pyfunction]
 #[pyo3(signature = (duration_ms = 0))]
@@ -18,6 +19,7 @@ fn smoke_test(py: Python<'_>, duration_ms: u64) -> &'static str {
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("__version__", env!("CARGO_PKG_VERSION"))?;
     module.add_function(wrap_pyfunction!(smoke_test, module)?)?;
+    strategy::register(module)?;
     module.add_function(wrap_pyfunction!(read::read_dataset, module)?)?;
     module.add_function(wrap_pyfunction!(read::read_factor, module)?)?;
     module.add_class::<factor::FactorDeclaration>()?;
