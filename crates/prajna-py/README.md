@@ -379,6 +379,27 @@ A `seed` parameter is rejected. Python purity/determinism remains a trust contra
 All parameter sequences remain in memory until execution begins; there is no
 streaming/memory-capacity claim.
 
+Python callback executions also return `ExecutionResult.statistics["python"]`
+with invocation-only wall timings in milliseconds:
+
+- `stage1_ms`: serial Decision preparation, including per-Run panel reads, Rust
+  Factor computation, As-of Views, Python callbacks and Rust Decision validation.
+- `stage2_ms`: the entire detached execution/storage call, including Rust
+  provenance capture, execution and persistence/replay verification. The existing
+  `statistics["run_time_ms"]` isolates the Run execution interval within it;
+  `stage2_ms` must not be interpreted as pure Rayon compute time.
+- `asof_view_ms`: one sample per constructed callback View, in canonical Run /
+  Session order, including safe row/column compaction, sessions/status/factor
+  tables, Arrow export and allocation of the Python View object. It excludes
+  shared per-Run preparation, parameter decoding, the callback and validation.
+
+These timings do not enter the manifest, result hashes or any identity. They
+are regenerated on replay; failed callbacks may leave View samples for that
+failed Run. External end-to-end timing is still needed for Python provenance
+(`pip freeze`), Experiment parsing and returned JSON conversion. The
+[MVP-5 record-only benchmark](../../poc/mvp5-benchmark/README.md) measures that
+real public API in release mode and compares its boundaries with historical B3.
+
 Execution metadata adds `python`: defining module file SHA-256, function code
 SHA-256 (`marshal.dumps(__code__)`), function name, declaration JSON, `sys.version`,
 and sorted output of `sys.executable -m pip freeze --all`. File-less Notebook

@@ -1,11 +1,11 @@
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Instant};
 
 use prajna_experiment::{Experiment, PythonProvenance, ResultLevel, WorkerCommand};
 use prajna_research::StaticUniverse;
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 
-use crate::{python_error, strategy::_generate_decisions};
+use crate::{python_error, strategy::generate_decisions};
 
 #[pyfunction]
 #[pyo3(signature = (definition, lake, repository, level, strategy_json, decide, provenance_json, threads=None, backend_python=None, backend_worker=None))]
@@ -59,14 +59,16 @@ fn _run_python_experiment(
     let definition: serde_json::Value = serde_json::from_str(&definition)
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
     let mut prepared = BTreeMap::new();
+    let mut asof_view_ms = Vec::new();
     // Stage 1: no Rayon callbacks, each canonical/deduplicated Run serially under GIL.
+    let stage1_started = Instant::now();
     for (run_id, params) in experiment.python_parameters().map_err(python_error)? {
         if params.get("seed").is_some() {
             return Err(PyValueError::new_err(
                 "Python strategies do not accept seed",
             ));
         }
-        let decisions = _generate_decisions(
+        let decisions = generate_decisions(
             py,
             lake.to_str()
                 .ok_or_else(|| PyValueError::new_err("lake path must be UTF-8"))?,
@@ -79,6 +81,7 @@ fn _run_python_experiment(
             definition["availability_assumption"]
                 .as_str()
                 .unwrap_or("none"),
+            &mut asof_view_ms,
         )
         .and_then(|decisions| {
             decisions
@@ -89,11 +92,24 @@ fn _run_python_experiment(
         .map_err(|error| error.to_string());
         prepared.insert(run_id, decisions);
     }
+    let stage1_ms = stage1_started.elapsed().as_secs_f64() * 1000.0;
     // Stage 2: only owned Rust data crosses detach. Existing Rayon / Accurate process pool.
-    py.detach(|| {
-        let stored = experiment.execute_python_and_store(&lake, &repository, level, threads, &prepared, provenance).map_err(python_error)?;
-        Ok(serde_json::json!({"manifest": stored.manifest, "path": stored.path, "statistics": stored.statistics, "action": stored.action}).to_string())
-    })
+    let stage2_started = Instant::now();
+    let stored = py.detach(|| {
+        let stored = experiment
+            .execute_python_and_store(&lake, &repository, level, threads, &prepared, provenance)
+            .map_err(python_error)?;
+        Ok::<_, PyErr>(stored)
+    })?;
+    let stage2_ms = stage2_started.elapsed().as_secs_f64() * 1000.0;
+    let mut statistics = serde_json::to_value(stored.statistics)
+        .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+    statistics["python"] = serde_json::json!({
+        "stage1_ms": stage1_ms,
+        "stage2_ms": stage2_ms,
+        "asof_view_ms": asof_view_ms,
+    });
+    Ok(serde_json::json!({"manifest": stored.manifest, "path": stored.path, "statistics": statistics, "action": stored.action}).to_string())
 }
 
 pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
