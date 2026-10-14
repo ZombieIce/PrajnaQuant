@@ -1,8 +1,13 @@
 //! Normalizer for frozen Shenzhen ETF source extracts (MVP-6, ticket #174).
 //!
-//! Each Raw object is a JSON envelope `{"frozen_format_version":1,"kind":...}`
-//! produced by a local extraction step from a frozen vendor file. Decoding the
-//! vendor binary formats (TDX ZIP/`.cod`/`.md1`) is outside this Normalizer.
+//! Each extract Raw object is a JSON envelope `{"frozen_format_version":1,"kind":...,
+//! "extraction":{extractor_id,extractor_version,original_raw_sha256s}}` produced
+//! by a local extraction step from frozen vendor originals. The originals are
+//! themselves Raw objects and must be listed as inputs; an extract whose
+//! originals are absent, or an input no extract refers to, is rejected, so the
+//! Dataset Version depends on the original bytes and the extractor version.
+//! Decoding the vendor binary formats (TDX ZIP/`.cod`/`.md1`) is outside this
+//! Normalizer.
 //!
 //! Kinds: `szse_calendar`, `tdx_daily` (primary Bars), `tencent_kline`
 //! (secondary, comparison only) and `cninfo_announcements` (index only).
@@ -28,7 +33,7 @@ use crate::{
 use super::{Normalizer, RawInput};
 
 const NORMALIZER_ID: &str = "szse-etf-frozen";
-const CONFIG_V1: &str = r#"{"announcement_available_at":"announced_date@15:00:00+08:00","bar_spec":"1d@session","bars":"tdx_daily","crosscheck":"tencent_kline_exact_ohlc_shares","execution_status":"not_derived","instrument_kind":"Etf","lot_size":100,"price_increment":"0.001","session_close":"15:00:00+08:00","session_open":"09:30:00+08:00","timezone":"Asia/Shanghai","venue":"SZSE","volume":"shares","tencent_volume":"lots*100"}"#;
+const CONFIG_V1: &str = r#"{"announcement_available_at":"close_of_first_session_after_announced_date","bar_available_at":"unknown_null","extract_requires_original_raw":true,"bar_spec":"1d@session","bars":"tdx_daily","crosscheck":"tencent_kline_exact_ohlc_shares","execution_status":"not_derived","instrument_kind":"Etf","lot_size":100,"price_increment":"0.001","session_close":"15:00:00+08:00","session_open":"09:30:00+08:00","timezone":"Asia/Shanghai","venue":"SZSE","volume":"shares","tencent_volume":"lots*100"}"#;
 const CATEGORIES: [&str; 9] = [
     "listing_notice",
     "fund_contract",
@@ -81,20 +86,32 @@ impl Normalizer for SzseEtfFrozen {
 enum Envelope {
     SzseCalendar {
         frozen_format_version: u32,
+        extraction: Extraction,
         sessions: Vec<String>,
     },
     TdxDaily {
         frozen_format_version: u32,
+        extraction: Extraction,
         bars: Vec<TdxBar>,
     },
     TencentKline {
         frozen_format_version: u32,
+        extraction: Extraction,
         rows: Vec<TencentRow>,
     },
     CninfoAnnouncements {
         frozen_format_version: u32,
+        extraction: Extraction,
         items: Vec<AnnouncementItem>,
     },
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Extraction {
+    extractor_id: String,
+    extractor_version: String,
+    original_raw_sha256s: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -131,6 +148,17 @@ struct AnnouncementItem {
     announced_date: String,
 }
 
+impl Envelope {
+    fn extraction(&self) -> &Extraction {
+        match self {
+            Self::SzseCalendar { extraction, .. }
+            | Self::TdxDaily { extraction, .. }
+            | Self::TencentKline { extraction, .. }
+            | Self::CninfoAnnouncements { extraction, .. } => extraction,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 struct Ohlcv {
     open: Price,
@@ -153,11 +181,24 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
     let mut calendar = BTreeSet::new();
     let mut primary: BTreeMap<(String, NaiveDate), Primary> = BTreeMap::new();
     let mut secondary: BTreeMap<(String, NaiveDate), (Ohlcv, String)> = BTreeMap::new();
-    let mut announcements: BTreeMap<String, AnnouncementRow> = BTreeMap::new();
+    let mut announcements: BTreeMap<String, (InstrumentId, String, NaiveDate, String)> =
+        BTreeMap::new();
     let mut announcement_content: BTreeMap<String, (String, String, NaiveDate)> = BTreeMap::new();
     let mut seen_raw = BTreeSet::new();
 
-    for (index, raw) in raw_inputs.iter().enumerate() {
+    let present: BTreeSet<&str> = raw_inputs.iter().map(|r| r.raw_sha256.as_str()).collect();
+    let parsed: Vec<_> = raw_inputs
+        .iter()
+        .map(|raw| serde_json::from_slice::<Envelope>(&raw.bytes))
+        .collect();
+    let referenced: BTreeSet<String> = parsed
+        .iter()
+        .flatten()
+        .flat_map(|envelope| envelope.extraction().original_raw_sha256s.iter())
+        .cloned()
+        .collect();
+
+    for (index, (raw, envelope)) in raw_inputs.iter().zip(parsed).enumerate() {
         let path = format!("inputs[{index}]");
         if !raw.has_valid_identity() {
             issues.push(issue(
@@ -175,13 +216,17 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
             ));
             continue;
         }
-        let envelope: Envelope = match serde_json::from_slice(&raw.bytes) {
+        if referenced.contains(&raw.raw_sha256) {
+            *kind_counts.entry("vendor_original").or_default() += 1;
+            continue;
+        }
+        let envelope = match envelope {
             Ok(envelope) => envelope,
             Err(error) => {
                 issues.push(issue(
                     "invalid_envelope",
                     &path,
-                    format!("frozen envelope cannot be parsed: {error}"),
+                    format!("frozen envelope cannot be parsed and no extract refers to it as an original: {error}"),
                 ));
                 continue;
             }
@@ -189,9 +234,11 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
         match envelope {
             Envelope::SzseCalendar {
                 frozen_format_version,
+                extraction,
                 sessions,
             } => {
                 check_version(frozen_format_version, &path, &mut issues);
+                check_extraction(&extraction, &present, &path, &mut issues);
                 *kind_counts.entry("szse_calendar").or_default() += 1;
                 for (i, text) in sessions.iter().enumerate() {
                     if let Some(date) =
@@ -208,9 +255,11 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
             }
             Envelope::TdxDaily {
                 frozen_format_version,
+                extraction,
                 bars,
             } => {
                 check_version(frozen_format_version, &path, &mut issues);
+                check_extraction(&extraction, &present, &path, &mut issues);
                 *kind_counts.entry("tdx_daily").or_default() += 1;
                 for (i, bar) in bars.iter().enumerate() {
                     let bar_path = format!("{path}.bars[{i}]");
@@ -244,9 +293,11 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
             }
             Envelope::TencentKline {
                 frozen_format_version,
+                extraction,
                 rows,
             } => {
                 check_version(frozen_format_version, &path, &mut issues);
+                check_extraction(&extraction, &present, &path, &mut issues);
                 *kind_counts.entry("tencent_kline").or_default() += 1;
                 for (i, row) in rows.iter().enumerate() {
                     let row_path = format!("{path}.rows[{i}]");
@@ -273,9 +324,11 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
             }
             Envelope::CninfoAnnouncements {
                 frozen_format_version,
+                extraction,
                 items,
             } => {
                 check_version(frozen_format_version, &path, &mut issues);
+                check_extraction(&extraction, &present, &path, &mut issues);
                 *kind_counts.entry("cninfo_announcements").or_default() += 1;
                 for (i, item) in items.iter().enumerate() {
                     let item_path = format!("{path}.items[{i}]");
@@ -317,22 +370,9 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
                         continue;
                     }
                     announcement_content.insert(item.id.clone(), content);
-                    // P6: a date-only announcement is knowable after that day's close.
-                    let Ok(available_at) = TimestampNs::parse(&format!("{date}T15:00:00+08:00"))
-                    else {
-                        issues.push(issue("invalid_date", &item_path, "unsupported date"));
-                        continue;
-                    };
                     announcements.insert(
                         item.id.clone(),
-                        AnnouncementRow {
-                            announcement_id: item.id.clone(),
-                            instrument_id: id,
-                            category: item.category.clone(),
-                            announced_date: date,
-                            available_at,
-                            source_raw_sha256: raw.raw_sha256.clone(),
-                        },
+                        (id, item.category.clone(), date, raw.raw_sha256.clone()),
                     );
                 }
             }
@@ -353,6 +393,32 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
                 "source row is not on a frozen SZSE session",
             ));
         }
+    }
+    // P6: a date-only announcement is knowable after the announced day's close,
+    // so it is usable from the close of the first session strictly after it.
+    let mut announcement_rows = Vec::new();
+    for (id, (instrument_id, category, date, source_raw_sha256)) in announcements {
+        let Some(available_at) = calendar
+            .range(date..)
+            .find(|next| **next > date)
+            .and_then(|next| make_session(venue.clone(), *next))
+            .map(|session| session.ts_close())
+        else {
+            issues.push(issue(
+                "announcement_next_session_unknown",
+                id.clone(),
+                "no frozen session after the announced date; availability cannot be set",
+            ));
+            continue;
+        };
+        announcement_rows.push(AnnouncementRow {
+            announcement_id: id,
+            instrument_id,
+            category,
+            announced_date: date,
+            available_at,
+            source_raw_sha256,
+        });
     }
     if !issues.is_empty() {
         return Err(issues);
@@ -407,7 +473,8 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
             close: value.ohlcv.close,
             volume: value.ohlcv.shares,
             amount: Some(value.amount),
-            available_at: Some(session.ts_close()),
+            // No vendor availability evidence: stays Unknown (ADR 0015 §3.4).
+            available_at: None,
         };
         bars.push(Bar::new(data, Some(session)).map_err(|error| {
             vec![issue(
@@ -466,10 +533,9 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
         }
     }
     let mut category_counts: BTreeMap<String, u64> = BTreeMap::new();
-    for row in announcements.values() {
+    for row in &announcement_rows {
         *category_counts.entry(row.category.clone()).or_default() += 1;
     }
-    let announcement_rows: Vec<_> = announcements.into_values().collect();
 
     let convert =
         |error: crate::DataError| vec![issue("table_conversion_failed", "$", error.to_string())];
@@ -665,6 +731,37 @@ fn parse_date(text: &str, path: &str, issues: &mut Vec<NormalizationIssue>) -> O
         Err(_) => {
             issues.push(issue("invalid_date", path, "dates must use YYYY-MM-DD"));
             None
+        }
+    }
+}
+
+fn check_extraction(
+    extraction: &Extraction,
+    present: &BTreeSet<&str>,
+    path: &str,
+    issues: &mut Vec<NormalizationIssue>,
+) {
+    if extraction.extractor_id.trim().is_empty() || extraction.extractor_version.trim().is_empty() {
+        issues.push(issue(
+            "invalid_extraction",
+            format!("{path}.extraction"),
+            "extractor_id and extractor_version must be non-empty",
+        ));
+    }
+    if extraction.original_raw_sha256s.is_empty() {
+        issues.push(issue(
+            "missing_original",
+            format!("{path}.extraction"),
+            "an extract must name at least one original Raw object",
+        ));
+    }
+    for hash in &extraction.original_raw_sha256s {
+        if !present.contains(hash.as_str()) {
+            issues.push(issue(
+                "missing_original",
+                format!("{path}.extraction"),
+                format!("original {hash} is not among the Raw inputs"),
+            ));
         }
     }
 }

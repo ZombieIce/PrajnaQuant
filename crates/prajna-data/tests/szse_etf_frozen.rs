@@ -71,19 +71,39 @@ struct Frozen {
     hashes: Vec<String>,
 }
 
+fn original_bytes(source: &str) -> Vec<u8> {
+    format!("vendor-original-bytes:{source}").into_bytes()
+}
+
+fn with_extraction(mut doc: Value, originals: &[&str]) -> Value {
+    doc["extraction"] = json!({"extractor_id": "test-extractor", "extractor_version": "1",
+        "original_raw_sha256s": originals});
+    doc
+}
+
 fn freeze_all(root: &Path, docs: &[(&str, Value)]) -> Frozen {
     let store = RawStore::open(root).unwrap();
-    let hashes = docs
+    let mut originals = Vec::new();
+    let mut hashes: Vec<String> = docs
         .iter()
         .map(|(source, doc)| {
+            let original = freeze_raw(
+                &store,
+                &original_bytes(source),
+                meta(source, "2026-10-14T10:00:00+08:00"),
+            )
+            .unwrap();
+            let extract = with_extraction(doc.clone(), &[&original]);
+            originals.push(original);
             freeze_raw(
                 &store,
-                &bytes(doc.clone()),
+                &bytes(extract),
                 meta(source, "2026-10-14T10:00:00+08:00"),
             )
             .unwrap()
         })
         .collect();
+    hashes.extend(originals);
     Frozen { store, hashes }
 }
 
@@ -211,32 +231,130 @@ fn bars_gaps_crosscheck_and_announcements_follow_the_frozen_set() {
     assert!(!serialized.contains("1.05") && !serialized.contains("21000"));
 }
 
+fn ts(text: &str) -> i64 {
+    chrono::DateTime::parse_from_rfc3339(text)
+        .unwrap()
+        .timestamp_nanos_opt()
+        .unwrap()
+}
+
+fn timestamps(root: &Path, dsv: &str, table: &str, column: usize) -> Vec<Option<i64>> {
+    let hex = dsv.strip_prefix("dsv:sha256:").unwrap();
+    let path = root
+        .join("normalized")
+        .join(table)
+        .join(hex)
+        .join("part-00000.parquet");
+    read_parquet(path, table, "1")
+        .unwrap()
+        .iter()
+        .flat_map(|batch| {
+            let array = batch
+                .column(column)
+                .as_any()
+                .downcast_ref::<arrow_array::TimestampNanosecondArray>()
+                .unwrap();
+            (0..array.len())
+                .map(|i| (!array.is_null(i)).then(|| array.value(i)))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
 #[test]
-fn announcement_is_available_only_after_its_close() {
+fn announcement_is_available_only_from_the_next_session_close() {
     let dir = tempfile::tempdir().unwrap();
     let frozen = standard(dir.path());
     let manifest = publish(dir.path(), &frozen).unwrap();
-    let hex = manifest.dsv.strip_prefix("dsv:sha256:").unwrap();
-    let path = dir
-        .path()
-        .join("normalized/announcements")
-        .join(hex)
-        .join("part-00000.parquet");
-    let batches = read_parquet(path, "announcements", "1").unwrap();
-    let available = batches[0]
-        .column(4)
-        .as_any()
-        .downcast_ref::<arrow_array::TimestampNanosecondArray>()
-        .unwrap();
-    // 2026-01-06T15:00:00+08:00 = 07:00:00Z
-    let expected = chrono::DateTime::parse_from_rfc3339("2026-01-06T15:00:00+08:00")
-        .unwrap()
-        .timestamp_nanos_opt()
-        .unwrap();
-    assert!(
-        (0..available.len()).any(|i| available.value(i) == expected),
-        "A-1 must be available at its announcement-day close"
+    let available = timestamps(dir.path(), &manifest.dsv, "announcements", 4);
+    // A-1 announced 2026-01-06 (a session): usable from 2026-01-07 close, not 01-06 close.
+    // A-2 announced 2025-12-01 (not a session): first later session is 2026-01-05.
+    assert_eq!(
+        available,
+        vec![
+            Some(ts("2026-01-07T15:00:00+08:00")),
+            Some(ts("2026-01-05T15:00:00+08:00"))
+        ]
     );
+    assert!(!available.contains(&Some(ts("2026-01-06T15:00:00+08:00"))));
+}
+
+#[test]
+fn announcement_without_a_later_session_fails_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let late = json!({"frozen_format_version": 1, "kind": "cninfo_announcements", "items": [
+        {"id": "A-9", "symbol": "159901", "category": "dividend", "announced_date": "2026-01-08"}]});
+    let frozen = freeze_all(
+        dir.path(),
+        &[
+            ("szse-calendar", calendar()),
+            ("tdx", default_tdx()),
+            ("cninfo", late),
+        ],
+    );
+    assert!(
+        issue_codes(publish(dir.path(), &frozen).unwrap_err())
+            .contains(&"announcement_next_session_unknown".to_owned())
+    );
+}
+
+#[test]
+fn real_source_bars_keep_availability_unknown() {
+    let dir = tempfile::tempdir().unwrap();
+    let frozen = standard(dir.path());
+    let manifest = publish(dir.path(), &frozen).unwrap();
+    let available = timestamps(dir.path(), &manifest.dsv, "bars", 11);
+    assert_eq!(available.len(), 4);
+    assert!(available.iter().all(Option::is_none));
+}
+
+#[test]
+fn dataset_depends_on_original_bytes_and_rejects_orphans() {
+    let dir = tempfile::tempdir().unwrap();
+    let frozen = standard(dir.path());
+    let manifest = publish(dir.path(), &frozen).unwrap();
+    let registry = NormalizerRegistry::with_builtins();
+
+    // Without the originals in the Raw set the extracts are refused.
+    let extracts_only = Frozen {
+        store: frozen.store.clone(),
+        hashes: frozen.hashes[..4].to_vec(),
+    };
+    assert!(
+        issue_codes(publish(dir.path(), &extracts_only).unwrap_err())
+            .contains(&"missing_original".to_owned())
+    );
+
+    // An original no extract refers to is refused.
+    let stray = freeze_raw(
+        &frozen.store,
+        b"stray",
+        meta("stray", "2026-10-14T10:00:00+08:00"),
+    )
+    .unwrap();
+    let mut with_stray = frozen.hashes.clone();
+    with_stray.push(stray);
+    assert!(
+        issue_codes(
+            publish(
+                dir.path(),
+                &Frozen {
+                    store: frozen.store.clone(),
+                    hashes: with_stray
+                }
+            )
+            .unwrap_err()
+        )
+        .contains(&"invalid_envelope".to_owned())
+    );
+
+    // Deleting a vendor original breaks replay even though extracts survive.
+    let hex = frozen.hashes[4].strip_prefix("sha256:").unwrap();
+    fs::remove_file(dir.path().join("raw/sha256").join(&hex[..2]).join(hex)).unwrap();
+    assert!(matches!(
+        rebuild_dataset(&frozen.store, &registry, &manifest),
+        Err(RebuildError::MissingRaw(_))
+    ));
 }
 
 #[test]
@@ -253,7 +371,7 @@ fn vendor_revision_creates_a_new_dsv_and_conflicting_revisions_fail_closed() {
     ]);
     let revised_hash = freeze_raw(
         &frozen.store,
-        &bytes(revised),
+        &bytes(with_extraction(revised, &[&frozen.hashes[5]])),
         meta("tdx", "2026-10-15T10:00:00+08:00"),
     )
     .unwrap();
