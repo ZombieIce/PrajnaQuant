@@ -2,6 +2,8 @@
 
 - 状态：Accepted，2026-10-09（MVP-3 设计，spec #112）；账本与 L1 Run seam、#122 合成 full_target 对拍已实现，Experiment/ResultLevel 接入与合成 Summary 扫描由 #123 实现；验证范围见后文
 
+MVP-6 目标扩展（2026-10-14）：[ADR 0023](0023-etf-corporate-actions-and-total-return-ledger.md) 为总回报账本增加分红/清算应收、折算取整与共同模式对拍，权益恒等式需计入应收；这些尚未实现，不将本文既有合成价格收益验证视为公司行动或真实总回报验收。
+
 [`ADR 0010`](0010-portfolio-accounting-and-result-boundary.md) 要求 Fast Event 以 Order → Fill → Position → Account 更新账本并逐日核对恒等式，同时要求它与 Vector 在共同语义子集上对拍。MVP-3 确定以下边界：
 
 - **账本数值**：现金、数量、价格与费用使用 Domain 定点十进制（i128，scale 18），乘除结果按 half-even 舍入到 scale 18，暂不做货币单位舍入。"现金＋Σ数量×估值价＝权益"在 Virtual Portfolio 与 Trading Account 两层都要求精确相等。与 f64 金标准（POC-0、Vector、Python）对拍时使用登记的容差。
