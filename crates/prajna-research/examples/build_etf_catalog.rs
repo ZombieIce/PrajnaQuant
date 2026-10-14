@@ -17,9 +17,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?
     );
     catalog.store(&args[3])?;
+    let decision = args[4].parse()?;
+    if let Ok(diagnostic) = catalog.diagnose_membership(decision) {
+        if !diagnostic.run_spec.coverage_gaps.is_empty() {
+            eprintln!("{}", serde_json::to_string_pretty(&diagnostic)?);
+        }
+    }
     println!(
         "{}",
-        serde_json::to_string_pretty(&catalog.universe(args[4].parse()?)?)?
+        serde_json::to_string_pretty(&catalog.universe(decision)?)?
     );
     Ok(())
 }

@@ -94,7 +94,11 @@ For attributes, choose the latest effective date among statements already
 available by decision close. Inconsistent values at that date exclude the
 instrument as `attribute_conflict`; no source wins by input order or by local
 collection time. Missing attributes, non-equity category and indexes outside
-the broad-index list have separate exclusion reasons. A later change has no
+the broad-index list have separate exclusion reasons. Missing/conflicting classification of an active fund also
+creates decision-specific membership gaps: `universe` fails, because the unknown
+fund could belong to the requested pool. `diagnose_membership` returns exclusions
+and the Run Spec fragment with these gaps, with no member pool or successful
+Universe identity. A later change has no
 retroactive effect. Lifecycle and selection exclusions remain in each result.
 
 Example: listing effective S2 is disclosed on date S3; S2/S3 exclude it, S4 close

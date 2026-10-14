@@ -497,6 +497,24 @@ impl HistoricalCatalog {
             .collect()
     }
     pub fn universe(&self, session_date: NaiveDate) -> Result<UniverseBuildResult> {
+        let result = self.evaluate_membership(session_date)?;
+        if !result.run_spec.coverage_gaps.is_empty() {
+            return Err(error(format!(
+                "incomplete Session membership evidence: {:?}; exclusions: {:?}",
+                result.run_spec.coverage_gaps, result.excluded
+            )));
+        }
+        Ok(result)
+    }
+    /// Diagnostic report has no successful Universe identity or usable member pool.
+    pub fn diagnose_membership(&self, session_date: NaiveDate) -> Result<MembershipDiagnostics> {
+        let result = self.evaluate_membership(session_date)?;
+        Ok(MembershipDiagnostics {
+            run_spec: result.run_spec,
+            excluded: result.excluded,
+        })
+    }
+    fn evaluate_membership(&self, session_date: NaiveDate) -> Result<UniverseBuildResult> {
         if !self.gaps.is_empty() {
             return Err(error(format!(
                 "incomplete historical coverage: {:?}",
@@ -525,6 +543,7 @@ impl HistoricalCatalog {
         }
         let mut members = Vec::new();
         let mut excluded = BTreeMap::new();
+        let mut session_gaps = self.gaps.clone();
         for life in &self.input.lifecycles {
             let id = life.instrument_id()?;
             let reason = if session_date < life.listing.effective_date {
@@ -575,6 +594,11 @@ impl HistoricalCatalog {
                 }
             };
             if let Some(reason) = reason {
+                if matches!(reason, "missing_attributes" | "attribute_conflict") {
+                    session_gaps.insert(format!(
+                        "membership_unresolved:{id}:{session_date}:{reason}"
+                    ));
+                }
                 excluded.insert(id, reason.into());
             } else {
                 members.push(id);
@@ -601,7 +625,7 @@ impl HistoricalCatalog {
             broad_index_version: hash("broad-index", &self.input.broad_indices)?,
             rule_version: self.input.rule_version.clone(),
             coverage: self.input.coverage.clone(),
-            coverage_gaps: self.gaps.clone(),
+            coverage_gaps: session_gaps,
             sources: self.sources(),
             decision_session: session_date,
             decision_at: now,
@@ -727,4 +751,12 @@ mod catalog_sessions {
             })
             .collect()
     }
+}
+
+/// Incomplete selection diagnostics, never accepted as a PIT Universe.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MembershipDiagnostics {
+    pub run_spec: UniverseRunSpec,
+    pub excluded: BTreeMap<InstrumentId, String>,
 }

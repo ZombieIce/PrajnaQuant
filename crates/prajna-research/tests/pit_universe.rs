@@ -107,14 +107,23 @@ fn missing_or_conflicting_attributes_are_excluded_without_last_write_wins() {
     input.lifecycles[2].attributes.push(conflict);
     let catalog = HistoricalCatalog::build(input.clone(), &raw).unwrap();
     assert_eq!(
-        catalog.universe(date(3)).unwrap().excluded[&id],
+        catalog.diagnose_membership(date(3)).unwrap().excluded[&id],
         "attribute_conflict"
+    );
+    assert!(catalog.universe(date(3)).is_err());
+    assert!(
+        !catalog
+            .diagnose_membership(date(3))
+            .unwrap()
+            .run_spec
+            .coverage_gaps
+            .is_empty()
     );
     input.lifecycles[2].attributes.clear();
     assert_eq!(
         HistoricalCatalog::build(input, &raw)
             .unwrap()
-            .universe(date(3))
+            .diagnose_membership(date(3))
             .unwrap()
             .excluded[&id],
         "missing_attributes"
