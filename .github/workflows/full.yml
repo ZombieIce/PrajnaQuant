@@ -143,7 +143,7 @@ jobs:
           fi
       - name: A16 per-Run research timing regression
         run: cargo test -p prajna-experiment --features nautilus-integration --example measure_accurate --locked
-      - name: Python-hosted Accurate strategy smoke (no skips)
+      - name: MVP-5 acceptance and Python-hosted S2 Accurate smoke (no skips)
         env:
           PRAJNA_PY_NAUTILUS: "1"
         run: |
@@ -152,8 +152,8 @@ jobs:
           source .venv/bin/activate
           python -m pip install 'maturin==1.15.0' -r backends/nautilus/requirements.txt
           maturin develop --locked
-          cargo build -p prajna-experiment --bin prajna-experiment --example prepare_fixture --locked
-          python -m unittest discover -s python/tests -p test_execution.py -v 2>&1 | tee python-accurate.log
+          cargo build -p prajna-experiment --bin prajna-experiment --example prepare_fixture --example acceptance_fixture --locked
+          python -m unittest discover -s python/tests -v 2>&1 | tee python-accurate.log
           if grep -q "skipped" python-accurate.log; then
             echo "::error::Python Accurate tests were skipped"
             exit 1

@@ -21,7 +21,7 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install 'maturin==1.15.0'
 maturin develop --locked --offline
-cargo build -p prajna-experiment --bin prajna-experiment --example prepare_fixture --locked --offline
+cargo build -p prajna-experiment --bin prajna-experiment --example prepare_fixture --example acceptance_fixture --locked --offline
 python -c 'import prajna; print(prajna.__version__, prajna.smoke_test())'
 ```
 
@@ -401,3 +401,49 @@ Each child has a separate process group and temporary packet directory; existing
 deadlines and group cleanup apply. Other OS environment variables remain inherited;
 this is process/import isolation, not an OS security sandbox. Real Nautilus tests
 run only in Full (macOS ARM64, pinned 2.0.0rc6), with skips forbidden there.
+
+## MVP-5 synthetic acceptance
+
+After the build commands above, run:
+
+```sh
+.venv/bin/python -m unittest discover -s python/tests -v
+```
+
+`python/tests/test_acceptance.py` is included in lightweight CI. The test-only
+`acceptance_fixture` example publishes the checked-in `dataset-v1` (3×10)
+and `b2-s2-scale-64x252-v2` fixtures and exports Decisions from the public
+Rust built-in strategies. Python implementations live in
+`python/tests/acceptance_strategies.py`, never in the Rust strategy enum.
+
+- S2 reads only Rust `RotationScore` Values through the As-of View, sorts
+  descending with instrument-ID tie breaking, and emits equal-weight TopK.
+  Both TopK=1/3 combinations are checked at every Decision Session.
+- S3 computes temporary MA20/60 crossover signals from permitted closes and
+  its previous intent. These are not Factor Values or cached Python Factors.
+  The 64×252 fixture has 192 post-warmup Sessions and changes its held set on
+  **every** one; its full Decision sequence can therefore match the Rust
+  change-only emitter. The 10-Session fixture cannot warm up MA60 and both
+  emit no Decisions. This does **not** establish general MA strategy equivalence:
+  fixed Python scheduling still requires full Decisions on unchanged targets,
+  whereas the Rust built-in emits only on held-set changes. Other datasets
+  can consequently rebalance differently.
+- CLI/Python S2 definitions match Experiment and Run Spec identities and all
+  saved Summary/Standard values. Python S2/S3 strategy references deliberately
+  have different identities from built-ins; comparisons exclude only Run ID
+  and built-in parameter metadata, retaining every result/metric column and
+  every saved Engine-specific table. Float comparisons preserve exact bits.
+- End-to-end Runs test hidden future rows, delayed/unknown availability,
+  declared columns, compact Arrow buffers, and failed invalid Decisions
+  (negative, overweight, outside Universe, NaN/infinite). Failed Runs keep an
+  explicit Summary error and publish no Standard tables.
+- File source hash, Python version and the actual pip-freeze snapshot are
+  checked; Notebook non-reproducibility is tested in `test_execution.py`.
+  Replay compares each Run's values and retained hashes.
+
+The single real Python-hosted Accurate smoke in `test_execution.py` now uses
+the S2 rewrite and retains the hostile-PYTHONPATH isolation check. It runs
+only in Full and is **not** equivalence evidence. These checks establish
+synthetic interface/semantic parity only, not real-market correctness,
+historical PIT, total returns, or production suitability. No execution,
+accounting, cost or time contract is changed.
