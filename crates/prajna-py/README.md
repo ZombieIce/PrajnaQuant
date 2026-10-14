@@ -4,9 +4,8 @@ Local Python-hosted PyO3 extension for [ADR 0021](../../docs/decisions/0021-pyth
 Typed Experiment definitions invoke the existing Rust parser, identity,
 execution and ResultLevel storage APIs. The single-Run strategy API generates
 and validates close-session Decisions using restricted As-of Views and Rust
-Factors. Python strategy references can be defined and identified, but their
-Decision sequences are not yet connected to Engine execution or Execution
-provenance. Read APIs reuse Rust's research panel, registered Factor definitions,
+Factors. Matching Python strategy declarations and callbacks drive two-stage
+Experiment execution with Python source/environment Execution provenance. Read APIs reuse Rust's research panel, registered Factor definitions,
 persistent Factor Cache and Experiment result storage, returning `pyarrow.Table`.
 Rust remains the only execution and performance authority.
 
@@ -120,9 +119,8 @@ print(result.action, result.path, result.manifest)
 `PythonStrategy("research.rotation", "1")` serializes as
 `"strategy": "research.rotation@1"`. Grid/List parameter objects may contain nested
 JSON values; Rust tags floats and strings when canonicalizing to prevent type
-collisions. Both CLI `run` and Python `run()` reject these references explicitly
-with `requires Python host` until the two-stage Python Decision execution ticket
-is complete. Defining a reference does not run Python code or capture Python
+collisions. CLI `run` and Python `run()` without a matching declaration/callback
+reject these references explicitly with `requires Python host`. Defining a reference does not run Python code or capture Python
 strategy source/environment provenance.
 
 ## Single-Run strategy API
@@ -237,7 +235,7 @@ boundary, **not a Python sandbox or purity detector**: arbitrary trusted Python
 can still access its globals, files or independently loaded data. No account,
 holdings, orders or fills are passed. The final close may generate a Decision;
 next-session open execution, cash sizing, costs and pending state belong to the
-future Python strategy Engine integration, not this single-Run API.
+the Experiment execution API, not this single-Run generator.
 
 ## Validation
 
@@ -347,3 +345,59 @@ statuses, cold/warm cache identity and CLI reuse, Vector Summary/Standard/Full
 and Fast Event Full tables, explicit absence errors, and corruption rejection.
 These are read/interop tests, not a new PIT, portfolio-accounting or real-market
 validation claim. Full research panels are **not** strategy-safe As-of Views.
+
+
+## Python strategy Experiment execution (#160)
+
+Supply the matching declaration and pure function to the existing Experiment API:
+
+```python
+experiment = prajna.Experiment(
+    dataset_version=prajna.DatasetVersion(dsv), universe=prajna.Universe(universe_id),
+    venue=prajna.Venue("SYNTH"), strategy=prajna.PythonStrategy("allocation", "1"),
+    engine=prajna.Engine(prajna.EngineKind.VECTOR), costs=prajna.Costs(),
+    parameter_space=prajna.Grid({"weight": [0.25, 0.5]}),
+)
+strategy = prajna.Strategy("allocation", "1", rebalance_every=20)
+
+def decide(view, params, previous):
+    return prajna.Decision({view.universe[0]: params["weight"]})
+
+result = experiment.run(lake, repository=repo, strategy=strategy, decide=decide,
+                        level=prajna.ResultLevel.FULL, threads=2)
+```
+
+Rust expands and deduplicates canonical Run identities. Stage one calls the
+#159 generator serially under the GIL for each Run, with original JSON parameter
+values (identity float/string tags never enter callbacks). Only owned Rust
+Decisions cross `Python::detach`; stage two reuses the existing Rayon Run pool
+or Accurate worker pool and shared execution/ledger/storage path. Summary,
+Standard and Full retain the existing Engine-specific tables. Invalid Decisions and callback exceptions
+are retained as failed Runs; valid combinations continue. Experiment/declaration
+errors abort before publication.
+A `seed` parameter is rejected. Python purity/determinism remains a trust contract.
+All parameter sequences remain in memory until execution begins; there is no
+streaming/memory-capacity claim.
+
+Execution metadata adds `python`: defining module file SHA-256, function code
+SHA-256 (`marshal.dumps(__code__)`), function name, declaration JSON, `sys.version`,
+and sorted output of `sys.executable -m pip freeze --all`. File-less Notebook
+functions use the code digest as their source digest and set `reproducible=false`.
+The snapshot covers installed packages, including editable/direct URL entries;
+it is an environment snapshot, **not artifact hashes or a resolver lock**.
+Only the defining module is file-hashed, not transitive local imports, globals,
+closure values, dynamic imports or external files. Functions must be trusted,
+pure, versioned and dependency-managed; metadata is not a sandbox or proof of
+complete dependency closure. Source paths and code filenames are identity-bearing.
+Source/declaration/environment changes create a new Execution while preserving
+Experiment/Run identities. Same-Execution replay regenerates Decisions and verifies
+all retained logical hashes, rejecting disagreement without overwriting results.
+
+Accurate requires both `backend_python` and `backend_worker` as before. The
+interpreter path preserves its venv symlink; a fresh process per Run receives no
+Python host objects or module state. `-E -s` ignores Python environment overrides
+and user-site packages while permitting the worker's trusted sibling imports.
+Each child has a separate process group and temporary packet directory; existing
+deadlines and group cleanup apply. Other OS environment variables remain inherited;
+this is process/import isolation, not an OS security sandbox. Real Nautilus tests
+run only in Full (macOS ARM64, pinned 2.0.0rc6), with skips forbidden there.

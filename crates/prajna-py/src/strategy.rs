@@ -102,9 +102,27 @@ pub(crate) struct PyDecision {
     targets: BTreeMap<String, f64>,
     ranked: Vec<(String, f64, u32)>,
     session_date: Option<String>,
+    decision_session: Option<PanelSession>,
 }
 
 impl PyDecision {
+    pub(crate) fn into_rust(self) -> PyResult<prajna_research::strategy::Decision> {
+        Ok(prajna_research::strategy::Decision {
+            decision_session: self
+                .decision_session
+                .ok_or_else(|| invalid("missing Decision Session"))?,
+            targets: self
+                .targets
+                .into_iter()
+                .map(|(id, weight)| Ok((id.parse().map_err(invalid)?, weight)))
+                .collect::<PyResult<_>>()?,
+            ranked: self
+                .ranked
+                .into_iter()
+                .map(|(id, score, rank)| Ok((id.parse().map_err(invalid)?, score, rank)))
+                .collect::<PyResult<_>>()?,
+        })
+    }
     fn validate(&self, universe: &BTreeSet<String>, session: &PanelSession) -> PyResult<()> {
         let fail = |message: String| {
             invalid(format!(
@@ -154,6 +172,7 @@ impl PyDecision {
             targets,
             ranked: ranked.unwrap_or_default(),
             session_date: None,
+            decision_session: None,
         }
     }
 
@@ -360,9 +379,14 @@ fn session_batch(window: &[PanelSession]) -> PyResult<RecordBatch> {
     .map_err(invalid)
 }
 
+pub(crate) fn validate_declaration(strategy_json: &str) -> PyResult<()> {
+    let declaration: Declaration = serde_json::from_str(strategy_json).map_err(invalid)?;
+    declaration.validate()
+}
+
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-fn _generate_decisions(
+pub(crate) fn _generate_decisions(
     py: Python<'_>,
     lake_root: &str,
     dsv: &str,
@@ -490,6 +514,7 @@ fn _generate_decisions(
         let mut decision = result.extract::<PyRef<'_, PyDecision>>()?.clone();
         decision.validate(&universe, session)?;
         decision.session_date = Some(session.session_date.to_string());
+        decision.decision_session = Some(session.clone());
         decisions.push(decision);
     }
     Ok(decisions)

@@ -35,6 +35,8 @@ use sha2::{Digest, Sha256};
 
 mod accurate;
 mod engine;
+mod python;
+pub use python::{PreparedDecisions, PythonProvenance};
 mod storage;
 mod summary;
 mod worker;
@@ -522,7 +524,7 @@ impl Experiment {
                 run_id,
                 parameters: Some(parameters),
                 factor: Some(factor),
-                strategy,
+                strategy: RunStrategy::Native(strategy),
             });
         }
         Ok(runs.into_values().collect())
@@ -543,6 +545,16 @@ impl Experiment {
         threads: usize,
         level: ResultLevel,
     ) -> Result<ExecutionReport, ExperimentError> {
+        self.execute_prepared(lake_root, threads, level, None)
+    }
+
+    fn execute_prepared(
+        &self,
+        lake_root: &Path,
+        threads: usize,
+        level: ResultLevel,
+        prepared: Option<&PreparedDecisions>,
+    ) -> Result<ExecutionReport, ExperimentError> {
         if threads == 0 {
             return Err(invalid("threads must be greater than zero"));
         }
@@ -558,7 +570,10 @@ impl Experiment {
             None
         };
         let universe = StaticUniverse::load(lake_root, &self.universe)?;
-        let runs = self.expand_for_universe(&universe)?;
+        let runs = match prepared {
+            Some(prepared) => self.prepared_runs(lake_root, prepared)?,
+            None => self.expand_for_universe(&universe)?,
+        };
         validate_universe_venue(&universe, &self.venue)
             .map_err(|error| execution_error("validate Universe venue", error))?;
         let venue = self
@@ -782,7 +797,13 @@ pub struct ExpandedRun {
     pub run_id: String,
     pub parameters: Option<StrategyParameters>,
     factor: Option<Factor>,
-    strategy: VectorStrategy,
+    strategy: RunStrategy,
+}
+
+#[derive(Debug, Clone)]
+enum RunStrategy {
+    Native(VectorStrategy),
+    Prepared(Result<Vec<prajna_research::strategy::Decision>, String>),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1062,6 +1083,8 @@ pub struct ExecutionIdentity {
     pub working_tree_diff_sha256: String,
     pub rustc_version: String,
     pub target_triple: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub python: Option<PythonProvenance>,
 }
 
 impl ExecutionIdentity {
@@ -1123,6 +1146,7 @@ impl ExecutionIdentity {
             working_tree_diff_sha256,
             rustc_version,
             target_triple,
+            python: None,
         })
     }
 }
@@ -1838,6 +1862,7 @@ mod tests {
             working_tree_diff_sha256: "0".repeat(64),
             rustc_version: "rustc test".into(),
             target_triple: "test-target".into(),
+            python: None,
         }
     }
 
@@ -2330,5 +2355,84 @@ mod tests {
             _ => assert_eq!(actual, expected, "{path}"),
         }
     }
+    mod python_execution {
+
+        use super::super::*;
+        use super::{definition, scale_fixture};
+        use prajna_research::strategy::Decision;
+        use tempfile::TempDir;
+
+        #[test]
+        fn callback_parameters_preserve_json_types_and_canonical_deduplication() {
+            let directory = TempDir::new().unwrap();
+            let (lake, dsv, universe) = scale_fixture(directory.path());
+            let mut definition = definition(&dsv, &universe);
+            definition["strategy"] = "python.test@1".into();
+            let parameters = serde_json::json!({"weight":0.5,"name":"a","nested":[true,null]});
+            definition["parameter_space"] = serde_json::json!({"list":[parameters,parameters]});
+            let experiment = Experiment::parse(&definition.to_string(), &lake).unwrap();
+            let callbacks = experiment.python_parameters().unwrap();
+            assert_eq!(callbacks.len(), 1);
+            assert_eq!(callbacks.values().next().unwrap(), &parameters);
+            let runs = experiment.run_definitions(&lake).unwrap();
+            assert!(callbacks.contains_key(&runs[0].run_id));
+            assert_eq!(
+                runs[0].run_spec["strategy"]["parameters"]["weight"],
+                serde_json::json!({"f64":"3fe0000000000000"})
+            );
+            assert!(
+                experiment
+                    .prepared_runs(Path::new(&lake), &BTreeMap::new())
+                    .is_err()
+            );
+            let prepared = callbacks
+                .keys()
+                .map(|id| (id.clone(), Ok(vec![])))
+                .collect();
+            let report = experiment
+                .execute_prepared(Path::new(&lake), 2, ResultLevel::Full, Some(&prepared))
+                .unwrap();
+            assert_eq!(report.runs.len(), 1);
+            assert_eq!(report.runs[0].status, RunStatus::Completed);
+        }
+
+        #[test]
+        fn prepared_decisions_validate_exact_sessions_and_universe_before_execution() {
+            let directory = TempDir::new().unwrap();
+            let (lake, dsv, universe) = scale_fixture(directory.path());
+            let mut definition = definition(&dsv, &universe);
+            definition["strategy"] = "python.test@1".into();
+            definition["parameter_space"] = serde_json::json!({"list":[{}]});
+            let experiment = Experiment::parse(&definition.to_string(), &lake).unwrap();
+            let run = experiment.run_definitions(&lake).unwrap().remove(0);
+            let panel = load_panel(&lake, &dsv, &"SYNTH".parse().unwrap()).unwrap();
+            let decision = Decision {
+                decision_session: panel.sessions[0].clone(),
+                ranked: vec![],
+                targets: [("OUTSIDE.SYNTH".parse().unwrap(), 0.5)].into(),
+            };
+            for decisions in [
+                vec![decision.clone()],
+                vec![
+                    Decision {
+                        targets: BTreeMap::new(),
+                        ..decision.clone()
+                    },
+                    Decision {
+                        targets: BTreeMap::new(),
+                        ..decision
+                    },
+                ],
+            ] {
+                let prepared = [(run.run_id.clone(), Ok(decisions))].into();
+                let report = experiment
+                    .execute_prepared(Path::new(&lake), 2, ResultLevel::Full, Some(&prepared))
+                    .unwrap();
+                assert_eq!(report.runs[0].status, RunStatus::Failed);
+                assert!(report.runs[0].result.is_none());
+            }
+        }
+    }
+
     mod fast_event;
 }

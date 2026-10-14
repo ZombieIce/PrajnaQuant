@@ -1,0 +1,101 @@
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+
+use prajna_experiment::{Experiment, PythonProvenance, ResultLevel, WorkerCommand};
+use prajna_research::StaticUniverse;
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
+
+use crate::{python_error, strategy::_generate_decisions};
+
+#[pyfunction]
+#[pyo3(signature = (definition, lake, repository, level, strategy_json, decide, provenance_json, threads=None, backend_python=None, backend_worker=None))]
+#[allow(clippy::too_many_arguments)]
+fn _run_python_experiment(
+    py: Python<'_>,
+    definition: String,
+    lake: PathBuf,
+    repository: PathBuf,
+    level: &str,
+    strategy_json: &str,
+    decide: Py<PyAny>,
+    provenance_json: &str,
+    threads: Option<usize>,
+    backend_python: Option<PathBuf>,
+    backend_worker: Option<PathBuf>,
+) -> PyResult<String> {
+    let level = match level {
+        "summary" => ResultLevel::Summary,
+        "standard" => ResultLevel::Standard,
+        "full" => ResultLevel::Full,
+        _ => {
+            return Err(PyValueError::new_err(
+                "level must be summary, standard or full",
+            ));
+        }
+    };
+    let threads = threads.unwrap_or_else(rayon::current_num_threads);
+    if threads == 0 {
+        return Err(PyValueError::new_err("threads must be greater than zero"));
+    }
+    crate::strategy::validate_declaration(strategy_json)?;
+    let mut experiment = Experiment::parse(&definition, &lake).map_err(python_error)?;
+    match (backend_python, backend_worker) {
+        (Some(python), Some(worker)) => {
+            experiment = experiment
+                .with_backend_factory(Arc::new(WorkerCommand::new(python, worker)))
+                .map_err(python_error)?;
+        }
+        (None, None) => {}
+        _ => {
+            return Err(PyValueError::new_err(
+                "backend_python and backend_worker must be supplied together",
+            ));
+        }
+    }
+    let provenance: PythonProvenance = serde_json::from_str(provenance_json)
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    let universe = StaticUniverse::load(&lake, experiment.universe())
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    let definition: serde_json::Value = serde_json::from_str(&definition)
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    let mut prepared = BTreeMap::new();
+    // Stage 1: no Rayon callbacks, each canonical/deduplicated Run serially under GIL.
+    for (run_id, params) in experiment.python_parameters().map_err(python_error)? {
+        if params.get("seed").is_some() {
+            return Err(PyValueError::new_err(
+                "Python strategies do not accept seed",
+            ));
+        }
+        let decisions = _generate_decisions(
+            py,
+            lake.to_str()
+                .ok_or_else(|| PyValueError::new_err("lake path must be UTF-8"))?,
+            experiment.dsv(),
+            experiment.venue(),
+            universe.members().iter().map(ToString::to_string).collect(),
+            strategy_json,
+            decide.clone_ref(py),
+            &params.to_string(),
+            definition["availability_assumption"]
+                .as_str()
+                .unwrap_or("none"),
+        )
+        .and_then(|decisions| {
+            decisions
+                .into_iter()
+                .map(|decision| decision.into_rust())
+                .collect::<PyResult<Vec<_>>>()
+        })
+        .map_err(|error| error.to_string());
+        prepared.insert(run_id, decisions);
+    }
+    // Stage 2: only owned Rust data crosses detach. Existing Rayon / Accurate process pool.
+    py.detach(|| {
+        let stored = experiment.execute_python_and_store(&lake, &repository, level, threads, &prepared, provenance).map_err(python_error)?;
+        Ok(serde_json::json!({"manifest": stored.manifest, "path": stored.path, "statistics": stored.statistics, "action": stored.action}).to_string())
+    })
+}
+
+pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_function(wrap_pyfunction!(_run_python_experiment, module)?)
+}

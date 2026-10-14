@@ -336,7 +336,7 @@ fn fast_invariant_failure_is_failed_while_other_runs_continue() {
     let mut no_trade = runs[0].clone();
     no_trade.run_id =
         "run:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into();
-    no_trade.strategy = VectorStrategy::MaCrossover(Default::default());
+    no_trade.strategy = RunStrategy::Native(VectorStrategy::MaCrossover(Default::default()));
     runs.push(no_trade);
     let mut panel = load_panel(&lake, &dsv, &"SYNTH".parse().unwrap()).unwrap();
     let has_bar = panel.grid.column("has_bar").unwrap().bool().unwrap();

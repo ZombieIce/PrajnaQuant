@@ -24,7 +24,7 @@
 
 ## Target Architecture Baseline (2026-09-26)
 
-- **Python 研究数据读取（Implemented，合成数据验证）**：`prajna` 本地扩展提供 DSV/Static Universe 面板筛选、已注册 Rust Factor 声明及 Cache 读取/计算、显式 Experiment/Execution/Run 的已保存结果读取，统一返回 Arrow PyCapsule 交换的 `pyarrow.Table`，不依赖 Python Polars。Factor 可用时刻与缓存身份沿用 Rust/CLI；未保存与 Engine 不产生分开报错，缓存和结果损坏不静默重算或返回空表。接口与复验命令见 [`prajna-py`](../crates/prajna-py/README.md)。完整面板先加载后筛选，非 out-of-core/PIT 或策略 As-of View；Python Experiment、Decision 和两阶段执行尚未实现。
+- **Python 研究数据读取（Implemented，合成数据验证）**：`prajna` 本地扩展提供 DSV/Static Universe 面板筛选、已注册 Rust Factor 声明及 Cache 读取/计算、显式 Experiment/Execution/Run 的已保存结果读取，统一返回 Arrow PyCapsule 交换的 `pyarrow.Table`，不依赖 Python Polars。Factor 可用时刻与缓存身份沿用 Rust/CLI；未保存与 Engine 不产生分开报错，缓存和结果损坏不静默重算或返回空表。接口与复验命令见 [`prajna-py`](../crates/prajna-py/README.md)。完整面板先加载后筛选，非 out-of-core/PIT 或策略 As-of View；Python Experiment、受限 Decision 及两阶段执行已接通共用 Rust 引擎；Execution 保存定义模块/函数字节码 hash、Python 版本与 pip freeze 快照，Notebook 标为不可完全复现，重放逐 Run 校验。未证明传递本地依赖闭包；真实 Python Accurate 冒烟仅 Full workflow。
 
 2026-09-28 B2 票据 08 归因（Issue #3 完成前的中间状态，已由顶部正式结论取代）：固定 64×252 S2 首差附近的 10 只 ETF / 68 session 缩减用例，独立手算 04-08 现金 48350、NAV 99560、ETF038 当日买入 100 股；Rust 与修复后 Adapter 均通过。根因是 Adapter 逐证券开盘 Quote 顺序使买入早于卖出；修复后双方各 351 个订单/Fill，全部计入字段对齐，无剩余独立差异类别。[诊断票据](../.scratch/poc-0-b2-matched-remeasure/issues/08-s2-64x252-parity-diagnosis.md)与[原协议重测](../poc/poc0-benchmark/results/b2-robustness-64x252-parity-diagnosis.json)记录 S2/S3 correctness 与数值门槛通过。按 ADR 0014，故障属 Adapter，不触发 Fast Event `reject`；当时 reset parity 尚未验证，fallback 性能仅 exploratory，整体 B2 当时为 `unresolved`，ADR 0012 原生停牌生命周期继续排除。下方票据 04 的 351/348 数据是修正前归档，不代表当前状态。
 

@@ -1,12 +1,14 @@
 """Typed definitions; Rust owns validation, canonical identities and execution."""
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
 from enum import StrEnum
 import json
 from pathlib import Path
 from typing import Literal
 
 from . import _native
+from .strategy import AsOfView, Decision, Strategy
 
 
 type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
@@ -252,7 +254,30 @@ class Experiment:
         threads: int | None = None,
         backend_python: PathLike | None = None,
         backend_worker: PathLike | None = None,
+        strategy: Strategy | None = None,
+        decide: Callable[[AsOfView, Parameters, Decision | None], Decision] | None = None,
     ) -> ExecutionResult:
+        if strategy is not None or decide is not None:
+            from .provenance import capture
+            if not isinstance(self.strategy, PythonStrategy):
+                raise ValueError("callback execution requires a PythonStrategy reference")
+            if not isinstance(strategy, Strategy) or not callable(decide):
+                raise TypeError("Python execution requires Strategy and a callable decide")
+            if strategy.identity != self.strategy.reference():
+                raise ValueError("Strategy declaration must match Experiment strategy reference")
+            declaration = json.dumps(asdict(strategy), sort_keys=True, allow_nan=False)
+            result = json.loads(_native._run_python_experiment(
+                self.to_json(), Path(lake),
+                Path.cwd() if repository is None else Path(repository),
+                level.value, declaration, decide,
+                json.dumps(capture(strategy.identity, declaration, decide)),
+                threads,
+                None if backend_python is None else Path(backend_python),
+                None if backend_worker is None else Path(backend_worker),
+            ))
+            return ExecutionResult(
+                result["manifest"], Path(result["path"]), result["statistics"], result["action"],
+            )
         result = json.loads(_native._run_experiment(
             self.to_json(),
             Path(lake),
