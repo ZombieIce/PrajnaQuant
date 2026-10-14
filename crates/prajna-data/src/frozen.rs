@@ -5,6 +5,8 @@ use crate::{RawStore, RawStoreError, SourceKind, SourceRecordInput};
 /// Provenance recorded with a frozen vendor file. None of it enters the Raw hash.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrozenSourceMeta {
+    /// Media type of the vendor bytes as received, e.g. `application/zip`.
+    pub content_type: String,
     pub source_id: String,
     pub endpoint: String,
     /// Local observation time (RFC 3339); not a historical publication time.
@@ -18,15 +20,16 @@ pub struct FrozenSourceMeta {
 
 /// Freezes already-downloaded bytes into the Raw Store as a `file_import`.
 ///
-/// Rejects blank provenance so a Raw object never lacks source, endpoint,
-/// observation time or terms conclusion. A revised vendor file has different
-/// bytes and therefore becomes a new Raw object; nothing is overwritten.
+/// Rejects blank provenance so a Raw object never lacks media type, source,
+/// endpoint, observation time or terms conclusion. A revised vendor file has
+/// different bytes and therefore becomes a new Raw object; nothing is overwritten.
 pub fn freeze_raw(
     store: &RawStore,
     bytes: &[u8],
     meta: FrozenSourceMeta,
 ) -> Result<String, RawStoreError> {
     let blank = [
+        &meta.content_type,
         &meta.source_id,
         &meta.endpoint,
         &meta.observed_at,
@@ -41,7 +44,7 @@ pub fn freeze_raw(
     store.put(
         bytes,
         SourceRecordInput {
-            content_type: "application/json".into(),
+            content_type: meta.content_type,
             source_kind: SourceKind::FileImport,
             source_id: meta.source_id,
             request: json!({

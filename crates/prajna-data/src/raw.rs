@@ -75,7 +75,7 @@ impl std::fmt::Display for RawStoreError {
             Self::CorruptObject(hash) => write!(f, "raw object is corrupt: {hash}"),
             Self::InvalidProvenance => write!(
                 f,
-                "frozen source provenance requires source, endpoint, observation time and terms conclusion"
+                "frozen source provenance requires media type, source, endpoint, observation time and terms conclusion"
             ),
         }
     }

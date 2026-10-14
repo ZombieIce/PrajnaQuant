@@ -1,28 +1,33 @@
-//! Normalizer for frozen Shenzhen ETF source extracts (MVP-6, ticket #174).
+//! Normalizer for frozen Shenzhen ETF vendor originals (MVP-6, ticket #174).
 //!
-//! Each extract Raw object is a JSON envelope `{"frozen_format_version":1,"kind":...,
-//! "extraction":{extractor_id,extractor_version,original_raw_sha256s}}` produced
-//! by a local extraction step from frozen vendor originals. The originals are
-//! themselves Raw objects and must be listed as inputs; an extract whose
-//! originals are absent, or an input no extract refers to, is rejected, so the
-//! Dataset Version depends on the original bytes and the extractor version.
-//! Decoding the vendor binary formats (TDX ZIP/`.cod`/`.md1`) is outside this
-//! Normalizer.
+//! Every Raw input is an unmodified vendor response, recognised by content:
 //!
-//! Kinds: `szse_calendar`, `tdx_daily` (primary Bars), `tencent_kline`
-//! (secondary, comparison only) and `cninfo_announcements` (index only).
+//! - SZSE `monthList` JSON: one complete natural month, `jyrq` + `jybz` per day.
+//! - TDX `g4day/YYYYMMDD.zip`: `szYYMMDD.cod` 150-byte records whose
+//!   little-endian u16 at offset 32 indexes a 512-byte `.md1` block (OHLC f64 at
+//!   12/20/28/36, volume u64 shares at 56, amount f64 at 72). Primary Bars.
+//! - Tencent `fqkline` JSON: unadjusted `day` rows `[date, open, close, high,
+//!   low, lots, ...]`. Secondary, comparison only.
+//! - cninfo `hisAnnouncement/query` JSON: announcement index only.
+//!
+//! The Dataset Version is therefore a pure function of the original bytes and
+//! this Normalizer's version/config. Only codes 159000–159999 are in scope.
 //! Missing Bars are never interpreted as halts; no execution status is derived.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::{Cursor, Read},
+};
 
-use chrono::NaiveDate;
+use chrono::{DateTime, Datelike, Duration, NaiveDate};
+use chrono_tz::Asia::Shanghai;
 use prajna_domain::{
     Bar, BarData, Currency, InstrumentId, InstrumentKind, InstrumentSpec, InstrumentSpecData,
     Notional, Price, Quantity, Session, TimestampNs, VenueId,
 };
-use serde::Deserialize;
-use serde_json::{Number, json};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
+use zip::ZipArchive;
 
 use crate::{
     AnnouncementRow, NormalizationIssue, NormalizationOutput, NormalizedTables,
@@ -33,17 +38,21 @@ use crate::{
 use super::{Normalizer, RawInput};
 
 const NORMALIZER_ID: &str = "szse-etf-frozen";
-const CONFIG_V1: &str = r#"{"announcement_available_at":"close_of_first_session_after_announced_date","bar_available_at":"unknown_null","extract_requires_original_raw":true,"bar_spec":"1d@session","bars":"tdx_daily","crosscheck":"tencent_kline_exact_ohlc_shares","execution_status":"not_derived","instrument_kind":"Etf","lot_size":100,"price_increment":"0.001","session_close":"15:00:00+08:00","session_open":"09:30:00+08:00","timezone":"Asia/Shanghai","venue":"SZSE","volume":"shares","tencent_volume":"lots*100"}"#;
-const CATEGORIES: [&str; 9] = [
-    "listing_notice",
-    "fund_contract",
-    "prospectus",
-    "underlying_index",
-    "termination",
-    "dividend",
-    "conversion",
-    "suspension",
-    "resumption",
+const CONFIG_V1: &str = r#"{"announcement_available_at":"close_of_first_session_after_announced_date_calendar_covered","announcement_category":"title_keyword_rules_v1_else_unclassified","announcement_date":"announcementTime_ms_in_Asia/Shanghai","bar_available_at":"unknown_null","bar_spec":"1d@session","bars":"tdx_g4day_sz_cod150_md1_512","code_scope":"159000-159999","crosscheck":"tencent_fqkline_day_exact_ohlc_shares","execution_status":"not_derived","identical_duplicate_facts":"deduplicated_min_raw_sha256","inputs":"vendor_originals_only","instrument_kind":"Etf","lot_size":100,"price_increment":"0.001","session_close":"15:00:00+08:00","session_open":"09:30:00+08:00","tdx_amount":"f64@72_fixed10","tdx_no_trade":"close<=0_or_open_high_low_all_zero_no_bar","tdx_price":"f64_rounded_to_0.001_tolerance_1e-6","tencent_volume":"lots*100","timezone":"Asia/Shanghai","venue":"SZSE","volume":"shares"}"#;
+const CODE_PREFIX: &str = "159";
+const MAX_MEMBER_BYTES: u64 = 256 * 1024 * 1024;
+const UNCLASSIFIED: &str = "unclassified";
+/// Ordered title rules; the first category whose keyword occurs in the title wins.
+const CATEGORY_RULES: [(&str, &[&str]); 9] = [
+    ("termination", &["终止上市", "基金合同终止", "终止基金合同"]),
+    ("resumption", &["复牌"]),
+    ("suspension", &["停牌"]),
+    ("conversion", &["折算"]),
+    ("dividend", &["分红", "收益分配"]),
+    ("listing_notice", &["上市交易公告书"]),
+    ("underlying_index", &["标的指数"]),
+    ("prospectus", &["招募说明书"]),
+    ("fund_contract", &["基金合同"]),
 ];
 
 pub(super) struct SzseEtfFrozen {
@@ -81,83 +90,7 @@ impl Normalizer for SzseEtfFrozen {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum Envelope {
-    SzseCalendar {
-        frozen_format_version: u32,
-        extraction: Extraction,
-        sessions: Vec<String>,
-    },
-    TdxDaily {
-        frozen_format_version: u32,
-        extraction: Extraction,
-        bars: Vec<TdxBar>,
-    },
-    TencentKline {
-        frozen_format_version: u32,
-        extraction: Extraction,
-        rows: Vec<TencentRow>,
-    },
-    CninfoAnnouncements {
-        frozen_format_version: u32,
-        extraction: Extraction,
-        items: Vec<AnnouncementItem>,
-    },
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Extraction {
-    extractor_id: String,
-    extractor_version: String,
-    original_raw_sha256s: Vec<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TdxBar {
-    symbol: String,
-    date: String,
-    open: Number,
-    high: Number,
-    low: Number,
-    close: Number,
-    volume: Number,
-    amount: Number,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TencentRow {
-    symbol: String,
-    date: String,
-    open: Number,
-    high: Number,
-    low: Number,
-    close: Number,
-    volume_lots: Number,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AnnouncementItem {
-    id: String,
-    symbol: String,
-    category: String,
-    announced_date: String,
-}
-
-impl Envelope {
-    fn extraction(&self) -> &Extraction {
-        match self {
-            Self::SzseCalendar { extraction, .. }
-            | Self::TdxDaily { extraction, .. }
-            | Self::TencentKline { extraction, .. }
-            | Self::CninfoAnnouncements { extraction, .. } => extraction,
-        }
-    }
-}
+type Key = (String, NaiveDate);
 
 #[derive(Clone, PartialEq, Eq)]
 struct Ohlcv {
@@ -168,256 +101,195 @@ struct Ohlcv {
     shares: Quantity,
 }
 
+#[derive(Clone, PartialEq, Eq)]
 struct Primary {
     ohlcv: Ohlcv,
     amount: Notional,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct Announcement {
+    symbol: String,
+    category: String,
+    date: NaiveDate,
+}
+
+/// A decoded fact and the smallest Raw hash that states it.
+struct Sourced<V> {
+    value: V,
     raw: String,
 }
 
+#[derive(Default)]
+struct Acc {
+    issues: Vec<NormalizationIssue>,
+    kind_counts: BTreeMap<&'static str, u64>,
+    calendar: BTreeMap<NaiveDate, Sourced<bool>>,
+    primary: BTreeMap<Key, Sourced<Primary>>,
+    secondary: BTreeMap<Key, Sourced<Ohlcv>>,
+    announcements: BTreeMap<String, Sourced<Announcement>>,
+    excluded: BTreeMap<&'static str, u64>,
+}
+
+impl Acc {
+    fn push(&mut self, code: &str, path: impl Into<String>, message: impl Into<String>) {
+        self.issues.push(issue(code, path, message));
+    }
+
+    fn count(&mut self, key: &'static str) {
+        *self.excluded.entry(key).or_default() += 1;
+    }
+}
+
+/// Identical facts from several Raw objects collapse to one; differing facts
+/// for the same key are a vendor revision conflict and fail closed.
+fn insert_fact<K: Ord + std::fmt::Debug, V: PartialEq>(
+    map: &mut BTreeMap<K, Sourced<V>>,
+    key: K,
+    value: V,
+    raw: &str,
+    path: &str,
+    issues: &mut Vec<NormalizationIssue>,
+    duplicates: &mut u64,
+) {
+    match map.get_mut(&key) {
+        Some(previous) if previous.value == value => {
+            *duplicates += 1;
+            if raw < previous.raw.as_str() {
+                previous.raw = raw.to_owned();
+            }
+        }
+        Some(_) => issues.push(issue(
+            "source_revision_conflict",
+            path,
+            format!("{key:?} has differing values in the Raw set"),
+        )),
+        None => {
+            map.insert(
+                key,
+                Sourced {
+                    value,
+                    raw: raw.to_owned(),
+                },
+            );
+        }
+    }
+}
+
 fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<NormalizationIssue>> {
-    let mut issues = Vec::new();
     let venue = VenueId::new("SZSE").expect("static venue is valid");
-    let mut kind_counts: BTreeMap<&str, u64> = BTreeMap::new();
-    let mut calendar = BTreeSet::new();
-    let mut primary: BTreeMap<(String, NaiveDate), Primary> = BTreeMap::new();
-    let mut secondary: BTreeMap<(String, NaiveDate), (Ohlcv, String)> = BTreeMap::new();
-    let mut announcements: BTreeMap<String, (InstrumentId, String, NaiveDate, String)> =
-        BTreeMap::new();
-    let mut announcement_content: BTreeMap<String, (String, String, NaiveDate)> = BTreeMap::new();
+    let mut acc = Acc::default();
+    let mut duplicates = 0_u64;
     let mut seen_raw = BTreeSet::new();
 
-    let present: BTreeSet<&str> = raw_inputs.iter().map(|r| r.raw_sha256.as_str()).collect();
-    let parsed: Vec<_> = raw_inputs
-        .iter()
-        .map(|raw| serde_json::from_slice::<Envelope>(&raw.bytes))
-        .collect();
-    let referenced: BTreeSet<String> = parsed
-        .iter()
-        .flatten()
-        .flat_map(|envelope| envelope.extraction().original_raw_sha256s.iter())
-        .cloned()
-        .collect();
-
-    for (index, (raw, envelope)) in raw_inputs.iter().zip(parsed).enumerate() {
+    for (index, raw) in raw_inputs.iter().enumerate() {
         let path = format!("inputs[{index}]");
         if !raw.has_valid_identity() {
-            issues.push(issue(
+            acc.push(
                 "raw_hash_mismatch",
                 &path,
                 "raw_sha256 does not match the supplied bytes",
-            ));
+            );
             continue;
         }
         if !seen_raw.insert(raw.raw_sha256.clone()) {
-            issues.push(issue(
-                "duplicate_raw_input",
+            acc.push("duplicate_raw_input", &path, "Raw object listed twice");
+            continue;
+        }
+        if raw.bytes.starts_with(b"PK\x03\x04") {
+            decode_tdx(raw, &path, &mut acc, &mut duplicates);
+            continue;
+        }
+        let Ok(Value::Object(object)) = serde_json::from_slice::<Value>(&raw.bytes) else {
+            acc.push(
+                "unrecognized_original",
                 &path,
-                "Raw object listed twice",
-            ));
+                "Raw object is neither a TDX ZIP nor a JSON object",
+            );
             continue;
-        }
-        if referenced.contains(&raw.raw_sha256) {
-            *kind_counts.entry("vendor_original").or_default() += 1;
-            continue;
-        }
-        let envelope = match envelope {
-            Ok(envelope) => envelope,
-            Err(error) => {
-                issues.push(issue(
-                    "invalid_envelope",
-                    &path,
-                    format!("frozen envelope cannot be parsed and no extract refers to it as an original: {error}"),
-                ));
-                continue;
-            }
         };
-        match envelope {
-            Envelope::SzseCalendar {
-                frozen_format_version,
-                extraction,
-                sessions,
-            } => {
-                check_version(frozen_format_version, &path, &mut issues);
-                check_extraction(&extraction, &present, &path, &mut issues);
-                *kind_counts.entry("szse_calendar").or_default() += 1;
-                for (i, text) in sessions.iter().enumerate() {
-                    if let Some(date) =
-                        parse_date(text, &format!("{path}.sessions[{i}]"), &mut issues)
-                        && !calendar.insert(date)
-                    {
-                        issues.push(issue(
-                            "duplicate_primary_key",
-                            format!("{path}.sessions[{i}]"),
-                            format!("duplicate session date {date}"),
-                        ));
-                    }
-                }
-            }
-            Envelope::TdxDaily {
-                frozen_format_version,
-                extraction,
-                bars,
-            } => {
-                check_version(frozen_format_version, &path, &mut issues);
-                check_extraction(&extraction, &present, &path, &mut issues);
-                *kind_counts.entry("tdx_daily").or_default() += 1;
-                for (i, bar) in bars.iter().enumerate() {
-                    let bar_path = format!("{path}.bars[{i}]");
-                    let Some((key, ohlcv)) = parse_ohlcv(
-                        &bar.symbol,
-                        &bar.date,
-                        [&bar.open, &bar.high, &bar.low, &bar.close],
-                        &bar.volume,
-                        1,
-                        &bar_path,
-                        &mut issues,
-                    ) else {
-                        continue;
-                    };
-                    let Some(amount) = parse_amount(&bar.amount, &bar_path, &mut issues) else {
-                        continue;
-                    };
-                    insert_unique(
-                        &mut primary,
-                        key,
-                        Primary {
-                            ohlcv,
-                            amount,
-                            raw: raw.raw_sha256.clone(),
-                        },
-                        |a, b| a.ohlcv == b.ohlcv && a.amount == b.amount,
-                        &bar_path,
-                        &mut issues,
-                    );
-                }
-            }
-            Envelope::TencentKline {
-                frozen_format_version,
-                extraction,
-                rows,
-            } => {
-                check_version(frozen_format_version, &path, &mut issues);
-                check_extraction(&extraction, &present, &path, &mut issues);
-                *kind_counts.entry("tencent_kline").or_default() += 1;
-                for (i, row) in rows.iter().enumerate() {
-                    let row_path = format!("{path}.rows[{i}]");
-                    let Some((key, ohlcv)) = parse_ohlcv(
-                        &row.symbol,
-                        &row.date,
-                        [&row.open, &row.high, &row.low, &row.close],
-                        &row.volume_lots,
-                        100,
-                        &row_path,
-                        &mut issues,
-                    ) else {
-                        continue;
-                    };
-                    insert_unique(
-                        &mut secondary,
-                        key,
-                        (ohlcv, raw.raw_sha256.clone()),
-                        |a, b| a.0 == b.0,
-                        &row_path,
-                        &mut issues,
-                    );
-                }
-            }
-            Envelope::CninfoAnnouncements {
-                frozen_format_version,
-                extraction,
-                items,
-            } => {
-                check_version(frozen_format_version, &path, &mut issues);
-                check_extraction(&extraction, &present, &path, &mut issues);
-                *kind_counts.entry("cninfo_announcements").or_default() += 1;
-                for (i, item) in items.iter().enumerate() {
-                    let item_path = format!("{path}.items[{i}]");
-                    if item.id.is_empty() {
-                        issues.push(issue("invalid_announcement_id", &item_path, "empty id"));
-                        continue;
-                    }
-                    if !CATEGORIES.contains(&item.category.as_str()) {
-                        issues.push(issue(
-                            "unknown_announcement_category",
-                            format!("{item_path}.category"),
-                            "category is not in the versioned category list",
-                        ));
-                        continue;
-                    }
-                    let Some(date) = parse_date(
-                        &item.announced_date,
-                        &format!("{item_path}.announced_date"),
-                        &mut issues,
-                    ) else {
-                        continue;
-                    };
-                    let Some(id) = instrument_id(&item.symbol, &venue, &item_path, &mut issues)
-                    else {
-                        continue;
-                    };
-                    let content = (item.symbol.clone(), item.category.clone(), date);
-                    if let Some(previous) = announcement_content.get(&item.id) {
-                        let code = if previous == &content {
-                            "duplicate_primary_key"
-                        } else {
-                            "source_revision_conflict"
-                        };
-                        issues.push(issue(
-                            code,
-                            &item_path,
-                            format!("announcement {} occurs more than once", item.id),
-                        ));
-                        continue;
-                    }
-                    announcement_content.insert(item.id.clone(), content);
-                    announcements.insert(
-                        item.id.clone(),
-                        (id, item.category.clone(), date, raw.raw_sha256.clone()),
-                    );
-                }
-            }
+        if object.contains_key("announcements") {
+            decode_cninfo(&object, raw, &path, &mut acc, &mut duplicates);
+        } else if object.get("data").is_some_and(Value::is_array) {
+            decode_calendar(&object, raw, &path, &mut acc, &mut duplicates);
+        } else if object.contains_key("code") && object.get("data").is_some_and(Value::is_object) {
+            decode_tencent(&object, raw, &path, &mut acc, &mut duplicates);
+        } else {
+            acc.push(
+                "unrecognized_original",
+                &path,
+                "JSON object matches no supported vendor response",
+            );
         }
     }
 
-    if kind_counts.get("szse_calendar").copied().unwrap_or(0) == 0 {
-        issues.push(issue("missing_source", "$", "no szse_calendar Raw object"));
-    }
-    if kind_counts.get("tdx_daily").copied().unwrap_or(0) == 0 {
-        issues.push(issue("missing_source", "$", "no tdx_daily Raw object"));
+    let Acc {
+        mut issues,
+        kind_counts,
+        calendar,
+        primary,
+        secondary,
+        announcements,
+        excluded,
+    } = acc;
+    for (kind, label) in [("szse_calendar", "SZSE calendar"), ("tdx_daily", "TDX")] {
+        if kind_counts.get(kind).copied().unwrap_or(0) == 0 {
+            issues.push(issue(
+                "missing_source",
+                "$",
+                format!("no {label} Raw object"),
+            ));
+        }
     }
     for (symbol, date) in primary.keys().chain(secondary.keys()) {
-        if !calendar.contains(date) {
-            issues.push(issue(
+        match calendar.get(date).map(|day| day.value) {
+            Some(true) => {}
+            Some(false) => issues.push(issue(
                 "bar_outside_calendar",
                 format!("{symbol}@{date}"),
-                "source row is not on a frozen SZSE session",
-            ));
+                "source row falls on an SZSE non-trading day",
+            )),
+            None => issues.push(issue(
+                "calendar_not_covered",
+                format!("{symbol}@{date}"),
+                "source row date is not covered by a frozen SZSE calendar month",
+            )),
         }
     }
     // P6: a date-only announcement is knowable after the announced day's close,
     // so it is usable from the close of the first session strictly after it.
+    // Every day up to that session must be covered, or an earlier unknown
+    // session could exist.
     let mut announcement_rows = Vec::new();
-    for (id, (instrument_id, category, date, source_raw_sha256)) in announcements {
-        let Some(available_at) = calendar
-            .range(date..)
-            .find(|next| **next > date)
-            .and_then(|next| make_session(venue.clone(), *next))
+    for (id, fact) in announcements {
+        let Announcement {
+            symbol,
+            category,
+            date,
+        } = fact.value;
+        let next = (1..)
+            .map(|offset| date + Duration::days(offset))
+            .map(|day| (day, calendar.get(&day).map(|known| known.value)))
+            .find(|(_, open)| *open != Some(false))
+            .and_then(|(day, open)| open.map(|_| day));
+        let Some(available_at) = next
+            .and_then(|day| make_session(venue.clone(), day))
             .map(|session| session.ts_close())
         else {
             issues.push(issue(
                 "announcement_next_session_unknown",
                 id.clone(),
-                "no frozen session after the announced date; availability cannot be set",
+                "frozen calendar does not establish the first session after the announced date",
             ));
             continue;
         };
         announcement_rows.push(AnnouncementRow {
             announcement_id: id,
-            instrument_id,
+            instrument_id: InstrumentId::new(symbol, venue.clone()).expect("validated symbol"),
             category,
             announced_date: date,
             available_at,
-            source_raw_sha256,
+            source_raw_sha256: fact.raw,
         });
     }
     if !issues.is_empty() {
@@ -426,9 +298,11 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
 
     let sessions = calendar
         .iter()
-        .map(|date| make_session(venue.clone(), *date))
+        .filter(|(_, day)| day.value)
+        .map(|(date, _)| make_session(venue.clone(), *date))
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| vec![issue("invalid_session", "$", "session cannot be built")])?;
+    let session_dates: BTreeSet<NaiveDate> = sessions.iter().map(Session::session_date).collect();
     let session_by_date: BTreeMap<_, _> = sessions.iter().map(|s| (s.session_date(), s)).collect();
 
     let symbols: BTreeSet<&String> = primary.keys().map(|(symbol, _)| symbol).collect();
@@ -459,7 +333,7 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
     }
 
     let mut bars = Vec::new();
-    for ((symbol, date), value) in &primary {
+    for ((symbol, date), fact) in &primary {
         let session = session_by_date[date];
         let data = BarData {
             instrument_id: InstrumentId::new(symbol.clone(), venue.clone()).expect("validated"),
@@ -467,12 +341,12 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
             session_date: *date,
             ts_open: session.ts_open(),
             ts_close: session.ts_close(),
-            open: value.ohlcv.open,
-            high: value.ohlcv.high,
-            low: value.ohlcv.low,
-            close: value.ohlcv.close,
-            volume: value.ohlcv.shares,
-            amount: Some(value.amount),
+            open: fact.value.ohlcv.open,
+            high: fact.value.ohlcv.high,
+            low: fact.value.ohlcv.low,
+            close: fact.value.ohlcv.close,
+            volume: fact.value.ohlcv.shares,
+            amount: Some(fact.value.amount),
             // No vendor availability evidence: stays Unknown (ADR 0015 §3.4).
             available_at: None,
         };
@@ -490,19 +364,17 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
     let keys: BTreeSet<_> = primary.keys().chain(secondary.keys()).cloned().collect();
     for key in keys {
         let (status, fields, p_raw, s_raw) = match (primary.get(&key), secondary.get(&key)) {
-            (Some(p), Some((s, s_raw))) => {
-                let fields = mismatch_fields(&p.ohlcv, s);
+            (Some(p), Some(s)) => {
+                let fields = mismatch_fields(&p.value.ohlcv, &s.value);
                 let status = if fields.is_empty() {
                     "match"
                 } else {
                     "mismatch"
                 };
-                (status, fields, Some(p.raw.clone()), Some(s_raw.clone()))
+                (status, fields, Some(p.raw.clone()), Some(s.raw.clone()))
             }
             (Some(p), None) => ("primary_only", String::new(), Some(p.raw.clone()), None),
-            (None, Some((_, s_raw))) => {
-                ("secondary_only", String::new(), None, Some(s_raw.clone()))
-            }
+            (None, Some(s)) => ("secondary_only", String::new(), None, Some(s.raw.clone())),
             (None, None) => continue,
         };
         *crosscheck_counts.entry(status).or_default() += 1;
@@ -520,13 +392,13 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
     // are gaps (UNKNOWN), never halts.
     let mut gap_sessions = 0_u64;
     for symbol in &symbols {
-        let dates: Vec<_> = primary
+        let dates: BTreeSet<_> = primary
             .keys()
             .filter(|(s, _)| s == *symbol)
             .map(|(_, d)| *d)
             .collect();
         if let (Some(first), Some(last)) = (dates.first(), dates.last()) {
-            gap_sessions += calendar
+            gap_sessions += session_dates
                 .range(*first..=*last)
                 .filter(|date| !dates.contains(date))
                 .count() as u64;
@@ -550,6 +422,7 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
     let coverage = json!({
         "kind": "szse-etf-frozen",
         "raw_objects_by_kind": kind_counts,
+        "calendar_days": calendar.len(),
         "sessions": sessions.len(),
         "instruments": specs.len(),
         "bars": bars.len(),
@@ -557,6 +430,8 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
         "crosscheck_by_status": crosscheck_counts,
         "announcements": announcement_rows.len(),
         "announcements_by_category": category_counts,
+        "excluded_records": excluded,
+        "identical_duplicate_facts": duplicates,
         "execution_status": "not_derived",
         "completeness_claim": "none; coverage is limited to the frozen Raw set",
     });
@@ -568,28 +443,416 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
     })
 }
 
-fn insert_unique<V>(
-    map: &mut BTreeMap<(String, NaiveDate), V>,
-    key: (String, NaiveDate),
-    value: V,
-    same: impl Fn(&V, &V) -> bool,
+fn decode_calendar(
+    object: &Map<String, Value>,
+    raw: &RawInput,
+    path: &str,
+    acc: &mut Acc,
+    duplicates: &mut u64,
+) {
+    *acc.kind_counts.entry("szse_calendar").or_default() += 1;
+    let rows = object["data"].as_array().expect("checked by caller");
+    let mut days = BTreeMap::new();
+    for (i, row) in rows.iter().enumerate() {
+        let row_path = format!("{path}.data[{i}]");
+        let date = row
+            .get("jyrq")
+            .and_then(Value::as_str)
+            .and_then(|text| NaiveDate::parse_from_str(text, "%Y-%m-%d").ok());
+        let open = row
+            .get("jybz")
+            .and_then(cell_text)
+            .and_then(|flag| match flag.as_str() {
+                "0" => Some(false),
+                "1" => Some(true),
+                _ => None,
+            });
+        match (date, open) {
+            (Some(date), Some(open)) if days.insert(date, open).is_none() => {}
+            (Some(_), Some(_)) => {
+                acc.push("invalid_calendar", &row_path, "duplicate jyrq");
+                return;
+            }
+            _ => {
+                acc.push(
+                    "invalid_calendar",
+                    &row_path,
+                    "row needs jyrq YYYY-MM-DD and jybz 0/1",
+                );
+                return;
+            }
+        }
+    }
+    let (Some(first), Some(last)) = (days.keys().next(), days.keys().next_back()) else {
+        acc.push("invalid_calendar", path, "calendar month has no days");
+        return;
+    };
+    let complete = first.day() == 1
+        && (first.year(), first.month()) == (last.year(), last.month())
+        && last.succ_opt().is_some_and(|next| next.day() == 1)
+        && days.len() == last.day() as usize;
+    if !complete {
+        acc.push(
+            "invalid_calendar",
+            path,
+            "calendar must cover exactly one complete natural month",
+        );
+        return;
+    }
+    for (date, open) in days {
+        insert_fact(
+            &mut acc.calendar,
+            date,
+            open,
+            &raw.raw_sha256,
+            path,
+            &mut acc.issues,
+            duplicates,
+        );
+    }
+}
+
+fn decode_tdx(raw: &RawInput, path: &str, acc: &mut Acc, duplicates: &mut u64) {
+    *acc.kind_counts.entry("tdx_daily").or_default() += 1;
+    let invalid = |acc: &mut Acc, message: String| acc.push("invalid_tdx_package", path, message);
+    let mut archive = match ZipArchive::new(Cursor::new(raw.bytes.as_slice())) {
+        Ok(archive) => archive,
+        Err(error) => return invalid(acc, format!("cannot open ZIP: {error}")),
+    };
+    let day_keys: Vec<String> = archive
+        .file_names()
+        .filter_map(|name| name.strip_prefix("sz")?.strip_suffix(".cod"))
+        .filter(|key| key.len() == 6 && key.bytes().all(|b| b.is_ascii_digit()))
+        .map(str::to_owned)
+        .collect();
+    let [day_key] = day_keys.as_slice() else {
+        return invalid(acc, "package must hold exactly one szYYMMDD.cod".into());
+    };
+    let Ok(date) = NaiveDate::parse_from_str(&format!("20{day_key}"), "%Y%m%d") else {
+        return invalid(acc, format!("member date {day_key} is not a date"));
+    };
+    let mut member = |name: String| -> Result<Vec<u8>, String> {
+        let file = archive
+            .by_name(&name)
+            .map_err(|error| format!("{name}: {error}"))?;
+        if file.size() > MAX_MEMBER_BYTES {
+            return Err(format!("{name} exceeds the member size limit"));
+        }
+        let mut bytes = Vec::new();
+        file.take(MAX_MEMBER_BYTES)
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("{name}: {error}"))?;
+        Ok(bytes)
+    };
+    let (cod, md1) = match (
+        member(format!("sz{day_key}.cod")),
+        member(format!("sz{day_key}.md1")),
+    ) {
+        (Ok(cod), Ok(md1)) => (cod, md1),
+        (Err(error), _) | (_, Err(error)) => return invalid(acc, error),
+    };
+    if cod.len() % 150 != 0 || md1.len() % 512 != 0 || cod.len() / 150 != md1.len() / 512 {
+        return invalid(acc, "code table and price blocks are misaligned".into());
+    }
+    let mut codes = BTreeSet::new();
+    let mut sequences = BTreeSet::new();
+    for (i, record) in cod.chunks_exact(150).enumerate() {
+        let record_path = format!("{path}.sz{day_key}.cod[{i}]");
+        let code = trim_nul_space(&record[0..6]);
+        let sequence = u16::from_le_bytes([record[32], record[33]]);
+        let Some(code) = std::str::from_utf8(code)
+            .ok()
+            .filter(|code| code.len() == 6 && code.bytes().all(|b| b.is_ascii_digit()))
+        else {
+            acc.push(
+                "invalid_tdx_package",
+                &record_path,
+                "code is not six ASCII digits",
+            );
+            continue;
+        };
+        if !codes.insert(code.to_owned()) || !sequences.insert(sequence) {
+            acc.push(
+                "invalid_tdx_package",
+                &record_path,
+                "duplicate code or price block sequence",
+            );
+            continue;
+        }
+        if !code.starts_with(CODE_PREFIX) {
+            acc.count("tdx_out_of_scope_records");
+            continue;
+        }
+        let offset = usize::from(sequence) * 512;
+        let Some(block) = md1.get(offset..offset + 512) else {
+            acc.push(
+                "invalid_tdx_package",
+                &record_path,
+                "price block sequence is out of range",
+            );
+            continue;
+        };
+        let read = |at: usize| f64::from_le_bytes(block[at..at + 8].try_into().expect("8 bytes"));
+        let [open, high, low, close, amount] = [12, 20, 28, 36, 72].map(read);
+        if ![open, high, low, close, amount]
+            .iter()
+            .all(|value| value.is_finite())
+        {
+            acc.push("invalid_price", &record_path, "non-finite value");
+            continue;
+        }
+        // No trade: either no close, or a carried close with an empty intraday range.
+        if close <= 0.0 || [open, high, low].iter().all(|value| *value == 0.0) {
+            acc.count("tdx_no_trade_records");
+            continue;
+        }
+        let shares = u64::from_le_bytes(block[56..64].try_into().expect("8 bytes"));
+        let prices = [open, high, low, close].map(f64_price);
+        let shares = Quantity::parse(&shares.to_string()).ok();
+        let Some(ohlcv) = build_ohlcv(prices, shares, &record_path, &mut acc.issues) else {
+            continue;
+        };
+        let amount = match Notional::parse(&format!("{amount:.10}")) {
+            Ok(value) if value >= Notional::ZERO => value,
+            _ => {
+                acc.push(
+                    "invalid_amount",
+                    &record_path,
+                    "amount must be non-negative",
+                );
+                continue;
+            }
+        };
+        insert_fact(
+            &mut acc.primary,
+            (code.to_owned(), date),
+            Primary { ohlcv, amount },
+            &raw.raw_sha256,
+            &record_path,
+            &mut acc.issues,
+            duplicates,
+        );
+    }
+}
+
+fn decode_tencent(
+    object: &Map<String, Value>,
+    raw: &RawInput,
+    path: &str,
+    acc: &mut Acc,
+    duplicates: &mut u64,
+) {
+    *acc.kind_counts.entry("tencent_kline").or_default() += 1;
+    if object.get("code").and_then(cell_text).as_deref() != Some("0") {
+        acc.push("invalid_tencent", path, "response code is not 0");
+        return;
+    }
+    let data = object["data"].as_object().expect("checked by caller");
+    for (key, node) in data {
+        let node_path = format!("{path}.data.{key}");
+        let Some(symbol) = key
+            .strip_prefix("sz")
+            .filter(|code| is_scoped_code(code))
+            .map(str::to_owned)
+        else {
+            acc.push("invalid_symbol", &node_path, "Tencent key must be sz159xxx");
+            continue;
+        };
+        // Only the unadjusted array is a comparable price source.
+        let Some(rows) = node.get("day").and_then(Value::as_array) else {
+            acc.push(
+                "invalid_tencent",
+                &node_path,
+                "unadjusted day array is missing",
+            );
+            continue;
+        };
+        for (i, row) in rows.iter().enumerate() {
+            let row_path = format!("{node_path}.day[{i}]");
+            let fields: Option<Vec<String>> = row.as_array().and_then(|cells| {
+                (cells.len() >= 6)
+                    .then(|| cells[..6].iter().map(cell_text).collect())
+                    .flatten()
+            });
+            let Some(fields) = fields else {
+                acc.push(
+                    "invalid_tencent",
+                    &row_path,
+                    "row needs date, open, close, high, low and lots",
+                );
+                continue;
+            };
+            let Ok(date) = NaiveDate::parse_from_str(&fields[0], "%Y-%m-%d") else {
+                acc.push("invalid_date", &row_path, "dates must use YYYY-MM-DD");
+                continue;
+            };
+            let price = |text: &String| Price::parse(text).ok();
+            let prices = [
+                price(&fields[1]),
+                price(&fields[3]),
+                price(&fields[4]),
+                price(&fields[2]),
+            ];
+            let shares = Quantity::parse(&fields[5])
+                .and_then(|lots| lots.checked_mul(100))
+                .ok();
+            let Some(ohlcv) = build_ohlcv(prices, shares, &row_path, &mut acc.issues) else {
+                continue;
+            };
+            insert_fact(
+                &mut acc.secondary,
+                (symbol.clone(), date),
+                ohlcv,
+                &raw.raw_sha256,
+                &row_path,
+                &mut acc.issues,
+                duplicates,
+            );
+        }
+    }
+}
+
+fn decode_cninfo(
+    object: &Map<String, Value>,
+    raw: &RawInput,
+    path: &str,
+    acc: &mut Acc,
+    duplicates: &mut u64,
+) {
+    *acc.kind_counts.entry("cninfo_announcements").or_default() += 1;
+    let items = match &object["announcements"] {
+        Value::Null => return,
+        Value::Array(items) => items,
+        _ => {
+            acc.push(
+                "invalid_cninfo",
+                path,
+                "announcements must be an array or null",
+            );
+            return;
+        }
+    };
+    for (i, item) in items.iter().enumerate() {
+        let item_path = format!("{path}.announcements[{i}]");
+        let text = |field: &str| item.get(field).and_then(cell_text);
+        let (Some(id), Some(code), Some(title), Some(millis)) = (
+            text("announcementId").filter(|id| !id.is_empty()),
+            text("secCode"),
+            text("announcementTitle"),
+            item.get("announcementTime").and_then(Value::as_i64),
+        ) else {
+            acc.push(
+                "invalid_cninfo",
+                &item_path,
+                "item needs announcementId, secCode, announcementTitle and announcementTime",
+            );
+            continue;
+        };
+        if code.len() != 6 || !code.bytes().all(|b| b.is_ascii_digit()) {
+            acc.push("invalid_symbol", &item_path, "secCode is not six digits");
+            continue;
+        }
+        if !code.starts_with(CODE_PREFIX) {
+            acc.count("announcements_out_of_scope");
+            continue;
+        }
+        let Some(date) = DateTime::from_timestamp_millis(millis)
+            .map(|time| time.with_timezone(&Shanghai).date_naive())
+        else {
+            acc.push(
+                "invalid_date",
+                &item_path,
+                "announcementTime is out of range",
+            );
+            continue;
+        };
+        let title = title.replace("<em>", "").replace("</em>", "");
+        let category = CATEGORY_RULES
+            .iter()
+            .find(|(_, keywords)| keywords.iter().any(|keyword| title.contains(keyword)))
+            .map_or(UNCLASSIFIED, |(category, _)| category);
+        insert_fact(
+            &mut acc.announcements,
+            id,
+            Announcement {
+                symbol: code,
+                category: category.to_owned(),
+                date,
+            },
+            &raw.raw_sha256,
+            &item_path,
+            &mut acc.issues,
+            duplicates,
+        );
+    }
+}
+
+fn is_scoped_code(code: &str) -> bool {
+    code.len() == 6 && code.bytes().all(|b| b.is_ascii_digit()) && code.starts_with(CODE_PREFIX)
+}
+
+fn cell_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    }
+}
+
+/// Converts a TDX float price to the 0.001 grid; off-grid values are rejected.
+fn f64_price(value: f64) -> Option<Price> {
+    let mils = (value * 1000.0).round();
+    if (value * 1000.0 - mils).abs() > 1e-6 || !(1.0..=1e15).contains(&mils) {
+        return None;
+    }
+    let mils = mils as i64;
+    Price::parse(&format!("{}.{:03}", mils / 1000, mils % 1000)).ok()
+}
+
+fn build_ohlcv(
+    prices: [Option<Price>; 4],
+    shares: Option<Quantity>,
     path: &str,
     issues: &mut Vec<NormalizationIssue>,
-) {
-    if let Some(previous) = map.get(&key) {
-        let code = if same(previous, &value) {
-            "duplicate_primary_key"
-        } else {
-            "source_revision_conflict"
-        };
+) -> Option<Ohlcv> {
+    let tick = Price::parse("0.001").expect("static increment is valid");
+    let valid = |price: &Option<Price>| {
+        price.filter(|value| *value > Price::ZERO && value.is_aligned_to(tick).unwrap_or(false))
+    };
+    let [Some(open), Some(high), Some(low), Some(close)] = prices.each_ref().map(valid) else {
         issues.push(issue(
-            code,
+            "invalid_price",
             path,
-            format!("{}@{} occurs more than once in the Raw set", key.0, key.1),
+            "prices must be positive and aligned to 0.001",
         ));
-    } else {
-        map.insert(key, value);
+        return None;
+    };
+    if high < open.max(close) || low > open.min(close) {
+        issues.push(issue(
+            "invalid_ohlc",
+            path,
+            "high/low do not bound open and close",
+        ));
+        return None;
     }
+    let whole = Quantity::parse("1").expect("static quantity is valid");
+    let Some(shares) = shares
+        .filter(|value| *value >= Quantity::ZERO && value.is_aligned_to(whole).unwrap_or(false))
+    else {
+        issues.push(issue(
+            "invalid_volume",
+            path,
+            "volume must be a non-negative whole number of shares",
+        ));
+        return None;
+    };
+    Some(Ohlcv {
+        open,
+        high,
+        low,
+        close,
+        shares,
+    })
 }
 
 fn mismatch_fields(left: &Ohlcv, right: &Ohlcv) -> String {
@@ -612,168 +875,12 @@ fn mismatch_fields(left: &Ohlcv, right: &Ohlcv) -> String {
     fields.join(",")
 }
 
-#[allow(clippy::too_many_arguments)]
-fn parse_ohlcv(
-    symbol: &str,
-    date: &str,
-    prices: [&Number; 4],
-    volume: &Number,
-    volume_multiplier: i128,
-    path: &str,
-    issues: &mut Vec<NormalizationIssue>,
-) -> Option<((String, NaiveDate), Ohlcv)> {
-    let venue = VenueId::new("SZSE").expect("static venue is valid");
-    instrument_id(symbol, &venue, path, issues)?;
-    let date = parse_date(date, &format!("{path}.date"), issues)?;
-    let tick = Price::parse("0.001").expect("static increment is valid");
-    let mut parsed = Vec::new();
-    for (name, number) in ["open", "high", "low", "close"].iter().zip(prices) {
-        let value = match Price::parse(&number.to_string()) {
-            Ok(value) => value,
-            Err(error) => {
-                issues.push(issue(
-                    "invalid_decimal",
-                    format!("{path}.{name}"),
-                    error.to_string(),
-                ));
-                return None;
-            }
-        };
-        if value <= Price::ZERO || !value.is_aligned_to(tick).unwrap_or(false) {
-            issues.push(issue(
-                "invalid_price",
-                format!("{path}.{name}"),
-                "price must be positive and aligned to 0.001",
-            ));
-            return None;
-        }
-        parsed.push(value);
-    }
-    let (open, high, low, close) = (parsed[0], parsed[1], parsed[2], parsed[3]);
-    if high < open.max(close) || low > open.min(close) {
-        issues.push(issue(
-            "invalid_ohlc",
-            path,
-            "high/low do not bound open and close",
-        ));
-        return None;
-    }
-    let shares = match Quantity::parse(&volume.to_string())
-        .and_then(|value| value.checked_mul(volume_multiplier))
-    {
-        Ok(value)
-            if value >= Quantity::ZERO
-                && value
-                    .is_aligned_to(Quantity::parse("1").unwrap())
-                    .unwrap_or(false) =>
-        {
-            value
-        }
-        _ => {
-            issues.push(issue(
-                "invalid_volume",
-                format!("{path}.volume"),
-                "volume must be a non-negative whole number of shares",
-            ));
-            return None;
-        }
-    };
-    Some((
-        (symbol.to_owned(), date),
-        Ohlcv {
-            open,
-            high,
-            low,
-            close,
-            shares,
-        },
-    ))
-}
-
-fn parse_amount(
-    number: &Number,
-    path: &str,
-    issues: &mut Vec<NormalizationIssue>,
-) -> Option<Notional> {
-    match Notional::parse(&number.to_string()) {
-        Ok(value) if value >= Notional::ZERO => Some(value),
-        _ => {
-            issues.push(issue(
-                "invalid_amount",
-                format!("{path}.amount"),
-                "amount must be a non-negative decimal",
-            ));
-            None
-        }
-    }
-}
-
-fn instrument_id(
-    symbol: &str,
-    venue: &VenueId,
-    path: &str,
-    issues: &mut Vec<NormalizationIssue>,
-) -> Option<InstrumentId> {
-    if symbol.len() != 6 || !symbol.bytes().all(|byte| byte.is_ascii_digit()) {
-        issues.push(issue(
-            "invalid_symbol",
-            format!("{path}.symbol"),
-            "symbol must be six ASCII digits",
-        ));
-        return None;
-    }
-    InstrumentId::new(symbol, venue.clone()).ok()
-}
-
-fn parse_date(text: &str, path: &str, issues: &mut Vec<NormalizationIssue>) -> Option<NaiveDate> {
-    match NaiveDate::parse_from_str(text, "%Y-%m-%d") {
-        Ok(date) => Some(date),
-        Err(_) => {
-            issues.push(issue("invalid_date", path, "dates must use YYYY-MM-DD"));
-            None
-        }
-    }
-}
-
-fn check_extraction(
-    extraction: &Extraction,
-    present: &BTreeSet<&str>,
-    path: &str,
-    issues: &mut Vec<NormalizationIssue>,
-) {
-    if extraction.extractor_id.trim().is_empty() || extraction.extractor_version.trim().is_empty() {
-        issues.push(issue(
-            "invalid_extraction",
-            format!("{path}.extraction"),
-            "extractor_id and extractor_version must be non-empty",
-        ));
-    }
-    if extraction.original_raw_sha256s.is_empty() {
-        issues.push(issue(
-            "missing_original",
-            format!("{path}.extraction"),
-            "an extract must name at least one original Raw object",
-        ));
-    }
-    for hash in &extraction.original_raw_sha256s {
-        if !present.contains(hash.as_str()) {
-            issues.push(issue(
-                "missing_original",
-                format!("{path}.extraction"),
-                format!("original {hash} is not among the Raw inputs"),
-            ));
-        }
-    }
-}
-
-fn check_version(version: u32, path: &str, issues: &mut Vec<NormalizationIssue>) {
-    if version != 1 {
-        issues.push(issue(
-            "unsupported_frozen_format_version",
-            path,
-            "only frozen_format_version 1 is supported",
-        ));
-    }
+fn trim_nul_space(bytes: &[u8]) -> &[u8] {
+    let end = bytes
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(bytes.len());
+    bytes[..end].trim_ascii()
 }
 
 fn make_session(venue: VenueId, date: NaiveDate) -> Option<Session> {
