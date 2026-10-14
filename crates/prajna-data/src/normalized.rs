@@ -462,6 +462,130 @@ pub fn execution_status_to_record_batch(
     RecordBatch::try_new(schema, cols).map_err(Into::into)
 }
 
+/// Cross-source comparison of one instrument session. Carries no prices.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceCrosscheckRow {
+    pub instrument_id: InstrumentId,
+    pub session_date: NaiveDate,
+    /// `match`, `mismatch`, `primary_only` or `secondary_only`.
+    pub status: String,
+    /// Comma-separated field names that differ; empty unless `mismatch`.
+    pub mismatch_fields: String,
+    pub primary_raw_sha256: Option<String>,
+    pub secondary_raw_sha256: Option<String>,
+}
+
+/// Indexed announcement metadata. Titles, bodies and attachments are not stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnnouncementRow {
+    pub announcement_id: String,
+    pub instrument_id: InstrumentId,
+    pub category: String,
+    pub announced_date: NaiveDate,
+    pub available_at: TimestampNs,
+    pub source_raw_sha256: String,
+}
+
+pub fn source_crosscheck_schema() -> SchemaRef {
+    schema(
+        "source_crosscheck",
+        vec![
+            utf8("instrument_id", false),
+            date("session_date"),
+            utf8("status", false),
+            utf8("mismatch_fields", false),
+            utf8("primary_raw_sha256", true),
+            utf8("secondary_raw_sha256", true),
+        ],
+    )
+}
+
+pub fn announcements_schema() -> SchemaRef {
+    schema(
+        "announcements",
+        vec![
+            utf8("announcement_id", false),
+            utf8("instrument_id", false),
+            utf8("category", false),
+            date("announced_date"),
+            timestamp("available_at", false),
+            utf8("source_raw_sha256", false),
+        ],
+    )
+}
+
+pub fn source_crosscheck_to_record_batch(
+    rows: &[SourceCrosscheckRow],
+) -> Result<RecordBatch, DataError> {
+    let mut rows = rows.iter().collect::<Vec<_>>();
+    rows.sort_by_key(|row| (row.instrument_id.to_string(), row.session_date));
+    if rows.windows(2).any(|pair| {
+        pair[0].instrument_id == pair[1].instrument_id
+            && pair[0].session_date == pair[1].session_date
+    }) {
+        return Err(err("duplicate source crosscheck primary key"));
+    }
+    let cols: Vec<ArrayRef> = vec![
+        Arc::new(StringArray::from_iter_values(
+            rows.iter().map(|row| row.instrument_id.to_string()),
+        )),
+        Arc::new(Date32Array::from(
+            rows.iter()
+                .map(|row| date32(row.session_date))
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        Arc::new(StringArray::from_iter_values(
+            rows.iter().map(|row| row.status.as_str()),
+        )),
+        Arc::new(StringArray::from_iter_values(
+            rows.iter().map(|row| row.mismatch_fields.as_str()),
+        )),
+        Arc::new(StringArray::from(
+            rows.iter()
+                .map(|row| row.primary_raw_sha256.as_deref())
+                .collect::<Vec<_>>(),
+        )),
+        Arc::new(StringArray::from(
+            rows.iter()
+                .map(|row| row.secondary_raw_sha256.as_deref())
+                .collect::<Vec<_>>(),
+        )),
+    ];
+    RecordBatch::try_new(source_crosscheck_schema(), cols).map_err(Into::into)
+}
+
+pub fn announcements_to_record_batch(rows: &[AnnouncementRow]) -> Result<RecordBatch, DataError> {
+    let mut rows = rows.iter().collect::<Vec<_>>();
+    rows.sort_by(|left, right| left.announcement_id.cmp(&right.announcement_id));
+    if rows
+        .windows(2)
+        .any(|pair| pair[0].announcement_id == pair[1].announcement_id)
+    {
+        return Err(err("duplicate announcement primary key"));
+    }
+    let cols: Vec<ArrayRef> = vec![
+        Arc::new(StringArray::from_iter_values(
+            rows.iter().map(|row| row.announcement_id.as_str()),
+        )),
+        Arc::new(StringArray::from_iter_values(
+            rows.iter().map(|row| row.instrument_id.to_string()),
+        )),
+        Arc::new(StringArray::from_iter_values(
+            rows.iter().map(|row| row.category.as_str()),
+        )),
+        Arc::new(Date32Array::from(
+            rows.iter()
+                .map(|row| date32(row.announced_date))
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        timestamps(rows.iter().map(|row| Some(row.available_at)).collect()),
+        Arc::new(StringArray::from_iter_values(
+            rows.iter().map(|row| row.source_raw_sha256.as_str()),
+        )),
+    ];
+    RecordBatch::try_new(announcements_schema(), cols).map_err(Into::into)
+}
+
 pub fn execution_status_from_record_batch(
     batch: &RecordBatch,
 ) -> Result<Vec<ExecutionStatusRow>, DataError> {
@@ -672,6 +796,8 @@ fn expected_schema(table: &str) -> Result<SchemaRef, DataError> {
         "bars" => Ok(bars_schema()),
         "sessions" => Ok(sessions_schema()),
         "execution_status" => Ok(execution_status_schema()),
+        "source_crosscheck" => Ok(source_crosscheck_schema()),
+        "announcements" => Ok(announcements_schema()),
         _ => Err(err("unsupported normalized table")),
     }
 }
@@ -696,7 +822,8 @@ fn check_primary_key_order(batch: &RecordBatch, table: &str) -> Result<(), DataE
         "instruments" => &[0],
         "bars" => &[0, 1, 3],
         "sessions" => &[0, 1],
-        "execution_status" => &[0, 1],
+        "execution_status" | "source_crosscheck" => &[0, 1],
+        "announcements" => &[0],
         _ => return Err(err("unsupported normalized table")),
     };
     let schema = batch.schema();

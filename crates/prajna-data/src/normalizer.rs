@@ -5,6 +5,9 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 mod synthetic_etf_daily;
+mod szse_etf_frozen;
+
+use crate::SourceKind;
 
 /// Raw bytes and their content identity supplied to a Normalizer.
 #[derive(Debug, Clone)]
@@ -62,6 +65,8 @@ pub struct NormalizedTables {
     pub sessions: RecordBatch,
     pub bars: RecordBatch,
     pub execution_status: Option<RecordBatch>,
+    pub source_crosscheck: Option<RecordBatch>,
+    pub announcements: Option<RecordBatch>,
 }
 
 /// A versioned conversion from immutable raw bytes to the normalized contract.
@@ -69,6 +74,10 @@ pub trait Normalizer: Send + Sync {
     fn id(&self) -> &str;
     fn version(&self) -> &str;
     fn config_sha256(&self) -> String;
+    /// Raw source kinds this Normalizer accepts; publishing fails closed otherwise.
+    fn accepted_source_kinds(&self) -> &[SourceKind] {
+        &[SourceKind::Fixture]
+    }
     fn normalize(
         &self,
         raw_inputs: &[RawInput],
@@ -91,6 +100,7 @@ impl NormalizerRegistry {
         registry.register(synthetic_etf_daily::SyntheticEtfDaily::v1());
         registry.register(synthetic_etf_daily::SyntheticEtfDaily::v2());
         registry.register(synthetic_etf_daily::SyntheticEtfDaily::v3());
+        registry.register(szse_etf_frozen::SzseEtfFrozen::v1());
         registry
     }
 
@@ -126,6 +136,7 @@ mod tests {
         assert!(registry.contains("synthetic-etf-daily", "1"));
         assert!(registry.contains("synthetic-etf-daily", "2"));
         assert!(registry.contains("synthetic-etf-daily", "3"));
+        assert!(registry.contains("szse-etf-frozen", "1"));
         assert!(!registry.contains("other", "1"));
     }
 }
