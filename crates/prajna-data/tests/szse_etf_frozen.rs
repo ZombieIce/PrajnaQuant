@@ -80,7 +80,11 @@ fn tdx_package(day_key: &str, records: &[TdxRecord], comment: Option<&str>) -> V
 
 fn zip_members(members: &[(String, Vec<u8>)], comment: Option<&str>) -> Vec<u8> {
     let mut writer = ZipWriter::new(std::io::Cursor::new(Vec::new()));
-    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    // Workspace feature unification may enable zip's current-time default.
+    // Synthetic originals must stay byte-identical regardless of wall clock.
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Deflated)
+        .last_modified_time(zip::DateTime::default());
     for (name, bytes) in members {
         writer.start_file(name.as_str(), options).unwrap();
         writer.write_all(bytes).unwrap();
