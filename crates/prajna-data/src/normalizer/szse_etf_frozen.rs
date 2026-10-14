@@ -38,7 +38,7 @@ use crate::{
 use super::{Normalizer, RawInput};
 
 const NORMALIZER_ID: &str = "szse-etf-frozen";
-const CONFIG_V1: &str = r#"{"announcement_available_at":"close_of_first_session_after_announced_date_calendar_covered","announcement_category":"title_keyword_rules_v1_else_unclassified","announcement_date":"announcementTime_ms_in_Asia/Shanghai","bar_available_at":"unknown_null","bar_spec":"1d@session","bars":"tdx_g4day_sz_cod150_md1_512","code_scope":"159000-159999","crosscheck":"tencent_fqkline_day_exact_ohlc_shares","execution_status":"not_derived","identical_duplicate_facts":"deduplicated_min_raw_sha256","inputs":"vendor_originals_only","instrument_kind":"Etf","lot_size":100,"price_increment":"0.001","session_close":"15:00:00+08:00","session_open":"09:30:00+08:00","tdx_amount":"f64@72_fixed10","tdx_no_trade":"close<=0_or_open_high_low_all_zero_no_bar","tdx_price":"f64_rounded_to_0.001_tolerance_1e-6","tencent_volume":"lots*100","timezone":"Asia/Shanghai","venue":"SZSE","volume":"shares"}"#;
+const CONFIG_V1: &str = r#"{"announcement_available_at":"close_of_first_session_after_announced_date_calendar_covered","announcement_category":"title_keyword_rules_v1_else_unclassified","announcement_date":"announcementTime_ms_in_Asia/Shanghai","bar_available_at":"unknown_null","bar_spec":"1d@session","bars":"tdx_g4day_sz_cod150_md1_512","code_scope":"159000-159999","crosscheck":"tencent_fqkline_day_exact_ohlc_shares","execution_status":"not_derived","identical_duplicate_facts":"deduplicated_min_raw_sha256","inputs":"vendor_originals_only","instrument_kind":"Etf","lot_size":100,"price_increment":"0.001","session_close":"15:00:00+08:00","session_open":"09:30:00+08:00","tdx_amount":"f64@72_fixed10","tdx_no_trade":"close<=0_or_open_high_low_all_zero_keyed_no_bar","tdx_revision":"trade_vs_no_trade_conflict","tdx_price":"f64_rounded_to_0.001_tolerance_1e-6","tencent_volume":"lots*100","timezone":"Asia/Shanghai","venue":"SZSE","volume":"shares"}"#;
 const CODE_PREFIX: &str = "159";
 const MAX_MEMBER_BYTES: u64 = 256 * 1024 * 1024;
 const UNCLASSIFIED: &str = "unclassified";
@@ -125,7 +125,8 @@ struct Acc {
     issues: Vec<NormalizationIssue>,
     kind_counts: BTreeMap<&'static str, u64>,
     calendar: BTreeMap<NaiveDate, Sourced<bool>>,
-    primary: BTreeMap<Key, Sourced<Primary>>,
+    // None is a keyed no-trade observation, retained until revision validation.
+    primary: BTreeMap<Key, Sourced<Option<Primary>>>,
     secondary: BTreeMap<Key, Sourced<Ohlcv>>,
     announcements: BTreeMap<String, Sourced<Announcement>>,
     excluded: BTreeMap<&'static str, u64>,
@@ -295,6 +296,23 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
     if !issues.is_empty() {
         return Err(issues);
     }
+
+    // No-trade facts participate in conflict detection but never become Bars,
+    // instruments or positive primary crosscheck observations.
+    let primary: BTreeMap<_, _> = primary
+        .into_iter()
+        .filter_map(|(key, fact)| {
+            fact.value.map(|value| {
+                (
+                    key,
+                    Sourced {
+                        value,
+                        raw: fact.raw,
+                    },
+                )
+            })
+        })
+        .collect();
 
     let sessions = calendar
         .iter()
@@ -604,6 +622,15 @@ fn decode_tdx(raw: &RawInput, path: &str, acc: &mut Acc, duplicates: &mut u64) {
         // No trade: either no close, or a carried close with an empty intraday range.
         if close <= 0.0 || [open, high, low].iter().all(|value| *value == 0.0) {
             acc.count("tdx_no_trade_records");
+            insert_fact(
+                &mut acc.primary,
+                (code.to_owned(), date),
+                None,
+                &raw.raw_sha256,
+                &record_path,
+                &mut acc.issues,
+                duplicates,
+            );
             continue;
         }
         let shares = u64::from_le_bytes(block[56..64].try_into().expect("8 bytes"));
@@ -626,7 +653,7 @@ fn decode_tdx(raw: &RawInput, path: &str, acc: &mut Acc, duplicates: &mut u64) {
         insert_fact(
             &mut acc.primary,
             (code.to_owned(), date),
-            Primary { ohlcv, amount },
+            Some(Primary { ohlcv, amount }),
             &raw.raw_sha256,
             &record_path,
             &mut acc.issues,

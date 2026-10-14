@@ -471,6 +471,51 @@ fn vendor_revision_creates_a_new_dsv_and_conflicting_revisions_fail_closed() {
 }
 
 #[test]
+fn trade_to_no_trade_revisions_fail_closed_in_both_orders() {
+    // Both documented no-trade encodings must participate in revision checks.
+    for revised_record in [rec("159901", 0.0), ("159901", 0.0, 0.0, 0.0, 1.05, 0, 0.0)] {
+        let dir = tempfile::tempdir().unwrap();
+        let frozen = standard(dir.path());
+        let first = publish(dir.path(), &frozen).unwrap();
+        let revised_hash = freeze_raw(
+            &frozen.store,
+            &tdx_package("260105", &[revised_record], None),
+            meta("tdx", "application/zip"),
+        )
+        .unwrap();
+        let mut combined = frozen.hashes.clone();
+        combined.push(revised_hash.clone());
+        for hashes in [combined.clone(), combined.into_iter().rev().collect()] {
+            let error = publish(dir.path(), &with_hashes(&frozen, hashes)).unwrap_err();
+            assert!(issue_codes(error).contains(&"source_revision_conflict".to_owned()));
+        }
+
+        // Replacing the old package is a new version, with no stale Jan-05 Bar.
+        let mut replacement = frozen.hashes.clone();
+        replacement[1] = revised_hash;
+        let revised = publish(dir.path(), &with_hashes(&frozen, replacement)).unwrap();
+        assert_ne!(first.dsv, revised.dsv);
+        assert_eq!(read_strings(dir.path(), &revised.dsv, "bars", 0).len(), 2);
+        assert_eq!(
+            read_strings(dir.path(), &revised.dsv, "source_crosscheck", 2),
+            [
+                "secondary_only",
+                "mismatch",
+                "secondary_only",
+                "primary_only"
+            ]
+        );
+        let registry = NormalizerRegistry::with_builtins();
+        for manifest in [&first, &revised] {
+            assert_eq!(
+                rebuild_dataset(&frozen.store, &registry, manifest).unwrap(),
+                manifest.dsv
+            );
+        }
+    }
+}
+
+#[test]
 fn re_download_with_identical_facts_deduplicates_deterministically() {
     let dir = tempfile::tempdir().unwrap();
     let frozen = standard(dir.path());
@@ -488,8 +533,8 @@ fn re_download_with_identical_facts_deduplicates_deterministically() {
     let a = publish(dir.path(), &with_hashes(&frozen, forward)).unwrap();
     let b = publish(dir.path(), &with_hashes(&frozen, reversed)).unwrap();
     assert_eq!(a.core.tables, b.core.tables);
-    // 159901 and 159902 on 2026-01-05 are restated identically.
-    assert_eq!(a.provenance.coverage["identical_duplicate_facts"], 2);
+    // Two traded and two no-trade observations on Jan-05 are restated identically.
+    assert_eq!(a.provenance.coverage["identical_duplicate_facts"], 4);
     let primary_raw = read_strings(dir.path(), &a.dsv, "source_crosscheck", 4);
     assert_eq!(primary_raw[0], again.clone().min(frozen.hashes[1].clone()));
 }
