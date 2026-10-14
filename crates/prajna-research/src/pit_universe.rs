@@ -330,10 +330,7 @@ impl HistoricalCatalog {
                     (Some(first), Some(last))
                         if first <= last
                             && first >= input.coverage.start
-                            && last <= input.coverage.end =>
-                    {
-                        ()
-                    }
+                            && last <= input.coverage.end => {}
                     _ => {
                         return Err(error(
                             "observed scan requires ordered dates inside coverage",
