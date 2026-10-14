@@ -1,13 +1,14 @@
 # prajna-py
 
 Local Python-hosted PyO3 extension for [ADR 0021](../../docs/decisions/0021-python-strategy-entry-and-decision-boundary.md).
-In addition to the smoke API, this crate generates and validates a single Run's
-close-session Decision sequence. It reuses Rust panel loading and registered
-Factor computation; it does not execute a backtest or expose accounts.
-Read APIs reuse Rust's research panel, registered Factor definitions, persistent
-Factor Cache, and Experiment result storage. Experiment construction, Engine
-integration and Execution provenance are separate MVP-5 tickets. This is not a
-second research or execution engine.
+Typed Experiment definitions invoke the existing Rust parser, identity,
+execution and ResultLevel storage APIs. The single-Run strategy API generates
+and validates close-session Decisions using restricted As-of Views and Rust
+Factors. Python strategy references can be defined and identified, but their
+Decision sequences are not yet connected to Engine execution or Execution
+provenance. Read APIs reuse Rust's research panel, registered Factor definitions,
+persistent Factor Cache and Experiment result storage, returning `pyarrow.Table`.
+Rust remains the only execution and performance authority.
 
 ## Environment and build
 
@@ -21,6 +22,7 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install 'maturin==1.15.0'
 maturin develop --locked --offline
+cargo build -p prajna-experiment --bin prajna-experiment --example prepare_fixture --locked --offline
 python -c 'import prajna; print(prajna.__version__, prajna.smoke_test())'
 ```
 
@@ -46,6 +48,82 @@ PyArrow is a runtime dependency (`>=18,<24`); Polars is not a Python dependency.
   the GIL via `Python::detach`, including for the default zero-duration call.
   Negative/overflowing integers raise `OverflowError`; non-integer arguments
   raise `TypeError`. The wait is a concurrency probe, not a backtest or benchmark.
+
+## Experiment API
+
+Prepare the checked-in synthetic dataset and its Static Universe:
+
+```sh
+target/debug/examples/prepare_fixture /tmp/prajna-lake /tmp/prajna-cli.json
+```
+
+Then construct the same S2 Experiment using typed objects:
+
+```python
+import json
+from pathlib import Path
+import prajna
+
+definition = json.loads(Path("/tmp/prajna-cli.json").read_text())
+experiment = prajna.Experiment(
+    dataset_version=prajna.DatasetVersion(definition["dsv"]),
+    universe=prajna.Universe(definition["universe"]),
+    venue=prajna.Venue("SYNTH"),
+    strategy=prajna.RustStrategy.S2_ROTATION,
+    engine=prajna.Engine(prajna.EngineKind.VECTOR),
+    costs=prajna.Costs(0.001, 10.0, 10.0, 0.0, 0.0),
+    parameter_space=prajna.Grid(definition["parameter_space"]["grid"]),
+)
+Path("/tmp/prajna-python.json").write_text(experiment.to_json())
+identity = experiment.describe("/tmp/prajna-lake")
+print(identity.experiment_id, identity.runs)
+result = experiment.run(
+    "/tmp/prajna-lake", repository=Path.cwd(),
+    level=prajna.ResultLevel.FULL, threads=2,
+)
+print(result.action, result.path, result.manifest)
+```
+
+- `to_definition()` / `to_json()` produce ordinary CLI input JSON, not a second
+  canonicalizer. No seed is accepted. `describe(lake)` validates against local
+  DSV/Universe data and returns Rust's Experiment ID, sorted/deduplicated Run
+  definitions and canonical identity JSON. The latter includes normalized float
+  bits and is **not** an input JSON round-trip format.
+- `RustStrategy` supports S2 rotation, S1 buy-and-hold and S3 MA crossover.
+  `Grid(axes)` and `List(combinations)` accept JSON parameter dictionaries;
+  Rust validates built-in parameter schemas and canonicalizes identities.
+  Non-string dictionary keys, non-JSON objects and nonfinite floats fail explicitly.
+- `Engine` selects Vector, Fast Event or Accurate Event. Event engines require
+  `FastEventSettings`, including decimal-string capital and costs, portfolios and
+  `LotSizeSource()` (instrument lots) or `LotSizeSource(values)` (explicit lots).
+  Accurate additionally requires `Backend(name, version)`. Its runtime worker
+  paths are supplied as the paired `run(backend_python=..., backend_worker=...)`
+  arguments and do not enter identity; Backend name/version do.
+- Availability defaults to `AvailabilityAssumption.NONE`; the explicit alternative
+  is `TREAT_UNKNOWN_AS_TS_CLOSE`. `sessions_per_year` defaults to 252.
+  `unfilled_entry` is optional and preserves Rust's strategy-specific defaults.
+- `run()` releases the GIL for Rust parsing, expansion, provenance capture,
+  parallel execution and result storage. `repository` defaults to the current
+  directory; omitted `threads` uses Rayon defaults, including `RAYON_NUM_THREADS`.
+  `ExecutionResult` exposes the existing manifest, directory, invocation statistics
+  and action. Individual failed Runs remain explicit manifest statuses, with
+  errors in the stored Summary; no Python success-shaped replacement is made.
+- `ResultLevel.SUMMARY` is the default; `STANDARD` and `FULL` save the same tables
+  as CLI. Replays recompute and verify every saved table's logical hash, including
+  scalar Float64 bits. Requesting more detail on an existing Execution raises
+  an explicit error: use the existing CLI `--promote` command. This ticket does
+  not add a Python promotion API; saved tables can be read with `read_run` below.
+- Definition/data errors raise `ValueError`, provenance I/O errors `OSError`,
+  and execution/provenance/replay errors `RuntimeError`. Native argument conversion
+  can raise `TypeError` or `OverflowError`.
+
+`PythonStrategy("research.rotation", "1")` serializes as
+`"strategy": "research.rotation@1"`. Grid/List parameter objects may contain nested
+JSON values; Rust tags floats and strings when canonicalizing to prevent type
+collisions. Both CLI `run` and Python `run()` reject these references explicitly
+with `requires Python host` until the two-stage Python Decision execution ticket
+is complete. Defining a reference does not run Python code or capture Python
+strategy source/environment provenance.
 
 ## Single-Run strategy API
 
@@ -159,7 +237,7 @@ boundary, **not a Python sandbox or purity detector**: arbitrary trusted Python
 can still access its globals, files or independently loaded data. No account,
 holdings, orders or fills are passed. The final close may generate a Decision;
 next-session open execution, cash sizing, costs and pending state belong to the
-future shared Engine phase, not this API.
+future Python strategy Engine integration, not this single-Run API.
 
 ## Validation
 
@@ -169,13 +247,23 @@ With the above venv active, from the repository root:
 cargo fmt --all -- --check
 cargo clippy -p prajna-py --all-targets --locked --offline -- -D warnings
 cargo test -p prajna-py --locked --offline
+cargo test -p prajna-experiment --locked --offline
+cargo build -p prajna-experiment --bin prajna-experiment --example prepare_fixture --locked --offline
 python -m unittest discover -s python/tests -v
 cargo check -p quant-research --no-default-features --features b3-pyo3 --all-targets --locked --offline
 ```
 
-The Python tests use the installed real extension: import/version, smoke result,
-argument errors, Python-thread progress strictly during a 300 ms Rust call, and
-strategy declaration/scheduling, Rust Factor warm-up, invalid Decision rejection,
+The Python tests use the installed real extension and explicitly built CLI/fixture
+binaries; missing binaries fail with the required build command, never skip.
+They cover S1/S2/S3 Grid/List identities and Full-table exact replay against CLI
+on the 64×252 fixture (Vector and Fast Event lot), all ResultLevels, invalid
+inputs, Python-reference rejection, and Python-thread progress strictly during
+real Rust experiment execution as well as the smoke wait. Exact replay uses the
+existing Rust scalar-level logical-hash checks, not approximate metric comparisons.
+Fast Event manifests verify cash/quantity accounting; Vector remains a simplified
+weight-return model. No real-market, PIT or total-return claim follows.
+
+They also cover strategy declaration/scheduling, Rust Factor warm-up, invalid Decision rejection,
 as-of availability, undeclared/future indexing and compact Arrow buffer checks.
 `strategy_fixture` is a test-only example that publishes immutable synthetic
 DSVs with explicit delayed/unknown Bar/status availability overrides. It is not

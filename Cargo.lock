@@ -3001,6 +3001,7 @@ dependencies = [
  "prajna-experiment",
  "prajna-research",
  "pyo3",
+ "rayon",
  "serde",
  "serde_json",
 ]

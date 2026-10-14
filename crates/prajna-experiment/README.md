@@ -87,6 +87,12 @@ cargo test -p prajna-experiment --locked --offline
 
 `engine` 接受 `vector` / `fast_event` / `accurate_event`（语义版本 `vector@1` / `fast_event@1` / `accurate_event@1`）。
 `strategy` 接受 `s2_rotation`（TopKRank）、`buy_and_hold`、`ma_crossover`。
+定义解析还接受 Python 策略引用字符串 `strategy_id@version`（两部分非空，
+无空白或额外 `@`），参数为任意 JSON object，仍使用 Grid/List。
+Rust `Experiment::run_definitions` 可在不执行策略时返回排序去重的 Run Spec/ID，
+`canonical_json` 保留引用；CLI `run` 显式报错 `requires Python host`，退出 2，
+不创建 Execution 或静默跳过。Python 的类型化定义与现有 Rust 策略执行入口见
+[`prajna-py`](../prajna-py/README.md)；Python Decision 执行尚未实现。
 S2 的九个参数及默认 Run Spec 字节保持不变；显式 `unfilled_entry: "skip"`
 与缺省同一身份，`retry` 进入身份。BuyAndHold 固定 retry；MA 默认 skip，也可显式 retry。
 运行前通过 `prajna-research::engine::Engine` 校验 Strategy × Engine × 模式：

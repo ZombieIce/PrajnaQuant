@@ -139,6 +139,59 @@ fn json_output(output: Output, expected: i32) -> Value {
 }
 
 #[test]
+fn python_strategy_definition_is_identified_but_cli_requires_python_host() {
+    let example = Example::new();
+    example.write_definition(|definition| {
+        definition["strategy"] = json!("research.rotation@1");
+        definition["parameter_space"] = json!({"list": [{"window": 5, "weight": 0.5}]});
+    });
+    let definition = fs::read_to_string(&example.definition).unwrap();
+    let experiment = prajna_experiment::Experiment::parse(&definition, &example.lake).unwrap();
+    assert!(experiment.id().unwrap().starts_with("exp:sha256:"));
+    let canonical: Value = serde_json::from_slice(&experiment.canonical_json().unwrap()).unwrap();
+    assert_eq!(canonical["strategy"], "research.rotation@1");
+    let output = example.run(&[]);
+    status(&output, 2);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("requires Python host"));
+    assert!(!example.lake.join("experiments").exists());
+}
+
+#[test]
+fn python_parameter_identity_preserves_json_types_and_nested_values() {
+    let example = Example::new();
+    let mut definition: Value =
+        serde_json::from_slice(&fs::read(&example.definition).unwrap()).unwrap();
+    definition["strategy"] = json!("research.rotation@1");
+    let identify = |parameters: Value| {
+        let mut definition = definition.clone();
+        definition["parameter_space"] = json!({"list": [parameters]});
+        let experiment =
+            prajna_experiment::Experiment::parse(&definition.to_string(), &example.lake).unwrap();
+        (
+            experiment.id().unwrap(),
+            experiment.run_definitions(&example.lake).unwrap()[0]
+                .run_id
+                .clone(),
+        )
+    };
+    let numeric = identify(json!({"nested": [0.5, true, null]}));
+    let text = identify(json!({"nested": ["3fe0000000000000", true, null]}));
+    assert_ne!(numeric, text);
+    assert_ne!(
+        identify(json!({"value": "text"})),
+        identify(json!({"value": {"string": "text"}})),
+    );
+    assert_ne!(
+        identify(json!({"value": 0.5})),
+        identify(json!({"value": {"f64": "3fe0000000000000"}})),
+    );
+    assert_ne!(
+        identify(json!({"value": 0.0})),
+        identify(json!({"value": -0.0}))
+    );
+}
+
+#[test]
 fn readme_example_creates_replays_promotes_and_diffs_two_executions() {
     let example = Example::new();
     let first = json_output(example.run(&[]), 0);

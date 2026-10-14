@@ -414,6 +414,26 @@ impl Experiment {
         Ok(identity("exp", &self.canonical_json()?))
     }
 
+    /// Identity-bearing Run definitions, including references requiring a Python host.
+    pub fn run_definitions(
+        &self,
+        lake_root: impl AsRef<Path>,
+    ) -> Result<Vec<RunDefinition>, ExperimentError> {
+        if engine::is_python_strategy(&self.strategy_kind) {
+            if let ParameterSpace::Native { combinations, .. } = &self.parameter_space {
+                return engine::python_run_specs(self, combinations);
+            }
+        }
+        Ok(self
+            .expand(lake_root)?
+            .into_iter()
+            .map(|run| RunDefinition {
+                run_id: run.run_id,
+                run_spec: run.run_spec,
+            })
+            .collect())
+    }
+
     /// Returns the content address of one parameterized Run Spec.
     pub fn run_id(&self, parameters: &StrategyParameters) -> Result<String, ExperimentError> {
         let bytes = restricted_jcs(&self.run_spec(parameters))
@@ -447,6 +467,12 @@ impl Experiment {
         &self,
         universe: &StaticUniverse,
     ) -> Result<Vec<ExpandedRun>, ExperimentError> {
+        if engine::is_python_strategy(&self.strategy_kind) {
+            return Err(invalid(format!(
+                "strategy {} requires Python host; Python strategy execution is not implemented",
+                self.strategy_kind
+            )));
+        }
         if let ParameterSpace::Native { combinations, .. } = &self.parameter_space {
             return engine::expand_native(self, combinations);
         }
@@ -757,6 +783,12 @@ pub struct ExpandedRun {
     pub parameters: Option<StrategyParameters>,
     factor: Option<Factor>,
     strategy: VectorStrategy,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RunDefinition {
+    pub run_id: String,
+    pub run_spec: Value,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
