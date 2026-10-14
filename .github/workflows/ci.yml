@@ -154,3 +154,6 @@ jobs:
 
       - name: MVP-4 cost report and resource gate (no Nautilus required)
         run: python -m unittest tests.test_mvp4_cost -v
+
+      - name: MVP-5 record-only throughput report tests
+        run: python -m unittest tests.test_mvp5_benchmark -v

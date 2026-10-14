@@ -1,0 +1,9 @@
+test_invocation_timings_cover_every_view_without_changing_replay (test_execution.ExecutionTests.test_invocation_timings_cover_every_view_without_changing_replay) ... ok
+test_complete_matrix_preserves_raw_samples_without_performance_gate (tests.test_mvp5_benchmark.BenchmarkReportTests.test_complete_matrix_preserves_raw_samples_without_performance_gate) ... ok
+test_incomplete_failed_or_inconsistent_samples_are_rejected (tests.test_mvp5_benchmark.BenchmarkReportTests.test_incomplete_failed_or_inconsistent_samples_are_rejected) ... ok
+test_skipped_correctness_cannot_be_summarized_as_measured (tests.test_mvp5_benchmark.BenchmarkReportTests.test_skipped_correctness_cannot_be_summarized_as_measured) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 6.297s
+
+OK

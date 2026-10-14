@@ -6,6 +6,8 @@
 
 新 Agent 按 [AGENTS.md](AGENTS.md) 的顺序阅读；先区分[目标架构](ARCHITECTURE.md)、[产品路线](docs/product-roadmap.md)与已实现状态。当前工作与下一步看 [HANDOFF.md](HANDOFF.md)，既有 A 股正确性问题看 [priorities.md](docs/priorities.md)。架构、时间、数据、因子、策略、引擎与 API 的实际状态分别在 `docs/` 同名文档。
 
+MVP-5 的 Python Decision S2/S3 64×252 合成吞吐、分段耗时、As-of View 成本与 RSS，见[可复跑测量及 B3 并列表](poc/mvp5-benchmark/README.md)。只记录、不设门槛；不推翻 B3 `reject`，不构成生产吞吐承诺。
+
 ## 实际组成
 
 | 路径 | 当前作用 |

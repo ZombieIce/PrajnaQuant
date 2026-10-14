@@ -1,0 +1,13 @@
+test_explicit_symbol (tests.test_warehouse.WarehouseTests.test_explicit_symbol) ... ok
+test_invalid_and_duplicate (tests.test_warehouse.WarehouseTests.test_invalid_and_duplicate) ... ok
+test_no_adjusted_substitution (tests.test_warehouse.WarehouseTests.test_no_adjusted_substitution) ... ok
+test_revisions_idempotence_reversion_and_export (tests.test_warehouse.WarehouseTests.test_revisions_idempotence_reversion_and_export) ... ok
+test_unit_and_ohlc (tests.test_warehouse.WarehouseTests.test_unit_and_ohlc) ... ok
+test_complete_matrix_preserves_raw_samples_without_performance_gate (tests.test_mvp5_benchmark.BenchmarkReportTests.test_complete_matrix_preserves_raw_samples_without_performance_gate) ... ok
+test_incomplete_failed_or_inconsistent_samples_are_rejected (tests.test_mvp5_benchmark.BenchmarkReportTests.test_incomplete_failed_or_inconsistent_samples_are_rejected) ... ok
+test_skipped_correctness_cannot_be_summarized_as_measured (tests.test_mvp5_benchmark.BenchmarkReportTests.test_skipped_correctness_cannot_be_summarized_as_measured) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 7.614s
+
+OK

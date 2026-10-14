@@ -1,0 +1,418 @@
+$ cargo fmt --all -- --check
+warning: `/Users/yibinzhang/.cargo/config` is deprecated in favor of `config.toml`
+  |
+  = help: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`
+$ cargo test -p prajna-py --locked --offline
+warning: `/Users/yibinzhang/.cargo/config` is deprecated in favor of `config.toml`
+  |
+  = help: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`
+warning: unused import: `PlRefPath`
+  --> poc/vendor/polars-io/src/cloud/options.rs:27:42
+   |
+27 | use polars_utils::pl_path::{CloudScheme, PlRefPath};
+   |                                          ^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `polars_time::prelude::*`
+ --> poc/vendor/polars-io/src/csv/read/read_impl.rs:9:5
+  |
+9 | use polars_time::prelude::*;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::parser::next_line_position`
+ --> poc/vendor/polars-io/src/csv/read/utils.rs:6:5
+  |
+6 | use super::parser::next_line_position;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::splitfields::SplitFields`
+ --> poc/vendor/polars-io/src/csv/read/utils.rs:9:5
+  |
+9 | use super::splitfields::SplitFields;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `CloudScheme`
+ --> poc/vendor/polars-io/src/path_utils/mod.rs:9:29
+  |
+9 | use polars_utils::pl_path::{CloudScheme, PlRefPath};
+  |                             ^^^^^^^^^^^
+
+warning: unused import: `std::sync::Arc`
+ --> poc/vendor/polars-io/src/shared.rs:2:5
+  |
+2 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `crate::options::RowIndex`
+ --> poc/vendor/polars-io/src/shared.rs:7:5
+  |
+7 | use crate::options::RowIndex;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `to_compute_err`
+ --> poc/vendor/polars-io/src/utils/compression.rs:6:35
+  |
+6 | use polars_error::{feature_gated, to_compute_err};
+  |                                   ^^^^^^^^^^^^^^
+
+warning: unused import: `crate::utils::sync_on_close::SyncOnCloseType`
+  --> poc/vendor/polars-io/src/utils/compression.rs:10:5
+   |
+10 | use crate::utils::sync_on_close::SyncOnCloseType;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `polars_err`
+ --> poc/vendor/polars-io/src/utils/file.rs:8:49
+  |
+8 | use polars_error::{PolarsResult, feature_gated, polars_err};
+  |                                                 ^^^^^^^^^^
+
+warning: unused import: `polars_utils::mmap::ensure_not_mapped`
+  --> poc/vendor/polars-io/src/utils/file.rs:11:5
+   |
+11 | use polars_utils::mmap::ensure_not_mapped;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `format_file_uri`
+  --> poc/vendor/polars-io/src/utils/file.rs:12:40
+   |
+12 | use polars_utils::pl_path::{PlRefPath, format_file_uri};
+   |                                        ^^^^^^^^^^^^^^^
+
+warning: unused variable: `separator`
+   --> poc/vendor/polars-io/src/csv/read/read_impl.rs:157:13
+    |
+157 |         let separator = parse_options.separator;
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_separator`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `algo`
+  --> poc/vendor/polars-io/src/utils/compression.rs:49:14
+   |
+49 |     let Some(algo) = SupportedCompression::check(bytes) else {
+   |              ^^^^ help: if this is intentional, prefix it with an underscore: `_algo`
+
+warning: unused variable: `new_slice_from_read`
+   --> poc/vendor/polars-io/src/utils/compression.rs:192:13
+    |
+192 |         let new_slice_from_read =
+    |             ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_new_slice_from_read`
+
+warning: unused variable: `writer`
+   --> poc/vendor/polars-io/src/utils/compression.rs:400:17
+    |
+400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {
+    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`
+
+warning: unused variable: `level`
+   --> poc/vendor/polars-io/src/utils/compression.rs:400:35
+    |
+400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {
+    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`
+
+warning: unused variable: `writer`
+   --> poc/vendor/polars-io/src/utils/compression.rs:409:17
+    |
+409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {
+    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`
+
+warning: unused variable: `level`
+   --> poc/vendor/polars-io/src/utils/compression.rs:409:35
+    |
+409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {
+    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`
+
+warning: unused variable: `buf`
+   --> poc/vendor/polars-io/src/utils/compression.rs:419:25
+    |
+419 |     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+    |                         ^^^ help: if this is intentional, prefix it with an underscore: `_buf`
+
+warning: unused variable: `io_metrics`
+   --> poc/vendor/polars-io/src/utils/byte_source.rs:245:9
+    |
+245 |         io_metrics: Option<Arc<IOMetrics>>,
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`
+
+warning: unused variable: `fetch_config`
+   --> poc/vendor/polars-io/src/utils/byte_source.rs:253:31
+    |
+253 |             Self::ObjectStore(fetch_config) => feature_gated!("cloud", {
+    |                               ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_fetch_config`
+
+warning: unused variable: `io_metrics`
+  --> poc/vendor/polars-io/src/utils/file.rs:50:9
+   |
+50 |         io_metrics: Option<Arc<IOMetrics>>,
+   |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`
+
+warning: function `nonzero_usize_max` is never used
+  --> poc/vendor/polars-io/src/csv/read/options.rs:53:10
+   |
+53 | const fn nonzero_usize_max() -> NonZeroUsize {
+   |          ^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `next_line_position` is never used
+   --> poc/vendor/polars-io/src/csv/read/parser.rs:269:15
+    |
+269 | pub(super) fn next_line_position(
+    |               ^^^^^^^^^^^^^^^^^^
+
+warning: methods `extend` and `extend_from_slice` are never used
+   --> poc/vendor/polars-io/src/path_utils/mod.rs:615:12
+    |
+600 | /     impl<F> OutPaths<'_, F>
+601 | |     where
+602 | |         F: Fn(&PlRefPath) -> bool,
+    | |__________________________________- methods in this implementation
+...
+615 |           fn extend(&mut self, values: impl IntoIterator<Item = PlRefPath>) {
+    |              ^^^^^^
+...
+628 |           fn extend_from_slice(&mut self, values: &[PlRefPath]) {
+    |              ^^^^^^^^^^^^^^^^^
+
+warning: constant `ESTIMATED_DEFLATE_RATIO` is never used
+   --> poc/vendor/polars-io/src/utils/compression.rs:138:15
+    |
+138 |         const ESTIMATED_DEFLATE_RATIO: usize = 3;
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `ESTIMATED_ZSTD_RATIO` is never used
+   --> poc/vendor/polars-io/src/utils/compression.rs:139:15
+    |
+139 |         const ESTIMATED_ZSTD_RATIO: usize = 5;
+    |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `cloud_writer_coalesce_run_length` is never used
+  --> poc/vendor/polars-io/src/configs.rs:41:15
+   |
+41 | pub(crate) fn cloud_writer_coalesce_run_length() -> usize {
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `cloud_writer_copy_buffer_size` is never used
+  --> poc/vendor/polars-io/src/configs.rs:65:15
+   |
+65 | pub(crate) fn cloud_writer_copy_buffer_size() -> NonZeroUsize {
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `polars-io` (lib) generated 30 warnings (run `cargo fix --lib -p polars-io` to apply 23 suggestions)
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `prajna-py` (example "read_fixture") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.45s
+     Running unittests src/lib.rs (target/debug/deps/_native-161bd3f8ac6d05a9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+$ cargo clippy -p prajna-py --all-targets --locked --offline -- -D warnings
+warning: `/Users/yibinzhang/.cargo/config` is deprecated in favor of `config.toml`
+  |
+  = help: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`
+warning: `/Users/yibinzhang/.cargo/config` is deprecated in favor of `config.toml`
+  |
+  = help: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`
+warning: unused import: `PlRefPath`
+  --> poc/vendor/polars-io/src/cloud/options.rs:27:42
+   |
+27 | use polars_utils::pl_path::{CloudScheme, PlRefPath};
+   |                                          ^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `polars_time::prelude::*`
+ --> poc/vendor/polars-io/src/csv/read/read_impl.rs:9:5
+  |
+9 | use polars_time::prelude::*;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::parser::next_line_position`
+ --> poc/vendor/polars-io/src/csv/read/utils.rs:6:5
+  |
+6 | use super::parser::next_line_position;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::splitfields::SplitFields`
+ --> poc/vendor/polars-io/src/csv/read/utils.rs:9:5
+  |
+9 | use super::splitfields::SplitFields;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `CloudScheme`
+ --> poc/vendor/polars-io/src/path_utils/mod.rs:9:29
+  |
+9 | use polars_utils::pl_path::{CloudScheme, PlRefPath};
+  |                             ^^^^^^^^^^^
+
+warning: unused import: `std::sync::Arc`
+ --> poc/vendor/polars-io/src/shared.rs:2:5
+  |
+2 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `crate::options::RowIndex`
+ --> poc/vendor/polars-io/src/shared.rs:7:5
+  |
+7 | use crate::options::RowIndex;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `to_compute_err`
+ --> poc/vendor/polars-io/src/utils/compression.rs:6:35
+  |
+6 | use polars_error::{feature_gated, to_compute_err};
+  |                                   ^^^^^^^^^^^^^^
+
+warning: unused import: `crate::utils::sync_on_close::SyncOnCloseType`
+  --> poc/vendor/polars-io/src/utils/compression.rs:10:5
+   |
+10 | use crate::utils::sync_on_close::SyncOnCloseType;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `polars_err`
+ --> poc/vendor/polars-io/src/utils/file.rs:8:49
+  |
+8 | use polars_error::{PolarsResult, feature_gated, polars_err};
+  |                                                 ^^^^^^^^^^
+
+warning: unused import: `polars_utils::mmap::ensure_not_mapped`
+  --> poc/vendor/polars-io/src/utils/file.rs:11:5
+   |
+11 | use polars_utils::mmap::ensure_not_mapped;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `format_file_uri`
+  --> poc/vendor/polars-io/src/utils/file.rs:12:40
+   |
+12 | use polars_utils::pl_path::{PlRefPath, format_file_uri};
+   |                                        ^^^^^^^^^^^^^^^
+
+warning: unused variable: `separator`
+   --> poc/vendor/polars-io/src/csv/read/read_impl.rs:157:13
+    |
+157 |         let separator = parse_options.separator;
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_separator`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `algo`
+  --> poc/vendor/polars-io/src/utils/compression.rs:49:14
+   |
+49 |     let Some(algo) = SupportedCompression::check(bytes) else {
+   |              ^^^^ help: if this is intentional, prefix it with an underscore: `_algo`
+
+warning: unused variable: `new_slice_from_read`
+   --> poc/vendor/polars-io/src/utils/compression.rs:192:13
+    |
+192 |         let new_slice_from_read =
+    |             ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_new_slice_from_read`
+
+warning: unused variable: `writer`
+   --> poc/vendor/polars-io/src/utils/compression.rs:400:17
+    |
+400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {
+    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`
+
+warning: unused variable: `level`
+   --> poc/vendor/polars-io/src/utils/compression.rs:400:35
+    |
+400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {
+    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`
+
+warning: unused variable: `writer`
+   --> poc/vendor/polars-io/src/utils/compression.rs:409:17
+    |
+409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {
+    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`
+
+warning: unused variable: `level`
+   --> poc/vendor/polars-io/src/utils/compression.rs:409:35
+    |
+409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {
+    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`
+
+warning: unused variable: `buf`
+   --> poc/vendor/polars-io/src/utils/compression.rs:419:25
+    |
+419 |     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+    |                         ^^^ help: if this is intentional, prefix it with an underscore: `_buf`
+
+warning: unused variable: `io_metrics`
+   --> poc/vendor/polars-io/src/utils/byte_source.rs:245:9
+    |
+245 |         io_metrics: Option<Arc<IOMetrics>>,
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`
+
+warning: unused variable: `fetch_config`
+   --> poc/vendor/polars-io/src/utils/byte_source.rs:253:31
+    |
+253 |             Self::ObjectStore(fetch_config) => feature_gated!("cloud", {
+    |                               ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_fetch_config`
+
+warning: unused variable: `io_metrics`
+  --> poc/vendor/polars-io/src/utils/file.rs:50:9
+   |
+50 |         io_metrics: Option<Arc<IOMetrics>>,
+   |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`
+
+warning: function `nonzero_usize_max` is never used
+  --> poc/vendor/polars-io/src/csv/read/options.rs:53:10
+   |
+53 | const fn nonzero_usize_max() -> NonZeroUsize {
+   |          ^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `next_line_position` is never used
+   --> poc/vendor/polars-io/src/csv/read/parser.rs:269:15
+    |
+269 | pub(super) fn next_line_position(
+    |               ^^^^^^^^^^^^^^^^^^
+
+warning: methods `extend` and `extend_from_slice` are never used
+   --> poc/vendor/polars-io/src/path_utils/mod.rs:615:12
+    |
+600 | /     impl<F> OutPaths<'_, F>
+601 | |     where
+602 | |         F: Fn(&PlRefPath) -> bool,
+    | |__________________________________- methods in this implementation
+...
+615 |           fn extend(&mut self, values: impl IntoIterator<Item = PlRefPath>) {
+    |              ^^^^^^
+...
+628 |           fn extend_from_slice(&mut self, values: &[PlRefPath]) {
+    |              ^^^^^^^^^^^^^^^^^
+
+warning: constant `ESTIMATED_DEFLATE_RATIO` is never used
+   --> poc/vendor/polars-io/src/utils/compression.rs:138:15
+    |
+138 |         const ESTIMATED_DEFLATE_RATIO: usize = 3;
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `ESTIMATED_ZSTD_RATIO` is never used
+   --> poc/vendor/polars-io/src/utils/compression.rs:139:15
+    |
+139 |         const ESTIMATED_ZSTD_RATIO: usize = 5;
+    |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `cloud_writer_coalesce_run_length` is never used
+  --> poc/vendor/polars-io/src/configs.rs:41:15
+   |
+41 | pub(crate) fn cloud_writer_coalesce_run_length() -> usize {
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `cloud_writer_copy_buffer_size` is never used
+  --> poc/vendor/polars-io/src/configs.rs:65:15
+   |
+65 | pub(crate) fn cloud_writer_copy_buffer_size() -> NonZeroUsize {
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `polars-io` (lib) generated 30 warnings (run `cargo clippy --fix --lib -p polars-io -- -D warnings` to apply 23 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.05s

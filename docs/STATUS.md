@@ -86,6 +86,8 @@ MVP-2 的 `prajna-experiment`（Issue #99–#104）可解析并校验 `experimen
 
 ### MVP-5 Python 入口
 
+**合成吞吐（Measured，不设门槛）**：64×252 的 S2/S3 Python Decision 与 Rust 内置策略已通过真实 release Experiment API 采样，覆盖 1/2 Rayon 线程、阶段一/二与 Run 子区间、每次安全裁剪/Arrow 导出 View 成本和隔离候选进程 RSS。S2 两个 canonical Run、S3 固定 MA20/60 单 Run，后者不能据此声称 Run 并行扩展；小批量 Python 端到端未因两线程改善。原始 40 次样本、采样前无跳过的正确性验收、环境、源码/二进制 hash、命令日志及与历史 B3 不同计时边界的并列表见 [MVP-5 吞吐归档](../poc/mvp5-benchmark/README.md)。这是合成负载测量，不推翻 B3 `reject`，不外推生产吞吐、PIT 或总回报。
+
 `prajna-py` / `python/prajna` 现提供本地 Python 宿主扩展（PyO3 0.29.0、maturin 1.15.0、abi3-py312）、类型化 Experiment API、只读研究 API 及单 Run `generate_decisions`。Experiment 复用 Rust 的解析、规范化身份、执行与 ResultLevel 存储，真实调用期间释放 GIL；Python 3.12 全新 venv、S1/S2/S3 Grid/List 在 64×252 合成 fixture 上的 Python/CLI Experiment 与 Run 身份、Vector 和 Fast Event `lot + full_target` Full 表逐值 logical-hash 重放、三种 ResultLevel 与线程进展测试通过，既有 CLI 身份/金标准回归通过。Python `strategy_id@version` 引用可序列化与生成身份，但 CLI/Python `run` 仍显式报错 `requires Python host`。单 Run 策略声明版本、Bar 列、Rust Factor 依赖、完整 lookback 窗口和再平衡间隔；Rust 构造按 close 可用时刻与 Static Universe 限制的 As-of View，串行调用纯 Decision 函数并严格校验权重、Universe 与可选排序。安全裁剪复制受限窗口，Arrow PyCapsule 到 PyArrow 为零拷贝，不声称源面板切片零拷贝；真实扩展的合成 DSV 测试覆盖未知/延迟可用时刻、未来/未声明字段及底层 buffer 对抗、调度和非法输出。未知可用时刻须显式声明 assumption，Static Universe 不构成历史 PIT；纯函数是受信 Python 的使用契约而非 sandbox 保证。`read_dataset` / `read_factor` / `read_run` 与 `Factor(kind, params)` 保留，策略的命名依赖使用 `FactorDependency(name, kind, params)`，共用 Rust 定义解析与 Arrow 导出；完整研究面板不等于策略安全 View。轻量 CI 保留依赖图守卫并构建真实 CLI/fixture 后测试绑定。尚未接入 Python Decision 的 Engine 执行与源码/环境 Execution 复现，不表示 MVP-5、PIT/总回报或生产 Python 策略入口已完成；构建与测试见 [`prajna-py`](../crates/prajna-py/README.md)。
 
 ### MVP-3 独立 full_target / POC entry_only 金标准

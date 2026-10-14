@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
     sync::Arc,
+    time::Instant,
 };
 
 use arrow_array::{
@@ -397,6 +398,33 @@ pub(crate) fn _generate_decisions(
     params_json: &str,
     availability_assumption: &str,
 ) -> PyResult<Vec<PyDecision>> {
+    generate_decisions(
+        py,
+        lake_root,
+        dsv,
+        venue,
+        members,
+        strategy_json,
+        decide,
+        params_json,
+        availability_assumption,
+        &mut Vec::new(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn generate_decisions(
+    py: Python<'_>,
+    lake_root: &str,
+    dsv: &str,
+    venue: &str,
+    members: Vec<String>,
+    strategy_json: &str,
+    decide: Py<PyAny>,
+    params_json: &str,
+    availability_assumption: &str,
+    asof_view_ms: &mut Vec<f64>,
+) -> PyResult<Vec<PyDecision>> {
     let declaration: Declaration = serde_json::from_str(strategy_json).map_err(invalid)?;
     declaration.validate()?;
     let params: Value = serde_json::from_str(params_json).map_err(invalid)?;
@@ -480,6 +508,7 @@ pub(crate) fn _generate_decisions(
         if (index - first_decision.expect("set above")) % declaration.rebalance_every != 0 {
             continue;
         }
+        let view_started = Instant::now();
         let factor_views = factors
             .iter()
             .map(|(name, batch)| {
@@ -508,6 +537,8 @@ pub(crate) fn _generate_decisions(
             factors: factor_views,
             availability_assumption: assumption.to_string(),
         };
+        let view = Py::new(py, view)?;
+        asof_view_ms.push(view_started.elapsed().as_secs_f64() * 1000.0);
         let previous = decisions.last().cloned();
         let params = py.import("json")?.call_method1("loads", (&params_json,))?;
         let result = decide.bind(py).call1((view, params, previous))?;

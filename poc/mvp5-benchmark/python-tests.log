@@ -1,0 +1,652 @@
+test_future_next_row_and_unavailable_fields_are_blocked_end_to_end (test_acceptance.AcceptanceTests.test_future_next_row_and_unavailable_fields_are_blocked_end_to_end) ... warning: `/Users/yibinzhang/.cargo/config` is deprecated in favor of `config.toml`
+  |
+  = help: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`
+warning: unused import: `PlRefPath`
+  --> poc/vendor/polars-io/src/cloud/options.rs:27:42
+   |
+27 | use polars_utils::pl_path::{CloudScheme, PlRefPath};
+   |                                          ^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `polars_time::prelude::*`
+ --> poc/vendor/polars-io/src/csv/read/read_impl.rs:9:5
+  |
+9 | use polars_time::prelude::*;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::parser::next_line_position`
+ --> poc/vendor/polars-io/src/csv/read/utils.rs:6:5
+  |
+6 | use super::parser::next_line_position;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::splitfields::SplitFields`
+ --> poc/vendor/polars-io/src/csv/read/utils.rs:9:5
+  |
+9 | use super::splitfields::SplitFields;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `CloudScheme`
+ --> poc/vendor/polars-io/src/path_utils/mod.rs:9:29
+  |
+9 | use polars_utils::pl_path::{CloudScheme, PlRefPath};
+  |                             ^^^^^^^^^^^
+
+warning: unused import: `std::sync::Arc`
+ --> poc/vendor/polars-io/src/shared.rs:2:5
+  |
+2 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `crate::options::RowIndex`
+ --> poc/vendor/polars-io/src/shared.rs:7:5
+  |
+7 | use crate::options::RowIndex;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `to_compute_err`
+ --> poc/vendor/polars-io/src/utils/compression.rs:6:35
+  |
+6 | use polars_error::{feature_gated, to_compute_err};
+  |                                   ^^^^^^^^^^^^^^
+
+warning: unused import: `crate::utils::sync_on_close::SyncOnCloseType`
+  --> poc/vendor/polars-io/src/utils/compression.rs:10:5
+   |
+10 | use crate::utils::sync_on_close::SyncOnCloseType;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `polars_err`
+ --> poc/vendor/polars-io/src/utils/file.rs:8:49
+  |
+8 | use polars_error::{PolarsResult, feature_gated, polars_err};
+  |                                                 ^^^^^^^^^^
+
+warning: unused import: `polars_utils::mmap::ensure_not_mapped`
+  --> poc/vendor/polars-io/src/utils/file.rs:11:5
+   |
+11 | use polars_utils::mmap::ensure_not_mapped;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `format_file_uri`
+  --> poc/vendor/polars-io/src/utils/file.rs:12:40
+   |
+12 | use polars_utils::pl_path::{PlRefPath, format_file_uri};
+   |                                        ^^^^^^^^^^^^^^^
+
+warning: unused variable: `separator`
+   --> poc/vendor/polars-io/src/csv/read/read_impl.rs:157:13
+    |
+157 |         let separator = parse_options.separator;
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_separator`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `algo`
+  --> poc/vendor/polars-io/src/utils/compression.rs:49:14
+   |
+49 |     let Some(algo) = SupportedCompression::check(bytes) else {
+   |              ^^^^ help: if this is intentional, prefix it with an underscore: `_algo`
+
+warning: unused variable: `new_slice_from_read`
+   --> poc/vendor/polars-io/src/utils/compression.rs:192:13
+    |
+192 |         let new_slice_from_read =
+    |             ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_new_slice_from_read`
+
+warning: unused variable: `writer`
+   --> poc/vendor/polars-io/src/utils/compression.rs:400:17
+    |
+400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {
+    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`
+
+warning: unused variable: `level`
+   --> poc/vendor/polars-io/src/utils/compression.rs:400:35
+    |
+400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {
+    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`
+
+warning: unused variable: `writer`
+   --> poc/vendor/polars-io/src/utils/compression.rs:409:17
+    |
+409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {
+    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`
+
+warning: unused variable: `level`
+   --> poc/vendor/polars-io/src/utils/compression.rs:409:35
+    |
+409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {
+    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`
+
+warning: unused variable: `buf`
+   --> poc/vendor/polars-io/src/utils/compression.rs:419:25
+    |
+419 |     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+    |                         ^^^ help: if this is intentional, prefix it with an underscore: `_buf`
+
+warning: unused variable: `io_metrics`
+   --> poc/vendor/polars-io/src/utils/byte_source.rs:245:9
+    |
+245 |         io_metrics: Option<Arc<IOMetrics>>,
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`
+
+warning: unused variable: `fetch_config`
+   --> poc/vendor/polars-io/src/utils/byte_source.rs:253:31
+    |
+253 |             Self::ObjectStore(fetch_config) => feature_gated!("cloud", {
+    |                               ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_fetch_config`
+
+warning: unused variable: `io_metrics`
+  --> poc/vendor/polars-io/src/utils/file.rs:50:9
+   |
+50 |         io_metrics: Option<Arc<IOMetrics>>,
+   |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`
+
+warning: function `nonzero_usize_max` is never used
+  --> poc/vendor/polars-io/src/csv/read/options.rs:53:10
+   |
+53 | const fn nonzero_usize_max() -> NonZeroUsize {
+   |          ^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `next_line_position` is never used
+   --> poc/vendor/polars-io/src/csv/read/parser.rs:269:15
+    |
+269 | pub(super) fn next_line_position(
+    |               ^^^^^^^^^^^^^^^^^^
+
+warning: methods `extend` and `extend_from_slice` are never used
+   --> poc/vendor/polars-io/src/path_utils/mod.rs:615:12
+    |
+600 | /     impl<F> OutPaths<'_, F>
+601 | |     where
+602 | |         F: Fn(&PlRefPath) -> bool,
+    | |__________________________________- methods in this implementation
+...
+615 |           fn extend(&mut self, values: impl IntoIterator<Item = PlRefPath>) {
+    |              ^^^^^^
+...
+628 |           fn extend_from_slice(&mut self, values: &[PlRefPath]) {
+    |              ^^^^^^^^^^^^^^^^^
+
+warning: constant `ESTIMATED_DEFLATE_RATIO` is never used
+   --> poc/vendor/polars-io/src/utils/compression.rs:138:15
+    |
+138 |         const ESTIMATED_DEFLATE_RATIO: usize = 3;
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `ESTIMATED_ZSTD_RATIO` is never used
+   --> poc/vendor/polars-io/src/utils/compression.rs:139:15
+    |
+139 |         const ESTIMATED_ZSTD_RATIO: usize = 5;
+    |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `cloud_writer_coalesce_run_length` is never used
+  --> poc/vendor/polars-io/src/configs.rs:41:15
+   |
+41 | pub(crate) fn cloud_writer_coalesce_run_length() -> usize {
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `cloud_writer_copy_buffer_size` is never used
+  --> poc/vendor/polars-io/src/configs.rs:65:15
+   |
+65 | pub(crate) fn cloud_writer_copy_buffer_size() -> NonZeroUsize {
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ok
+test_invalid_decisions_fail_runs_without_publishing_standard_tables (test_acceptance.AcceptanceTests.test_invalid_decisions_fail_runs_without_publishing_standard_tables) ... ok
+test_s2_cli_identity_and_all_retained_values_match_python_api (test_acceptance.AcceptanceTests.test_s2_cli_identity_and_all_retained_values_match_python_api) ... ok
+test_s2_decisions_match_rust_on_every_session (test_acceptance.AcceptanceTests.test_s2_decisions_match_rust_on_every_session) ... ok
+test_s2_python_strategy_summary_standard_and_replay_match_builtin (test_acceptance.AcceptanceTests.test_s2_python_strategy_summary_standard_and_replay_match_builtin) ... ok
+test_s3_ma20_60_decisions_and_results_match_on_registered_fixtures (test_acceptance.AcceptanceTests.test_s3_ma20_60_decisions_and_results_match_on_registered_fixtures) ... ok
+test_callbacks_are_serial_before_gil_free_execution (test_execution.ExecutionTests.test_callbacks_are_serial_before_gil_free_execution) ... ok
+test_changed_decisions_in_same_execution_are_rejected (test_execution.ExecutionTests.test_changed_decisions_in_same_execution_are_rejected) ... ok
+test_grid_results_retention_and_run_by_run_replay (test_execution.ExecutionTests.test_grid_results_retention_and_run_by_run_replay) ... ok
+test_invalid_decision_fails_only_its_run_and_replays (test_execution.ExecutionTests.test_invalid_decision_fails_only_its_run_and_replays) ... ok
+test_invocation_timings_cover_every_view_without_changing_replay (test_execution.ExecutionTests.test_invocation_timings_cover_every_view_without_changing_replay) ... ok
+test_notebook_function_is_not_fully_reproducible (test_execution.ExecutionTests.test_notebook_function_is_not_fully_reproducible) ... ok
+test_real_accurate_python_run_in_isolated_worker (test_execution.ExecutionTests.test_real_accurate_python_run_in_isolated_worker) ... skipped 'real Nautilus only in Full workflow'
+test_reference_seed_and_callback_errors_do_not_publish_results (test_execution.ExecutionTests.test_reference_seed_and_callback_errors_do_not_publish_results) ... ok
+test_invalid_parameters_and_runtime_options_are_explicit_errors (test_experiment.ExperimentTests.test_invalid_parameters_and_runtime_options_are_explicit_errors) ... ok
+test_python_reference_grid_deduplicates_runs_and_preserves_json_types (test_experiment.ExperimentTests.test_python_reference_grid_deduplicates_runs_and_preserves_json_types) ... ok
+test_python_reference_is_serialized_and_identified_but_not_executed (test_experiment.ExperimentTests.test_python_reference_is_serialized_and_identified_but_not_executed) ... ok
+test_real_experiment_execution_releases_gil (test_experiment.ExperimentTests.test_real_experiment_execution_releases_gil) ... ok
+test_result_levels_and_replay_limits_use_rust_storage (test_experiment.ExperimentTests.test_result_levels_and_replay_limits_use_rust_storage) ... ok
+test_s1_s2_s3_grid_and_list_match_cli_across_vector_and_fast_event (test_experiment.ExperimentTests.test_s1_s2_s3_grid_and_list_match_cli_across_vector_and_fast_event) ... ok
+test_typed_s2_experiment_replays_cli_identity_and_saved_results (test_experiment.ExperimentTests.test_typed_s2_experiment_replays_cli_identity_and_saved_results) ... ok
+test_import_exposes_rust_version_and_smoke_entry (test_prajna.PrajnaSmokeTests.test_import_exposes_rust_version_and_smoke_entry) ... ok
+test_invalid_duration_raises_an_explicit_error (test_prajna.PrajnaSmokeTests.test_invalid_duration_raises_an_explicit_error) ... ok
+test_python_thread_runs_during_long_rust_call (test_prajna.PrajnaSmokeTests.test_python_thread_runs_during_long_rust_call) ... ok
+warning: `/Users/yibinzhang/.cargo/config` is deprecated in favor of `config.toml`
+  |
+  = help: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`
+warning: unused import: `PlRefPath`
+  --> poc/vendor/polars-io/src/cloud/options.rs:27:42
+   |
+27 | use polars_utils::pl_path::{CloudScheme, PlRefPath};
+   |                                          ^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `polars_time::prelude::*`
+ --> poc/vendor/polars-io/src/csv/read/read_impl.rs:9:5
+  |
+9 | use polars_time::prelude::*;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::parser::next_line_position`
+ --> poc/vendor/polars-io/src/csv/read/utils.rs:6:5
+  |
+6 | use super::parser::next_line_position;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::splitfields::SplitFields`
+ --> poc/vendor/polars-io/src/csv/read/utils.rs:9:5
+  |
+9 | use super::splitfields::SplitFields;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `CloudScheme`
+ --> poc/vendor/polars-io/src/path_utils/mod.rs:9:29
+  |
+9 | use polars_utils::pl_path::{CloudScheme, PlRefPath};
+  |                             ^^^^^^^^^^^
+
+warning: unused import: `std::sync::Arc`
+ --> poc/vendor/polars-io/src/shared.rs:2:5
+  |
+2 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `crate::options::RowIndex`
+ --> poc/vendor/polars-io/src/shared.rs:7:5
+  |
+7 | use crate::options::RowIndex;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `to_compute_err`
+ --> poc/vendor/polars-io/src/utils/compression.rs:6:35
+  |
+6 | use polars_error::{feature_gated, to_compute_err};
+  |                                   ^^^^^^^^^^^^^^
+
+warning: unused import: `crate::utils::sync_on_close::SyncOnCloseType`
+  --> poc/vendor/polars-io/src/utils/compression.rs:10:5
+   |
+10 | use crate::utils::sync_on_close::SyncOnCloseType;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `polars_err`
+ --> poc/vendor/polars-io/src/utils/file.rs:8:49
+  |
+8 | use polars_error::{PolarsResult, feature_gated, polars_err};
+  |                                                 ^^^^^^^^^^
+
+warning: unused import: `polars_utils::mmap::ensure_not_mapped`
+  --> poc/vendor/polars-io/src/utils/file.rs:11:5
+   |
+11 | use polars_utils::mmap::ensure_not_mapped;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `format_file_uri`
+  --> poc/vendor/polars-io/src/utils/file.rs:12:40
+   |
+12 | use polars_utils::pl_path::{PlRefPath, format_file_uri};
+   |                                        ^^^^^^^^^^^^^^^
+
+warning: unused variable: `separator`
+   --> poc/vendor/polars-io/src/csv/read/read_impl.rs:157:13
+    |
+157 |         let separator = parse_options.separator;
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_separator`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `algo`
+  --> poc/vendor/polars-io/src/utils/compression.rs:49:14
+   |
+49 |     let Some(algo) = SupportedCompression::check(bytes) else {
+   |              ^^^^ help: if this is intentional, prefix it with an underscore: `_algo`
+
+warning: unused variable: `new_slice_from_read`
+   --> poc/vendor/polars-io/src/utils/compression.rs:192:13
+    |
+192 |         let new_slice_from_read =
+    |             ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_new_slice_from_read`
+
+warning: unused variable: `writer`
+   --> poc/vendor/polars-io/src/utils/compression.rs:400:17
+    |
+400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {
+    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`
+
+warning: unused variable: `level`
+   --> poc/vendor/polars-io/src/utils/compression.rs:400:35
+    |
+400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {
+    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`
+
+warning: unused variable: `writer`
+   --> poc/vendor/polars-io/src/utils/compression.rs:409:17
+    |
+409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {
+    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`
+
+warning: unused variable: `level`
+   --> poc/vendor/polars-io/src/utils/compression.rs:409:35
+    |
+409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {
+    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`
+
+warning: unused variable: `buf`
+   --> poc/vendor/polars-io/src/utils/compression.rs:419:25
+    |
+419 |     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+    |                         ^^^ help: if this is intentional, prefix it with an underscore: `_buf`
+
+warning: unused variable: `io_metrics`
+   --> poc/vendor/polars-io/src/utils/byte_source.rs:245:9
+    |
+245 |         io_metrics: Option<Arc<IOMetrics>>,
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`
+
+warning: unused variable: `fetch_config`
+   --> poc/vendor/polars-io/src/utils/byte_source.rs:253:31
+    |
+253 |             Self::ObjectStore(fetch_config) => feature_gated!("cloud", {
+    |                               ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_fetch_config`
+
+warning: unused variable: `io_metrics`
+  --> poc/vendor/polars-io/src/utils/file.rs:50:9
+   |
+50 |         io_metrics: Option<Arc<IOMetrics>>,
+   |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`
+
+warning: function `nonzero_usize_max` is never used
+  --> poc/vendor/polars-io/src/csv/read/options.rs:53:10
+   |
+53 | const fn nonzero_usize_max() -> NonZeroUsize {
+   |          ^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `next_line_position` is never used
+   --> poc/vendor/polars-io/src/csv/read/parser.rs:269:15
+    |
+269 | pub(super) fn next_line_position(
+    |               ^^^^^^^^^^^^^^^^^^
+
+warning: methods `extend` and `extend_from_slice` are never used
+   --> poc/vendor/polars-io/src/path_utils/mod.rs:615:12
+    |
+600 | /     impl<F> OutPaths<'_, F>
+601 | |     where
+602 | |         F: Fn(&PlRefPath) -> bool,
+    | |__________________________________- methods in this implementation
+...
+615 |           fn extend(&mut self, values: impl IntoIterator<Item = PlRefPath>) {
+    |              ^^^^^^
+...
+628 |           fn extend_from_slice(&mut self, values: &[PlRefPath]) {
+    |              ^^^^^^^^^^^^^^^^^
+
+warning: constant `ESTIMATED_DEFLATE_RATIO` is never used
+   --> poc/vendor/polars-io/src/utils/compression.rs:138:15
+    |
+138 |         const ESTIMATED_DEFLATE_RATIO: usize = 3;
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `ESTIMATED_ZSTD_RATIO` is never used
+   --> poc/vendor/polars-io/src/utils/compression.rs:139:15
+    |
+139 |         const ESTIMATED_ZSTD_RATIO: usize = 5;
+    |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `cloud_writer_coalesce_run_length` is never used
+  --> poc/vendor/polars-io/src/configs.rs:41:15
+   |
+41 | pub(crate) fn cloud_writer_coalesce_run_length() -> usize {
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `cloud_writer_copy_buffer_size` is never used
+  --> poc/vendor/polars-io/src/configs.rs:65:15
+   |
+65 | pub(crate) fn cloud_writer_copy_buffer_size() -> NonZeroUsize {
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `polars-io` (lib) generated 30 warnings (run `cargo fix --lib -p polars-io` to apply 23 suggestions)
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `prajna-py` (example "read_fixture") generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.24s
+     Running `target/debug/examples/read_fixture /var/folders/9b/jnz6153n7bg4bqf21f9jb2dr0000gn/T/tmps1i29plr`
+warning: `/Users/yibinzhang/.cargo/config` is deprecated in favor of `config.toml`
+  |
+  = help: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`
+warning: unused import: `PlRefPath`
+  --> poc/vendor/polars-io/src/cloud/options.rs:27:42
+   |
+27 | use polars_utils::pl_path::{CloudScheme, PlRefPath};
+   |                                          ^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `polars_time::prelude::*`
+ --> poc/vendor/polars-io/src/csv/read/read_impl.rs:9:5
+  |
+9 | use polars_time::prelude::*;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::parser::next_line_position`
+ --> poc/vendor/polars-io/src/csv/read/utils.rs:6:5
+  |
+6 | use super::parser::next_line_position;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::splitfields::SplitFields`
+ --> poc/vendor/polars-io/src/csv/read/utils.rs:9:5
+  |
+9 | use super::splitfields::SplitFields;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `CloudScheme`
+ --> poc/vendor/polars-io/src/path_utils/mod.rs:9:29
+  |
+9 | use polars_utils::pl_path::{CloudScheme, PlRefPath};
+  |                             ^^^^^^^^^^^
+
+warning: unused import: `std::sync::Arc`
+ --> poc/vendor/polars-io/src/shared.rs:2:5
+  |
+2 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `crate::options::RowIndex`
+ --> poc/vendor/polars-io/src/shared.rs:7:5
+  |
+7 | use crate::options::RowIndex;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `to_compute_err`
+ --> poc/vendor/polars-io/src/utils/compression.rs:6:35
+  |
+6 | use polars_error::{feature_gated, to_compute_err};
+  |                                   ^^^^^^^^^^^^^^
+
+warning: unused import: `crate::utils::sync_on_close::SyncOnCloseType`
+  --> poc/vendor/polars-io/src/utils/compression.rs:10:5
+   |
+10 | use crate::utils::sync_on_close::SyncOnCloseType;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `polars_err`
+ --> poc/vendor/polars-io/src/utils/file.rs:8:49
+  |
+8 | use polars_error::{PolarsResult, feature_gated, polars_err};
+  |                                                 ^^^^^^^^^^
+
+warning: unused import: `polars_utils::mmap::ensure_not_mapped`
+  --> poc/vendor/polars-io/src/utils/file.rs:11:5
+   |
+11 | use polars_utils::mmap::ensure_not_mapped;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `format_file_uri`
+  --> poc/vendor/polars-io/src/utils/file.rs:12:40
+   |
+12 | use polars_utils::pl_path::{PlRefPath, format_file_uri};
+   |                                        ^^^^^^^^^^^^^^^
+
+warning: unused variable: `separator`
+   --> poc/vendor/polars-io/src/csv/read/read_impl.rs:157:13
+    |
+157 |         let separator = parse_options.separator;
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_separator`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `algo`
+  --> poc/vendor/polars-io/src/utils/compression.rs:49:14
+   |
+49 |     let Some(algo) = SupportedCompression::check(bytes) else {
+   |              ^^^^ help: if this is intentional, prefix it with an underscore: `_algo`
+
+warning: unused variable: `new_slice_from_read`
+   --> poc/vendor/polars-io/src/utils/compression.rs:192:13
+    |
+192 |         let new_slice_from_read =
+    |             ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_new_slice_from_read`
+
+warning: unused variable: `writer`
+   --> poc/vendor/polars-io/src/utils/compression.rs:400:17
+    |
+400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {
+    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`
+
+warning: unused variable: `level`
+   --> poc/vendor/polars-io/src/utils/compression.rs:400:35
+    |
+400 |     pub fn gzip(writer: Writable, level: Option<u32>) -> Self {
+    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`
+
+warning: unused variable: `writer`
+   --> poc/vendor/polars-io/src/utils/compression.rs:409:17
+    |
+409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {
+    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer`
+
+warning: unused variable: `level`
+   --> poc/vendor/polars-io/src/utils/compression.rs:409:35
+    |
+409 |     pub fn zstd(writer: Writable, level: Option<u32>) -> std::io::Result<Self> {
+    |                                   ^^^^^ help: if this is intentional, prefix it with an underscore: `_level`
+
+warning: unused variable: `buf`
+   --> poc/vendor/polars-io/src/utils/compression.rs:419:25
+    |
+419 |     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+    |                         ^^^ help: if this is intentional, prefix it with an underscore: `_buf`
+
+warning: unused variable: `io_metrics`
+   --> poc/vendor/polars-io/src/utils/byte_source.rs:245:9
+    |
+245 |         io_metrics: Option<Arc<IOMetrics>>,
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`
+
+warning: unused variable: `fetch_config`
+   --> poc/vendor/polars-io/src/utils/byte_source.rs:253:31
+    |
+253 |             Self::ObjectStore(fetch_config) => feature_gated!("cloud", {
+    |                               ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_fetch_config`
+
+warning: unused variable: `io_metrics`
+  --> poc/vendor/polars-io/src/utils/file.rs:50:9
+   |
+50 |         io_metrics: Option<Arc<IOMetrics>>,
+   |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_io_metrics`
+
+warning: function `nonzero_usize_max` is never used
+  --> poc/vendor/polars-io/src/csv/read/options.rs:53:10
+   |
+53 | const fn nonzero_usize_max() -> NonZeroUsize {
+   |          ^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `next_line_position` is never used
+   --> poc/vendor/polars-io/src/csv/read/parser.rs:269:15
+    |
+269 | pub(super) fn next_line_position(
+    |               ^^^^^^^^^^^^^^^^^^
+
+warning: methods `extend` and `extend_from_slice` are never used
+   --> poc/vendor/polars-io/src/path_utils/mod.rs:615:12
+    |
+600 | /     impl<F> OutPaths<'_, F>
+601 | |     where
+602 | |         F: Fn(&PlRefPath) -> bool,
+    | |__________________________________- methods in this implementation
+...
+615 |           fn extend(&mut self, values: impl IntoIterator<Item = PlRefPath>) {
+    |              ^^^^^^
+...
+628 |           fn extend_from_slice(&mut self, values: &[PlRefPath]) {
+    |              ^^^^^^^^^^^^^^^^^
+
+warning: constant `ESTIMATED_DEFLATE_RATIO` is never used
+   --> poc/vendor/polars-io/src/utils/compression.rs:138:15
+    |
+138 |         const ESTIMATED_DEFLATE_RATIO: usize = 3;
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `ESTIMATED_ZSTD_RATIO` is never used
+   --> poc/vendor/polars-io/src/utils/compression.rs:139:15
+    |
+139 |         const ESTIMATED_ZSTD_RATIO: usize = 5;
+    |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `cloud_writer_coalesce_run_length` is never used
+  --> poc/vendor/polars-io/src/configs.rs:41:15
+   |
+41 | pub(crate) fn cloud_writer_coalesce_run_length() -> usize {
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `cloud_writer_copy_buffer_size` is never used
+  --> poc/vendor/polars-io/src/configs.rs:65:15
+   |
+65 | pub(crate) fn cloud_writer_copy_buffer_size() -> NonZeroUsize {
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `polars-io` (lib) generated 30 warnings (run `cargo fix --lib -p polars-io` to apply 23 suggestions)
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `prajna-experiment` (bin "prajna-experiment") generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.06s
+test_corrupt_factor_cache_is_not_recomputed (test_read_api.ReadApiTests.test_corrupt_factor_cache_is_not_recomputed) ... ok
+test_dataset_selection_matches_rust_panel (test_read_api.ReadApiTests.test_dataset_selection_matches_rust_panel) ... ok
+test_invalid_dataset_and_factor_requests_are_explicit (test_read_api.ReadApiTests.test_invalid_dataset_and_factor_requests_are_explicit) ... ok
+test_registered_factors_match_rust_and_persist_cache (test_read_api.ReadApiTests.test_registered_factors_match_rust_and_persist_cache) ... ok
+test_run_tables_and_level_errors_match_cli_storage (test_read_api.ReadApiTests.test_run_tables_and_level_errors_match_cli_storage) ... ok
+test_invalid_decisions_fail_the_run_without_repair (test_strategy.StrategyTests.test_invalid_decisions_fail_the_run_without_repair) ... ok
+test_invalid_declarations_fail_before_calling_python (test_strategy.StrategyTests.test_invalid_declarations_fail_before_calling_python) ... ok
+test_no_eligible_sessions_produces_no_callbacks_or_partial_windows (test_strategy.StrategyTests.test_no_eligible_sessions_produces_no_callbacks_or_partial_windows) ... ok
+test_none_is_not_a_skip_and_python_errors_are_not_hidden (test_strategy.StrategyTests.test_none_is_not_a_skip_and_python_errors_are_not_hidden) ... ok
+test_only_declared_sessions_invoke_the_strategy_with_a_full_window (test_strategy.StrategyTests.test_only_declared_sessions_invoke_the_strategy_with_a_full_window) ... ok
+test_params_and_previous_decision_cannot_mutate_later_calls (test_strategy.StrategyTests.test_params_and_previous_decision_cannot_mutate_later_calls) ... ok
+test_rank_validation_and_weight_boundaries (test_strategy.StrategyTests.test_rank_validation_and_weight_boundaries) ... ok
+test_rust_canonicalizes_json_params_and_rejects_non_json_values (test_strategy.StrategyTests.test_rust_canonicalizes_json_params_and_rejects_non_json_values) ... ok
+test_rust_factor_dependencies_control_warmup_and_export_only_declared_values (test_strategy.StrategyTests.test_rust_factor_dependencies_control_warmup_and_export_only_declared_values) ... ok
+test_static_universe_is_projected_before_export_and_validation (test_strategy.StrategyTests.test_static_universe_is_projected_before_export_and_validation) ... ok
+test_unknown_values_require_an_explicit_availability_assumption (test_strategy.StrategyTests.test_unknown_values_require_an_explicit_availability_assumption) ... ok
+test_view_excludes_future_unknown_and_undeclared_data_even_in_arrow_buffers (test_strategy.StrategyTests.test_view_excludes_future_unknown_and_undeclared_data_even_in_arrow_buffers) ... ok
+
+----------------------------------------------------------------------
+Ran 41 tests in 1793.712s
+
+OK (skipped=1)

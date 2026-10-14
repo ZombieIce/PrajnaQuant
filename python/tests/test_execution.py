@@ -83,6 +83,20 @@ class ExecutionTests(unittest.TestCase):
         self.assertFalse(result.manifest["execution"]["reproducible"])
         self.assertIsNone(result.manifest["execution"]["python"]["source_file"])
 
+    def test_invocation_timings_cover_every_view_without_changing_replay(self):
+        experiment = self.python_experiment()
+        result = self.run_python(experiment)
+        timings = result.statistics["python"]
+        self.assertEqual(len(timings["asof_view_ms"]), 26)
+        self.assertTrue(all(value > 0 for value in timings["asof_view_ms"]))
+        self.assertGreaterEqual(timings["stage1_ms"], sum(timings["asof_view_ms"]))
+        self.assertGreaterEqual(timings["stage2_ms"], result.statistics["run_time_ms"])
+        self.assertNotIn("asof_view_ms", json.dumps(result.manifest))
+        replay = self.run_python(experiment)
+        self.assertEqual(replay.action, "replayed")
+        self.assertEqual(result.manifest, replay.manifest)
+        self.assertEqual(len(replay.statistics["python"]["asof_view_ms"]), 26)
+
     def test_changed_decisions_in_same_execution_are_rejected(self):
         # Trusted pure functions are required; this deliberate violation proves replay protection.
         weights = [0.25]
