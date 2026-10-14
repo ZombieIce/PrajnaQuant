@@ -1,0 +1,14 @@
+{
+  "requests.csv": {
+    "bytes": 1036941,
+    "sha256": "d7f84fff4387fc370ed58bf4eea676022dc114a26db45697db2d0c7effaa7d1a"
+  },
+  "scan.json": {
+    "bytes": 255728,
+    "sha256": "aaf768bb8f43ac08d2f07fd84945bca544956da7c22b64daa1c58594af51dce6"
+  },
+  "summary.json": {
+    "bytes": 25217,
+    "sha256": "75d1a696ca2c528b7c7bdf18fe872d2490f424fc10f090d9b6fdb94de6da5d04"
+  }
+}

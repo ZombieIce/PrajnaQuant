@@ -1,0 +1,61 @@
+Issue: #172; audit date: 2026-10-14
+Base: 253ae62b0e4183542e3e101a4a813d0b8ad967f7
+Environment: macOS; Python 3.12.15; curl 8.7.1 (LibreSSL/3.3.6)
+Paths below normalize the machine-local prefix as $AUDIT_ROOT:
+  $HOME/.copilot/session-state/311c4d49-bcd8-41ea-93e8-f7dd5d774f8f/files/172-audit
+
+Executed acquisition:
+  python3 "$AUDIT_ROOT/run_audit.py" calendar tdx samples
+  python3 "$AUDIT_ROOT/run_audit.py" cninfo
+  python3 "$AUDIT_ROOT/run_audit.py" scan
+  Additional inline Python calls used the same request() helper for:
+    cninfo-boundary-{1,47,48}, keyword=复牌, same window/forms as requests.csv
+    cninfo-code-{159919,159522,159560}, window=2000-01-01~2026-09-30
+  Acquisition script SHA256:
+    c1b280244a2451020270d42ceb1c347bc2abe638cab6c866efba2aae78e1d2cb
+
+Per-request command template actually used by request():
+  curl --silent --show-error --location --connect-timeout 8 --max-time 20 \
+    --user-agent Mozilla/5.0 --dump-header "$AUDIT_ROOT/raw/$label.headers" \
+    --output "$AUDIT_ROOT/raw/$label.body" --write-out '%{http_code}' \
+    [--head] [--header 'Referer: https://www.cninfo.com.cn/' --data "$form"] "$url"
+  Exact method, URL and form for every request: requests.csv.
+  Forms were encoded with Python urllib.parse.urlencode.
+  GET/HEAD traversal used four workers; cninfo queries were serial.
+  No automatic retries, proxy rotation, CAPTCHA/WAF bypass or substituted sources.
+  HTTP 200 with curl != 0 is not a successful download.
+  HEAD .body files contain HEAD response bytes, NOT ZIP bytes.
+  Transport failures are not classified as non-trading days or empty history.
+
+Executed local analysis:
+  python3 "$AUDIT_ROOT/analyze.py"
+  Analysis script SHA256:
+    27ab99e61b79915dfff5d8c575a4d9a0118ea7f0f3e3d35789f5c6454442cfc8
+  python3 -m py_compile "$AUDIT_ROOT/run_audit.py" "$AUDIT_ROOT/analyze.py"
+  PASS: exhaustive unique 1000-code x 2-window request identity check.
+  PASS: completed calendar/scan/cninfo request-body hash and length check (2074).
+  Calendar: exact natural month, no duplicates, jybz in {0,1}.
+  HEAD: cross-tab by official open/closed flag and curl/HTTP outcome.
+  GET: ZIP testzip CRC; partial downloads remain failed.
+  Comparison: 30 planned pairs, all unresolved; zero successful OHLCV comparisons.
+  Scan: only code/date-window/status/row-count exported; not security master facts.
+  cninfo: only response totals/pages/row counts exported; no announcement contents.
+
+Public export:
+  python3 "$AUDIT_ROOT/export.py" docs/research/evidence/172
+  Export allowlist: request identity/status/hash/byte-count, coverage counts,
+  unresolved dates, sample comparison booleans, code-window row counts.
+  Raw OHLCV, original ZIP/PDF/HTML, response headers and account data are excluded.
+  Final public metadata checksums: checksums.json (excludes this command log).
+  python3 "$AUDIT_ROOT/validate.py" docs/research/evidence/172
+  PASS: 3555 unique requests; local body/header hashes and byte lengths;
+  3 public file checksums; exact calendar/HEAD/ZIP/scan/cninfo/sample counts;
+  metadata-only export schemas; acquisition/analysis script hashes.
+  Initial staged whitespace check failed on csv.writer's default CRLF output.
+  Corrected exporter to use LF, regenerated CSV/checksums, revalidated counts/hashes.
+  git diff --cached --check: PASS after correction.
+  Local freeze: 7139 files, 31314184 bytes (excluding the inventory itself).
+  Frozen files made read-only; frozen-inventory.json SHA256:
+    0b8a45124b5c1eabec20f6424fe4f42eea517494a2d92a3b76157b31a53be1c7
+  No full ingestion, Dataset Version, Run, portfolio or offline-backup validation.
+  No Rust/Python product tests or web build: documentation/metadata-only changes.
