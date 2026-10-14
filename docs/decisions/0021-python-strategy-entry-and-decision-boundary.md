@@ -101,3 +101,31 @@ Python 参数为 JSON object，Grid/List 展开后按 Run Spec 身份排序去�
 - Python 宿主启动 Accurate worker 时的进程与环境隔离；由 #160 核实。
 
 合成接口与语义对拍不构成真实市场、历史 PIT、分红总回报或生产可用性结论。本票不实现代码或修改 STATUS / HANDOFF；轻量 CI 的扩展构建与 Python 测试由后续票据按 #154 P15 落实。
+
+
+### #160 Execution provenance and host execution (2026-10-14)
+
+The Python host supplies a matching Strategy declaration and pure Decision function
+alongside the existing Experiment reference. Canonical deduplicated Run parameter
+values are generated serially under GIL; owned Decisions then enter the existing
+Rust execution schedule with GIL detached. Routing, next-session open execution,
+accounting and ResultLevel storage remain shared. Accurate retains its process pool.
+
+The Execution source hash covers the defining module's entire file. A separate
+`marshal.dumps(function.__code__)` hash captures the loaded function, and the
+Strategy declaration participates in Execution identity. Transitive local imports,
+globals, closures and external data are outside this hash scope; deterministic pure
+functions and dependency management remain caller obligations. File-less Notebook
+functions are explicitly not fully reproducible. Installed dependencies are the
+sorted `sys.executable -m pip freeze --all` snapshot (including editable/direct URL
+entries), not a resolver lock or wheel-content hash. Python version is `sys.version`.
+Paths/code filenames are identity-bearing. Existing Rust/CLI identity bytes remain
+unchanged when optional Python provenance is absent; Python provenance affects only
+Execution identity. Replay checks every retained Run table's logical hash.
+
+The specified worker interpreter preserves its venv. Worker processes ignore host
+Python overrides/user-site via `-E -s`, use separate process groups and per-Run packet
+directories, and inherit no host Python objects. Trusted worker sibling imports and
+non-Python OS environment remain available. This is not a security sandbox. A real
+Python-hosted Accurate smoke with hostile PYTHONPATH runs in Full only; lightweight
+CI intentionally skips that smoke.

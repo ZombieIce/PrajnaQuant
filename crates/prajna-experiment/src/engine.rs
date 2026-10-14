@@ -558,7 +558,7 @@ pub(super) fn expand_native(
                 run_id,
                 parameters: None,
                 factor: None,
-                strategy,
+                strategy: RunStrategy::Native(strategy),
             },
         );
     }
@@ -572,16 +572,27 @@ pub(super) fn decisions(
     members: &[InstrumentId],
     assumption: AvailabilityAssumption,
 ) -> Result<Vec<Decision>, String> {
+    let strategy = match &run.strategy {
+        RunStrategy::Prepared(decisions) => {
+            let decisions = decisions.as_ref().map_err(Clone::clone)?;
+            validate_prepared(decisions, panel, members)?;
+            engine
+                .validate_mode(&run.run_spec["strategy"]["kind"].to_string())
+                .map_err(|error| error.to_string())?;
+            return Ok(decisions.clone());
+        }
+        RunStrategy::Native(strategy) => strategy,
+    };
     if let Some(factor) = &run.factor {
         let score = values
             .get(&factor.canonical_json().to_string())
             .ok_or("stage 1 did not produce this Run's score Factor Values")?;
         engine
-            .decide(&run.strategy, score, &panel.sessions)
+            .decide(strategy, score, &panel.sessions)
             .map_err(|e| e.to_string())
     } else {
         engine
-            .decide_panel(&run.strategy, panel, members, assumption)
+            .decide_panel(strategy, panel, members, assumption)
             .map_err(|e| e.to_string())
     }
 }
@@ -613,9 +624,11 @@ pub(super) fn execute(
     };
     let result = (|| -> Result<(), String> {
         let engine = experiment.engine.selection();
-        engine
-            .validate(&run.strategy)
-            .map_err(|error| error.to_string())?;
+        if let RunStrategy::Native(strategy) = &run.strategy {
+            engine
+                .validate(strategy)
+                .map_err(|error| error.to_string())?;
+        }
         if let Some(config) = &experiment.engine.fast {
             let decisions = decisions(engine, run, factors, panel, members, assumption)?;
             let portfolios = experiment
@@ -726,4 +739,47 @@ pub(super) fn execute(
         execution.summary = None;
     }
     execution
+}
+
+// Defense at the Rust execution seam, including callers other than the Python binding.
+fn validate_prepared(
+    decisions: &[Decision],
+    panel: &Panel,
+    members: &[InstrumentId],
+) -> Result<(), String> {
+    let mut previous = None;
+    for decision in decisions {
+        let session = &decision.decision_session;
+        if previous.is_some_and(|date| date >= session.session_date)
+            || !panel.sessions.contains(session)
+        {
+            return Err(
+                "prepared Decisions require strictly increasing, exact Venue Sessions".into(),
+            );
+        }
+        previous = Some(session.session_date);
+        let mut sum = 0.0;
+        for (id, weight) in &decision.targets {
+            if !members.contains(id) || !weight.is_finite() || *weight < 0.0 {
+                return Err("prepared Decision has invalid target or weight".into());
+            }
+            sum += weight;
+        }
+        if sum > 1.0 {
+            return Err("prepared Decision weight sum exceeds 1".into());
+        }
+        let mut ids = BTreeSet::new();
+        let mut ranks = BTreeSet::new();
+        for (id, score, rank) in &decision.ranked {
+            if !members.contains(id)
+                || !score.is_finite()
+                || *rank == 0
+                || !ids.insert(id)
+                || !ranks.insert(rank)
+            {
+                return Err("prepared Decision has invalid ranking".into());
+            }
+        }
+    }
+    Ok(())
 }

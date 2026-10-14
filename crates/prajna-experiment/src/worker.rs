@@ -58,6 +58,9 @@ impl WorkerCommand {
             self.python.clone()
         };
         let mut command = Command::new(python);
+        // Keep the explicitly selected venv, but ignore host Python path/home/startup
+        // overrides and user-site packages. The worker's own sibling imports remain valid.
+        command.args(["-E", "-s"]);
         command.current_dir(
             worker
                 .parent()

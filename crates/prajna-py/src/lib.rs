@@ -90,6 +90,7 @@ fn _run_experiment(
 }
 
 mod arrow;
+mod execution;
 mod factor;
 mod read;
 mod strategy;
@@ -110,6 +111,7 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(_describe_experiment, module)?)?;
     module.add_function(wrap_pyfunction!(_run_experiment, module)?)?;
     strategy::register(module)?;
+    execution::register(module)?;
     module.add_function(wrap_pyfunction!(read::read_dataset, module)?)?;
     module.add_function(wrap_pyfunction!(read::read_factor, module)?)?;
     module.add_class::<factor::FactorDeclaration>()?;
