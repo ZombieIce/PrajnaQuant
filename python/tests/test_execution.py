@@ -10,6 +10,7 @@ import time
 import unittest
 
 import prajna
+from acceptance_strategies import s2_declaration, s2_decide
 from test_experiment import ExperimentTests, ROOT
 
 
@@ -169,8 +170,11 @@ class ExecutionTests(unittest.TestCase):
         )
         engine = prajna.Engine(prajna.EngineKind.ACCURATE_EVENT, settings,
                               prajna.Backend("nautilus_trader", "2.0.0rc6"))
+        params = {key: values[0] for key, values in
+                  self.definition_data["parameter_space"]["grid"].items()}
+        declaration = replace(s2_declaration(params), strategy_id="test.execution")
         experiment = replace(
-            self.python_experiment(engine, prajna.List([{"weight": 0.5}])),
+            self.python_experiment(engine, prajna.List([params])),
             # Fixture quote precision is 0.01; do not request fractional-tick slippage.
             costs=prajna.Costs(commission_rate=0.001),
         )
@@ -181,9 +185,11 @@ class ExecutionTests(unittest.TestCase):
         old = os.environ.get("PYTHONPATH")
         os.environ["PYTHONPATH"] = str(poison)
         try:
-            result = self.run_python(experiment, level=prajna.ResultLevel.FULL,
-                                     backend_python=sys.executable,
-                                     backend_worker=ROOT / "backends/nautilus/worker.py")
+            result = experiment.run(
+                self.lake, repository=self.repo, strategy=declaration, decide=s2_decide,
+                level=prajna.ResultLevel.FULL, backend_python=sys.executable,
+                backend_worker=ROOT / "backends/nautilus/worker.py",
+            )
         finally:
             if old is None:
                 os.environ.pop("PYTHONPATH", None)
@@ -193,9 +199,11 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(run["status"], "completed", run)
         self.assertTrue(run["accounting_verified"])
         self.assertIn("backend_events", run["table_hashes"])
-        self.assertEqual(self.run_python(experiment, level=prajna.ResultLevel.FULL,
-                                        backend_python=sys.executable,
-                                        backend_worker=ROOT / "backends/nautilus/worker.py").action, "replayed")
+        self.assertEqual(experiment.run(
+            self.lake, repository=self.repo, strategy=declaration, decide=s2_decide,
+            level=prajna.ResultLevel.FULL, backend_python=sys.executable,
+            backend_worker=ROOT / "backends/nautilus/worker.py",
+        ).action, "replayed")
 
 # Borrow fixture setup without exposing its test class twice to unittest discovery.
 del ExperimentTests

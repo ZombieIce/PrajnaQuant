@@ -130,7 +130,7 @@ jobs:
 
       - name: Prajna Python tests
         run: |
-          cargo build -p prajna-experiment --bin prajna-experiment --example prepare_fixture --locked
+          cargo build -p prajna-experiment --bin prajna-experiment --example prepare_fixture --example acceptance_fixture --locked
           .venv/bin/python -m unittest discover -s python/tests -v
 
       # Feature-only code (b3-pyo3) must still type-check when shared signatures change.
