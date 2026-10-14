@@ -687,6 +687,8 @@ fn normalize_fixture(
             } else {
                 None
             },
+            source_crosscheck: None,
+            announcements: None,
         })
     })();
     let tables =

@@ -14,8 +14,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     Manifest, ManifestCore, ManifestError, ManifestFile, ManifestInput, ManifestProvenance,
     ManifestTable, NormalizationIssue, NormalizedTables, NormalizerRegistry, RawInput, RawStore,
-    RawStoreError, SourceKind, logical_hash, read_manifest, schema_fingerprint, write_manifest,
-    write_parquet,
+    RawStoreError, logical_hash, read_manifest, schema_fingerprint, write_manifest, write_parquet,
 };
 
 static NEXT_STAGE_ID: AtomicU64 = AtomicU64::new(0);
@@ -179,17 +178,19 @@ pub fn publish_dataset(
         })
         .collect::<Result<Vec<_>, RawStoreError>>()?;
     for raw_input in &raw_inputs {
+        let accepted = normalizer.accepted_source_kinds();
         if !raw_store
             .sources(&raw_input.raw_sha256)?
             .iter()
-            .any(|record| record.source_kind == SourceKind::Fixture)
+            .any(|record| accepted.contains(&record.source_kind))
         {
             return Err(PublishError::Validation(vec![NormalizationIssue {
                 code: "invalid_raw_source".into(),
                 path: raw_input.raw_sha256.clone(),
-                message:
-                    "synthetic-etf-daily requires a Raw source record with source_kind=fixture"
-                        .into(),
+                message: format!(
+                    "{} requires a Raw source record with source_kind in {accepted:?}",
+                    normalizer.id()
+                ),
             }]));
         }
     }
@@ -450,6 +451,24 @@ fn table_descriptors(tables: &NormalizedTables) -> Vec<TableToPublish<'_>> {
             schema: batch.schema(),
             batch,
             primary_key: &["instrument_id", "session_date"],
+        });
+    }
+    if let Some(batch) = &tables.source_crosscheck {
+        descriptors.push(TableToPublish {
+            name: "source_crosscheck",
+            schema_version: 1,
+            schema: batch.schema(),
+            batch,
+            primary_key: &["instrument_id", "session_date"],
+        });
+    }
+    if let Some(batch) = &tables.announcements {
+        descriptors.push(TableToPublish {
+            name: "announcements",
+            schema_version: 1,
+            schema: batch.schema(),
+            batch,
+            primary_key: &["announcement_id"],
         });
     }
     descriptors

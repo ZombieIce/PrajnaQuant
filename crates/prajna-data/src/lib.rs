@@ -1,11 +1,13 @@
 //! Arrow and Parquet data layer for Prajna Quant.
 
+mod frozen;
 mod manifest;
 mod normalized;
 mod normalizer;
 mod publish;
 mod raw;
 
+pub use frozen::{FrozenSourceMeta, freeze_raw};
 pub use normalizer::{
     NormalizationIssue, NormalizationOutput, NormalizedTables, Normalizer, NormalizerRegistry,
     RawInput,
@@ -17,11 +19,13 @@ pub use manifest::{
     ManifestTable, NormalizerIdentity, read_manifest, write_manifest,
 };
 pub use normalized::{
-    DataError, ExecutionStatusRow, ParquetWriteOptions, bars_from_record_batch, bars_schema,
+    AnnouncementRow, DataError, ExecutionStatusRow, ParquetWriteOptions, SourceCrosscheckRow,
+    announcements_schema, announcements_to_record_batch, bars_from_record_batch, bars_schema,
     bars_to_record_batch, execution_status_from_record_batch, execution_status_schema,
     execution_status_to_record_batch, instruments_from_record_batch, instruments_schema,
     instruments_to_record_batch, parquet_write_options, read_parquet, sessions_from_record_batch,
-    sessions_schema, sessions_to_record_batch, write_parquet,
+    sessions_schema, sessions_to_record_batch, source_crosscheck_schema,
+    source_crosscheck_to_record_batch, write_parquet,
 };
 pub use raw::{RawStore, RawStoreError, SourceKind, SourceRecord, SourceRecordInput};
 

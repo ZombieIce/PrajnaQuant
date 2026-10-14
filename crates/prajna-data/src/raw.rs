@@ -63,6 +63,7 @@ pub enum RawStoreError {
     Json(serde_json::Error),
     InvalidHash(String),
     CorruptObject(String),
+    InvalidProvenance,
 }
 
 impl std::fmt::Display for RawStoreError {
@@ -72,6 +73,10 @@ impl std::fmt::Display for RawStoreError {
             Self::Json(error) => write!(f, "invalid raw source record: {error}"),
             Self::InvalidHash(hash) => write!(f, "invalid raw SHA-256: {hash}"),
             Self::CorruptObject(hash) => write!(f, "raw object is corrupt: {hash}"),
+            Self::InvalidProvenance => write!(
+                f,
+                "frozen source provenance requires media type, source, endpoint, observation time and terms conclusion"
+            ),
         }
     }
 }
@@ -81,7 +86,7 @@ impl std::error::Error for RawStoreError {
         match self {
             Self::Io(error) => Some(error),
             Self::Json(error) => Some(error),
-            Self::InvalidHash(_) | Self::CorruptObject(_) => None,
+            Self::InvalidHash(_) | Self::CorruptObject(_) | Self::InvalidProvenance => None,
         }
     }
 }
