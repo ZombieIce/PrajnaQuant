@@ -1,0 +1,46 @@
+# 深市 ETF 派生执行证据、Eligible Set 与动量输入
+
+实现位置为 `prajna-research::{etf_market, etf_eligible, etf_momentum}`；对应 #176、#171 P9～P14 与 ADR 0022。它是离线证据输入构建契约，不是实时开盘状态源。旧 D7、旧 Factor、现有 Engine/Experiment API 不变；#177 负责逐 Session Engine/Run Spec 消费，#178 负责 Python。真实来源覆盖、授权与完整公告提取仍受 #172 门禁约束。
+
+## 构建与冻结
+
+1. `HistoricalCatalog::build/load` 验证 #175 Catalog、生命周期身份和 Raw 原文。
+2. `DerivedMarket::from_dataset(lake_root, dsv, catalog, MarketEvidence)` 读取冻结 Manifest，从 Raw 重跑 #174 `szse-etf-frozen` Normalizer，核对 instruments/sessions/bars/source_crosscheck logical hash。规范化价格按 0.001，腾讯手数乘 100 转份，与 TDX OHLC/份数精确一致；成交额仅取 TDX。代码按当日生命周期映射，不跨代码复用连接。Dataset 与 Catalog 的 Session 时间必须一致。
+3. `MarketEvidence` 是从冻结官方附件明确提取、裁决的输入，需保存 JSON 原件供重放。每个开盘格子的 `OpeningEvidence` 引用公告覆盖、来源独立性、开盘停牌时段、PIT 规则和除权息调整后前收盘参考价。全部文档引用沿用 Catalog 的 `Evidence`（Raw hash、公告 ID、定位、发布时间精度）；读取时校验 Raw 完整性。没有证据的格子保持 UNKNOWN，不使用标题关键词断言实际停牌时段。
+4. `DerivedMarket::version()` 绑定 DSV、Catalog、排序后的完整证据、推导语义版本 `szse-derived-open@1` 和全部派生格子。调用者将输入证据与版本一起冻结；导出格子用 `market.cells().values()`，不要直接 JSON 序列化 tuple-key Map。真实逐日价格只存本地，不提交到 public 仓库。
+
+`MarketEvidence.start/end` 必须处于 Catalog 覆盖内；非空 `coverage_gaps`、全市场任一 Session 缺 TDX 行、日历不符、无归属行情或重复裁决都会报错。单标的缺行/来源冲突不会被补成停牌。空 Eligible Set 可以成功，但缺市场 Session 不可以成功。
+
+## 开盘状态与方向
+
+- 两源精确匹配、有正成交、公告覆盖与来源独立性有证据、PIT 限价规则明确时，才能推导 TRADABLE。
+- 官方明确开盘停牌为 HALTED。`OpeningOnly` 可以与下午成交协调；`FullSession` 与正成交冲突为 UNKNOWN。HALTED 成交额按 0 参与流动性窗口。
+- 规则按生命周期/日期显式选择，含版本、官方证据、生效/废止区间、首日适用、tick、涨跌幅和舍入。当前仅支持 `nearest_tick_half_up`；参考价先除权息调整，再精确计算 `reference × (10000 ± rate_bps) / 10000`、按 tick 四舍五入。无法证明规则或参考价时 UNKNOWN；没有默认 10%/20% 或首日豁免。
+- 开盘涨停仅 `can_buy=false`，跌停仅 `can_sell=false`。不是双向 HALTED。原因、上下限、证据 hash、规则版本与实际可用时刻随格子返回。
+
+`market_available_at` 是两源历史输入真正可用的时刻，不能取本地 `observed_at` 代替。日线对拍最早在当日 close 可观察，推导可用时刻取所有依赖最晚时刻；None 仍未知。公告 DateOnly(D) 最早为 D 后下一 Session close。`known_by` 控制收盘筛选，`permits`/`rebalance_gate` 是**离线执行复核**，不得作为开盘前 Strategy 已知信息或真实排队成交证明。
+
+手算事件序列：S1 close 形成 B 目标；S2 open 已持有 A，但 A 为 UNKNOWN，则 `rebalance_gate(S2, required_sells=[A], requested_buys=[B])` 返回 Deferred，零买卖腿。S3 open A 明确可卖后重试。若仅 B 为 UNKNOWN、没有被阻塞卖腿，Permitted 的 `allowed_buys` 排除 B。所需卖腿（含减仓）、pending 保存/信号替换和实际账户执行由 #177 负责，不在此门禁复制账户核心。
+
+## TRI 接口与 Factor Cache
+
+`TotalReturnIndex::build(market, provider, empty_actions, raw_store)` 仅接受两种互斥输入：
+
+- `TotalReturnProvider` 提供已计算的正数指数水平、每点可用时刻与完整输入身份。包括 HALTED 日也必须明确提供，以免携带发生公司行动的旧参考值。实际点值（IEEE 754 bits）及可用时刻也进入身份，避免 provider 身份误复用。
+- `EmptyActionCoverage` 显式覆盖全部生命周期与日期，附版本、Raw 证据 hash 和可用时刻。Raw 缺失/损坏会拒绝。6a 中已声明公司行动为空时指数等价原始价格；HALTED 延续上一水平、UNKNOWN 打断延续。这个显式工程输入不证明真实历史公司行动为空，也不实现 #180/#181 的 TRI/公司行动账本。
+
+`EtfMomentum::new(N)` 的独立身份为 `etf_tri_momentum@1`，高值优先，值为 `TRI[t]/TRI[t-N]-1`，需要 N+1 个交易所 Session。整个窗口内任一状态/指数输入 UNKNOWN 或缺失则 `missing_input`，不跨缺口找更早价格；HALTED 平持。依赖可用时刻未知为 `unknown_availability`；成功值可用时刻取全部依赖最晚值，且不早于观察 Session close。输出复用既有 Factor Values schema，非 ok 行 value/available_at 均 null。
+
+`EtfMomentum::cached` 复用 `FactorCache` 的校验、Parquet 和原子发布。独立 `FactorKey::for_etf_input` 绑定新因子版本/参数、DSV、Catalog、状态完整输入、TRI 输入、Universe 版本、实际成员、Values schema 和实现版本；旧 FactorKey 不变。缓存命中前也校验 TRI 与市场身份/成员，不能用另一市场的指数命中旧条目。
+
+## Eligible Set
+
+`EligibleSet::build(catalog, market, tri, session_date, params)` 自行生成该日 PIT Universe、计算新动量，避免传入无身份的外部评分。默认上市满 61 Session、60 Session 动量可用、最近 20 Session 平均 TDX 成交额 ≥ 10,000,000 元、当天可买且全部输入在决策 close 已可用。
+
+上市时长与窗口按 Catalog 交易所 Session，不按已观测 bar 数。金额使用 fixed-point 整数比较总和与阈值 × 窗口，不作浮点近似；HALTED 为 0，UNKNOWN/缺成交额不补 0。小窗口 fixture 可显式改参数。历史窗口中晚到证据同样不得进入当次决策。
+
+输出保留原 Universe/Run Spec 片段、Eligible 版本、市场版本、Factor Cache key、全部参数、成员和逐标的排除原因；应由 #177 原样进入 Run Spec 与全部 ResultLevel。Eligible 只是收盘候选池，不能保证下一开盘可买，也不替代持仓卖出门禁。
+
+## 验证与边界
+
+完全合成 fixture 覆盖 3 ETF × 10 Session、61/60/20 边界、精确阈值、开盘停牌但下午成交、全天停牌与成交冲突、涨跌停方向、来源冲突/缺行、全市场缺 Session、晚到证据、UNKNOWN 整次延期门禁、缓存隔离、原文篡改与 DSV 重放。真实市场 P0、Engine/Experiment 端到端与总回报最终验收不能由这些测试替代。执行入口/账本没有在本票改动，因此本票也不新增真实成交或 NAV 守恒验证结论。

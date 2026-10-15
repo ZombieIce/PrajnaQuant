@@ -244,6 +244,11 @@ impl FactorCache {
             })
     }
 
+    /// Read a validated Values entry for an explicitly versioned external input contract.
+    pub fn load(&self, key: &FactorKey) -> Result<Option<DataFrame>, CacheError> {
+        self.read_if_present(key)
+    }
+
     fn read_if_present(&self, key: &FactorKey) -> Result<Option<DataFrame>, CacheError> {
         let path = self.cache_path(key)?;
         match fs::symlink_metadata(&path) {
@@ -312,7 +317,7 @@ impl FactorCache {
         Ok(values)
     }
 
-    fn publish(&self, key: &FactorKey, values: &DataFrame) -> Result<(), CacheError> {
+    pub fn publish(&self, key: &FactorKey, values: &DataFrame) -> Result<(), CacheError> {
         ensure_values_schema(values)?;
         let destination = self.cache_path(key)?;
         if let Some(existing) = self.read_if_present(key)? {

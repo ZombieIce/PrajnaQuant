@@ -59,7 +59,7 @@ pub struct Evidence {
     pub publication: Publication,
 }
 impl Evidence {
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         if !raw_hash(&self.raw_sha256)
             || self.announcement_id.trim().is_empty()
             || self.locator.trim().is_empty()
@@ -70,7 +70,7 @@ impl Evidence {
         }
         Ok(())
     }
-    fn available_at(&self, calendar: &CatalogInput) -> Result<TimestampNs> {
+    pub(crate) fn available_at(&self, calendar: &CatalogInput) -> Result<TimestampNs> {
         match self.publication {
             Publication::Exact { timestamp } => Ok(timestamp),
             Publication::DateOnly { date } => {
