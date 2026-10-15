@@ -67,6 +67,7 @@ pub struct NormalizedTables {
     pub execution_status: Option<RecordBatch>,
     pub source_crosscheck: Option<RecordBatch>,
     pub announcements: Option<RecordBatch>,
+    pub corporate_actions: Option<RecordBatch>,
 }
 
 /// A versioned conversion from immutable raw bytes to the normalized contract.
@@ -101,6 +102,7 @@ impl NormalizerRegistry {
         registry.register(synthetic_etf_daily::SyntheticEtfDaily::v2());
         registry.register(synthetic_etf_daily::SyntheticEtfDaily::v3());
         registry.register(szse_etf_frozen::SzseEtfFrozen::v1());
+        registry.register(szse_etf_frozen::SzseEtfFrozen::v2());
         registry
     }
 

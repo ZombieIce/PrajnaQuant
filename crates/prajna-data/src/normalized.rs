@@ -486,6 +486,37 @@ pub struct AnnouncementRow {
     pub source_raw_sha256: String,
 }
 
+/// Corporate action facts explicitly present in normalized source input.
+/// Unsupported or incomplete action documents are rejected by the normalizer
+/// instead of being treated as evidence that no action occurred.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CorporateActionKind {
+    Dividend,
+    ShareConversion,
+    Liquidation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct CorporateActionRow {
+    pub announcement_id: String,
+    pub action_index: u32,
+    pub instrument_id: InstrumentId,
+    pub kind: CorporateActionKind,
+    pub announced_date: NaiveDate,
+    pub available_at: TimestampNs,
+    pub record_date: Option<NaiveDate>,
+    pub ex_date: Option<NaiveDate>,
+    pub pay_date: Option<NaiveDate>,
+    pub effective_date: Option<NaiveDate>,
+    /// Canonical decimal strings, preserving source precision without f64.
+    pub cash_per_share: Option<String>,
+    pub share_ratio: Option<String>,
+    pub liquidation_cash_per_share: Option<String>,
+    pub source_raw_sha256: String,
+    pub normalization_version: String,
+}
+
 pub fn source_crosscheck_schema() -> SchemaRef {
     schema(
         "source_crosscheck",
@@ -512,6 +543,170 @@ pub fn announcements_schema() -> SchemaRef {
             utf8("source_raw_sha256", false),
         ],
     )
+}
+
+pub fn corporate_actions_schema() -> SchemaRef {
+    schema(
+        "corporate_actions",
+        vec![
+            utf8("announcement_id", false),
+            utf8("action_index", false),
+            utf8("instrument_id", false),
+            utf8("kind", false),
+            utf8("announced_date", false),
+            timestamp("available_at", false),
+            utf8("record_date", true),
+            utf8("ex_date", true),
+            utf8("pay_date", true),
+            utf8("effective_date", true),
+            utf8("cash_per_share", true),
+            utf8("share_ratio", true),
+            utf8("liquidation_cash_per_share", true),
+            utf8("source_raw_sha256", false),
+            utf8("normalization_version", false),
+        ],
+    )
+}
+
+pub fn corporate_actions_to_record_batch(
+    rows: &[CorporateActionRow],
+) -> Result<RecordBatch, DataError> {
+    let mut rows = rows.iter().collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        left.announcement_id
+            .cmp(&right.announcement_id)
+            .then(left.action_index.cmp(&right.action_index))
+    });
+    if rows.windows(2).any(|pair| {
+        pair[0].announcement_id == pair[1].announcement_id
+            && pair[0].action_index == pair[1].action_index
+    }) {
+        return Err(err("duplicate corporate action primary key"));
+    }
+    let dates = |values: Vec<Option<NaiveDate>>| {
+        Arc::new(StringArray::from(
+            values
+                .iter()
+                .map(|x| x.map(|d| d.to_string()))
+                .collect::<Vec<_>>(),
+        )) as ArrayRef
+    };
+    let optional_strings =
+        |values: Vec<Option<&str>>| Arc::new(StringArray::from(values)) as ArrayRef;
+    let cols: Vec<ArrayRef> = vec![
+        Arc::new(StringArray::from_iter_values(
+            rows.iter().map(|row| row.announcement_id.as_str()),
+        )),
+        Arc::new(StringArray::from_iter_values(
+            rows.iter().map(|row| format!("{:010}", row.action_index)),
+        )),
+        Arc::new(StringArray::from_iter_values(
+            rows.iter().map(|row| row.instrument_id.to_string()),
+        )),
+        Arc::new(StringArray::from_iter_values(rows.iter().map(
+            |row| match row.kind {
+                CorporateActionKind::Dividend => "dividend",
+                CorporateActionKind::ShareConversion => "share_conversion",
+                CorporateActionKind::Liquidation => "liquidation",
+            },
+        ))),
+        Arc::new(StringArray::from_iter_values(
+            rows.iter().map(|row| row.announced_date.to_string()),
+        )),
+        timestamps(rows.iter().map(|row| Some(row.available_at)).collect()),
+        dates(rows.iter().map(|row| row.record_date).collect()),
+        dates(rows.iter().map(|row| row.ex_date).collect()),
+        dates(rows.iter().map(|row| row.pay_date).collect()),
+        dates(rows.iter().map(|row| row.effective_date).collect()),
+        optional_strings(
+            rows.iter()
+                .map(|row| row.cash_per_share.as_deref())
+                .collect(),
+        ),
+        optional_strings(rows.iter().map(|row| row.share_ratio.as_deref()).collect()),
+        optional_strings(
+            rows.iter()
+                .map(|row| row.liquidation_cash_per_share.as_deref())
+                .collect(),
+        ),
+        Arc::new(StringArray::from_iter_values(
+            rows.iter().map(|row| row.source_raw_sha256.as_str()),
+        )),
+        Arc::new(StringArray::from_iter_values(
+            rows.iter().map(|row| row.normalization_version.as_str()),
+        )),
+    ];
+    RecordBatch::try_new(corporate_actions_schema(), cols).map_err(Into::into)
+}
+
+pub fn corporate_actions_from_record_batch(
+    batch: &RecordBatch,
+) -> Result<Vec<CorporateActionRow>, DataError> {
+    check_batch(batch, "corporate_actions")?;
+    let mut rows = Vec::with_capacity(batch.num_rows());
+    for row in 0..batch.num_rows() {
+        let string_column = |column: usize| -> Result<&StringArray, DataError> {
+            batch
+                .column(column)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .ok_or_else(|| err("expected string corporate action column"))
+        };
+        let text = |column: usize| -> Result<&str, DataError> {
+            if string_column(column)?.is_null(row) {
+                Err(err("unexpected null corporate action field"))
+            } else {
+                Ok(string_column(column)?.value(row))
+            }
+        };
+        let optional_text = |column: usize| -> Result<Option<&str>, DataError> {
+            let strings = string_column(column)?;
+            Ok((!strings.is_null(row)).then(|| strings.value(row)))
+        };
+        let date = |column: usize| -> Result<NaiveDate, DataError> {
+            text(column)?
+                .parse()
+                .map_err(|_| err("invalid corporate action date"))
+        };
+        let optional_date = |column: usize| -> Result<Option<NaiveDate>, DataError> {
+            optional_text(column)?
+                .map(|value| {
+                    value
+                        .parse()
+                        .map_err(|_| err("invalid optional corporate action date"))
+                })
+                .transpose()
+        };
+        let kind = match text(3)? {
+            "dividend" => CorporateActionKind::Dividend,
+            "share_conversion" => CorporateActionKind::ShareConversion,
+            "liquidation" => CorporateActionKind::Liquidation,
+            _ => return Err(err("invalid corporate action kind")),
+        };
+        rows.push(CorporateActionRow {
+            announcement_id: text(0)?.into(),
+            action_index: text(1)?
+                .parse()
+                .map_err(|_| err("invalid corporate action index"))?,
+            instrument_id: text(2)?
+                .parse()
+                .map_err(|error| err(format!("invalid corporate action instrument: {error}")))?,
+            kind,
+            announced_date: date(4)?,
+            available_at: optional_timestamp_at(batch, 5, row)?
+                .ok_or_else(|| err("missing corporate action availability"))?,
+            record_date: optional_date(6)?,
+            ex_date: optional_date(7)?,
+            pay_date: optional_date(8)?,
+            effective_date: optional_date(9)?,
+            cash_per_share: optional_text(10)?.map(str::to_owned),
+            share_ratio: optional_text(11)?.map(str::to_owned),
+            liquidation_cash_per_share: optional_text(12)?.map(str::to_owned),
+            source_raw_sha256: text(13)?.into(),
+            normalization_version: text(14)?.into(),
+        });
+    }
+    Ok(rows)
 }
 
 pub fn source_crosscheck_to_record_batch(
@@ -798,6 +993,7 @@ fn expected_schema(table: &str) -> Result<SchemaRef, DataError> {
         "execution_status" => Ok(execution_status_schema()),
         "source_crosscheck" => Ok(source_crosscheck_schema()),
         "announcements" => Ok(announcements_schema()),
+        "corporate_actions" => Ok(corporate_actions_schema()),
         _ => Err(err("unsupported normalized table")),
     }
 }
@@ -824,6 +1020,7 @@ fn check_primary_key_order(batch: &RecordBatch, table: &str) -> Result<(), DataE
         "sessions" => &[0, 1],
         "execution_status" | "source_crosscheck" => &[0, 1],
         "announcements" => &[0],
+        "corporate_actions" => &[0, 1],
         _ => return Err(err("unsupported normalized table")),
     };
     let schema = batch.schema();

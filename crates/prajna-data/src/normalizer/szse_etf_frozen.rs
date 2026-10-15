@@ -30,8 +30,9 @@ use sha2::{Digest, Sha256};
 use zip::ZipArchive;
 
 use crate::{
-    AnnouncementRow, NormalizationIssue, NormalizationOutput, NormalizedTables,
-    SourceCrosscheckRow, SourceKind, announcements_to_record_batch, bars_to_record_batch,
+    AnnouncementRow, CorporateActionKind, CorporateActionRow, NormalizationIssue,
+    NormalizationOutput, NormalizedTables, SourceCrosscheckRow, SourceKind,
+    announcements_to_record_batch, bars_to_record_batch, corporate_actions_to_record_batch,
     instruments_to_record_batch, sessions_to_record_batch, source_crosscheck_to_record_batch,
 };
 
@@ -39,6 +40,7 @@ use super::{Normalizer, RawInput};
 
 const NORMALIZER_ID: &str = "szse-etf-frozen";
 const CONFIG_V1: &str = r#"{"announcement_available_at":"close_of_first_session_after_announced_date_calendar_covered","announcement_category":"title_keyword_rules_v1_else_unclassified","announcement_date":"announcementTime_ms_in_Asia/Shanghai","bar_available_at":"unknown_null","bar_spec":"1d@session","bars":"tdx_g4day_sz_cod150_md1_512","code_scope":"159000-159999","crosscheck":"tencent_fqkline_day_exact_ohlc_shares","execution_status":"not_derived","identical_duplicate_facts":"deduplicated_min_raw_sha256","inputs":"vendor_originals_only","instrument_kind":"Etf","lot_size":100,"price_increment":"0.001","session_close":"15:00:00+08:00","session_open":"09:30:00+08:00","tdx_amount":"f64@72_fixed10","tdx_no_trade":"close<=0_or_open_high_low_all_zero_keyed_no_bar","tdx_revision":"trade_vs_no_trade_conflict","tdx_price":"f64_rounded_to_0.001_tolerance_1e-6","tencent_volume":"lots*100","timezone":"Asia/Shanghai","venue":"SZSE","volume":"shares"}"#;
+const CONFIG_V2: &str = r#"{"actions":"cninfo_corporateActions_structured_v1","action_dates":"ISO-8601","action_unknown_fields":"reject","announcement_available_at":"close_of_first_session_after_announced_date_calendar_covered","announcement_category":"title_keyword_rules_v1_else_unclassified","announcement_date":"announcementTime_ms_in_Asia/Shanghai","bar_available_at":"unknown_null","bar_spec":"1d@session","bars":"tdx_g4day_sz_cod150_md1_512","code_scope":"159000-159999","crosscheck":"tencent_fqkline_day_exact_ohlc_shares","execution_status":"not_derived","identical_duplicate_facts":"deduplicated_min_raw_sha256","inputs":"vendor_originals_only","instrument_kind":"Etf","lot_size":100,"price_increment":"0.001","session_close":"15:00:00+08:00","session_open":"09:30:00+08:00","tdx_amount":"f64@72_fixed10","tdx_no_trade":"close<=0_or_open_high_low_all_zero_keyed_no_bar","tdx_revision":"trade_vs_no_trade_conflict","tdx_price":"f64_rounded_to_0.001_tolerance_1e-6","tencent_volume":"lots*100","timezone":"Asia/Shanghai","venue":"SZSE","volume":"shares"}"#;
 const CODE_PREFIX: &str = "159";
 const MAX_MEMBER_BYTES: u64 = 256 * 1024 * 1024;
 const UNCLASSIFIED: &str = "unclassified";
@@ -63,6 +65,9 @@ impl SzseEtfFrozen {
     pub(super) const fn v1() -> Self {
         Self { version: "1" }
     }
+    pub(super) const fn v2() -> Self {
+        Self { version: "2" }
+    }
 }
 
 impl Normalizer for SzseEtfFrozen {
@@ -75,7 +80,12 @@ impl Normalizer for SzseEtfFrozen {
     }
 
     fn config_sha256(&self) -> String {
-        format!("sha256:{:x}", Sha256::digest(CONFIG_V1.as_bytes()))
+        let config = if self.version == "1" {
+            CONFIG_V1
+        } else {
+            CONFIG_V2
+        };
+        format!("sha256:{:x}", Sha256::digest(config.as_bytes()))
     }
 
     fn accepted_source_kinds(&self) -> &[SourceKind] {
@@ -86,7 +96,7 @@ impl Normalizer for SzseEtfFrozen {
         &self,
         raw_inputs: &[RawInput],
     ) -> Result<NormalizationOutput, Vec<NormalizationIssue>> {
-        normalize(raw_inputs)
+        normalize(raw_inputs, self.version == "2")
     }
 }
 
@@ -114,6 +124,23 @@ struct Announcement {
     date: NaiveDate,
 }
 
+#[derive(Clone)]
+struct ActionDraft {
+    announcement_id: String,
+    action_index: u32,
+    instrument_id: String,
+    kind: CorporateActionKind,
+    announced_date: NaiveDate,
+    record_date: Option<NaiveDate>,
+    ex_date: Option<NaiveDate>,
+    pay_date: Option<NaiveDate>,
+    effective_date: Option<NaiveDate>,
+    cash_per_share: Option<String>,
+    share_ratio: Option<String>,
+    liquidation_cash_per_share: Option<String>,
+    raw: String,
+}
+
 /// A decoded fact and the smallest Raw hash that states it.
 struct Sourced<V> {
     value: V,
@@ -129,6 +156,7 @@ struct Acc {
     primary: BTreeMap<Key, Sourced<Option<Primary>>>,
     secondary: BTreeMap<Key, Sourced<Ohlcv>>,
     announcements: BTreeMap<String, Sourced<Announcement>>,
+    corporate_actions: Vec<ActionDraft>,
     excluded: BTreeMap<&'static str, u64>,
 }
 
@@ -177,7 +205,10 @@ fn insert_fact<K: Ord + std::fmt::Debug, V: PartialEq>(
     }
 }
 
-fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<NormalizationIssue>> {
+fn normalize(
+    raw_inputs: &[RawInput],
+    include_actions: bool,
+) -> Result<NormalizationOutput, Vec<NormalizationIssue>> {
     let venue = VenueId::new("SZSE").expect("static venue is valid");
     let mut acc = Acc::default();
     let mut duplicates = 0_u64;
@@ -210,7 +241,14 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
             continue;
         };
         if object.contains_key("announcements") {
-            decode_cninfo(&object, raw, &path, &mut acc, &mut duplicates);
+            decode_cninfo(
+                &object,
+                raw,
+                &path,
+                &mut acc,
+                &mut duplicates,
+                include_actions,
+            );
         } else if object.get("data").is_some_and(Value::is_array) {
             decode_calendar(&object, raw, &path, &mut acc, &mut duplicates);
         } else if object.contains_key("code") && object.get("data").is_some_and(Value::is_object) {
@@ -231,6 +269,7 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
         primary,
         secondary,
         announcements,
+        corporate_actions: action_drafts,
         excluded,
     } = acc;
     for (kind, label) in [("szse_calendar", "SZSE calendar"), ("tdx_daily", "TDX")] {
@@ -291,6 +330,42 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
             announced_date: date,
             available_at,
             source_raw_sha256: fact.raw,
+        });
+    }
+    let mut corporate_actions = Vec::new();
+    let action_availability: BTreeMap<_, _> = announcement_rows
+        .iter()
+        .map(|row| (row.announcement_id.as_str(), row.available_at))
+        .collect();
+    for draft in action_drafts {
+        let Some(available_at) = action_availability
+            .get(draft.announcement_id.as_str())
+            .copied()
+        else {
+            issues.push(issue(
+                "corporate_action_next_session_unknown",
+                draft.announcement_id.clone(),
+                "corporate action has no valid announcement availability row",
+            ));
+            continue;
+        };
+        corporate_actions.push(CorporateActionRow {
+            announcement_id: draft.announcement_id,
+            action_index: draft.action_index,
+            instrument_id: InstrumentId::new(draft.instrument_id, venue.clone())
+                .expect("validated symbol"),
+            kind: draft.kind,
+            announced_date: draft.announced_date,
+            available_at,
+            record_date: draft.record_date,
+            ex_date: draft.ex_date,
+            pay_date: draft.pay_date,
+            effective_date: draft.effective_date,
+            cash_per_share: draft.cash_per_share,
+            share_ratio: draft.share_ratio,
+            liquidation_cash_per_share: draft.liquidation_cash_per_share,
+            source_raw_sha256: draft.raw,
+            normalization_version: "szse-corporate-action@1".into(),
         });
     }
     if !issues.is_empty() {
@@ -436,6 +511,9 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
         execution_status: None,
         source_crosscheck: Some(source_crosscheck_to_record_batch(&crosscheck).map_err(convert)?),
         announcements: Some(announcements_to_record_batch(&announcement_rows).map_err(convert)?),
+        corporate_actions: include_actions
+            .then(|| corporate_actions_to_record_batch(&corporate_actions).map_err(convert))
+            .transpose()?,
     };
     let coverage = json!({
         "kind": "szse-etf-frozen",
@@ -448,6 +526,7 @@ fn normalize(raw_inputs: &[RawInput]) -> Result<NormalizationOutput, Vec<Normali
         "crosscheck_by_status": crosscheck_counts,
         "announcements": announcement_rows.len(),
         "announcements_by_category": category_counts,
+        "corporate_actions": corporate_actions.len(),
         "excluded_records": excluded,
         "identical_duplicate_facts": duplicates,
         "execution_status": "not_derived",
@@ -745,6 +824,7 @@ fn decode_cninfo(
     path: &str,
     acc: &mut Acc,
     duplicates: &mut u64,
+    include_actions: bool,
 ) {
     *acc.kind_counts.entry("cninfo_announcements").or_default() += 1;
     let items = match &object["announcements"] {
@@ -800,9 +880,9 @@ fn decode_cninfo(
             .map_or(UNCLASSIFIED, |(category, _)| category);
         insert_fact(
             &mut acc.announcements,
-            id,
+            id.clone(),
             Announcement {
-                symbol: code,
+                symbol: code.clone(),
                 category: category.to_owned(),
                 date,
             },
@@ -811,7 +891,159 @@ fn decode_cninfo(
             &mut acc.issues,
             duplicates,
         );
+        if include_actions {
+            let actions = match item.get("corporateActions") {
+                Some(Value::Array(actions)) => actions.as_slice(),
+                Some(Value::Null) | None => &[],
+                _ => {
+                    acc.push(
+                        "invalid_corporate_action",
+                        &item_path,
+                        "corporateActions must be an array or null",
+                    );
+                    continue;
+                }
+            };
+            if matches!(category, "dividend" | "conversion") && actions.is_empty() {
+                acc.push(
+                    "unparsed_corporate_action",
+                    &item_path,
+                    "action announcement has no normalized corporateActions facts",
+                );
+                continue;
+            }
+            for (action_index, action) in actions.iter().enumerate() {
+                let action_path = format!("{item_path}.corporateActions[{action_index}]");
+                match parse_action(
+                    action,
+                    action_index as u32,
+                    id.clone(),
+                    code.clone(),
+                    date,
+                    raw.raw_sha256.clone(),
+                    &action_path,
+                ) {
+                    Ok(draft) => acc.corporate_actions.push(draft),
+                    Err((code, message)) => acc.push(&code, action_path, message),
+                }
+            }
+        }
     }
+}
+
+fn parse_action(
+    value: &Value,
+    action_index: u32,
+    announcement_id: String,
+    symbol: String,
+    announced_date: NaiveDate,
+    raw: String,
+    path: &str,
+) -> Result<ActionDraft, (String, String)> {
+    let obj = value.as_object().ok_or_else(|| {
+        (
+            "invalid_corporate_action".into(),
+            "action must be an object".into(),
+        )
+    })?;
+    const ALLOWED: &[&str] = &[
+        "type",
+        "recordDate",
+        "exDate",
+        "payDate",
+        "effectiveDate",
+        "cashPerShare",
+        "shareRatio",
+        "liquidationCashPerShare",
+    ];
+    if obj.keys().any(|key| !ALLOWED.contains(&key.as_str())) {
+        return Err((
+            "unknown_corporate_action_field".into(),
+            "action contains an unsupported field".into(),
+        ));
+    }
+    let date = |field: &str| -> Result<Option<NaiveDate>, (String, String)> {
+        obj.get(field)
+            .and_then(Value::as_str)
+            .map(|text| {
+                text.parse().map_err(|_| {
+                    (
+                        "invalid_corporate_action_date".into(),
+                        format!("{field} must be YYYY-MM-DD"),
+                    )
+                })
+            })
+            .transpose()
+    };
+    let decimal = |field: &str| -> Result<Option<String>, (String, String)> {
+        let Some(value) = obj.get(field) else {
+            return Ok(None);
+        };
+        let text = value.as_str().ok_or_else(|| {
+            (
+                "invalid_corporate_action_decimal".into(),
+                format!("{field} must be a decimal string"),
+            )
+        })?;
+        let parsed = prajna_domain::Price::parse(text).map_err(|_| {
+            (
+                "invalid_corporate_action_decimal".into(),
+                format!("{field} must be positive and finite"),
+            )
+        })?;
+        Ok(Some(parsed.to_string()))
+    };
+    let kind = match obj.get("type").and_then(Value::as_str) {
+        Some("dividend") => CorporateActionKind::Dividend,
+        Some("share_conversion") => CorporateActionKind::ShareConversion,
+        Some("liquidation") => CorporateActionKind::Liquidation,
+        _ => {
+            return Err((
+                "invalid_corporate_action_type".into(),
+                "type must be dividend, share_conversion or liquidation".into(),
+            ));
+        }
+    };
+    let record_date = date("recordDate")?;
+    let ex_date = date("exDate")?;
+    let pay_date = date("payDate")?;
+    let effective_date = date("effectiveDate")?;
+    let cash_per_share = decimal("cashPerShare")?;
+    let share_ratio = decimal("shareRatio")?;
+    let liquidation_cash_per_share = decimal("liquidationCashPerShare")?;
+    let valid = match kind {
+        CorporateActionKind::Dividend => {
+            record_date.is_some()
+                && ex_date.is_some()
+                && pay_date.is_some()
+                && cash_per_share.is_some()
+        }
+        CorporateActionKind::ShareConversion => effective_date.is_some() && share_ratio.is_some(),
+        CorporateActionKind::Liquidation => {
+            effective_date.is_some() && liquidation_cash_per_share.is_some()
+        }
+    };
+    if !valid {
+        return Err((
+            "incomplete_corporate_action".into(),
+            format!("required dates or amounts are missing in {path}"),
+        ));
+    }
+    Ok(ActionDraft {
+        announcement_id,
+        action_index,
+        instrument_id: symbol,
+        kind,
+        announced_date,
+        record_date,
+        ex_date,
+        pay_date,
+        effective_date,
+        cash_per_share,
+        share_ratio,
+        liquidation_cash_per_share,
+        raw,
+    })
 }
 
 fn is_scoped_code(code: &str) -> bool {

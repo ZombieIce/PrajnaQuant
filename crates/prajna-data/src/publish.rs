@@ -471,6 +471,15 @@ fn table_descriptors(tables: &NormalizedTables) -> Vec<TableToPublish<'_>> {
             primary_key: &["announcement_id"],
         });
     }
+    if let Some(batch) = &tables.corporate_actions {
+        descriptors.push(TableToPublish {
+            name: "corporate_actions",
+            schema_version: 1,
+            schema: batch.schema(),
+            batch,
+            primary_key: &["announcement_id", "action_index"],
+        });
+    }
     descriptors
 }
 
