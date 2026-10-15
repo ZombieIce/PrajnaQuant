@@ -4,7 +4,7 @@ use prajna_data::RawStore;
 use prajna_research::{
     etf_eligible::EligibilityParams,
     etf_market::{DerivedMarket, MarketEvidence},
-    etf_momentum::{EmptyActionCoverage, TotalReturnIndex},
+    etf_momentum::{CorporateActionRules, EmptyActionCoverage, TotalReturnIndex},
     pit_strategy::{self, PitS2Params, RiskNotice, RiskSignals},
     pit_universe::{CatalogInput, HistoricalCatalog},
 };
@@ -14,7 +14,10 @@ use prajna_research::{
 pub struct PitInput {
     catalog: CatalogInput,
     market: MarketEvidence,
-    empty_actions: EmptyActionCoverage,
+    #[serde(default)]
+    empty_actions: Option<EmptyActionCoverage>,
+    #[serde(default)]
+    corporate_action_rules: Option<CorporateActionRules>,
     #[serde(default)]
     eligibility: EligibilityParams,
     #[serde(default)]
@@ -38,8 +41,28 @@ impl PitContext {
             .map_err(|e| invalid(e.to_string()))?;
         let market = DerivedMarket::from_dataset(root, dsv, &catalog, input.market.clone())
             .map_err(|e| invalid(e.to_string()))?;
-        let tri = TotalReturnIndex::build(&market, None, Some(&input.empty_actions), &raw)
-            .map_err(|e| invalid(e.to_string()))?;
+        let manifest = prajna_data::read_manifest(root, dsv).map_err(|e| invalid(e.to_string()))?;
+        let has_actions = manifest
+            .core
+            .tables
+            .iter()
+            .any(|table| table.table == "corporate_actions");
+        let tri = if has_actions {
+            let rules = input.corporate_action_rules.as_ref().ok_or_else(|| {
+                invalid("corporate_action_rules are required by this Dataset Version")
+            })?;
+            TotalReturnIndex::build_from_dataset(&market, root, rules, &raw)
+        } else {
+            TotalReturnIndex::build(
+                &market,
+                None,
+                Some(input.empty_actions.as_ref().ok_or_else(|| {
+                    invalid("empty_actions coverage is required for a 6a Dataset Version")
+                })?),
+                &raw,
+            )
+        }
+        .map_err(|e| invalid(e.to_string()))?;
         let risk = RiskSignals::build(&catalog, input.risk_notices.clone(), &raw)
             .map_err(|e| invalid(e.to_string()))?;
         let identity = serde_json::json!({
@@ -51,7 +74,7 @@ impl PitContext {
             "eligibility": input.eligibility, "risk_signals": risk,
             "risk_exit_rule": "persistent-next-explicitly-sellable-open@1",
             "evidence_mode": "offline-opening-evidence",
-            "return_mode": "price_engineering_6a_empty_actions",
+            "return_mode": if has_actions { "corporate_action_total_return_6b" } else { "price_engineering_6a_empty_actions" },
         });
         Ok(Self {
             catalog,

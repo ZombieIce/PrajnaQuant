@@ -59,7 +59,7 @@ cd "$repo"
 新增、显式选择 `strategy: "s2_pit_rotation"`；旧 `s2_rotation`、Static Universe、
 Factor 与旧 Run 身份不变。此路径只接受 SZSE、`availability_assumption: "none"`、
 `unfilled_entry: "skip"` 和 `full_target`，支持 Vector 与 Fast Event，不接 Accurate；Python 入口见 `prajna-py`。
-DSV 必须来自 `szse-etf-frozen@1`；无网络采集或真实历史数据验收。
+DSV 可来自 `szse-etf-frozen@1`（6a）或 `@2`（含结构化公司行动表）；无网络采集或真实历史数据验收。
 
 定义新增 `pit` 对象（不得用已计算的候选集/任意评分代替原始证据）：
 
@@ -67,7 +67,8 @@ DSV 必须来自 `szse-etf-frozen@1`；无网络采集或真实历史数据验�
 | --- | --- |
 | `catalog` | #175 `CatalogInput`，其 content identity 填入顶层 `universe` |
 | `market` | #176 `MarketEvidence`；从冻结 DSV Raw 重建并核对表 hash |
-| `empty_actions` | #176 `EmptyActionCoverage`，明确的 6a 空公司行动工程假设 |
+| `empty_actions` | `@1` 必需的 #176 `EmptyActionCoverage`；`@2` 有 `corporate_actions` 表时忽略 |
+| `corporate_action_rules` | `@2` 必需；绑定 TRI 跳变阈值/语义版本，进入 PIT、Cache 与 Run 身份 |
 | `eligibility` | 可省略；默认上市 61 Session、金额窗口 20、日均 1 千万元；`momentum_sessions` 由每 Run 的 `lookback` 覆盖 |
 | `risk_notices` | 可省略；`instrument_id` 为生命周期 ID，`kind` 与 `evidence` 引用冻结官方附件；Catalog 正式终止事实自动加入 |
 
@@ -112,8 +113,10 @@ Vector `executions` 与 Fast Full `orders` 附风险尝试及期末等待记录�
 `pending_at_end` 同时包含未退出风险腿。旧 Run 不新增此可选 manifest 字段。
 
 3 ETF × 10 Session 的供应商格式合成 Raw、逐日手算现金/持仓/费用/开收盘 NAV 和
-Vector/Fast 日对拍见两 crate 的 `tests/pit_s2.rs`。价格工程模式不证明真实 PIT、
-双源授权、开盘排队成交或分红总回报；公司行动仍是独立范围；#178 Python PIT 视图复用同一输入和执行层，见 [`prajna-py`](../prajna-py/README.md)。
+Vector/Fast 日对拍见两 crate 的 `tests/pit_s2.rs`。#180 的 `@2` 公司行动/TRI 仅有
+独立合成研究层测试；当前 Normalizer 需要结构化 `corporateActions` 字段，保留源发布时间并
+单独计算保守可用时刻，但不解析原始 cninfo 附件或证明公告全集。6b 账户应收/现金账本仍由后续范围处理；#178 Python PIT
+视图复用同一 Rust 输入和执行层，见 [`prajna-py`](../prajna-py/README.md)。
 
 ## stdout JSON 与退出码
 

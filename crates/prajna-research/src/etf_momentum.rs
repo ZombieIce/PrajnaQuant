@@ -10,7 +10,10 @@ use crate::{
 };
 use chrono::NaiveDate;
 use polars::prelude::*;
-use prajna_data::{CanonicalError, RawStore};
+use prajna_data::{
+    CanonicalError, CorporateActionKind, CorporateActionRow, RawStore,
+    corporate_actions_from_record_batch, logical_hash, read_manifest, read_parquet,
+};
 use prajna_domain::{InstrumentId, TimestampNs};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -55,7 +58,34 @@ pub struct TotalReturnIndex {
     identity: Value,
     version: String,
     market_identity: String,
+    integrity: Vec<InstrumentActionIntegrity>,
 }
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CorporateActionRules {
+    pub version: String,
+    pub unexplained_jump_threshold_bps: u32,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct InstrumentActionIntegrity {
+    pub instrument_id: InstrumentId,
+    pub start: NaiveDate,
+    pub end: NaiveDate,
+    pub observed_actions: usize,
+    pub unapplied_action_dates: Vec<NaiveDate>,
+    pub unexplained_price_jumps: Vec<NaiveDate>,
+    /// Raw-set presence does not prove complete official announcement coverage.
+    pub coverage_status: ActionCoverageStatus,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionCoverageStatus {
+    ObservedRawSetOnly,
+}
+
 impl TotalReturnIndex {
     pub fn build(
         market: &DerivedMarket,
@@ -163,8 +193,226 @@ impl TotalReturnIndex {
             identity,
             version,
             market_identity: market.version().into(),
+            integrity: Vec::new(),
         })
     }
+
+    /// Builds the 6b TRI from versioned, normalized corporate actions. Actions
+    /// affect the ex/effective-date return; their availability remains attached
+    /// to the resulting point so late notices cannot be used as-of earlier.
+    pub fn build_with_actions(
+        market: &DerivedMarket,
+        actions: &[CorporateActionRow],
+        rules: &CorporateActionRules,
+        dataset_version: &str,
+        raw: &RawStore,
+    ) -> Result<Self, FactorError> {
+        if dataset_version != market.dsv()
+            || rules.version.trim().is_empty()
+            || rules.unexplained_jump_threshold_bps == 0
+        {
+            return Err(FactorError::Evaluation(
+                "invalid corporate action Dataset Version or rules".into(),
+            ));
+        }
+        let mut by_date = BTreeMap::new();
+        for action in actions {
+            raw.get(&action.source_raw_sha256)
+                .map_err(|e| FactorError::Evaluation(e.to_string()))?;
+            let (date, ratio, cash) = action_terms(action)?;
+            if action.normalization_version.trim().is_empty()
+                || !market
+                    .cells()
+                    .contains_key(&(action.instrument_id.clone(), date))
+            {
+                return Err(FactorError::Evaluation(
+                    "corporate action is outside normalized market coverage".into(),
+                ));
+            }
+            if by_date
+                .insert((action.instrument_id.clone(), date), (action, ratio, cash))
+                .is_some()
+            {
+                return Err(FactorError::Evaluation(
+                    "multiple same-day corporate actions have unresolved ordering".into(),
+                ));
+            }
+        }
+        let ids: BTreeSet<_> = market.cells().keys().map(|(id, _)| id.clone()).collect();
+        let mut points = BTreeMap::new();
+        let mut integrity = Vec::new();
+        for id in ids {
+            let dates: Vec<_> = market.sessions().iter().map(|s| s.session_date()).collect();
+            let mut previous_close: Option<f64> = None;
+            let mut previous_level: Option<IndexPoint> = None;
+            let mut suspicious = Vec::new();
+            let mut unapplied = Vec::new();
+            let mut count = 0usize;
+            for session in market.sessions() {
+                let date = session.session_date();
+                let key = (id.clone(), date);
+                let Some(cell) = market.cells().get(&key) else {
+                    if by_date.contains_key(&key) {
+                        unapplied.push(date);
+                    }
+                    previous_close = None;
+                    previous_level = None;
+                    continue;
+                };
+                if cell.state == TradeState::Unknown {
+                    if by_date.contains_key(&key) {
+                        unapplied.push(date);
+                    }
+                    previous_close = None;
+                    previous_level = None;
+                    continue;
+                }
+                let Some(close) = cell.close.map(|price| price.to_f64()) else {
+                    if by_date.contains_key(&key) {
+                        unapplied.push(date);
+                    }
+                    previous_close = None;
+                    previous_level = None;
+                    continue;
+                };
+                let action = by_date.get(&key).copied();
+                let mut current_level = None;
+                if let (Some(prior_close), Some(prior)) = (previous_close, previous_level) {
+                    let (ratio, cash) = action.map_or((1.0, 0.0), |(_, ratio, cash)| (ratio, cash));
+                    let adjusted_return_bps =
+                        (((ratio * close + cash) / prior_close - 1.0) * 10_000.0).abs();
+                    if adjusted_return_bps > f64::from(rules.unexplained_jump_threshold_bps) {
+                        suspicious.push(date);
+                    } else {
+                        let value = prior.level * (ratio * close + cash) / prior_close;
+                        let available_at = if let Some((action, _, _)) = action {
+                            max_known(
+                                prior.available_at,
+                                max_known(cell.available_at, Some(action.available_at)),
+                            )
+                        } else {
+                            max_known(prior.available_at, cell.available_at)
+                        };
+                        current_level = Some(IndexPoint {
+                            level: value,
+                            available_at,
+                        });
+                        if action.is_some() {
+                            count += 1;
+                        }
+                    }
+                } else if action.is_none() {
+                    current_level = Some(IndexPoint {
+                        level: close,
+                        available_at: cell.available_at,
+                    });
+                } else {
+                    // An event on the first usable point has no prior close to
+                    // define its return. Keep it out of TRI and report it.
+                    unapplied.push(date);
+                }
+                if let Some(point) = current_level.filter(|p| p.level.is_finite() && p.level > 0.0)
+                {
+                    let point = IndexPoint {
+                        level: point.level,
+                        available_at: point.available_at.map(|at| at.max(session.ts_close())),
+                    };
+                    points.insert(key, point);
+                    previous_level = Some(point);
+                    previous_close = Some(close);
+                } else {
+                    points.remove(&key);
+                    previous_level = None;
+                    previous_close = None;
+                }
+            }
+            integrity.push(InstrumentActionIntegrity {
+                instrument_id: id,
+                start: *dates.first().expect("market has sessions"),
+                end: *dates.last().expect("market has sessions"),
+                observed_actions: count,
+                unapplied_action_dates: unapplied,
+                unexplained_price_jumps: suspicious,
+                coverage_status: ActionCoverageStatus::ObservedRawSetOnly,
+            });
+        }
+        let identity = json!({
+            "semantic_version":"etf-total-return-index@2", "market":market.version(),
+            "dataset_version":dataset_version, "normalization_version":"szse-corporate-action@1",
+            "rules":rules, "actions":actions, "integrity":integrity,
+            "points":points.iter().map(|((id,date),p)|json!({"instrument":id,"date":date,"level_bits":format!("{:016x}",p.level.to_bits()),"available_at":p.available_at})).collect::<Vec<_>>()
+        });
+        let canonical = prajna_data::restricted_jcs(&identity)
+            .map_err(|e| FactorError::Evaluation(e.to_string()))?;
+        let version = format!("etf-tri-input:sha256:{:x}", Sha256::digest(canonical));
+        Ok(Self {
+            points,
+            identity,
+            version,
+            market_identity: market.version().into(),
+            integrity,
+        })
+    }
+
+    pub fn build_from_dataset(
+        market: &DerivedMarket,
+        root: &std::path::Path,
+        rules: &CorporateActionRules,
+        raw: &RawStore,
+    ) -> Result<Self, FactorError> {
+        let manifest = read_manifest(root, market.dsv())
+            .map_err(|e| FactorError::Evaluation(e.to_string()))?;
+        let table = manifest
+            .core
+            .tables
+            .iter()
+            .find(|table| table.table == "corporate_actions")
+            .ok_or_else(|| {
+                FactorError::Evaluation(
+                    "Dataset Version has no normalized corporate_actions table".into(),
+                )
+            })?;
+        let dsv_hex = market
+            .dsv()
+            .strip_prefix("dsv:sha256:")
+            .ok_or_else(|| FactorError::Evaluation("invalid Dataset Version".into()))?;
+        let path = root
+            .join("normalized")
+            .join("corporate_actions")
+            .join(dsv_hex)
+            .join("part-00000.parquet");
+        let batches = read_parquet(path, "corporate_actions", "1")
+            .map_err(|e| FactorError::Evaluation(e.to_string()))?;
+        let actual_hash = logical_hash(
+            "corporate_actions",
+            batches
+                .first()
+                .ok_or_else(|| {
+                    FactorError::Evaluation("corporate_actions table is empty or missing".into())
+                })?
+                .schema()
+                .as_ref(),
+            &batches,
+            &["announcement_id", "action_index"],
+        )
+        .map_err(|e| FactorError::Evaluation(e.to_string()))?;
+        let row_count: u64 = batches.iter().map(|batch| batch.num_rows() as u64).sum();
+        if actual_hash != table.logical_hash || row_count != table.row_count {
+            return Err(FactorError::Evaluation(
+                "corporate_actions table does not match Dataset Version".into(),
+            ));
+        }
+        let actions = batches
+            .iter()
+            .map(corporate_actions_from_record_batch)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| FactorError::Evaluation(e.to_string()))?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        Self::build_with_actions(market, &actions, rules, market.dsv(), raw)
+    }
+
     pub fn identity(&self) -> &Value {
         &self.identity
     }
@@ -177,7 +425,49 @@ impl TotalReturnIndex {
     pub fn point(&self, id: &InstrumentId, date: NaiveDate) -> Option<IndexPoint> {
         self.points.get(&(id.clone(), date)).copied()
     }
+    pub fn integrity(&self) -> &[InstrumentActionIntegrity] {
+        &self.integrity
+    }
 }
+
+fn parse_action_decimal(value: Option<&str>) -> Result<f64, FactorError> {
+    let value = value.ok_or_else(|| {
+        FactorError::Evaluation("corporate action is missing a required amount or ratio".into())
+    })?;
+    let parsed = value
+        .parse::<f64>()
+        .map_err(|_| FactorError::Evaluation("invalid corporate action decimal".into()))?;
+    if !parsed.is_finite() || parsed <= 0.0 {
+        return Err(FactorError::Evaluation(
+            "corporate action amount or ratio must be positive".into(),
+        ));
+    }
+    Ok(parsed)
+}
+
+fn action_terms(action: &CorporateActionRow) -> Result<(NaiveDate, f64, f64), FactorError> {
+    let (date, ratio, cash) = match action.kind {
+        CorporateActionKind::Dividend => (
+            action.ex_date,
+            1.0,
+            parse_action_decimal(action.cash_per_share.as_deref())?,
+        ),
+        CorporateActionKind::ShareConversion => (
+            action.effective_date,
+            parse_action_decimal(action.share_ratio.as_deref())?,
+            0.0,
+        ),
+        CorporateActionKind::Liquidation => (
+            action.effective_date,
+            0.0,
+            parse_action_decimal(action.liquidation_cash_per_share.as_deref())?,
+        ),
+    };
+    let date = date
+        .ok_or_else(|| FactorError::Evaluation("corporate action lacks effective date".into()))?;
+    Ok((date, ratio, cash))
+}
+
 fn max_known(a: Option<TimestampNs>, b: Option<TimestampNs>) -> Option<TimestampNs> {
     a.zip(b).map(|(a, b)| a.max(b))
 }

@@ -4,8 +4,9 @@ use std::{fs, io::Write, path::Path};
 
 use arrow_array::{Array, StringArray};
 use prajna_data::{
-    FrozenSourceMeta, Manifest, NormalizerRegistry, PublishError, RawStore, RebuildError,
-    SourceKind, SourceRecordInput, freeze_raw, publish_dataset, read_parquet, rebuild_dataset,
+    CorporateActionKind, FrozenSourceMeta, Manifest, NormalizerRegistry, PublishError, RawStore,
+    RebuildError, SourceKind, SourceRecordInput, corporate_actions_from_record_batch, freeze_raw,
+    publish_dataset, read_parquet, rebuild_dataset,
 };
 use serde_json::{Value, json};
 use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
@@ -370,6 +371,139 @@ fn vendor_originals_decode_to_bars_gaps_crosscheck_and_announcements() {
     );
     let serialized = coverage.to_string();
     assert!(!serialized.contains("1.05") && !serialized.contains("21000"));
+}
+
+#[test]
+fn corporate_action_dataset_v2_normalizes_late_announcement_and_binds_facts() {
+    let dir = tempfile::tempdir().unwrap();
+    let cninfo = serde_json::to_vec(&json!({"announcements":[{
+        "announcementId":"CA-1", "secCode":"159901", "secName":"合成ETF",
+        "announcementTitle":"合成ETF收益分配公告",
+        "announcementTime":millis("2026-01-06T00:00:00+08:00"),
+        "corporateActions":[
+            {"type":"dividend", "recordDate":"2026-01-05", "exDate":"2026-01-06", "payDate":"2026-01-08", "cashPerShare":"0.0728"},
+            {"type":"share_conversion", "effectiveDate":"2026-01-07", "shareRatio":"2"},
+            {"type":"liquidation", "effectiveDate":"2026-01-08", "liquidationCashPerShare":"0.85"}
+        ]
+    }], "totalRecordNum":1, "hasMore":false})).unwrap();
+    let frozen = freeze_all(
+        dir.path(),
+        &[
+            ("szse-calendar", calendar()),
+            ("tdx", tdx_0105(1.05, None)),
+            ("tdx", tdx_package("260106", &[rec("159901", 1.06)], None)),
+            ("tdx", tdx_package("260108", &[rec("159901", 1.07)], None)),
+            ("tencent", tencent()),
+            ("cninfo", cninfo),
+        ],
+    );
+    let manifest = publish_dataset(
+        dir.path(),
+        &frozen.store,
+        &NormalizerRegistry::with_builtins(),
+        ID,
+        "2",
+        &frozen.hashes,
+        OBSERVED,
+    )
+    .unwrap();
+    assert!(
+        manifest
+            .core
+            .tables
+            .iter()
+            .any(|table| table.table == "corporate_actions")
+    );
+    let batch = read_parquet(
+        table_path(dir.path(), &manifest.dsv, "corporate_actions"),
+        "corporate_actions",
+        "1",
+    )
+    .unwrap();
+    let rows = corporate_actions_from_record_batch(batch.first().unwrap()).unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].kind, CorporateActionKind::Dividend);
+    assert_eq!(rows[0].cash_per_share.as_deref(), Some("0.0728"));
+    assert_eq!(
+        rows[0].announced_at,
+        "2026-01-05T16:00:00Z".parse().unwrap()
+    );
+    assert_eq!(rows[1].kind, CorporateActionKind::ShareConversion);
+    assert_eq!(rows[1].share_ratio.as_deref(), Some("2"));
+    assert_eq!(rows[2].kind, CorporateActionKind::Liquidation);
+    assert_eq!(rows[2].liquidation_cash_per_share.as_deref(), Some("0.85"));
+    // Jan 7 is the first session after the Jan 6 publication date.
+    assert_eq!(
+        rows[0].available_at,
+        "2026-01-07T15:00:00+08:00".parse().unwrap()
+    );
+    assert_eq!(
+        rebuild_dataset(
+            &frozen.store,
+            &NormalizerRegistry::with_builtins(),
+            &manifest
+        )
+        .unwrap(),
+        manifest.dsv
+    );
+    let price_only = publish_dataset(
+        dir.path(),
+        &frozen.store,
+        &NormalizerRegistry::with_builtins(),
+        ID,
+        "1",
+        &frozen.hashes,
+        OBSERVED,
+    )
+    .unwrap();
+    assert_ne!(price_only.dsv, manifest.dsv);
+}
+
+#[test]
+fn action_category_without_structured_facts_fails_closed_in_v2() {
+    let dir = tempfile::tempdir().unwrap();
+    let frozen = standard(dir.path());
+    let error = publish_dataset(
+        dir.path(),
+        &frozen.store,
+        &NormalizerRegistry::with_builtins(),
+        ID,
+        "2",
+        &frozen.hashes,
+        OBSERVED,
+    )
+    .unwrap_err();
+    assert!(format!("{error:?}").contains("unparsed_corporate_action"));
+}
+
+#[test]
+fn termination_announcement_without_liquidation_facts_fails_closed_in_v2() {
+    let dir = tempfile::tempdir().unwrap();
+    let frozen = freeze_all(
+        dir.path(),
+        &[
+            ("szse-calendar", calendar()),
+            ("tdx", tdx_0105(1.05, None)),
+            ("tdx", tdx_package("260106", &[rec("159901", 1.06)], None)),
+            ("tdx", tdx_package("260108", &[rec("159901", 1.07)], None)),
+            ("tencent", tencent()),
+            (
+                "cninfo",
+                cninfo_doc(&[("T-1", "159901", "合成ETF基金合同终止公告", "2026-01-06")]),
+            ),
+        ],
+    );
+    let error = publish_dataset(
+        dir.path(),
+        &frozen.store,
+        &NormalizerRegistry::with_builtins(),
+        ID,
+        "2",
+        &frozen.hashes,
+        OBSERVED,
+    )
+    .unwrap_err();
+    assert!(format!("{error:?}").contains("unparsed_corporate_action"));
 }
 
 #[test]
