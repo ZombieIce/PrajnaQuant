@@ -129,3 +129,24 @@ directories, and inherit no host Python objects. Trusted worker sibling imports 
 non-Python OS environment remain available. This is not a security sandbox. A real
 Python-hosted Accurate smoke with hostile PYTHONPATH runs in Full only; lightweight
 CI intentionally skips that smoke.
+
+
+### #178 PIT extension (2026-10-15)
+
+The optional MVP-6 path replaces Static membership with the per-Session Historical
+Catalog Universe and Rust Eligible Set from ADR 0022. Python receives lifecycle
+IDs, known derived statuses/directional gates and optional Rust `etf_tri_momentum`
+Values. Only positive targets and ranking entries in Eligible and outside known
+risk exclusions are accepted; Catalog-member zero targets permit exit intent
+without passing holdings to the callback. Actual exits remain in the common Rust
+Engine. PIT parameters are the strict S2 lookback/top_k/rebalance_every object;
+the declaration retains its existing full-window and Factor-readiness warm-up,
+then schedules by `Strategy.rebalance_every` from the first ready Session.
+Readiness uses only current Universe members; later empty Eligible Sessions
+do not skip callbacks. The parameter cadence applies to built-in S2, not Python
+callbacks, so cross-strategy comparisons must explicitly align Decisions.
+This preserves the owner-confirmed Python scheduling contract for PIT and Static.
+Compact Arrow export still bounds every row by current membership, window and
+actual availability. Matching built-in PIT definitions retain CLI/Python identity
+and result parity; Python references retain distinct strategy and source/environment
+Execution identities. Only synthetic 6a engineering inputs are validated here.

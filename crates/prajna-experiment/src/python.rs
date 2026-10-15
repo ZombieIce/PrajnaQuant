@@ -21,7 +21,10 @@ pub struct PythonProvenance {
 
 impl Experiment {
     /// JSON values for callbacks, kept separate from identity-bearing tagged float/string values.
-    pub fn python_parameters(&self) -> Result<BTreeMap<String, Value>, ExperimentError> {
+    pub fn python_parameters(
+        &self,
+        lake: impl AsRef<Path>,
+    ) -> Result<BTreeMap<String, Value>, ExperimentError> {
         if !engine::is_python_strategy(&self.strategy_kind) {
             return Err(invalid(
                 "Python parameters require a Python strategy reference",
@@ -30,6 +33,13 @@ impl Experiment {
         let ParameterSpace::Native { combinations, .. } = &self.parameter_space else {
             return Err(invalid("missing Python parameter space"));
         };
+        if self.pit.is_some() {
+            return Ok(self
+                .run_definitions(lake)?
+                .into_iter()
+                .map(|run| (run.run_id, run.run_spec["strategy"]["parameters"].clone()))
+                .collect());
+        }
         let mut parameters = BTreeMap::new();
         for combination in combinations {
             let definitions = engine::python_run_specs(self, std::slice::from_ref(combination))?;

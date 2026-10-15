@@ -54,15 +54,23 @@ fn _run_python_experiment(
     }
     let provenance: PythonProvenance = serde_json::from_str(provenance_json)
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
-    let universe = StaticUniverse::load(&lake, experiment.universe())
-        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    let members = if experiment.pit_context().is_some() {
+        Vec::new()
+    } else {
+        StaticUniverse::load(&lake, experiment.universe())
+            .map_err(|error| PyValueError::new_err(error.to_string()))?
+            .members()
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    };
     let definition: serde_json::Value = serde_json::from_str(&definition)
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
     let mut prepared = BTreeMap::new();
     let mut asof_view_ms = Vec::new();
     // Stage 1: no Rayon callbacks, each canonical/deduplicated Run serially under GIL.
     let stage1_started = Instant::now();
-    for (run_id, params) in experiment.python_parameters().map_err(python_error)? {
+    for (run_id, params) in experiment.python_parameters(&lake).map_err(python_error)? {
         if params.get("seed").is_some() {
             return Err(PyValueError::new_err(
                 "Python strategies do not accept seed",
@@ -74,7 +82,7 @@ fn _run_python_experiment(
                 .ok_or_else(|| PyValueError::new_err("lake path must be UTF-8"))?,
             experiment.dsv(),
             experiment.venue(),
-            universe.members().iter().map(ToString::to_string).collect(),
+            members.clone(),
             strategy_json,
             decide.clone_ref(py),
             &params.to_string(),
@@ -82,6 +90,7 @@ fn _run_python_experiment(
                 .as_str()
                 .unwrap_or("none"),
             &mut asof_view_ms,
+            experiment.pit_context(),
         )
         .and_then(|decisions| {
             decisions
