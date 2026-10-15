@@ -21,7 +21,7 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install 'maturin==1.15.0'
 maturin develop --locked --offline
-cargo build -p prajna-experiment --bin prajna-experiment --example prepare_fixture --example acceptance_fixture --locked --offline
+cargo build -p prajna-experiment --bin prajna-experiment --example prepare_fixture --example acceptance_fixture --example pit_fixture --locked --offline
 python -c 'import prajna; print(prajna.__version__, prajna.smoke_test())'
 ```
 
@@ -217,9 +217,9 @@ fields. Non-ok Factor values remain null; nothing is filled from future rows.
 Missing bars remain absent, not zero-priced or executable. The DSV must provide
 an execution_status table; a missing table is an explicit error.
 
-This implementation supports **Static Universe only**: explicit members validated
-against the Venue's DSV instruments. It does not establish historical membership,
-real-market PIT, corporate actions or dividend total returns.
+Static Universes retain explicit members validated against the Venue DSV.
+The optional MVP-6 PIT path below uses the frozen Historical Catalog instead;
+synthetic PIT support does not establish real-market coverage or total returns.
 
 **Safe buffers, zero-copy export:** slicing the original Arrow panel would retain
 full buffers, allowing Python `buffers()` to read excluded future/out-of-window
@@ -468,3 +468,57 @@ only in Full and is **not** equivalence evidence. These checks establish
 synthetic interface/semantic parity only, not real-market correctness,
 historical PIT, total returns, or production suitability. No execution,
 accounting, cost or time contract is changed.
+
+## MVP-6 PIT Python entry (#178)
+
+`RustStrategy.S2_PIT_ROTATION` and `Experiment(pit=...)` accept the same frozen
+`pit` input object as the CLI. Use `Universe(catalog_content_id)`, `Venue("SZSE")`,
+`availability_assumption=NONE`, and Vector or Fast Event `full_target + skip`.
+Vector requires `Engine(EngineKind.VECTOR, initial_capital="10000")`, serialized
+as `vector_pit.initial_capital`. Fast Event uses the existing settings object.
+Inputs are rebuilt/validated by Rust; there is no Python Catalog or trading core.
+The typed built-in Experiment and the same CLI definition share Experiment,
+Execution and Run IDs and every saved logical hash under the same code/environment.
+
+Python callbacks also accept PIT Experiments using `PythonStrategy(id, version)`;
+these retain their own strategy/Execution identities and Python provenance.
+Their parameters are the strict PIT S2 object (`lookback`, `top_k`,
+`rebalance_every`), which controls the Rust Eligible Set and Session-zero anchored
+cadence. The declaration's `lookback_sessions` still controls the visible window;
+PIT does not wait for nonempty Factor/Eligible values before starting the cadence.
+An empty Eligible Set is a valid cash Decision. A declaration can request
+`FactorDependency("momentum", "etf_tri_momentum", {"lookback": 60})`; only this
+Rust PIT Factor is supported on this path. Existing Static Factor kinds and
+warm-up scheduling are unchanged. The Factor's window is independent of the
+visible history window and the parameter controlling Eligible membership.
+
+The immutable View additionally exposes:
+
+- `universe`: the current Session's PIT lifecycle Instrument IDs;
+- `eligible`: the current Session's Rust Eligible Set (before Risk Exit exclusion);
+- `risk_excluded`: risk notices already known by this close;
+- `execution_status`: only known derived rows for current members in the declared
+  window, with `can_buy`, `can_sell`, `reasons` and `rule_version` in addition to
+  the existing keys/status/source/availability columns.
+
+Bars resolve native codes to their owning lifecycle, never splice reused codes,
+and preserve unknown availability. Bars, Factor Values and statuses are compacted
+before Arrow export and require `available_at <= decision close`; future and
+late rows are absent. No future state is exposed through underlying buffers.
+
+Positive targets and ranked entries must be in `eligible` and outside
+`risk_excluded`. Zero targets may name Catalog lifecycles that have left the pool;
+omitting them also requests exit. No actual holdings are passed to callbacks.
+Rust remains responsible for actual sellability, whole-rebalance deferral and
+persistent Risk Exit, including failed exits after Universe removal. Exit intent
+does not authorize a fill at an unavailable price.
+
+For the single-Run generator pass `pit=<same frozen input object>` and `members=[]`.
+Mixing Static members or an availability override with PIT is rejected. The
+same Rust constructors and validation are used by callback Experiment execution.
+
+`python/tests/test_pit.py` and the synthetic-only `pit_fixture` Cargo example cover
+3 lifecycles × 10 Sessions, adversarial buys/availability, buffer boundaries,
+CLI identities/hashes, Python S2/common Engine values and replay. This remains
+6a price engineering with explicit empty-action coverage, not real historical
+PIT evidence, a real-market P0 closure or dividend total-return validation.

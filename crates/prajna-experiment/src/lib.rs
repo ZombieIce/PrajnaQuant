@@ -35,7 +35,7 @@ use sha2::{Digest, Sha256};
 
 mod accurate;
 mod engine;
-mod pit;
+pub mod pit;
 mod python;
 pub use python::{PreparedDecisions, PythonProvenance};
 mod storage;
@@ -361,13 +361,13 @@ impl Experiment {
         }
         read_manifest(lake_root.as_ref(), &input.dsv)?;
         let pit = if let Some(pit_input) = &input.pit {
-            if input.strategy != "s2_pit_rotation"
+            if (input.strategy != "s2_pit_rotation" && !engine::is_python_strategy(&input.strategy))
                 || input.venue != "SZSE"
                 || input.availability_assumption != "none"
                 || input.engine == "accurate_event"
             {
                 return Err(invalid(
-                    "PIT requires s2_pit_rotation, SZSE, availability=none and Vector/Fast Event",
+                    "PIT requires s2_pit_rotation or Python strategy, SZSE, availability=none and Vector/Fast Event",
                 ));
             }
             let context = pit::PitContext::build(pit_input, lake_root.as_ref(), &input.dsv)?;
@@ -436,6 +436,9 @@ impl Experiment {
     pub fn venue(&self) -> &str {
         &self.venue
     }
+    pub fn pit_context(&self) -> Option<&pit::PitContext> {
+        self.pit.as_deref()
+    }
     pub fn costs(&self) -> Costs {
         self.costs
     }
@@ -460,7 +463,7 @@ impl Experiment {
         &self,
         lake_root: impl AsRef<Path>,
     ) -> Result<Vec<RunDefinition>, ExperimentError> {
-        if engine::is_python_strategy(&self.strategy_kind) {
+        if self.pit.is_none() && engine::is_python_strategy(&self.strategy_kind) {
             if let ParameterSpace::Native { combinations, .. } = &self.parameter_space {
                 return engine::python_run_specs(self, combinations);
             }
@@ -627,10 +630,10 @@ impl Experiment {
         } else {
             None
         };
+        if prepared.is_none() && engine::is_python_strategy(&self.strategy_kind) {
+            return Err(invalid("strategy requires Python host"));
+        }
         let runs = match prepared {
-            Some(_) if self.pit.is_some() => {
-                return Err(invalid("PIT Python views are not implemented"));
-            }
             Some(prepared) => self.prepared_runs(lake_root, prepared)?,
             None => self.expand(lake_root)?,
         };
@@ -2446,7 +2449,7 @@ mod tests {
             let parameters = serde_json::json!({"weight":0.5,"name":"a","nested":[true,null]});
             definition["parameter_space"] = serde_json::json!({"list":[parameters,parameters]});
             let experiment = Experiment::parse(&definition.to_string(), &lake).unwrap();
-            let callbacks = experiment.python_parameters().unwrap();
+            let callbacks = experiment.python_parameters(&lake).unwrap();
             assert_eq!(callbacks.len(), 1);
             assert_eq!(callbacks.values().next().unwrap(), &parameters);
             let runs = experiment.run_definitions(&lake).unwrap();

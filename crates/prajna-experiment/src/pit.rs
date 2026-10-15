@@ -1,4 +1,4 @@
-//! #177 offline MVP-6 integration. Corporate actions and Python views are separate.
+//! Offline MVP-6 inputs shared by CLI and Python views; no corporate-action ledger.
 use super::*;
 use prajna_data::RawStore;
 use prajna_research::{
@@ -11,7 +11,7 @@ use prajna_research::{
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct PitInput {
+pub struct PitInput {
     catalog: CatalogInput,
     market: MarketEvidence,
     empty_actions: EmptyActionCoverage,
@@ -22,12 +22,12 @@ pub(super) struct PitInput {
 }
 
 #[derive(Debug)]
-pub(super) struct PitContext {
+pub struct PitContext {
     pub catalog: HistoricalCatalog,
     pub market: DerivedMarket,
     pub tri: TotalReturnIndex,
     pub risk: RiskSignals,
-    eligibility: EligibilityParams,
+    pub eligibility: EligibilityParams,
     pub identity: Value,
 }
 
@@ -84,7 +84,7 @@ impl PitContext {
             .map_err(|e| invalid(e.to_string()))?;
             let mut spec = serde_json::json!({
                 "dsv": experiment.dsv, "universe": experiment.universe, "venue": experiment.venue,
-                "strategy": {"kind": "s2_pit_rotation", "parameters": params},
+                "strategy": {"kind": experiment.strategy_kind, "parameters": params},
                 "pit": self.identity, "pit_plan_version": plan.version,
                 "session_inputs": plan.inputs,
                 "execution_exclusions": self.market.cells().values().filter(|cell| {
@@ -107,7 +107,13 @@ impl PitContext {
                     run_spec: spec,
                     parameters: None,
                     factor: None,
-                    strategy: RunStrategy::Prepared(Ok(plan.decisions)),
+                    strategy: RunStrategy::Prepared(
+                        if engine::is_python_strategy(&experiment.strategy_kind) {
+                            Err("strategy requires Python host".into())
+                        } else {
+                            Ok(plan.decisions)
+                        },
+                    ),
                 },
             );
         }

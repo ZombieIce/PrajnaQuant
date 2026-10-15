@@ -93,9 +93,7 @@ impl EngineSettings {
             normalized: None,
             vector_pit_capital: None,
         };
-        if input.vector_pit.is_some()
-            && (input.engine != "vector" || input.strategy != "s2_pit_rotation")
-        {
+        if input.vector_pit.is_some() && (input.engine != "vector" || input.pit.is_none()) {
             return Err(invalid("vector_pit is only valid for Vector PIT S2"));
         }
         if input.engine != "accurate_event" && input.backend.is_some() {
@@ -105,7 +103,7 @@ impl EngineSettings {
             if input.fast_event.is_some() {
                 return Err(invalid("vector cannot accept fast_event settings"));
             }
-            if input.strategy == "s2_pit_rotation" {
+            if input.pit.is_some() {
                 let settings = input
                     .vector_pit
                     .as_ref()

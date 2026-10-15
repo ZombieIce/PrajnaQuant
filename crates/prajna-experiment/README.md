@@ -58,7 +58,7 @@ cd "$repo"
 
 新增、显式选择 `strategy: "s2_pit_rotation"`；旧 `s2_rotation`、Static Universe、
 Factor 与旧 Run 身份不变。此路径只接受 SZSE、`availability_assumption: "none"`、
-`unfilled_entry: "skip"` 和 `full_target`，支持 Vector 与 Fast Event，不接 Accurate/Python。
+`unfilled_entry: "skip"` 和 `full_target`，支持 Vector 与 Fast Event，不接 Accurate；Python 入口见 `prajna-py`。
 DSV 必须来自 `szse-etf-frozen@1`；无网络采集或真实历史数据验收。
 
 定义新增 `pit` 对象（不得用已计算的候选集/任意评分代替原始证据）：
@@ -113,7 +113,7 @@ Vector `executions` 与 Fast Full `orders` 附风险尝试及期末等待记录�
 
 3 ETF × 10 Session 的供应商格式合成 Raw、逐日手算现金/持仓/费用/开收盘 NAV 和
 Vector/Fast 日对拍见两 crate 的 `tests/pit_s2.rs`。价格工程模式不证明真实 PIT、
-双源授权、开盘排队成交或分红总回报；公司行动和 Python PIT 视图仍是独立范围。
+双源授权、开盘排队成交或分红总回报；公司行动仍是独立范围；#178 Python PIT 视图复用同一输入和执行层，见 [`prajna-py`](../prajna-py/README.md)。
 
 ## stdout JSON 与退出码
 

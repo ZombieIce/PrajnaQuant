@@ -44,6 +44,10 @@ pub fn fixture(root: &Path) -> Fixture {
 }
 
 pub fn fixture_at_price(root: &Path, price: f64) -> Fixture {
+    fixture_options(root, price, false)
+}
+
+pub fn fixture_options(root: &Path, price: f64, terminated: bool) -> Fixture {
     let raw = RawStore::open(root).unwrap();
     let put = |bytes: &[u8]| {
         raw.put(
@@ -105,7 +109,7 @@ pub fn fixture_at_price(root: &Path, price: f64) -> Fixture {
         }))
         .collect(),
     };
-    let catalog_input = CatalogInput {
+    let mut catalog_input = CatalogInput {
         schema_version: 1,
         rule_version: "synthetic-catalog@1".into(),
         calendar_start: date(1),
@@ -149,6 +153,20 @@ pub fn fixture_at_price(root: &Path, price: f64) -> Fixture {
             evidence: vec![evidence("scope", time(1, 8))],
         },
     };
+    if terminated {
+        let life = &mut catalog_input.lifecycles[0];
+        life.attributes.truncate(1);
+        life.termination = Some(LifecycleFact {
+            effective_date: date(8),
+            evidence: evidence("formal-termination", time(8, 8)),
+        });
+        catalog_input
+            .scans
+            .iter_mut()
+            .find(|s| s.native_symbol == "159001")
+            .unwrap()
+            .last_observed = Some(date(7));
+    }
     let catalog = HistoricalCatalog::build(catalog_input.clone(), &raw).unwrap();
     let ids = catalog
         .input()
@@ -172,13 +190,16 @@ pub fn fixture_at_price(root: &Path, price: f64) -> Fixture {
     for day in 1..=10 {
         let codes = if day < 4 { 2 } else { 3 };
         let mut cod = Vec::new();
-        let mut md1 = vec![0u8; codes * 512];
+        let mut md1 = Vec::new();
         for i in 0..codes {
+            if terminated && i == 0 && day >= 8 {
+                continue;
+            }
             let mut record = [0u8; 150];
             record[..6].copy_from_slice(format!("15900{}", i + 1).as_bytes());
-            record[32..34].copy_from_slice(&(i as u16).to_le_bytes());
+            record[32..34].copy_from_slice(&((cod.len() / 150) as u16).to_le_bytes());
             cod.extend_from_slice(&record);
-            let block = &mut md1[i * 512..(i + 1) * 512];
+            let mut block = [0u8; 512];
             for (offset, v) in [
                 (12, open_price(i, day)),
                 (20, price),
@@ -189,6 +210,7 @@ pub fn fixture_at_price(root: &Path, price: f64) -> Fixture {
                 block[offset..offset + 8].copy_from_slice(&v.to_le_bytes());
             }
             block[56..64].copy_from_slice(&20_000u64.to_le_bytes());
+            md1.extend_from_slice(&block);
         }
         let mut zip = ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let opts = SimpleFileOptions::default().last_modified_time(zip::DateTime::default());
@@ -203,6 +225,7 @@ pub fn fixture_at_price(root: &Path, price: f64) -> Fixture {
     }
     for (i, _) in ids.iter().enumerate() {
         let rows = (if i == 2 { 4 } else { 1 }..=10)
+            .filter(|d| !terminated || i != 0 || *d < 8)
             .map(|d| {
                 json!([
                     date(d).to_string(),

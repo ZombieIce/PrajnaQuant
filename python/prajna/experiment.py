@@ -29,6 +29,7 @@ class EngineKind(StrEnum):
 
 class RustStrategy(StrEnum):
     S2_ROTATION = "s2_rotation"
+    S2_PIT_ROTATION = "s2_pit_rotation"
     BUY_AND_HOLD = "buy_and_hold"
     MA_CROSSOVER = "ma_crossover"
 
@@ -140,6 +141,7 @@ class Engine:
     kind: EngineKind
     settings: FastEventSettings | None = None
     backend: Backend | None = None
+    initial_capital: str | None = None
 
 
 @dataclass(frozen=True)
@@ -204,6 +206,7 @@ class Experiment:
     availability_assumption: AvailabilityAssumption = AvailabilityAssumption.NONE
     sessions_per_year: int = 252
     unfilled_entry: Literal["skip", "retry"] | None = None
+    pit: Parameters | None = None
 
     def to_definition(self) -> Parameters:
         result: Parameters = {
@@ -221,6 +224,10 @@ class Experiment:
             "sessions_per_year": self.sessions_per_year,
             "parameter_space": self.parameter_space.to_definition(),
         }
+        if self.pit is not None:
+            result["pit"] = self.pit
+        if self.engine.initial_capital is not None:
+            result["vector_pit"] = {"initial_capital": self.engine.initial_capital}
         if self.unfilled_entry is not None:
             result["unfilled_entry"] = self.unfilled_entry
         if self.engine.settings is not None:

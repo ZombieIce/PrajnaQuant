@@ -152,7 +152,7 @@ jobs:
           source .venv/bin/activate
           python -m pip install 'maturin==1.15.0' -r backends/nautilus/requirements.txt
           maturin develop --locked
-          cargo build -p prajna-experiment --bin prajna-experiment --example prepare_fixture --example acceptance_fixture --locked
+          cargo build -p prajna-experiment --bin prajna-experiment --example prepare_fixture --example acceptance_fixture --example pit_fixture --locked
           python -m unittest discover -s python/tests -v 2>&1 | tee python-accurate.log
           if grep -q "skipped" python-accurate.log; then
             echo "::error::Python Accurate tests were skipped"

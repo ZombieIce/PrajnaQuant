@@ -42,6 +42,7 @@ def generate_decisions(
     decide: Callable[[AsOfView, dict[str, Any], Decision | None], Decision],
     params: Mapping[str, Any],
     availability_assumption: str = "none",
+    pit: Mapping[str, Any] | None = None,
 ) -> list[Decision]:
     """Call a pure strategy once per declared Session under the GIL.
 
@@ -54,4 +55,5 @@ def generate_decisions(
         json.dumps(asdict(strategy), allow_nan=False),
         decide, json.dumps(dict(params), allow_nan=False),
         availability_assumption,
+        None if pit is None else json.dumps(dict(pit), allow_nan=False),
     )
