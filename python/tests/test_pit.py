@@ -26,6 +26,16 @@ def rotation(view, params, previous):
     )
 
 
+def flat_rotation(view, params, previous):
+    # All synthetic close-to-close momentum scores are zero.
+    members = sorted(set(view.eligible) - set(view.risk_excluded))
+    selected = members[:params['top_k']]
+    return prajna.Decision(
+        {instrument: 1 / len(selected) for instrument in selected},
+        [(instrument, 0.0, i + 1) for i, instrument in enumerate(members)],
+    )
+
+
 class PitTests(unittest.TestCase):
     def setUp(self):
         if not PREPARE.is_file():
@@ -73,6 +83,38 @@ class PitTests(unittest.TestCase):
             pit=self.data['pit'] if pit is None else pit,
         )
 
+    def test_pit_preserves_declared_factor_warmup_window_and_cadence(self):
+        strategy = prajna.Strategy(
+            'pit_schedule', '1', bar_columns=(), lookback_sessions=2, rebalance_every=3,
+            factors=(
+                prajna.FactorDependency('momentum', 'etf_tri_momentum', {'lookback': 1}),
+                prajna.FactorDependency('slow', 'etf_tri_momentum', {'lookback': 2}),
+            ),
+        )
+        seen = []
+        def inspect(view, params, previous):
+            seen.append((view.session_date, view.sessions.num_rows,
+                         None if previous is None else previous.session_date))
+            return prajna.Decision({})
+        decisions = self.generate(inspect, strategy=strategy)
+        self.assertEqual(seen, [
+            ('2023-01-03', 2, None),
+            ('2023-01-06', 2, '2023-01-03'),
+            ('2023-01-09', 2, '2023-01-06'),
+        ])
+        self.assertEqual([d.session_date for d in decisions], [day for day, _, _ in seen])
+
+    def test_removed_members_cannot_complete_factor_warmup(self):
+        strategy = prajna.Strategy('pit_warmup', '1', bar_columns=(), factors=(
+            prajna.FactorDependency('momentum', 'etf_tri_momentum', {'lookback': 7}),
+        ))
+        seen = []
+        def inspect(view, params, previous):
+            seen.append(view.session_date)
+            return prajna.Decision({})
+        self.assertEqual(self.generate(inspect, strategy=strategy), [])
+        self.assertEqual(seen, [])
+
     def test_session_members_eligibility_and_safe_buffers(self):
         seen = []
         def inspect(view, params, previous):
@@ -92,16 +134,17 @@ class PitTests(unittest.TestCase):
             return rotation(view, params, previous)
         decisions = self.generate(inspect)
         self.assertEqual([d.session_date for d in decisions],
-                         ['2023-01-01', '2023-01-03', '2023-01-05', '2023-01-07', '2023-01-09'])
+                         [f'2023-01-{day:02}' for day in range(2, 11)])
         self.assertNotIn(self.ids[2], seen[0][1])
-        self.assertEqual(seen[0][2], [])
-        self.assertEqual(seen[1][2], self.ids[:2])
-        self.assertNotIn(self.ids[0], seen[2][1])
-        self.assertEqual(seen[3][1], [self.ids[2]])
+        self.assertEqual(seen[0][2], self.ids[:2])
+        self.assertIn(self.ids[2], seen[2][1])
+        self.assertNotIn(self.ids[2], seen[2][2])
+        self.assertNotIn(self.ids[0], seen[3][1])
+        self.assertEqual(seen[5][1], [self.ids[2]])
 
     def test_invalid_buys_fail_and_explicit_exit_remains_valid(self):
-        cases = [('future listing', self.ids[2], '2023-01-01'),
-                 ('not eligible', self.ids[0], '2023-01-01'),
+        cases = [('future listing', self.ids[2], '2023-01-02'),
+                 ('not eligible', self.ids[2], '2023-01-04'),
                  ('removed member', self.ids[0], '2023-01-05')]
         for name, instrument, day in cases:
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'Eligible Set'):
@@ -168,23 +211,25 @@ class PitTests(unittest.TestCase):
         run = result.manifest['runs'][0]
         self.assertEqual(run['status'], 'failed')
         self.assertEqual(run['table_hashes'], {})
-        summary = prajna.read_run(self.lake, experiment.describe(self.lake).experiment_id,
+        summary = prajna.read_run(str(self.lake), experiment.describe(self.lake).experiment_id,
             result.manifest['execution']['id'], run['run_id'], table='summary')
         self.assertIn('Eligible Set', summary.to_pylist()[0]['error'])
 
     def test_python_rotation_uses_shared_engine_risk_exits_and_replays(self):
+        strategy = prajna.Strategy('pit_rotation', '1', bar_columns=(),
+                                   rebalance_every=self.params['rebalance_every'])
         for engine in ('vector', 'fast_event'):
             with self.subTest(engine=engine):
                 builtin = self.experiment(engine).run(self.lake, repository=self.repo, level=prajna.ResultLevel.FULL)
                 experiment = self.experiment(engine, python=True)
-                result = experiment.run(self.lake, repository=self.repo, strategy=self.strategy,
-                    decide=rotation, level=prajna.ResultLevel.FULL)
+                result = experiment.run(self.lake, repository=self.repo, strategy=strategy,
+                    decide=flat_rotation, level=prajna.ResultLevel.FULL)
                 self.assertEqual(result.manifest['runs'][0]['status'], 'completed')
                 a, b = builtin.manifest['runs'][0], result.manifest['runs'][0]
                 # Strategies retain distinct IDs. Every Engine-produced data value agrees.
                 self.assertEqual(a['table_hashes'], b['table_hashes'])
-                replay = experiment.run(self.lake, repository=self.repo, strategy=self.strategy,
-                    decide=rotation, level=prajna.ResultLevel.FULL, threads=2)
+                replay = experiment.run(self.lake, repository=self.repo, strategy=strategy,
+                    decide=flat_rotation, level=prajna.ResultLevel.FULL, threads=2)
                 self.assertEqual(replay.action, 'replayed')
                 self.assertEqual(result.manifest['execution']['id'], replay.manifest['execution']['id'])
                 self.assertEqual(result.manifest['runs'], replay.manifest['runs'])

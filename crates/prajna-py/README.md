@@ -483,9 +483,13 @@ Execution and Run IDs and every saved logical hash under the same code/environme
 Python callbacks also accept PIT Experiments using `PythonStrategy(id, version)`;
 these retain their own strategy/Execution identities and Python provenance.
 Their parameters are the strict PIT S2 object (`lookback`, `top_k`,
-`rebalance_every`), which controls the Rust Eligible Set and Session-zero anchored
-cadence. The declaration's `lookback_sessions` still controls the visible window;
-PIT does not wait for nonempty Factor/Eligible values before starting the cadence.
+`rebalance_every`), which supplies the shared Rust PIT plan and Eligible Set.
+Python callback scheduling retains the existing declaration contract: wait for a
+full `lookback_sessions` window and each declared Factor's current, known `ok`
+value for at least one current Universe member, then use `Strategy.rebalance_every`
+from that first ready Session. Later empty Eligible Sets do not skip callbacks.
+The parameter cadence controls the built-in S2 strategy, not Python callbacks;
+cross-strategy result comparisons require explicitly aligned Decisions.
 An empty Eligible Set is a valid cash Decision. A declaration can request
 `FactorDependency("momentum", "etf_tri_momentum", {"lookback": 60})`; only this
 Rust PIT Factor is supported on this path. Existing Static Factor kinds and

@@ -250,14 +250,20 @@ fn factor_batch(values: &polars::prelude::DataFrame) -> PyResult<RecordBatch> {
     RecordBatch::try_new(values_schema().arrow, batch.columns().to_vec()).map_err(invalid)
 }
 
-fn usable_factor(batch: &RecordBatch, session: &PanelSession) -> PyResult<bool> {
+fn usable_factor(
+    batch: &RecordBatch,
+    session: &PanelSession,
+    members: &BTreeSet<String>,
+) -> PyResult<bool> {
     let date = date32(session.session_date)?;
+    let ids = column::<StringArray>(batch, "instrument_id")?;
     let dates = column::<Date32Array>(batch, "session_date")?;
     let values = column::<Float64Array>(batch, "value")?;
     let times = column::<TimestampNanosecondArray>(batch, "available_at")?;
     let statuses = column::<StringArray>(batch, "status")?;
     Ok((0..batch.num_rows()).any(|row| {
         dates.value(row) == date
+            && members.contains(ids.value(row))
             && !values.is_null(row)
             && statuses.value(row) == "ok"
             && !times.is_null(row)
@@ -704,7 +710,6 @@ pub(crate) fn generate_decisions(
                 &params,
                 &panel.sessions,
             )
-            .map(|plan| (params, plan))
             .map_err(invalid)
         })
         .transpose()?;
@@ -713,25 +718,7 @@ pub(crate) fn generate_decisions(
     for index in declaration.lookback_sessions - 1..panel.sessions.len() {
         let window = &panel.sessions[index + 1 - declaration.lookback_sessions..=index];
         let session = &panel.sessions[index];
-        if pit.is_none() && first_decision.is_none() {
-            let readiness = factors
-                .values()
-                .map(|values| usable_factor(values, session))
-                .collect::<PyResult<Vec<_>>>()?;
-            if readiness.iter().any(|ready| !ready) {
-                continue;
-            }
-            first_decision = Some(index);
-        }
-        let scheduled = if let Some((params, _)) = &plan {
-            index % params.rebalance_every as usize == 0
-        } else {
-            (index - first_decision.expect("set above")) % declaration.rebalance_every == 0
-        };
-        if !scheduled {
-            continue;
-        }
-        let (session_universe, eligible, risk_excluded) = if let Some((_, plan)) = &plan {
+        let (session_universe, eligible, risk_excluded) = if let Some(plan) = &plan {
             let input = &plan.inputs[index];
             (
                 input
@@ -756,6 +743,19 @@ pub(crate) fn generate_decisions(
         } else {
             (universe.clone(), universe.clone(), BTreeSet::new())
         };
+        if first_decision.is_none() {
+            let readiness = factors
+                .values()
+                .map(|values| usable_factor(values, session, &session_universe))
+                .collect::<PyResult<Vec<_>>>()?;
+            if readiness.iter().any(|ready| !ready) {
+                continue;
+            }
+            first_decision = Some(index);
+        }
+        if (index - first_decision.expect("set above")) % declaration.rebalance_every != 0 {
+            continue;
+        }
         let view_started = Instant::now();
         let factor_views = factors
             .iter()
