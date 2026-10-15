@@ -262,9 +262,10 @@ pub(crate) fn summarize_fast(
             kind,
             blocked,
             skipped_buys: skipped,
+            pit_sizing: None,
         });
     }
-    let projection=VectorResult {sessions,executions,decisions:vec![],pending_at_end:None,risk_exits:vec![],pending_risk_exits:vec![],assumptions:result.assumptions.iter().map(|s|s.to_string()).chain(["Account and VP identities verified at every Session open-after and close; exact scale-18 ledger.".into(), "Metrics use close account NAV; turnover/cost normalized by raw-open pre-trade account equity.".into()]).collect(),costs:prajna_research::vector::VectorCosts {commission_rate:0.0,buy_slippage_bps:0.0,sell_slippage_bps:0.0,buy_tax_rate:0.0,sell_tax_rate:0.0},availability_assumption:availability.into()};
+    let projection=VectorResult {sessions,executions,decisions:vec![],pending_at_end:None,risk_exits:vec![],pending_risk_exits:vec![],pit_initial_capital:None,assumptions:result.assumptions.iter().map(|s|s.to_string()).chain(["Account and VP identities verified at every Session open-after and close; exact scale-18 ledger.".into(), "Metrics use close account NAV; turnover/cost normalized by raw-open pre-trade account equity.".into()]).collect(),costs:prajna_research::vector::VectorCosts {commission_rate:0.0,buy_slippage_bps:0.0,sell_slippage_bps:0.0,buy_tax_rate:0.0,sell_tax_rate:0.0},availability_assumption:availability.into()};
     let mut summary = summarize(&projection, sessions_per_year);
     summary.pending_at_end = pending || !result.pending_risk_exits.is_empty();
     Ok(summary)
@@ -280,6 +281,7 @@ mod tests {
 
     fn result(nav_and_returns: &[(f64, f64)]) -> VectorResult {
         VectorResult {
+            pit_initial_capital: None,
             sessions: nav_and_returns
                 .iter()
                 .enumerate()
@@ -367,6 +369,7 @@ mod tests {
             kind: VectorExecutionKind::Executed,
             blocked: BTreeSet::new(),
             skipped_buys: BTreeSet::new(),
+            pit_sizing: None,
         });
         vector.pending_at_end = Some(VectorPending {
             decision_session: "2026-01-03".into(),
@@ -395,6 +398,7 @@ mod tests {
                 kind,
                 blocked: BTreeSet::new(),
                 skipped_buys: BTreeSet::new(),
+                pit_sizing: None,
             });
         }
         let summary = summarize(&vector, 252);

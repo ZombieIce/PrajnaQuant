@@ -324,6 +324,8 @@ struct DefinitionInput {
     #[serde(default)]
     fast_event: Option<engine::FastSettingsInput>,
     #[serde(default)]
+    vector_pit: Option<engine::VectorPitSettingsInput>,
+    #[serde(default)]
     backend: Option<engine::BackendIdentity>,
     #[serde(default)]
     pit: Option<pit::PitInput>,

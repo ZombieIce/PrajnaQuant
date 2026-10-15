@@ -40,6 +40,10 @@ pub struct Fixture {
 }
 
 pub fn fixture(root: &Path) -> Fixture {
+    fixture_at_price(root, 1.0)
+}
+
+pub fn fixture_at_price(root: &Path, price: f64) -> Fixture {
     let raw = RawStore::open(root).unwrap();
     let put = |bytes: &[u8]| {
         raw.put(
@@ -160,9 +164,9 @@ pub fn fixture(root: &Path) -> Fixture {
     let mut hashes = vec![put(&serde_json::to_vec(&json!({"data":days})).unwrap())];
     let open_price = |code: usize, day: u32| {
         if code == 0 && day == 7 {
-            0.9_f64
+            (price * 900.0).round() / 1000.0
         } else {
-            1.0_f64
+            price
         }
     };
     for day in 1..=10 {
@@ -177,9 +181,9 @@ pub fn fixture(root: &Path) -> Fixture {
             let block = &mut md1[i * 512..(i + 1) * 512];
             for (offset, v) in [
                 (12, open_price(i, day)),
-                (20, 1.0_f64),
+                (20, price),
                 (28, open_price(i, day)),
-                (36, 1.0_f64),
+                (36, price),
                 (72, 20_000_000.0_f64),
             ] {
                 block[offset..offset + 8].copy_from_slice(&v.to_le_bytes());
@@ -203,8 +207,16 @@ pub fn fixture(root: &Path) -> Fixture {
                 json!([
                     date(d).to_string(),
                     open_price(i, d).to_string(),
-                    "1.0",
-                    "1.0",
+                    if price == 1.0 {
+                        "1.0".to_owned()
+                    } else {
+                        price.to_string()
+                    },
+                    if price == 1.0 {
+                        "1.0".to_owned()
+                    } else {
+                        price.to_string()
+                    },
                     open_price(i, d).to_string(),
                     "200"
                 ])
@@ -258,7 +270,7 @@ pub fn fixture(root: &Path) -> Fixture {
                     evidence: known.clone(),
                 }),
                 reference: Some(ReferencePrice {
-                    adjusted_previous_close: "1".parse().unwrap(),
+                    adjusted_previous_close: price.to_string().parse().unwrap(),
                     evidence: known,
                 }),
                 market_available_at: Some(s.ts_close()),

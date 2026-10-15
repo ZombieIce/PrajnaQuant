@@ -22,7 +22,7 @@ fn case(
     commission: &str,
     expected: [(&str, &str, &str); 2],
     deferred: [bool; 2],
-) -> Vec<FastEventResult> {
+) -> (Vec<FastEventResult>, prajna_research::vector::VectorResult) {
     let lake = fixture::lake();
     let f = fixture::fixture(lake.path());
     assert_eq!(f.market.sessions().len(), 10);
@@ -154,6 +154,7 @@ fn case(
             buy_tax_rate: 0.0,
             sell_tax_rate: 0.0,
         },
+        "10000".parse().unwrap(),
     )
     .unwrap();
     let (a, b, cash) = expected[1];
@@ -195,7 +196,7 @@ fn case(
     for (session, fast_equity) in vector.sessions.iter().zip(parity_nav) {
         assert!((session.nav / (1.0 + session.gross_return) * 10000.0 - fast_equity).abs() < 1e-8);
     }
-    results
+    (results, vector)
 }
 
 #[test]
@@ -349,7 +350,7 @@ fn lower_limit_allows_exact_buy_fee_only_adjustment_despite_float_roundoff() {
         ],
         [false; 2],
     );
-    let parity = &results[1];
+    let parity = &results.0[1];
     assert_eq!(
         parity.sessions[2].open_after.account.equity,
         "9970.03".parse().unwrap()
@@ -398,10 +399,309 @@ fn real_sub_tolerance_sized_sell_still_defers_instead_of_becoming_fee_only() {
         [false, true],
     );
     assert_eq!(
-        results[1].sessions[3].open_after.account.equity,
+        results.0[1].sessions[3].open_after.account.equity,
         "9970.03".parse().unwrap()
     );
-    assert!(results[1].account.fee_settlements().is_empty());
+    assert!(results.0[1].account.fee_settlements().is_empty());
+}
+
+#[test]
+fn adjacent_fee_perturbation_preserves_the_real_money_sized_sell() {
+    let results = case(
+        0.2997,
+        BTreeMap::from([
+            ("A.SZSE".parse().unwrap(), 0.3),
+            ("B.SZSE".parse().unwrap(), 0.09970000000000002),
+        ]),
+        true,
+        "0.01",
+        [("2900", "900", "6162"), ("2988.017991", "0", "6982.012009")],
+        [false, true],
+    );
+    assert_eq!(
+        results.0[1].sessions[3].open_after.account.equity,
+        "9970.03".parse().unwrap()
+    );
+    assert!(results.0[1].account.fee_settlements().is_empty());
+    let a = results.0[1].fills[0].fill.order().instrument_id();
+    let trace = results
+        .1
+        .executions
+        .iter()
+        .find(|e| e.session_date == "2023-01-04")
+        .unwrap()
+        .pit_sizing
+        .as_ref()
+        .unwrap();
+    assert_eq!(trace.equity, "9970.03".parse().unwrap());
+    assert_eq!(trace.fees, "9.970030000000001994".parse().unwrap());
+    assert_eq!(
+        trace.desired_quantities[a],
+        "2988.017990999999999402".parse().unwrap()
+    );
+    assert_eq!(trace.required_sides[a], "sell");
+}
+
+#[test]
+fn money_and_quantity_boundaries_depend_on_capital_price_and_fee_components() {
+    for (capital, price, commission, tax, slip, b, pre, fees, delta) in [
+        (
+            "1",
+            1.0,
+            "0.01",
+            "0",
+            "0",
+            0.09970000000000002,
+            "0.997003",
+            "0.000997003",
+            0,
+        ),
+        (
+            "10000",
+            1.0,
+            "0.01",
+            "0",
+            "0",
+            0.09970000000000002,
+            "9970.03",
+            "9.970030000000001994",
+            -598,
+        ),
+        (
+            "10000",
+            2.0,
+            "0.01",
+            "0",
+            "0",
+            0.09970000000000002,
+            "9970.03",
+            "9.970030000000001994",
+            -299,
+        ),
+        (
+            "10000",
+            7.5,
+            "0.01",
+            "0",
+            "0",
+            0.09970000000000002,
+            "9970.03",
+            "9.970030000000001994",
+            -80,
+        ),
+        (
+            "1000000",
+            0.25,
+            "0.01",
+            "0",
+            "0",
+            0.09970000000000002,
+            "997003",
+            "997.003000000000199401",
+            -239280,
+        ),
+        (
+            "10000",
+            2.0,
+            "0.004",
+            "0.002",
+            "0.004",
+            0.09970000000000002,
+            "9970.03",
+            "9.970030000000001995",
+            -299,
+        ),
+        (
+            "250000",
+            3.25,
+            "0.005",
+            "0",
+            "0",
+            0.19970000000000002,
+            "249625.375",
+            "249.625375000000024963",
+            -2304,
+        ),
+        (
+            "10000",
+            1e6,
+            "0.01",
+            "0",
+            "0",
+            0.09970000000000002,
+            "9970.03",
+            "9.970030000000001994",
+            0,
+        ),
+    ] {
+        let lake = fixture::lake();
+        let f = fixture::fixture_at_price(lake.path(), price);
+        assert_eq!(f.market.sessions().len(), 10);
+        assert!(!f.tri.version().is_empty());
+        assert!(!f.risk.signals.is_empty());
+        let native =
+            prajna_research::load_panel(lake.path(), &f.dsv, &"SZSE".parse().unwrap()).unwrap();
+        let panel = pit_strategy::lifecycle_panel(&native, &f.catalog).unwrap();
+        let mut evidence: MarketEvidence =
+            serde_json::from_value(f.input["market"].clone()).unwrap();
+        for cell in &mut evidence.openings {
+            if cell.instrument_id == f.ids[0] && cell.session_date == fixture::date(4) {
+                let reference = price
+                    .to_string()
+                    .parse::<prajna_domain::Notional>()
+                    .unwrap()
+                    .checked_div_decimal("0.9".parse().unwrap())
+                    .unwrap();
+                cell.reference.as_mut().unwrap().adjusted_previous_close =
+                    prajna_domain::Price::from_mantissa(reference.mantissa()).unwrap();
+            }
+        }
+        let market =
+            DerivedMarket::from_dataset(lake.path(), &f.dsv, &f.catalog, evidence).unwrap();
+        assert!(!pit_strategy::permits(
+            &market,
+            &panel,
+            &f.ids[0],
+            &panel.sessions[3],
+            false
+        ));
+        assert!(pit_strategy::permits(
+            &market,
+            &panel,
+            &f.ids[0],
+            &panel.sessions[3],
+            true
+        ));
+        let decisions = vec![
+            Decision {
+                decision_session: panel.sessions[0].clone(),
+                ranked: vec![],
+                targets: BTreeMap::from([(f.ids[0].clone(), 0.2997)]),
+            },
+            Decision {
+                decision_session: panel.sessions[2].clone(),
+                ranked: vec![],
+                targets: BTreeMap::from([(f.ids[0].clone(), 0.3), (f.ids[1].clone(), b)]),
+            },
+        ];
+        let config = FastEventConfig {
+            currency: "CNY".parse().unwrap(),
+            venue: "SZSE".parse().unwrap(),
+            initial_cash: capital.parse().unwrap(),
+            sizing: Sizing::VectorParity,
+            lot_sizes: BTreeMap::new(),
+            costs: FastEventCosts {
+                commission_rate: commission.parse().unwrap(),
+                buy_tax_rate: tax.parse().unwrap(),
+                sell_tax_rate: tax.parse().unwrap(),
+                buy_slippage_rate: slip.parse().unwrap(),
+                sell_slippage_rate: slip.parse().unwrap(),
+                ..FastEventCosts::ZERO
+            },
+        };
+        let fast = run_fast_event_pit(
+            &panel,
+            &market,
+            &RiskSignals::default(),
+            &config,
+            &[PortfolioRun {
+                id: VirtualPortfolioId(1),
+                capital: config.initial_cash,
+                decisions: decisions.clone(),
+                unfilled_entry: UnfilledEntry::Skip,
+                rebalance: Rebalance::FullTarget,
+            }],
+        )
+        .unwrap();
+        let vector = run_vector_pit(
+            &panel,
+            &decisions,
+            &market,
+            &RiskSignals::default(),
+            &VectorCosts {
+                commission_rate: commission.parse().unwrap(),
+                buy_tax_rate: tax.parse().unwrap(),
+                sell_tax_rate: tax.parse().unwrap(),
+                buy_slippage_bps: slip.parse::<f64>().unwrap() * 10000.0,
+                sell_slippage_bps: slip.parse::<f64>().unwrap() * 10000.0,
+            },
+            config.initial_cash,
+        )
+        .unwrap();
+        let event = vector
+            .executions
+            .iter()
+            .find(|e| e.session_date == "2023-01-04")
+            .unwrap();
+        assert_eq!(
+            event.kind == prajna_research::vector::VectorExecutionKind::Deferred,
+            delta < 0
+        );
+        let trace = event.pit_sizing.as_ref().unwrap();
+        assert_eq!(trace.equity, pre.parse().unwrap());
+        assert_eq!(trace.fees, fees.parse().unwrap());
+        let held = &fast.sessions[2].open_after.portfolios[&VirtualPortfolioId(1)].positions;
+        assert_eq!(
+            trace.desired_quantities[&f.ids[0]].mantissa() - held[&f.ids[0]].quantity.mantissa(),
+            delta
+        );
+        assert_eq!(
+            trace.required_sides[&f.ids[0]],
+            if delta < 0 { "sell" } else { "buy" }
+        );
+        if delta < 0 {
+            assert!(
+                fast.fills
+                    .iter()
+                    .all(|f| f.fill.executed_at() != panel.sessions[3].ts_open)
+            );
+            assert_eq!(
+                fast.sessions[3].open_after.account.cash,
+                fast.sessions[2].open_after.account.cash
+            );
+            assert_eq!(
+                fast.sessions[3].open_after.account.equity,
+                pre.parse().unwrap()
+            );
+        } else {
+            assert_eq!(fast.account.fee_settlements().len(), 1);
+            assert_eq!(
+                fast.account.fee_settlements()[0].fee_side(),
+                prajna_account::Side::Buy
+            );
+        }
+        let capital = capital.parse::<f64>().unwrap();
+        for (f, v) in fast.sessions.iter().zip(&vector.sessions) {
+            f.open_after.validate().unwrap();
+            f.close.validate().unwrap();
+            let equity = f
+                .open_after
+                .account
+                .equity
+                .to_string()
+                .parse::<f64>()
+                .unwrap()
+                / capital;
+            assert!((v.nav / (1.0 + v.gross_return) - equity).abs() < 1e-12);
+            let portfolio = &f.open_after.portfolios[&VirtualPortfolioId(1)];
+            for id in &panel.instruments {
+                let actual = portfolio
+                    .positions
+                    .get(id)
+                    .map_or(0.0, |p| p.market_value.to_string().parse::<f64>().unwrap())
+                    / f.open_after
+                        .account
+                        .equity
+                        .to_string()
+                        .parse::<f64>()
+                        .unwrap();
+                assert!(
+                    (v.weights_after_execution.get(id).copied().unwrap_or(0.0) - actual).abs()
+                        < 1e-12
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -420,7 +720,7 @@ fn upper_limit_blocks_buy_fee_only_and_resizes_the_other_leg_without_that_fee() 
         ],
         [false; 2],
     );
-    let parity = &results[1];
+    let parity = &results.0[1];
     assert!(parity.account.fee_settlements().is_empty());
     assert_eq!(
         parity.sessions[3].open_after.account.equity,
@@ -434,7 +734,7 @@ fn upper_limit_blocks_buy_fee_only_and_resizes_the_other_leg_without_that_fee() 
 }
 
 #[test]
-fn tiny_held_weight_drift_is_quantized_before_retrying_a_deferred_target() {
+fn exact_held_quantities_survive_retrying_a_deferred_target() {
     case(
         0.002997,
         BTreeMap::from([
@@ -510,7 +810,7 @@ fn neighboring_exact_fee_only_targets_keep_direction_despite_float_sign_variatio
             [(lot_a, lot_b, lot_cash), (a, quantity_b, cash)],
             [false; 2],
         );
-        let parity = &results[1];
+        let parity = &results.0[1];
         assert_eq!(parity.account.fee_settlements().len(), 1);
         assert_eq!(
             parity.account.fee_settlements()[0].fee_side(),

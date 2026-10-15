@@ -81,14 +81,22 @@ DSV 必须来自 `szse-etf-frozen@1`；无网络采集或真实历史数据验�
 初始资金及 VP 资本 1,000,000、佣金 0.0003、最低佣金 5、买卖滑点各 2bp、税 0。
 既有 `costs`/`fast_event` 字段仍须显式填写；没有隐藏的成本默认值。
 对拍运行改为 `vector_parity + full_target`，忽略最低佣金与 lot，Vector 沿用同样比例成本。
+PIT Vector 必须显式提供 `"vector_pit":{"initial_capital":"1000000"}`，
+与所对拍的 Fast VP capital 一致；资本影响金额与数量的 scale-18 舍入边界，
+不能以归一化资本 1 替代。该值进入 Experiment 身份和 Run Spec 的
+`engine.initial_capital`。旧 PIT Vector 定义须补此字段；旧 Static Universe Vector 不变。
 Native DSV 价格按 Catalog 拆成生命周期面板，不把复用代码的另一生命周期价格携带进来。
 
 常规方向门禁按费用/数量 sizing 后的实际交易侧判断，而非目标成员身份：
 真正必需的受阻卖腿令整次目标延期；受阻买腿保留当前数量、不扣该腿费用，
 重算其他腿并保留现金，不重归一目标。涨停持仓可减仓、跌停持仓可加仓。
-PIT 的侧判断使用 Domain scale-18/half-even sizing；精确零增量才回退到
-F8 fee-only settlement 的 fee_side，不设 no-trade epsilon。`pit-s2@3` 记录此语义，
-旧路径不变。方向与 fee-only 手算回归见 `prajna-research/tests/pit_sides.rs`。
+PIT Vector/Fast 共用 F8 **金额与数量** sizing：按实际权益算逐项费用，再按扣费后权益
+及原始价格算目标数量，所有操作按 Domain scale-18/half-even 的相同次序进行，
+不先对归一化费用或目标市值舍入。只有数量精确不变才回退到 fee-only 的 fee_side，
+不设 no-trade epsilon。Vector 保留精确 sizing 输入状态，但不提交订单或结算账本，
+仍独立计算浮点绩效；Fast 仍是账本权威。`pit-s2@4` 记录此语义和资本契约。
+Vector `executions[].pit_sizing` 保存计划的权益、费用、目标数量和必需方向；
+延期计划不代表已成交。手算回归见 `prajna-research/tests/pit_sides.rs`。
 
 Risk Notice 类型为 `vote_suspension`、`termination_proposal`、`liquidation_notice`、
 `official_termination`、`low_nav_warning`；最后一种只标注。Exact 发布时间沿用原时刻，

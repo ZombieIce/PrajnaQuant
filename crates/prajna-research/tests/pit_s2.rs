@@ -167,6 +167,7 @@ fn three_etf_ten_session_hand_golden_and_daily_parity() {
             buy_tax_rate: 0.0,
             sell_tax_rate: 0.0,
         },
+        config.initial_cash,
     )
     .unwrap();
     for (f, v) in fast.sessions.iter().zip(&vector.sessions) {
@@ -290,6 +291,7 @@ fn risk_exit_is_independent_of_cadence_preserves_other_quantity_and_never_reente
             buy_tax_rate: 0.0,
             sell_tax_rate: 0.0,
         },
+        config.initial_cash,
     )
     .unwrap();
     let held = |i: usize| &fast.sessions[i].close.portfolios[&VirtualPortfolioId(1)].positions;
@@ -406,6 +408,7 @@ fn upper_limit_skips_only_buys_and_lower_limit_defers_required_sells() {
             buy_tax_rate: 0.0,
             sell_tax_rate: 0.0,
         },
+        config.initial_cash,
     )
     .unwrap();
     assert!(vector.sessions.iter().all(|s| s.nav == 1.0));
@@ -474,6 +477,7 @@ fn last_close_risk_notice_remains_pending_without_fabricated_fill() {
             buy_tax_rate: 0.0,
             sell_tax_rate: 0.0,
         },
+        config.initial_cash,
     )
     .unwrap();
     assert_eq!(fast.fills.len(), 1);

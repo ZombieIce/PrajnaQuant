@@ -5,15 +5,16 @@ use std::{
 };
 
 use polars::prelude::PolarsError;
-use prajna_domain::{FixedPointError, InstrumentId, Notional};
+use prajna_account::Side;
+use prajna_domain::{FixedPointError, InstrumentId, Notional, Price, Quantity};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     Panel, PanelSession,
     factor::AvailabilityAssumption,
-    strategy::{
-        Decision, ExecutionEvent, ExecutionState, UnfilledEntry, execution_add, execution_decimal,
-    },
+    fast_event::{FastEventCosts, Marks, PriceField},
+    parity_sizing::{ParityPlan, ParitySizingState, target_plan},
+    strategy::{Decision, ExecutionEvent, ExecutionState, UnfilledEntry, execution_decimal},
 };
 
 const RETURN_TOLERANCE: f64 = 1e-12;
@@ -40,6 +41,8 @@ pub struct VectorResult {
     pub risk_exits: Vec<crate::pit_strategy::RiskExitAttempt>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_risk_exits: Vec<InstrumentId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pit_initial_capital: Option<Notional>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -75,6 +78,16 @@ pub struct VectorExecution {
     pub kind: VectorExecutionKind,
     pub blocked: BTreeSet<InstrumentId>,
     pub skipped_buys: BTreeSet<InstrumentId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pit_sizing: Option<VectorPitSizing>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VectorPitSizing {
+    pub equity: Notional,
+    pub fees: Notional,
+    pub desired_quantities: BTreeMap<InstrumentId, Quantity>,
+    pub required_sides: BTreeMap<InstrumentId, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -189,7 +202,11 @@ pub fn run_vector_pit(
     market: &crate::etf_market::DerivedMarket,
     risk: &crate::pit_strategy::RiskSignals,
     costs: &VectorCosts,
+    initial_capital: Notional,
 ) -> Result<VectorResult, VectorError> {
+    if initial_capital <= Notional::ZERO {
+        return Err(invalid_input("PIT initial_capital must be positive"));
+    }
     crate::pit_strategy::validate_execution_panel(panel, market)
         .map_err(|e| invalid_input(e.to_string()))?;
     run_vector_inner(
@@ -199,7 +216,7 @@ pub fn run_vector_pit(
         costs,
         AvailabilityAssumption::None,
         None,
-        Some((market, risk)),
+        Some((market, risk, initial_capital)),
     )
 }
 
@@ -212,136 +229,86 @@ struct SizedVectorTarget {
     cost: f64,
     blocked_sells: BTreeSet<InstrumentId>,
     skipped_buys: BTreeSet<InstrumentId>,
+    next: Option<ParitySizingState>,
+    plan: ParityPlan,
 }
 
 fn pit_target_plan(
     panel: &Panel,
     market: &crate::etf_market::DerivedMarket,
     session: &PanelSession,
-    current: &BTreeMap<InstrumentId, f64>,
+    current: &ParitySizingState,
     targets: &BTreeMap<InstrumentId, f64>,
-    costs: &VectorCosts,
+    prices: &BTreeMap<InstrumentId, Price>,
+    costs: FastEventCosts,
 ) -> Result<SizedVectorTarget, VectorError> {
-    let one = execution_decimal(1.0)?;
-    let bps_divisor = execution_decimal(10000.0)?;
-    let commission = execution_decimal(costs.commission_rate)?;
-    let buy_rates = [
-        commission,
-        execution_decimal(costs.buy_tax_rate)?,
-        execution_decimal(costs.buy_slippage_bps)?.checked_div_decimal(bps_divisor)?,
-    ];
-    let sell_rates = [
-        commission,
-        execution_decimal(costs.sell_tax_rate)?,
-        execution_decimal(costs.sell_slippage_bps)?.checked_div_decimal(bps_divisor)?,
-    ];
-    let current = current
-        .iter()
-        .map(|(id, value)| Ok((id.clone(), drift_decimal(*value)?)))
-        .collect::<Result<BTreeMap<_, _>, VectorError>>()?;
-    let targets = targets
-        .iter()
-        .map(|(id, value)| Ok((id.clone(), execution_decimal(*value)?)))
-        .collect::<Result<BTreeMap<_, _>, VectorError>>()?;
-    let instruments = current
-        .keys()
-        .chain(targets.keys())
-        .cloned()
-        .collect::<BTreeSet<_>>();
+    let equity = current.equity(prices).map_err(sizing_error)?;
     let mut skipped_buys = targets
         .iter()
-        .filter(|(id, w)| {
-            **w > Notional::ZERO
-                && !current.contains_key(*id)
-                && !crate::pit_strategy::permits(market, panel, id, session, true)
-        })
+        .filter(|(id, w)| **w > 0.0 && !prices.contains_key(*id))
         .map(|(id, _)| id.clone())
         .collect::<BTreeSet<_>>();
     loop {
-        let mut cost = Notional::ZERO;
-        let mut turnover = Notional::ZERO;
-        let mut fee_deltas = BTreeMap::new();
-        for id in instruments.iter().filter(|id| !skipped_buys.contains(*id)) {
-            let delta = execution_add(
-                targets.get(id).copied().unwrap_or(Notional::ZERO),
-                current
-                    .get(id)
-                    .copied()
-                    .unwrap_or(Notional::ZERO)
-                    .checked_mul(-1)?,
-            )?;
-            let absolute = Notional::from_mantissa(delta.mantissa().abs())?;
-            turnover = execution_add(turnover, absolute)?;
-            let rates = if delta > Notional::ZERO {
-                &buy_rates
-            } else {
-                &sell_rates
-            };
-            let mut fee = Notional::ZERO;
-            for rate in rates {
-                fee = execution_add(fee, absolute.checked_mul_decimal(*rate)?)?;
-            }
-            cost = execution_add(cost, fee)?;
-            fee_deltas.insert(
-                id.clone(),
-                if fee > Notional::ZERO {
-                    delta
-                } else {
-                    Notional::ZERO
-                },
-            );
-        }
-        if cost >= one {
-            return Err(invalid_costs("sized PIT execution exhausts equity"));
-        }
-        let after = execution_add(one, cost.checked_mul(-1)?)?;
-        let mut weights = BTreeMap::new();
+        let plan = target_plan(
+            equity,
+            &current.positions,
+            targets,
+            prices,
+            costs,
+            &skipped_buys,
+        )
+        .map_err(sizing_error)?;
         let mut new_skipped = BTreeSet::new();
         let mut blocked_sells = BTreeSet::new();
-        for id in &instruments {
-            let held = current.get(id).copied().unwrap_or(Notional::ZERO);
-            let target = targets.get(id).copied().unwrap_or(Notional::ZERO);
-            let frozen = skipped_buys.contains(id);
-            // Classify only after scale-18/half-even sizing, never a float
-            // subtraction or epsilon: an exact zero can still owe F8 fees.
-            let after_value = if frozen {
-                held
-            } else {
-                target.checked_mul_decimal(after)?
-            };
-            let delta = execution_add(after_value, held.checked_mul(-1)?)?;
-            if !frozen {
-                // F8 may charge a fee-only settlement with zero quantity delta.
-                let side = if delta != Notional::ZERO {
-                    delta
-                } else {
-                    fee_deltas[id]
-                };
-                if side > Notional::ZERO
-                    && !crate::pit_strategy::permits(market, panel, id, session, true)
+        for leg in &plan.legs {
+            match leg.required_side().map_err(sizing_error)? {
+                Some(Side::Buy)
+                    if !crate::pit_strategy::permits(
+                        market,
+                        panel,
+                        &leg.instrument,
+                        session,
+                        true,
+                    ) =>
                 {
-                    new_skipped.insert(id.clone());
-                } else if side < Notional::ZERO
-                    && !crate::pit_strategy::permits(market, panel, id, session, false)
-                {
-                    blocked_sells.insert(id.clone());
+                    new_skipped.insert(leg.instrument.clone());
                 }
-            }
-            let weight = decimal_float(after_value.checked_div_decimal(after)?)?;
-            if weight > 0.0 {
-                weights.insert(id.clone(), weight);
+                Some(Side::Sell)
+                    if !crate::pit_strategy::permits(
+                        market,
+                        panel,
+                        &leg.instrument,
+                        session,
+                        false,
+                    ) =>
+                {
+                    blocked_sells.insert(leg.instrument.clone());
+                }
+                _ => {}
             }
         }
         if !new_skipped.is_empty() {
             skipped_buys.extend(new_skipped);
             continue;
         }
+        let next = if blocked_sells.is_empty() {
+            Some(current.preview(&plan).map_err(sizing_error)?)
+        } else {
+            None
+        };
+        let weights = next
+            .as_ref()
+            .unwrap_or(current)
+            .weights(prices)
+            .map_err(sizing_error)?;
         return Ok(SizedVectorTarget {
             weights,
-            turnover: decimal_float(turnover)?,
-            cost: decimal_float(cost)?,
+            turnover: decimal_float(plan.turnover)?,
+            cost: decimal_float(plan.total_fees)? / decimal_float(equity)?,
             blocked_sells,
             skipped_buys,
+            next,
+            plan,
         });
     }
 }
@@ -353,31 +320,46 @@ fn decimal_float(value: Notional) -> Result<f64, VectorError> {
         .map_err(|error| invalid_input(format!("PIT decimal report: {error}")))
 }
 
-fn drift_decimal(value: f64) -> Result<Notional, VectorError> {
-    match execution_decimal(value) {
-        Ok(decimal) => Ok(decimal),
-        Err(FixedPointError::InexactScale) => {
-            // Drift ratios may have more than 18 fractional digits. Round the
-            // shortest decimal half-even, not the underlying binary expansion.
-            let text = value.to_string();
-            let (whole, fraction) = text
-                .split_once('.')
-                .ok_or(FixedPointError::InvalidLiteral)?;
-            let (kept, discarded) = fraction.split_at(prajna_domain::DECIMAL_SCALE as usize);
-            let decimal: Notional = format!("{whole}.{kept}").parse()?;
-            let digits = discarded.as_bytes();
-            let round_up = digits[0] > b'5'
-                || digits[0] == b'5'
-                    && (digits[1..].iter().any(|digit| *digit != b'0')
-                        || decimal.mantissa() % 2 != 0);
-            if round_up {
-                Ok(execution_add(decimal, Notional::from_mantissa(1)?)?)
-            } else {
-                Ok(decimal)
-            }
+fn sizing_error(error: crate::fast_event::FastEventError) -> VectorError {
+    invalid_input(format!("PIT monetary sizing: {error}"))
+}
+
+fn sizing_diagnostic(plan: &ParityPlan) -> Result<VectorPitSizing, VectorError> {
+    let mut sides = BTreeMap::new();
+    for leg in &plan.legs {
+        if let Some(side) = leg.required_side().map_err(sizing_error)? {
+            sides.insert(
+                leg.instrument.clone(),
+                if side == Side::Buy {
+                    "buy".into()
+                } else {
+                    "sell".into()
+                },
+            );
         }
-        Err(error) => Err(error.into()),
     }
+    Ok(VectorPitSizing {
+        equity: plan.equity,
+        fees: plan.total_fees,
+        desired_quantities: plan
+            .legs
+            .iter()
+            .map(|leg| (leg.instrument.clone(), leg.desired))
+            .collect(),
+        required_sides: sides,
+    })
+}
+
+fn monetary_costs(costs: &VectorCosts) -> Result<FastEventCosts, VectorError> {
+    let bps = execution_decimal(10000.0)?;
+    Ok(FastEventCosts {
+        commission_rate: execution_decimal(costs.commission_rate)?,
+        buy_slippage_rate: execution_decimal(costs.buy_slippage_bps)?.checked_div_decimal(bps)?,
+        sell_slippage_rate: execution_decimal(costs.sell_slippage_bps)?.checked_div_decimal(bps)?,
+        buy_tax_rate: execution_decimal(costs.buy_tax_rate)?,
+        sell_tax_rate: execution_decimal(costs.sell_tax_rate)?,
+        minimum_commission: Notional::ZERO,
+    })
 }
 
 fn run_vector_inner(
@@ -390,6 +372,7 @@ fn run_vector_inner(
     pit: Option<(
         &crate::etf_market::DerivedMarket,
         &crate::pit_strategy::RiskSignals,
+        Notional,
     )>,
 ) -> Result<VectorResult, VectorError> {
     validate_costs(costs)?;
@@ -437,14 +420,26 @@ fn run_vector_inner(
     let mut result_executions = Vec::new();
     let mut risk_exits = Vec::new();
     let mut pit_state = pit.map(|_| ExecutionState::new(UnfilledEntry::Skip));
+    let mut sizing_state = pit.map(|(_, _, capital)| ParitySizingState::new(capital));
+    let sizing_costs = pit.map(|_| monetary_costs(costs)).transpose()?;
+    let mut decimal_marks = Marks::default();
 
     for (session_index, session) in panel.sessions.iter().enumerate() {
         let mut risk_turnover = 0.0;
         let mut risk_cost = 0.0;
-        if let Some((market, risk)) = pit {
+        if let Some((market, risk, _)) = pit {
+            decimal_marks
+                .update(panel, session_index, PriceField::Open)
+                .map_err(sizing_error)?;
+            let book = sizing_state
+                .as_mut()
+                .ok_or_else(|| invalid_input("missing PIT sizing state"))?;
+            let before = book.equity(&decimal_marks.prices).map_err(sizing_error)?;
+            let mut sold = Notional::ZERO;
+            let mut fees = Notional::ZERO;
             let active = risk.active_before_open(session.ts_open);
             pending_targets.retain(|id, _| !active.contains(id));
-            for id in weights.keys().cloned().collect::<Vec<_>>() {
+            for id in book.positions.keys().cloned().collect::<Vec<_>>() {
                 if !active.contains(&id) {
                     continue;
                 }
@@ -455,23 +450,37 @@ fn run_vector_inner(
                     executed,
                 });
                 if executed {
-                    risk_turnover += weights.remove(&id).unwrap_or(0.0);
+                    let (principal, fee) = book
+                        .risk_sale(
+                            &id,
+                            decimal_marks.prices[&id],
+                            sizing_costs
+                                .ok_or_else(|| invalid_input("missing PIT monetary costs"))?,
+                        )
+                        .map_err(sizing_error)?;
+                    sold = crate::fast_event::add(sold, principal).map_err(sizing_error)?;
+                    fees = crate::fast_event::add(fees, fee).map_err(sizing_error)?;
                 }
             }
-            risk_cost = risk_turnover * sell_rate;
-            if risk_cost >= 1.0 {
-                return Err(invalid_costs("Risk Exit exhausts equity"));
-            }
-            for weight in weights.values_mut() {
-                *weight /= 1.0 - risk_cost;
-            }
+            risk_turnover = decimal_float(sold)? / decimal_float(before)?;
+            risk_cost = decimal_float(fees)? / decimal_float(before)?;
+            weights = book.weights(&decimal_marks.prices).map_err(sizing_error)?;
         }
         let mut sized_target = None;
-        let generated = if let (Some(state), Some((market, risk))) = (&mut pit_state, pit) {
+        let generated = if let (Some(state), Some((market, risk, _))) = (&mut pit_state, pit) {
             state.exclude(&risk.active_before_open(session.ts_open));
             if let Some(request) = state.pending_execution() {
-                let sized =
-                    pit_target_plan(panel, market, session, &weights, &request.targets, costs)?;
+                let sized = pit_target_plan(
+                    panel,
+                    market,
+                    session,
+                    sizing_state
+                        .as_ref()
+                        .ok_or_else(|| invalid_input("missing PIT sizing state"))?,
+                    &request.targets,
+                    &decimal_marks.prices,
+                    sizing_costs.ok_or_else(|| invalid_input("missing PIT monetary costs"))?,
+                )?;
                 let event = state.resolve_sized(
                     session,
                     sized.weights.clone(),
@@ -501,7 +510,10 @@ fn run_vector_inner(
                     ExecutionEvent::Deferred { blocked, .. } => {
                         if blocked.is_empty()
                             || blocked.iter().any(|instrument| {
-                                weights.get(instrument).copied().unwrap_or(0.0) <= 0.0
+                                sizing_state.as_ref().map_or_else(
+                                    || weights.get(instrument).copied().unwrap_or(0.0) <= 0.0,
+                                    |state| !state.positions.contains_key(instrument),
+                                )
                             })
                         {
                             return Err(invalid_input(
@@ -517,6 +529,10 @@ fn run_vector_inner(
                             },
                             blocked: blocked.clone(),
                             skipped_buys: BTreeSet::new(),
+                            pit_sizing: sized_target
+                                .as_ref()
+                                .map(|s| sizing_diagnostic(&s.plan))
+                                .transpose()?,
                         });
                     }
                     ExecutionEvent::Executed {
@@ -572,6 +588,7 @@ fn run_vector_inner(
                         if let Some(sized) = &sized_target {
                             turnover = sized.turnover;
                             cost = sized.cost;
+                            sizing_state = sized.next.clone();
                         } else if is_retry {
                             (turnover, cost) = apply_entry_retry(&mut weights, applied, buy_rate)?;
                         } else {
@@ -618,6 +635,10 @@ fn run_vector_inner(
                             },
                             blocked: BTreeSet::new(),
                             skipped_buys: skipped_buys.clone(),
+                            pit_sizing: sized_target
+                                .as_ref()
+                                .map(|s| sizing_diagnostic(&s.plan))
+                                .transpose()?,
                         });
                     }
                     ExecutionEvent::PendingAtEnd { .. } => unreachable!(),
@@ -774,9 +795,13 @@ fn run_vector_inner(
         })
         .collect();
 
-    let pending_risk_exits = if let (Some((_, risk)), Some(last)) = (pit, panel.sessions.last()) {
+    let pending_risk_exits = if let (Some((_, risk, _)), Some(last)) = (pit, panel.sessions.last())
+    {
         let active = risk.active(last.ts_close);
-        weights
+        sizing_state
+            .as_ref()
+            .ok_or_else(|| invalid_input("missing PIT sizing state"))?
+            .positions
             .keys()
             .filter(|id| active.contains(*id))
             .cloned()
@@ -785,6 +810,7 @@ fn run_vector_inner(
         Vec::new()
     };
     Ok(VectorResult {
+        pit_initial_capital: pit.map(|(_, _, capital)| capital),
         sessions: result_sessions,
         decisions: result_decisions,
         executions: result_executions,
@@ -1172,28 +1198,4 @@ fn invalid_input(message: impl Into<String>) -> VectorError {
 
 fn invalid_costs(message: impl Into<String>) -> VectorError {
     VectorError::InvalidCosts(message.into())
-}
-
-#[cfg(test)]
-mod pit_rounding_tests {
-    use super::drift_decimal;
-    use prajna_domain::Notional;
-
-    #[test]
-    fn drift_ratios_round_half_even_only_at_the_domain_quantum() {
-        for (input, mantissa) in [
-            (0.0000000000000000005, 0),
-            (0.000000000000000001, 1),
-            (0.0000000000000000015, 2),
-            (0.0000000000000000025, 2),
-            (0.00030000000000000003, 300000000000000),
-            (0.0003000000000000005, 300000000000000),
-            (0.0003000000000000015, 300000000000002),
-        ] {
-            assert_eq!(
-                drift_decimal(input).unwrap(),
-                Notional::from_mantissa(mantissa).unwrap()
-            );
-        }
-    }
 }

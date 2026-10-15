@@ -39,6 +39,12 @@ struct CapitalInput {
     id: u64,
     capital: String,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct VectorPitSettingsInput {
+    initial_capital: String,
+}
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum LotSource {
@@ -56,6 +62,7 @@ pub(super) struct EngineSettings {
     rebalance: Rebalance,
     policy: UnfilledEntry,
     normalized: Option<Value>,
+    vector_pit_capital: Option<Notional>,
 }
 impl EngineSettings {
     pub(super) fn parse(input: &DefinitionInput, lake: &Path) -> Result<Self, ExperimentError> {
@@ -84,13 +91,33 @@ impl EngineSettings {
             rebalance: Rebalance::FullTarget,
             policy,
             normalized: None,
+            vector_pit_capital: None,
         };
+        if input.vector_pit.is_some()
+            && (input.engine != "vector" || input.strategy != "s2_pit_rotation")
+        {
+            return Err(invalid("vector_pit is only valid for Vector PIT S2"));
+        }
         if input.engine != "accurate_event" && input.backend.is_some() {
             return Err(invalid("Backend identity is only valid for accurate_event"));
         }
         if input.engine == "vector" {
             if input.fast_event.is_some() {
                 return Err(invalid("vector cannot accept fast_event settings"));
+            }
+            if input.strategy == "s2_pit_rotation" {
+                let settings = input
+                    .vector_pit
+                    .as_ref()
+                    .ok_or_else(|| invalid("Vector PIT requires vector_pit.initial_capital"))?;
+                let capital: Notional = settings
+                    .initial_capital
+                    .parse()
+                    .map_err(|e| invalid(format!("invalid PIT capital: {e}")))?;
+                if capital <= Notional::ZERO {
+                    return Err(invalid("Vector PIT initial_capital must be positive"));
+                }
+                result.vector_pit_capital = Some(capital);
             }
             return Ok(result);
         }
@@ -386,6 +413,9 @@ impl EngineSettings {
         }
     }
     pub(super) fn normalize_definition(&self, value: &mut Value, strategy: &str) {
+        if let Some(capital) = self.vector_pit_capital {
+            value["vector_pit"] = serde_json::json!({"initial_capital":capital.to_string()});
+        }
         if self.fast.is_some() || self.policy != UnfilledEntry::Skip || strategy != "s2_rotation" {
             value["unfilled_entry"] = self.policy_name().into();
         }
@@ -397,6 +427,9 @@ impl EngineSettings {
         }
     }
     pub(super) fn normalize_spec(&self, value: &mut Value) {
+        if let Some(capital) = self.vector_pit_capital {
+            value["engine"]["initial_capital"] = serde_json::json!(capital.to_string());
+        }
         if self.fast.is_some()
             || self.policy != UnfilledEntry::Skip
             || value["strategy"]["kind"] != "s2_rotation"
@@ -778,6 +811,10 @@ pub(super) fn execute(
                         &pit.market,
                         &pit.risk,
                         costs,
+                        experiment
+                            .engine
+                            .vector_pit_capital
+                            .ok_or("missing Vector PIT capital")?,
                     )
                 } else {
                     run_vector_with_policy(

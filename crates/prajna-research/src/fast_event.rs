@@ -55,7 +55,11 @@ impl FastEventCosts {
         minimum_commission: Notional::ZERO,
     };
 
-    fn fees(self, basis: Notional, side: Side) -> Result<(FillCosts, Notional), FastEventError> {
+    pub(crate) fn fees(
+        self,
+        basis: Notional,
+        side: Side,
+    ) -> Result<(FillCosts, Notional), FastEventError> {
         let (slip, tax) = match side {
             Side::Buy => (self.buy_slippage_rate, self.buy_tax_rate),
             Side::Sell => (self.sell_slippage_rate, self.sell_tax_rate),
@@ -219,26 +223,26 @@ impl From<polars::error::PolarsError> for FastEventError {
 fn invalid(message: impl Into<String>) -> FastEventError {
     FastEventError::InvalidInput(message.into())
 }
-fn add(a: Notional, b: Notional) -> Result<Notional, FastEventError> {
+pub(crate) fn add(a: Notional, b: Notional) -> Result<Notional, FastEventError> {
     Ok(crate::strategy::execution_add(a, b)?)
 }
-fn sub(a: Notional, b: Notional) -> Result<Notional, FastEventError> {
+pub(crate) fn sub(a: Notional, b: Notional) -> Result<Notional, FastEventError> {
     add(a, b.checked_mul(-1)?)
 }
 fn decimal_price(price: Price) -> Result<Notional, FastEventError> {
     Ok(Notional::from_mantissa(price.mantissa())?)
 }
-fn value(quantity: Quantity, price: Price) -> Result<Notional, FastEventError> {
+pub(crate) fn value(quantity: Quantity, price: Price) -> Result<Notional, FastEventError> {
     Ok(Notional::from_mantissa(quantity.mantissa())?.checked_mul_decimal(decimal_price(price)?)?)
 }
-fn quantity(budget: Notional, price: Price) -> Result<Quantity, FastEventError> {
+pub(crate) fn quantity(budget: Notional, price: Price) -> Result<Quantity, FastEventError> {
     Ok(Quantity::from_mantissa(
         budget
             .checked_div_decimal(decimal_price(price)?)?
             .mantissa(),
     )?)
 }
-fn weight(input: f64) -> Result<Notional, FastEventError> {
+pub(crate) fn weight(input: f64) -> Result<Notional, FastEventError> {
     if !input.is_finite() || !(0.0..=1.0).contains(&input) {
         return Err(invalid("weights must be finite and in [0, 1]"));
     }
@@ -247,13 +251,13 @@ fn weight(input: f64) -> Result<Notional, FastEventError> {
 }
 
 #[derive(Default)]
-struct Marks {
-    prices: BTreeMap<InstrumentId, Price>,
+pub(crate) struct Marks {
+    pub(crate) prices: BTreeMap<InstrumentId, Price>,
     sources: BTreeMap<InstrumentId, PriceSource>,
 }
 
 impl Marks {
-    fn update(
+    pub(crate) fn update(
         &mut self,
         panel: &Panel,
         index: usize,
@@ -1500,54 +1504,26 @@ fn parity_fills_retaining(
     }
     let portfolio = &account.portfolios()[&id];
     let equity = account.value(prices)?.portfolios[&id].equity;
-    if equity == Notional::ZERO {
-        return Ok(PlannedExecution::default());
-    }
-    let instruments = portfolio
-        .positions()
-        .keys()
-        .chain(targets.keys())
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let mut plans = Vec::new();
-    let mut total = Notional::ZERO;
-    for instrument in instruments {
-        if retained.contains(&instrument) {
-            continue;
-        }
-        let price = *prices
-            .get(&instrument)
-            .ok_or_else(|| LedgerError::MissingPrice(instrument.clone()))?;
-        let current = portfolio
-            .positions()
-            .get(&instrument)
-            .copied()
-            .unwrap_or(Quantity::ZERO);
-        let target = weight(targets.get(&instrument).copied().unwrap_or(0.0))?;
-        let drift = value(current, price)?.checked_div_decimal(equity)?;
-        let delta = sub(target, drift)?;
-        let side = if delta >= Notional::ZERO {
-            Side::Buy
-        } else {
-            Side::Sell
-        };
-        let abs = Notional::from_mantissa(delta.mantissa().abs())?;
-        let basis = equity.checked_mul_decimal(abs)?;
-        let (fees, slip) = costs.fees(basis, side)?;
-        total = add(total, add(add(fees.commission, fees.tax)?, slip)?)?;
-        plans.push((instrument, price, current, target, basis, side, fees, slip));
-    }
-    let after = sub(equity, total)?;
-    if after <= Notional::ZERO {
-        return Err(invalid("costs exhaust pre-open equity"));
-    }
+    let plan = crate::parity_sizing::target_plan(
+        equity,
+        portfolio.positions(),
+        targets,
+        prices,
+        costs,
+        retained,
+    )?;
     let mut planned = PlannedExecution::default();
-    for (instrument, price, current, target, basis, fee_side, fees, slip) in plans {
-        let desired = quantity(target.checked_mul_decimal(after)?, price)?;
-        let delta = desired
-            .mantissa()
-            .checked_sub(current.mantissa())
-            .ok_or(FixedPointError::Overflow)?;
+    for leg in plan.legs {
+        let delta = leg.delta()?;
+        let crate::parity_sizing::ParityLeg {
+            instrument,
+            price,
+            basis,
+            fee_side,
+            fees,
+            slip,
+            ..
+        } = leg;
         let q = Quantity::from_mantissa(delta.abs())?;
         if q == Quantity::ZERO {
             if add(add(fees.commission, fees.tax)?, slip)? > Notional::ZERO {

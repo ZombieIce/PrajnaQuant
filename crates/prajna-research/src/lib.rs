@@ -10,6 +10,7 @@ pub mod engine;
 pub mod factor;
 pub mod fast_event;
 mod panel;
+mod parity_sizing;
 pub mod pit_universe;
 pub mod strategy;
 mod universe;

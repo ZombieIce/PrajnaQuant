@@ -17,6 +17,8 @@ fn definition(f: &fixture::Fixture, engine: &str) -> Value {
         value["fast_event"] = json!({"currency":"CNY","initial_cash":"10000","sizing":"lot",
             "rebalance":"full_target","minimum_commission":"5","portfolios":[{"id":1,"capital":"10000"}],
             "lot_size_source":{"kind":"instrument"}});
+    } else if engine == "vector" {
+        value["vector_pit"] = json!({"initial_capital":"10000"});
     }
     value
 }
@@ -72,8 +74,11 @@ fn pit_experiment_identity_engine_results_and_persistence() {
             );
             assert_eq!(result.risk_exits.len(), 4);
         } else {
-            assert_eq!(report.runs[0].result.as_ref().unwrap().risk_exits.len(), 4);
+            let result = report.runs[0].result.as_ref().unwrap();
+            assert_eq!(result.risk_exits.len(), 4);
+            assert_eq!(result.pit_initial_capital, Some("10000".parse().unwrap()));
         }
+
         let stored = experiment
             .execute_and_store(
                 lake.path(),
@@ -101,6 +106,12 @@ fn pit_experiment_identity_engine_results_and_persistence() {
             .to_string();
         assert!(printed.contains("session_inputs"));
         assert!(printed.contains("risk_signals"));
+        if engine == "vector" {
+            assert_eq!(
+                stored.manifest.runs[0].run_spec.as_ref().unwrap()["engine"]["initial_capital"],
+                "10000"
+            );
+        }
         let promoted = experiment
             .promote(
                 lake.path(),
@@ -112,6 +123,12 @@ fn pit_experiment_identity_engine_results_and_persistence() {
             )
             .unwrap();
         assert_eq!(promoted.manifest.runs[0].result_level, ResultLevel::Full);
+        if engine == "vector" {
+            assert_eq!(
+                promoted.manifest.runs[0].run_spec.as_ref().unwrap()["engine"]["initial_capital"],
+                "10000"
+            );
+        }
         let table = if engine == "vector" {
             "executions"
         } else {
@@ -153,6 +170,44 @@ fn pit_experiment_identity_engine_results_and_persistence() {
             .is_err()
         );
     }
+}
+
+#[test]
+fn vector_pit_capital_is_explicit_positive_and_identity_bearing() {
+    let lake = fixture::lake();
+    let f = fixture::fixture(lake.path());
+    let input = definition(&f, "vector");
+    let original = Experiment::parse(&input.to_string(), lake.path()).unwrap();
+    let run = original.expand(lake.path()).unwrap().remove(0);
+    assert_eq!(run.run_spec["engine"]["initial_capital"], "10000");
+    let mut changed = input.clone();
+    changed["vector_pit"]["initial_capital"] = json!("1");
+    let other = Experiment::parse(&changed.to_string(), lake.path()).unwrap();
+    assert_ne!(original.id().unwrap(), other.id().unwrap());
+    assert_ne!(run.run_id, other.expand(lake.path()).unwrap()[0].run_id);
+    let mut equivalent = input.clone();
+    equivalent["vector_pit"]["initial_capital"] = json!("10000.000");
+    assert_eq!(
+        original.id().unwrap(),
+        Experiment::parse(&equivalent.to_string(), lake.path())
+            .unwrap()
+            .id()
+            .unwrap()
+    );
+    for capital in ["0", "-1", "not-a-decimal"] {
+        changed["vector_pit"]["initial_capital"] = json!(capital);
+        assert!(Experiment::parse(&changed.to_string(), lake.path()).is_err());
+    }
+    changed.as_object_mut().unwrap().remove("vector_pit");
+    assert!(
+        Experiment::parse(&changed.to_string(), lake.path())
+            .unwrap_err()
+            .to_string()
+            .contains("initial_capital")
+    );
+    let mut fast = definition(&f, "fast_event");
+    fast["vector_pit"] = input["vector_pit"].clone();
+    assert!(Experiment::parse(&fast.to_string(), lake.path()).is_err());
 }
 
 #[test]
