@@ -54,6 +54,29 @@ impl FactorKey {
         build(root, dsv, universe_id, assumption)
     }
 
+    /// Complete identity for evidence-aware ETF factors; legacy keys are unchanged.
+    pub fn for_etf_input(
+        factor_identity: Value,
+        dsv: &str,
+        universe_id: &str,
+        input_identity: Value,
+    ) -> Result<Self, prajna_data::CanonicalError> {
+        let key_object = json!({
+            "key_version": "etf-input@1",
+            "factor": factor_identity,
+            "dsv": dsv,
+            "universe": universe_id,
+            "inputs": input_identity,
+            "implementation": {"prajna_research": env!("CARGO_PKG_VERSION"), "polars": POLARS_VERSION},
+            "values_schema_version": VALUES_SCHEMA_VERSION,
+        });
+        let canonical = prajna_data::restricted_jcs(&key_object)?;
+        Ok(Self {
+            value: format!("fv:sha256:{:x}", Sha256::digest(canonical)),
+            key_object,
+        })
+    }
+
     pub fn as_str(&self) -> &str {
         &self.value
     }
