@@ -1,7 +1,10 @@
 use super::*;
 use crate::pit_universe::*;
 use chrono::NaiveDate;
-use prajna_data::{RawStore, SourceKind, SourceRecordInput};
+use prajna_data::{
+    CorporateActionKind, CorporateActionRow, RawStore, SourceKind, SourceRecordInput,
+    bars_from_record_batch, bars_to_record_batch,
+};
 use prajna_domain::{Session, TimestampNs};
 use std::collections::BTreeSet;
 fn date(day: u32) -> NaiveDate {
@@ -63,9 +66,7 @@ fn fixture(root: &std::path::Path) -> (RawStore, CatalogInput) {
     };
     (raw, input)
 }
-use prajna_data::{
-    NormalizedTables, SourceCrosscheckRow, bars_to_record_batch, source_crosscheck_to_record_batch,
-};
+use prajna_data::{NormalizedTables, SourceCrosscheckRow, source_crosscheck_to_record_batch};
 use prajna_domain::{BarData, Notional, Price, Quantity};
 fn data(catalog: &HistoricalCatalog) -> (NormalizedTables, MarketEvidence) {
     let mut bars = Vec::new();
@@ -137,6 +138,7 @@ fn data(catalog: &HistoricalCatalog) -> (NormalizedTables, MarketEvidence) {
             execution_status: None,
             source_crosscheck: Some(source_crosscheck_to_record_batch(&checks).unwrap()),
             announcements: None,
+            corporate_actions: None,
         },
         MarketEvidence {
             rule_version: "synthetic-opening@1".into(),
@@ -341,6 +343,264 @@ fn tri(market: &DerivedMarket, cat: &HistoricalCatalog, raw: &RawStore) -> Total
         raw,
     )
     .unwrap()
+}
+
+fn action(
+    id: &InstrumentId,
+    raw_hash: &str,
+    kind: CorporateActionKind,
+    announced_day: u32,
+    action_day: u32,
+    cash: Option<&str>,
+    ratio: Option<&str>,
+) -> CorporateActionRow {
+    CorporateActionRow {
+        announcement_id: format!("synthetic-action-{announced_day}-{action_day}"),
+        action_index: 0,
+        instrument_id: id.clone(),
+        kind,
+        announced_date: date(announced_day),
+        announced_at: time(announced_day, 0),
+        available_at: time(announced_day + 1, 15),
+        record_date: (kind == CorporateActionKind::Dividend).then(|| date(action_day - 1)),
+        ex_date: (kind == CorporateActionKind::Dividend).then(|| date(action_day)),
+        pay_date: (kind == CorporateActionKind::Dividend).then(|| date(action_day + 2)),
+        effective_date: (kind != CorporateActionKind::Dividend).then(|| date(action_day)),
+        cash_per_share: cash.map(str::to_owned),
+        share_ratio: ratio.map(str::to_owned),
+        liquidation_cash_per_share: None,
+        source_raw_sha256: raw_hash.to_owned(),
+        normalization_version: "szse-corporate-action@1".into(),
+    }
+}
+
+fn set_close(
+    catalog: &HistoricalCatalog,
+    tables: &mut NormalizedTables,
+    instrument_id: &InstrumentId,
+    session: u32,
+    close: &str,
+) {
+    let native_symbol = catalog
+        .input()
+        .lifecycles
+        .iter()
+        .find(|lifecycle| lifecycle.instrument_id().ok().as_ref() == Some(instrument_id))
+        .unwrap()
+        .native_symbol
+        .clone();
+    let id: InstrumentId = format!("{native_symbol}.SZSE").parse().unwrap();
+    let mut bars = bars_from_record_batch(&tables.bars, &catalog.input().sessions).unwrap();
+    let bar = bars
+        .iter_mut()
+        .find(|bar| bar.instrument_id() == &id && bar.session_date() == date(session))
+        .unwrap();
+    let px = Price::parse(close).unwrap();
+    *bar = Bar::new(
+        BarData {
+            instrument_id: bar.instrument_id().clone(),
+            bar_spec: bar.bar_spec(),
+            session_date: bar.session_date(),
+            ts_open: bar.ts_open(),
+            ts_close: bar.ts_close(),
+            open: px,
+            high: px,
+            low: px,
+            close: px,
+            volume: bar.volume(),
+            amount: bar.amount(),
+            available_at: bar.available_at(),
+        },
+        Some(&catalog.input().sessions[(session - 1) as usize]),
+    )
+    .unwrap();
+    tables.bars = bars_to_record_batch(&bars).unwrap();
+}
+
+#[test]
+fn corporate_action_tri_handles_dividend_split_late_notice_and_identity() {
+    use crate::etf_momentum::{CorporateActionRules, EtfMomentum};
+    let tmp = tempfile::tempdir().unwrap();
+    let (raw, input) = fixture(tmp.path());
+    let cat = HistoricalCatalog::build(input, &raw).unwrap();
+    let (mut tables, evidence) = data(&cat);
+    let dividend_id = cat.universe(date(1)).unwrap().members[0].clone();
+    set_close(&cat, &mut tables, &dividend_id, 4, "0.9");
+    let market = build(&cat, &raw, &tables, evidence);
+    let no_actions = TotalReturnIndex::build_with_actions(
+        &market,
+        &[],
+        &CorporateActionRules {
+            version: "tri-rules@1".into(),
+            unexplained_jump_threshold_bps: 2000,
+        },
+        market.dsv(),
+        &raw,
+    )
+    .unwrap();
+    let six_a = tri(&market, &cat, &raw);
+    for session in market.sessions() {
+        assert_eq!(
+            no_actions
+                .point(&dividend_id, session.session_date())
+                .unwrap()
+                .level,
+            six_a
+                .point(&dividend_id, session.session_date())
+                .unwrap()
+                .level
+        );
+    }
+    let ids = cat.universe(date(1)).unwrap().members;
+    let momentum = EtfMomentum::new(1).unwrap();
+    let price_momentum = momentum.compute(&market, &six_a, &ids).unwrap();
+    let no_action_momentum = momentum.compute(&market, &no_actions, &ids).unwrap();
+    let price_values = price_momentum.column("value").unwrap().f64().unwrap();
+    let no_action_values = no_action_momentum.column("value").unwrap().f64().unwrap();
+    let price_status = price_momentum.column("status").unwrap().str().unwrap();
+    let no_action_status = no_action_momentum.column("status").unwrap().str().unwrap();
+    for row in 0..price_values.len() {
+        assert_eq!(price_values.get(row), no_action_values.get(row));
+        assert_eq!(price_status.get(row), no_action_status.get(row));
+    }
+    let dividend = action(
+        &dividend_id,
+        cat.input().calendar_raw_sha256.iter().next().unwrap(),
+        CorporateActionKind::Dividend,
+        4,
+        4,
+        Some("0.1"),
+        None,
+    );
+    let rules = CorporateActionRules {
+        version: "tri-rules@1".into(),
+        unexplained_jump_threshold_bps: 2000,
+    };
+    let dividend_tri =
+        TotalReturnIndex::build_with_actions(&market, &[dividend], &rules, market.dsv(), &raw)
+            .unwrap();
+    assert_eq!(
+        dividend_tri.point(&dividend_id, date(3)).unwrap().level,
+        six_a.point(&dividend_id, date(3)).unwrap().level
+    );
+    assert!((dividend_tri.point(&dividend_id, date(4)).unwrap().level - 1.0).abs() < 1e-12);
+    assert_eq!(
+        dividend_tri
+            .point(&dividend_id, date(4))
+            .unwrap()
+            .available_at,
+        Some(time(5, 15))
+    );
+    let ids = cat.universe(date(1)).unwrap().members;
+    let momentum = EtfMomentum::new(1).unwrap();
+    assert_ne!(
+        momentum.cache_key(&market, &six_a, "u", &ids).unwrap(),
+        momentum
+            .cache_key(&market, &dividend_tri, "u", &ids)
+            .unwrap()
+    );
+    let other_rules = CorporateActionRules {
+        version: "tri-rules@2".into(),
+        unexplained_jump_threshold_bps: 2000,
+    };
+    let revised =
+        TotalReturnIndex::build_with_actions(&market, &[], &other_rules, market.dsv(), &raw)
+            .unwrap();
+    assert_ne!(no_actions.version(), revised.version());
+}
+
+#[test]
+fn conversion_adjusts_tri_and_unexplained_jump_is_reported_unknown() {
+    use crate::etf_momentum::CorporateActionRules;
+    let tmp = tempfile::tempdir().unwrap();
+    let (raw, input) = fixture(tmp.path());
+    let cat = HistoricalCatalog::build(input, &raw).unwrap();
+    let (mut tables, mut evidence) = data(&cat);
+    let id = cat.universe(date(1)).unwrap().members[0].clone();
+    set_close(&cat, &mut tables, &id, 4, "0.5");
+    evidence
+        .openings
+        .iter_mut()
+        .find(|opening| opening.instrument_id == id && opening.session_date == date(4))
+        .unwrap()
+        .reference
+        .as_mut()
+        .unwrap()
+        .adjusted_previous_close = Price::parse("0.5").unwrap();
+    let market = build(&cat, &raw, &tables, evidence);
+    let raw_hash = cat.input().calendar_raw_sha256.iter().next().unwrap();
+    let rules = CorporateActionRules {
+        version: "tri-rules@1".into(),
+        unexplained_jump_threshold_bps: 2000,
+    };
+    let split = action(
+        &id,
+        raw_hash,
+        CorporateActionKind::ShareConversion,
+        4,
+        4,
+        None,
+        Some("2"),
+    );
+    let split_tri = TotalReturnIndex::build_with_actions(
+        &market,
+        std::slice::from_ref(&split),
+        &rules,
+        market.dsv(),
+        &raw,
+    )
+    .unwrap();
+    assert!((split_tri.point(&id, date(4)).unwrap().level - 1.0).abs() < 1e-12);
+    let unexplained_by_action = action(
+        &id,
+        raw_hash,
+        CorporateActionKind::ShareConversion,
+        4,
+        4,
+        None,
+        Some("3"),
+    );
+    let still_unexplained = TotalReturnIndex::build_with_actions(
+        &market,
+        &[unexplained_by_action],
+        &rules,
+        market.dsv(),
+        &raw,
+    )
+    .unwrap();
+    assert_eq!(
+        still_unexplained.integrity()[0].unexplained_price_jumps,
+        vec![date(4)]
+    );
+    assert!(still_unexplained.point(&id, date(4)).is_none());
+    let first_day_action = action(
+        &id,
+        raw_hash,
+        CorporateActionKind::ShareConversion,
+        1,
+        1,
+        None,
+        Some("2"),
+    );
+    let first_day_tri = TotalReturnIndex::build_with_actions(
+        &market,
+        &[first_day_action],
+        &rules,
+        market.dsv(),
+        &raw,
+    )
+    .unwrap();
+    assert_eq!(
+        first_day_tri.integrity()[0].unapplied_action_dates,
+        vec![date(1)]
+    );
+    let unexplained =
+        TotalReturnIndex::build_with_actions(&market, &[], &rules, market.dsv(), &raw).unwrap();
+    assert_eq!(
+        unexplained.integrity()[0].unexplained_price_jumps,
+        vec![date(4)]
+    );
+    assert!(unexplained.point(&id, date(4)).is_none());
 }
 #[test]
 fn full_momentum_window_halt_carry_unknown_gap_and_cache_identity() {

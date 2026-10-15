@@ -36,7 +36,7 @@ Portfolio 是资金与风险管理的一等对象：Trading Account 可分配资
 
 ### 数据与研究对象
 
-MVP-6 深市 ETF 目标契约见 [ADR 0022](docs/decisions/0022-historical-etf-catalog-and-derived-execution-status.md)（历史生命周期、PIT Universe / Eligible Set、推导开盘状态与 Risk Exit）和 [ADR 0023](docs/decisions/0023-etf-corporate-actions-and-total-return-ledger.md)（顺序 TRI、分红应收/发放、折算与清算、Fast Event 权威及 Vector 总回报对拍）。均为设计，未实现；[#172 审计](docs/research/mvp-6-source-gate-audit.md)的许可、历史规则、公告和双源覆盖未决项仍阻断真实数据开工，不以设计采纳宣称 P0 关闭。
+MVP-6 深市 ETF 目标契约见 [ADR 0022](docs/decisions/0022-historical-etf-catalog-and-derived-execution-status.md)（历史生命周期、PIT Universe / Eligible Set、推导开盘状态与 Risk Exit）和 [ADR 0023](docs/decisions/0023-etf-corporate-actions-and-total-return-ledger.md)（顺序 TRI、分红应收/发放、折算与清算、Fast Event 权威及 Vector 总回报对拍）。#175～#180 已实现离线/合成部分；#180 增加结构化公司行动表与合成 TRI，但不解析真实 cninfo 附件、不证明公告覆盖，也不等于分红账本或 Vector 总回报验收。[#172 审计](docs/research/mvp-6-source-gate-audit.md)未决项仍阻断真实数据验收，不以代码或设计采纳宣称 P0 关闭。
 
 目标 Data Lake 分为不可覆盖的 `raw/`、可版本化重建的 `normalized/`、`features/` 和 `results/`。原始字节、来源、采集时间及 hash 保留；Normalizer 修订产生新的 Dataset Version，不覆写旧版。目标使用 Parquet 持久化、Arrow 作列式交换契约、Polars 作研究与 ETL；Rust 热路径是否采用 Custom SoA 待基准结果决定。此处是目标分工，现有 `data-core/` / DuckDB / Parquet 发布链继续按当前 ADR 0008 运作。
 

@@ -1,6 +1,6 @@
 # ADR 0023：ETF 公司行动、顺序总回报指数与权威账本
 
-- 状态：Accepted as target architecture，2026-10-14（spec [#171](https://github.com/ZombieIce/PrajnaQuant/issues/171) P19～P22，设计票据 [#173](https://github.com/ZombieIce/PrajnaQuant/issues/173)）；**未实现、未通过真实数据验收**。扩展 [ADR 0019](0019-fast-event-ledger-and-vector-parity.md) 的权益恒等式与 Vector 共同语义，不改写既有价格收益结果。
+- 状态：Accepted as target architecture，2026-10-14（spec [#171](https://github.com/ZombieIce/PrajnaQuant/issues/171) P19～P22，设计票据 [#173](https://github.com/ZombieIce/PrajnaQuant/issues/173)）。#180 已实现合成验证的数据层 v2 结构化事件表与顺序 TRI；**真实 cninfo 附件解析、完整性证明、账户账本、Vector 对拍和真实数据验收仍未实现**。扩展 [ADR 0019](0019-fast-event-ledger-and-vector-parity.md) 的权益恒等式与 Vector 共同语义，不改写既有价格收益结果。
 
 ## 背景与边界
 

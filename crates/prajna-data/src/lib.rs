@@ -19,13 +19,15 @@ pub use manifest::{
     ManifestTable, NormalizerIdentity, read_manifest, write_manifest,
 };
 pub use normalized::{
-    AnnouncementRow, DataError, ExecutionStatusRow, ParquetWriteOptions, SourceCrosscheckRow,
-    announcements_schema, announcements_to_record_batch, bars_from_record_batch, bars_schema,
-    bars_to_record_batch, execution_status_from_record_batch, execution_status_schema,
-    execution_status_to_record_batch, instruments_from_record_batch, instruments_schema,
-    instruments_to_record_batch, parquet_write_options, read_parquet, sessions_from_record_batch,
-    sessions_schema, sessions_to_record_batch, source_crosscheck_schema,
-    source_crosscheck_to_record_batch, write_parquet,
+    AnnouncementRow, CorporateActionKind, CorporateActionRow, DataError, ExecutionStatusRow,
+    ParquetWriteOptions, SourceCrosscheckRow, announcements_schema, announcements_to_record_batch,
+    bars_from_record_batch, bars_schema, bars_to_record_batch, corporate_actions_from_record_batch,
+    corporate_actions_schema, corporate_actions_to_record_batch,
+    execution_status_from_record_batch, execution_status_schema, execution_status_to_record_batch,
+    instruments_from_record_batch, instruments_schema, instruments_to_record_batch,
+    parquet_write_options, read_parquet, sessions_from_record_batch, sessions_schema,
+    sessions_to_record_batch, source_crosscheck_schema, source_crosscheck_to_record_batch,
+    write_parquet,
 };
 pub use raw::{RawStore, RawStoreError, SourceKind, SourceRecord, SourceRecordInput};
 
