@@ -10,6 +10,7 @@ pub mod engine;
 pub mod factor;
 pub mod fast_event;
 mod panel;
+pub mod pit_universe;
 pub mod strategy;
 mod universe;
 pub mod vector;
