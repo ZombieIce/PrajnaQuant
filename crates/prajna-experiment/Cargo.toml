@@ -44,5 +44,8 @@ rustix = { version = "1.1", features = ["process"] }
 [lints.rust]
 unsafe_code = "forbid"
 
+[dev-dependencies]
+zip = { version = "6.0", default-features = false, features = ["deflate"] }
+
 [lints.clippy]
 all = { level = "warn", priority = -1 }

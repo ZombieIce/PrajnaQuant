@@ -26,3 +26,4 @@ pub mod ma_crossover;
 pub mod etf_eligible;
 pub mod etf_market;
 pub mod etf_momentum;
+pub mod pit_strategy;

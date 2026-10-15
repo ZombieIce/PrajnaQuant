@@ -167,10 +167,28 @@ impl ExecutionState {
         held: &BTreeSet<InstrumentId>,
         executable: impl Fn(&InstrumentId, &PanelSession) -> bool,
     ) -> Option<ExecutionEvent> {
+        self.attempt_directional(session, held, |id, s, _| executable(id, s))
+    }
+
+    pub fn exclude(&mut self, instruments: &BTreeSet<InstrumentId>) {
+        if let Some(decision) = &mut self.pending {
+            decision.targets.retain(|id, _| !instruments.contains(id));
+        }
+        if let Some(entries) = &mut self.missing_entries {
+            entries.retain(|id, _| !instruments.contains(id));
+        }
+    }
+
+    pub fn attempt_directional(
+        &mut self,
+        session: &PanelSession,
+        held: &BTreeSet<InstrumentId>,
+        executable: impl Fn(&InstrumentId, &PanelSession, bool) -> bool,
+    ) -> Option<ExecutionEvent> {
         if let Some(decision) = &self.pending {
             let blocked = held
                 .iter()
-                .filter(|instrument| !executable(instrument, session))
+                .filter(|instrument| !executable(instrument, session, false))
                 .cloned()
                 .collect::<BTreeSet<_>>();
             if blocked.is_empty() {
@@ -179,7 +197,7 @@ impl ExecutionState {
                 let is_retry = self.missing_entries.is_some();
                 let targets = self.missing_entries.as_ref().unwrap_or(&decision.targets);
                 for (instrument, weight) in targets {
-                    if executable(instrument, session) {
+                    if executable(instrument, session, true) {
                         applied.insert(instrument.clone(), *weight);
                     } else if *weight > 0.0 || self.unfilled_entry == UnfilledEntry::Skip {
                         skipped_buys.insert(instrument.clone());

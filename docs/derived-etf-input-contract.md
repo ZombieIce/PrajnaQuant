@@ -41,6 +41,34 @@
 
 输出保留原 Universe/Run Spec 片段、Eligible 版本、市场版本、Factor Cache key、全部参数、成员和逐标的排除原因；应由 #177 原样进入 Run Spec 与全部 ResultLevel。Eligible 只是收盘候选池，不能保证下一开盘可买，也不替代持仓卖出门禁。
 
+## #177 Engine / Run 消费
+
+`prajna-experiment` 的显式 `s2_pit_rotation` 接入上述构建产物，顶层 Universe
+为 Catalog content identity，不改变旧 Static Universe 路径。参数 lookback/Top-K/
+cadence 与上市、金额阈值和所有输入/规则版本均进入身份；每 Session Universe、
+Eligible（含缺失/排除诊断）在所有 ResultLevel 的 PIT Run Spec 保留。
+HALTED/UNKNOWN/涨跌停受限格子另存 `execution_exclusions`，不因其已离开 Universe
+而丢失已持仓的未知执行格子。具体定义和存储入口见
+[`prajna-experiment`](../crates/prajna-experiment/README.md)。
+
+新路径复用 `ExecutionState::attempt_directional`：sell 方向被阻塞时整次常规目标延期，
+buy 方向被阻塞时只跳过该买腿、原权重留现金、不事后重归一。每个新 close 的常规
+Decision 替换旧 pending，但不取消独立持久 Risk Exit。风险退出优先于常规 open 尝试，
+逐个风险标的等待明确可卖 open，不等待 cadence、不受其他持仓延期影响，卖后保留其他
+持仓数量。下一 open 必须严格晚于风险证据可用时刻；DateOnly 沿用 Catalog 的保守规则。
+低净值提示只标注；未退出风险腿在期末仍报告 pending。
+
+手算 3×10 用例（全部平价 1，只有 S7 的 A open=0.9）：S3 close 选 A；S4 open
+以 10,000 元、lot100、3bp/min5、2bp 滑点买 A 9,900 份，现金 93.02、NAV 9,993.02。
+S4 close 终止议案可知；S5 HALTED、S6 UNKNOWN、S7 跌停均不卖。Universe 在 S5
+移除 A，常规 pending 由 S5 的 B 换成 S7 的 C，但风险仍等待。S8 明确可卖后先以
+0.9998 卖 A，扣最低佣金 5，现金 9,986.04；再买 C 9,900 份，现金 79.06、NAV
+9,979.06。S7 open 的 NAV=93.02+9,900×0.9=9,003.02，close 回到 9,993.02，
+不把跌停或 UNKNOWN 估值成零。累计三笔佣金 15、滑点 5.94。
+对拍忽略 lot/min5：S4 A=9,995；S8 卖后现金=9,990.0025，买 C 后 NAV=
+9,985.00749875。Vector 每行含 next-open return，按
+`nav/(1+gross_return)` 与 Fast 同 Session 的 open-after 权益比较。
+
 ## 验证与边界
 
-完全合成 fixture 覆盖 3 ETF × 10 Session、61/60/20 边界、精确阈值、开盘停牌但下午成交、全天停牌与成交冲突、涨跌停方向、来源冲突/缺行、全市场缺 Session、晚到证据、UNKNOWN 整次延期门禁、缓存隔离、原文篡改与 DSV 重放。真实市场 P0、Engine/Experiment 端到端与总回报最终验收不能由这些测试替代。执行入口/账本没有在本票改动，因此本票也不新增真实成交或 NAV 守恒验证结论。
+完全合成 fixture 覆盖 3 ETF × 10 Session、61/60/20 边界、精确阈值、开盘停牌但下午成交、全天停牌与成交冲突、涨跌停方向、来源冲突/缺行、全市场缺 Session、晚到证据、UNKNOWN 整次延期门禁、缓存隔离、原文篡改与 DSV 重放。#177 另验证逐日 lot 账本守恒、Risk Exit/cadence 分离、延期替换、fewer-than-Top-K/现金、Vector/Fast 共同语义日对拍、Experiment 身份及 Summary→Full 提升。前者仍是 #176 输入构建的验证范围；后者只是新增合成工程验证，不等于真实市场 P0、真实总回报或父票据 #171 的最终验收。

@@ -38,7 +38,8 @@ pub struct IndexPoint {
 
 /// Explicit 6a assertion: no corporate actions exist in this immutable coverage.
 /// A real provider must replace this contract whenever any action is present.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EmptyActionCoverage {
     pub version: String,
     pub instruments: BTreeSet<InstrumentId>,
@@ -48,6 +49,7 @@ pub struct EmptyActionCoverage {
     pub available_at: Option<TimestampNs>,
 }
 
+#[derive(Debug)]
 pub struct TotalReturnIndex {
     points: BTreeMap<(InstrumentId, NaiveDate), IndexPoint>,
     identity: Value,

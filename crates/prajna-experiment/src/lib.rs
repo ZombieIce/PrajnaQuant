@@ -35,6 +35,7 @@ use sha2::{Digest, Sha256};
 
 mod accurate;
 mod engine;
+mod pit;
 mod python;
 pub use python::{PreparedDecisions, PythonProvenance};
 mod storage;
@@ -300,6 +301,7 @@ pub struct Experiment {
     engine: engine::EngineSettings,
     strategy_kind: String,
     backend_factory: Option<Arc<dyn BackendFactory>>,
+    pit: Option<Arc<pit::PitContext>>,
 }
 
 #[derive(Deserialize)]
@@ -323,6 +325,8 @@ struct DefinitionInput {
     fast_event: Option<engine::FastSettingsInput>,
     #[serde(default)]
     backend: Option<engine::BackendIdentity>,
+    #[serde(default)]
+    pit: Option<pit::PitInput>,
 }
 
 impl Experiment {
@@ -337,7 +341,7 @@ impl Experiment {
                 "sessions_per_year must be a positive integer no greater than 2^53 - 1",
             ));
         }
-        let engine = engine::EngineSettings::parse(&input, lake_root.as_ref())?;
+        let mut engine = engine::EngineSettings::parse(&input, lake_root.as_ref())?;
         if input.seed.as_ref().is_some_and(|seed| !seed.is_null()) {
             return Err(invalid("deterministic engine seed must be omitted or null"));
         }
@@ -354,13 +358,45 @@ impl Experiment {
             }
         }
         read_manifest(lake_root.as_ref(), &input.dsv)?;
-        let universe = StaticUniverse::load(lake_root.as_ref(), &input.universe)?;
-        universe.validate_against(lake_root.as_ref(), &input.dsv)?;
-        validate_universe_venue(&universe, &input.venue)?;
+        let pit = if let Some(pit_input) = &input.pit {
+            if input.strategy != "s2_pit_rotation"
+                || input.venue != "SZSE"
+                || input.availability_assumption != "none"
+                || input.engine == "accurate_event"
+            {
+                return Err(invalid(
+                    "PIT requires s2_pit_rotation, SZSE, availability=none and Vector/Fast Event",
+                ));
+            }
+            let context = pit::PitContext::build(pit_input, lake_root.as_ref(), &input.dsv)?;
+            if context
+                .catalog
+                .version()
+                .map_err(|e| invalid(e.to_string()))?
+                != input.universe
+            {
+                return Err(invalid(
+                    "PIT universe must equal the Catalog content identity",
+                ));
+            }
+            engine.configure_pit(&context.catalog)?;
+            Some(Arc::new(context))
+        } else {
+            if input.strategy == "s2_pit_rotation" {
+                return Err(invalid("s2_pit_rotation requires PIT inputs"));
+            }
+            let universe = StaticUniverse::load(lake_root.as_ref(), &input.universe)?;
+            universe.validate_against(lake_root.as_ref(), &input.dsv)?;
+            validate_universe_venue(&universe, &input.venue)?;
+            None
+        };
         let costs = Costs::parse(&input.costs)?;
         let parameter_space = engine::parse_space(&input.strategy, &input.parameter_space)?;
         let mut normalized = normalize_definition(&input, costs, &parameter_space);
         engine.normalize_definition(&mut normalized, &input.strategy);
+        if let Some(context) = &pit {
+            normalized["pit"] = context.identity.clone();
+        }
         Ok(Self {
             dsv: input.dsv,
             universe: input.universe,
@@ -373,6 +409,7 @@ impl Experiment {
             engine,
             strategy_kind: input.strategy,
             backend_factory: None,
+            pit,
         })
     }
 
@@ -461,6 +498,20 @@ impl Experiment {
 
     /// Expands and validates every parameter combination before returning any Runs.
     pub fn expand(&self, lake_root: impl AsRef<Path>) -> Result<Vec<ExpandedRun>, ExperimentError> {
+        if let Some(pit) = &self.pit {
+            let venue = self
+                .venue
+                .parse::<VenueId>()
+                .map_err(|e| invalid(e.to_string()))?;
+            let native = load_panel(lake_root.as_ref(), &self.dsv, &venue)
+                .map_err(|e| invalid(e.to_string()))?;
+            let panel = prajna_research::pit_strategy::lifecycle_panel(&native, &pit.catalog)
+                .map_err(|e| invalid(e.to_string()))?;
+            if let ParameterSpace::Native { combinations, .. } = &self.parameter_space {
+                return pit.expand(self, combinations, &panel);
+            }
+            return Err(invalid("PIT requires native S2 parameters"));
+        }
         let universe = StaticUniverse::load(lake_root, &self.universe)?;
         self.expand_for_universe(&universe)
     }
@@ -569,28 +620,50 @@ impl Experiment {
         } else {
             None
         };
-        let universe = StaticUniverse::load(lake_root, &self.universe)?;
-        let runs = match prepared {
-            Some(prepared) => self.prepared_runs(lake_root, prepared)?,
-            None => self.expand_for_universe(&universe)?,
+        let universe = if self.pit.is_none() {
+            Some(StaticUniverse::load(lake_root, &self.universe)?)
+        } else {
+            None
         };
-        validate_universe_venue(&universe, &self.venue)
-            .map_err(|error| execution_error("validate Universe venue", error))?;
+        let runs = match prepared {
+            Some(_) if self.pit.is_some() => {
+                return Err(invalid("PIT Python views are not implemented"));
+            }
+            Some(prepared) => self.prepared_runs(lake_root, prepared)?,
+            None => self.expand(lake_root)?,
+        };
+        if let Some(universe) = &universe {
+            validate_universe_venue(universe, &self.venue)
+                .map_err(|error| execution_error("validate Universe venue", error))?;
+            universe
+                .validate_against(lake_root, &self.dsv)
+                .map_err(|error| execution_error("validate Universe", error))?;
+        }
         let venue = self
             .venue
             .parse::<VenueId>()
             .map_err(|_| invalid("venue is not a valid VenueId"))?;
-        let panel = load_panel(lake_root, &self.dsv, &venue)
+        let native_panel = load_panel(lake_root, &self.dsv, &venue)
             .map_err(|error| execution_error("load panel", error))?;
-        let statuses = load_execution_status(lake_root, &self.dsv)
-            .map_err(|error| execution_error("load execution status", error))?;
-        universe
-            .validate_against(lake_root, &self.dsv)
-            .map_err(|error| execution_error("validate Universe", error))?;
+        let panel = if let Some(pit) = &self.pit {
+            prajna_research::pit_strategy::lifecycle_panel(&native_panel, &pit.catalog)
+                .map_err(|e| invalid(e.to_string()))?
+        } else {
+            native_panel
+        };
+        let statuses = if self.pit.is_some() {
+            BTreeMap::new()
+        } else {
+            load_execution_status(lake_root, &self.dsv)
+                .map_err(|error| execution_error("load execution status", error))?
+        };
+        let members = universe
+            .as_ref()
+            .map_or(panel.instruments.as_slice(), |u| u.members());
 
         // Resolve execution availability once; the callback in each Run then reads this shared map.
         let mut executable_by_key = HashMap::new();
-        for instrument in universe.members() {
+        for instrument in members {
             for session in &panel.sessions {
                 let allowed = executable(&panel, &statuses, instrument, session)
                     .map_err(|error| execution_error("resolve execution status", error))?;
@@ -645,7 +718,7 @@ impl Experiment {
                         cache
                             .get_or_compute(
                                 &panel,
-                                universe.members(),
+                                members,
                                 &self.universe,
                                 &self.dsv,
                                 factor,
@@ -670,7 +743,7 @@ impl Experiment {
                         cache
                             .get_or_compute(
                                 &panel,
-                                universe.members(),
+                                members,
                                 &self.universe,
                                 &self.dsv,
                                 factor,
@@ -699,7 +772,7 @@ impl Experiment {
                 &executable_by_key,
                 &costs,
                 assumption,
-                universe.members(),
+                members,
                 level,
                 packet.as_ref(),
             )

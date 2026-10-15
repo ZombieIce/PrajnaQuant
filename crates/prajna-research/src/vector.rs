@@ -34,6 +34,10 @@ pub struct VectorResult {
     pub assumptions: Vec<String>,
     pub costs: VectorCosts,
     pub availability_assumption: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub risk_exits: Vec<crate::pit_strategy::RiskExitAttempt>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_risk_exits: Vec<InstrumentId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -134,6 +138,7 @@ pub fn run_vector(
         costs,
         availability_assumption,
         None,
+        None,
     )
 }
 
@@ -166,6 +171,44 @@ pub fn run_vector_with_policy(
         costs,
         availability_assumption,
         Some(&mut generate),
+        None,
+    )
+}
+
+pub fn run_vector_pit(
+    panel: &Panel,
+    decisions: &[Decision],
+    market: &crate::etf_market::DerivedMarket,
+    risk: &crate::pit_strategy::RiskSignals,
+    costs: &VectorCosts,
+) -> Result<VectorResult, VectorError> {
+    crate::pit_strategy::validate_execution_panel(panel, market)
+        .map_err(|e| invalid_input(e.to_string()))?;
+    let mut state = ExecutionState::new(UnfilledEntry::Skip);
+    let mut generate = |session: &PanelSession,
+                        held: &BTreeSet<InstrumentId>,
+                        decision: Option<&Decision>,
+                        at_end: bool| {
+        if let Some(decision) = decision {
+            state.decide(decision);
+            None
+        } else if at_end {
+            state.pending_at_end()
+        } else {
+            state.exclude(&risk.active_before_open(session.ts_open));
+            state.attempt_directional(session, held, |id, s, buy| {
+                crate::pit_strategy::permits(market, panel, id, s, buy)
+            })
+        }
+    };
+    run_vector_inner(
+        panel,
+        decisions,
+        &[],
+        costs,
+        AvailabilityAssumption::None,
+        Some(&mut generate),
+        Some((market, risk)),
     )
 }
 
@@ -179,6 +222,10 @@ fn run_vector_inner(
     costs: &VectorCosts,
     availability_assumption: AvailabilityAssumption,
     mut generate: Option<&mut EventGenerator<'_>>,
+    pit: Option<(
+        &crate::etf_market::DerivedMarket,
+        &crate::pit_strategy::RiskSignals,
+    )>,
 ) -> Result<VectorResult, VectorError> {
     validate_costs(costs)?;
     let prices = read_prices(panel)?;
@@ -223,8 +270,36 @@ fn run_vector_inner(
     let mut nav = 1.0;
     let mut result_sessions = Vec::with_capacity(panel.sessions.len());
     let mut result_executions = Vec::new();
+    let mut risk_exits = Vec::new();
 
     for (session_index, session) in panel.sessions.iter().enumerate() {
+        let mut risk_turnover = 0.0;
+        let mut risk_cost = 0.0;
+        if let Some((market, risk)) = pit {
+            let active = risk.active_before_open(session.ts_open);
+            pending_targets.retain(|id, _| !active.contains(id));
+            for id in weights.keys().cloned().collect::<Vec<_>>() {
+                if !active.contains(&id) {
+                    continue;
+                }
+                let executed = crate::pit_strategy::permits(market, panel, &id, session, false);
+                risk_exits.push(crate::pit_strategy::RiskExitAttempt {
+                    session_date: session.session_date,
+                    instrument_id: id.clone(),
+                    executed,
+                });
+                if executed {
+                    risk_turnover += weights.remove(&id).unwrap_or(0.0);
+                }
+            }
+            risk_cost = risk_turnover * sell_rate;
+            if risk_cost >= 1.0 {
+                return Err(invalid_costs("Risk Exit exhausts equity"));
+            }
+            for weight in weights.values_mut() {
+                *weight /= 1.0 - risk_cost;
+            }
+        }
         let generated = generate.as_mut().and_then(|generate| {
             generate(session, &weights.keys().cloned().collect(), None, false)
         });
@@ -371,6 +446,8 @@ fn run_vector_inner(
             (None, None) => {}
         }
 
+        turnover = risk_turnover + turnover * (1.0 - risk_cost);
+        cost = risk_cost + cost * (1.0 - risk_cost);
         let weights_after_execution = weights.clone();
         let mut gross_return = 0.0;
         let mut price_relatives = BTreeMap::new();
@@ -501,14 +578,34 @@ fn run_vector_inner(
         })
         .collect();
 
+    let pending_risk_exits = if let (Some((_, risk)), Some(last)) = (pit, panel.sessions.last()) {
+        let active = risk.active(last.ts_close);
+        weights
+            .keys()
+            .filter(|id| active.contains(*id))
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
     Ok(VectorResult {
         sessions: result_sessions,
         decisions: result_decisions,
         executions: result_executions,
         pending_at_end,
-        assumptions: assumptions(availability_assumption),
+        assumptions: if pit.is_some() {
+            vec![
+            "Offline PIT/Eligible/Derived Market evidence; not real-market PIT certification.".into(),
+            "Directional limits and persistent Risk Exit; no lot/minimum commission, T+1 or corporate actions.".into(),
+            "Vector NAV includes next-open return; compare nav/(1+gross_return) to Fast open-after.".into(),
+        ]
+        } else {
+            assumptions(availability_assumption)
+        },
         costs: *costs,
         availability_assumption: availability_assumption.canonical_str().to_owned(),
+        risk_exits,
+        pending_risk_exits,
     })
 }
 

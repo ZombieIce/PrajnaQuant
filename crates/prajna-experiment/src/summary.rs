@@ -100,7 +100,7 @@ pub fn summarize(result: &VectorResult, sessions_per_year: u64) -> RunSummary {
             .map(|execution| execution.skipped_buys.len())
             .sum(),
         session_count,
-        pending_at_end: result.pending_at_end.is_some(),
+        pending_at_end: result.pending_at_end.is_some() || !result.pending_risk_exits.is_empty(),
         insufficient_sessions,
         zero_volatility,
         assumptions: result.assumptions.clone(),
@@ -264,9 +264,9 @@ pub(crate) fn summarize_fast(
             skipped_buys: skipped,
         });
     }
-    let projection=VectorResult {sessions,executions,decisions:vec![],pending_at_end:None,assumptions:result.assumptions.iter().map(|s|s.to_string()).chain(["Account and VP identities verified at every Session open-after and close; exact scale-18 ledger.".into(), "Metrics use close account NAV; turnover/cost normalized by raw-open pre-trade account equity.".into()]).collect(),costs:prajna_research::vector::VectorCosts {commission_rate:0.0,buy_slippage_bps:0.0,sell_slippage_bps:0.0,buy_tax_rate:0.0,sell_tax_rate:0.0},availability_assumption:availability.into()};
+    let projection=VectorResult {sessions,executions,decisions:vec![],pending_at_end:None,risk_exits:vec![],pending_risk_exits:vec![],assumptions:result.assumptions.iter().map(|s|s.to_string()).chain(["Account and VP identities verified at every Session open-after and close; exact scale-18 ledger.".into(), "Metrics use close account NAV; turnover/cost normalized by raw-open pre-trade account equity.".into()]).collect(),costs:prajna_research::vector::VectorCosts {commission_rate:0.0,buy_slippage_bps:0.0,sell_slippage_bps:0.0,buy_tax_rate:0.0,sell_tax_rate:0.0},availability_assumption:availability.into()};
     let mut summary = summarize(&projection, sessions_per_year);
-    summary.pending_at_end = pending;
+    summary.pending_at_end = pending || !result.pending_risk_exits.is_empty();
     Ok(summary)
 }
 
@@ -307,6 +307,8 @@ mod tests {
                 sell_tax_rate: 0.0,
             },
             availability_assumption: "none".into(),
+            risk_exits: vec![],
+            pending_risk_exits: vec![],
         }
     }
 

@@ -168,6 +168,8 @@ pub struct FastEventResult {
     pub sizing_adjustments: Vec<FastEventSizingAdjustment>,
     pub account: TradingAccount,
     pub assumptions: Vec<&'static str>,
+    pub risk_exits: Vec<(VirtualPortfolioId, crate::pit_strategy::RiskExitAttempt)>,
+    pub pending_risk_exits: Vec<(VirtualPortfolioId, InstrumentId)>,
 }
 
 #[derive(Debug)]
@@ -303,7 +305,32 @@ pub fn run_fast_event(
     config: &FastEventConfig,
     portfolios: &[PortfolioRun],
 ) -> Result<FastEventResult, FastEventError> {
-    run_with_execution(panel, statuses, config, portfolios, None)
+    run_with_execution(panel, statuses, config, portfolios, None, None)
+}
+
+pub fn run_fast_event_pit(
+    panel: &Panel,
+    market: &crate::etf_market::DerivedMarket,
+    risk: &crate::pit_strategy::RiskSignals,
+    config: &FastEventConfig,
+    portfolios: &[PortfolioRun],
+) -> Result<FastEventResult, FastEventError> {
+    crate::pit_strategy::validate_execution_panel(panel, market)
+        .map_err(|e| invalid(e.to_string()))?;
+    if portfolios
+        .iter()
+        .any(|p| p.rebalance != Rebalance::FullTarget)
+    {
+        return Err(invalid("PIT requires full_target"));
+    }
+    run_with_execution(
+        panel,
+        &BTreeMap::new(),
+        config,
+        portfolios,
+        None,
+        Some((market, risk)),
+    )
 }
 
 /// A market-order boundary, not a second sizing or accounting implementation.
@@ -336,7 +363,7 @@ pub fn run_lot_with_execution(
     if config.sizing != Sizing::Lot {
         return Err(invalid("external execution requires lot sizing"));
     }
-    run_with_execution(panel, statuses, config, portfolios, Some(execution))
+    run_with_execution(panel, statuses, config, portfolios, Some(execution), None)
 }
 
 fn run_with_execution(
@@ -345,6 +372,10 @@ fn run_with_execution(
     config: &FastEventConfig,
     portfolios: &[PortfolioRun],
     mut execution: Option<&mut dyn MarketExecution>,
+    pit: Option<(
+        &crate::etf_market::DerivedMarket,
+        &crate::pit_strategy::RiskSignals,
+    )>,
 ) -> Result<FastEventResult, FastEventError> {
     validate(panel, config, portfolios)?;
     let external_execution = execution.is_some();
@@ -365,12 +396,22 @@ fn run_with_execution(
     let mut attempts = Vec::new();
     let mut fills = Vec::new();
     let mut sizing_adjustments = Vec::new();
+    let mut risk_exits = Vec::new();
     for (index, session) in panel.sessions.iter().enumerate() {
         open.update(panel, index, PriceField::Open)?;
         let gates = panel
             .instruments
             .iter()
-            .map(|id| executable(panel, statuses, id, session).map(|yes| (id.clone(), yes)))
+            .map(|id| {
+                if let Some((market, _)) = pit {
+                    Ok((
+                        id.clone(),
+                        crate::pit_strategy::permits(market, panel, id, session, true),
+                    ))
+                } else {
+                    executable(panel, statuses, id, session).map(|yes| (id.clone(), yes))
+                }
+            })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
         if let Some(market) = execution.as_deref_mut() {
             market.open(session, &open.prices, &gates, config.costs)?;
@@ -381,12 +422,68 @@ fn run_with_execution(
         let mut entry_attempted = BTreeSet::new();
         for (portfolio_index, (portfolio, state)) in portfolios.iter().zip(&mut states).enumerate()
         {
+            if let Some((market, risk)) = pit {
+                let active = risk.active_before_open(session.ts_open);
+                state.exclude(&active);
+                let positions = account.portfolios()[&portfolio.id].positions().clone();
+                for (id, quantity) in positions {
+                    if !active.contains(&id) {
+                        continue;
+                    }
+                    let executed = crate::pit_strategy::permits(market, panel, &id, session, false);
+                    risk_exits.push((
+                        portfolio.id,
+                        crate::pit_strategy::RiskExitAttempt {
+                            session_date: session.session_date,
+                            instrument_id: id.clone(),
+                            executed,
+                        },
+                    ));
+                    if !executed {
+                        continue;
+                    }
+                    let price = open.prices[&id];
+                    let order = Order::new(
+                        next_order(&account, 0)?,
+                        portfolio.id,
+                        id,
+                        Side::Sell,
+                        quantity,
+                        session.ts_open,
+                    )?;
+                    let basis = value(quantity, price)?;
+                    let fill = match config.sizing {
+                        Sizing::Lot => lot_fill(order, price, config.costs)?,
+                        Sizing::VectorParity => {
+                            let (fees, slip) = config.costs.fees(basis, Side::Sell)?;
+                            Fill::new(
+                                order,
+                                session.ts_open,
+                                price,
+                                FillPricing::SeparateSlippage { slippage: slip },
+                                fees,
+                            )?
+                        }
+                    };
+                    account.submit_order(fill.order().clone())?;
+                    account.apply_fill(fill.clone())?;
+                    fills.push(FastEventFill {
+                        fee_basis: basis,
+                        fee_side: Side::Sell,
+                        fill,
+                    });
+                }
+            }
             let held = account.portfolios()[&portfolio.id]
                 .positions()
                 .keys()
                 .cloned()
                 .collect::<BTreeSet<_>>();
-            if let Some(event) = state.attempt(session, &held, |id, _| gates[id]) {
+            if let Some(event) = state.attempt_directional(session, &held, |id, s, buy| {
+                pit.map_or(gates[id], |(market, _)| {
+                    crate::pit_strategy::permits(market, panel, id, s, buy)
+                })
+            }) {
                 let execution = match &event {
                     ExecutionEvent::Executed { applied, .. } => Some((applied, false)),
                     ExecutionEvent::RetryableExecution {
@@ -617,6 +714,22 @@ fn run_with_execution(
             });
         }
     }
+    let pending_risk_exits = if let (Some((_, risk)), Some(last)) = (pit, panel.sessions.last()) {
+        let active = risk.active(last.ts_close);
+        account
+            .portfolios()
+            .iter()
+            .flat_map(|(id, portfolio)| {
+                portfolio
+                    .positions()
+                    .keys()
+                    .filter(|instrument| active.contains(*instrument))
+                    .map(|instrument| (*id, instrument.clone()))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     Ok(FastEventResult {
         semantic_version: SEMANTIC_VERSION,
         config: config.clone(),
@@ -624,14 +737,26 @@ fn run_with_execution(
         attempts,
         fills,
         sizing_adjustments,
+        risk_exits,
+        pending_risk_exits,
         account,
-        assumptions: vec![
-            "Single Venue, single currency, long-only, unlevered; full market fills.",
-            "T+1, price limits, currency-unit rounding and corporate actions are not modeled.",
-            "Static synthetic Universe evidence does not establish PIT or dividend total return.",
-            "Valid raw bars mark even HALTED/UNKNOWN instruments; status gates execution only.",
-            "Missing prices carry the last valid price of the same field, never zero.",
-        ],
+        assumptions: if pit.is_some() {
+            vec![
+                "Single Venue, single currency, long-only, unlevered; full market fills.",
+                "Offline PIT Universe/Eligible/Derived Market evidence; not real-market PIT certification.",
+                "Directional opening price limits and persistent Risk Exit; regular blocked sells defer the whole target.",
+                "T+1, live queues, currency-unit rounding and corporate actions are not modeled.",
+                "Valid raw bars mark HALTED/UNKNOWN; missing prices carry same-field last prices, never zero.",
+            ]
+        } else {
+            vec![
+                "Single Venue, single currency, long-only, unlevered; full market fills.",
+                "T+1, price limits, currency-unit rounding and corporate actions are not modeled.",
+                "Static synthetic Universe evidence does not establish PIT or dividend total return.",
+                "Valid raw bars mark even HALTED/UNKNOWN instruments; status gates execution only.",
+                "Missing prices carry the last valid price of the same field, never zero.",
+            ]
+        },
     })
 }
 
