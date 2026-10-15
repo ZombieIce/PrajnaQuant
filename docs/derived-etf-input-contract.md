@@ -41,6 +41,67 @@
 
 输出保留原 Universe/Run Spec 片段、Eligible 版本、市场版本、Factor Cache key、全部参数、成员和逐标的排除原因；应由 #177 原样进入 Run Spec 与全部 ResultLevel。Eligible 只是收盘候选池，不能保证下一开盘可买，也不替代持仓卖出门禁。
 
+## #177 Engine / Run 消费
+
+`prajna-experiment` 的显式 `s2_pit_rotation` 接入上述构建产物，顶层 Universe
+为 Catalog content identity，不改变旧 Static Universe 路径。参数 lookback/Top-K/
+cadence 与上市、金额阈值和所有输入/规则版本均进入身份；每 Session Universe、
+Eligible（含缺失/排除诊断）在所有 ResultLevel 的 PIT Run Spec 保留。
+HALTED/UNKNOWN/涨跌停受限格子另存 `execution_exclusions`，不因其已离开 Universe
+而丢失已持仓的未知执行格子。具体定义和存储入口见
+[`prajna-experiment`](../crates/prajna-experiment/README.md)。
+
+新路径先按 full_target 的费用、实际数量与 lot/cash 约束完成 sizing，再由共享
+`ExecutionState::resolve_sized` 提交状态：实际必需 sell 被阻塞时整次常规目标延期，
+无常规成交或扣费；实际 buy 被阻塞时冻结该标的已有数量（未持有则保留现金），
+移除该腿费用后重算其他腿，不重归一目标。不能以目标成员身份或名义权重变化代替
+实际买卖方向；Vector PIT/Fast 共用同一 F8 金额/数量 planner，按实际现金、数量、
+原始估值价算权益、费用基数与分项费用，再用扣费后权益乘目标、除原始开盘价，
+以相同操作次序按 Domain scale-18/half-even 舍入。不能先舍入归一化费用或市值，
+不能从浮点权重/NAV 反推 sizing 输入，也不设 no-trade epsilon。精确零数量增量但有费用的
+F8 fee-only settlement 按其 fee_side 门禁；所有可表示的非零增量仍判实际方向。
+Fast Retry 只补足缺失的绝对目标增量，保留其他持仓；Skip 不重试。
+PIT Vector 的显式 `vector_pit.initial_capital` 为所对拍 VP 的资本，进入身份；
+其内部精确现金/数量只用于 sizing 与方向判定，不是第二套结算账本。
+语义版本 `pit-s2@4` 进入身份，避免重用旧方向判定结果，
+旧 Static Universe 路径不变。每个新 close 的常规
+Decision 替换旧 pending，但不取消独立持久 Risk Exit。风险退出优先于常规 open 尝试，
+逐个风险标的等待明确可卖 open，不等待 cadence、不受其他持仓延期影响，卖后保留其他
+持仓数量。下一 open 必须严格晚于风险证据可用时刻；DateOnly 沿用 Catalog 的保守规则。
+低净值提示只标注；未退出风险腿在期末仍报告 pending。
+
+持仓方向回归见 `tests/pit_sides.rs`：10,000 元、A 8,000 份、现金 2,000，
+目标 A/B 各 50%、零费用且 A 涨停时，允许卖 A 3,000、买 B 5,000，
+最终 A/B 各 5,000、现金 0；A 从 50% 增至 100% 的跌停买入不被卖方向阻塞。
+另验 1% 费用、费用导致名义增持变成实际减持、整次延期和持仓增量 Retry；
+lot 与 common parity 均有独立手算数量/现金断言，不只互相对拍。
+
+Fee-only 边界：平价 1、资本 10,000、佣金 1%，先持有 A 权重 0.2997，
+后调至 A=0.3/B=0.0997。common parity 的开盘前权益 9,970.03、
+A=2,988.017991；费用 9.97003 后 A 数量精确不变，A 的 buy-side fee-only
+扣费 0.02991009、B 买入 993.017979009（费用 9.94011991），
+现金 5,979.023999991、权益 9,960.05997。A 跌停允许该买方向结算，
+不能因浮点差 −5.55e−17 判成受阻卖出。另验涨停跳过该结算后重算 B、
+正/负浮点零边界与真实小于 1e−12 的卖增量仍整次延期。
+
+相邻有效输入只把 B 改为 `0.09970000000000002`，B 费用即为
+9.940119910000001994、总费用 9.970030000000001994、A 目标数量
+2,988.017990999999999402：实际减少 598 个数量 quantum，跌停时整次延期。
+同一目标在资本 1 时数量增量为零，而资本 10,000、价格 2 / 7.5 时分别减少
+299 / 80 quantum。资本、价格、佣金/税/滑点分项矩阵另验逐日现金/数量守恒和
+Vector/Fast NAV/权重对拍；只验证合成工程口径。
+
+手算 3×10 用例（全部平价 1，只有 S7 的 A open=0.9）：S3 close 选 A；S4 open
+以 10,000 元、lot100、3bp/min5、2bp 滑点买 A 9,900 份，现金 93.02、NAV 9,993.02。
+S4 close 终止议案可知；S5 HALTED、S6 UNKNOWN、S7 跌停均不卖。Universe 在 S5
+移除 A，常规 pending 由 S5 的 B 换成 S7 的 C，但风险仍等待。S8 明确可卖后先以
+0.9998 卖 A，扣最低佣金 5，现金 9,986.04；再买 C 9,900 份，现金 79.06、NAV
+9,979.06。S7 open 的 NAV=93.02+9,900×0.9=9,003.02，close 回到 9,993.02，
+不把跌停或 UNKNOWN 估值成零。累计三笔佣金 15、滑点 5.94。
+对拍忽略 lot/min5：S4 A=9,995；S8 卖后现金=9,990.0025，买 C 后 NAV=
+9,985.00749875。Vector 每行含 next-open return，按
+`nav/(1+gross_return)` 与 Fast 同 Session 的 open-after 权益比较。
+
 ## 验证与边界
 
-完全合成 fixture 覆盖 3 ETF × 10 Session、61/60/20 边界、精确阈值、开盘停牌但下午成交、全天停牌与成交冲突、涨跌停方向、来源冲突/缺行、全市场缺 Session、晚到证据、UNKNOWN 整次延期门禁、缓存隔离、原文篡改与 DSV 重放。真实市场 P0、Engine/Experiment 端到端与总回报最终验收不能由这些测试替代。执行入口/账本没有在本票改动，因此本票也不新增真实成交或 NAV 守恒验证结论。
+完全合成 fixture 覆盖 3 ETF × 10 Session、61/60/20 边界、精确阈值、开盘停牌但下午成交、全天停牌与成交冲突、涨跌停方向、来源冲突/缺行、全市场缺 Session、晚到证据、UNKNOWN 整次延期门禁、缓存隔离、原文篡改与 DSV 重放。#177 另验证逐日 lot 账本守恒、Risk Exit/cadence 分离、延期替换、fewer-than-Top-K/现金、Vector/Fast 共同语义日对拍、Experiment 身份及 Summary→Full 提升。前者仍是 #176 输入构建的验证范围；后者只是新增合成工程验证，不等于真实市场 P0、真实总回报或父票据 #171 的最终验收。

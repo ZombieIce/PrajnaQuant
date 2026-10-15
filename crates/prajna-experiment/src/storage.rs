@@ -261,6 +261,9 @@ pub struct StoredRun {
     pub not_produced_by_engine: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accounting_verified: Option<bool>,
+    /// PIT session membership/eligibility and evidence identities survive Summary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_spec: Option<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -973,12 +976,24 @@ fn publish_promotion(
 
 fn read_manifest_file(path: &Path) -> Result<ExecutionManifest, ExperimentError> {
     let bytes = fs::read(path).map_err(io_error(path))?;
-    serde_json::from_slice(&bytes).map_err(|error| {
+    let manifest: ExecutionManifest = serde_json::from_slice(&bytes).map_err(|error| {
         err(format!(
             "invalid execution manifest {}: {error}",
             path.display()
         ))
-    })
+    })?;
+    for run in &manifest.runs {
+        if let Some(spec) = &run.run_spec {
+            let calculated = crate::identity(
+                "run",
+                &prajna_data::restricted_jcs(spec).map_err(|e| err(e.to_string()))?,
+            );
+            if calculated != run.run_id {
+                return Err(err("stored PIT Run Spec content identity mismatch"));
+            }
+        }
+    }
+    Ok(manifest)
 }
 
 fn stored_run(
@@ -1011,6 +1026,10 @@ fn stored_run(
         } else {
             None
         },
+        run_spec: execution
+            .run_spec
+            .get("pit")
+            .map(|_| execution.run_spec.clone()),
     }
 }
 
@@ -1314,6 +1333,22 @@ fn result_rows(
         "executions" => {
             for execution in &result.executions {
                 rows.push((execution.session_date.clone(), json_payload(execution)?));
+            }
+            for (index, attempt) in result.risk_exits.iter().enumerate() {
+                rows.push((
+                    format!("risk|{index:020}"),
+                    json_payload(&serde_json::json!({
+                        "record_type": "risk_exit", "attempt": attempt,
+                    }))?,
+                ));
+            }
+            for instrument in &result.pending_risk_exits {
+                rows.push((
+                    format!("risk_pending|{instrument}"),
+                    json_payload(&serde_json::json!({
+                        "record_type": "risk_exit_pending_at_end", "instrument_id": instrument,
+                    }))?,
+                ));
             }
         }
         "target_weights" | "weights_after_execution" => {
@@ -2293,6 +2328,24 @@ fn fast_rows(
                     payload["blocked_entries"] = skipped;
                 }
                 rows.push((format!("attempt|{index:020}"), json_payload(&payload)?));
+            }
+            for (index, (portfolio, attempt)) in result.risk_exits.iter().enumerate() {
+                rows.push((
+                    format!("risk|{index:020}"),
+                    json_payload(&serde_json::json!({
+                        "record_type": "risk_exit", "portfolio_id": portfolio,
+                        "attempt": attempt,
+                    }))?,
+                ));
+            }
+            for (portfolio, instrument) in &result.pending_risk_exits {
+                rows.push((
+                    format!("risk_pending|{}|{instrument}", portfolio.0),
+                    json_payload(
+                        &serde_json::json!({"record_type":"risk_exit_pending_at_end",
+                        "portfolio_id":portfolio,"instrument_id":instrument}),
+                    )?,
+                ));
             }
         }
         "fills" => {

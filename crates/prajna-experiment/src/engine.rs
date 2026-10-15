@@ -39,6 +39,12 @@ struct CapitalInput {
     id: u64,
     capital: String,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct VectorPitSettingsInput {
+    initial_capital: String,
+}
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum LotSource {
@@ -56,12 +62,13 @@ pub(super) struct EngineSettings {
     rebalance: Rebalance,
     policy: UnfilledEntry,
     normalized: Option<Value>,
+    vector_pit_capital: Option<Notional>,
 }
 impl EngineSettings {
     pub(super) fn parse(input: &DefinitionInput, lake: &Path) -> Result<Self, ExperimentError> {
         if !matches!(
             input.strategy.as_str(),
-            "s2_rotation" | "buy_and_hold" | "ma_crossover"
+            "s2_rotation" | "s2_pit_rotation" | "buy_and_hold" | "ma_crossover"
         ) && !is_python_strategy(&input.strategy)
         {
             return Err(invalid(
@@ -84,13 +91,33 @@ impl EngineSettings {
             rebalance: Rebalance::FullTarget,
             policy,
             normalized: None,
+            vector_pit_capital: None,
         };
+        if input.vector_pit.is_some()
+            && (input.engine != "vector" || input.strategy != "s2_pit_rotation")
+        {
+            return Err(invalid("vector_pit is only valid for Vector PIT S2"));
+        }
         if input.engine != "accurate_event" && input.backend.is_some() {
             return Err(invalid("Backend identity is only valid for accurate_event"));
         }
         if input.engine == "vector" {
             if input.fast_event.is_some() {
                 return Err(invalid("vector cannot accept fast_event settings"));
+            }
+            if input.strategy == "s2_pit_rotation" {
+                let settings = input
+                    .vector_pit
+                    .as_ref()
+                    .ok_or_else(|| invalid("Vector PIT requires vector_pit.initial_capital"))?;
+                let capital: Notional = settings
+                    .initial_capital
+                    .parse()
+                    .map_err(|e| invalid(format!("invalid PIT capital: {e}")))?;
+                if capital <= Notional::ZERO {
+                    return Err(invalid("Vector PIT initial_capital must be positive"));
+                }
+                result.vector_pit_capital = Some(capital);
             }
             return Ok(result);
         }
@@ -184,7 +211,11 @@ impl EngineSettings {
                 "VP capital must be nonempty and not exceed initial_cash",
             ));
         }
-        let universe = StaticUniverse::load(lake, &input.universe)?;
+        let universe = if input.pit.is_some() {
+            None
+        } else {
+            Some(StaticUniverse::load(lake, &input.universe)?)
+        };
         let manifest = read_manifest(lake, &input.dsv)?;
         let table = manifest
             .core
@@ -209,7 +240,9 @@ impl EngineSettings {
                 .map_err(|e| invalid(e.to_string()))?
             {
                 if instrument.id().venue().as_str() == input.venue {
-                    if universe.members().contains(instrument.id())
+                    if universe
+                        .as_ref()
+                        .is_none_or(|u| u.members().contains(instrument.id()))
                         && instrument.quote_currency().map(|c| c.as_str())
                             != Some(settings.currency.as_str())
                     {
@@ -309,6 +342,45 @@ impl EngineSettings {
             "retry"
         }
     }
+    pub(super) fn configure_pit(
+        &mut self,
+        catalog: &prajna_research::pit_universe::HistoricalCatalog,
+    ) -> Result<(), ExperimentError> {
+        if self.rebalance != Rebalance::FullTarget || self.policy != UnfilledEntry::Skip {
+            return Err(invalid(
+                "PIT S2 requires full_target and unfilled_entry=skip",
+            ));
+        }
+        if let Some(config) = &mut self.fast {
+            let mut lots = BTreeMap::new();
+            for life in &catalog.input().lifecycles {
+                let native: InstrumentId = format!("{}.SZSE", life.native_symbol)
+                    .parse()
+                    .map_err(|e| invalid(format!("{e}")))?;
+                if let Some(lot) = config.lot_sizes.get(&native) {
+                    lots.insert(
+                        life.instrument_id().map_err(|e| invalid(e.to_string()))?,
+                        *lot,
+                    );
+                } else if config.sizing == Sizing::Lot {
+                    return Err(invalid(
+                        "PIT lot sizing requires a resolved native lot for each lifecycle",
+                    ));
+                }
+            }
+            config.lot_sizes = lots;
+            if let Some(normalized) = &mut self.normalized {
+                normalized["lot_size_source"]["resolved"] = serde_json::json!(
+                    config
+                        .lot_sizes
+                        .iter()
+                        .map(|(id, q)| (id.to_string(), q.to_string()))
+                        .collect::<BTreeMap<_, _>>()
+                );
+            }
+        }
+        Ok(())
+    }
     pub(super) fn packet(
         &self,
         lake: &Path,
@@ -341,6 +413,9 @@ impl EngineSettings {
         }
     }
     pub(super) fn normalize_definition(&self, value: &mut Value, strategy: &str) {
+        if let Some(capital) = self.vector_pit_capital {
+            value["vector_pit"] = serde_json::json!({"initial_capital":capital.to_string()});
+        }
         if self.fast.is_some() || self.policy != UnfilledEntry::Skip || strategy != "s2_rotation" {
             value["unfilled_entry"] = self.policy_name().into();
         }
@@ -352,6 +427,9 @@ impl EngineSettings {
         }
     }
     pub(super) fn normalize_spec(&self, value: &mut Value) {
+        if let Some(capital) = self.vector_pit_capital {
+            value["engine"]["initial_capital"] = serde_json::json!(capital.to_string());
+        }
         if self.fast.is_some()
             || self.policy != UnfilledEntry::Skip
             || value["strategy"]["kind"] != "s2_rotation"
@@ -400,7 +478,9 @@ pub(super) fn parse_space(kind: &str, space: &Value) -> Result<ParameterSpace, E
         let axes = grid
             .as_object()
             .ok_or_else(|| invalid("grid must be object"))?;
-        let expected = if kind == "buy_and_hold" {
+        let expected = if kind == "s2_pit_rotation" {
+            vec!["lookback", "top_k", "rebalance_every"]
+        } else if kind == "buy_and_hold" {
             vec!["params_version"]
         } else {
             vec!["params_version", "short_window", "long_window"]
@@ -441,6 +521,10 @@ pub(super) fn parse_space(kind: &str, space: &Value) -> Result<ParameterSpace, E
                 return Err(invalid("Python strategy parameters must be JSON objects"));
             }
             normalize_python_parameters(parameters)?;
+        } else if kind == "s2_pit_rotation" {
+            let params: prajna_research::pit_strategy::PitS2Params =
+                serde_json::from_value(parameters.clone())?;
+            params.validate().map_err(|e| invalid(e.to_string()))?;
         } else {
             native_strategy(kind, parameters)?;
         }
@@ -671,8 +755,18 @@ pub(super) fn execute(
                 execution.backend_diagnostics = Some(diagnostics);
                 result.execution
             } else {
-                fast_event::run_fast_event(panel, statuses, config, &portfolios)
-                    .map_err(|e| e.to_string())?
+                if let Some(pit) = &experiment.pit {
+                    fast_event::run_fast_event_pit(
+                        panel,
+                        &pit.market,
+                        &pit.risk,
+                        config,
+                        &portfolios,
+                    )
+                } else {
+                    fast_event::run_fast_event(panel, statuses, config, &portfolios)
+                }
+                .map_err(|e| e.to_string())?
             };
             execution.summary = Some(crate::summary::summarize_fast(
                 &result,
@@ -710,19 +804,33 @@ pub(super) fn execute(
             // Native strategy membership is the declared Universe, never all dataset instruments.
             let decisions = decisions(engine, run, factors, panel, members, assumption)?;
             execution.result = Some(
-                run_vector_with_policy(
-                    panel,
-                    &decisions,
-                    experiment.engine.policy,
-                    costs,
-                    assumption,
-                    |id, s| {
-                        executable
-                            .get(&(id.clone(), s.session_date))
-                            .copied()
-                            .unwrap_or(false)
-                    },
-                )
+                if let Some(pit) = &experiment.pit {
+                    prajna_research::vector::run_vector_pit(
+                        panel,
+                        &decisions,
+                        &pit.market,
+                        &pit.risk,
+                        costs,
+                        experiment
+                            .engine
+                            .vector_pit_capital
+                            .ok_or("missing Vector PIT capital")?,
+                    )
+                } else {
+                    run_vector_with_policy(
+                        panel,
+                        &decisions,
+                        experiment.engine.policy,
+                        costs,
+                        assumption,
+                        |id, s| {
+                            executable
+                                .get(&(id.clone(), s.session_date))
+                                .copied()
+                                .unwrap_or(false)
+                        },
+                    )
+                }
                 .map_err(|e| e.to_string())?,
             );
         }

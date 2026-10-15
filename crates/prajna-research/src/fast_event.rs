@@ -55,7 +55,11 @@ impl FastEventCosts {
         minimum_commission: Notional::ZERO,
     };
 
-    fn fees(self, basis: Notional, side: Side) -> Result<(FillCosts, Notional), FastEventError> {
+    pub(crate) fn fees(
+        self,
+        basis: Notional,
+        side: Side,
+    ) -> Result<(FillCosts, Notional), FastEventError> {
         let (slip, tax) = match side {
             Side::Buy => (self.buy_slippage_rate, self.buy_tax_rate),
             Side::Sell => (self.sell_slippage_rate, self.sell_tax_rate),
@@ -168,6 +172,8 @@ pub struct FastEventResult {
     pub sizing_adjustments: Vec<FastEventSizingAdjustment>,
     pub account: TradingAccount,
     pub assumptions: Vec<&'static str>,
+    pub risk_exits: Vec<(VirtualPortfolioId, crate::pit_strategy::RiskExitAttempt)>,
+    pub pending_risk_exits: Vec<(VirtualPortfolioId, InstrumentId)>,
 }
 
 #[derive(Debug)]
@@ -217,45 +223,41 @@ impl From<polars::error::PolarsError> for FastEventError {
 fn invalid(message: impl Into<String>) -> FastEventError {
     FastEventError::InvalidInput(message.into())
 }
-fn add(a: Notional, b: Notional) -> Result<Notional, FastEventError> {
-    Ok(Notional::from_mantissa(
-        a.mantissa()
-            .checked_add(b.mantissa())
-            .ok_or(FixedPointError::Overflow)?,
-    )?)
+pub(crate) fn add(a: Notional, b: Notional) -> Result<Notional, FastEventError> {
+    Ok(crate::strategy::execution_add(a, b)?)
 }
-fn sub(a: Notional, b: Notional) -> Result<Notional, FastEventError> {
+pub(crate) fn sub(a: Notional, b: Notional) -> Result<Notional, FastEventError> {
     add(a, b.checked_mul(-1)?)
 }
 fn decimal_price(price: Price) -> Result<Notional, FastEventError> {
     Ok(Notional::from_mantissa(price.mantissa())?)
 }
-fn value(quantity: Quantity, price: Price) -> Result<Notional, FastEventError> {
+pub(crate) fn value(quantity: Quantity, price: Price) -> Result<Notional, FastEventError> {
     Ok(Notional::from_mantissa(quantity.mantissa())?.checked_mul_decimal(decimal_price(price)?)?)
 }
-fn quantity(budget: Notional, price: Price) -> Result<Quantity, FastEventError> {
+pub(crate) fn quantity(budget: Notional, price: Price) -> Result<Quantity, FastEventError> {
     Ok(Quantity::from_mantissa(
         budget
             .checked_div_decimal(decimal_price(price)?)?
             .mantissa(),
     )?)
 }
-fn weight(input: f64) -> Result<Notional, FastEventError> {
+pub(crate) fn weight(input: f64) -> Result<Notional, FastEventError> {
     if !input.is_finite() || !(0.0..=1.0).contains(&input) {
         return Err(invalid("weights must be finite and in [0, 1]"));
     }
     // Decision weights originate in Research f64; prices and ledger never do.
-    Ok(input.to_string().parse()?)
+    Ok(crate::strategy::execution_decimal(input)?)
 }
 
 #[derive(Default)]
-struct Marks {
-    prices: BTreeMap<InstrumentId, Price>,
+pub(crate) struct Marks {
+    pub(crate) prices: BTreeMap<InstrumentId, Price>,
     sources: BTreeMap<InstrumentId, PriceSource>,
 }
 
 impl Marks {
-    fn update(
+    pub(crate) fn update(
         &mut self,
         panel: &Panel,
         index: usize,
@@ -303,7 +305,32 @@ pub fn run_fast_event(
     config: &FastEventConfig,
     portfolios: &[PortfolioRun],
 ) -> Result<FastEventResult, FastEventError> {
-    run_with_execution(panel, statuses, config, portfolios, None)
+    run_with_execution(panel, statuses, config, portfolios, None, None)
+}
+
+pub fn run_fast_event_pit(
+    panel: &Panel,
+    market: &crate::etf_market::DerivedMarket,
+    risk: &crate::pit_strategy::RiskSignals,
+    config: &FastEventConfig,
+    portfolios: &[PortfolioRun],
+) -> Result<FastEventResult, FastEventError> {
+    crate::pit_strategy::validate_execution_panel(panel, market)
+        .map_err(|e| invalid(e.to_string()))?;
+    if portfolios
+        .iter()
+        .any(|p| p.rebalance != Rebalance::FullTarget)
+    {
+        return Err(invalid("PIT requires full_target"));
+    }
+    run_with_execution(
+        panel,
+        &BTreeMap::new(),
+        config,
+        portfolios,
+        None,
+        Some((market, risk)),
+    )
 }
 
 /// A market-order boundary, not a second sizing or accounting implementation.
@@ -336,7 +363,7 @@ pub fn run_lot_with_execution(
     if config.sizing != Sizing::Lot {
         return Err(invalid("external execution requires lot sizing"));
     }
-    run_with_execution(panel, statuses, config, portfolios, Some(execution))
+    run_with_execution(panel, statuses, config, portfolios, Some(execution), None)
 }
 
 fn run_with_execution(
@@ -345,6 +372,10 @@ fn run_with_execution(
     config: &FastEventConfig,
     portfolios: &[PortfolioRun],
     mut execution: Option<&mut dyn MarketExecution>,
+    pit: Option<(
+        &crate::etf_market::DerivedMarket,
+        &crate::pit_strategy::RiskSignals,
+    )>,
 ) -> Result<FastEventResult, FastEventError> {
     validate(panel, config, portfolios)?;
     let external_execution = execution.is_some();
@@ -365,12 +396,22 @@ fn run_with_execution(
     let mut attempts = Vec::new();
     let mut fills = Vec::new();
     let mut sizing_adjustments = Vec::new();
+    let mut risk_exits = Vec::new();
     for (index, session) in panel.sessions.iter().enumerate() {
         open.update(panel, index, PriceField::Open)?;
         let gates = panel
             .instruments
             .iter()
-            .map(|id| executable(panel, statuses, id, session).map(|yes| (id.clone(), yes)))
+            .map(|id| {
+                if let Some((market, _)) = pit {
+                    Ok((
+                        id.clone(),
+                        crate::pit_strategy::permits(market, panel, id, session, true),
+                    ))
+                } else {
+                    executable(panel, statuses, id, session).map(|yes| (id.clone(), yes))
+                }
+            })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
         if let Some(market) = execution.as_deref_mut() {
             market.open(session, &open.prices, &gates, config.costs)?;
@@ -381,6 +422,90 @@ fn run_with_execution(
         let mut entry_attempted = BTreeSet::new();
         for (portfolio_index, (portfolio, state)) in portfolios.iter().zip(&mut states).enumerate()
         {
+            if let Some((market, risk)) = pit {
+                let active = risk.active_before_open(session.ts_open);
+                state.exclude(&active);
+                let positions = account.portfolios()[&portfolio.id].positions().clone();
+                for (id, quantity) in positions {
+                    if !active.contains(&id) {
+                        continue;
+                    }
+                    let executed = crate::pit_strategy::permits(market, panel, &id, session, false);
+                    risk_exits.push((
+                        portfolio.id,
+                        crate::pit_strategy::RiskExitAttempt {
+                            session_date: session.session_date,
+                            instrument_id: id.clone(),
+                            executed,
+                        },
+                    ));
+                    if !executed {
+                        continue;
+                    }
+                    let price = open.prices[&id];
+                    let order = Order::new(
+                        next_order(&account, 0)?,
+                        portfolio.id,
+                        id,
+                        Side::Sell,
+                        quantity,
+                        session.ts_open,
+                    )?;
+                    let basis = value(quantity, price)?;
+                    let fill = match config.sizing {
+                        Sizing::Lot => lot_fill(order, price, config.costs)?,
+                        Sizing::VectorParity => {
+                            let (fees, slip) = config.costs.fees(basis, Side::Sell)?;
+                            Fill::new(
+                                order,
+                                session.ts_open,
+                                price,
+                                FillPricing::SeparateSlippage { slippage: slip },
+                                fees,
+                            )?
+                        }
+                    };
+                    account.submit_order(fill.order().clone())?;
+                    account.apply_fill(fill.clone())?;
+                    fills.push(FastEventFill {
+                        fee_basis: basis,
+                        fee_side: Side::Sell,
+                        fill,
+                    });
+                }
+            }
+            if let Some((market, _)) = pit {
+                if let Some(request) = state.pending_execution() {
+                    let sized = pit_fills(
+                        &account,
+                        portfolio,
+                        &request,
+                        &open.prices,
+                        session,
+                        config,
+                        panel,
+                        market,
+                    )?;
+                    let event = state
+                        .resolve_sized(
+                            session,
+                            sized.applied,
+                            sized.blocked_sells.clone(),
+                            sized.skipped_buys,
+                        )
+                        .ok_or_else(|| invalid("sized execution without pending Decision"))?;
+                    if sized.blocked_sells.is_empty() {
+                        session_fills.extend(sized.planned.fills);
+                        session_fees.extend(sized.planned.fee_settlements);
+                        sizing_adjustments.extend(sized.adjustments);
+                    }
+                    attempts.push(FastEventAttempt {
+                        portfolio_id: portfolio.id,
+                        event,
+                    });
+                }
+                continue;
+            }
             let held = account.portfolios()[&portfolio.id]
                 .positions()
                 .keys()
@@ -433,6 +558,7 @@ fn run_with_execution(
                                     retry,
                                     pre_open_equity,
                                     limit_buys_to_cash: true,
+                                    retained: None,
                                 },
                                 &open.prices,
                                 session,
@@ -617,6 +743,22 @@ fn run_with_execution(
             });
         }
     }
+    let pending_risk_exits = if let (Some((_, risk)), Some(last)) = (pit, panel.sessions.last()) {
+        let active = risk.active(last.ts_close);
+        account
+            .portfolios()
+            .iter()
+            .flat_map(|(id, portfolio)| {
+                portfolio
+                    .positions()
+                    .keys()
+                    .filter(|instrument| active.contains(*instrument))
+                    .map(|instrument| (*id, instrument.clone()))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     Ok(FastEventResult {
         semantic_version: SEMANTIC_VERSION,
         config: config.clone(),
@@ -624,14 +766,26 @@ fn run_with_execution(
         attempts,
         fills,
         sizing_adjustments,
+        risk_exits,
+        pending_risk_exits,
         account,
-        assumptions: vec![
-            "Single Venue, single currency, long-only, unlevered; full market fills.",
-            "T+1, price limits, currency-unit rounding and corporate actions are not modeled.",
-            "Static synthetic Universe evidence does not establish PIT or dividend total return.",
-            "Valid raw bars mark even HALTED/UNKNOWN instruments; status gates execution only.",
-            "Missing prices carry the last valid price of the same field, never zero.",
-        ],
+        assumptions: if pit.is_some() {
+            vec![
+                "Single Venue, single currency, long-only, unlevered; full market fills.",
+                "Offline PIT Universe/Eligible/Derived Market evidence; not real-market PIT certification.",
+                "Directional opening price limits and persistent Risk Exit; regular blocked sells defer the whole target.",
+                "T+1, live queues, currency-unit rounding and corporate actions are not modeled.",
+                "Valid raw bars mark HALTED/UNKNOWN; missing prices carry same-field last prices, never zero.",
+            ]
+        } else {
+            vec![
+                "Single Venue, single currency, long-only, unlevered; full market fills.",
+                "T+1, price limits, currency-unit rounding and corporate actions are not modeled.",
+                "Static synthetic Universe evidence does not establish PIT or dividend total return.",
+                "Valid raw bars mark even HALTED/UNKNOWN instruments; status gates execution only.",
+                "Missing prices carry the last valid price of the same field, never zero.",
+            ]
+        },
     })
 }
 
@@ -725,6 +879,7 @@ struct TargetAttempt<'a> {
     retry: bool,
     pre_open_equity: Option<Notional>,
     limit_buys_to_cash: bool,
+    retained: Option<&'a BTreeSet<InstrumentId>>,
 }
 
 struct SessionLotAttempt {
@@ -732,6 +887,190 @@ struct SessionLotAttempt {
     applied: BTreeMap<InstrumentId, f64>,
     retry: bool,
     pre_open_equity: Notional,
+}
+
+struct SizedPitExecution {
+    planned: PlannedExecution,
+    applied: BTreeMap<InstrumentId, f64>,
+    blocked_sells: BTreeSet<InstrumentId>,
+    skipped_buys: BTreeSet<InstrumentId>,
+    adjustments: Vec<FastEventSizingAdjustment>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pit_fills(
+    account: &TradingAccount,
+    run: &PortfolioRun,
+    request: &crate::strategy::PendingExecution,
+    prices: &BTreeMap<InstrumentId, Price>,
+    session: &PanelSession,
+    config: &FastEventConfig,
+    panel: &Panel,
+    market: &crate::etf_market::DerivedMarket,
+) -> Result<SizedPitExecution, FastEventError> {
+    let mut skipped_buys = request
+        .targets
+        .iter()
+        .filter(|(id, w)| **w > 0.0 && !prices.contains_key(*id))
+        .map(|(id, _)| id.clone())
+        .collect::<BTreeSet<_>>();
+    loop {
+        let mut adjustments = Vec::new();
+        let planned = match config.sizing {
+            Sizing::Lot => PlannedExecution {
+                fills: lot_fills(
+                    account,
+                    run,
+                    TargetAttempt {
+                        applied: &request.targets,
+                        original: &request.targets,
+                        retry: request.is_retry,
+                        pre_open_equity: None,
+                        limit_buys_to_cash: true,
+                        retained: Some(&skipped_buys),
+                    },
+                    prices,
+                    session,
+                    config,
+                    &mut adjustments,
+                )?,
+                fee_settlements: Vec::new(),
+            },
+            Sizing::VectorParity if request.is_retry => PlannedExecution {
+                fills: parity_retry_fills_inner(
+                    account,
+                    run.id,
+                    &request.targets,
+                    prices,
+                    session,
+                    config.costs,
+                    RetrySizing {
+                        absolute: true,
+                        retained: &skipped_buys,
+                    },
+                )?,
+                fee_settlements: Vec::new(),
+            },
+            Sizing::VectorParity => parity_fills_retaining(
+                account,
+                run.id,
+                &request.targets,
+                prices,
+                session,
+                config.costs,
+                false,
+                &skipped_buys,
+            )?,
+        };
+        let required = planned
+            .fills
+            .iter()
+            .map(|f| (f.fill.order().instrument_id(), f.fill.order().side()))
+            .chain(
+                planned
+                    .fee_settlements
+                    .iter()
+                    .map(|fee| (fee.instrument_id(), fee.fee_side())),
+            )
+            .collect::<Vec<_>>();
+        let new_skipped = required
+            .iter()
+            .filter(|(id, side)| {
+                *side == Side::Buy
+                    && !crate::pit_strategy::permits(market, panel, id, session, true)
+            })
+            .map(|(id, _)| (*id).clone())
+            .collect::<BTreeSet<_>>();
+        if !new_skipped.is_empty() {
+            // Freeze actual held quantities, not membership. Re-sizing frees the
+            // skipped orders' fees/cash and can expose another affordable buy.
+            skipped_buys.extend(new_skipped);
+            continue;
+        }
+        let blocked_sells = required
+            .iter()
+            .filter(|(id, side)| {
+                *side == Side::Sell
+                    && !crate::pit_strategy::permits(market, panel, id, session, false)
+            })
+            .map(|(id, _)| (*id).clone())
+            .collect::<BTreeSet<_>>();
+        let applied = if blocked_sells.is_empty() {
+            projected_weights(account, run.id, prices, &planned)?
+        } else {
+            BTreeMap::new()
+        };
+        return Ok(SizedPitExecution {
+            planned,
+            applied,
+            blocked_sells,
+            skipped_buys,
+            adjustments,
+        });
+    }
+}
+
+fn projected_weights(
+    account: &TradingAccount,
+    id: VirtualPortfolioId,
+    prices: &BTreeMap<InstrumentId, Price>,
+    planned: &PlannedExecution,
+) -> Result<BTreeMap<InstrumentId, f64>, FastEventError> {
+    let portfolio = &account.portfolios()[&id];
+    let mut positions = portfolio.positions().clone();
+    let mut cash = portfolio.cash();
+    for entry in &planned.fills {
+        let order = entry.fill.order();
+        let current = positions
+            .get(order.instrument_id())
+            .copied()
+            .unwrap_or(Quantity::ZERO);
+        let signed = if order.side() == Side::Buy {
+            order.quantity().mantissa()
+        } else {
+            -order.quantity().mantissa()
+        };
+        let quantity = Quantity::from_mantissa(
+            current
+                .mantissa()
+                .checked_add(signed)
+                .ok_or(FixedPointError::Overflow)?,
+        )?;
+        positions.insert(order.instrument_id().clone(), quantity);
+        cash = add(cash, entry.fill.cash_delta())?;
+    }
+    for fee in &planned.fee_settlements {
+        cash = add(cash, fee.cash_delta())?;
+    }
+    let mut values = BTreeMap::new();
+    let mut equity = cash;
+    for (id, q) in positions {
+        if q == Quantity::ZERO {
+            continue;
+        }
+        let v = value(
+            q,
+            *prices
+                .get(&id)
+                .ok_or_else(|| LedgerError::MissingPrice(id.clone()))?,
+        )?;
+        equity = add(equity, v)?;
+        values.insert(id, v);
+    }
+    if equity <= Notional::ZERO || cash < Notional::ZERO {
+        return Err(invalid("sized PIT plan exhausts equity or cash"));
+    }
+    values
+        .into_iter()
+        .map(|(id, amount)| {
+            let weight = amount
+                .checked_div_decimal(equity)?
+                .to_string()
+                .parse::<f64>()
+                .map_err(|e| invalid(e.to_string()))?;
+            Ok((id, weight))
+        })
+        .collect()
 }
 
 fn fill_order_key(entry: &FastEventFill) -> (bool, InstrumentId, VirtualPortfolioId) {
@@ -772,6 +1111,7 @@ fn plan_buys_after_sells(
                 retry: attempt.retry,
                 pre_open_equity: Some(attempt.pre_open_equity),
                 limit_buys_to_cash: false,
+                retained: None,
             },
             prices,
             session,
@@ -809,6 +1149,17 @@ fn lot_fills(
             None => account.value(prices)?.portfolios[&run.id].equity,
         };
         for (instrument, target) in attempt.applied {
+            if attempt.retained.is_some_and(|ids| ids.contains(instrument)) {
+                desired.insert(
+                    instrument.clone(),
+                    portfolio
+                        .positions()
+                        .get(instrument)
+                        .copied()
+                        .unwrap_or(Quantity::ZERO),
+                );
+                continue;
+            }
             let price = *prices
                 .get(instrument)
                 .ok_or_else(|| LedgerError::MissingPrice(instrument.clone()))?;
@@ -824,7 +1175,18 @@ fn lot_fills(
                 quantity,
                 rounded,
             );
-            desired.insert(instrument.clone(), rounded);
+            let desired_quantity = if attempt.retry && attempt.retained.is_some() {
+                rounded.max(
+                    portfolio
+                        .positions()
+                        .get(instrument)
+                        .copied()
+                        .unwrap_or(Quantity::ZERO),
+                )
+            } else {
+                rounded
+            };
+            desired.insert(instrument.clone(), desired_quantity);
         }
     } else {
         desired = portfolio
@@ -1111,6 +1473,29 @@ fn parity_fills(
     costs: FastEventCosts,
     retry: bool,
 ) -> Result<PlannedExecution, FastEventError> {
+    parity_fills_retaining(
+        account,
+        id,
+        targets,
+        prices,
+        session,
+        costs,
+        retry,
+        &BTreeSet::new(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn parity_fills_retaining(
+    account: &TradingAccount,
+    id: VirtualPortfolioId,
+    targets: &BTreeMap<InstrumentId, f64>,
+    prices: &BTreeMap<InstrumentId, Price>,
+    session: &PanelSession,
+    costs: FastEventCosts,
+    retry: bool,
+    retained: &BTreeSet<InstrumentId>,
+) -> Result<PlannedExecution, FastEventError> {
     if retry {
         return Ok(PlannedExecution {
             fills: parity_retry_fills(account, id, targets, prices, session, costs)?,
@@ -1119,51 +1504,26 @@ fn parity_fills(
     }
     let portfolio = &account.portfolios()[&id];
     let equity = account.value(prices)?.portfolios[&id].equity;
-    if equity == Notional::ZERO {
-        return Ok(PlannedExecution::default());
-    }
-    let instruments = portfolio
-        .positions()
-        .keys()
-        .chain(targets.keys())
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let mut plans = Vec::new();
-    let mut total = Notional::ZERO;
-    for instrument in instruments {
-        let price = *prices
-            .get(&instrument)
-            .ok_or_else(|| LedgerError::MissingPrice(instrument.clone()))?;
-        let current = portfolio
-            .positions()
-            .get(&instrument)
-            .copied()
-            .unwrap_or(Quantity::ZERO);
-        let target = weight(targets.get(&instrument).copied().unwrap_or(0.0))?;
-        let drift = value(current, price)?.checked_div_decimal(equity)?;
-        let delta = sub(target, drift)?;
-        let side = if delta >= Notional::ZERO {
-            Side::Buy
-        } else {
-            Side::Sell
-        };
-        let abs = Notional::from_mantissa(delta.mantissa().abs())?;
-        let basis = equity.checked_mul_decimal(abs)?;
-        let (fees, slip) = costs.fees(basis, side)?;
-        total = add(total, add(add(fees.commission, fees.tax)?, slip)?)?;
-        plans.push((instrument, price, current, target, basis, side, fees, slip));
-    }
-    let after = sub(equity, total)?;
-    if after <= Notional::ZERO {
-        return Err(invalid("costs exhaust pre-open equity"));
-    }
+    let plan = crate::parity_sizing::target_plan(
+        equity,
+        portfolio.positions(),
+        targets,
+        prices,
+        costs,
+        retained,
+    )?;
     let mut planned = PlannedExecution::default();
-    for (instrument, price, current, target, basis, fee_side, fees, slip) in plans {
-        let desired = quantity(target.checked_mul_decimal(after)?, price)?;
-        let delta = desired
-            .mantissa()
-            .checked_sub(current.mantissa())
-            .ok_or(FixedPointError::Overflow)?;
+    for leg in plan.legs {
+        let delta = leg.delta()?;
+        let crate::parity_sizing::ParityLeg {
+            instrument,
+            price,
+            basis,
+            fee_side,
+            fees,
+            slip,
+            ..
+        } = leg;
         let q = Quantity::from_mantissa(delta.abs())?;
         if q == Quantity::ZERO {
             if add(add(fees.commission, fees.tax)?, slip)? > Notional::ZERO {
@@ -1204,6 +1564,34 @@ fn parity_retry_fills(
     session: &PanelSession,
     costs: FastEventCosts,
 ) -> Result<Vec<FastEventFill>, FastEventError> {
+    parity_retry_fills_inner(
+        account,
+        id,
+        targets,
+        prices,
+        session,
+        costs,
+        RetrySizing {
+            absolute: false,
+            retained: &BTreeSet::new(),
+        },
+    )
+}
+
+struct RetrySizing<'a> {
+    absolute: bool,
+    retained: &'a BTreeSet<InstrumentId>,
+}
+
+fn parity_retry_fills_inner(
+    account: &TradingAccount,
+    id: VirtualPortfolioId,
+    targets: &BTreeMap<InstrumentId, f64>,
+    prices: &BTreeMap<InstrumentId, Price>,
+    session: &PanelSession,
+    costs: FastEventCosts,
+    sizing: RetrySizing<'_>,
+) -> Result<Vec<FastEventFill>, FastEventError> {
     let equity = account.value(prices)?.portfolios[&id].equity;
     let mut cash = account.portfolios()[&id].cash();
     let rate = add(
@@ -1213,15 +1601,30 @@ fn parity_retry_fills(
     let multiplier = add("1".parse()?, rate)?;
     let mut fills = Vec::new();
     for (instrument, target) in targets {
-        if *target == 0.0 || cash == Notional::ZERO {
+        if *target == 0.0 || cash == Notional::ZERO || sizing.retained.contains(instrument) {
             continue;
         }
         let price = *prices
             .get(instrument)
             .ok_or_else(|| LedgerError::MissingPrice(instrument.clone()))?;
-        let budget = weight(*target)?
-            .checked_mul_decimal(equity)?
-            .min(cash.checked_div_decimal(multiplier)?);
+        let requested = weight(*target)?.checked_mul_decimal(equity)?;
+        let requested = if sizing.absolute {
+            sub(
+                requested,
+                value(
+                    account.portfolios()[&id]
+                        .positions()
+                        .get(instrument)
+                        .copied()
+                        .unwrap_or(Quantity::ZERO),
+                    price,
+                )?,
+            )?
+            .max(Notional::ZERO)
+        } else {
+            requested
+        };
+        let budget = requested.min(cash.checked_div_decimal(multiplier)?);
         let (fees, slip) = costs.fees(budget, Side::Buy)?;
         let fees_total = add(add(fees.commission, fees.tax)?, slip)?;
         let available = sub(cash, fees_total)?;

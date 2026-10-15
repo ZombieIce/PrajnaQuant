@@ -141,3 +141,13 @@ JSON payload 封装为 row_id 寻址的 Parquet 表，logical hash、等级提�
 Fast Event E11 使用账户 daily close NAV，turnover/cost 按 raw-open pre-trade equity 归一；
 Vector 保持 open NAV，跨引擎数值比较仍须按前文对齐估值点。
 具体输入、表映射与局限见 [Experiment 契约](../../crates/prajna-experiment/README.md)。
+
+### #177 PIT 方向门禁的共同 sizing 边界
+
+`s2_pit_rotation` 的 Vector 与 Fast F8 共用实际货币/数量 sizing，不先在归一权重上量化成本。
+顺序为实际现金与 raw-open 持仓估值 → drift → 每腿费用基数 → 分别量化佣金、税和滑点 →
+扣费权益 → 量化目标金额 → 按 raw price 量化目标数量；以数量差判断方向，只有数量差严格为零
+且费用非零时才回退到 fee-only side。不得用 epsilon 消除合法数量 quantum。
+PIT Vector 必须显式携带 `vector_pit.initial_capital`，纳入 Experiment/Run 身份，并保留精确现金/数量
+作为后续 sizing 输入，不能从 f64 NAV/权重重建。该最小状态只用于 sizing，Vector 的收益摘要仍独立；
+Fast `TradingAccount` 的订单、成交、fee settlement 与双层账本仍是 canonical，旧 Vector 路径不变。

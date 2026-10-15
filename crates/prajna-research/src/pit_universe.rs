@@ -70,7 +70,7 @@ impl Evidence {
         }
         Ok(())
     }
-    pub(crate) fn available_at(&self, calendar: &CatalogInput) -> Result<TimestampNs> {
+    pub fn available_at(&self, calendar: &CatalogInput) -> Result<TimestampNs> {
         match self.publication {
             Publication::Exact { timestamp } => Ok(timestamp),
             Publication::DateOnly { date } => {

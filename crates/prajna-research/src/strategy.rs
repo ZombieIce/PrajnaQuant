@@ -6,13 +6,25 @@ use std::{
 
 use chrono::NaiveDate;
 use polars::prelude::{DataFrame, PolarsError};
-use prajna_domain::InstrumentId;
+use prajna_domain::{FixedPointError, InstrumentId, Notional};
 
 use crate::{
     Panel, PanelSession,
     factor::AvailabilityAssumption,
     factor::{Factor, FactorStatus, values_schema},
 };
+
+pub(crate) fn execution_decimal(input: f64) -> Result<Notional, FixedPointError> {
+    input.to_string().parse()
+}
+
+pub(crate) fn execution_add(left: Notional, right: Notional) -> Result<Notional, FixedPointError> {
+    Notional::from_mantissa(
+        left.mantissa()
+            .checked_add(right.mantissa())
+            .ok_or(FixedPointError::Overflow)?,
+    )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StrategyCapability {
@@ -152,6 +164,12 @@ pub struct ExecutionState {
     missing_entries: Option<BTreeMap<InstrumentId, f64>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct PendingExecution {
+    pub targets: BTreeMap<InstrumentId, f64>,
+    pub is_retry: bool,
+}
+
 impl ExecutionState {
     pub fn new(unfilled_entry: UnfilledEntry) -> Self {
         Self {
@@ -162,6 +180,84 @@ impl ExecutionState {
     }
 
     pub fn attempt(
+        &mut self,
+        session: &PanelSession,
+        held: &BTreeSet<InstrumentId>,
+        executable: impl Fn(&InstrumentId, &PanelSession) -> bool,
+    ) -> Option<ExecutionEvent> {
+        self.attempt_legacy(session, held, executable)
+    }
+
+    pub fn exclude(&mut self, instruments: &BTreeSet<InstrumentId>) {
+        if let Some(decision) = &mut self.pending {
+            decision.targets.retain(|id, _| !instruments.contains(id));
+        }
+        if let Some(entries) = &mut self.missing_entries {
+            entries.retain(|id, _| !instruments.contains(id));
+        }
+    }
+
+    pub fn pending_execution(&self) -> Option<PendingExecution> {
+        self.pending.as_ref().map(|decision| PendingExecution {
+            targets: self
+                .missing_entries
+                .as_ref()
+                .unwrap_or(&decision.targets)
+                .clone(),
+            is_retry: self.missing_entries.is_some(),
+        })
+    }
+
+    /// Sizing and direction permissions are resolved by the engine before this
+    /// state transition. A skipped increment may still retain a held position.
+    pub fn resolve_sized(
+        &mut self,
+        session: &PanelSession,
+        applied: BTreeMap<InstrumentId, f64>,
+        blocked_sells: BTreeSet<InstrumentId>,
+        skipped_buys: BTreeSet<InstrumentId>,
+    ) -> Option<ExecutionEvent> {
+        let decision = self.pending.as_ref()?;
+        if !blocked_sells.is_empty() {
+            return Some(ExecutionEvent::Deferred {
+                decision_session: decision.decision_session.clone(),
+                attempt_session: session.clone(),
+                blocked: blocked_sells,
+            });
+        }
+        let request = self.pending_execution()?;
+        let decision_session = decision.decision_session.clone();
+        let remaining = request
+            .targets
+            .into_iter()
+            .filter(|(id, weight)| *weight > 0.0 && skipped_buys.contains(id))
+            .collect::<BTreeMap<_, _>>();
+        let event = if self.unfilled_entry == UnfilledEntry::Retry {
+            ExecutionEvent::RetryableExecution {
+                decision_session,
+                attempt_session: session.clone(),
+                applied,
+                skipped_buys,
+                is_retry: request.is_retry,
+            }
+        } else {
+            ExecutionEvent::Executed {
+                decision_session,
+                attempt_session: session.clone(),
+                applied,
+                skipped_buys,
+            }
+        };
+        if self.unfilled_entry == UnfilledEntry::Retry && !remaining.is_empty() {
+            self.missing_entries = Some(remaining);
+        } else {
+            self.pending = None;
+            self.missing_entries = None;
+        }
+        Some(event)
+    }
+
+    fn attempt_legacy(
         &mut self,
         session: &PanelSession,
         held: &BTreeSet<InstrumentId>,

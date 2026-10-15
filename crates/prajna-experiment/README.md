@@ -54,6 +54,67 @@ cd "$repo"
 
 新 Execution 保存于 `<lake>/experiments/<exp-hex>/executions/<exe-hex>/`。Summary 不创建 `runs/`。Standard 添加 `sessions`、`executions`；Full 再添加权重、排名及 pending 表。每 Run 的 manifest 区分未保存与 Engine 不产生的表；不把缺表解释为零。
 
+## MVP-6 离线 PIT S2（#177）
+
+新增、显式选择 `strategy: "s2_pit_rotation"`；旧 `s2_rotation`、Static Universe、
+Factor 与旧 Run 身份不变。此路径只接受 SZSE、`availability_assumption: "none"`、
+`unfilled_entry: "skip"` 和 `full_target`，支持 Vector 与 Fast Event，不接 Accurate/Python。
+DSV 必须来自 `szse-etf-frozen@1`；无网络采集或真实历史数据验收。
+
+定义新增 `pit` 对象（不得用已计算的候选集/任意评分代替原始证据）：
+
+| 字段 | 契约 |
+| --- | --- |
+| `catalog` | #175 `CatalogInput`，其 content identity 填入顶层 `universe` |
+| `market` | #176 `MarketEvidence`；从冻结 DSV Raw 重建并核对表 hash |
+| `empty_actions` | #176 `EmptyActionCoverage`，明确的 6a 空公司行动工程假设 |
+| `eligibility` | 可省略；默认上市 61 Session、金额窗口 20、日均 1 千万元；`momentum_sessions` 由每 Run 的 `lookback` 覆盖 |
+| `risk_notices` | 可省略；`instrument_id` 为生命周期 ID，`kind` 与 `evidence` 引用冻结官方附件；Catalog 正式终止事实自动加入 |
+
+参数组合为 `{"lookback":60,"top_k":3,"rebalance_every":5}`，支持 `list` 或
+`grid`（例如 lookback 20/60 × top_k 1/3 × rebalance_every 5/20）。要求正整数，
+不因 Catalog/Eligible 少于 Top-K 拒绝；实际合格标的间等权，空集合为现金。
+常规决策从覆盖首 Session 开始每 N Session 在 close 产生，下一 open 执行；
+窗口不足时显式产生现金决策，不预热成交。
+
+主运行 Fast Event 配置为 `lot`、lot 100（Instrument 或显式 native-code lot 来源）、
+初始资金及 VP 资本 1,000,000、佣金 0.0003、最低佣金 5、买卖滑点各 2bp、税 0。
+既有 `costs`/`fast_event` 字段仍须显式填写；没有隐藏的成本默认值。
+对拍运行改为 `vector_parity + full_target`，忽略最低佣金与 lot，Vector 沿用同样比例成本。
+PIT Vector 必须显式提供 `"vector_pit":{"initial_capital":"1000000"}`，
+与所对拍的 Fast VP capital 一致；资本影响金额与数量的 scale-18 舍入边界，
+不能以归一化资本 1 替代。该值进入 Experiment 身份和 Run Spec 的
+`engine.initial_capital`。旧 PIT Vector 定义须补此字段；旧 Static Universe Vector 不变。
+Native DSV 价格按 Catalog 拆成生命周期面板，不把复用代码的另一生命周期价格携带进来。
+
+常规方向门禁按费用/数量 sizing 后的实际交易侧判断，而非目标成员身份：
+真正必需的受阻卖腿令整次目标延期；受阻买腿保留当前数量、不扣该腿费用，
+重算其他腿并保留现金，不重归一目标。涨停持仓可减仓、跌停持仓可加仓。
+PIT Vector/Fast 共用 F8 **金额与数量** sizing：按实际权益算逐项费用，再按扣费后权益
+及原始价格算目标数量，所有操作按 Domain scale-18/half-even 的相同次序进行，
+不先对归一化费用或目标市值舍入。只有数量精确不变才回退到 fee-only 的 fee_side，
+不设 no-trade epsilon。Vector 保留精确 sizing 输入状态，但不提交订单或结算账本，
+仍独立计算浮点绩效；Fast 仍是账本权威。`pit-s2@4` 记录此语义和资本契约。
+Vector `executions[].pit_sizing` 保存计划的权益、费用、目标数量和必需方向；
+延期计划不代表已成交。手算回归见 `prajna-research/tests/pit_sides.rs`。
+
+Risk Notice 类型为 `vote_suspension`、`termination_proposal`、`liquidation_notice`、
+`official_termination`、`low_nav_warning`；最后一种只标注。Exact 发布时间沿用原时刻，
+DateOnly(D) 沿用 #175 的 D 后下一 Session close。风险退出在信息已知后的下一
+**严格晚于可用时刻、明确可卖** open 单独清掉风险持仓；HALTED/UNKNOWN/跌停持续等待，
+普通 cadence、新信号或 Universe 移除都不能取消它。只卖风险腿，不调整其他持仓数量；
+常规延期目标仍可由新 close 决策替换。风险收益暂存现金，只有实际执行常规目标时再分配。
+
+Run Spec 保存 Catalog/市场/TRI/规则/风险身份、逐 Session Universe/Eligible 与排除原因、
+以及 HALTED/UNKNOWN/方向受限格子的 `execution_exclusions`。`execution.json` 的 PIT
+`StoredRun.run_spec` 在 **Summary/Standard/Full** 均保留，读取核对 Run content hash。
+Vector `executions` 与 Fast Full `orders` 附风险尝试及期末等待记录；Summary 的
+`pending_at_end` 同时包含未退出风险腿。旧 Run 不新增此可选 manifest 字段。
+
+3 ETF × 10 Session 的供应商格式合成 Raw、逐日手算现金/持仓/费用/开收盘 NAV 和
+Vector/Fast 日对拍见两 crate 的 `tests/pit_s2.rs`。价格工程模式不证明真实 PIT、
+双源授权、开盘排队成交或分红总回报；公司行动和 Python PIT 视图仍是独立范围。
+
 ## stdout JSON 与退出码
 
 `run` 成功只输出一个 JSON 对象：`exp`、`exe`、`reproducible`、`run_count`、`failed_count`、`action`（`created`/`replayed`/`promoted` 三选一）、本次线程数、`timings_ms`（定义校验/展开、因子阶段、Run 阶段、总计）、`cache.compute_count`/`hit_count`、`written_bytes`/`written_files`。
