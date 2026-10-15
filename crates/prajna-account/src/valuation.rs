@@ -13,6 +13,8 @@ pub struct MarkedPosition {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PortfolioValuation {
     pub cash: Notional,
+    pub dividend_receivable: Notional,
+    pub liquidation_receivable: Notional,
     pub positions: BTreeMap<InstrumentId, MarkedPosition>,
     pub equity: Notional,
 }
@@ -33,9 +35,20 @@ impl TradingAccount {
         self.validate_balances()?;
         let mut portfolios = BTreeMap::new();
         let mut account_positions: BTreeMap<InstrumentId, MarkedPosition> = BTreeMap::new();
+        let mut account_dividend_receivable = Notional::ZERO;
+        let mut account_liquidation_receivable = Notional::ZERO;
         for (id, portfolio) in self.portfolios() {
             let mut positions = BTreeMap::new();
-            let mut equity = portfolio.cash();
+            let mut equity = add(
+                add(portfolio.cash(), portfolio.dividend_receivable())?,
+                portfolio.liquidation_receivable(),
+            )?;
+            account_dividend_receivable =
+                add(account_dividend_receivable, portfolio.dividend_receivable())?;
+            account_liquidation_receivable = add(
+                account_liquidation_receivable,
+                portfolio.liquidation_receivable(),
+            )?;
             for (instrument, quantity) in portfolio.positions() {
                 let price = *prices
                     .get(instrument)
@@ -68,12 +81,17 @@ impl TradingAccount {
                 *id,
                 PortfolioValuation {
                     cash: portfolio.cash(),
+                    dividend_receivable: portfolio.dividend_receivable(),
+                    liquidation_receivable: portfolio.liquidation_receivable(),
                     positions,
                     equity,
                 },
             );
         }
-        let mut equity = self.cash();
+        let mut equity = add(
+            add(self.cash(), account_dividend_receivable)?,
+            account_liquidation_receivable,
+        )?;
         for position in account_positions.values_mut() {
             // Independently value the aggregate quantity. Scale-18 rounding may
             // disagree with the sum of VP marks; validation must reject that
@@ -85,6 +103,8 @@ impl TradingAccount {
             unallocated_capital: self.unallocated_capital(),
             account: PortfolioValuation {
                 cash: self.cash(),
+                dividend_receivable: account_dividend_receivable,
+                liquidation_receivable: account_liquidation_receivable,
                 positions: account_positions,
                 equity,
             },
@@ -101,14 +121,26 @@ impl AccountValuation {
             return Err(LedgerError::NegativeCash);
         }
         let mut cash = self.unallocated_capital;
+        let mut dividend_receivable = Notional::ZERO;
+        let mut liquidation_receivable = Notional::ZERO;
         let mut equity = self.unallocated_capital;
         let mut positions: BTreeMap<InstrumentId, MarkedPosition> = BTreeMap::new();
         for portfolio in self.portfolios.values() {
             if portfolio.cash < Notional::ZERO {
                 return Err(LedgerError::NegativeCash);
             }
+            if portfolio.dividend_receivable < Notional::ZERO
+                || portfolio.liquidation_receivable < Notional::ZERO
+            {
+                return Err(LedgerError::InvalidReceivable);
+            }
             cash = add(cash, portfolio.cash)?;
-            let mut vp_equity = portfolio.cash;
+            dividend_receivable = add(dividend_receivable, portfolio.dividend_receivable)?;
+            liquidation_receivable = add(liquidation_receivable, portfolio.liquidation_receivable)?;
+            let mut vp_equity = add(
+                add(portfolio.cash, portfolio.dividend_receivable)?,
+                portfolio.liquidation_receivable,
+            )?;
             for (id, position) in &portfolio.positions {
                 if position.quantity <= Quantity::ZERO {
                     return Err(LedgerError::NonPositiveQuantity);
@@ -134,19 +166,27 @@ impl AccountValuation {
                 aggregate.market_value = add(aggregate.market_value, position.market_value)?;
             }
             if portfolio.equity != vp_equity {
-                return Err(LedgerError::Invariant("VP equity != cash + market value"));
+                return Err(LedgerError::Invariant(
+                    "VP equity != cash + receivables + market value",
+                ));
             }
             equity = add(equity, portfolio.equity)?;
         }
-        if self.account.cash != cash {
+        if self.account.cash != cash
+            || self.account.dividend_receivable != dividend_receivable
+            || self.account.liquidation_receivable != liquidation_receivable
+        {
             return Err(LedgerError::Invariant(
-                "account cash != VP cash + unallocated",
+                "account balances != VP balances + unallocated",
             ));
         }
         if self.account.positions != positions {
             return Err(LedgerError::Invariant("account positions != VP positions"));
         }
-        let mut marked_equity = self.account.cash;
+        let mut marked_equity = add(
+            add(self.account.cash, self.account.dividend_receivable)?,
+            self.account.liquidation_receivable,
+        )?;
         for position in self.account.positions.values() {
             if position.quantity <= Quantity::ZERO {
                 return Err(LedgerError::NonPositiveQuantity);

@@ -1,4 +1,7 @@
-use prajna_research::vector::VectorResult;
+use prajna_research::{
+    corporate_actions::{CorporateActionCompleteness, CorporateActionCoverage, ReturnBasis},
+    vector::VectorResult,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -24,6 +27,16 @@ pub struct RunSummary {
     pub zero_volatility: bool,
     pub assumptions: Vec<String>,
     pub availability_assumption: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub return_basis: Option<ReturnBasis>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corporate_action_schedule_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corporate_action_dividend_tax_rate: Option<prajna_domain::Notional>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub corporate_action_coverage: Vec<CorporateActionCoverage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corporate_action_completeness: Option<CorporateActionCompleteness>,
 }
 
 /// Summarize Vector output using the Session-open NAV interval defined by ADR 0017.
@@ -105,6 +118,17 @@ pub fn summarize(result: &VectorResult, sessions_per_year: u64) -> RunSummary {
         zero_volatility,
         assumptions: result.assumptions.clone(),
         availability_assumption: result.availability_assumption.clone(),
+        return_basis: result
+            .corporate_action_schedule_version
+            .as_ref()
+            .map(|_| result.return_basis),
+        corporate_action_schedule_version: result.corporate_action_schedule_version.clone(),
+        corporate_action_dividend_tax_rate: result.corporate_action_dividend_tax_rate,
+        corporate_action_coverage: result.corporate_action_coverage.clone(),
+        corporate_action_completeness: result
+            .corporate_action_schedule_version
+            .as_ref()
+            .map(|_| result.corporate_action_completeness.clone()),
     }
 }
 
@@ -209,6 +233,8 @@ pub(crate) fn summarize_fast(
             turnover: turnover / pre_open,
             target_weights: BTreeMap::new(),
             weights_after_execution: BTreeMap::new(),
+            portfolio_components: None,
+            portfolio_components_close: None,
             valuation_carried: vec![],
         });
         previous = equity;
@@ -265,7 +291,38 @@ pub(crate) fn summarize_fast(
             pit_sizing: None,
         });
     }
-    let projection=VectorResult {sessions,executions,decisions:vec![],pending_at_end:None,risk_exits:vec![],pending_risk_exits:vec![],pit_initial_capital:None,assumptions:result.assumptions.iter().map(|s|s.to_string()).chain(["Account and VP identities verified at every Session open-after and close; exact scale-18 ledger.".into(), "Metrics use close account NAV; turnover/cost normalized by raw-open pre-trade account equity.".into()]).collect(),costs:prajna_research::vector::VectorCosts {commission_rate:0.0,buy_slippage_bps:0.0,sell_slippage_bps:0.0,buy_tax_rate:0.0,sell_tax_rate:0.0},availability_assumption:availability.into()};
+    let projection = VectorResult {
+        sessions,
+        executions,
+        decisions: vec![],
+        pending_at_end: None,
+        risk_exits: vec![],
+        pending_risk_exits: vec![],
+        pit_initial_capital: None,
+        assumptions: result
+            .assumptions
+            .iter()
+            .map(|s| s.to_string())
+            .chain([
+                "Account and VP identities verified at every Session open-after and close; exact scale-18 ledger.".into(),
+                "Metrics use close account NAV; turnover/cost normalized by raw-open pre-trade account equity.".into(),
+            ])
+            .collect(),
+        costs: prajna_research::vector::VectorCosts {
+            commission_rate: 0.0,
+            buy_slippage_bps: 0.0,
+            sell_slippage_bps: 0.0,
+            buy_tax_rate: 0.0,
+            sell_tax_rate: 0.0,
+        },
+        availability_assumption: availability.into(),
+        return_basis: result.return_basis,
+        corporate_action_schedule_version: result.corporate_action_schedule_version.clone(),
+        corporate_action_dividend_tax_rate: result.corporate_action_dividend_tax_rate,
+        corporate_action_coverage: result.corporate_action_coverage.clone(),
+        corporate_action_completeness: result.corporate_action_completeness.clone(),
+        corporate_action_ledger: result.corporate_action_ledger.clone(),
+    };
     let mut summary = summarize(&projection, sessions_per_year);
     summary.pending_at_end = pending || !result.pending_risk_exits.is_empty();
     Ok(summary)
@@ -294,6 +351,8 @@ mod tests {
                     gross_return: *net_return,
                     net_return: *net_return,
                     nav: *nav,
+                    portfolio_components: None,
+                    portfolio_components_close: None,
                     valuation_carried: Vec::new(),
                 })
                 .collect(),
@@ -311,6 +370,12 @@ mod tests {
             availability_assumption: "none".into(),
             risk_exits: vec![],
             pending_risk_exits: vec![],
+            return_basis: ReturnBasis::PriceReturn,
+            corporate_action_schedule_version: None,
+            corporate_action_dividend_tax_rate: None,
+            corporate_action_coverage: Vec::new(),
+            corporate_action_completeness: CorporateActionCompleteness::default(),
+            corporate_action_ledger: Vec::new(),
         }
     }
 

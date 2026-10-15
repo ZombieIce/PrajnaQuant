@@ -11,6 +11,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Panel, PanelSession,
+    corporate_actions::{
+        CorporateActionCompleteness, CorporateActionCoverage, CorporateActionLedgerEntry,
+        CorporateActionProcessor, CorporateActionSchedule, ReturnBasis, apply_transition_to_vector,
+    },
     factor::AvailabilityAssumption,
     fast_event::{FastEventCosts, Marks, PriceField},
     parity_sizing::{ParityPlan, ParitySizingState, target_plan},
@@ -18,6 +22,7 @@ use crate::{
 };
 
 const RETURN_TOLERANCE: f64 = 1e-12;
+pub const CORPORATE_ACTION_SEMANTIC_VERSION: &str = "vector@2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct VectorCosts {
@@ -43,6 +48,18 @@ pub struct VectorResult {
     pub pending_risk_exits: Vec<InstrumentId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pit_initial_capital: Option<Notional>,
+    #[serde(default, skip_serializing_if = "is_price_return")]
+    pub return_basis: ReturnBasis,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corporate_action_schedule_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corporate_action_dividend_tax_rate: Option<Notional>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub corporate_action_coverage: Vec<CorporateActionCoverage>,
+    #[serde(default, skip_serializing_if = "is_unreported_completeness")]
+    pub corporate_action_completeness: CorporateActionCompleteness,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub corporate_action_ledger: Vec<CorporateActionLedgerEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -55,7 +72,18 @@ pub struct VectorSession {
     pub gross_return: f64,
     pub net_return: f64,
     pub nav: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub portfolio_components: Option<VectorPortfolioComponents>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub portfolio_components_close: Option<VectorPortfolioComponents>,
     pub valuation_carried: Vec<InstrumentId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VectorPortfolioComponents {
+    pub available_cash_weight: f64,
+    pub dividend_receivable_weight: f64,
+    pub liquidation_receivable_weight: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -160,6 +188,7 @@ pub fn run_vector(
         availability_assumption,
         None,
         None,
+        None,
     )
 }
 
@@ -193,6 +222,7 @@ pub fn run_vector_with_policy(
         availability_assumption,
         Some(&mut generate),
         None,
+        None,
     )
 }
 
@@ -217,6 +247,33 @@ pub fn run_vector_pit(
         AvailabilityAssumption::None,
         None,
         Some((market, risk, initial_capital)),
+        None,
+    )
+}
+
+pub fn run_vector_pit_with_actions(
+    panel: &Panel,
+    decisions: &[Decision],
+    market: &crate::etf_market::DerivedMarket,
+    risk: &crate::pit_strategy::RiskSignals,
+    costs: &VectorCosts,
+    initial_capital: Notional,
+    actions: &CorporateActionSchedule,
+) -> Result<VectorResult, VectorError> {
+    if initial_capital <= Notional::ZERO {
+        return Err(invalid_input("PIT initial_capital must be positive"));
+    }
+    crate::pit_strategy::validate_execution_panel(panel, market)
+        .map_err(|e| invalid_input(e.to_string()))?;
+    run_vector_inner(
+        panel,
+        decisions,
+        &[],
+        costs,
+        AvailabilityAssumption::None,
+        None,
+        Some((market, risk, initial_capital)),
+        Some(actions),
     )
 }
 
@@ -362,6 +419,7 @@ fn monetary_costs(costs: &VectorCosts) -> Result<FastEventCosts, VectorError> {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_vector_inner(
     panel: &Panel,
     decisions: &[Decision],
@@ -374,8 +432,19 @@ fn run_vector_inner(
         &crate::pit_strategy::RiskSignals,
         Notional,
     )>,
+    actions: Option<&CorporateActionSchedule>,
 ) -> Result<VectorResult, VectorError> {
     validate_costs(costs)?;
+    if actions.is_some() && pit.is_none() {
+        return Err(invalid_input(
+            "corporate actions require the PIT Vector Engine entry point",
+        ));
+    }
+    let mut action_processor = actions
+        .map(|actions| {
+            CorporateActionProcessor::new(actions, panel).map_err(|e| invalid_input(e.to_string()))
+        })
+        .transpose()?;
     let prices = read_prices(panel)?;
     let decision_indices = index_decisions(panel, decisions)?;
     let event_indices = index_events(panel, events)?;
@@ -427,10 +496,33 @@ fn run_vector_inner(
     for (session_index, session) in panel.sessions.iter().enumerate() {
         let mut risk_turnover = 0.0;
         let mut risk_cost = 0.0;
-        if let Some((market, risk, _)) = pit {
+        if pit.is_some() {
             decimal_marks
                 .update(panel, session_index, PriceField::Open)
                 .map_err(sizing_error)?;
+        }
+        if let Some(processor) = &mut action_processor {
+            let book = sizing_state
+                .as_mut()
+                .ok_or_else(|| invalid_input("missing PIT sizing state"))?;
+            let fresh_prices = decimal_marks.fresh_ids_on(session.session_date);
+            let transitions = processor
+                .opening(
+                    session.session_date,
+                    None,
+                    &book.positions,
+                    &decimal_marks.prices,
+                    &fresh_prices,
+                    false,
+                )
+                .map_err(|e| invalid_input(e.to_string()))?;
+            for transition in &transitions {
+                apply_transition_to_vector(transition, book).map_err(invalid_input)?;
+            }
+            processor.record(transitions);
+            weights = book.weights(&decimal_marks.prices).map_err(sizing_error)?;
+        }
+        if let Some((market, risk, _)) = pit {
             let book = sizing_state
                 .as_mut()
                 .ok_or_else(|| invalid_input("missing PIT sizing state"))?;
@@ -438,9 +530,18 @@ fn run_vector_inner(
             let mut sold = Notional::ZERO;
             let mut fees = Notional::ZERO;
             let active = risk.active_before_open(session.ts_open);
-            pending_targets.retain(|id, _| !active.contains(id));
+            let terminal = action_processor
+                .as_ref()
+                .map(|processor| processor.terminal_instruments(session.session_date))
+                .unwrap_or_default();
+            let mut excluded = active.clone();
+            excluded.extend(terminal.iter().cloned());
+            if let Some(state) = &mut pit_state {
+                state.exclude(&excluded);
+            }
+            pending_targets.retain(|id, _| !excluded.contains(id));
             for id in book.positions.keys().cloned().collect::<Vec<_>>() {
-                if !active.contains(&id) {
+                if !active.contains(&id) || terminal.contains(&id) {
                     continue;
                 }
                 let executed = crate::pit_strategy::permits(market, panel, &id, session, false);
@@ -662,28 +763,101 @@ fn run_vector_inner(
         turnover = risk_turnover + turnover * (1.0 - risk_cost);
         cost = risk_cost + cost * (1.0 - risk_cost);
         let weights_after_execution = weights.clone();
+        let portfolio_components = if action_processor.is_some() {
+            Some(vector_components(
+                sizing_state
+                    .as_ref()
+                    .ok_or_else(|| invalid_input("missing PIT sizing state"))?,
+                &decimal_marks.prices,
+            )?)
+        } else {
+            None
+        };
+        if let Some(processor) = &mut action_processor {
+            let book = sizing_state
+                .as_mut()
+                .ok_or_else(|| invalid_input("missing PIT sizing state"))?;
+            let transitions = processor
+                .closing(session.session_date, None, &book.positions)
+                .map_err(|e| invalid_input(e.to_string()))?;
+            for transition in &transitions {
+                apply_transition_to_vector(transition, book).map_err(invalid_input)?;
+            }
+            processor.record(transitions);
+        }
+        let portfolio_components_close = if action_processor.is_some() {
+            Some(vector_components(
+                sizing_state
+                    .as_ref()
+                    .ok_or_else(|| invalid_input("missing PIT sizing state"))?,
+                &decimal_marks.prices,
+            )?)
+        } else {
+            None
+        };
         let mut gross_return = 0.0;
         let mut price_relatives = BTreeMap::new();
+        let mut action_next_weights = None;
         if let Some(next_marks) = marks_by_session.get(session_index + 1) {
-            for (instrument, weight) in &weights {
-                let instrument_index = panel
-                    .instruments
-                    .binary_search(instrument)
-                    .map_err(|_| invalid_input(format!("unknown held instrument {instrument}")))?;
-                let current_price =
-                    marks_by_session[session_index][instrument_index].ok_or_else(|| {
+            if let Some(processor) = &action_processor {
+                let book = sizing_state
+                    .as_ref()
+                    .ok_or_else(|| invalid_input("missing PIT sizing state"))?;
+                let current_equity = book.equity(&decimal_marks.prices).map_err(sizing_error)?;
+                let next_index = session_index + 1;
+                let mut next_marks = Marks::default();
+                next_marks
+                    .update(panel, next_index, PriceField::Open)
+                    .map_err(sizing_error)?;
+                let mut next_book = book.clone();
+                let mut next_processor = processor.clone();
+                let next_date = panel.sessions[next_index].session_date;
+                let fresh_prices = next_marks.fresh_ids_on(next_date);
+                let transitions = next_processor
+                    .opening(
+                        next_date,
+                        None,
+                        &next_book.positions,
+                        &next_marks.prices,
+                        &fresh_prices,
+                        false,
+                    )
+                    .map_err(|e| invalid_input(e.to_string()))?;
+                for transition in &transitions {
+                    apply_transition_to_vector(transition, &mut next_book)
+                        .map_err(invalid_input)?;
+                }
+                next_processor.record(transitions);
+                let next_equity = next_book.equity(&next_marks.prices).map_err(sizing_error)?;
+                let current = decimal_float(current_equity)?;
+                let next = decimal_float(next_equity)?;
+                gross_return = next / current - 1.0;
+                action_next_weights = Some(
+                    next_book
+                        .weights(&next_marks.prices)
+                        .map_err(sizing_error)?,
+                );
+            } else {
+                for (instrument, weight) in &weights {
+                    let instrument_index =
+                        panel.instruments.binary_search(instrument).map_err(|_| {
+                            invalid_input(format!("unknown held instrument {instrument}"))
+                        })?;
+                    let current_price = marks_by_session[session_index][instrument_index]
+                        .ok_or_else(|| {
+                            invalid_input(format!(
+                                "held instrument {instrument} has no current valuation price"
+                            ))
+                        })?;
+                    let next_price = next_marks[instrument_index].ok_or_else(|| {
                         invalid_input(format!(
-                            "held instrument {instrument} has no current valuation price"
+                            "held instrument {instrument} has no next valuation price to carry"
                         ))
                     })?;
-                let next_price = next_marks[instrument_index].ok_or_else(|| {
-                    invalid_input(format!(
-                        "held instrument {instrument} has no next valuation price to carry"
-                    ))
-                })?;
-                let relative = next_price / current_price;
-                price_relatives.insert(instrument.clone(), relative);
-                gross_return += weight * (relative - 1.0);
+                    let relative = next_price / current_price;
+                    price_relatives.insert(instrument.clone(), relative);
+                    gross_return += weight * (relative - 1.0);
+                }
             }
             if !gross_return.is_finite() || 1.0 + gross_return <= 0.0 {
                 return Err(invalid_input(
@@ -702,14 +876,18 @@ fn run_vector_inner(
         }
 
         if session_index + 1 < panel.sessions.len() {
-            let return_divisor = 1.0 + gross_return;
-            for (instrument, weight) in &mut weights {
-                let relative = price_relatives.get(instrument).ok_or_else(|| {
-                    invalid_input(format!(
-                        "missing price transition for held instrument {instrument}"
-                    ))
-                })?;
-                *weight *= relative / return_divisor;
+            if let Some(next_weights) = action_next_weights {
+                weights = next_weights;
+            } else {
+                let return_divisor = 1.0 + gross_return;
+                for (instrument, weight) in &mut weights {
+                    let relative = price_relatives.get(instrument).ok_or_else(|| {
+                        invalid_input(format!(
+                            "missing price transition for held instrument {instrument}"
+                        ))
+                    })?;
+                    *weight *= relative / return_divisor;
+                }
             }
             validate_applied_weights(panel, &weights)?;
         }
@@ -736,6 +914,8 @@ fn run_vector_inner(
             gross_return,
             net_return,
             nav,
+            portfolio_components,
+            portfolio_components_close,
             valuation_carried: carried_by_session[session_index].clone(),
         });
     }
@@ -798,36 +978,92 @@ fn run_vector_inner(
     let pending_risk_exits = if let (Some((_, risk, _)), Some(last)) = (pit, panel.sessions.last())
     {
         let active = risk.active(last.ts_close);
+        let terminal = action_processor
+            .as_ref()
+            .map(|processor| processor.terminal_instruments(last.session_date))
+            .unwrap_or_default();
         sizing_state
             .as_ref()
             .ok_or_else(|| invalid_input("missing PIT sizing state"))?
             .positions
             .keys()
-            .filter(|id| active.contains(*id))
+            .filter(|id| active.contains(*id) && !terminal.contains(*id))
             .cloned()
             .collect()
     } else {
         Vec::new()
     };
+    let (
+        return_basis,
+        corporate_action_schedule_version,
+        corporate_action_dividend_tax_rate,
+        corporate_action_coverage,
+        corporate_action_completeness,
+        corporate_action_ledger,
+    ) = if let (Some(schedule), Some(processor)) = (actions, action_processor.as_ref()) {
+        (
+            ReturnBasis::TotalReturn,
+            Some(schedule.version().to_owned()),
+            Some(schedule.dividend_tax_rate()),
+            schedule.coverage().to_vec(),
+            processor.completeness(),
+            processor.ledger().to_vec(),
+        )
+    } else {
+        (
+            ReturnBasis::PriceReturn,
+            None,
+            None,
+            Vec::new(),
+            CorporateActionCompleteness {
+                is_complete: false,
+                reasons: vec![
+                    "corporate-action coverage was not supplied; total return is unknown".into(),
+                ],
+            },
+            Vec::new(),
+        )
+    };
+    let mut assumptions = if pit.is_some() {
+        vec![
+            "Offline PIT/Eligible/Derived Market evidence; not real-market PIT certification."
+                .into(),
+        if actions.is_some() {
+            "Directional limits and persistent Risk Exit; no lot/minimum commission or T+1."
+                .into()
+        } else {
+            "Directional limits and persistent Risk Exit; no lot/minimum commission, T+1 or corporate actions."
+                .into()
+        },
+        "Vector NAV includes next-open return; compare nav/(1+gross_return) to Fast open-after."
+            .into(),
+        ]
+    } else {
+        assumptions(availability_assumption)
+    };
+    if actions.is_some() {
+        assumptions.push(
+            "Corporate actions are applied in continuous-share parity mode; lot rounding is excluded."
+                .into(),
+        );
+    }
     Ok(VectorResult {
         pit_initial_capital: pit.map(|(_, _, capital)| capital),
         sessions: result_sessions,
         decisions: result_decisions,
         executions: result_executions,
         pending_at_end,
-        assumptions: if pit.is_some() {
-            vec![
-            "Offline PIT/Eligible/Derived Market evidence; not real-market PIT certification.".into(),
-            "Directional limits and persistent Risk Exit; no lot/minimum commission, T+1 or corporate actions.".into(),
-            "Vector NAV includes next-open return; compare nav/(1+gross_return) to Fast open-after.".into(),
-        ]
-        } else {
-            assumptions(availability_assumption)
-        },
+        assumptions,
         costs: *costs,
         availability_assumption: availability_assumption.canonical_str().to_owned(),
         risk_exits,
         pending_risk_exits,
+        return_basis,
+        corporate_action_schedule_version,
+        corporate_action_dividend_tax_rate,
+        corporate_action_coverage,
+        corporate_action_completeness,
+        corporate_action_ledger,
     })
 }
 
@@ -854,11 +1090,44 @@ fn validate_costs(costs: &VectorCosts) -> Result<(), VectorError> {
     {
         return Err(invalid_costs("all rates must be finite and non-negative"));
     }
+
     let (buy_rate, sell_rate) = costs.side_rates();
     if !buy_rate.is_finite() || !sell_rate.is_finite() {
         return Err(invalid_costs("combined side rates must be finite"));
     }
     Ok(())
+}
+
+fn vector_components(
+    book: &ParitySizingState,
+    prices: &BTreeMap<InstrumentId, prajna_domain::Price>,
+) -> Result<VectorPortfolioComponents, VectorError> {
+    let equity = book.equity(prices).map_err(sizing_error)?;
+    if equity <= Notional::ZERO {
+        return Err(invalid_input(
+            "Vector portfolio equity must remain positive",
+        ));
+    }
+    let denominator = decimal_float(equity)?;
+    Ok(VectorPortfolioComponents {
+        available_cash_weight: decimal_float(book.cash)? / denominator,
+        dividend_receivable_weight: decimal_float(book.dividend_receivable)? / denominator,
+        liquidation_receivable_weight: decimal_float(book.liquidation_receivable)? / denominator,
+    })
+}
+
+fn is_price_return(return_basis: &ReturnBasis) -> bool {
+    *return_basis == ReturnBasis::PriceReturn
+}
+
+fn is_unreported_completeness(completeness: &CorporateActionCompleteness) -> bool {
+    !completeness.is_complete
+        && completeness.reasons.len() == 1
+        && matches!(
+            completeness.reasons[0].as_str(),
+            "corporate-action coverage was not supplied; total return is unknown"
+                | "corporate-action completeness was not supplied"
+        )
 }
 
 fn read_prices(panel: &Panel) -> Result<Vec<Vec<Option<f64>>>, VectorError> {

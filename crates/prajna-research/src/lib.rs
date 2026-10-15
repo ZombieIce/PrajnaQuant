@@ -1,5 +1,6 @@
 mod base;
 pub mod cache;
+pub mod corporate_actions;
 pub use base::compute_base;
 mod composite;
 pub use composite::compute_composite;

@@ -10,11 +10,18 @@ use prajna_account::{
 use prajna_domain::{Currency, FixedPointError, InstrumentId, Notional, Price, Quantity, VenueId};
 
 use crate::{
-    ExecutionStatusMap, Panel, PanelError, PanelSession, executable,
+    ExecutionStatusMap, Panel, PanelError, PanelSession,
+    corporate_actions::{
+        CorporateActionCompleteness, CorporateActionCoverage, CorporateActionLedgerEntry,
+        CorporateActionProcessor, CorporateActionSchedule, ReturnBasis,
+        apply_transition_to_account,
+    },
+    executable,
     strategy::{Decision, ExecutionEvent, ExecutionState, UnfilledEntry},
 };
 
 pub const SEMANTIC_VERSION: &str = "fast_event@1";
+pub const CORPORATE_ACTION_SEMANTIC_VERSION: &str = "fast_event@2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sizing {
@@ -171,6 +178,12 @@ pub struct FastEventResult {
     pub fills: Vec<FastEventFill>,
     pub sizing_adjustments: Vec<FastEventSizingAdjustment>,
     pub account: TradingAccount,
+    pub return_basis: ReturnBasis,
+    pub corporate_action_schedule_version: Option<String>,
+    pub corporate_action_dividend_tax_rate: Option<Notional>,
+    pub corporate_action_coverage: Vec<CorporateActionCoverage>,
+    pub corporate_action_completeness: CorporateActionCompleteness,
+    pub corporate_action_ledger: Vec<CorporateActionLedgerEntry>,
     pub assumptions: Vec<&'static str>,
     pub risk_exits: Vec<(VirtualPortfolioId, crate::pit_strategy::RiskExitAttempt)>,
     pub pending_risk_exits: Vec<(VirtualPortfolioId, InstrumentId)>,
@@ -257,6 +270,14 @@ pub(crate) struct Marks {
 }
 
 impl Marks {
+    pub(crate) fn fresh_ids_on(&self, date: NaiveDate) -> BTreeSet<InstrumentId> {
+        self.sources
+            .iter()
+            .filter(|(_, source)| source.session_date == date)
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
     pub(crate) fn update(
         &mut self,
         panel: &Panel,
@@ -305,7 +326,7 @@ pub fn run_fast_event(
     config: &FastEventConfig,
     portfolios: &[PortfolioRun],
 ) -> Result<FastEventResult, FastEventError> {
-    run_with_execution(panel, statuses, config, portfolios, None, None)
+    run_with_execution(panel, statuses, config, portfolios, None, None, None)
 }
 
 pub fn run_fast_event_pit(
@@ -330,6 +351,34 @@ pub fn run_fast_event_pit(
         portfolios,
         None,
         Some((market, risk)),
+        None,
+    )
+}
+
+pub fn run_fast_event_pit_with_actions(
+    panel: &Panel,
+    market: &crate::etf_market::DerivedMarket,
+    risk: &crate::pit_strategy::RiskSignals,
+    config: &FastEventConfig,
+    portfolios: &[PortfolioRun],
+    actions: &CorporateActionSchedule,
+) -> Result<FastEventResult, FastEventError> {
+    crate::pit_strategy::validate_execution_panel(panel, market)
+        .map_err(|e| invalid(e.to_string()))?;
+    if portfolios
+        .iter()
+        .any(|p| p.rebalance != Rebalance::FullTarget)
+    {
+        return Err(invalid("PIT requires full_target"));
+    }
+    run_with_execution(
+        panel,
+        &BTreeMap::new(),
+        config,
+        portfolios,
+        None,
+        Some((market, risk)),
+        Some(actions),
     )
 }
 
@@ -363,7 +412,15 @@ pub fn run_lot_with_execution(
     if config.sizing != Sizing::Lot {
         return Err(invalid("external execution requires lot sizing"));
     }
-    run_with_execution(panel, statuses, config, portfolios, Some(execution), None)
+    run_with_execution(
+        panel,
+        statuses,
+        config,
+        portfolios,
+        Some(execution),
+        None,
+        None,
+    )
 }
 
 fn run_with_execution(
@@ -376,8 +433,19 @@ fn run_with_execution(
         &crate::etf_market::DerivedMarket,
         &crate::pit_strategy::RiskSignals,
     )>,
+    actions: Option<&CorporateActionSchedule>,
 ) -> Result<FastEventResult, FastEventError> {
     validate(panel, config, portfolios)?;
+    if actions.is_some() && pit.is_none() {
+        return Err(invalid(
+            "corporate actions require the PIT Engine entry point",
+        ));
+    }
+    let mut action_processor = actions
+        .map(|actions| {
+            CorporateActionProcessor::new(actions, panel).map_err(|e| invalid(e.to_string()))
+        })
+        .transpose()?;
     let external_execution = execution.is_some();
     let mut account = TradingAccount::new(
         config.currency.clone(),
@@ -399,11 +467,37 @@ fn run_with_execution(
     let mut risk_exits = Vec::new();
     for (index, session) in panel.sessions.iter().enumerate() {
         open.update(panel, index, PriceField::Open)?;
+        if let Some(action_processor) = &mut action_processor {
+            let fresh_prices = open.fresh_ids_on(session.session_date);
+            for portfolio in portfolios {
+                let positions = account.portfolios()[&portfolio.id].positions().clone();
+                let transitions = action_processor
+                    .opening(
+                        session.session_date,
+                        Some(portfolio.id),
+                        &positions,
+                        &open.prices,
+                        &fresh_prices,
+                        config.sizing == Sizing::Lot,
+                    )
+                    .map_err(|e| invalid(e.to_string()))?;
+                for transition in &transitions {
+                    apply_transition_to_account(transition, &mut account, portfolio.id)?;
+                }
+                action_processor.record(transitions);
+            }
+        }
         let gates = panel
             .instruments
             .iter()
             .map(|id| {
-                if let Some((market, _)) = pit {
+                if action_processor.as_ref().is_some_and(|processor| {
+                    processor
+                        .terminal_instruments(session.session_date)
+                        .contains(id)
+                }) {
+                    Ok((id.clone(), false))
+                } else if let Some((market, _)) = pit {
                     Ok((
                         id.clone(),
                         crate::pit_strategy::permits(market, panel, id, session, true),
@@ -424,10 +518,16 @@ fn run_with_execution(
         {
             if let Some((market, risk)) = pit {
                 let active = risk.active_before_open(session.ts_open);
-                state.exclude(&active);
+                let terminal = action_processor
+                    .as_ref()
+                    .map(|processor| processor.terminal_instruments(session.session_date))
+                    .unwrap_or_default();
+                let mut excluded = active.clone();
+                excluded.extend(terminal.iter().cloned());
+                state.exclude(&excluded);
                 let positions = account.portfolios()[&portfolio.id].positions().clone();
                 for (id, quantity) in positions {
-                    if !active.contains(&id) {
+                    if !active.contains(&id) || terminal.contains(&id) {
                         continue;
                     }
                     let executed = crate::pit_strategy::permits(market, panel, &id, session, false);
@@ -712,6 +812,18 @@ fn run_with_execution(
         }
         let open_after = account.value(&open.prices)?;
         close.update(panel, index, PriceField::Close)?;
+        if let Some(action_processor) = &mut action_processor {
+            for portfolio in portfolios {
+                let positions = account.portfolios()[&portfolio.id].positions().clone();
+                let transitions = action_processor
+                    .closing(session.session_date, Some(portfolio.id), &positions)
+                    .map_err(|e| invalid(e.to_string()))?;
+                for transition in &transitions {
+                    apply_transition_to_account(transition, &mut account, portfolio.id)?;
+                }
+                action_processor.record(transitions);
+            }
+        }
         let close_value = account.value(&close.prices)?;
         if let Some(market) = execution.as_deref_mut() {
             market.close(session)?;
@@ -745,6 +857,10 @@ fn run_with_execution(
     }
     let pending_risk_exits = if let (Some((_, risk)), Some(last)) = (pit, panel.sessions.last()) {
         let active = risk.active(last.ts_close);
+        let terminal = action_processor
+            .as_ref()
+            .map(|processor| processor.terminal_instruments(last.session_date))
+            .unwrap_or_default();
         account
             .portfolios()
             .iter()
@@ -752,15 +868,52 @@ fn run_with_execution(
                 portfolio
                     .positions()
                     .keys()
-                    .filter(|instrument| active.contains(*instrument))
+                    .filter(|instrument| {
+                        active.contains(*instrument) && !terminal.contains(*instrument)
+                    })
                     .map(|instrument| (*id, instrument.clone()))
             })
             .collect()
     } else {
         Vec::new()
     };
+    let (
+        return_basis,
+        corporate_action_schedule_version,
+        corporate_action_dividend_tax_rate,
+        corporate_action_coverage,
+        corporate_action_completeness,
+        corporate_action_ledger,
+    ) = if let (Some(schedule), Some(processor)) = (actions, action_processor.as_ref()) {
+        (
+            ReturnBasis::TotalReturn,
+            Some(schedule.version().to_owned()),
+            Some(schedule.dividend_tax_rate()),
+            schedule.coverage().to_vec(),
+            processor.completeness(),
+            processor.ledger().to_vec(),
+        )
+    } else {
+        (
+            ReturnBasis::PriceReturn,
+            None,
+            None,
+            Vec::new(),
+            CorporateActionCompleteness {
+                is_complete: false,
+                reasons: vec![
+                    "corporate-action coverage was not supplied; total return is unknown".into(),
+                ],
+            },
+            Vec::new(),
+        )
+    };
     Ok(FastEventResult {
-        semantic_version: SEMANTIC_VERSION,
+        semantic_version: if actions.is_some() {
+            CORPORATE_ACTION_SEMANTIC_VERSION
+        } else {
+            SEMANTIC_VERSION
+        },
         config: config.clone(),
         sessions,
         attempts,
@@ -769,12 +922,22 @@ fn run_with_execution(
         risk_exits,
         pending_risk_exits,
         account,
+        return_basis,
+        corporate_action_schedule_version,
+        corporate_action_dividend_tax_rate,
+        corporate_action_coverage,
+        corporate_action_completeness,
+        corporate_action_ledger,
         assumptions: if pit.is_some() {
             vec![
                 "Single Venue, single currency, long-only, unlevered; full market fills.",
                 "Offline PIT Universe/Eligible/Derived Market evidence; not real-market PIT certification.",
                 "Directional opening price limits and persistent Risk Exit; regular blocked sells defer the whole target.",
-                "T+1, live queues, currency-unit rounding and corporate actions are not modeled.",
+                if actions.is_some() {
+                    "T+1, live queues and currency-unit rounding are not modeled."
+                } else {
+                    "T+1, live queues, currency-unit rounding and corporate actions are not modeled."
+                },
                 "Valid raw bars mark HALTED/UNKNOWN; missing prices carry same-field last prices, never zero.",
             ]
         } else {
@@ -1043,7 +1206,10 @@ fn projected_weights(
         cash = add(cash, fee.cash_delta())?;
     }
     let mut values = BTreeMap::new();
-    let mut equity = cash;
+    let mut equity = add(
+        add(cash, portfolio.dividend_receivable())?,
+        portfolio.liquidation_receivable(),
+    )?;
     for (id, q) in positions {
         if q == Quantity::ZERO {
             continue;

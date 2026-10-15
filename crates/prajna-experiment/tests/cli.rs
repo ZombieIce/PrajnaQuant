@@ -223,7 +223,7 @@ fn readme_example_creates_replays_promotes_and_diffs_two_executions() {
     assert_eq!(promoted["action"], "promoted");
     assert_eq!(promoted["exe"], first["exe"]);
     assert_eq!(promoted["cache"]["compute_count"], 0);
-    assert_eq!(promoted["written_files"], 7); // six tables and replaced manifest.
+    assert_eq!(promoted["written_files"], 8); // seven tables and replaced manifest.
     let updated: Value =
         serde_json::from_slice(&fs::read(directory.join("execution.json")).unwrap()).unwrap();
     assert_eq!(updated["runs"][0]["result_level"], "full");

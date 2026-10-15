@@ -1,13 +1,43 @@
-//! Offline MVP-6 inputs shared by CLI and Python views; no corporate-action ledger.
+//! Offline MVP-6 inputs shared by CLI and Python views, including the PIT action schedule.
 use super::*;
 use prajna_data::RawStore;
+use prajna_domain::Notional;
 use prajna_research::{
+    corporate_actions::CorporateActionSchedule,
     etf_eligible::EligibilityParams,
     etf_market::{DerivedMarket, MarketEvidence},
     etf_momentum::{CorporateActionRules, EmptyActionCoverage, TotalReturnIndex},
     pit_strategy::{self, PitS2Params, RiskNotice, RiskSignals},
     pit_universe::{CatalogInput, HistoricalCatalog},
 };
+
+fn default_dividend_tax_rate() -> Notional {
+    Notional::ZERO
+}
+
+fn bind_corporate_action_engine_version(spec: &mut Value) -> Result<(), ExperimentError> {
+    if spec.get("corporate_action_schedule").is_none() {
+        return Ok(());
+    }
+    let engine_kind = spec["engine"]
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("corporate-action Run Spec has no Engine kind"))?;
+    let semantic_version = match engine_kind {
+        "fast_event" => prajna_research::fast_event::CORPORATE_ACTION_SEMANTIC_VERSION,
+        "vector" => prajna_research::vector::CORPORATE_ACTION_SEMANTIC_VERSION,
+        "accurate_event" => {
+            return Err(invalid(
+                "Accurate Event does not implement the corporate-action ledger",
+            ));
+        }
+        _ => return Err(invalid(format!("unsupported PIT Engine {engine_kind}"))),
+    };
+    spec["engine"]["semantic_version"] = serde_json::json!(semantic_version);
+    spec["corporate_action_schedule"]["semantic_version"] =
+        serde_json::json!(prajna_research::corporate_actions::SEMANTIC_VERSION);
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -18,6 +48,8 @@ pub struct PitInput {
     empty_actions: Option<EmptyActionCoverage>,
     #[serde(default)]
     corporate_action_rules: Option<CorporateActionRules>,
+    #[serde(default = "default_dividend_tax_rate")]
+    dividend_tax_rate: Notional,
     #[serde(default)]
     eligibility: EligibilityParams,
     #[serde(default)]
@@ -32,6 +64,8 @@ pub struct PitContext {
     pub risk: RiskSignals,
     pub eligibility: EligibilityParams,
     pub identity: Value,
+    pub has_corporate_action_table: bool,
+    pub dividend_tax_rate: Notional,
 }
 
 impl PitContext {
@@ -65,7 +99,7 @@ impl PitContext {
         .map_err(|e| invalid(e.to_string()))?;
         let risk = RiskSignals::build(&catalog, input.risk_notices.clone(), &raw)
             .map_err(|e| invalid(e.to_string()))?;
-        let identity = serde_json::json!({
+        let mut identity = serde_json::json!({
             "semantic_version": pit_strategy::SEMANTIC_VERSION,
             "catalog_version": catalog.version().map_err(|e| invalid(e.to_string()))?,
             "derived_market_version": market.version(),
@@ -76,6 +110,9 @@ impl PitContext {
             "evidence_mode": "offline-opening-evidence",
             "return_mode": if has_actions { "corporate_action_total_return_6b" } else { "price_engineering_6a_empty_actions" },
         });
+        if has_actions {
+            identity["dividend_tax_rate"] = serde_json::json!(input.dividend_tax_rate);
+        }
         Ok(Self {
             catalog,
             market,
@@ -83,7 +120,31 @@ impl PitContext {
             risk,
             eligibility: input.eligibility.clone(),
             identity,
+            has_corporate_action_table: has_actions,
+            dividend_tax_rate: input.dividend_tax_rate,
         })
+    }
+
+    pub fn corporate_action_schedule(
+        &self,
+        panel: &Panel,
+    ) -> Result<Option<CorporateActionSchedule>, ExperimentError> {
+        if !self.has_corporate_action_table {
+            return Ok(None);
+        }
+        let version = format!(
+            "{}:{}",
+            prajna_research::corporate_actions::SEMANTIC_VERSION,
+            self.tri.version()
+        );
+        CorporateActionSchedule::from_total_return_index(
+            version,
+            panel,
+            &self.tri,
+            self.dividend_tax_rate,
+        )
+        .map(Some)
+        .map_err(|e| invalid(e.to_string()))
     }
 
     pub fn expand(
@@ -105,6 +166,7 @@ impl PitContext {
                 &panel.sessions,
             )
             .map_err(|e| invalid(e.to_string()))?;
+            let corporate_actions = self.corporate_action_schedule(panel)?;
             let mut spec = serde_json::json!({
                 "dsv": experiment.dsv, "universe": experiment.universe, "venue": experiment.venue,
                 "strategy": {"kind": experiment.strategy_kind, "parameters": params},
@@ -116,7 +178,17 @@ impl PitContext {
                 "costs": experiment.costs.normalized(), "availability_assumption": "none",
                 "engine": {"kind":"vector", "semantic_version":"vector@1"}, "seed": null,
             });
+            if let Some(schedule) = &corporate_actions {
+                spec["corporate_action_schedule"] = serde_json::json!({
+                    "semantic_version": prajna_research::corporate_actions::SEMANTIC_VERSION,
+                    "version": schedule.version(),
+                    "dividend_tax_rate": schedule.dividend_tax_rate(),
+                    "coverage": schedule.coverage(),
+                    "return_basis": "total_return",
+                });
+            }
             experiment.engine.normalize_spec(&mut spec);
+            bind_corporate_action_engine_version(&mut spec)?;
             spec["engine"]["pit_semantic_version"] =
                 serde_json::json!(pit_strategy::SEMANTIC_VERSION);
             let id = identity(
@@ -140,6 +212,51 @@ impl PitContext {
                 },
             );
         }
+
         Ok(runs.into_values().collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn action_schedule_versions_are_bound_to_pit_engine_identity() {
+        for (kind, expected) in [
+            (
+                "fast_event",
+                prajna_research::fast_event::CORPORATE_ACTION_SEMANTIC_VERSION,
+            ),
+            (
+                "vector",
+                prajna_research::vector::CORPORATE_ACTION_SEMANTIC_VERSION,
+            ),
+        ] {
+            let mut spec = serde_json::json!({
+                "engine": {"kind": kind, "semantic_version": "legacy"},
+                "corporate_action_schedule": {"version": "fixture"},
+            });
+            bind_corporate_action_engine_version(&mut spec).unwrap();
+            assert_eq!(spec["engine"]["semantic_version"], expected);
+            assert_eq!(
+                spec["corporate_action_schedule"]["semantic_version"],
+                prajna_research::corporate_actions::SEMANTIC_VERSION
+            );
+        }
+    }
+
+    #[test]
+    fn action_schedule_is_rejected_for_accurate_event() {
+        let mut spec = serde_json::json!({
+            "engine": {"kind": "accurate_event", "semantic_version": "accurate_event@1"},
+            "corporate_action_schedule": {"version": "fixture"},
+        });
+        assert!(
+            bind_corporate_action_engine_version(&mut spec)
+                .unwrap_err()
+                .to_string()
+                .contains("does not implement the corporate-action ledger")
+        );
     }
 }

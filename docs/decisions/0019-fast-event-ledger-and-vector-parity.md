@@ -2,7 +2,7 @@
 
 - 状态：Accepted，2026-10-09（MVP-3 设计，spec #112）；账本与 L1 Run seam、#122 合成 full_target 对拍已实现，Experiment/ResultLevel 接入与合成 Summary 扫描由 #123 实现；验证范围见后文
 
-MVP-6 目标扩展（2026-10-14）：[ADR 0023](0023-etf-corporate-actions-and-total-return-ledger.md) 为总回报账本增加分红/清算应收、折算取整与共同模式对拍，权益恒等式需计入应收；这些尚未实现，不将本文既有合成价格收益验证视为公司行动或真实总回报验收。
+MVP-6 扩展（2026-10-15）：[#181](https://github.com/ZombieIce/PrajnaQuant/issues/181) 按 [ADR 0023](0023-etf-corporate-actions-and-total-return-ledger.md) 增加 action-aware PIT Fast Event 应收/转换账本与 Vector 非投资现金/应收权重，并纳入事件账本和完整性结果。完全合成 3 ETF × 10 Session 对拍验证通过；不改变旧价格收益入口，也不构成真实公司行动覆盖或收益验收。
 
 [`ADR 0010`](0010-portfolio-accounting-and-result-boundary.md) 要求 Fast Event 以 Order → Fill → Position → Account 更新账本并逐日核对恒等式，同时要求它与 Vector 在共同语义子集上对拍。MVP-3 确定以下边界：
 

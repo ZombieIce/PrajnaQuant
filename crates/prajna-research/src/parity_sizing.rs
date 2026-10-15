@@ -128,6 +128,8 @@ pub(crate) fn target_plan(
 #[derive(Debug, Clone)]
 pub(crate) struct ParitySizingState {
     pub cash: Notional,
+    pub dividend_receivable: Notional,
+    pub liquidation_receivable: Notional,
     pub positions: BTreeMap<InstrumentId, Quantity>,
 }
 
@@ -135,6 +137,8 @@ impl ParitySizingState {
     pub fn new(capital: Notional) -> Self {
         Self {
             cash: capital,
+            dividend_receivable: Notional::ZERO,
+            liquidation_receivable: Notional::ZERO,
             positions: BTreeMap::new(),
         }
     }
@@ -143,7 +147,10 @@ impl ParitySizingState {
         &self,
         prices: &BTreeMap<InstrumentId, Price>,
     ) -> Result<Notional, FastEventError> {
-        let mut equity = self.cash;
+        let mut equity = add(
+            add(self.cash, self.dividend_receivable)?,
+            self.liquidation_receivable,
+        )?;
         for (id, q) in &self.positions {
             let price = *prices
                 .get(id)

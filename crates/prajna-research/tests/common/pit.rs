@@ -13,7 +13,11 @@ use prajna_research::{
     pit_universe::*,
 };
 use serde_json::{Value, json};
-use std::{collections::BTreeSet, io::Write, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::Write,
+    path::Path,
+};
 use zip::{ZipWriter, write::SimpleFileOptions};
 
 pub fn date(day: u32) -> NaiveDate {
@@ -29,6 +33,7 @@ pub fn lake() -> tempfile::TempDir {
     std::fs::create_dir_all(&path).unwrap();
     tempfile::tempdir_in(path).unwrap()
 }
+#[allow(dead_code)]
 pub struct Fixture {
     pub dsv: String,
     pub catalog: HistoricalCatalog,
@@ -48,6 +53,23 @@ pub fn fixture_at_price(root: &Path, price: f64) -> Fixture {
 }
 
 pub fn fixture_options(root: &Path, price: f64, terminated: bool) -> Fixture {
+    fixture_with_prices(root, price, terminated, &BTreeMap::new())
+}
+
+#[allow(dead_code)]
+pub fn fixture_with_action_prices(
+    root: &Path,
+    overrides: BTreeMap<(usize, u32), (f64, f64)>,
+) -> Fixture {
+    fixture_with_prices(root, 1.0, false, &overrides)
+}
+
+fn fixture_with_prices(
+    root: &Path,
+    price: f64,
+    terminated: bool,
+    overrides: &BTreeMap<(usize, u32), (f64, f64)>,
+) -> Fixture {
     let raw = RawStore::open(root).unwrap();
     let put = |bytes: &[u8]| {
         raw.put(
@@ -187,6 +209,12 @@ pub fn fixture_options(root: &Path, price: f64, terminated: bool) -> Fixture {
             price
         }
     };
+    let bar_prices = |code: usize, day: u32| {
+        overrides
+            .get(&(code, day))
+            .copied()
+            .unwrap_or_else(|| (open_price(code, day), price))
+    };
     for day in 1..=10 {
         let codes = if day < 4 { 2 } else { 3 };
         let mut cod = Vec::new();
@@ -200,11 +228,12 @@ pub fn fixture_options(root: &Path, price: f64, terminated: bool) -> Fixture {
             record[32..34].copy_from_slice(&((cod.len() / 150) as u16).to_le_bytes());
             cod.extend_from_slice(&record);
             let mut block = [0u8; 512];
+            let (open, close) = bar_prices(i, day);
             for (offset, v) in [
-                (12, open_price(i, day)),
-                (20, price),
-                (28, open_price(i, day)),
-                (36, price),
+                (12, open),
+                (20, open.max(close)),
+                (28, open.min(close)),
+                (36, close),
                 (72, 20_000_000.0_f64),
             ] {
                 block[offset..offset + 8].copy_from_slice(&v.to_le_bytes());
@@ -227,20 +256,13 @@ pub fn fixture_options(root: &Path, price: f64, terminated: bool) -> Fixture {
         let rows = (if i == 2 { 4 } else { 1 }..=10)
             .filter(|d| !terminated || i != 0 || *d < 8)
             .map(|d| {
+                let (open, close) = bar_prices(i, d);
                 json!([
                     date(d).to_string(),
-                    open_price(i, d).to_string(),
-                    if price == 1.0 {
-                        "1.0".to_owned()
-                    } else {
-                        price.to_string()
-                    },
-                    if price == 1.0 {
-                        "1.0".to_owned()
-                    } else {
-                        price.to_string()
-                    },
-                    open_price(i, d).to_string(),
+                    open.to_string(),
+                    close.to_string(),
+                    open.max(close).to_string(),
+                    open.min(close).to_string(),
                     "200"
                 ])
             })
@@ -269,6 +291,7 @@ pub fn fixture_options(root: &Path, price: f64, terminated: bool) -> Fixture {
         .map(|(i, id, s)| {
             let day = s.session_date().day();
             let known = evidence("opening-coverage", time(1, 8));
+            let reference_price = overrides.get(&(i, day)).map_or(price, |(open, _)| *open);
             OpeningEvidence {
                 instrument_id: id.clone(),
                 session_date: s.session_date(),
@@ -293,7 +316,7 @@ pub fn fixture_options(root: &Path, price: f64, terminated: bool) -> Fixture {
                     evidence: known.clone(),
                 }),
                 reference: Some(ReferencePrice {
-                    adjusted_previous_close: price.to_string().parse().unwrap(),
+                    adjusted_previous_close: reference_price.to_string().parse().unwrap(),
                     evidence: known,
                 }),
                 market_available_at: Some(s.ts_close()),

@@ -1,6 +1,6 @@
 # ADR 0023：ETF 公司行动、顺序总回报指数与权威账本
 
-- 状态：Accepted as target architecture，2026-10-14（spec [#171](https://github.com/ZombieIce/PrajnaQuant/issues/171) P19～P22，设计票据 [#173](https://github.com/ZombieIce/PrajnaQuant/issues/173)）。#180 已实现合成验证的数据层 v2 结构化事件表与顺序 TRI；**真实 cninfo 附件解析、完整性证明、账户账本、Vector 对拍和真实数据验收仍未实现**。扩展 [ADR 0019](0019-fast-event-ledger-and-vector-parity.md) 的权益恒等式与 Vector 共同语义，不改写既有价格收益结果。
+- 状态：Accepted as target architecture，2026-10-14（spec [#171](https://github.com/ZombieIce/PrajnaQuant/issues/171) P19～P22，设计票据 [#173](https://github.com/ZombieIce/PrajnaQuant/issues/173)）。#180 实现合成验证的数据层 v2 结构化事件表与顺序 TRI；#181 接入 action-aware PIT Fast Event/Vector 账本、非投资应收权重、覆盖/不完整声明与逐日合成对拍。**真实 cninfo 附件解析、公告完整性证明和真实数据验收仍未实现**。扩展 [ADR 0019](0019-fast-event-ledger-and-vector-parity.md) 的权益恒等式与 Vector 共同语义，不改写旧价格收益入口。
 
 ## 背景与边界
 
@@ -78,7 +78,7 @@ Risk Exit 未成功的终止持仓不消失，也不按末日行情强制平仓�
 | 折算 | 101 份 × 1.5=151.5，实际 151 份；原价 9、新参考价 6，市值由 909 到 906，`corporate_action_rounding` 为 -3，无现金补偿。连续数量 parity 模式为 151.5 份、市值 909，须标明模式差异。 |
 | 清算 | 100 份最后估值 1，正式公告每份清算 0.8：转证券 0、清算应收 80，并显式确认 -20 差额；支付后现金 80、应收 0。若金额未知，只能输出未决与不完整结果。 |
 
-后续 3 ETF × 10 Session 金标准须联合覆盖登记日前后买卖、停复牌、延期、Risk Exit、分红到账、非整手折算和终止清算，逐日核验两层恒等式、非负现金/数量、税费及无分红样本回归。真实 159919/159522（折算另含 159560）仅作待官方证据链确认的本地控制样本，不能把 spec 给定日期当已验证事实。
+合成 3 ETF × 10 Session 金标准现覆盖分红登记/除息/发放、应收非投资收益、份额折算、终止清算、Vector/Fast Event 逐日对拍、现金/持仓/应收/NAV 恒等式、未解释价格跳变和未知清算金额；另以一份 lot-mode 用例验证折算取整差额。无公司行动样本与价格收益回归通过。真实 159919/159522（折算另含 159560）仍仅是待官方证据链确认的本地控制样本，不能把 spec 给定日期当已验证事实。
 
 ## Considered Options
 
@@ -91,6 +91,6 @@ Risk Exit 未成功的终止持仓不消失，也不按末日行情强制平仓�
 
 ## 后果与后续验收
 
-需扩展事件规范化、Factor 输入、账户应收/结算、ResultLevel 与 Run 身份；Return Basis、事件/规则版本、覆盖与不完整原因均须持久化。Summary/Standard/Full 可省略明细但不能省略口径及失败/不完整状态，Vector 不产出的账本也不能解释为零。上述是目标契约，具体 schema 由实现票据发布。
+事件规范化与 TRI 由 #180 提供；#181 为 Fast Event 账户增加分红/清算应收和转换账本，为 Vector PIT 增加现金/应收非投资组件，并将 Return Basis、税率、覆盖报告与不完整原因写入 Run Spec/Summary，Standard/Full 保存非空的公司行动事件行。Summary 不含逐事件明细；缺失的 Vector 账本不能解释为零。`Complete` 覆盖只接受显式输入声明；从 TRI 映射的 `observed_raw_set_only` 不构成公告完整性证明。当前 synthetic API 与 ResultLevel 不替代真实 cninfo 解析、真实事件链、来源授权或 P0-2 验收。
 
 6b 基准为沪深300全收益指数，需声明来源、版本和日期对齐，不与价格指数混用。按 P24/P25 冻结本地授权原文、数据/规则/代码/环境与离线备份，两次独立执行所有 ResultLevel logical hash 一致；仓库只保存合成金标准、hash/身份、覆盖与守恒摘要、命令日志，不发布真实行情、公告 PDF 或逐日价格账本。#172 的许可、规则、公告与覆盖未决项均须先解决，设计采纳不等于真实验收通过。
