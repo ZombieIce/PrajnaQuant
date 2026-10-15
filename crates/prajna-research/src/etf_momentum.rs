@@ -77,7 +77,13 @@ pub struct InstrumentActionIntegrity {
     pub unapplied_action_dates: Vec<NaiveDate>,
     pub unexplained_price_jumps: Vec<NaiveDate>,
     /// Raw-set presence does not prove complete official announcement coverage.
-    pub coverage_status: String,
+    pub coverage_status: ActionCoverageStatus,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionCoverageStatus {
+    ObservedRawSetOnly,
 }
 
 impl TotalReturnIndex {
@@ -327,7 +333,7 @@ impl TotalReturnIndex {
                 observed_actions: count,
                 unapplied_action_dates: unapplied,
                 unexplained_price_jumps: suspicious,
-                coverage_status: "observed_raw_set_only".into(),
+                coverage_status: ActionCoverageStatus::ObservedRawSetOnly,
             });
         }
         let identity = json!({
