@@ -152,6 +152,12 @@ pub struct ExecutionState {
     missing_entries: Option<BTreeMap<InstrumentId, f64>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct PendingExecution {
+    pub targets: BTreeMap<InstrumentId, f64>,
+    pub is_retry: bool,
+}
+
 impl ExecutionState {
     pub fn new(unfilled_entry: UnfilledEntry) -> Self {
         Self {
@@ -167,7 +173,7 @@ impl ExecutionState {
         held: &BTreeSet<InstrumentId>,
         executable: impl Fn(&InstrumentId, &PanelSession) -> bool,
     ) -> Option<ExecutionEvent> {
-        self.attempt_directional(session, held, |id, s, _| executable(id, s))
+        self.attempt_legacy(session, held, executable)
     }
 
     pub fn exclude(&mut self, instruments: &BTreeSet<InstrumentId>) {
@@ -179,16 +185,76 @@ impl ExecutionState {
         }
     }
 
-    pub fn attempt_directional(
+    pub fn pending_execution(&self) -> Option<PendingExecution> {
+        self.pending.as_ref().map(|decision| PendingExecution {
+            targets: self
+                .missing_entries
+                .as_ref()
+                .unwrap_or(&decision.targets)
+                .clone(),
+            is_retry: self.missing_entries.is_some(),
+        })
+    }
+
+    /// Sizing and direction permissions are resolved by the engine before this
+    /// state transition. A skipped increment may still retain a held position.
+    pub fn resolve_sized(
+        &mut self,
+        session: &PanelSession,
+        applied: BTreeMap<InstrumentId, f64>,
+        blocked_sells: BTreeSet<InstrumentId>,
+        skipped_buys: BTreeSet<InstrumentId>,
+    ) -> Option<ExecutionEvent> {
+        let decision = self.pending.as_ref()?;
+        if !blocked_sells.is_empty() {
+            return Some(ExecutionEvent::Deferred {
+                decision_session: decision.decision_session.clone(),
+                attempt_session: session.clone(),
+                blocked: blocked_sells,
+            });
+        }
+        let request = self.pending_execution()?;
+        let decision_session = decision.decision_session.clone();
+        let remaining = request
+            .targets
+            .into_iter()
+            .filter(|(id, weight)| *weight > 0.0 && skipped_buys.contains(id))
+            .collect::<BTreeMap<_, _>>();
+        let event = if self.unfilled_entry == UnfilledEntry::Retry {
+            ExecutionEvent::RetryableExecution {
+                decision_session,
+                attempt_session: session.clone(),
+                applied,
+                skipped_buys,
+                is_retry: request.is_retry,
+            }
+        } else {
+            ExecutionEvent::Executed {
+                decision_session,
+                attempt_session: session.clone(),
+                applied,
+                skipped_buys,
+            }
+        };
+        if self.unfilled_entry == UnfilledEntry::Retry && !remaining.is_empty() {
+            self.missing_entries = Some(remaining);
+        } else {
+            self.pending = None;
+            self.missing_entries = None;
+        }
+        Some(event)
+    }
+
+    fn attempt_legacy(
         &mut self,
         session: &PanelSession,
         held: &BTreeSet<InstrumentId>,
-        executable: impl Fn(&InstrumentId, &PanelSession, bool) -> bool,
+        executable: impl Fn(&InstrumentId, &PanelSession) -> bool,
     ) -> Option<ExecutionEvent> {
         if let Some(decision) = &self.pending {
             let blocked = held
                 .iter()
-                .filter(|instrument| !executable(instrument, session, false))
+                .filter(|instrument| !executable(instrument, session))
                 .cloned()
                 .collect::<BTreeSet<_>>();
             if blocked.is_empty() {
@@ -197,7 +263,7 @@ impl ExecutionState {
                 let is_retry = self.missing_entries.is_some();
                 let targets = self.missing_entries.as_ref().unwrap_or(&decision.targets);
                 for (instrument, weight) in targets {
-                    if executable(instrument, session, true) {
+                    if executable(instrument, session) {
                         applied.insert(instrument.clone(), *weight);
                     } else if *weight > 0.0 || self.unfilled_entry == UnfilledEntry::Skip {
                         skipped_buys.insert(instrument.clone());

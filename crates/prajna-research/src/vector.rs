@@ -184,36 +184,108 @@ pub fn run_vector_pit(
 ) -> Result<VectorResult, VectorError> {
     crate::pit_strategy::validate_execution_panel(panel, market)
         .map_err(|e| invalid_input(e.to_string()))?;
-    let mut state = ExecutionState::new(UnfilledEntry::Skip);
-    let mut generate = |session: &PanelSession,
-                        held: &BTreeSet<InstrumentId>,
-                        decision: Option<&Decision>,
-                        at_end: bool| {
-        if let Some(decision) = decision {
-            state.decide(decision);
-            None
-        } else if at_end {
-            state.pending_at_end()
-        } else {
-            state.exclude(&risk.active_before_open(session.ts_open));
-            state.attempt_directional(session, held, |id, s, buy| {
-                crate::pit_strategy::permits(market, panel, id, s, buy)
-            })
-        }
-    };
     run_vector_inner(
         panel,
         decisions,
         &[],
         costs,
         AvailabilityAssumption::None,
-        Some(&mut generate),
+        None,
         Some((market, risk)),
     )
 }
 
 type EventGenerator<'a> = dyn FnMut(&PanelSession, &BTreeSet<InstrumentId>, Option<&Decision>, bool) -> Option<ExecutionEvent>
     + 'a;
+
+struct SizedVectorTarget {
+    weights: BTreeMap<InstrumentId, f64>,
+    turnover: f64,
+    cost: f64,
+    blocked_sells: BTreeSet<InstrumentId>,
+    skipped_buys: BTreeSet<InstrumentId>,
+}
+
+fn pit_target_plan(
+    panel: &Panel,
+    market: &crate::etf_market::DerivedMarket,
+    session: &PanelSession,
+    current: &BTreeMap<InstrumentId, f64>,
+    targets: &BTreeMap<InstrumentId, f64>,
+    buy_rate: f64,
+    sell_rate: f64,
+) -> Result<SizedVectorTarget, VectorError> {
+    let instruments = current
+        .keys()
+        .chain(targets.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut skipped_buys = targets
+        .iter()
+        .filter(|(id, w)| {
+            **w > 0.0
+                && !current.contains_key(*id)
+                && !crate::pit_strategy::permits(market, panel, id, session, true)
+        })
+        .map(|(id, _)| id.clone())
+        .collect::<BTreeSet<_>>();
+    loop {
+        let mut cost = 0.0;
+        let mut turnover = 0.0;
+        for id in instruments.iter().filter(|id| !skipped_buys.contains(*id)) {
+            let delta =
+                targets.get(id).copied().unwrap_or(0.0) - current.get(id).copied().unwrap_or(0.0);
+            turnover += delta.abs();
+            cost += delta.max(0.0) * buy_rate + (-delta).max(0.0) * sell_rate;
+        }
+        if !cost.is_finite() || cost >= 1.0 {
+            return Err(invalid_costs("sized PIT execution exhausts equity"));
+        }
+        let mut weights = BTreeMap::new();
+        let mut new_skipped = BTreeSet::new();
+        let mut blocked_sells = BTreeSet::new();
+        for id in &instruments {
+            let held = current.get(id).copied().unwrap_or(0.0);
+            let target = targets.get(id).copied().unwrap_or(0.0);
+            let frozen = skipped_buys.contains(id);
+            let after_value = if frozen { held } else { target * (1.0 - cost) };
+            let delta = after_value - held;
+            if !frozen {
+                // F8 may charge a fee-only settlement with zero quantity delta.
+                let fee_delta = target - held;
+                let side = if delta != 0.0 {
+                    delta
+                } else if fee_delta > 0.0 && buy_rate > 0.0 || fee_delta < 0.0 && sell_rate > 0.0 {
+                    fee_delta
+                } else {
+                    0.0
+                };
+                if side > 0.0 && !crate::pit_strategy::permits(market, panel, id, session, true) {
+                    new_skipped.insert(id.clone());
+                } else if side < 0.0
+                    && !crate::pit_strategy::permits(market, panel, id, session, false)
+                {
+                    blocked_sells.insert(id.clone());
+                }
+            }
+            let weight = after_value / (1.0 - cost);
+            if weight > 0.0 {
+                weights.insert(id.clone(), weight);
+            }
+        }
+        if !new_skipped.is_empty() {
+            skipped_buys.extend(new_skipped);
+            continue;
+        }
+        return Ok(SizedVectorTarget {
+            weights,
+            turnover,
+            cost,
+            blocked_sells,
+            skipped_buys,
+        });
+    }
+}
 
 fn run_vector_inner(
     panel: &Panel,
@@ -271,6 +343,7 @@ fn run_vector_inner(
     let mut result_sessions = Vec::with_capacity(panel.sessions.len());
     let mut result_executions = Vec::new();
     let mut risk_exits = Vec::new();
+    let mut pit_state = pit.map(|_| ExecutionState::new(UnfilledEntry::Skip));
 
     for (session_index, session) in panel.sessions.iter().enumerate() {
         let mut risk_turnover = 0.0;
@@ -300,9 +373,35 @@ fn run_vector_inner(
                 *weight /= 1.0 - risk_cost;
             }
         }
-        let generated = generate.as_mut().and_then(|generate| {
-            generate(session, &weights.keys().cloned().collect(), None, false)
-        });
+        let mut sized_target = None;
+        let generated = if let (Some(state), Some((market, risk))) = (&mut pit_state, pit) {
+            state.exclude(&risk.active_before_open(session.ts_open));
+            if let Some(request) = state.pending_execution() {
+                let sized = pit_target_plan(
+                    panel,
+                    market,
+                    session,
+                    &weights,
+                    &request.targets,
+                    buy_rate,
+                    sell_rate,
+                )?;
+                let event = state.resolve_sized(
+                    session,
+                    sized.weights.clone(),
+                    sized.blocked_sells.clone(),
+                    sized.skipped_buys.clone(),
+                );
+                sized_target = Some(sized);
+                event
+            } else {
+                None
+            }
+        } else {
+            generate.as_mut().and_then(|generate| {
+                generate(session, &weights.keys().cloned().collect(), None, false)
+            })
+        };
         let event = generated
             .as_ref()
             .or_else(|| events_by_index.get(&session_index).copied());
@@ -356,7 +455,9 @@ fn run_vector_inner(
                             ));
                         }
                         validate_applied_weights(panel, applied)?;
-                        validate_skipped_buys(&pending_targets, applied, skipped_buys)?;
+                        if pit.is_none() {
+                            validate_skipped_buys(&pending_targets, applied, skipped_buys)?;
+                        }
                         if is_retry
                             && applied
                                 .keys()
@@ -366,8 +467,10 @@ fn run_vector_inner(
                                 "an entry retry cannot rebalance a held leg",
                             ));
                         }
-                        let required_prices =
-                            applied.keys().chain(weights.keys().filter(|_| !is_retry));
+                        let required_prices = applied
+                            .keys()
+                            .chain(weights.keys().filter(|_| !is_retry))
+                            .filter(|_| pit.is_none());
                         for instrument in required_prices {
                             let instrument_index =
                                 panel.instruments.binary_search(instrument).map_err(|_| {
@@ -380,7 +483,10 @@ fn run_vector_inner(
                                 )));
                             }
                         }
-                        if is_retry {
+                        if let Some(sized) = &sized_target {
+                            turnover = sized.turnover;
+                            cost = sized.cost;
+                        } else if is_retry {
                             (turnover, cost) = apply_entry_retry(&mut weights, applied, buy_rate)?;
                         } else {
                             let mut buys = 0.0;
@@ -509,6 +615,9 @@ fn run_vector_inner(
             if let Some(generate) = &mut generate {
                 generate(session, &BTreeSet::new(), Some(decision), false);
             }
+            if let Some(state) = &mut pit_state {
+                state.decide(decision);
+            }
         }
 
         result_sessions.push(VectorSession {
@@ -524,12 +633,13 @@ fn run_vector_inner(
         });
     }
 
-    let generated_pending =
-        if let (Some(generate), Some(last)) = (&mut generate, panel.sessions.last()) {
-            generate(last, &BTreeSet::new(), None, true)
-        } else {
-            None
-        };
+    let generated_pending = if let Some(state) = &pit_state {
+        state.pending_at_end()
+    } else if let (Some(generate), Some(last)) = (&mut generate, panel.sessions.last()) {
+        generate(last, &BTreeSet::new(), None, true)
+    } else {
+        None
+    };
     let pending_event = generated_pending
         .as_ref()
         .into_iter()

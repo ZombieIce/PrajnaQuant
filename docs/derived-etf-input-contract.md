@@ -51,12 +51,23 @@ HALTED/UNKNOWN/涨跌停受限格子另存 `execution_exclusions`，不因其已
 而丢失已持仓的未知执行格子。具体定义和存储入口见
 [`prajna-experiment`](../crates/prajna-experiment/README.md)。
 
-新路径复用 `ExecutionState::attempt_directional`：sell 方向被阻塞时整次常规目标延期，
-buy 方向被阻塞时只跳过该买腿、原权重留现金、不事后重归一。每个新 close 的常规
+新路径先按 full_target 的费用、实际数量与 lot/cash 约束完成 sizing，再由共享
+`ExecutionState::resolve_sized` 提交状态：实际必需 sell 被阻塞时整次常规目标延期，
+无常规成交或扣费；实际 buy 被阻塞时冻结该标的已有数量（未持有则保留现金），
+移除该腿费用后重算其他腿，不重归一目标。不能以目标成员身份或名义权重变化代替
+实际买卖方向；F8 的 fee-only settlement 按其 fee_side 门禁。Fast Retry 只补足
+缺失的绝对目标增量，保留其他持仓；Skip 不重试。语义版本 `pit-s2@2` 进入身份，
+旧 Static Universe 路径不变。每个新 close 的常规
 Decision 替换旧 pending，但不取消独立持久 Risk Exit。风险退出优先于常规 open 尝试，
 逐个风险标的等待明确可卖 open，不等待 cadence、不受其他持仓延期影响，卖后保留其他
 持仓数量。下一 open 必须严格晚于风险证据可用时刻；DateOnly 沿用 Catalog 的保守规则。
 低净值提示只标注；未退出风险腿在期末仍报告 pending。
+
+持仓方向回归见 `tests/pit_sides.rs`：10,000 元、A 8,000 份、现金 2,000，
+目标 A/B 各 50%、零费用且 A 涨停时，允许卖 A 3,000、买 B 5,000，
+最终 A/B 各 5,000、现金 0；A 从 50% 增至 100% 的跌停买入不被卖方向阻塞。
+另验 1% 费用、费用导致名义增持变成实际减持、整次延期和持仓增量 Retry；
+lot 与 common parity 均有独立手算数量/现金断言，不只互相对拍。
 
 手算 3×10 用例（全部平价 1，只有 S7 的 A open=0.9）：S3 close 选 A；S4 open
 以 10,000 元、lot100、3bp/min5、2bp 滑点买 A 9,900 份，现金 93.02、NAV 9,993.02。

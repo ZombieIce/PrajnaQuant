@@ -83,6 +83,11 @@ DSV 必须来自 `szse-etf-frozen@1`；无网络采集或真实历史数据验�
 对拍运行改为 `vector_parity + full_target`，忽略最低佣金与 lot，Vector 沿用同样比例成本。
 Native DSV 价格按 Catalog 拆成生命周期面板，不把复用代码的另一生命周期价格携带进来。
 
+常规方向门禁按费用/数量 sizing 后的实际交易侧判断，而非目标成员身份：
+真正必需的受阻卖腿令整次目标延期；受阻买腿保留当前数量、不扣该腿费用，
+重算其他腿并保留现金，不重归一目标。涨停持仓可减仓、跌停持仓可加仓。
+F8 fee-only settlement 使用 fee_side；`pit-s2@2` 记录此语义变更，旧路径不变。
+
 Risk Notice 类型为 `vote_suspension`、`termination_proposal`、`liquidation_notice`、
 `official_termination`、`low_nav_warning`；最后一种只标注。Exact 发布时间沿用原时刻，
 DateOnly(D) 沿用 #175 的 D 后下一 Session close。风险退出在信息已知后的下一

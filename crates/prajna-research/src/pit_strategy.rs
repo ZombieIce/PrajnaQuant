@@ -15,7 +15,7 @@ use crate::{
     strategy::Decision,
 };
 
-pub const SEMANTIC_VERSION: &str = "pit-s2@1";
+pub const SEMANTIC_VERSION: &str = "pit-s2@2";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -144,17 +144,7 @@ pub fn plan(
 ) -> Result<PitPlan, CatalogError> {
     params.validate()?;
     eligibility.momentum_sessions = params.lookback;
-    if sessions.len() != market.sessions().len()
-        || sessions.iter().zip(market.sessions()).any(|(a, b)| {
-            a.session_date != b.session_date()
-                || a.ts_open != b.ts_open()
-                || a.ts_close != b.ts_close()
-        })
-    {
-        return Err(CatalogError(
-            "PIT market/Panel Session coverage mismatch".into(),
-        ));
-    }
+    validate_sessions(sessions, market)?;
     let mut decisions = Vec::new();
     let mut inputs = Vec::new();
     for (i, session) in sessions.iter().enumerate() {
@@ -277,19 +267,32 @@ pub fn permits(
 }
 
 pub fn validate_execution_panel(panel: &Panel, market: &DerivedMarket) -> Result<(), CatalogError> {
-    if panel.sessions.len() != market.sessions().len()
-        || panel.sessions.iter().zip(market.sessions()).any(|(a, b)| {
+    validate_sessions(&panel.sessions, market)?;
+    if market
+        .cells()
+        .keys()
+        .any(|(id, _)| !panel.instruments.contains(id))
+    {
+        return Err(CatalogError(
+            "execution Panel/Derived Market coverage mismatch".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_sessions(
+    sessions: &[PanelSession],
+    market: &DerivedMarket,
+) -> Result<(), CatalogError> {
+    if sessions.len() != market.sessions().len()
+        || sessions.iter().zip(market.sessions()).any(|(a, b)| {
             a.session_date != b.session_date()
                 || a.ts_open != b.ts_open()
                 || a.ts_close != b.ts_close()
         })
-        || market
-            .cells()
-            .keys()
-            .any(|(id, _)| !panel.instruments.contains(id))
     {
         return Err(CatalogError(
-            "execution Panel/Derived Market coverage mismatch".into(),
+            "PIT market/Panel Session coverage mismatch".into(),
         ));
     }
     Ok(())
