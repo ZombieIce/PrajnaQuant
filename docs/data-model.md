@@ -27,4 +27,4 @@ B 的日频发布目录为 `<data-dir>/snapshots/<snapshot_id>/`：`daily.parque
 
 当前无基本面事实表、ETF 分红/份额变更表、策略配置表、每日目标权重/持仓明细表。指数成员 CSV 已进入可追溯底座，但历史 provider 尚未连接到 Universe API，不能用于严格 PIT；`sh000300` 仍只是指数价格。旧 `docs/A股本地数据库建设方案.md` 的逻辑模型是路线图，不能当已实现 schema。
 
-新平台 `prajna-data` 的 `szse-etf-frozen@2` 增加版本化 `corporate_actions` Parquet 表，包含公告/Raw hash、生命周期 InstrumentId、事件类型、公告日与保守可用时刻，以及登记/除息/发放/折算/清算日期和金额/比例。该 Normalizer 目前只接受已结构化的 `corporateActions` 事实字段；它不提取真实 cninfo PDF/附件，也不证明完整公告覆盖。v1 DSV 与既有 Normalizer 输出保持不变；v2 事件表参与 DSV。研究层 TRI 及其价格完整性报告绑定 DSV 和规则身份，尚不包含应收、现金或账户清算账本。
+新平台 `prajna-data` 的 `szse-etf-frozen@2` 增加版本化 `corporate_actions` Parquet 表，包含公告/Raw hash、生命周期 InstrumentId、事件类型、来源发布时间 `announced_at`、公告日与保守可用时刻，以及登记/除息/发放/折算/清算日期和金额/比例。该 Normalizer 目前只接受已结构化的 `corporateActions` 事实字段；它不提取真实 cninfo PDF/附件，也不证明完整公告覆盖。v1 DSV 与既有 Normalizer 输出保持不变；v2 事件表参与 DSV。研究层 TRI 及其价格完整性报告绑定 DSV 和规则身份，尚不包含应收、现金或账户清算账本。

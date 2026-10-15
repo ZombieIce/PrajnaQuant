@@ -424,6 +424,10 @@ fn corporate_action_dataset_v2_normalizes_late_announcement_and_binds_facts() {
     assert_eq!(rows.len(), 3);
     assert_eq!(rows[0].kind, CorporateActionKind::Dividend);
     assert_eq!(rows[0].cash_per_share.as_deref(), Some("0.0728"));
+    assert_eq!(
+        rows[0].announced_at,
+        "2026-01-05T16:00:00Z".parse().unwrap()
+    );
     assert_eq!(rows[1].kind, CorporateActionKind::ShareConversion);
     assert_eq!(rows[1].share_ratio.as_deref(), Some("2"));
     assert_eq!(rows[2].kind, CorporateActionKind::Liquidation);
@@ -459,6 +463,36 @@ fn corporate_action_dataset_v2_normalizes_late_announcement_and_binds_facts() {
 fn action_category_without_structured_facts_fails_closed_in_v2() {
     let dir = tempfile::tempdir().unwrap();
     let frozen = standard(dir.path());
+    let error = publish_dataset(
+        dir.path(),
+        &frozen.store,
+        &NormalizerRegistry::with_builtins(),
+        ID,
+        "2",
+        &frozen.hashes,
+        OBSERVED,
+    )
+    .unwrap_err();
+    assert!(format!("{error:?}").contains("unparsed_corporate_action"));
+}
+
+#[test]
+fn termination_announcement_without_liquidation_facts_fails_closed_in_v2() {
+    let dir = tempfile::tempdir().unwrap();
+    let frozen = freeze_all(
+        dir.path(),
+        &[
+            ("szse-calendar", calendar()),
+            ("tdx", tdx_0105(1.05, None)),
+            ("tdx", tdx_package("260106", &[rec("159901", 1.06)], None)),
+            ("tdx", tdx_package("260108", &[rec("159901", 1.07)], None)),
+            ("tencent", tencent()),
+            (
+                "cninfo",
+                cninfo_doc(&[("T-1", "159901", "合成ETF基金合同终止公告", "2026-01-06")]),
+            ),
+        ],
+    );
     let error = publish_dataset(
         dir.path(),
         &frozen.store,

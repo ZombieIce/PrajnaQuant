@@ -114,8 +114,8 @@ Vector `executions` 与 Fast Full `orders` 附风险尝试及期末等待记录�
 
 3 ETF × 10 Session 的供应商格式合成 Raw、逐日手算现金/持仓/费用/开收盘 NAV 和
 Vector/Fast 日对拍见两 crate 的 `tests/pit_s2.rs`。#180 的 `@2` 公司行动/TRI 仅有
-独立合成研究层测试；当前 Normalizer 需要结构化 `corporateActions` 字段，不解析原始
-cninfo 附件或证明公告全集。6b 账户应收/现金账本仍由后续范围处理；#178 Python PIT
+独立合成研究层测试；当前 Normalizer 需要结构化 `corporateActions` 字段，保留源发布时间并
+单独计算保守可用时刻，但不解析原始 cninfo 附件或证明公告全集。6b 账户应收/现金账本仍由后续范围处理；#178 Python PIT
 视图复用同一 Rust 输入和执行层，见 [`prajna-py`](../prajna-py/README.md)。
 
 ## stdout JSON 与退出码

@@ -504,6 +504,7 @@ pub struct CorporateActionRow {
     pub instrument_id: InstrumentId,
     pub kind: CorporateActionKind,
     pub announced_date: NaiveDate,
+    pub announced_at: TimestampNs,
     pub available_at: TimestampNs,
     pub record_date: Option<NaiveDate>,
     pub ex_date: Option<NaiveDate>,
@@ -554,6 +555,7 @@ pub fn corporate_actions_schema() -> SchemaRef {
             utf8("instrument_id", false),
             utf8("kind", false),
             utf8("announced_date", false),
+            timestamp("announced_at", false),
             timestamp("available_at", false),
             utf8("record_date", true),
             utf8("ex_date", true),
@@ -613,6 +615,7 @@ pub fn corporate_actions_to_record_batch(
         Arc::new(StringArray::from_iter_values(
             rows.iter().map(|row| row.announced_date.to_string()),
         )),
+        timestamps(rows.iter().map(|row| Some(row.announced_at)).collect()),
         timestamps(rows.iter().map(|row| Some(row.available_at)).collect()),
         dates(rows.iter().map(|row| row.record_date).collect()),
         dates(rows.iter().map(|row| row.ex_date).collect()),
@@ -693,17 +696,19 @@ pub fn corporate_actions_from_record_batch(
                 .map_err(|error| err(format!("invalid corporate action instrument: {error}")))?,
             kind,
             announced_date: date(4)?,
-            available_at: optional_timestamp_at(batch, 5, row)?
+            announced_at: optional_timestamp_at(batch, 5, row)?
+                .ok_or_else(|| err("missing corporate action announcement time"))?,
+            available_at: optional_timestamp_at(batch, 6, row)?
                 .ok_or_else(|| err("missing corporate action availability"))?,
-            record_date: optional_date(6)?,
-            ex_date: optional_date(7)?,
-            pay_date: optional_date(8)?,
-            effective_date: optional_date(9)?,
-            cash_per_share: optional_text(10)?.map(str::to_owned),
-            share_ratio: optional_text(11)?.map(str::to_owned),
-            liquidation_cash_per_share: optional_text(12)?.map(str::to_owned),
-            source_raw_sha256: text(13)?.into(),
-            normalization_version: text(14)?.into(),
+            record_date: optional_date(7)?,
+            ex_date: optional_date(8)?,
+            pay_date: optional_date(9)?,
+            effective_date: optional_date(10)?,
+            cash_per_share: optional_text(11)?.map(str::to_owned),
+            share_ratio: optional_text(12)?.map(str::to_owned),
+            liquidation_cash_per_share: optional_text(13)?.map(str::to_owned),
+            source_raw_sha256: text(14)?.into(),
+            normalization_version: text(15)?.into(),
         });
     }
     Ok(rows)

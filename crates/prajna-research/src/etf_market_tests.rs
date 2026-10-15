@@ -360,6 +360,7 @@ fn action(
         instrument_id: id.clone(),
         kind,
         announced_date: date(announced_day),
+        announced_at: time(announced_day, 0),
         available_at: time(announced_day + 1, 15),
         record_date: (kind == CorporateActionKind::Dividend).then(|| date(action_day - 1)),
         ex_date: (kind == CorporateActionKind::Dividend).then(|| date(action_day)),
@@ -450,6 +451,18 @@ fn corporate_action_tri_handles_dividend_split_late_notice_and_identity() {
                 .level
         );
     }
+    let ids = cat.universe(date(1)).unwrap().members;
+    let momentum = EtfMomentum::new(1).unwrap();
+    let price_momentum = momentum.compute(&market, &six_a, &ids).unwrap();
+    let no_action_momentum = momentum.compute(&market, &no_actions, &ids).unwrap();
+    let price_values = price_momentum.column("value").unwrap().f64().unwrap();
+    let no_action_values = no_action_momentum.column("value").unwrap().f64().unwrap();
+    let price_status = price_momentum.column("status").unwrap().str().unwrap();
+    let no_action_status = no_action_momentum.column("status").unwrap().str().unwrap();
+    for row in 0..price_values.len() {
+        assert_eq!(price_values.get(row), no_action_values.get(row));
+        assert_eq!(price_status.get(row), no_action_status.get(row));
+    }
     let dividend = action(
         &dividend_id,
         cat.input().calendar_raw_sha256.iter().next().unwrap(),
@@ -538,6 +551,28 @@ fn conversion_adjusts_tri_and_unexplained_jump_is_reported_unknown() {
     )
     .unwrap();
     assert!((split_tri.point(&id, date(4)).unwrap().level - 1.0).abs() < 1e-12);
+    let unexplained_by_action = action(
+        &id,
+        raw_hash,
+        CorporateActionKind::ShareConversion,
+        4,
+        4,
+        None,
+        Some("3"),
+    );
+    let still_unexplained = TotalReturnIndex::build_with_actions(
+        &market,
+        &[unexplained_by_action],
+        &rules,
+        market.dsv(),
+        &raw,
+    )
+    .unwrap();
+    assert_eq!(
+        still_unexplained.integrity()[0].unexplained_price_jumps,
+        vec![date(4)]
+    );
+    assert!(still_unexplained.point(&id, date(4)).is_none());
     let first_day_action = action(
         &id,
         raw_hash,

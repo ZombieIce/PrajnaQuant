@@ -213,15 +213,7 @@ impl TotalReturnIndex {
         for action in actions {
             raw.get(&action.source_raw_sha256)
                 .map_err(|e| FactorError::Evaluation(e.to_string()))?;
-            let date = match action.kind {
-                CorporateActionKind::Dividend => action.ex_date,
-                CorporateActionKind::ShareConversion | CorporateActionKind::Liquidation => {
-                    action.effective_date
-                }
-            }
-            .ok_or_else(|| {
-                FactorError::Evaluation("corporate action lacks effective date".into())
-            })?;
+            let (date, ratio, cash) = action_terms(action)?;
             if action.normalization_version.trim().is_empty()
                 || !market
                     .cells()
@@ -232,7 +224,7 @@ impl TotalReturnIndex {
                 ));
             }
             if by_date
-                .insert((action.instrument_id.clone(), date), action)
+                .insert((action.instrument_id.clone(), date), (action, ratio, cash))
                 .is_some()
             {
                 return Err(FactorError::Evaluation(
@@ -280,30 +272,14 @@ impl TotalReturnIndex {
                 let action = by_date.get(&key).copied();
                 let mut current_level = None;
                 if let (Some(prior_close), Some(prior)) = (previous_close, previous_level) {
-                    let raw_return_bps = ((close / prior_close - 1.0) * 10_000.0).abs();
-                    if raw_return_bps > f64::from(rules.unexplained_jump_threshold_bps)
-                        && action.is_none()
-                    {
+                    let (ratio, cash) = action.map_or((1.0, 0.0), |(_, ratio, cash)| (ratio, cash));
+                    let adjusted_return_bps =
+                        (((ratio * close + cash) / prior_close - 1.0) * 10_000.0).abs();
+                    if adjusted_return_bps > f64::from(rules.unexplained_jump_threshold_bps) {
                         suspicious.push(date);
                     } else {
-                        let ratio = match action.map(|a| a.kind) {
-                            Some(CorporateActionKind::ShareConversion) => {
-                                parse_action_decimal(action.and_then(|a| a.share_ratio.as_deref()))?
-                            }
-                            Some(CorporateActionKind::Liquidation) => 0.0,
-                            _ => 1.0,
-                        };
-                        let cash = match action.map(|a| a.kind) {
-                            Some(CorporateActionKind::Dividend) => parse_action_decimal(
-                                action.and_then(|a| a.cash_per_share.as_deref()),
-                            )?,
-                            Some(CorporateActionKind::Liquidation) => parse_action_decimal(
-                                action.and_then(|a| a.liquidation_cash_per_share.as_deref()),
-                            )?,
-                            _ => 0.0,
-                        };
                         let value = prior.level * (ratio * close + cash) / prior_close;
-                        let available_at = if let Some(action) = action {
+                        let available_at = if let Some((action, _, _)) = action {
                             max_known(
                                 prior.available_at,
                                 max_known(cell.available_at, Some(action.available_at)),
@@ -462,6 +438,30 @@ fn parse_action_decimal(value: Option<&str>) -> Result<f64, FactorError> {
     }
     Ok(parsed)
 }
+
+fn action_terms(action: &CorporateActionRow) -> Result<(NaiveDate, f64, f64), FactorError> {
+    let (date, ratio, cash) = match action.kind {
+        CorporateActionKind::Dividend => (
+            action.ex_date,
+            1.0,
+            parse_action_decimal(action.cash_per_share.as_deref())?,
+        ),
+        CorporateActionKind::ShareConversion => (
+            action.effective_date,
+            parse_action_decimal(action.share_ratio.as_deref())?,
+            0.0,
+        ),
+        CorporateActionKind::Liquidation => (
+            action.effective_date,
+            0.0,
+            parse_action_decimal(action.liquidation_cash_per_share.as_deref())?,
+        ),
+    };
+    let date = date
+        .ok_or_else(|| FactorError::Evaluation("corporate action lacks effective date".into()))?;
+    Ok((date, ratio, cash))
+}
+
 fn max_known(a: Option<TimestampNs>, b: Option<TimestampNs>) -> Option<TimestampNs> {
     a.zip(b).map(|(a, b)| a.max(b))
 }

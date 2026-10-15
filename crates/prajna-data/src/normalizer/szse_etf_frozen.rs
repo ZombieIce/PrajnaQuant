@@ -131,6 +131,7 @@ struct ActionDraft {
     instrument_id: String,
     kind: CorporateActionKind,
     announced_date: NaiveDate,
+    announced_at: TimestampNs,
     record_date: Option<NaiveDate>,
     ex_date: Option<NaiveDate>,
     pay_date: Option<NaiveDate>,
@@ -138,7 +139,17 @@ struct ActionDraft {
     cash_per_share: Option<String>,
     share_ratio: Option<String>,
     liquidation_cash_per_share: Option<String>,
-    raw: String,
+    source_raw_sha256: String,
+}
+
+struct ActionSource<'a> {
+    announcement_id: &'a str,
+    action_index: u32,
+    symbol: &'a str,
+    announced_date: NaiveDate,
+    announced_at: TimestampNs,
+    source_raw_sha256: &'a str,
+    path: &'a str,
 }
 
 /// A decoded fact and the smallest Raw hash that states it.
@@ -356,6 +367,7 @@ fn normalize(
                 .expect("validated symbol"),
             kind: draft.kind,
             announced_date: draft.announced_date,
+            announced_at: draft.announced_at,
             available_at,
             record_date: draft.record_date,
             ex_date: draft.ex_date,
@@ -364,7 +376,7 @@ fn normalize(
             cash_per_share: draft.cash_per_share,
             share_ratio: draft.share_ratio,
             liquidation_cash_per_share: draft.liquidation_cash_per_share,
-            source_raw_sha256: draft.raw,
+            source_raw_sha256: draft.source_raw_sha256,
             normalization_version: "szse-corporate-action@1".into(),
         });
     }
@@ -863,9 +875,7 @@ fn decode_cninfo(
             acc.count("announcements_out_of_scope");
             continue;
         }
-        let Some(date) = DateTime::from_timestamp_millis(millis)
-            .map(|time| time.with_timezone(&Shanghai).date_naive())
-        else {
+        let Some(announced_time) = DateTime::from_timestamp_millis(millis) else {
             acc.push(
                 "invalid_date",
                 &item_path,
@@ -873,6 +883,18 @@ fn decode_cninfo(
             );
             continue;
         };
+        let Some(announced_at) = announced_time
+            .timestamp_nanos_opt()
+            .map(TimestampNs::from_unix_nanos)
+        else {
+            acc.push(
+                "invalid_date",
+                &item_path,
+                "announcementTime cannot be represented at nanosecond precision",
+            );
+            continue;
+        };
+        let date = announced_time.with_timezone(&Shanghai).date_naive();
         let title = title.replace("<em>", "").replace("</em>", "");
         let category = CATEGORY_RULES
             .iter()
@@ -904,7 +926,7 @@ fn decode_cninfo(
                     continue;
                 }
             };
-            if matches!(category, "dividend" | "conversion") && actions.is_empty() {
+            if matches!(category, "dividend" | "conversion" | "termination") && actions.is_empty() {
                 acc.push(
                     "unparsed_corporate_action",
                     &item_path,
@@ -916,12 +938,15 @@ fn decode_cninfo(
                 let action_path = format!("{item_path}.corporateActions[{action_index}]");
                 match parse_action(
                     action,
-                    action_index as u32,
-                    id.clone(),
-                    code.clone(),
-                    date,
-                    raw.raw_sha256.clone(),
-                    &action_path,
+                    ActionSource {
+                        announcement_id: &id,
+                        action_index: action_index as u32,
+                        symbol: &code,
+                        announced_date: date,
+                        announced_at,
+                        source_raw_sha256: &raw.raw_sha256,
+                        path: &action_path,
+                    },
                 ) {
                     Ok(draft) => acc.corporate_actions.push(draft),
                     Err((code, message)) => acc.push(&code, action_path, message),
@@ -931,15 +956,7 @@ fn decode_cninfo(
     }
 }
 
-fn parse_action(
-    value: &Value,
-    action_index: u32,
-    announcement_id: String,
-    symbol: String,
-    announced_date: NaiveDate,
-    raw: String,
-    path: &str,
-) -> Result<ActionDraft, (String, String)> {
+fn parse_action(value: &Value, source: ActionSource<'_>) -> Result<ActionDraft, (String, String)> {
     let obj = value.as_object().ok_or_else(|| {
         (
             "invalid_corporate_action".into(),
@@ -1026,15 +1043,16 @@ fn parse_action(
     if !valid {
         return Err((
             "incomplete_corporate_action".into(),
-            format!("required dates or amounts are missing in {path}"),
+            format!("required dates or amounts are missing in {}", source.path),
         ));
     }
     Ok(ActionDraft {
-        announcement_id,
-        action_index,
-        instrument_id: symbol,
+        announcement_id: source.announcement_id.to_owned(),
+        action_index: source.action_index,
+        instrument_id: source.symbol.to_owned(),
         kind,
-        announced_date,
+        announced_date: source.announced_date,
+        announced_at: source.announced_at,
         record_date,
         ex_date,
         pay_date,
@@ -1042,7 +1060,7 @@ fn parse_action(
         cash_per_share,
         share_ratio,
         liquidation_cash_per_share,
-        raw,
+        source_raw_sha256: source.source_raw_sha256.to_owned(),
     })
 }
 
