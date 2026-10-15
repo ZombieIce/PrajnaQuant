@@ -220,11 +220,7 @@ fn invalid(message: impl Into<String>) -> FastEventError {
     FastEventError::InvalidInput(message.into())
 }
 fn add(a: Notional, b: Notional) -> Result<Notional, FastEventError> {
-    Ok(Notional::from_mantissa(
-        a.mantissa()
-            .checked_add(b.mantissa())
-            .ok_or(FixedPointError::Overflow)?,
-    )?)
+    Ok(crate::strategy::execution_add(a, b)?)
 }
 fn sub(a: Notional, b: Notional) -> Result<Notional, FastEventError> {
     add(a, b.checked_mul(-1)?)
@@ -247,7 +243,7 @@ fn weight(input: f64) -> Result<Notional, FastEventError> {
         return Err(invalid("weights must be finite and in [0, 1]"));
     }
     // Decision weights originate in Research f64; prices and ledger never do.
-    Ok(input.to_string().parse()?)
+    Ok(crate::strategy::execution_decimal(input)?)
 }
 
 #[derive(Default)]

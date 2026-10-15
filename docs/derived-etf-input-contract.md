@@ -55,8 +55,11 @@ HALTED/UNKNOWN/涨跌停受限格子另存 `execution_exclusions`，不因其已
 `ExecutionState::resolve_sized` 提交状态：实际必需 sell 被阻塞时整次常规目标延期，
 无常规成交或扣费；实际 buy 被阻塞时冻结该标的已有数量（未持有则保留现金），
 移除该腿费用后重算其他腿，不重归一目标。不能以目标成员身份或名义权重变化代替
-实际买卖方向；F8 的 fee-only settlement 按其 fee_side 门禁。Fast Retry 只补足
-缺失的绝对目标增量，保留其他持仓；Skip 不重试。语义版本 `pit-s2@2` 进入身份，
+实际买卖方向；Vector PIT 的归一化费用、扣费后目标市值及侧判断先使用 Domain
+scale-18/half-even 算术，不对浮点差设置 no-trade epsilon。精确零增量但有费用的
+F8 fee-only settlement 按其 fee_side 门禁；所有可表示的非零增量仍判实际方向。
+Fast Retry 只补足缺失的绝对目标增量，保留其他持仓；Skip 不重试。
+语义版本 `pit-s2@3` 进入身份，避免重用旧方向判定结果，
 旧 Static Universe 路径不变。每个新 close 的常规
 Decision 替换旧 pending，但不取消独立持久 Risk Exit。风险退出优先于常规 open 尝试，
 逐个风险标的等待明确可卖 open，不等待 cadence、不受其他持仓延期影响，卖后保留其他
@@ -68,6 +71,14 @@ Decision 替换旧 pending，但不取消独立持久 Risk Exit。风险退出�
 最终 A/B 各 5,000、现金 0；A 从 50% 增至 100% 的跌停买入不被卖方向阻塞。
 另验 1% 费用、费用导致名义增持变成实际减持、整次延期和持仓增量 Retry；
 lot 与 common parity 均有独立手算数量/现金断言，不只互相对拍。
+
+Fee-only 边界：平价 1、资本 10,000、佣金 1%，先持有 A 权重 0.2997，
+后调至 A=0.3/B=0.0997。common parity 的开盘前权益 9,970.03、
+A=2,988.017991；费用 9.97003 后 A 数量精确不变，A 的 buy-side fee-only
+扣费 0.02991009、B 买入 993.017979009（费用 9.94011991），
+现金 5,979.023999991、权益 9,960.05997。A 跌停允许该买方向结算，
+不能因浮点差 −5.55e−17 判成受阻卖出。另验涨停跳过该结算后重算 B、
+正/负浮点零边界与真实小于 1e−12 的卖增量仍整次延期。
 
 手算 3×10 用例（全部平价 1，只有 S7 的 A open=0.9）：S3 close 选 A；S4 open
 以 10,000 元、lot100、3bp/min5、2bp 滑点买 A 9,900 份，现金 93.02、NAV 9,993.02。

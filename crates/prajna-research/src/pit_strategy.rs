@@ -15,7 +15,7 @@ use crate::{
     strategy::Decision,
 };
 
-pub const SEMANTIC_VERSION: &str = "pit-s2@2";
+pub const SEMANTIC_VERSION: &str = "pit-s2@3";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

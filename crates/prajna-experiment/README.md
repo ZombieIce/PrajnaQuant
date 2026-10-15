@@ -86,7 +86,9 @@ Native DSV 价格按 Catalog 拆成生命周期面板，不把复用代码的另
 常规方向门禁按费用/数量 sizing 后的实际交易侧判断，而非目标成员身份：
 真正必需的受阻卖腿令整次目标延期；受阻买腿保留当前数量、不扣该腿费用，
 重算其他腿并保留现金，不重归一目标。涨停持仓可减仓、跌停持仓可加仓。
-F8 fee-only settlement 使用 fee_side；`pit-s2@2` 记录此语义变更，旧路径不变。
+PIT 的侧判断使用 Domain scale-18/half-even sizing；精确零增量才回退到
+F8 fee-only settlement 的 fee_side，不设 no-trade epsilon。`pit-s2@3` 记录此语义，
+旧路径不变。方向与 fee-only 手算回归见 `prajna-research/tests/pit_sides.rs`。
 
 Risk Notice 类型为 `vote_suspension`、`termination_proposal`、`liquidation_notice`、
 `official_termination`、`low_nav_warning`；最后一种只标注。Exact 发布时间沿用原时刻，

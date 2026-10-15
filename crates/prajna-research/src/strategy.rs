@@ -6,13 +6,25 @@ use std::{
 
 use chrono::NaiveDate;
 use polars::prelude::{DataFrame, PolarsError};
-use prajna_domain::InstrumentId;
+use prajna_domain::{FixedPointError, InstrumentId, Notional};
 
 use crate::{
     Panel, PanelSession,
     factor::AvailabilityAssumption,
     factor::{Factor, FactorStatus, values_schema},
 };
+
+pub(crate) fn execution_decimal(input: f64) -> Result<Notional, FixedPointError> {
+    input.to_string().parse()
+}
+
+pub(crate) fn execution_add(left: Notional, right: Notional) -> Result<Notional, FixedPointError> {
+    Notional::from_mantissa(
+        left.mantissa()
+            .checked_add(right.mantissa())
+            .ok_or(FixedPointError::Overflow)?,
+    )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StrategyCapability {

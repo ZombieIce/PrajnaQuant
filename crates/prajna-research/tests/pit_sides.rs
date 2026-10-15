@@ -6,7 +6,8 @@ use prajna_domain::{InstrumentId, Quantity};
 use prajna_research::{
     etf_market::{DerivedMarket, MarketEvidence},
     fast_event::{
-        FastEventConfig, FastEventCosts, PortfolioRun, Rebalance, Sizing, run_fast_event_pit,
+        FastEventConfig, FastEventCosts, FastEventResult, PortfolioRun, Rebalance, Sizing,
+        run_fast_event_pit,
     },
     pit_strategy::{self, RiskSignals},
     strategy::{Decision, UnfilledEntry},
@@ -20,8 +21,8 @@ fn case(
     lower: bool,
     commission: &str,
     expected: [(&str, &str, &str); 2],
-    deferred: bool,
-) {
+    deferred: [bool; 2],
+) -> Vec<FastEventResult> {
     let lake = fixture::lake();
     let f = fixture::fixture(lake.path());
     assert_eq!(f.market.sessions().len(), 10);
@@ -58,6 +59,7 @@ fn case(
         },
     ];
     let mut parity_nav = Vec::new();
+    let mut results = Vec::new();
     for (i, sizing) in [Sizing::Lot, Sizing::VectorParity].into_iter().enumerate() {
         let config = FastEventConfig {
             currency: "CNY".parse().unwrap(),
@@ -90,8 +92,10 @@ fn case(
         .unwrap();
         let positions = &result.sessions[3].open_after.portfolios[&VirtualPortfolioId(1)].positions;
         assert_eq!(
-            positions.get(&f.ids[0]).map(|p| p.quantity),
-            Some(expected[i].0.parse::<Quantity>().unwrap()),
+            positions
+                .get(&f.ids[0])
+                .map_or(Quantity::ZERO, |p| p.quantity),
+            expected[i].0.parse::<Quantity>().unwrap(),
             "{sizing:?}"
         );
         assert_eq!(
@@ -110,10 +114,10 @@ fn case(
             result.attempts.iter().any(|a| matches!(&a.event,
             prajna_research::strategy::ExecutionEvent::Deferred {attempt_session,..}
                 if attempt_session.session_date == fixture::date(4))),
-            deferred,
+            deferred[i],
             "{sizing:?}"
         );
-        if deferred {
+        if deferred[i] {
             assert!(
                 result
                     .fills
@@ -136,6 +140,7 @@ fn case(
                 );
             }
         }
+        results.push(result);
     }
     let vector = run_vector_pit(
         &panel,
@@ -185,11 +190,12 @@ fn case(
             .iter()
             .any(|e| e.session_date == fixture::date(4).to_string()
                 && e.kind == prajna_research::vector::VectorExecutionKind::Deferred),
-        deferred
+        deferred[1]
     );
     for (session, fast_equity) in vector.sessions.iter().zip(parity_nav) {
         assert!((session.nav / (1.0 + session.gross_return) * 10000.0 - fast_equity).abs() < 1e-8);
     }
+    results
 }
 
 #[test]
@@ -203,7 +209,7 @@ fn upper_limit_held_reduction_retains_target_quantity() {
         false,
         "0",
         [("5000", "5000", "0"); 2],
-        false,
+        [false; 2],
     );
 }
 
@@ -215,7 +221,7 @@ fn lower_limit_buy_only_does_not_require_sell_permission() {
         true,
         "0",
         [("10000", "0", "0"); 2],
-        false,
+        [false; 2],
     );
 }
 
@@ -227,7 +233,7 @@ fn blocked_buy_increase_keeps_existing_quantity_instead_of_liquidating() {
         false,
         "0",
         [("5000", "0", "5000"); 2],
-        false,
+        [false; 2],
     );
 }
 
@@ -242,7 +248,7 @@ fn upper_limit_reduction_sizes_after_fees_and_lot_rounding() {
         false,
         "0.01",
         [("4900", "4900", "40"), ("4920.32", "4920.32", "0")],
-        false,
+        [false; 2],
     );
 }
 
@@ -254,7 +260,7 @@ fn lower_limit_increase_remains_buy_only_after_fees() {
         true,
         "0.01",
         [("9900", "0", "1"), ("9900.25", "0", "0")],
-        false,
+        [false; 2],
     );
 }
 
@@ -266,7 +272,7 @@ fn blocked_increment_freezes_quantity_without_charging_skipped_fees() {
         false,
         "0.01",
         [("5000", "0", "4950"), ("4975", "0", "4975")],
-        false,
+        [false; 2],
     );
 }
 
@@ -281,7 +287,7 @@ fn blocked_increment_removes_its_fee_and_resizes_the_other_buy() {
         false,
         "0.01",
         [("5000", "1900", "3031"), ("4975", "1986.02", "2969.08")],
-        false,
+        [false; 2],
     );
 }
 
@@ -296,7 +302,7 @@ fn fees_can_turn_nominal_weight_increase_into_a_blocked_required_sell() {
         true,
         "0.01",
         [("5000", "0", "4950"), ("4975", "0", "4975")],
-        true,
+        [true; 2],
     );
 }
 
@@ -311,7 +317,7 @@ fn lower_limit_reduction_defers_all_legs_without_fees() {
         true,
         "0",
         [("8000", "0", "2000"); 2],
-        true,
+        [true; 2],
     );
 }
 
@@ -323,8 +329,201 @@ fn unchanged_lower_limit_holding_needs_no_sell_permission() {
         true,
         "0",
         [("5000", "0", "5000"); 2],
-        false,
+        [false; 2],
     );
+}
+
+#[test]
+fn lower_limit_allows_exact_buy_fee_only_adjustment_despite_float_roundoff() {
+    let results = case(
+        0.2997,
+        BTreeMap::from([
+            ("A.SZSE".parse().unwrap(), 0.3),
+            ("B.SZSE".parse().unwrap(), 0.0997),
+        ]),
+        true,
+        "0.01",
+        [
+            ("2900", "900", "6162"),
+            ("2988.017991", "993.017979009", "5979.023999991"),
+        ],
+        [false; 2],
+    );
+    let parity = &results[1];
+    assert_eq!(
+        parity.sessions[2].open_after.account.equity,
+        "9970.03".parse().unwrap()
+    );
+    assert_eq!(
+        parity.sessions[3].open_after.account.equity,
+        "9960.05997".parse().unwrap()
+    );
+    assert_eq!(parity.account.fee_settlements().len(), 1);
+    let fee = &parity.account.fee_settlements()[0];
+    assert_eq!(fee.fee_side(), prajna_account::Side::Buy);
+    assert_eq!(fee.fee_basis(), "2.991009".parse().unwrap());
+    assert_eq!(fee.total_fees(), "0.02991009".parse().unwrap());
+    assert_eq!(parity.fills.len(), 2);
+    assert!(
+        parity
+            .fills
+            .iter()
+            .all(|f| f.fill.order().side() == prajna_account::Side::Buy)
+    );
+    assert_eq!(
+        parity.fills[0].fill.order().quantity(),
+        "2988.017991".parse().unwrap()
+    );
+    assert_eq!(
+        parity.fills[1].fill.order().quantity(),
+        "993.017979009".parse().unwrap()
+    );
+    assert_eq!(
+        parity.fills[1].fill.total_fees(),
+        "9.94011991".parse().unwrap()
+    );
+}
+
+#[test]
+fn real_sub_tolerance_sized_sell_still_defers_instead_of_becoming_fee_only() {
+    let results = case(
+        0.2997,
+        BTreeMap::from([
+            ("A.SZSE".parse().unwrap(), 0.299999999999999),
+            ("B.SZSE".parse().unwrap(), 0.0997),
+        ]),
+        true,
+        "0.01",
+        [("2900", "900", "6162"), ("2988.017991", "0", "6982.012009")],
+        [false, true],
+    );
+    assert_eq!(
+        results[1].sessions[3].open_after.account.equity,
+        "9970.03".parse().unwrap()
+    );
+    assert!(results[1].account.fee_settlements().is_empty());
+}
+
+#[test]
+fn upper_limit_blocks_buy_fee_only_and_resizes_the_other_leg_without_that_fee() {
+    let results = case(
+        0.2997,
+        BTreeMap::from([
+            ("A.SZSE".parse().unwrap(), 0.3),
+            ("B.SZSE".parse().unwrap(), 0.0997),
+        ]),
+        false,
+        "0.01",
+        [
+            ("2900", "900", "6162"),
+            ("2988.017991", "993.020961044973", "5979.050928045027"),
+        ],
+        [false; 2],
+    );
+    let parity = &results[1];
+    assert!(parity.account.fee_settlements().is_empty());
+    assert_eq!(
+        parity.sessions[3].open_after.account.equity,
+        "9960.08988009".parse().unwrap()
+    );
+    assert_eq!(parity.fills.len(), 2);
+    assert_eq!(
+        parity.fills[1].fill.total_fees(),
+        "9.94011991".parse().unwrap()
+    );
+}
+
+#[test]
+fn tiny_held_weight_drift_is_quantized_before_retrying_a_deferred_target() {
+    case(
+        0.002997,
+        BTreeMap::from([
+            ("A.SZSE".parse().unwrap(), 0.002999999999999),
+            ("B.SZSE".parse().unwrap(), 0.099997),
+        ]),
+        true,
+        "0.01",
+        [
+            ("0", "900", "9091"),
+            ("29.9691017991", "0", "9969.7311982009"),
+        ],
+        [false, true],
+    );
+}
+
+#[test]
+fn neighboring_exact_fee_only_targets_keep_direction_despite_float_sign_variations() {
+    for (initial, target, b, lot_a, lot_b, lot_cash, a, quantity_b, cash) in [
+        (
+            0.1998,
+            0.2,
+            0.0998,
+            "1900",
+            "900",
+            "7172",
+            "1994.007996",
+            "995.009990004",
+            "6981.021993996",
+        ),
+        (
+            0.5994,
+            0.6,
+            0.0994,
+            "5900",
+            "900",
+            "3132",
+            "5958.071964",
+            "987.053922036",
+            "2984.994053964",
+        ),
+        (
+            0.6993,
+            0.7,
+            0.0993,
+            "6900",
+            "900",
+            "2122",
+            "6944.097951",
+            "985.069895049",
+            "1990.972083951",
+        ),
+        (
+            0.0997,
+            0.1,
+            0.2997,
+            "900",
+            "2900",
+            "6162",
+            "996.005991",
+            "2985.029955027",
+            "5979.023963973",
+        ),
+    ] {
+        let results = case(
+            initial,
+            BTreeMap::from([
+                ("A.SZSE".parse().unwrap(), target),
+                ("B.SZSE".parse().unwrap(), b),
+            ]),
+            true,
+            "0.01",
+            [(lot_a, lot_b, lot_cash), (a, quantity_b, cash)],
+            [false; 2],
+        );
+        let parity = &results[1];
+        assert_eq!(parity.account.fee_settlements().len(), 1);
+        assert_eq!(
+            parity.account.fee_settlements()[0].fee_side(),
+            prajna_account::Side::Buy
+        );
+        assert_eq!(parity.fills.len(), 2);
+        assert!(
+            parity
+                .fills
+                .iter()
+                .all(|f| f.fill.order().side() == prajna_account::Side::Buy)
+        );
+    }
 }
 
 #[test]
