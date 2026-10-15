@@ -209,7 +209,7 @@ impl EtfMomentum {
             self.canonical_json(),
             market.dsv(),
             universe_version,
-            json!({"catalog":market.catalog_version(),"market":market.version(),"tri":tri.identity(),"members":members.iter().collect::<BTreeSet<_>>()}),
+            json!({"catalog":market.catalog_version(),"market":market.version(),"tri":tri.version(),"members":members.iter().collect::<BTreeSet<_>>()}),
         )
     }
     pub fn cached(
@@ -224,12 +224,7 @@ impl EtfMomentum {
         let key = self
             .cache_key(market, tri, universe_version, members)
             .map_err(|e| FactorError::Evaluation(e.to_string()))?;
-        if let Some(values) = cache.load(&key)? {
-            return Ok(values);
-        }
-        let values = self.compute(market, tri, members)?;
-        cache.publish(&key, &values)?;
-        Ok(values)
+        cache.get_or_compute_values(&key, || self.compute(market, tri, members))
     }
     pub fn compute(
         &self,

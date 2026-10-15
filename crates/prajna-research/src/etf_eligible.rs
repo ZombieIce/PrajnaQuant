@@ -91,8 +91,20 @@ impl EligibleSet {
             .datetime()
             .map_err(column_error)?
             .physical();
+        let factor_dates = values
+            .column("session_date")
+            .map_err(column_error)?
+            .date()
+            .map_err(column_error)?
+            .physical();
+        let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).expect("epoch");
+        let selected_day = i32::try_from((date - epoch).num_days())
+            .map_err(|_| error("decision date overflow"))?;
         let mut momentum = BTreeMap::new();
-        for row in (i..values.height()).step_by(market.sessions().len()) {
+        for row in 0..values.height() {
+            if factor_dates.get(row) != Some(selected_day) {
+                continue;
+            }
             momentum.insert(
                 ids.get(row).unwrap_or_default(),
                 statuses.get(row) == Some("ok")

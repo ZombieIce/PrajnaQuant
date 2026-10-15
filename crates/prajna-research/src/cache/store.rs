@@ -244,9 +244,19 @@ impl FactorCache {
             })
     }
 
-    /// Read a validated Values entry for an explicitly versioned external input contract.
-    pub fn load(&self, key: &FactorKey) -> Result<Option<DataFrame>, CacheError> {
-        self.read_if_present(key)
+    /// Share the integrity and publication path with evidence-aware factor evaluators.
+    pub(crate) fn get_or_compute_values(
+        &self,
+        key: &FactorKey,
+        compute: impl FnOnce() -> Result<DataFrame, FactorError>,
+    ) -> Result<DataFrame, CacheError> {
+        if let Some(values) = self.read_if_present(key)? {
+            return Ok(values);
+        }
+        self.compute_count.fetch_add(1, Ordering::Relaxed);
+        let values = compute()?;
+        self.publish(key, &values)?;
+        Ok(values)
     }
 
     fn read_if_present(&self, key: &FactorKey) -> Result<Option<DataFrame>, CacheError> {
@@ -317,7 +327,7 @@ impl FactorCache {
         Ok(values)
     }
 
-    pub fn publish(&self, key: &FactorKey, values: &DataFrame) -> Result<(), CacheError> {
+    fn publish(&self, key: &FactorKey, values: &DataFrame) -> Result<(), CacheError> {
         ensure_values_schema(values)?;
         let destination = self.cache_path(key)?;
         if let Some(existing) = self.read_if_present(key)? {

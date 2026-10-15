@@ -309,6 +309,10 @@ fn availability_is_not_backdated_and_evidence_changes_identity() {
     assert!(!later.cells()[&(id.clone(), date(1))].known_by(time(1, 15)));
     assert_ne!(later.version(), market.version());
     e.openings[0].market_available_at = None;
+    let unknown_time = build(&cat, &raw, &tables, e.clone());
+    assert!(!unknown_time.cells()[&(id.clone(), date(1))].permits(true));
+    assert!(!unknown_time.cells()[&(id.clone(), date(1))].can_buy);
+
     assert!(!build(&cat, &raw, &tables, e).cells()[&(id, date(1))].known_by(time(10, 15)));
 }
 
@@ -377,6 +381,7 @@ fn full_momentum_window_halt_carry_unknown_gap_and_cache_identity() {
         values
     );
     assert!(cache.hit_count() > 0);
+    assert_eq!(cache.compute_count(), 1);
     let key = f.cache_key(&market, &index, "pit-v1", &ids).unwrap();
     assert_ne!(key, f.cache_key(&market, &index, "pit-v2", &ids).unwrap());
     assert_ne!(
@@ -620,6 +625,22 @@ fn rebuild_frozen_dataset_then_derive_replays_and_detects_raw_tampering() {
             .values()
             .all(|c| c.state == TradeState::Tradable)
     );
+    let missing_secondary = prajna_data::publish_dataset(
+        tmp.path(),
+        &raw,
+        &NormalizerRegistry::with_builtins(),
+        "szse-etf-frozen",
+        "1",
+        &hashes[..hashes.len() - 1],
+        "2026-10-15T00:00:00Z",
+    )
+    .unwrap();
+    assert!(
+        DerivedMarket::from_dataset(tmp.path(), &missing_secondary.dsv, &cat, e.clone())
+            .unwrap_err()
+            .0
+            .contains("whole-market missing")
+    );
     let hash = hashes.last().unwrap();
     let hex = hash.strip_prefix("sha256:").unwrap();
     std::fs::write(
@@ -672,4 +693,45 @@ fn provider_levels_are_used_and_actual_points_participate_in_cache_identity() {
         f.cache_key(&market, &b, "uni", &ids).unwrap()
     );
     assert!(TotalReturnIndex::build(&market, None, None, &raw).is_err());
+}
+#[test]
+fn halted_state_preserves_latest_dependency_and_source_conflicts_remain_unknown() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (raw, input) = fixture(tmp.path());
+    let cat = HistoricalCatalog::build(input, &raw).unwrap();
+    let (mut tables, mut e) = data(&cat);
+    let id = e.openings[1].instrument_id.clone();
+    e.openings[1].halt = Some(HaltEvidence {
+        scope: HaltScope::OpeningOnly,
+        evidence: e.openings[1].announcement_coverage.clone().unwrap(),
+    });
+    e.openings[1].market_available_at = Some(time(9, 16));
+    let market = build(&cat, &raw, &tables, e.clone());
+    let cell = &market.cells()[&(id.clone(), date(2))];
+    assert_eq!(cell.state, TradeState::Halted);
+    assert_eq!(cell.available_at, Some(time(9, 16)));
+    assert!(!cell.known_by(time(2, 15)));
+    e.openings[1].market_available_at = None;
+    assert_eq!(
+        build(&cat, &raw, &tables, e.clone()).cells()[&(id.clone(), date(2))].available_at,
+        None
+    );
+    let checks = tables.source_crosscheck.as_ref().unwrap();
+    let mut statuses = vec!["match"; checks.num_rows()];
+    statuses[1] = "mismatch";
+    let mut columns = checks.columns().to_vec();
+    columns[2] = std::sync::Arc::new(StringArray::from(statuses));
+    tables.source_crosscheck = Some(RecordBatch::try_new(checks.schema(), columns).unwrap());
+    let unknown = build(&cat, &raw, &tables, e);
+    assert_eq!(unknown.cells()[&(id, date(2))].state, TradeState::Unknown);
+    let index = tri(&unknown, &cat, &raw);
+    let ids = cat.universe(date(3)).unwrap().members;
+    let values = EtfMomentum::new(2)
+        .unwrap()
+        .compute(&unknown, &index, &ids)
+        .unwrap();
+    assert_eq!(
+        values.column("status").unwrap().str().unwrap().get(2),
+        Some("missing_input")
+    );
 }

@@ -285,6 +285,9 @@ impl DerivedMarket {
             if !checks
                 .iter()
                 .any(|((_, d), c)| *d == session.session_date() && c.has_primary)
+                || !checks
+                    .iter()
+                    .any(|((_, d), c)| *d == session.session_date() && c.has_secondary)
             {
                 return Err(err(format!(
                     "whole-market missing Session {}",
@@ -408,6 +411,7 @@ pub enum RebalanceGate {
 }
 struct Crosscheck {
     has_primary: bool,
+    has_secondary: bool,
     matched: bool,
     sources: BTreeSet<String>,
 }
@@ -457,6 +461,7 @@ fn crosschecks(
                 (id, date),
                 Crosscheck {
                     has_primary: !primary.is_null(i),
+                    has_secondary: !secondary.is_null(i),
                     matched,
                     sources,
                 },
@@ -509,6 +514,10 @@ fn derive(
             .copied()
             .fold(at.max(session.ts_close()), TimestampNs::max)
     });
+    if check.is_some_and(|c| c.has_primary && c.has_secondary && !c.matched) {
+        cell.reasons.insert("sources_conflicting".into());
+        return Ok(cell);
+    }
     if let Some(halt) = &o.halt {
         if halt.scope == HaltScope::FullSession && bar.is_some_and(|b| b.volume() > Quantity::ZERO)
         {
@@ -516,7 +525,6 @@ fn derive(
         } else {
             cell.state = TradeState::Halted;
             cell.reasons.insert("official_opening_halt".into());
-            cell.available_at = Some(halt.evidence.available_at(catalog.input())?);
             // HALTED amount counts as zero, including an afternoon resumption.
             cell.amount = Some(Notional::ZERO);
         }
@@ -584,6 +592,11 @@ fn derive(
     } else {
         cell.can_buy = false;
         cell.can_sell = false;
+    }
+    if cell.available_at.is_none() {
+        cell.can_buy = false;
+        cell.can_sell = false;
+        cell.reasons.insert("unknown_availability".into());
     }
     Ok(cell)
 }
