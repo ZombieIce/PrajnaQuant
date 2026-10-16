@@ -35,6 +35,8 @@ cargo run -p prajna-data --bin prajna-cninfo --locked --offline -- \
 
 `announced_ms` 是原始公告时间；`available_at` 明确为 null。后续 Catalog 必须按 P6 和交易日历计算下一 Session 收盘可用时间：不得把索引中的公告时间直接当可用时间，不得向前填充首条全称。首条事实以前、未解析变更以后及日历未覆盖期间按 unknown 排除并报告。`observed_at` 始终只是本地采集时间。
 
+#205 的 `RiskSignals::build_from_cninfo` / Experiment `pit.cninfo_index` 已连接风险提示分类与 P6：取公告时间的上海日期，再用 Catalog 日历推到下一 Session close，大会/计票停牌/合同终止/清算类别产生持久 Risk Exit 输入。它检查索引/基金 unknown、分类版本、窗口与 Raw 引用，不据标题断言开盘停牌区间或清算金额。完整状态与时间边界见 [派生输入契约](derived-etf-input-contract.md)；仅合成验证。
+
 ## PDF 字段与公司行动
 
 `cninfo_pdf_fields_v1` 使用本机 `pdftotext -layout -enc UTF-8`，保守匹配带标签的日期与每份金额；字段重复且有歧义、无效日期或转换失败为 null。数额保留十进制字符串。每个非 null 字段的 `fieldSources` 都引用原始 PDF Raw SHA-256；整份 PDF hash 也进入 Manifest inputs。转换器环境差异若改变提取结果，会改变输出 logical hash 与 DSV。

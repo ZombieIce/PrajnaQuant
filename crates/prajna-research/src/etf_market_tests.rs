@@ -84,6 +84,14 @@ fn data(catalog: &HistoricalCatalog) -> (NormalizedTables, MarketEvidence) {
     let doc = input.lifecycles[0].listing.evidence.clone();
     for l in &input.lifecycles {
         for s in &input.sessions {
+            if input.schema_version == 2
+                && catalog
+                    .resolve_row(&l.native_symbol, s.session_date())
+                    .as_ref()
+                    != l.instrument_id().as_ref()
+            {
+                continue;
+            }
             let native: InstrumentId = format!("{}.SZSE", l.native_symbol).parse().unwrap();
             bars.push(
                 Bar::new(
@@ -128,6 +136,7 @@ fn data(catalog: &HistoricalCatalog) -> (NormalizedTables, MarketEvidence) {
                     rounding: "nearest_tick_half_up".into(),
                     applies_on_first_session: true,
                     evidence: doc.clone(),
+                    official_rule: None,
                 }),
                 reference: Some(ReferencePrice {
                     adjusted_previous_close: Price::parse("1").unwrap(),
@@ -151,6 +160,7 @@ fn data(catalog: &HistoricalCatalog) -> (NormalizedTables, MarketEvidence) {
             tdx_code_table: None,
         },
         MarketEvidence {
+            semantic_version: None,
             rule_version: "synthetic-opening@1".into(),
             start: date(1),
             end: date(10),
@@ -863,6 +873,13 @@ fn unknown_sale_defers_entire_target_and_unknown_buy_is_excluded() {
     ));
 }
 fn vendor_originals(raw: &RawStore) -> Vec<String> {
+    vendor_originals_edited(raw, |_, _, _| true, |_, _| true)
+}
+fn vendor_originals_edited(
+    raw: &RawStore,
+    edit_tdx: impl Fn(u32, usize, &mut [u8]) -> bool,
+    include_tencent: impl Fn(u32, usize) -> bool,
+) -> Vec<String> {
     use std::io::{Cursor, Write};
     use zip::{ZipWriter, write::SimpleFileOptions};
     let mut originals = Vec::new();
@@ -872,18 +889,21 @@ fn vendor_originals(raw: &RawStore) -> Vec<String> {
     originals.push(serde_json::to_vec(&serde_json::json!({"data":days})).unwrap());
     for day in 1..=10 {
         let mut cod = Vec::new();
-        let mut md1 = vec![0_u8; 3 * 512];
+        let mut md1 = Vec::new();
         for (i, code) in ["159001", "159002", "159003"].iter().enumerate() {
             let mut record = [0_u8; 150];
             record[..6].copy_from_slice(code.as_bytes());
-            record[32..34].copy_from_slice(&(i as u16).to_le_bytes());
-            cod.extend_from_slice(&record);
-            let block = &mut md1[i * 512..][..512];
-            for off in [12, 20, 28, 36] {
+            record[32..34].copy_from_slice(&((cod.len() / 150) as u16).to_le_bytes());
+            let mut block = [0_u8; 512];
+            for off in [4, 12, 20, 28, 36] {
                 block[off..off + 8].copy_from_slice(&1.0_f64.to_le_bytes());
             }
             block[56..64].copy_from_slice(&20000_u64.to_le_bytes());
             block[72..80].copy_from_slice(&10000000_f64.to_le_bytes());
+            if edit_tdx(day, i, &mut block) {
+                cod.extend_from_slice(&record);
+                md1.extend_from_slice(&block);
+            }
         }
         let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
         let options = SimpleFileOptions::default().last_modified_time(zip::DateTime::default());
@@ -896,10 +916,15 @@ fn vendor_originals(raw: &RawStore) -> Vec<String> {
         }
         originals.push(writer.finish().unwrap().into_inner());
     }
-    let rows: Vec<_> = (1..=10)
-        .map(|d| serde_json::json!([date(d).to_string(), "1", "1", "1", "1", "200"]))
-        .collect();
-    originals.push(serde_json::to_vec(&serde_json::json!({"code":0,"data":{"sz159001":{"day":rows},"sz159002":{"day":rows},"sz159003":{"day":rows}}})).unwrap());
+    let mut quotes = serde_json::Map::new();
+    for (i, code) in ["sz159001", "sz159002", "sz159003"].iter().enumerate() {
+        let rows: Vec<_> = (1..=10)
+            .filter(|d| include_tencent(*d, i))
+            .map(|d| serde_json::json!([date(d).to_string(), "1", "1", "1", "1", "200"]))
+            .collect();
+        quotes.insert((*code).into(), serde_json::json!({"day": rows}));
+    }
+    originals.push(serde_json::to_vec(&serde_json::json!({"code":0,"data":quotes})).unwrap());
     originals
         .into_iter()
         .map(|bytes| {
@@ -924,6 +949,13 @@ fn rebuild_frozen_dataset_then_derive_replays_and_detects_raw_tampering() {
     let (raw, input) = fixture(tmp.path());
     let cat = HistoricalCatalog::build(input, &raw).unwrap();
     let (_, e) = data(&cat);
+    let legacy_json = serde_json::to_value(&e).unwrap();
+    assert!(legacy_json.get("semantic_version").is_none());
+    assert!(
+        legacy_json["openings"][0]["limit_rule"]
+            .get("official_rule")
+            .is_none()
+    );
     let hashes = vendor_originals(&raw);
     let manifest = prajna_data::publish_dataset(
         tmp.path(),
@@ -969,6 +1001,298 @@ fn rebuild_frozen_dataset_then_derive_replays_and_detects_raw_tampering() {
     )
     .unwrap();
     assert!(DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, e).is_err());
+}
+fn v2_evidence(catalog: &HistoricalCatalog) -> MarketEvidence {
+    let (_, evidence) = data(catalog);
+    let mut value = serde_json::to_value(evidence).unwrap();
+    value["semantic_version"] = serde_json::json!("szse-derived-open@2");
+    for opening in value["openings"].as_array_mut().unwrap() {
+        opening["source_independence"] = serde_json::Value::Null;
+        opening["reference"] = serde_json::Value::Null;
+        opening["limit_rule"]["official_rule"] = serde_json::json!({
+            "document_number": "SYNTHETIC-EXCHANGE-2023-1",
+            "fund_category": "synthetic_domestic_equity_etf"
+        });
+    }
+    serde_json::from_value(value).unwrap()
+}
+
+#[test]
+fn v2_tdx_only_dataset_is_tradable_without_dual_source_claims() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (raw, input) = fixture(tmp.path());
+    let cat = HistoricalCatalog::build(input, &raw).unwrap();
+    let hashes = vendor_originals(&raw);
+    let manifest = prajna_data::publish_dataset(
+        tmp.path(),
+        &raw,
+        &NormalizerRegistry::with_builtins(),
+        "szse-etf-frozen",
+        "3",
+        &hashes[..hashes.len() - 1],
+        "2026-10-15T00:00:00Z",
+    )
+    .unwrap();
+    let evidence = v2_evidence(&cat);
+    let market =
+        DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, evidence.clone()).unwrap();
+    assert_eq!(market.cells().len(), 30);
+    assert!(
+        market
+            .cells()
+            .values()
+            .all(|c| c.permits(true) && c.permits(false))
+    );
+    assert_eq!(
+        market.cells().values().next().unwrap().upper_limit,
+        Some(Price::parse("1.1").unwrap())
+    );
+    let replay = DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, evidence).unwrap();
+    assert_eq!(market.version(), replay.version());
+}
+
+#[test]
+fn v2_frozen_openings_use_tdx_ex_rights_reference_and_fail_closed() {
+    use crate::etf_eligible::{EligibilityParams, EligibleSet};
+    let tmp = tempfile::tempdir().unwrap();
+    let (raw, input) = fixture(tmp.path());
+    let cat = HistoricalCatalog::build(input, &raw).unwrap();
+    let hashes = vendor_originals_edited(
+        &raw,
+        |day, i, block| {
+            if i != 0 {
+                return true;
+            }
+            if matches!(day, 5 | 6) {
+                return false;
+            }
+            if day == 2 {
+                for off in [4, 12, 20, 28, 36] {
+                    block[off..off + 8].copy_from_slice(&0.9_f64.to_le_bytes());
+                }
+            }
+            if matches!(day, 3 | 4) {
+                let price = if day == 3 { 1.1_f64 } else { 0.9_f64 };
+                for off in [12, 20, 28, 36] {
+                    block[off..off + 8].copy_from_slice(&price.to_le_bytes());
+                }
+            }
+            true
+        },
+        |day, i| !(i == 0 && day == 5),
+    );
+    let manifest = prajna_data::publish_dataset(
+        tmp.path(),
+        &raw,
+        &NormalizerRegistry::with_builtins(),
+        "szse-etf-frozen",
+        "3",
+        &hashes,
+        "2026-10-15T00:00:00Z",
+    )
+    .unwrap();
+    let mut e = v2_evidence(&cat);
+    let id = e.openings[0].instrument_id.clone();
+    let doc = e.openings[0].announcement_coverage.clone().unwrap();
+    e.openings[6].halt = Some(HaltEvidence {
+        scope: HaltScope::OpeningOnly,
+        evidence: doc.clone(),
+    });
+    e.openings[7].halt = Some(HaltEvidence {
+        scope: HaltScope::FullSession,
+        evidence: doc,
+    });
+    e.openings[8].limit_rule = None;
+    e.openings[9].market_available_at = None;
+    let market = DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, e.clone()).unwrap();
+    let cell = |d| &market.cells()[&(id.clone(), date(d))];
+    // Prior close = 1, but TDX's ex-rights reference is 0.9: upper = 0.99.
+    assert_eq!(cell(2).upper_limit, Some(Price::parse("0.99").unwrap()));
+    assert!(cell(2).permits(true));
+    assert!(!cell(3).permits(true));
+    assert!(cell(3).permits(false));
+    assert!(cell(4).permits(true));
+    assert!(!cell(4).permits(false));
+    assert_eq!(cell(5).state, TradeState::Unknown);
+    assert!(cell(5).close.is_none());
+    assert_eq!(cell(6).state, TradeState::Unknown);
+    assert_eq!(cell(6).amount, None);
+    assert_eq!(cell(7).state, TradeState::Halted);
+    assert_eq!(cell(7).amount, Some(Notional::ZERO));
+    for d in [5, 6, 7, 8, 9, 10] {
+        assert!(!cell(d).permits(true) && !cell(d).permits(false));
+        assert!(matches!(
+            market
+                .rebalance_gate(date(d), std::slice::from_ref(&id), &[])
+                .unwrap(),
+            RebalanceGate::Deferred { .. }
+        ));
+    }
+    let index = tri(&market, &cat, &raw);
+    let eligible = EligibleSet::build(
+        &cat,
+        &market,
+        &index,
+        date(10),
+        EligibilityParams {
+            minimum_listing_sessions: 1,
+            momentum_sessions: 1,
+            amount_sessions: 5,
+            minimum_average_amount: Notional::ZERO,
+        },
+    )
+    .unwrap();
+    assert!(eligible.excluded[&id].contains("amount_missing_input"));
+    assert_eq!(eligible.universe.members.len(), 3);
+
+    // Unknown/expired/future rules, absent official category and coverage cannot trade.
+    for variant in 0..5 {
+        let mut missing = e.clone();
+        let opening = &mut missing.openings[0];
+        match variant {
+            0 => opening.limit_rule.as_mut().unwrap().official_rule = None,
+            1 => opening.limit_rule.as_mut().unwrap().effective_until = Some(date(1)),
+            2 => {
+                opening.limit_rule.as_mut().unwrap().evidence.publication = Publication::Exact {
+                    timestamp: time(2, 8),
+                }
+            }
+            3 => opening.announcement_coverage = None,
+            _ => {
+                missing.openings.remove(0);
+            }
+        }
+        let m = DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, missing).unwrap();
+        assert_eq!(m.cells()[&(id.clone(), date(1))].state, TradeState::Unknown);
+    }
+}
+
+#[test]
+fn v2_observed_prices_outside_official_limit_error_instead_of_succeeding() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (raw, input) = fixture(tmp.path());
+    let cat = HistoricalCatalog::build(input, &raw).unwrap();
+    for off in [12, 36] {
+        let hashes = vendor_originals_edited(
+            &raw,
+            |day, i, block| {
+                if day == 2 && i == 0 {
+                    block[off..off + 8].copy_from_slice(&1.101_f64.to_le_bytes());
+                    block[20..28].copy_from_slice(&1.101_f64.to_le_bytes());
+                }
+
+                true
+            },
+            |_, _| true,
+        );
+        let manifest = prajna_data::publish_dataset(
+            tmp.path(),
+            &raw,
+            &NormalizerRegistry::with_builtins(),
+            "szse-etf-frozen",
+            "3",
+            &hashes,
+            "2026-10-15T00:00:00Z",
+        )
+        .unwrap();
+        assert!(
+            DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, v2_evidence(&cat))
+                .unwrap_err()
+                .0
+                .contains("prices_outside_pit_rule")
+        );
+        let mut halted = v2_evidence(&cat);
+        halted.openings[1].halt = Some(HaltEvidence {
+            scope: HaltScope::OpeningOnly,
+            evidence: halted.openings[1].announcement_coverage.clone().unwrap(),
+        });
+        assert!(
+            DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, halted)
+                .unwrap_err()
+                .0
+                .contains("prices_outside_pit_rule")
+        );
+    }
+}
+#[test]
+fn v2_consumes_v4_catalog_lifecycle_boundaries_without_cross_identity_cells() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (raw, mut input) = fixture(tmp.path());
+    let hashes = vendor_originals(&raw);
+    let registry = NormalizerRegistry::with_builtins();
+    let manifest = prajna_data::publish_dataset(
+        tmp.path(),
+        &raw,
+        &registry,
+        "szse-etf-frozen",
+        "4",
+        &hashes,
+        "2026-10-15T00:00:00Z",
+    )
+    .unwrap();
+    let originals: Vec<_> = hashes
+        .iter()
+        .map(|hash| prajna_data::RawInput::from_bytes(raw.get(hash).unwrap()))
+        .collect();
+    let tables = registry
+        .get("szse-etf-frozen", "4")
+        .unwrap()
+        .normalize(&originals)
+        .unwrap()
+        .tables;
+    input.schema_version = 2;
+    input.code_ranges = Some(vec![CodeRange {
+        start: 158000,
+        end: 159999,
+    }]);
+    input.code_tables =
+        prajna_data::tdx_code_table_from_record_batch(tables.tdx_code_table.as_ref().unwrap())
+            .unwrap()
+            .into_iter()
+            .map(Into::into)
+            .collect();
+    input.broad_indices.named_indices = vec![BroadIndexName {
+        index_id: "CSI:300".into(),
+        official_name: "SYNTHETIC-INDEX".into(),
+        aliases: BTreeSet::new(),
+    }];
+    for life in &mut input.lifecycles {
+        life.identity_start = Some(date(1));
+        life.attributes[0].legal_name = Some("SYNTHETIC-INDEX A".into());
+    }
+    let mut next_life = input.lifecycles[0].clone();
+    next_life.identity_start = Some(date(6));
+    next_life.listing.effective_date = date(6);
+    next_life.attributes[0].effective_date = date(6);
+    next_life.attributes[0].legal_name = Some("SYNTHETIC-INDEX B".into());
+    next_life.attributes[0].evidence.publication = Publication::Exact {
+        timestamp: time(6, 8),
+    };
+    input.lifecycles.push(next_life);
+    input.scans.retain(|s| s.status == ScanStatus::Observed);
+    for scan in &mut input.scans {
+        scan.identity_start = Some(date(1));
+        if scan.native_symbol == "159001" {
+            scan.last_observed = Some(date(5));
+        }
+    }
+    let mut scan = input.scans[0].clone();
+    scan.identity_start = Some(date(6));
+    scan.first_observed = Some(date(6));
+    scan.last_observed = Some(date(10));
+    input.scans.push(scan);
+    let cat = HistoricalCatalog::build(input, &raw).unwrap();
+    assert!(cat.coverage_gaps().is_empty(), "{:?}", cat.coverage_gaps());
+    let old = cat.resolve_row("159001", date(5)).unwrap();
+    let new = cat.resolve_row("159001", date(6)).unwrap();
+    assert_ne!(old, new);
+    let e = v2_evidence(&cat);
+    let m = DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, e).unwrap();
+    assert_eq!(m.cells().len(), 30);
+    assert!(!m.cells().contains_key(&(old.clone(), date(6))));
+    assert!(!m.cells().contains_key(&(new.clone(), date(5))));
+    assert!(m.cells()[&(old, date(5))].permits(true));
+    assert!(m.cells()[&(new, date(6))].permits(true));
 }
 #[test]
 fn provider_levels_are_used_and_actual_points_participate_in_cache_identity() {

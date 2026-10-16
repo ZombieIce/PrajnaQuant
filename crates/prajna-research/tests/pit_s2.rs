@@ -488,3 +488,81 @@ fn last_close_risk_notice_remains_pending_without_fabricated_fill() {
     );
     assert_eq!(vector.pending_risk_exits, vec![f.ids[0].clone()]);
 }
+#[test]
+fn cninfo_classifications_trigger_risk_only_after_p6_next_session_close() {
+    use prajna_data::{
+        RawStore, SourceKind, SourceRecordInput,
+        cninfo::{FundIndex, IndexDataset, PageSet},
+    };
+    use prajna_research::pit_strategy::RiskSignals;
+    use serde_json::json;
+    let tmp = fixture::lake();
+    let f = fixture::fixture(tmp.path());
+    let raw = RawStore::open(tmp.path()).unwrap();
+    let bytes = serde_json::to_vec(&json!({
+        "totalAnnouncement": 4,
+        "announcements": [
+            {"announcementId":"meeting","secCode":"159001","orgId":"synthetic",
+             "announcementTitle":"合成沪深300交易型开放式指数证券投资基金持有人大会计票日停牌提示",
+             "announcementTime":1672617600000_i64},
+            {"announcementId":"termination","secCode":"159002","orgId":"synthetic",
+             "announcementTitle":"合成沪深300交易型开放式指数证券投资基金终止基金合同议案",
+             "announcementTime":1672617600000_i64},
+            {"announcementId":"liquidation","secCode":"159003","orgId":"synthetic",
+             "announcementTitle":"合成沪深300交易型开放式指数证券投资基金清算提示",
+             "announcementTime":1672876800000_i64},
+            {"announcementId":"report","secCode":"159001","orgId":"synthetic",
+             "announcementTitle":"合成沪深300交易型开放式指数证券投资基金年度报告",
+             "announcementTime":1672617600000_i64}
+        ]
+    }))
+    .unwrap();
+    let hash = raw
+        .put(
+            &bytes,
+            SourceRecordInput {
+                content_type: "application/json".into(),
+                source_kind: SourceKind::FileImport,
+                source_id: "synthetic-cninfo".into(),
+                request: json!({}),
+                observed_at: "2026-10-16T00:00:00Z".into(),
+                ingested_by: "test".into(),
+            },
+        )
+        .unwrap();
+    let mut pages = PageSet::default();
+    pages.push(1, &bytes).unwrap();
+    let (announcements, _) = pages.finish().unwrap();
+    let mut index = IndexDataset::new(fixture::date(1), fixture::date(10)).unwrap();
+    index.source_raw_sha256.insert(hash);
+    for code in ["159001", "159002", "159003"] {
+        let fund = FundIndex::new(
+            code.into(),
+            announcements
+                .iter()
+                .filter(|a| a.code == code)
+                .cloned()
+                .collect(),
+        );
+        index.funds.push(fund);
+    }
+    let risk = RiskSignals::build_from_cninfo(&f.catalog, vec![], &index, &raw).unwrap();
+    assert!(risk.active(fixture::time(2, 15)).is_empty());
+    assert!(risk.active_before_open(fixture::time(3, 9)).is_empty());
+    assert_eq!(
+        risk.active(fixture::time(3, 15)),
+        f.ids[..2].iter().cloned().collect()
+    );
+    assert_eq!(
+        risk.active_before_open(fixture::time(4, 9)),
+        f.ids[..2].iter().cloned().collect()
+    );
+    assert_eq!(risk.active(fixture::time(6, 15)).len(), 3);
+    assert!(
+        risk.signals
+            .iter()
+            .all(|s| s.notice.evidence.locator.contains("cninfo_title_rules_v2"))
+    );
+    index.unknown.push("missing_page".into());
+    assert!(RiskSignals::build_from_cninfo(&f.catalog, vec![], &index, &raw).is_err());
+}

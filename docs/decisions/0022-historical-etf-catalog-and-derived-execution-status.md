@@ -9,7 +9,7 @@
 - **P5/P7/P11**：TDX g4day 是行情主源，范围为配置的深市 ETF 代码段（含 158xxx）。腾讯未复权 `day` 只在 TDX 缺失 Instrument/Session 时补位，每根 Bar 保存来源；TDX 无成交观察阻止补位。取消双源完全一致门槛；跨源差异保留诊断，不能覆盖主源。源内相同主键的不同修订仍报错。补位成交额缺失，不估算、不补零、不缩短或跳过最近 20 Session 窗口；缺失窗口输入不能通过流动性条件。
 - **P12**：参考价是 TDX 昨收（交易所除权参考价），不是前一根 Bar 的 close。补位无参考价；未知参考价或 PIT 规则时保留 UNKNOWN，不能借腾讯 close 猜测。该字段供方向门禁及公司行动发现读取，不改变信号 T close、下一 Session open 的执行序列。
 - **P7/P8**：目标名录由 TDX 逐日代码表重建，缺席间隔与 cninfo 法定全称变化切分生命周期。目标宽基筛选使用 cninfo 法定全称与版本化国内宽基指数名/别名匹配，按公告可知时刻生效，不用场内简称；缺失/无法匹配期间排除并报告。具体实现由 #203 承担。
-- **P10**：目标 TRADABLE 允许 TDX 或补位正成交 Bar，加已知开盘停牌排除和 P12 门禁；公告覆盖开盘为 HALTED，无 Bar 且无停牌公告为 UNKNOWN。#205 将版本化消费该契约，#201 不改既有 `szse-derived-open@1` 的双源逻辑。
+- **P10**：TRADABLE 允许 TDX 或补位正成交 Bar，加已知开盘停牌排除和 P12 门禁；公告覆盖开盘为 HALTED，无 Bar 且无停牌公告为 UNKNOWN。#205 实现显式 `MarketEvidence.semantic_version = "szse-derived-open@2"`，省略仍保留旧版身份/双源逻辑；v2 只消费 v3/v4 的来源参考价，并记录官方规则文号/类别/生效区间，越界行情报错。补位参考价缺失仍 UNKNOWN，Eligible 固定窗口不跳过缺金额 Session；cninfo 分类风险信号按 P6 日历连接。仅合成验证，契约见 [派生输入](../derived-etf-input-contract.md)。
 
 #201 实现 `szse-etf-frozen@3`、独立来源/参考价表及受 #172 §3 约束的补位采集工具，只经合成数据验证。#203 实现 `szse-etf-frozen@4` 的逐 Session TDX 代码表和 Catalog v2 生命周期/法定全称消费；v1-v3 Normalizer 与 Catalog v1 身份保持不变。v2 只按明确版本化的法定全称/别名匹配宽基，真实名单仍需官方证据。以上未用真实数据重建或通过真实数据门禁。#202/#204 负责新版公告与公司行动契约，三方一致性不由行情 Normalizer 单独证明。采集须国内直连、同域串行间隔至少 1 秒、指数退避最多 3 次重试、如实 UA、无伪造 Cookie/Referer，连续访问拦截停源；真实字节、hash、覆盖与日志只存本机。
 

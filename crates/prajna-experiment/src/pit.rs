@@ -54,6 +54,8 @@ pub struct PitInput {
     eligibility: EligibilityParams,
     #[serde(default)]
     risk_notices: Vec<RiskNotice>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cninfo_index: Option<prajna_data::cninfo::IndexDataset>,
 }
 
 #[derive(Debug)]
@@ -97,8 +99,13 @@ impl PitContext {
             )
         }
         .map_err(|e| invalid(e.to_string()))?;
-        let risk = RiskSignals::build(&catalog, input.risk_notices.clone(), &raw)
-            .map_err(|e| invalid(e.to_string()))?;
+        let risk = match &input.cninfo_index {
+            Some(index) => {
+                RiskSignals::build_from_cninfo(&catalog, input.risk_notices.clone(), index, &raw)
+            }
+            None => RiskSignals::build(&catalog, input.risk_notices.clone(), &raw),
+        }
+        .map_err(|e| invalid(e.to_string()))?;
         let mut identity = serde_json::json!({
             "semantic_version": pit_strategy::SEMANTIC_VERSION,
             "catalog_version": catalog.version().map_err(|e| invalid(e.to_string()))?,
