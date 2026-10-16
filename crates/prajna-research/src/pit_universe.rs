@@ -302,7 +302,7 @@ pub struct Coverage {
 #[serde(deny_unknown_fields)]
 pub struct BroadIndexList {
     pub version: String,
-    /// Stable provider-qualified domestic broad equity index IDs, not fund names.
+    /// Stable provider-qualified IDs; for schema v2 these match `named_indices`.
     pub index_ids: BTreeSet<String>,
     pub evidence: Vec<Evidence>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -660,6 +660,14 @@ impl HistoricalCatalog {
             {
                 return Err(error("invalid/duplicate broad-index name or alias"));
             }
+        }
+        if input.schema_version == 2
+            && input.broad_indices.index_ids
+                != broad_index_ids.iter().cloned().collect::<BTreeSet<_>>()
+        {
+            return Err(error(
+                "Catalog v2 broad-index IDs must match the named index entries",
+            ));
         }
         input.sessions.sort_by_key(Session::session_date);
         for (i, s) in input.sessions.iter().enumerate() {

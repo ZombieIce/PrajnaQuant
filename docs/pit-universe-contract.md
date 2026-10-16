@@ -92,7 +92,8 @@ not independent proof of attachment pagination or of every interior price row.
 
 V1 broad-index membership uses provider-qualified IDs. V2 uses an explicitly
 versioned `BroadIndexList` of official scale-index names and curated aliases,
-backed by official evidence. The current repository does not silently provide
+backed by official evidence; its provider-qualified IDs must match the named
+entries used for classification. The current repository does not silently provide
 or claim a real, independently verified whitelist. The latest known legal fund
 full name must contain an exact configured name/alias after whitespace
 normalization; no venue abbreviation, inferred keyword, or `secName` is used.

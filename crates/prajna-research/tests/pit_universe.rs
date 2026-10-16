@@ -420,8 +420,14 @@ fn tdx_code_tables_rebuild_configured_158xxx_lifecycles_and_name_based_pit_unive
         })
         .collect();
 
+    let mut inconsistent_index_ids = input.clone();
+    inconsistent_index_ids.broad_indices.named_indices[0].index_id = "CSI:500".into();
+    assert!(HistoricalCatalog::build(inconsistent_index_ids, &raw).is_err());
+
     let catalog = HistoricalCatalog::build(input.clone(), &raw).unwrap();
     assert!(catalog.coverage_gaps().is_empty());
+    let id_158001 = catalog.resolve_row("158001", date(2)).unwrap();
+    assert!(id_158001.symbol().starts_with("158001-"));
     let old_code_life = catalog
         .input()
         .lifecycles
