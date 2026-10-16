@@ -52,7 +52,7 @@ exe_b=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["exe"])'
 cd "$repo"
 ```
 
-新 Execution 保存于 `<lake>/experiments/<exp-hex>/executions/<exe-hex>/`。Summary 不创建 `runs/`。Standard 添加 `sessions`、`executions`；Full 再添加权重、排名及 pending 表。每 Run 的 manifest 区分未保存与 Engine 不产生的表；不把缺表解释为零。
+新 Execution 保存于 `<lake>/experiments/<exp-hex>/executions/<exe-hex>/`。Summary 不创建 `runs/`。Vector Standard 添加 `sessions`、`executions`、`corporate_actions`；Full 再添加权重、排名及 pending 表。没有公司行动的运行仍保存空的 `corporate_actions` 表。每 Run 的 manifest 区分未保存与 Engine 不产生的表；不把缺表解释为零。
 
 ## MVP-6 离线 PIT S2（#177）
 

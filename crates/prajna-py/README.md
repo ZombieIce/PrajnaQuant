@@ -331,6 +331,9 @@ summary = prajna.read_run(
   the selected Run's summary row, or the named saved table with its original
   storage schema (including existing JSON payload columns). Full tables vary
   by Engine; names are recorded in `execution.json`.
+  Vector and Fast Event retain `corporate_actions` at Standard and Full levels,
+  including a saved empty table for runs without corporate actions; Summary
+  does not retain it. Accurate Event does not produce this table.
   `ResultNotSavedError` distinguishes omitted tables/levels from
   `EngineNotProducedError` for known tables the Engine does not produce.
   Both subclass `ValueError`; unknown names/IDs, I/O and integrity failures

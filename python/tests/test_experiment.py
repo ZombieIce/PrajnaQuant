@@ -264,13 +264,22 @@ class ExperimentTests(unittest.TestCase):
                 set(run["table_hashes"]),
                 {
                     prajna.ResultLevel.SUMMARY: set(),
-                    prajna.ResultLevel.STANDARD: {"sessions", "executions"},
+                    prajna.ResultLevel.STANDARD: {
+                        "sessions", "executions", "corporate_actions",
+                    },
                     prajna.ResultLevel.FULL: {
-                        "sessions", "executions", "target_weights",
+                        "sessions", "executions", "corporate_actions", "target_weights",
                         "weights_after_execution", "decisions", "pending_at_end",
                     },
                 }[level],
             )
+            if level != prajna.ResultLevel.SUMMARY:
+                actions = prajna.read_run(
+                    self.lake, result.manifest["experiment_id"],
+                    result.manifest["execution"]["id"], run_id,
+                    table="corporate_actions", result_level=level,
+                )
+                self.assertEqual(actions.num_rows, 0)
 
     def test_invalid_parameters_and_runtime_options_are_explicit_errors(self):
         for params in ({1: "value"}, {"bad": object()}, {"bad": float("nan")}):
