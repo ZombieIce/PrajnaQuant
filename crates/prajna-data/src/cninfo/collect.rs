@@ -55,19 +55,35 @@ impl Transport for reqwest::blocking::Client {
 pub struct Collector<T> {
     transport: T,
     raw: RawStore,
+    network_path: String,
     last_request: Option<Instant>,
     stopped: bool,
     captured: BTreeSet<String>,
 }
 impl Collector<reqwest::blocking::Client> {
     pub fn direct(raw: RawStore) -> Result<Self> {
+        Self::direct_with_network_path(raw, "direct_no_proxy; egress region unverified")
+    }
+
+    /// Requires an operator-supplied description of the direct egress path.
+    /// This is audit provenance only; it does not configure a proxy or route.
+    pub fn direct_with_network_path(
+        raw: RawStore,
+        network_path: impl Into<String>,
+    ) -> Result<Self> {
+        let network_path = network_path.into();
+        if network_path.trim().is_empty() {
+            return Err("direct network path description is required".into());
+        }
         let client = reqwest::blocking::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(60))
             .user_agent("PrajnaQuant/0.1 (local noncommercial fund research)")
             .build()?;
-        Ok(Self::new(client, raw))
+        let mut collector = Self::new(client, raw);
+        collector.network_path = network_path;
+        Ok(collector)
     }
 }
 impl<T: Transport> Collector<T> {
@@ -75,6 +91,7 @@ impl<T: Transport> Collector<T> {
         Self {
             transport,
             raw,
+            network_path: "injected_transport".into(),
             last_request: None,
             stopped: false,
             captured: BTreeSet::new(),
@@ -97,7 +114,7 @@ impl<T: Transport> Collector<T> {
             };
             let stored = self.raw.put(&bytes, SourceRecordInput {
                 content_type, source_kind: SourceKind::VendorApi, source_id:"cninfo".into(),
-                request:json!({"url":request.url,"params":request.form,"http_status":status,"attempt":attempt,"network_path":"direct_no_proxy","outcome":if status == 0 {"transport_error"} else {"http_response"}}),
+                request:json!({"url":request.url,"params":request.form,"http_status":status,"attempt":attempt,"network_path":self.network_path.clone(),"terms_conclusion":"issue_172_owner_authorization_for_local_noncommercial_research","outcome":if status == 0 {"transport_error"} else {"http_response"}}),
                 observed_at:observed, ingested_by:"prajna-cninfo/1".into(),
             });
             let hash = match stored {

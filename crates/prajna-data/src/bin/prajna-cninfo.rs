@@ -20,15 +20,16 @@ fn main() {
 }
 fn run() -> prajna_data::cninfo::Result<()> {
     let args: Vec<_> = std::env::args().collect();
-    if args.len() != 4 {
+    if args.len() != 5 {
         return Err(
-            "usage: prajna-cninfo START END CODES_FILE (one historical code per line)".into(),
+            "usage: prajna-cninfo START END CODES_FILE NETWORK_PATH (one historical code per line)"
+                .into(),
         );
     }
     let start = args[1].parse()?;
     let end = args[2].parse()?;
-    if start < "2022-10-01".parse()? || end > "2026-09-30".parse()? {
-        return Err("outside spec window".into());
+    if start != "2022-10-01".parse()? || end != "2026-09-30".parse()? {
+        return Err("cninfo collection requires the complete MVP-6 specification window".into());
     }
     let home = PathBuf::from(std::env::var("HOME")?);
     let root = home.join("PrajnaData/mvp-6");
@@ -52,8 +53,8 @@ fn run() -> prajna_data::cninfo::Result<()> {
     if codes.is_empty() {
         return Err("historical candidate set is required".into());
     }
-    let raw = RawStore::open(root.join("raw"))?;
-    let mut collector = Collector::direct(raw)?;
+    let raw = RawStore::open(root.clone())?;
+    let mut collector = Collector::direct_with_network_path(raw, args[4].clone())?;
     let dataset = collector.collect(IndexDataset::new(start, end)?, &codes, &mut Poppler);
     let complete =
         dataset.unknown.is_empty() && dataset.funds.iter().all(|f| f.require_usable().is_ok());
@@ -76,10 +77,49 @@ fn run() -> prajna_data::cninfo::Result<()> {
     writer.close()?;
     install_local(&acceptance.join("cninfo_index.parquet"), &parquet_bytes)?;
     write_manifest(&acceptance, &manifest)?;
+    update_mvp6_coverage(&root, &dataset, complete)?;
     if !complete {
         return Err("local coverage report contains unknowns".into());
     }
     Ok(())
+}
+
+fn update_mvp6_coverage(
+    root: &Path,
+    dataset: &IndexDataset,
+    complete: bool,
+) -> prajna_data::cninfo::Result<()> {
+    let path = root.join("acceptance/mvp6-coverage.json");
+    let Ok(bytes) = fs::read(&path) else {
+        return Ok(());
+    };
+    let mut report: serde_json::Value = serde_json::from_slice(&bytes)?;
+    let missing_org_ids: Vec<_> = dataset
+        .funds
+        .iter()
+        .filter(|fund| {
+            fund.org_ids.is_empty() || fund.announcements.iter().any(|item| item.org_id.is_none())
+        })
+        .map(|fund| fund.code.clone())
+        .collect();
+    let missing_legal_names: Vec<_> = dataset
+        .funds
+        .iter()
+        .filter(|fund| {
+            fund.full_names.is_empty()
+                || fund.unknown.iter().any(|item| item == "legal_name_unknown")
+        })
+        .map(|fund| fund.code.clone())
+        .collect();
+    report["source_status"]["cninfo"] = serde_json::json!(if complete {
+        "captured_index"
+    } else {
+        "captured_index_with_unknowns"
+    });
+    report["missing_org_id_codes"] = serde_json::json!(missing_org_ids);
+    report["missing_legal_names"] = serde_json::json!(missing_legal_names);
+    report["cninfo_unknown_facts"] = serde_json::json!(dataset.unknown);
+    write_local(&path, &serde_json::to_vec_pretty(&report)?)
 }
 
 // Stage complete bytes before installation; never accept a truncated prior file.
@@ -98,4 +138,14 @@ fn install_local(path: &Path, bytes: &[u8]) -> prajna_data::cninfo::Result<()> {
         }
         Err(error) => Err(error.error.into()),
     }
+}
+
+fn write_local(path: &Path, bytes: &[u8]) -> prajna_data::cninfo::Result<()> {
+    let parent = path.parent().ok_or("missing parent")?;
+    fs::create_dir_all(parent)?;
+    let mut stage = tempfile::NamedTempFile::new_in(parent)?;
+    stage.write_all(bytes)?;
+    stage.as_file().sync_all()?;
+    stage.persist(path).map_err(|error| error.error)?;
+    Ok(())
 }

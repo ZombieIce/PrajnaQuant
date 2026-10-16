@@ -72,6 +72,10 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(len(self.logs()), 2)
         self.assertEqual(self.logs()[0]["outcome"], "success")
         self.assertEqual(self.logs()[0]["transport"], "direct_no_proxy")
+        self.assertEqual(
+            self.logs()[0]["terms_conclusion"],
+            "issue_172_owner_authorization_for_local_noncommercial_research",
+        )
 
     def test_maximum_three_retries_exponential_backoff_and_failure_logs(self):
         client = self.client([OSError("synthetic")] * 4)

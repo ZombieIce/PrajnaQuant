@@ -58,6 +58,7 @@ class Collector:
                       observed_at=dt.datetime.now(dt.timezone.utc).isoformat(),
                       http_status=status, byte_len=len(body), sha256=digest,
                       network_path=self.network_path, transport="direct_no_proxy",
+                      terms_conclusion="issue_172_owner_authorization_for_local_noncommercial_research",
                       error=error, outcome="unresolved" if error else "success")
         logs = self.root / "acceptance"
         logs.mkdir(parents=True, exist_ok=True)

@@ -8,16 +8,17 @@
 
 ```sh
 cargo run -p prajna-data --bin prajna-cninfo --locked --offline -- \
-  2022-10-01 2026-09-30 /absolute/local/path/historical-codes.txt
+  2022-10-01 2026-09-30 /absolute/local/path/historical-codes.txt \
+  "<operator-confirmed direct domestic egress description>"
 ```
 
 代码文件每行一个历史候选代码；不能以查询成功名单替代历史候选集。代码文件由后续 TDX 名录流程提供。输出固定在 `~/PrajnaData/mvp-6/`，根目录不允许符号链接：
 
-- `raw/`：原始响应与 RawStore 追加来源记录，包括失败响应；记录 URL、参数、采集时刻、状态、长度、SHA-256、重试次序及 `direct_no_proxy` 网络路径。
+- `raw/`：原始响应与 RawStore 追加来源记录，包括失败响应；记录 URL、参数、采集时刻、状态、长度、SHA-256、重试次序、操作者提供的直连网络路径说明及 #172 授权结论。
 - `acceptance/cninfo/<DSV hex>/`：`coverage.json`、`cninfo_index.parquet` 和标准 `manifests/` 文件。stdout/stderr 不输出真实代码、URL、hash、覆盖数或正文。发现缺口退出非零，报告仍保存在本机。
 - `cninfo.lock`：同一命令的进程互斥；进程内所有请求串行、间隔至少 1 秒，失败退避 1/2/4 秒，最多重试三次。首次 401/403/501、验证码或登录控制即停止整个来源；不跟随重定向，不伪造 Referer/Cookie，不切换协议或代理规避控制。Raw 持久化失败立即中止请求。
 
-所有真实 Raw、索引、报告、hash、计数和日志只留本机，不提交 GitHub。此命令不负责备份，也不宣称来源方授权或来源全集。
+所有真实 Raw、索引、报告、hash、计数和日志只留本机，不提交 GitHub。命令记录的是操作者报告的网络路径，不独立验证出口地理位置；它不证明来源全集或第三方数据完整性。
 
 ## 查询与覆盖
 

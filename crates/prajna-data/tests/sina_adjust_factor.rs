@@ -135,6 +135,11 @@ fn collector_stores_paired_originals_and_paces_requests_to_sina() {
         assert_eq!(sources.len(), 1);
         assert_eq!(sources[0].source_id, "sina_adjust_factor");
         assert_eq!(sources[0].request["http_status"], json!(200));
+        assert_eq!(sources[0].request["network_path"], "injected_transport");
+        assert_eq!(
+            sources[0].request["terms_conclusion"],
+            "issue_172_owner_authorization_for_local_noncommercial_research"
+        );
     }
 }
 

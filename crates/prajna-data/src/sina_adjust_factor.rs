@@ -126,11 +126,26 @@ pub struct AdjustmentPair {
 pub struct Collector<T> {
     transport: T,
     raw: RawStore,
+    network_path: String,
     stopped: bool,
 }
 
 impl Collector<reqwest::blocking::Client> {
     pub fn direct(raw: RawStore) -> Result<Self> {
+        Self::direct_with_network_path(raw, "direct_no_proxy; egress region unverified")
+    }
+
+    /// Creates the direct client and records the operator-supplied egress path
+    /// with every local Raw response. The value is provenance, not a network
+    /// route override.
+    pub fn direct_with_network_path(
+        raw: RawStore,
+        network_path: impl Into<String>,
+    ) -> Result<Self> {
+        let network_path = network_path.into();
+        if network_path.trim().is_empty() {
+            return Err(error("direct network path description is required"));
+        }
         let client = reqwest::blocking::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
@@ -138,7 +153,9 @@ impl Collector<reqwest::blocking::Client> {
             .user_agent(USER_AGENT)
             .build()
             .map_err(|e| error(format!("could not create direct Sina client: {e}")))?;
-        Ok(Self::new(client, raw))
+        let mut collector = Self::new(client, raw);
+        collector.network_path = network_path;
+        Ok(collector)
     }
 }
 
@@ -147,6 +164,7 @@ impl<T: Transport> Collector<T> {
         Self {
             transport,
             raw,
+            network_path: "injected_transport".into(),
             stopped: false,
         }
     }
@@ -231,9 +249,10 @@ impl<T: Transport> Collector<T> {
                             "window_end": end,
                             "http_status": status,
                             "byte_len": bytes.len(),
+                            "terms_conclusion": "issue_172_owner_authorization_for_local_noncommercial_research",
                             "transport_error": transport_error,
                             "attempt": attempt,
-                            "network_path": "direct_no_proxy",
+                            "network_path": self.network_path.clone(),
                             "request_id": NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed),
                         }),
                         observed_at,
