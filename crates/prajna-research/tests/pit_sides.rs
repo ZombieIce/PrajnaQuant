@@ -16,19 +16,13 @@ use prajna_research::{
 };
 use std::collections::BTreeMap;
 
-#[test]
-fn dataset_actions_are_mapped_to_the_catalog_lifecycle_identity() {
-    let lake = fixture::lake();
-    let f = fixture::fixture_options(lake.path(), 1.0, true);
-    let factor_lifecycle = f
-        .catalog
-        .sina_factor_lifecycles()
-        .into_iter()
-        .find(|life| life.native_symbol == "159001")
-        .unwrap();
-    assert_eq!(factor_lifecycle.end_exclusive, Some(fixture::date(8)));
-    let raw = prajna_data::RawStore::open(lake.path()).unwrap();
-    let mut hashes = prajna_data::read_manifest(lake.path(), &f.dsv)
+fn build_tri_with_actions(
+    root: &std::path::Path,
+    fixture: &fixture::Fixture,
+    actions: serde_json::Value,
+) -> TotalReturnIndex {
+    let raw = prajna_data::RawStore::open(root).unwrap();
+    let mut hashes = prajna_data::read_manifest(root, &fixture.dsv)
         .unwrap()
         .core
         .inputs
@@ -43,15 +37,9 @@ fn dataset_actions_are_mapped_to_the_catalog_lifecycle_identity() {
             "announcementId": "SYN-ACTION-1",
             "secCode": "159001",
             "secName": "Synthetic ETF",
-            "announcementTitle": "Synthetic ETF dividend",
+            "announcementTitle": "Synthetic ETF corporate actions",
             "announcementTime": announced_at,
-            "corporateActions": [{
-                "type": "dividend",
-                "recordDate": "2023-01-03",
-                "exDate": "2023-01-04",
-                "payDate": "2023-01-08",
-                "cashPerShare": "0.05"
-            }]
+            "corporateActions": actions
         }],
         "totalRecordNum": 1,
         "hasMore": false
@@ -72,7 +60,7 @@ fn dataset_actions_are_mapped_to_the_catalog_lifecycle_identity() {
         .unwrap(),
     );
     let manifest = prajna_data::publish_dataset(
-        lake.path(),
+        root,
         &raw,
         &prajna_data::NormalizerRegistry::with_builtins(),
         "szse-etf-frozen",
@@ -81,20 +69,85 @@ fn dataset_actions_are_mapped_to_the_catalog_lifecycle_identity() {
         "2026-10-15T00:00:00Z",
     )
     .unwrap();
-    let evidence: MarketEvidence = serde_json::from_value(f.input["market"].clone()).unwrap();
+    let evidence: MarketEvidence = serde_json::from_value(fixture.input["market"].clone()).unwrap();
     let market =
-        DerivedMarket::from_dataset(lake.path(), &manifest.dsv, &f.catalog, evidence).unwrap();
+        DerivedMarket::from_dataset(root, &manifest.dsv, &fixture.catalog, evidence).unwrap();
     let rules = CorporateActionRules {
         version: "synthetic-tri-rules@1".into(),
         unexplained_jump_threshold_bps: 1_000,
     };
-    let tri = TotalReturnIndex::build_from_dataset(&market, lake.path(), &rules, &raw).unwrap();
+    TotalReturnIndex::build_from_dataset(&market, root, &rules, &raw).unwrap()
+}
+
+#[test]
+fn dataset_actions_map_to_lifecycle_and_settle_after_termination() {
+    let lake = fixture::lake();
+    let f = fixture::fixture_options(lake.path(), 1.0, true);
+    let factor_lifecycle = f
+        .catalog
+        .sina_factor_lifecycles()
+        .into_iter()
+        .find(|life| life.native_symbol == "159001")
+        .unwrap();
+    assert_eq!(factor_lifecycle.end_exclusive, Some(fixture::date(8)));
+    let tri = build_tri_with_actions(
+        lake.path(),
+        &f,
+        serde_json::json!([
+            {
+                "type": "dividend",
+                "recordDate": "2023-01-03",
+                "exDate": "2023-01-04",
+                "payDate": "2023-01-08",
+                "cashPerShare": "0.05"
+            },
+            {
+                "type": "liquidation",
+                "effectiveDate": "2023-01-09",
+                "liquidationCashPerShare": "0.85"
+            }
+        ]),
+    );
+
+    assert_eq!(tri.actions().len(), 2);
+    let instrument = f.catalog.resolve_row("159001", fixture::date(4)).unwrap();
+    assert!(
+        tri.actions()
+            .iter()
+            .all(|action| action.instrument_id == instrument)
+    );
+    assert_eq!(
+        tri.point(&instrument, fixture::date(9)).unwrap().level,
+        0.85
+    );
+}
+
+#[test]
+fn ex_date_only_share_conversion_is_usable_by_dataset_tri() {
+    let lake = fixture::lake();
+    let prices = BTreeMap::from([
+        ((0, 4), (0.5, 0.5)),
+        ((0, 5), (0.5, 0.5)),
+        ((0, 6), (0.5, 0.5)),
+        ((0, 7), (0.5, 0.5)),
+        ((0, 8), (0.5, 0.5)),
+        ((0, 9), (0.5, 0.5)),
+        ((0, 10), (0.5, 0.5)),
+    ]);
+    let f = fixture::fixture_with_action_prices(lake.path(), prices);
+    let tri = build_tri_with_actions(
+        lake.path(),
+        &f,
+        serde_json::json!([{
+            "type": "share_conversion",
+            "exDate": "2023-01-04",
+            "shareRatio": "2"
+        }]),
+    );
 
     assert_eq!(tri.actions().len(), 1);
-    assert_eq!(
-        tri.actions()[0].instrument_id,
-        f.catalog.resolve_row("159001", fixture::date(4)).unwrap()
-    );
+    assert_eq!(tri.actions()[0].effective_date, Some(fixture::date(4)));
+    assert_eq!(tri.point(&f.ids[0], fixture::date(4)).unwrap().level, 1.0);
 }
 
 fn case(

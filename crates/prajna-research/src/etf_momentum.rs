@@ -237,10 +237,23 @@ impl TotalReturnIndex {
             raw.get(&action.source_raw_sha256)
                 .map_err(|e| FactorError::Evaluation(e.to_string()))?;
             let (date, ratio, cash) = action_terms(action)?;
+            let terminal_settlement = action.kind == CorporateActionKind::Liquidation
+                && market
+                    .termination_date(&action.instrument_id)
+                    .is_some_and(|termination| date >= termination)
+                && market
+                    .sessions()
+                    .iter()
+                    .any(|session| session.session_date() == date)
+                && market
+                    .cells()
+                    .keys()
+                    .any(|(id, market_date)| id == &action.instrument_id && *market_date < date);
             if action.normalization_version.trim().is_empty()
-                || !market
+                || (!market
                     .cells()
                     .contains_key(&(action.instrument_id.clone(), date))
+                    && !terminal_settlement)
             {
                 return Err(FactorError::Evaluation(
                     "corporate action is outside normalized market coverage".into(),
@@ -268,8 +281,48 @@ impl TotalReturnIndex {
             for session in market.sessions() {
                 let date = session.session_date();
                 let key = (id.clone(), date);
+                let action = by_date.get(&key).copied();
+                if let Some((settlement, _, cash)) =
+                    action.filter(|(action, _, _)| action.kind == CorporateActionKind::Liquidation)
+                {
+                    if let (Some(previous_close), Some(previous)) = (previous_close, previous_level)
+                    {
+                        let point = IndexPoint {
+                            level: previous.level * cash / previous_close,
+                            available_at: max_known(
+                                previous.available_at,
+                                Some(settlement.available_at),
+                            ),
+                        };
+                        if point.level.is_finite() && point.level > 0.0 {
+                            points.insert(
+                                key.clone(),
+                                IndexPoint {
+                                    available_at: point
+                                        .available_at
+                                        .map(|at| at.max(session.ts_close())),
+                                    ..point
+                                },
+                            );
+                            count += 1;
+                        } else {
+                            unapplied.push(date);
+                        }
+                    } else {
+                        unapplied.push(date);
+                    }
+                    previous_close = None;
+                    previous_level = None;
+                    continue;
+                }
                 let Some(cell) = market.cells().get(&key) else {
-                    if by_date.contains_key(&key) {
+                    let after_termination = market
+                        .termination_date(&id)
+                        .is_some_and(|termination| date >= termination);
+                    if after_termination {
+                        continue;
+                    }
+                    if action.is_some() {
                         unapplied.push(date);
                     }
                     previous_close = None;
@@ -292,7 +345,6 @@ impl TotalReturnIndex {
                     previous_level = None;
                     continue;
                 };
-                let action = by_date.get(&key).copied();
                 let mut current_level = None;
                 if let (Some(prior_close), Some(prior)) = (previous_close, previous_level) {
                     let (ratio, cash) = action.map_or((1.0, 0.0), |(_, ratio, cash)| (ratio, cash));
@@ -435,9 +487,12 @@ impl TotalReturnIndex {
                     )
                 })?;
                 let native_symbol = action.instrument_id.symbol().to_owned();
-                action.instrument_id = market
-                    .resolve_native_row(&native_symbol, date)
-                    .map_err(|e| FactorError::Evaluation(e.to_string()))?;
+                action.instrument_id = if action.kind == CorporateActionKind::Liquidation {
+                    market.resolve_settlement_action(&native_symbol, date)
+                } else {
+                    market.resolve_native_row(&native_symbol, date)
+                }
+                .map_err(|e| FactorError::Evaluation(e.to_string()))?;
                 Ok(action)
             })
             .collect::<Result<Vec<_>, FactorError>>()?;

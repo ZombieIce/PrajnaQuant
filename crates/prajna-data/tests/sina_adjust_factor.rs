@@ -139,6 +139,32 @@ fn collector_stores_paired_originals_and_paces_requests_to_sina() {
 }
 
 #[test]
+fn collector_accepts_cumulative_reset_from_reused_code() {
+    let qfq = br#"var qfq = {"data":[
+        {"d":"2026-01-05","u":"0.05","s":"1"},
+        {"d":"2026-01-06","u":"0","s":"1"}
+    ]};"#;
+    let hfq = br#"var hfq = {"data":[
+        {"d":"2026-01-05","u":"0.05","s":"1"},
+        {"d":"2026-01-06","u":"0","s":"1"}
+    ]};"#;
+    let transport = QueueTransport {
+        replies: VecDeque::from([HttpReply::ok(qfq.to_vec()), HttpReply::ok(hfq.to_vec())]),
+        requests: Arc::default(),
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let mut collector = Collector::new(transport, RawStore::open(dir.path()).unwrap());
+    let pairs = collector
+        .collect(
+            &["sz159901".into()],
+            "2026-01-01".parse().unwrap(),
+            "2026-01-31".parse().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(pairs.len(), 1);
+}
+
+#[test]
 fn collector_stops_on_access_control_and_records_the_failed_response() {
     let transport = QueueTransport {
         replies: VecDeque::from([

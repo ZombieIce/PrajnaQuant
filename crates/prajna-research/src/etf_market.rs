@@ -493,6 +493,16 @@ impl DerivedMarket {
     ) -> Result<InstrumentId> {
         self.catalog.resolve_row(native_symbol, date)
     }
+    pub(crate) fn resolve_settlement_action(
+        &self,
+        native_symbol: &str,
+        date: NaiveDate,
+    ) -> Result<InstrumentId> {
+        self.catalog.resolve_settlement_action(native_symbol, date)
+    }
+    pub(crate) fn termination_date(&self, id: &InstrumentId) -> Option<NaiveDate> {
+        self.catalog.termination_date(id)
+    }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]

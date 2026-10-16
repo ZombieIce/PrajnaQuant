@@ -179,7 +179,7 @@ impl<T: Transport> Collector<T> {
         for symbol in symbols {
             let (qfq_raw_sha256, qfq) = self.fetch(&symbol, "qfq", start, end)?;
             let (hfq_raw_sha256, hfq) = self.fetch(&symbol, "hfq", start, end)?;
-            if let Err(problem) = compare_adjustment_series(&qfq, &hfq) {
+            if let Err(problem) = verify_paired_series(&qfq, &hfq) {
                 self.stopped = true;
                 return Err(problem);
             }
@@ -452,6 +452,15 @@ pub fn parse_adjustment_series_for_lifecycles(
     }
     output.sort_by_key(|event| event.effective_date);
     Ok(output)
+}
+
+/// Compares source points only; events are derived later per #203 lifecycle,
+/// so reused codes whose cumulative factors reset are not rejected here.
+fn verify_paired_series(qfq: &[u8], hfq: &[u8]) -> Result<()> {
+    if points(qfq)? != points(hfq)? {
+        return Err(error("Sina qfq and hfq cumulative factors differ"));
+    }
+    Ok(())
 }
 
 pub fn compare_adjustment_series(qfq: &[u8], hfq: &[u8]) -> Result<Vec<AdjustmentEvent>> {

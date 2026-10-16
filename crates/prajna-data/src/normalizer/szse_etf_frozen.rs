@@ -1746,6 +1746,11 @@ fn parse_action(value: &Value, source: ActionSource<'_>) -> Result<ActionDraft, 
     let ex_date = date("exDate")?;
     let pay_date = date("payDate")?;
     let effective_date = date("effectiveDate")?;
+    let effective_date = if kind == CorporateActionKind::ShareConversion {
+        effective_date.or(ex_date)
+    } else {
+        effective_date
+    };
     let cash_per_share = decimal("cashPerShare")?;
     let share_ratio = decimal("shareRatio")?;
     let liquidation_cash_per_share = decimal("liquidationCashPerShare")?;

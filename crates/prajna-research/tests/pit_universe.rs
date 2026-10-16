@@ -86,6 +86,24 @@ fn three_lifecycles_ten_sessions_listing_termination_and_code_reuse() {
     assert!(!catalog.universe(date(5)).unwrap().members.contains(&a));
     assert!(catalog.resolve_row("159001", date(5)).is_err());
     assert!(catalog.resolve_row("159003", date(8)).is_err());
+    assert_eq!(
+        catalog
+            .resolve_settlement_action("159001", date(5))
+            .unwrap(),
+        a
+    );
+    assert_eq!(
+        catalog
+            .resolve_settlement_action("159001", date(6))
+            .unwrap(),
+        a
+    );
+    assert_eq!(
+        catalog
+            .resolve_settlement_action("159001", date(7))
+            .unwrap(),
+        b
+    );
 }
 #[test]
 fn date_only_late_announcement_changes_attributes_at_next_session_close() {
