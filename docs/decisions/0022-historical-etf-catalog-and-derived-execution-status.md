@@ -1,6 +1,6 @@
 # ADR 0022：历史 ETF 名录、PIT Universe 与推导开盘执行状态
 
-- 状态：Accepted as target architecture，2026-10-14（spec [#171](https://github.com/ZombieIce/PrajnaQuant/issues/171) P7～P15，设计票据 [#173](https://github.com/ZombieIce/PrajnaQuant/issues/173)）；**未实现、未通过真实数据门禁**。仅对新 MVP-6 路径修订 [ADR 0017](0017-vector-engine-semantics.md)；旧 Factor、Static Universe 和既有结果不变。
+- 状态：Accepted as target architecture，2026-10-14（spec [#171](https://github.com/ZombieIce/PrajnaQuant/issues/171) P7～P15，设计票据 [#173](https://github.com/ZombieIce/PrajnaQuant/issues/173)）；部分实现但**未通过真实数据门禁**。仅对新 MVP-6 路径修订 [ADR 0017](0017-vector-engine-semantics.md)；旧 Factor、Static Universe 和既有结果不变。
 
 ## 2026-10-16 数据源契约 v3 修订
 
@@ -11,7 +11,7 @@
 - **P7/P8**：目标名录由 TDX 逐日代码表重建，缺席间隔与 cninfo 法定全称变化切分生命周期。目标宽基筛选使用 cninfo 法定全称与版本化国内宽基指数名/别名匹配，按公告可知时刻生效，不用场内简称；缺失/无法匹配期间排除并报告。具体实现由 #203 承担。
 - **P10**：目标 TRADABLE 允许 TDX 或补位正成交 Bar，加已知开盘停牌排除和 P12 门禁；公告覆盖开盘为 HALTED，无 Bar 且无停牌公告为 UNKNOWN。#205 将版本化消费该契约，#201 不改既有 `szse-derived-open@1` 的双源逻辑。
 
-#201 实现 `szse-etf-frozen@3`、独立来源/参考价表及受 #172 §3 约束的补位采集工具，只经合成数据验证；#202/#204 负责新版公告与公司行动契约，三方一致性不由行情 Normalizer 单独证明。采集须国内直连、同域串行间隔至少 1 秒、指数退避最多 3 次重试、如实 UA、无伪造 Cookie/Referer，连续访问拦截停源；真实字节、hash、覆盖与日志只存本机。
+#201 实现 `szse-etf-frozen@3`、独立来源/参考价表及受 #172 §3 约束的补位采集工具，只经合成数据验证。#203 实现 `szse-etf-frozen@4` 的逐 Session TDX 代码表和 Catalog v2 生命周期/法定全称消费；v1-v3 Normalizer 与 Catalog v1 身份保持不变。v2 只按明确版本化的法定全称/别名匹配宽基，真实名单仍需官方证据。以上未用真实数据重建或通过真实数据门禁。#202/#204 负责新版公告与公司行动契约，三方一致性不由行情 Normalizer 单独证明。采集须国内直连、同域串行间隔至少 1 秒、指数退避最多 3 次重试、如实 UA、无伪造 Cookie/Referer，连续访问拦截停源；真实字节、hash、覆盖与日志只存本机。
 
 ## 背景与证据边界
 

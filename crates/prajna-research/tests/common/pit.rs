@@ -122,14 +122,21 @@ fn fixture_with_prices(
             category: FundCategory::Equity,
             index_id: "CSI:300".into(),
             evidence: evidence("contract", time(1, 8)),
+            legal_name: None,
         })
         .chain(removal.map(|d| AttributeFact {
             effective_date: date(d),
             category: FundCategory::Other,
             index_id: "CSI:300".into(),
             evidence: evidence("category-change", time(d, 8)),
+            legal_name: None,
         }))
         .collect(),
+        identity_start: None,
+        identity_end_exclusive: None,
+        code_table_first_seen: None,
+        code_table_last_seen: None,
+        code_table_exit_date: None,
     };
     let mut catalog_input = CatalogInput {
         schema_version: 1,
@@ -166,6 +173,7 @@ fn fixture_with_prices(
                     raw_sha256: doc.clone(),
                     first_observed: seen.then(|| date(if code == 159003 { 4 } else { 1 })),
                     last_observed: seen.then(|| date(10)),
+                    identity_start: None,
                 }
             })
             .collect(),
@@ -173,7 +181,10 @@ fn fixture_with_prices(
             version: "synthetic-domestic@1".into(),
             index_ids: BTreeSet::from(["CSI:300".into()]),
             evidence: vec![evidence("scope", time(1, 8))],
+            named_indices: vec![],
         },
+        code_ranges: None,
+        code_tables: vec![],
     };
     if terminated {
         let life = &mut catalog_input.lifecycles[0];

@@ -54,15 +54,23 @@ fn fixture(root: &std::path::Path) -> (RawStore, CatalogInput) {
             category: FundCategory::Equity,
             index_id: "CSI:300".into(),
             evidence: evidence("contract"),
+            legal_name: None,
         }],
+        identity_start: None,
+        identity_end_exclusive: None,
+        code_table_first_seen: None,
+        code_table_last_seen: None,
+        code_table_exit_date: None,
     };
     let input = CatalogInput {
         schema_version: 1, rule_version: "synthetic-rules@1".into(), calendar_start: date(1), calendar_end: date(10), calendar_raw_sha256: BTreeSet::from([h.clone()]),
         sessions: (1..=10).map(|d| Session::new("SZSE".parse().unwrap(), date(d), format!("2023-01-{d:02}T09:30:00+08:00").parse().unwrap(), time(d, 15)).unwrap()).collect(),
         coverage: Coverage { start: date(1), end: date(10), scan_method: "synthetic 159000..159999 full-window scan".into(), announcement_method: "synthetic full listings/contracts/terminations + attachments and pre-window identities".into(), announcement_raw_sha256: BTreeSet::from([h.clone()]), gaps: BTreeSet::new(), resolutions: vec![] },
         lifecycles: vec![life("159001", 1, None), life("159002", 1, None), life("159003", 1, None)],
-        scans: (159000..=159999).map(|c| ScanObservation { native_symbol: c.to_string(), status: if (159001..=159003).contains(&c) { ScanStatus::Observed } else { ScanStatus::NoRows }, raw_sha256: h.clone(), first_observed: ((159001..=159003).contains(&c)).then(|| date(1)), last_observed: ((159001..=159003).contains(&c)).then(|| date(10)) }).collect(),
-        broad_indices: BroadIndexList { version: "synthetic-domestic@1".into(), index_ids: BTreeSet::from(["CSI:300".into()]), evidence: vec![evidence("index-scope")] },
+        scans: (159000..=159999).map(|c| ScanObservation { native_symbol: c.to_string(), status: if (159001..=159003).contains(&c) { ScanStatus::Observed } else { ScanStatus::NoRows }, raw_sha256: h.clone(), first_observed: ((159001..=159003).contains(&c)).then(|| date(1)), last_observed: ((159001..=159003).contains(&c)).then(|| date(10)), identity_start: None }).collect(),
+        broad_indices: BroadIndexList { version: "synthetic-domestic@1".into(), index_ids: BTreeSet::from(["CSI:300".into()]), evidence: vec![evidence("index-scope")], named_indices: vec![] },
+        code_ranges: None,
+        code_tables: vec![],
     };
     (raw, input)
 }
@@ -140,6 +148,7 @@ fn data(catalog: &HistoricalCatalog) -> (NormalizedTables, MarketEvidence) {
             source_crosscheck: Some(source_crosscheck_to_record_batch(&checks).unwrap()),
             announcements: None,
             corporate_actions: None,
+            tdx_code_table: None,
         },
         MarketEvidence {
             rule_version: "synthetic-opening@1".into(),

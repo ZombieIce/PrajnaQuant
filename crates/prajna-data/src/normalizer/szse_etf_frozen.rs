@@ -12,7 +12,8 @@
 //!
 //! The Dataset Version is therefore a pure function of the original bytes and
 //! this Normalizer's version/config. V1/v2 scope is 159000–159999; v3 uses
-//! configured inclusive code ranges (builtin: 158000–159999).
+//! configured inclusive code ranges (builtin: 158000–159999). V4 preserves v3
+//! market data and adds a complete configured-scope TDX code-table snapshot.
 //! Missing Bars are never interpreted as halts; no execution status is derived.
 
 use std::{
@@ -94,6 +95,14 @@ impl SzseEtfFrozen {
         })
     }
 
+    /// V4 preserves the v3 market-data contract and publishes the complete
+    /// configured TDX code table separately from Bars.
+    pub fn v4(code_ranges: Vec<(u32, u32)>) -> Result<Self, String> {
+        let mut normalizer = Self::v3(code_ranges)?;
+        normalizer.version = "4";
+        Ok(normalizer)
+    }
+
     fn scoped(&self, code: &str) -> bool {
         code.len() == 6
             && code.bytes().all(|b| b.is_ascii_digit())
@@ -113,7 +122,7 @@ impl Normalizer for SzseEtfFrozen {
     }
 
     fn config_sha256(&self) -> String {
-        if self.version == "3" {
+        if self.version == "3" || self.version == "4" {
             let mut config: Value = serde_json::from_str(CONFIG_V2).expect("static config");
             config["code_scope"] = json!(self.code_ranges);
             config["bars"] = json!("tdx_primary_tencent_missing_cell_only@1");
@@ -122,6 +131,9 @@ impl Normalizer for SzseEtfFrozen {
             config["crosscheck"] = json!("diagnostic_only");
             config["fallback_amount"] = json!("null_missing_session_not_zero");
             config["tdx_no_trade"] = json!("tdx_key_blocks_fallback_including_zero_volume");
+            if self.version == "4" {
+                config["tdx_code_table"] = json!("tdx_code_table@1");
+            }
             return format!(
                 "sha256:{:x}",
                 Sha256::digest(crate::restricted_jcs(&config).expect("static config"))
@@ -216,6 +228,7 @@ struct Acc {
     primary: BTreeMap<Key, Sourced<Option<SelectedBar>>>,
     secondary: BTreeMap<Key, Sourced<Ohlcv>>,
     announcements: BTreeMap<String, Sourced<Announcement>>,
+    tdx_code_tables: BTreeMap<NaiveDate, Sourced<BTreeSet<String>>>,
     corporate_actions: Vec<ActionDraft>,
     excluded: BTreeMap<&'static str, u64>,
 }
@@ -270,7 +283,7 @@ fn normalize(
     config: &SzseEtfFrozen,
 ) -> Result<NormalizationOutput, Vec<NormalizationIssue>> {
     let include_actions = config.version != "1";
-    let v3 = config.version == "3";
+    let v3 = matches!(config.version, "3" | "4");
     let venue = VenueId::new("SZSE").expect("static venue is valid");
     let mut acc = Acc::default();
     let mut duplicates = 0_u64;
@@ -325,6 +338,7 @@ fn normalize(
         secondary,
         announcements,
         corporate_actions: action_drafts,
+        tdx_code_tables,
         excluded,
     } = acc;
     for (kind, label) in [("szse_calendar", "SZSE calendar"), ("tdx_daily", "TDX")] {
@@ -607,8 +621,22 @@ fn normalize(
         corporate_actions: include_actions
             .then(|| corporate_actions_to_record_batch(&corporate_actions).map_err(convert))
             .transpose()?,
+        tdx_code_table: (config.version == "4")
+            .then(|| {
+                let rows = tdx_code_tables
+                    .iter()
+                    .map(|(session_date, table)| crate::TdxCodeTableRow {
+                        session_date: *session_date,
+                        native_symbols: table.value.iter().cloned().collect(),
+                        code_ranges: config.code_ranges.clone(),
+                        source_raw_sha256: table.raw.clone(),
+                    })
+                    .collect::<Vec<_>>();
+                crate::tdx_code_table_to_record_batch(&rows).map_err(convert)
+            })
+            .transpose()?,
     };
-    let coverage = json!({
+    let mut coverage = json!({
         "kind": "szse-etf-frozen",
         "raw_objects_by_kind": kind_counts,
         "calendar_days": calendar.len(),
@@ -625,6 +653,9 @@ fn normalize(
         "execution_status": "not_derived",
         "completeness_claim": "none; coverage is limited to the frozen Raw set",
     });
+    if config.version == "4" {
+        coverage["tdx_code_table_sessions"] = json!(tdx_code_tables.len());
+    }
     Ok(NormalizationOutput {
         tables,
         coverage,
@@ -711,6 +742,7 @@ fn decode_tdx(
 ) {
     *acc.kind_counts.entry("tdx_daily").or_default() += 1;
     let invalid = |acc: &mut Acc, message: String| acc.push("invalid_tdx_package", path, message);
+    let v3 = matches!(config.version, "3" | "4");
     let mut archive = match ZipArchive::new(Cursor::new(raw.bytes.as_slice())) {
         Ok(archive) => archive,
         Err(error) => return invalid(acc, format!("cannot open ZIP: {error}")),
@@ -751,6 +783,7 @@ fn decode_tdx(
         return invalid(acc, "code table and price blocks are misaligned".into());
     }
     let mut codes = BTreeSet::new();
+    let mut scoped_codes = BTreeSet::new();
     let mut sequences = BTreeSet::new();
     for (i, record) in cod.chunks_exact(150).enumerate() {
         let record_path = format!("{path}.sz{day_key}.cod[{i}]");
@@ -779,6 +812,7 @@ fn decode_tdx(
             acc.count("tdx_out_of_scope_records");
             continue;
         }
+        scoped_codes.insert(code.to_owned());
         let offset = usize::from(sequence) * 512;
         let Some(block) = md1.get(offset..offset + 512) else {
             acc.push(
@@ -800,8 +834,7 @@ fn decode_tdx(
         // No trade: either no close, or a carried close with an empty intraday range.
         if close <= 0.0
             || [open, high, low].iter().all(|value| *value == 0.0)
-            || (config.version == "3"
-                && u64::from_le_bytes(block[56..64].try_into().expect("8 bytes")) == 0)
+            || (v3 && u64::from_le_bytes(block[56..64].try_into().expect("8 bytes")) == 0)
         {
             acc.count("tdx_no_trade_records");
             insert_fact(
@@ -815,7 +848,7 @@ fn decode_tdx(
             );
             continue;
         }
-        let reference_price = if config.version == "3" {
+        let reference_price = if v3 {
             match f64_price(read(4)).filter(|p| *p > Price::ZERO) {
                 Some(price) => Some(price),
                 None => {
@@ -858,6 +891,17 @@ fn decode_tdx(
             }),
             &raw.raw_sha256,
             &record_path,
+            &mut acc.issues,
+            duplicates,
+        );
+    }
+    if config.version == "4" {
+        insert_fact(
+            &mut acc.tdx_code_tables,
+            date,
+            scoped_codes,
+            &raw.raw_sha256,
+            path,
             &mut acc.issues,
             duplicates,
         );
