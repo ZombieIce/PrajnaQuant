@@ -457,17 +457,18 @@ pub fn parse_adjustment_series_for_lifecycles(
 /// Compares source points only; events are derived later per #203 lifecycle,
 /// so reused codes whose cumulative factors reset are not rejected here.
 fn verify_paired_series(qfq: &[u8], hfq: &[u8]) -> Result<()> {
-    if points(qfq)? != points(hfq)? {
-        return Err(error("Sina qfq and hfq cumulative factors differ"));
-    }
-    Ok(())
+    paired_points(qfq, hfq).map(|_| ())
 }
 
-pub fn compare_adjustment_series(qfq: &[u8], hfq: &[u8]) -> Result<Vec<AdjustmentEvent>> {
+fn paired_points(qfq: &[u8], hfq: &[u8]) -> Result<Vec<AdjustmentPoint>> {
     let qfq_points = points(qfq)?;
     let hfq_points = points(hfq)?;
     if qfq_points != hfq_points {
         return Err(error("Sina qfq and hfq cumulative factors differ"));
     }
-    events(&qfq_points)
+    Ok(qfq_points)
+}
+
+pub fn compare_adjustment_series(qfq: &[u8], hfq: &[u8]) -> Result<Vec<AdjustmentEvent>> {
+    events(&paired_points(qfq, hfq)?)
 }
