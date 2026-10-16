@@ -275,7 +275,7 @@ class ExperimentTests(unittest.TestCase):
             )
             if level != prajna.ResultLevel.SUMMARY:
                 actions = prajna.read_run(
-                    self.lake, result.manifest["experiment_id"],
+                    str(self.lake), result.manifest["experiment_id"],
                     result.manifest["execution"]["id"], run_id,
                     table="corporate_actions", result_level=level,
                 )
