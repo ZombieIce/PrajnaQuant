@@ -940,6 +940,24 @@ impl HistoricalCatalog {
     pub fn input(&self) -> &CatalogInput {
         &self.input
     }
+    pub fn sina_factor_lifecycles(&self) -> Vec<prajna_data::LifecycleRange> {
+        self.input
+            .lifecycles
+            .iter()
+            .map(|life| {
+                let end_exclusive = life
+                    .identity_end_exclusive
+                    .into_iter()
+                    .chain(life.termination.iter().map(|end| end.effective_date))
+                    .min();
+                prajna_data::LifecycleRange {
+                    native_symbol: life.native_symbol.clone(),
+                    start: life.listing.effective_date.max(life.identity_start()),
+                    end_exclusive,
+                }
+            })
+            .collect()
+    }
     pub fn differences(&self) -> &[Difference] {
         &self.differences
     }
@@ -961,6 +979,51 @@ impl HistoricalCatalog {
             return Err(error("ambiguous price-row lifecycle"));
         }
         life.instrument_id()
+    }
+    /// Settlement actions remain attributable after trading terminates, until
+    /// the legal identity ends or the native code is reused.
+    pub fn resolve_settlement_action(
+        &self,
+        native_symbol: &str,
+        date: NaiveDate,
+    ) -> Result<InstrumentId> {
+        let mut matches = self.input.lifecycles.iter().filter(|life| {
+            if life.native_symbol != native_symbol {
+                return false;
+            }
+            let start = life.listing.effective_date.max(life.identity_start());
+            let next_identity_start = self
+                .input
+                .lifecycles
+                .iter()
+                .filter_map(|next| {
+                    let next_start = next.listing.effective_date.max(next.identity_start());
+                    (next.native_symbol == native_symbol && next_start > start)
+                        .then_some(next_start)
+                })
+                .min();
+            let end = life
+                .identity_end_exclusive
+                .into_iter()
+                .chain(next_identity_start)
+                .min();
+            date >= start && end.is_none_or(|end| date < end)
+        });
+        let life = matches
+            .next()
+            .ok_or_else(|| error("unattributed settlement action: no evidenced identity"))?;
+        if matches.next().is_some() {
+            return Err(error("ambiguous settlement-action lifecycle"));
+        }
+        life.instrument_id()
+    }
+    pub(crate) fn termination_date(&self, instrument_id: &InstrumentId) -> Option<NaiveDate> {
+        self.input
+            .lifecycles
+            .iter()
+            .find(|life| life.instrument_id().as_ref() == Ok(instrument_id))
+            .and_then(|life| life.termination.as_ref())
+            .map(|termination| termination.effective_date)
     }
     /// Current directory differences are diagnostic only: they do not change the
     /// frozen Catalog, version, attributes or historical snapshots.

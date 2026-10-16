@@ -6,22 +6,28 @@ use sha2::{Digest, Sha256};
 
 mod synthetic_etf_daily;
 mod szse_etf_frozen;
+pub use crate::sina_adjust_factor::LifecycleRange;
 pub use szse_etf_frozen::SzseEtfFrozen;
 
-use crate::SourceKind;
+use crate::{SourceKind, SourceRecord};
 
 /// Raw bytes and their content identity supplied to a Normalizer.
 #[derive(Debug, Clone)]
 pub struct RawInput {
     pub raw_sha256: String,
     pub bytes: Vec<u8>,
+    pub source_records: Vec<SourceRecord>,
 }
 
 impl RawInput {
     pub fn from_bytes(bytes: impl Into<Vec<u8>>) -> Self {
         let bytes = bytes.into();
         let raw_sha256 = format!("sha256:{:x}", Sha256::digest(&bytes));
-        Self { raw_sha256, bytes }
+        Self {
+            raw_sha256,
+            bytes,
+            source_records: Vec::new(),
+        }
     }
 
     fn has_valid_identity(&self) -> bool {
@@ -109,6 +115,15 @@ impl NormalizerRegistry {
         registry.register(SzseEtfFrozen::v3(vec![(158000, 159999)]).expect("builtin ranges"));
         registry.register(SzseEtfFrozen::v4(vec![(158000, 159999)]).expect("builtin ranges"));
         registry
+    }
+
+    pub fn with_sina_adjustment_v5(lifecycles: Vec<LifecycleRange>) -> Result<Self, String> {
+        let mut registry = Self::with_builtins();
+        let normalizer = SzseEtfFrozen::v5(lifecycles)?;
+        if !registry.register(normalizer) {
+            return Err("Sina adjustment normalizer v5 is already registered".into());
+        }
+        Ok(registry)
     }
 
     pub fn register(&mut self, normalizer: impl Normalizer + 'static) -> bool {

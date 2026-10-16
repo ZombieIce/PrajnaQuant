@@ -33,9 +33,11 @@ use zip::ZipArchive;
 
 use crate::{
     AnnouncementRow, CorporateActionKind, CorporateActionRow, NormalizationIssue,
-    NormalizationOutput, NormalizedTables, SourceCrosscheckRow, SourceKind,
+    NormalizationOutput, NormalizedTables, SourceCrosscheckRow, SourceKind, SourceRecord,
     announcements_to_record_batch, bars_to_record_batch, corporate_actions_to_record_batch,
-    instruments_to_record_batch, sessions_to_record_batch, source_crosscheck_to_record_batch,
+    instruments_to_record_batch, sessions_to_record_batch,
+    sina_adjust_factor::{AdjustmentEvent, LifecycleRange, parse_adjustment_series_for_lifecycles},
+    source_crosscheck_to_record_batch,
 };
 
 use super::{Normalizer, RawInput};
@@ -62,6 +64,7 @@ const CATEGORY_RULES: [(&str, &[&str]); 9] = [
 pub struct SzseEtfFrozen {
     version: &'static str,
     code_ranges: Vec<(u32, u32)>,
+    lifecycles: Vec<LifecycleRange>,
 }
 
 impl SzseEtfFrozen {
@@ -69,12 +72,14 @@ impl SzseEtfFrozen {
         Self {
             version: "1",
             code_ranges: vec![(159000, 159999)],
+            lifecycles: Vec::new(),
         }
     }
     pub(super) fn v2() -> Self {
         Self {
             version: "2",
             code_ranges: vec![(159000, 159999)],
+            lifecycles: Vec::new(),
         }
     }
     /// Configure inclusive Shenzhen ETF code ranges. The canonical ranges enter
@@ -92,6 +97,7 @@ impl SzseEtfFrozen {
         Ok(Self {
             version: "3",
             code_ranges,
+            lifecycles: Vec::new(),
         })
     }
 
@@ -101,6 +107,39 @@ impl SzseEtfFrozen {
         let mut normalizer = Self::v3(code_ranges)?;
         normalizer.version = "4";
         Ok(normalizer)
+    }
+
+    /// V5 adds Sina factor validation and binds the configured Catalog lives
+    /// into the normalizer identity so reused codes cannot share factor history.
+    pub fn v5(lifecycles: Vec<LifecycleRange>) -> Result<Self, String> {
+        let mut normalizer = Self::v4(vec![(158000, 159999)])?;
+        if lifecycles.is_empty()
+            || lifecycles.iter().any(|life| {
+                life.native_symbol.len() != 6
+                    || !life.native_symbol.bytes().all(|byte| byte.is_ascii_digit())
+                    || !normalizer.scoped(&life.native_symbol)
+                    || life.end_exclusive.is_some_and(|end| life.start >= end)
+            })
+        {
+            return Err("v5 requires valid, nonempty catalog lifecycle ranges".into());
+        }
+        let mut lifecycles = lifecycles;
+        lifecycles.sort_by_key(|life| (life.native_symbol.clone(), life.start));
+        if lifecycles.windows(2).any(|pair| {
+            pair[0].native_symbol == pair[1].native_symbol
+                && pair[0].end_exclusive.is_none_or(|end| end > pair[1].start)
+        }) {
+            return Err("v5 catalog lifecycle ranges must not overlap".into());
+        }
+        normalizer.version = "5";
+        normalizer.lifecycles = lifecycles;
+        Ok(normalizer)
+    }
+
+    fn lifecycle(&self, symbol: &str, date: NaiveDate) -> Option<&LifecycleRange> {
+        self.lifecycles
+            .iter()
+            .find(|life| life.native_symbol == symbol && life.contains(date))
     }
 
     fn scoped(&self, code: &str) -> bool {
@@ -122,7 +161,7 @@ impl Normalizer for SzseEtfFrozen {
     }
 
     fn config_sha256(&self) -> String {
-        if self.version == "3" || self.version == "4" {
+        if matches!(self.version, "3" | "4" | "5") {
             let mut config: Value = serde_json::from_str(CONFIG_V2).expect("static config");
             config["code_scope"] = json!(self.code_ranges);
             config["bars"] = json!("tdx_primary_tencent_missing_cell_only@1");
@@ -131,8 +170,16 @@ impl Normalizer for SzseEtfFrozen {
             config["crosscheck"] = json!("diagnostic_only");
             config["fallback_amount"] = json!("null_missing_session_not_zero");
             config["tdx_no_trade"] = json!("tdx_key_blocks_fallback_including_zero_volume");
-            if self.version == "4" {
+            if matches!(self.version, "4" | "5") {
                 config["tdx_code_table"] = json!("tdx_code_table@1");
+            }
+            if self.version == "5" {
+                config["sina_adjust_factor"] = json!({
+                    "event_derivation": "u_adjacent_difference_s_adjacent_ratio@1",
+                    "crosscheck": "qfq_hfq_tdx_reference_cninfo@1",
+                    "lifecycle_ranges": self.lifecycles,
+                    "record_date": "previous_session_before_ex_date",
+                });
             }
             return format!(
                 "sha256:{:x}",
@@ -211,6 +258,7 @@ struct ActionSource<'a> {
     announced_at: TimestampNs,
     source_raw_sha256: &'a str,
     path: &'a str,
+    allow_sina_values: bool,
 }
 
 /// A decoded fact and the smallest Raw hash that states it.
@@ -230,6 +278,7 @@ struct Acc {
     announcements: BTreeMap<String, Sourced<Announcement>>,
     tdx_code_tables: BTreeMap<NaiveDate, Sourced<BTreeSet<String>>>,
     corporate_actions: Vec<ActionDraft>,
+    sina_factors: BTreeMap<(String, String), Sourced<Vec<AdjustmentEvent>>>,
     excluded: BTreeMap<&'static str, u64>,
 }
 
@@ -283,7 +332,7 @@ fn normalize(
     config: &SzseEtfFrozen,
 ) -> Result<NormalizationOutput, Vec<NormalizationIssue>> {
     let include_actions = config.version != "1";
-    let v3 = matches!(config.version, "3" | "4");
+    let v3 = matches!(config.version, "3" | "4" | "5");
     let venue = VenueId::new("SZSE").expect("static venue is valid");
     let mut acc = Acc::default();
     let mut duplicates = 0_u64;
@@ -301,6 +350,25 @@ fn normalize(
         }
         if !seen_raw.insert(raw.raw_sha256.clone()) {
             acc.push("duplicate_raw_input", &path, "Raw object listed twice");
+            continue;
+        }
+        let sina_records: Vec<_> = raw
+            .source_records
+            .iter()
+            .filter(|record| record.source_id == "sina_adjust_factor")
+            .collect();
+        if !sina_records.is_empty() {
+            if config.version != "5" {
+                acc.push(
+                    "unsupported_sina_adjust_factor",
+                    &path,
+                    "Sina adjustment factors require szse-etf-frozen v5",
+                );
+                continue;
+            }
+            for record in sina_records {
+                decode_sina_adjustment(raw, record, &path, &mut acc, &mut duplicates, config);
+            }
             continue;
         }
         if raw.bytes.starts_with(b"PK\x03\x04") {
@@ -338,6 +406,7 @@ fn normalize(
         secondary,
         announcements,
         corporate_actions: action_drafts,
+        sina_factors,
         tdx_code_tables,
         excluded,
     } = acc;
@@ -438,6 +507,18 @@ fn normalize(
             normalization_version: "szse-corporate-action@1".into(),
         });
     }
+    let sina_event_count = if config.version == "5" {
+        reconcile_sina_adjustments(
+            &mut corporate_actions,
+            &primary,
+            &sina_factors,
+            config,
+            &calendar,
+            &mut issues,
+        )
+    } else {
+        0
+    };
     if !issues.is_empty() {
         return Err(issues);
     }
@@ -592,6 +673,19 @@ fn normalize(
     for row in &announcement_rows {
         *category_counts.entry(row.category.clone()).or_default() += 1;
     }
+    let incomplete_action_fields: Vec<_> = corporate_actions
+        .iter()
+        .filter_map(|action| {
+            let missing = missing_action_fields(action);
+            (!missing.is_empty()).then(|| {
+                json!({
+                    "announcement_id": action.announcement_id,
+                    "instrument_id": action.instrument_id,
+                    "missing_fields": missing,
+                })
+            })
+        })
+        .collect();
 
     let convert =
         |error: crate::DataError| vec![issue("table_conversion_failed", "$", error.to_string())];
@@ -621,7 +715,7 @@ fn normalize(
         corporate_actions: include_actions
             .then(|| corporate_actions_to_record_batch(&corporate_actions).map_err(convert))
             .transpose()?,
-        tdx_code_table: (config.version == "4")
+        tdx_code_table: (matches!(config.version, "4" | "5"))
             .then(|| {
                 let rows = tdx_code_tables
                     .iter()
@@ -653,8 +747,23 @@ fn normalize(
         "execution_status": "not_derived",
         "completeness_claim": "none; coverage is limited to the frozen Raw set",
     });
-    if config.version == "4" {
+    if matches!(config.version, "4" | "5") {
         coverage["tdx_code_table_sessions"] = json!(tdx_code_tables.len());
+    }
+    if config.version == "5" {
+        coverage["corporate_actions_with_missing_fields"] = json!(incomplete_action_fields);
+        coverage["sina_adjust_factor"] = json!({
+            "qfq_raw_objects": kind_counts.get("sina_adjust_factor_qfq").copied().unwrap_or(0),
+            "hfq_raw_objects": kind_counts.get("sina_adjust_factor_hfq").copied().unwrap_or(0),
+            "events": sina_event_count,
+            "reconciliation": "qfq_hfq_tdx_reference_cninfo@1",
+            "lifecycle_coverage": sina_lifecycle_coverage(
+                config,
+                &sina_factors,
+                &primary,
+                &corporate_actions,
+            ),
+        });
     }
     Ok(NormalizationOutput {
         tables,
@@ -742,7 +851,7 @@ fn decode_tdx(
 ) {
     *acc.kind_counts.entry("tdx_daily").or_default() += 1;
     let invalid = |acc: &mut Acc, message: String| acc.push("invalid_tdx_package", path, message);
-    let v3 = matches!(config.version, "3" | "4");
+    let v3 = matches!(config.version, "3" | "4" | "5");
     let mut archive = match ZipArchive::new(Cursor::new(raw.bytes.as_slice())) {
         Ok(archive) => archive,
         Err(error) => return invalid(acc, format!("cannot open ZIP: {error}")),
@@ -895,7 +1004,7 @@ fn decode_tdx(
             duplicates,
         );
     }
-    if config.version == "4" {
+    if matches!(config.version, "4" | "5") {
         insert_fact(
             &mut acc.tdx_code_tables,
             date,
@@ -988,6 +1097,456 @@ fn decode_tencent(
             );
         }
     }
+}
+
+fn reconcile_sina_adjustments(
+    actions: &mut [CorporateActionRow],
+    primary: &BTreeMap<Key, Sourced<Option<SelectedBar>>>,
+    factors: &BTreeMap<(String, String), Sourced<Vec<AdjustmentEvent>>>,
+    config: &SzseEtfFrozen,
+    calendar: &BTreeMap<NaiveDate, Sourced<bool>>,
+    issues: &mut Vec<NormalizationIssue>,
+) -> usize {
+    let lifecycles = &config.lifecycles;
+    let symbols: BTreeSet<_> = lifecycles
+        .iter()
+        .map(|life| life.native_symbol.as_str())
+        .collect();
+    let mut events_by_date = BTreeMap::new();
+    for symbol in symbols {
+        let qfq = factors.get(&(symbol.to_owned(), "qfq".into()));
+        let hfq = factors.get(&(symbol.to_owned(), "hfq".into()));
+        let (Some(qfq), Some(hfq)) = (qfq, hfq) else {
+            issues.push(issue(
+                "sina_adjust_factor_pair_missing",
+                symbol,
+                "both qfq and hfq Raw sources are required for each catalog code",
+            ));
+            continue;
+        };
+        if qfq.value != hfq.value {
+            issues.push(issue(
+                "sina_adjust_factor_mismatch",
+                symbol,
+                "qfq and hfq do not derive identical event dates and values",
+            ));
+            continue;
+        }
+        for life in lifecycles
+            .iter()
+            .filter(|life| life.native_symbol == symbol)
+        {
+            for event in qfq
+                .value
+                .iter()
+                .filter(|event| life.contains(event.effective_date))
+            {
+                if event.cash_per_share.is_some() && event.share_ratio.is_some() {
+                    issues.push(issue(
+                        "sina_compound_action_unresolved",
+                        format!("{symbol}@{}", event.effective_date),
+                        "dividend and share conversion on the same ex-date require explicit ordering",
+                    ));
+                    continue;
+                }
+                if events_by_date
+                    .insert((symbol.to_owned(), event.effective_date), event.clone())
+                    .is_some()
+                {
+                    issues.push(issue(
+                        "sina_event_lifecycle_ambiguous",
+                        format!("{symbol}@{}", event.effective_date),
+                        "factor event maps to more than one catalog lifecycle",
+                    ));
+                }
+            }
+        }
+    }
+
+    for ((symbol, date), fact) in primary {
+        if fact.value.as_ref().is_some_and(|bar| bar.source == "tdx")
+            && config.lifecycle(symbol, *date).is_none()
+        {
+            issues.push(issue(
+                "tdx_lifecycle_missing",
+                format!("{symbol}@{date}"),
+                "TDX bar is outside every configured catalog lifecycle",
+            ));
+        }
+    }
+
+    let mut reference_checked = BTreeSet::new();
+    let mut reference_jumps = BTreeSet::new();
+    for life in lifecycles {
+        let mut previous_close = None;
+        for ((symbol, date), fact) in primary
+            .iter()
+            .filter(|((symbol, date), _)| symbol == &life.native_symbol && life.contains(*date))
+        {
+            let Some(Some(bar)) = fact.value.as_ref().map(Some) else {
+                continue;
+            };
+            if bar.source != "tdx" {
+                continue;
+            }
+            let event_key = (symbol.clone(), *date);
+            let has_event = events_by_date.contains_key(&event_key);
+            match (previous_close, bar.reference_price) {
+                (Some(previous), Some(reference)) => {
+                    reference_checked.insert(event_key.clone());
+                    let is_jump = reference != previous;
+                    if is_jump {
+                        reference_jumps.insert(event_key.clone());
+                    }
+                    if is_jump != has_event {
+                        issues.push(issue(
+                            "p21_reference_factor_mismatch",
+                            format!("{symbol}@{date}"),
+                            "TDX ex-right reference change and Sina factor event are not equivalent",
+                        ));
+                    }
+                }
+                (Some(_), None) => issues.push(issue(
+                    "p21_reference_missing",
+                    format!("{symbol}@{date}"),
+                    "TDX row has no exchange reference price for comparison",
+                )),
+                (_, None) if has_event => issues.push(issue(
+                    "p21_reference_missing",
+                    format!("{symbol}@{date}"),
+                    "factor event has no TDX exchange reference price",
+                )),
+                (None, Some(_)) if has_event => issues.push(issue(
+                    "p21_reference_history_missing",
+                    format!("{symbol}@{date}"),
+                    "factor event has no prior priced TDX Session within its lifecycle",
+                )),
+                _ => {}
+            }
+            previous_close = Some(bar.ohlcv.close);
+        }
+    }
+    for (symbol, date) in events_by_date.keys() {
+        if !reference_checked.contains(&(symbol.clone(), *date)) {
+            issues.push(issue(
+                "p21_reference_missing",
+                format!("{symbol}@{date}"),
+                "factor event cannot be compared with a TDX ex-right reference",
+            ));
+        }
+    }
+
+    for ((symbol, date), event) in &events_by_date {
+        let expected_kind = if event.cash_per_share.is_some() {
+            CorporateActionKind::Dividend
+        } else {
+            CorporateActionKind::ShareConversion
+        };
+        let matches: Vec<_> = actions
+            .iter_mut()
+            .filter(|action| {
+                action.instrument_id.symbol() == symbol
+                    && action_event_date(action) == Some(*date)
+                    && action.kind == expected_kind
+            })
+            .collect();
+        if matches.len() != 1 {
+            issues.push(issue(
+                "sina_announcement_mismatch",
+                format!("{symbol}@{date}"),
+                "Sina event must match exactly one cninfo dividend or conversion announcement",
+            ));
+            continue;
+        }
+        let action = matches.into_iter().next().expect("one match");
+        if let Some(cash) = &event.cash_per_share {
+            if action
+                .cash_per_share
+                .as_ref()
+                .is_some_and(|official| official != cash)
+            {
+                issues.push(issue(
+                    "sina_announcement_amount_mismatch",
+                    format!("{symbol}@{date}"),
+                    "Sina dividend amount differs from the structured cninfo amount",
+                ));
+            } else {
+                action.cash_per_share = Some(cash.clone());
+            }
+        }
+        if let Some(ratio) = &event.share_ratio {
+            if action
+                .share_ratio
+                .as_ref()
+                .is_some_and(|official| official != ratio)
+            {
+                issues.push(issue(
+                    "sina_announcement_ratio_mismatch",
+                    format!("{symbol}@{date}"),
+                    "Sina share ratio differs from the structured cninfo ratio",
+                ));
+            } else {
+                action.share_ratio = Some(ratio.clone());
+            }
+        }
+        let record_date = calendar
+            .range(..*date)
+            .rev()
+            .find(|(_, session)| session.value)
+            .map(|(session_date, _)| *session_date);
+        let Some(record_date) = record_date else {
+            issues.push(issue(
+                "corporate_action_record_date_unknown",
+                format!("{symbol}@{date}"),
+                "calendar does not establish the previous Session before ex-date",
+            ));
+            continue;
+        };
+        if action
+            .record_date
+            .is_some_and(|official| official != record_date)
+        {
+            issues.push(issue(
+                "corporate_action_record_date_mismatch",
+                format!("{symbol}@{date}"),
+                "record date must be the previous Session before ex-date",
+            ));
+        }
+        action.record_date = Some(record_date);
+        action.ex_date = Some(*date);
+    }
+
+    for action in actions.iter() {
+        if !matches!(
+            action.kind,
+            CorporateActionKind::Dividend | CorporateActionKind::ShareConversion
+        ) {
+            continue;
+        }
+        let Some(date) = action_event_date(action) else {
+            issues.push(issue(
+                "corporate_action_ex_date_missing",
+                action.announcement_id.clone(),
+                "dividend and conversion facts require an ex-date",
+            ));
+            continue;
+        };
+        if lifecycles
+            .iter()
+            .any(|life| life.native_symbol == action.instrument_id.symbol() && life.contains(date))
+            && !events_by_date.contains_key(&(action.instrument_id.symbol().to_owned(), date))
+        {
+            issues.push(issue(
+                "sina_event_missing",
+                format!("{}@{date}", action.instrument_id.symbol()),
+                "cninfo corporate action has no matching Sina factor event",
+            ));
+        }
+    }
+    reference_jumps.len()
+}
+
+fn action_event_date(action: &CorporateActionRow) -> Option<NaiveDate> {
+    action.ex_date.or(action.effective_date)
+}
+
+fn missing_action_fields(action: &CorporateActionRow) -> Vec<&'static str> {
+    match action.kind {
+        CorporateActionKind::Dividend if action.pay_date.is_none() => vec!["pay_date"],
+        CorporateActionKind::ShareConversion if action.share_ratio.is_none() => {
+            vec!["share_ratio"]
+        }
+        CorporateActionKind::Liquidation if action.liquidation_cash_per_share.is_none() => {
+            vec!["liquidation_cash_per_share"]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn sina_lifecycle_coverage(
+    config: &SzseEtfFrozen,
+    factors: &BTreeMap<(String, String), Sourced<Vec<AdjustmentEvent>>>,
+    primary: &BTreeMap<Key, Sourced<SelectedBar>>,
+    actions: &[CorporateActionRow],
+) -> Vec<Value> {
+    config
+        .lifecycles
+        .iter()
+        .map(|life| {
+            let qfq = factors.get(&(life.native_symbol.clone(), "qfq".into()));
+            let hfq = factors.get(&(life.native_symbol.clone(), "hfq".into()));
+            let factor_events = qfq.map_or(0, |source| {
+                source
+                    .value
+                    .iter()
+                    .filter(|event| life.contains(event.effective_date))
+                    .count()
+            });
+            let mut previous_close = None;
+            let mut reference_checks = 0;
+            let mut reference_jumps = 0;
+            let mut reference_unchecked_sessions = Vec::new();
+            for ((_, date), fact) in primary
+                .iter()
+                .filter(|((symbol, date), _)| symbol == &life.native_symbol && life.contains(*date))
+            {
+                let bar = &fact.value;
+                if bar.source != "tdx" {
+                    continue;
+                }
+                match (previous_close, bar.reference_price) {
+                    (Some(previous), Some(reference)) => {
+                        reference_checks += 1;
+                        reference_jumps += usize::from(reference != previous);
+                    }
+                    (None, _) => reference_unchecked_sessions.push(json!({
+                        "session_date": date,
+                        "reason": "no_prior_priced_tdx_session",
+                    })),
+                    (Some(_), None) => reference_unchecked_sessions.push(json!({
+                        "session_date": date,
+                        "reason": "missing_tdx_reference",
+                    })),
+                }
+                previous_close = Some(bar.ohlcv.close);
+            }
+            let lifecycle_actions: Vec<_> = actions
+                .iter()
+                .filter(|action| {
+                    action.instrument_id.symbol() == life.native_symbol
+                        && action_event_date(action).is_some_and(|date| life.contains(date))
+                })
+                .collect();
+            let incomplete_actions: Vec<_> = lifecycle_actions
+                .iter()
+                .filter_map(|action| {
+                    let missing = missing_action_fields(action);
+                    (!missing.is_empty()).then(|| {
+                        json!({
+                            "announcement_id": action.announcement_id,
+                            "effective_date": action_event_date(action),
+                            "missing_fields": missing,
+                        })
+                    })
+                })
+                .collect();
+            json!({
+                "native_symbol": life.native_symbol,
+                "lifecycle_start": life.start,
+                "lifecycle_end_exclusive": life.end_exclusive,
+                "qfq_raw_sha256": qfq.map(|source| &source.raw),
+                "hfq_raw_sha256": hfq.map(|source| &source.raw),
+                "factor_events": factor_events,
+                "matched_factor_events": factor_events,
+                "tdx_reference_checks": reference_checks,
+                "tdx_reference_jumps": reference_jumps,
+                "tdx_reference_unchecked_sessions": reference_unchecked_sessions,
+                "corporate_actions": lifecycle_actions.len(),
+                "actions_with_missing_fields": incomplete_actions,
+            })
+        })
+        .collect()
+}
+
+fn decode_sina_adjustment(
+    raw: &RawInput,
+    source: &SourceRecord,
+    path: &str,
+    acc: &mut Acc,
+    duplicates: &mut u64,
+    config: &SzseEtfFrozen,
+) {
+    let Some(url) = source.request.get("url").and_then(Value::as_str) else {
+        acc.push(
+            "invalid_sina_adjustment_source",
+            path,
+            "Sina source record is missing its request URL",
+        );
+        return;
+    };
+    let Some(endpoint) = url.strip_prefix("https://finance.sina.com.cn/realstock/company/") else {
+        acc.push(
+            "invalid_sina_adjustment_source",
+            path,
+            "Sina source URL is outside the authorized endpoint",
+        );
+        return;
+    };
+    let Some((symbol, kind_file)) = endpoint.split_once('/') else {
+        acc.push(
+            "invalid_sina_adjustment_source",
+            path,
+            "Sina source URL is missing its symbol or adjustment kind",
+        );
+        return;
+    };
+    let Some(kind) = kind_file.strip_suffix(".js") else {
+        acc.push(
+            "invalid_sina_adjustment_source",
+            path,
+            "Sina source URL must end in .js",
+        );
+        return;
+    };
+    let valid_symbol = symbol.len() == 8
+        && symbol.is_ascii()
+        && symbol.starts_with("sz")
+        && symbol[2..].bytes().all(|byte| byte.is_ascii_digit());
+    if !matches!(kind, "qfq" | "hfq")
+        || source
+            .request
+            .get("adjustment_kind")
+            .and_then(Value::as_str)
+            != Some(kind)
+        || source.request.get("symbol").and_then(Value::as_str) != Some(symbol)
+        || source.request.get("http_status").and_then(Value::as_u64) != Some(200)
+        || source.request.get("byte_len").and_then(Value::as_u64) != Some(raw.bytes.len() as u64)
+        || source.request.get("network_path").and_then(Value::as_str) != Some("direct_no_proxy")
+        || source.source_kind != SourceKind::VendorApi
+        || !valid_symbol
+        || !config.scoped(&symbol[2..])
+        || !config
+            .lifecycles
+            .iter()
+            .any(|life| life.native_symbol == symbol[2..])
+        || source.raw_sha256 != raw.raw_sha256
+    {
+        acc.push(
+            "invalid_sina_adjustment_source",
+            path,
+            "Sina source record identity does not match its Raw object or configured scope",
+        );
+        return;
+    }
+    let lifecycles = config
+        .lifecycles
+        .iter()
+        .filter(|life| life.native_symbol == symbol[2..])
+        .cloned()
+        .collect::<Vec<_>>();
+    let events = match parse_adjustment_series_for_lifecycles(&raw.bytes, &lifecycles) {
+        Ok(events) => events,
+        Err(problem) => {
+            acc.push("invalid_sina_adjustment", path, problem.to_string());
+            return;
+        }
+    };
+    *acc.kind_counts
+        .entry(if kind == "qfq" {
+            "sina_adjust_factor_qfq"
+        } else {
+            "sina_adjust_factor_hfq"
+        })
+        .or_default() += 1;
+    insert_fact(
+        &mut acc.sina_factors,
+        (symbol[2..].to_owned(), kind.to_owned()),
+        events,
+        &raw.raw_sha256,
+        path,
+        &mut acc.issues,
+        duplicates,
+    );
 }
 
 fn decode_cninfo(
@@ -1107,6 +1666,7 @@ fn decode_cninfo(
                         announced_at,
                         source_raw_sha256: &raw.raw_sha256,
                         path: &action_path,
+                        allow_sina_values: config.version == "5",
                     },
                 ) {
                     Ok(draft) => acc.corporate_actions.push(draft),
@@ -1186,19 +1746,27 @@ fn parse_action(value: &Value, source: ActionSource<'_>) -> Result<ActionDraft, 
     let ex_date = date("exDate")?;
     let pay_date = date("payDate")?;
     let effective_date = date("effectiveDate")?;
+    let effective_date = if kind == CorporateActionKind::ShareConversion {
+        effective_date.or(ex_date)
+    } else {
+        effective_date
+    };
     let cash_per_share = decimal("cashPerShare")?;
     let share_ratio = decimal("shareRatio")?;
     let liquidation_cash_per_share = decimal("liquidationCashPerShare")?;
     let valid = match kind {
         CorporateActionKind::Dividend => {
-            record_date.is_some()
-                && ex_date.is_some()
-                && pay_date.is_some()
-                && cash_per_share.is_some()
+            ex_date.is_some()
+                && (source.allow_sina_values
+                    || (record_date.is_some() && pay_date.is_some() && cash_per_share.is_some()))
         }
-        CorporateActionKind::ShareConversion => effective_date.is_some() && share_ratio.is_some(),
+        CorporateActionKind::ShareConversion => {
+            effective_date.or(ex_date).is_some()
+                && (source.allow_sina_values || share_ratio.is_some())
+        }
         CorporateActionKind::Liquidation => {
-            effective_date.is_some() && liquidation_cash_per_share.is_some()
+            effective_date.is_some()
+                && (source.allow_sina_values || liquidation_cash_per_share.is_some())
         }
     };
     if !valid {

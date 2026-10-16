@@ -5,6 +5,7 @@ use prajna_account::VirtualPortfolioId;
 use prajna_domain::{InstrumentId, Quantity};
 use prajna_research::{
     etf_market::{DerivedMarket, MarketEvidence},
+    etf_momentum::{CorporateActionRules, TotalReturnIndex},
     fast_event::{
         FastEventConfig, FastEventCosts, FastEventResult, PortfolioRun, Rebalance, Sizing,
         run_fast_event_pit,
@@ -14,6 +15,140 @@ use prajna_research::{
     vector::{VectorCosts, run_vector_pit},
 };
 use std::collections::BTreeMap;
+
+fn build_tri_with_actions(
+    root: &std::path::Path,
+    fixture: &fixture::Fixture,
+    actions: serde_json::Value,
+) -> TotalReturnIndex {
+    let raw = prajna_data::RawStore::open(root).unwrap();
+    let mut hashes = prajna_data::read_manifest(root, &fixture.dsv)
+        .unwrap()
+        .core
+        .inputs
+        .into_iter()
+        .map(|input| input.raw_sha256)
+        .collect::<Vec<_>>();
+    let announced_at = chrono::DateTime::parse_from_rfc3339("2023-01-02T00:00:00+08:00")
+        .unwrap()
+        .timestamp_millis();
+    let action_bytes = serde_json::to_vec(&serde_json::json!({
+        "announcements": [{
+            "announcementId": "SYN-ACTION-1",
+            "secCode": "159001",
+            "secName": "Synthetic ETF",
+            "announcementTitle": "Synthetic ETF corporate actions",
+            "announcementTime": announced_at,
+            "corporateActions": actions
+        }],
+        "totalRecordNum": 1,
+        "hasMore": false
+    }))
+    .unwrap();
+    hashes.push(
+        raw.put(
+            &action_bytes,
+            prajna_data::SourceRecordInput {
+                content_type: "application/json".into(),
+                source_kind: prajna_data::SourceKind::FileImport,
+                source_id: "synthetic-cninfo-actions".into(),
+                request: serde_json::json!({}),
+                observed_at: "2026-10-15T00:00:00Z".into(),
+                ingested_by: "pit-sides-test".into(),
+            },
+        )
+        .unwrap(),
+    );
+    let manifest = prajna_data::publish_dataset(
+        root,
+        &raw,
+        &prajna_data::NormalizerRegistry::with_builtins(),
+        "szse-etf-frozen",
+        "2",
+        &hashes,
+        "2026-10-15T00:00:00Z",
+    )
+    .unwrap();
+    let evidence: MarketEvidence = serde_json::from_value(fixture.input["market"].clone()).unwrap();
+    let market =
+        DerivedMarket::from_dataset(root, &manifest.dsv, &fixture.catalog, evidence).unwrap();
+    let rules = CorporateActionRules {
+        version: "synthetic-tri-rules@1".into(),
+        unexplained_jump_threshold_bps: 1_000,
+    };
+    TotalReturnIndex::build_from_dataset(&market, root, &rules, &raw).unwrap()
+}
+
+#[test]
+fn dataset_actions_map_to_lifecycle_and_settle_after_termination() {
+    let lake = fixture::lake();
+    let f = fixture::fixture_options(lake.path(), 1.0, true);
+    let factor_lifecycle = f
+        .catalog
+        .sina_factor_lifecycles()
+        .into_iter()
+        .find(|life| life.native_symbol == "159001")
+        .unwrap();
+    assert_eq!(factor_lifecycle.end_exclusive, Some(fixture::date(8)));
+    let tri = build_tri_with_actions(
+        lake.path(),
+        &f,
+        serde_json::json!([
+            {
+                "type": "dividend",
+                "recordDate": "2023-01-03",
+                "exDate": "2023-01-04",
+                "payDate": "2023-01-08",
+                "cashPerShare": "0.05"
+            },
+            {
+                "type": "liquidation",
+                "effectiveDate": "2023-01-09",
+                "liquidationCashPerShare": "0.85"
+            }
+        ]),
+    );
+
+    assert_eq!(tri.actions().len(), 2);
+    let instrument = f.catalog.resolve_row("159001", fixture::date(4)).unwrap();
+    assert!(
+        tri.actions()
+            .iter()
+            .all(|action| action.instrument_id == instrument)
+    );
+    assert_eq!(
+        tri.point(&instrument, fixture::date(9)).unwrap().level,
+        0.85
+    );
+}
+
+#[test]
+fn ex_date_only_share_conversion_is_usable_by_dataset_tri() {
+    let lake = fixture::lake();
+    let prices = BTreeMap::from([
+        ((0, 4), (0.5, 0.5)),
+        ((0, 5), (0.5, 0.5)),
+        ((0, 6), (0.5, 0.5)),
+        ((0, 7), (0.5, 0.5)),
+        ((0, 8), (0.5, 0.5)),
+        ((0, 9), (0.5, 0.5)),
+        ((0, 10), (0.5, 0.5)),
+    ]);
+    let f = fixture::fixture_with_action_prices(lake.path(), prices);
+    let tri = build_tri_with_actions(
+        lake.path(),
+        &f,
+        serde_json::json!([{
+            "type": "share_conversion",
+            "exDate": "2023-01-04",
+            "shareRatio": "2"
+        }]),
+    );
+
+    assert_eq!(tri.actions().len(), 1);
+    assert_eq!(tri.actions()[0].effective_date, Some(fixture::date(4)));
+    assert_eq!(tri.point(&f.ids[0], fixture::date(4)).unwrap().level, 1.0);
+}
 
 fn case(
     initial: f64,
