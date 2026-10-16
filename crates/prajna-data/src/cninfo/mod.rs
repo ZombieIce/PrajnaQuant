@@ -6,7 +6,7 @@ mod index;
 pub use collect::{Collector, HttpReply, Request, Transport};
 pub use extract::{EXTRACTOR_VERSION, PdfText, Poppler, extract_fields};
 pub use index::{
-    Announcement, FundIndex, IndexDataset, PageSet, RULES_VERSION, classify, scoped_code,
+    Announcement, FundIndex, IndexDataset, NameFact, PageSet, RULES_VERSION, classify, scoped_code,
 };
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;

@@ -70,6 +70,7 @@ pub struct NormalizedTables {
     pub announcements: Option<RecordBatch>,
     pub corporate_actions: Option<RecordBatch>,
     pub bar_sources: Option<RecordBatch>,
+    pub tdx_code_table: Option<RecordBatch>,
 }
 
 /// A versioned conversion from immutable raw bytes to the normalized contract.
@@ -106,6 +107,7 @@ impl NormalizerRegistry {
         registry.register(szse_etf_frozen::SzseEtfFrozen::v1());
         registry.register(szse_etf_frozen::SzseEtfFrozen::v2());
         registry.register(SzseEtfFrozen::v3(vec![(158000, 159999)]).expect("builtin ranges"));
+        registry.register(SzseEtfFrozen::v4(vec![(158000, 159999)]).expect("builtin ranges"));
         registry
     }
 

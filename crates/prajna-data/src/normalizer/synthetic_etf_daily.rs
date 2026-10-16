@@ -691,6 +691,7 @@ fn normalize_fixture(
             source_crosscheck: None,
             announcements: None,
             corporate_actions: None,
+            tdx_code_table: None,
         })
     })();
     let tables =

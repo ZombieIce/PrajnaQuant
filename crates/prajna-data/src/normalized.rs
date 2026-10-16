@@ -171,6 +171,107 @@ pub struct BarSourceRow {
     pub reference_price: Option<Price>,
 }
 
+/// Full configured Shenzhen code table from one TDX daily package, including
+/// codes with no tradeable Bar and empty tables.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TdxCodeTableRow {
+    pub session_date: NaiveDate,
+    pub native_symbols: Vec<String>,
+    pub code_ranges: Vec<(u32, u32)>,
+    pub source_raw_sha256: String,
+}
+
+pub fn tdx_code_table_schema() -> SchemaRef {
+    schema(
+        "tdx_code_table",
+        vec![
+            date("session_date"),
+            utf8("native_symbols_json", false),
+            utf8("code_ranges_json", false),
+            utf8("source_raw_sha256", false),
+        ],
+    )
+}
+
+pub fn tdx_code_table_to_record_batch(rows: &[TdxCodeTableRow]) -> Result<RecordBatch, DataError> {
+    let mut rows = rows.iter().collect::<Vec<_>>();
+    rows.sort_by_key(|row| row.session_date);
+    let batch = RecordBatch::try_new(
+        tdx_code_table_schema(),
+        vec![
+            Arc::new(Date32Array::from(
+                rows.iter()
+                    .map(|row| date32(row.session_date))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            Arc::new(StringArray::from_iter_values(rows.iter().map(|row| {
+                serde_json::to_string(&row.native_symbols).expect("serializable code table")
+            }))),
+            Arc::new(StringArray::from_iter_values(rows.iter().map(|row| {
+                serde_json::to_string(&row.code_ranges).expect("serializable code ranges")
+            }))),
+            Arc::new(StringArray::from_iter_values(
+                rows.iter().map(|row| row.source_raw_sha256.as_str()),
+            )),
+        ],
+    )?;
+    check_primary_key_order(&batch, "tdx_code_table")?;
+    Ok(batch)
+}
+
+pub fn tdx_code_table_from_record_batch(
+    batch: &RecordBatch,
+) -> Result<Vec<TdxCodeTableRow>, DataError> {
+    check_batch(batch, "tdx_code_table")?;
+    check_primary_key_order(batch, "tdx_code_table")?;
+    let mut rows = Vec::with_capacity(batch.num_rows());
+    for row in 0..batch.num_rows() {
+        let native_symbols: Vec<String> =
+            serde_json::from_str(string_at(batch, 1, row)?).map_err(|e| err(e.to_string()))?;
+        if native_symbols
+            .iter()
+            .any(|code| code.len() != 6 || !code.bytes().all(|byte| byte.is_ascii_digit()))
+            || native_symbols.windows(2).any(|pair| pair[0] >= pair[1])
+        {
+            return Err(err(
+                "TDX code table symbols must be unique sorted six-digit codes",
+            ));
+        }
+        let code_ranges: Vec<(u32, u32)> =
+            serde_json::from_str(string_at(batch, 2, row)?).map_err(|e| err(e.to_string()))?;
+        if code_ranges.is_empty()
+            || code_ranges
+                .iter()
+                .any(|(start, end)| *start < 100_000 || start > end || *end > 999_999)
+            || code_ranges.windows(2).any(|pair| pair[0].1 >= pair[1].0)
+            || native_symbols.iter().any(|code| {
+                let value = code.parse::<u32>().expect("validated six-digit code");
+                !code_ranges
+                    .iter()
+                    .any(|(start, end)| *start <= value && value <= *end)
+            })
+        {
+            return Err(err(
+                "TDX code table has invalid scope or out-of-scope symbols",
+            ));
+        }
+        rows.push(TdxCodeTableRow {
+            session_date: naive_date(
+                batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<Date32Array>()
+                    .ok_or_else(|| err("expected Date32"))?
+                    .value(row),
+            )?,
+            native_symbols,
+            code_ranges,
+            source_raw_sha256: string_at(batch, 3, row)?.into(),
+        });
+    }
+    Ok(rows)
+}
+
 pub fn bar_sources_schema() -> SchemaRef {
     schema(
         "bar_sources",
@@ -1078,6 +1179,7 @@ fn expected_schema(table: &str) -> Result<SchemaRef, DataError> {
         "instruments" => Ok(instruments_schema()),
         "bars" => Ok(bars_schema()),
         "bar_sources" => Ok(bar_sources_schema()),
+        "tdx_code_table" => Ok(tdx_code_table_schema()),
         "sessions" => Ok(sessions_schema()),
         "execution_status" => Ok(execution_status_schema()),
         "source_crosscheck" => Ok(source_crosscheck_schema()),
@@ -1108,6 +1210,7 @@ fn check_primary_key_order(batch: &RecordBatch, table: &str) -> Result<(), DataE
         "bars" => &[0, 1, 3],
         "sessions" => &[0, 1],
         "execution_status" | "source_crosscheck" | "bar_sources" => &[0, 1],
+        "tdx_code_table" => &[0],
         "announcements" => &[0],
         "corporate_actions" => &[0, 1],
         _ => return Err(err("unsupported normalized table")),

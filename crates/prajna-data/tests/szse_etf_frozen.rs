@@ -1102,6 +1102,7 @@ fn v3_invalid_tdx_reference_fails_closed_without_changing_legacy_decoding() {
         for v in ["1", "2"] {
             assert!(registry.get(ID, v).unwrap().normalize(&inputs).is_ok());
         }
+
         assert!(
             registry
                 .get(ID, "3")
@@ -1112,4 +1113,95 @@ fn v3_invalid_tdx_reference_fails_closed_without_changing_legacy_decoding() {
                 .any(|e| e.code == "invalid_reference_price")
         );
     }
+}
+
+#[test]
+fn v4_publishes_full_configured_tdx_code_tables_including_no_trade_and_empty_sessions() {
+    use arrow_array::StringArray;
+    use prajna_data::{Normalizer, RawInput, SzseEtfFrozen, tdx_code_table_from_record_batch};
+    let dir = tempfile::tempdir().unwrap();
+    let frozen = freeze_all(
+        dir.path(),
+        &[
+            ("szse-calendar", calendar()),
+            (
+                "tdx",
+                with_reference(
+                    tdx_package(
+                        "260105",
+                        &[
+                            rec("158001", 1.05),
+                            ("158002", 1.0, 1.1, 0.9, 1.0, 0, 0.0),
+                            rec("159001", 1.05),
+                        ],
+                        None,
+                    ),
+                    1.0,
+                ),
+            ),
+            ("tdx", with_reference(tdx_package("260106", &[], None), 1.0)),
+        ],
+    );
+    let mut registry = NormalizerRegistry::new();
+    registry.register(SzseEtfFrozen::v4(vec![(158000, 158999)]).unwrap());
+    let manifest = publish_dataset(
+        dir.path(),
+        &frozen.store,
+        &registry,
+        ID,
+        "4",
+        &frozen.hashes,
+        OBSERVED,
+    )
+    .unwrap();
+    assert_eq!(
+        manifest
+            .core
+            .tables
+            .iter()
+            .filter(|table| table.table == "tdx_code_table")
+            .count(),
+        1
+    );
+    let batches = read_parquet(
+        table_path(dir.path(), &manifest.dsv, "tdx_code_table"),
+        "tdx_code_table",
+        "1",
+    )
+    .unwrap();
+    assert_eq!(batches[0].num_rows(), 2);
+    let code_tables = tdx_code_table_from_record_batch(&batches[0]).unwrap();
+    assert_eq!(code_tables[0].code_ranges, vec![(158000, 158999)]);
+    assert_eq!(code_tables[0].source_raw_sha256.len(), "sha256:".len() + 64);
+    let symbols = batches[0]
+        .column(1)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Vec<String>>(symbols.value(0)).unwrap(),
+        ["158001", "158002"]
+    );
+    assert_eq!(
+        serde_json::from_str::<Vec<String>>(symbols.value(1)).unwrap(),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        rebuild_dataset(&frozen.store, &registry, &manifest).unwrap(),
+        manifest.dsv
+    );
+    let v3 = SzseEtfFrozen::v3(vec![(158000, 159999)]).unwrap();
+    let legacy = v3
+        .normalize(
+            &frozen
+                .hashes
+                .iter()
+                .map(|hash| RawInput {
+                    raw_sha256: hash.clone(),
+                    bytes: frozen.store.get(hash).unwrap(),
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+    assert!(legacy.tables.tdx_code_table.is_none());
 }

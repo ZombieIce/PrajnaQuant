@@ -50,15 +50,23 @@ fn fixture(root: &std::path::Path) -> (RawStore, CatalogInput) {
             category: FundCategory::Equity,
             index_id: "CSI:300".into(),
             evidence: evidence("contract"),
+            legal_name: None,
         }],
+        identity_start: None,
+        identity_end_exclusive: None,
+        code_table_first_seen: None,
+        code_table_last_seen: None,
+        code_table_exit_date: None,
     };
     let input = CatalogInput {
         schema_version: 1, rule_version: "synthetic-rules@1".into(), calendar_start: date(1), calendar_end: date(10), calendar_raw_sha256: BTreeSet::from([h.clone()]),
         sessions: (1..=10).map(|d| Session::new("SZSE".parse().unwrap(), date(d), time(d, 9), time(d, 15)).unwrap()).collect(),
         coverage: Coverage { start: date(1), end: date(10), scan_method: "synthetic 159000..159999 full-window scan".into(), announcement_method: "synthetic full listings/contracts/terminations + attachments and pre-window identities".into(), announcement_raw_sha256: BTreeSet::from([h.clone()]), gaps: BTreeSet::new(), resolutions: vec![] },
         lifecycles: vec![life("159001", 2, Some(5)), life("159001", 7, None), life("159002", 1, None)],
-        scans: (159000..=159999).map(|c| ScanObservation { native_symbol: c.to_string(), status: if c == 159001 || c == 159002 { ScanStatus::Observed } else { ScanStatus::NoRows }, raw_sha256: h.clone(), first_observed: (c == 159001 || c == 159002).then(|| date(if c == 159001 {2} else {1})), last_observed: (c == 159001 || c == 159002).then(|| date(10)) }).collect(),
-        broad_indices: BroadIndexList { version: "synthetic-domestic@1".into(), index_ids: BTreeSet::from(["CSI:300".into()]), evidence: vec![evidence("index-scope")] },
+        scans: (159000..=159999).map(|c| ScanObservation { native_symbol: c.to_string(), status: if c == 159001 || c == 159002 { ScanStatus::Observed } else { ScanStatus::NoRows }, raw_sha256: h.clone(), first_observed: (c == 159001 || c == 159002).then(|| date(if c == 159001 {2} else {1})), last_observed: (c == 159001 || c == 159002).then(|| date(10)), identity_start: None }).collect(),
+        broad_indices: BroadIndexList { version: "synthetic-domestic@1".into(), index_ids: BTreeSet::from(["CSI:300".into()]), evidence: vec![evidence("index-scope")], named_indices: vec![] },
+        code_ranges: None,
+        code_tables: vec![],
     };
     (raw, input)
 }
@@ -311,4 +319,219 @@ fn frozen_version_mismatch_and_malformed_calendar_are_rejected() {
     input.sessions[0] =
         Session::new("SZSE".parse().unwrap(), date(1), time(2, 9), time(2, 15)).unwrap();
     assert!(HistoricalCatalog::build(input, &raw).is_err());
+}
+
+#[test]
+fn tdx_code_tables_rebuild_configured_158xxx_lifecycles_and_name_based_pit_universe() {
+    let temp = tempfile::tempdir().unwrap();
+    let (raw, mut input) = fixture(temp.path());
+    input.schema_version = 2;
+    input.rule_version = "synthetic-tdx-catalog@2".into();
+    input.code_ranges = Some(vec![
+        CodeRange {
+            start: 158_000,
+            end: 158_999,
+        },
+        CodeRange {
+            start: 159_000,
+            end: 159_999,
+        },
+    ]);
+    input.lifecycles[0].identity_start = Some(date(1));
+    input.lifecycles[1].identity_start = Some(date(7));
+    input.lifecycles[2].identity_start = Some(date(1));
+    input.lifecycles[2].attributes[0].legal_name = Some("合成沪深300ETF".into());
+    let changed_name_evidence = Evidence {
+        raw_sha256: input.lifecycles[2].listing.evidence.raw_sha256.clone(),
+        announcement_id: "synthetic-underlying-index-change".into(),
+        locator: "synthetic p2".into(),
+        publication: Publication::DateOnly { date: date(6) },
+    };
+    let mut changed_name_lifecycle = input.lifecycles[2].clone();
+    changed_name_lifecycle.identity_start = Some(date(6));
+    changed_name_lifecycle.listing = LifecycleFact {
+        effective_date: date(6),
+        evidence: changed_name_evidence.clone(),
+    };
+    changed_name_lifecycle.attributes = vec![AttributeFact {
+        effective_date: date(6),
+        category: FundCategory::Equity,
+        index_id: "CSI:500".into(),
+        evidence: changed_name_evidence,
+        legal_name: Some("合成中证500ETF".into()),
+    }];
+
+    let missing_name = Lifecycle {
+        native_symbol: "158001".into(),
+        contract_raw_sha256: input.lifecycles[2].contract_raw_sha256.clone(),
+        listing: LifecycleFact {
+            effective_date: date(1),
+            evidence: input.lifecycles[2].listing.evidence.clone(),
+        },
+        termination: None,
+        attributes: vec![AttributeFact {
+            effective_date: date(1),
+            category: FundCategory::Equity,
+            index_id: String::new(),
+            evidence: input.lifecycles[2].listing.evidence.clone(),
+            legal_name: None,
+        }],
+        identity_start: Some(date(1)),
+        identity_end_exclusive: None,
+        code_table_first_seen: None,
+        code_table_last_seen: None,
+        code_table_exit_date: None,
+    };
+    input.lifecycles.push(changed_name_lifecycle);
+    input.lifecycles.push(missing_name);
+    let scan = |native_symbol: &str, identity_start, first, last| ScanObservation {
+        native_symbol: native_symbol.into(),
+        status: ScanStatus::Observed,
+        raw_sha256: input.lifecycles[0].contract_raw_sha256.clone(),
+        first_observed: Some(date(first)),
+        last_observed: Some(date(last)),
+        identity_start: Some(date(identity_start)),
+    };
+    input.scans = vec![
+        scan("159001", 1, 2, 4),
+        scan("159001", 7, 7, 10),
+        scan("159002", 1, 1, 5),
+        scan("159002", 6, 6, 10),
+        scan("158001", 1, 1, 10),
+    ];
+    input.broad_indices.named_indices = vec![BroadIndexName {
+        index_id: "CSI:300".into(),
+        official_name: "沪深300指数".into(),
+        aliases: BTreeSet::from(["沪深300".into()]),
+    }];
+    input.broad_indices.version = "synthetic-official-scale-list@1".into();
+    input.code_tables = (1..=10)
+        .map(|day| {
+            let mut symbols = BTreeSet::from(["158001".to_owned(), "159002".to_owned()]);
+            if day <= 4 || day >= 7 {
+                symbols.insert("159001".into());
+            }
+            CodeTableSnapshot {
+                session_date: date(day),
+                raw_sha256: input.calendar_raw_sha256.iter().next().unwrap().clone(),
+                symbols,
+                code_ranges: input.code_ranges.as_ref().unwrap().clone(),
+            }
+        })
+        .collect();
+
+    let catalog = HistoricalCatalog::build(input.clone(), &raw).unwrap();
+    assert!(catalog.coverage_gaps().is_empty());
+    let old_code_life = catalog
+        .input()
+        .lifecycles
+        .iter()
+        .find(|life| life.native_symbol == "159001" && life.identity_start == Some(date(1)))
+        .unwrap();
+    assert_eq!(old_code_life.code_table_first_seen, Some(date(1)));
+    assert_eq!(old_code_life.code_table_last_seen, Some(date(4)));
+    assert_eq!(old_code_life.code_table_exit_date, Some(date(5)));
+    assert_eq!(old_code_life.identity_end_exclusive, Some(date(5)));
+    let reused = catalog.resolve_row("159001", date(7)).unwrap();
+    assert_ne!(catalog.resolve_row("159001", date(2)).unwrap(), reused);
+    assert!(catalog.resolve_row("159001", date(5)).is_err());
+
+    let broad_before_change = catalog.universe(date(5)).unwrap();
+    assert!(
+        broad_before_change
+            .members
+            .iter()
+            .any(|id| id.symbol().starts_with("159002-"))
+    );
+    assert_eq!(
+        broad_before_change
+            .excluded
+            .values()
+            .filter(|reason| *reason == "missing_legal_name")
+            .count(),
+        1
+    );
+    assert_eq!(
+        catalog
+            .universe(date(6))
+            .unwrap()
+            .excluded
+            .values()
+            .filter(|reason| *reason == "listing_not_known")
+            .count(),
+        1
+    );
+    assert!(
+        catalog
+            .universe(date(7))
+            .unwrap()
+            .excluded
+            .values()
+            .any(|reason| reason == "not_domestic_broad_index")
+    );
+
+    let mut changed_list = input;
+    changed_list.broad_indices.version = "synthetic-official-scale-list@2".into();
+    let changed_catalog = HistoricalCatalog::build(changed_list, &raw).unwrap();
+    assert_ne!(
+        catalog.universe(date(5)).unwrap().universe_version,
+        changed_catalog.universe(date(5)).unwrap().universe_version
+    );
+}
+
+#[test]
+fn tdx_catalog_rejects_missing_sessions_and_unconfigured_codes() {
+    let temp = tempfile::tempdir().unwrap();
+    let (raw, mut input) = fixture(temp.path());
+    input.schema_version = 2;
+    input.code_ranges = Some(vec![CodeRange {
+        start: 159_000,
+        end: 159_999,
+    }]);
+    input.broad_indices.named_indices = vec![BroadIndexName {
+        index_id: "CSI:300".into(),
+        official_name: "沪深300指数".into(),
+        aliases: BTreeSet::from(["沪深300".into()]),
+    }];
+    input.code_tables = (1..=10)
+        .map(|day| CodeTableSnapshot {
+            session_date: date(day),
+            raw_sha256: input.calendar_raw_sha256.iter().next().unwrap().clone(),
+            symbols: BTreeSet::new(),
+            code_ranges: input.code_ranges.as_ref().unwrap().clone(),
+        })
+        .collect();
+    input.code_tables.pop();
+    assert!(HistoricalCatalog::build(input.clone(), &raw).is_err());
+    input.code_tables.push(CodeTableSnapshot {
+        session_date: date(10),
+        raw_sha256: input.calendar_raw_sha256.iter().next().unwrap().clone(),
+        symbols: BTreeSet::from(["158001".into()]),
+        code_ranges: input.code_ranges.as_ref().unwrap().clone(),
+    });
+    assert!(HistoricalCatalog::build(input, &raw).is_err());
+}
+
+#[test]
+fn cninfo_name_facts_are_mapped_to_exact_publication_time_not_collection_time() {
+    let published_at = time(4, 16);
+    let name = prajna_data::cninfo::NameFact {
+        name: "合成沪深300ETF".into(),
+        announced_ms: published_at.as_unix_nanos() / 1_000_000,
+        available_at: None,
+        announcement_id: "synthetic-name-change".into(),
+        source_raw_sha256: format!("sha256:{}", "a".repeat(64)),
+    };
+    let attribute = AttributeFact::from_cninfo_name(&name, FundCategory::Equity).unwrap();
+    assert_eq!(attribute.effective_date, date(4));
+    assert_eq!(attribute.legal_name.as_deref(), Some("合成沪深300ETF"));
+    assert_eq!(
+        attribute.evidence.publication,
+        Publication::Exact {
+            timestamp: published_at
+        }
+    );
+    let mut already_available = name;
+    already_available.available_at = Some("2023-01-05T15:00:00+08:00".into());
+    assert!(AttributeFact::from_cninfo_name(&already_available, FundCategory::Equity).is_err());
 }

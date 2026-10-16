@@ -462,6 +462,15 @@ fn table_descriptors(tables: &NormalizedTables) -> Vec<TableToPublish<'_>> {
             primary_key: &["instrument_id", "session_date"],
         });
     }
+    if let Some(batch) = &tables.tdx_code_table {
+        descriptors.push(TableToPublish {
+            name: "tdx_code_table",
+            schema_version: 1,
+            schema: batch.schema(),
+            batch,
+            primary_key: &["session_date"],
+        });
+    }
     if let Some(batch) = &tables.source_crosscheck {
         descriptors.push(TableToPublish {
             name: "source_crosscheck",

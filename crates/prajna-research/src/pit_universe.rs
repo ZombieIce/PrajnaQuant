@@ -42,6 +42,38 @@ fn scoped(code: &str) -> bool {
     code.len() == 6 && code.starts_with("159") && code.bytes().all(|b| b.is_ascii_digit())
 }
 
+fn valid_szse_code(code: &str) -> bool {
+    code.len() == 6 && code.bytes().all(|b| b.is_ascii_digit())
+}
+
+fn in_code_scope(code: &str, ranges: &[CodeRange]) -> bool {
+    code.len() == 6
+        && code.bytes().all(|b| b.is_ascii_digit())
+        && code.parse::<u32>().is_ok_and(|value| {
+            ranges
+                .iter()
+                .any(|range| range.start <= value && value <= range.end)
+        })
+}
+
+fn normalized_name(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn broad_index_matches(indices: &BroadIndexList, legal_name: &str) -> bool {
+    let name = normalized_name(legal_name);
+    indices.named_indices.iter().any(|index| {
+        std::iter::once(&index.official_name)
+            .chain(index.aliases.iter())
+            .map(|term| normalized_name(term))
+            .any(|term| !term.is_empty() && name.contains(&term))
+    })
+}
+
 /// Historical knowledge, never the local collection timestamp.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "precision", rename_all = "snake_case", deny_unknown_fields)]
@@ -108,6 +140,43 @@ pub struct AttributeFact {
     pub category: FundCategory,
     pub index_id: String,
     pub evidence: Evidence,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legal_name: Option<String>,
+}
+impl AttributeFact {
+    pub fn from_cninfo_name(
+        name: &prajna_data::cninfo::NameFact,
+        category: FundCategory,
+    ) -> Result<Self> {
+        if name.available_at.is_some() || name.name.trim().is_empty() {
+            return Err(error(
+                "cninfo name must be a nonempty publication fact with unresolved P6 availability",
+            ));
+        }
+        let published_at = DateTime::from_timestamp_millis(name.announced_ms)
+            .ok_or_else(|| error("invalid cninfo name publication timestamp"))?;
+        let published_at_ns = name
+            .announced_ms
+            .checked_mul(1_000_000)
+            .ok_or_else(|| error("cninfo name publication timestamp overflow"))?;
+        let effective_date = published_at
+            .with_timezone(&FixedOffset::east_opt(8 * 3600).expect("Shanghai offset"))
+            .date_naive();
+        Ok(Self {
+            effective_date,
+            category,
+            index_id: String::new(),
+            evidence: Evidence {
+                raw_sha256: name.source_raw_sha256.clone(),
+                announcement_id: name.announcement_id.clone(),
+                locator: "cninfo.full_names.name".into(),
+                publication: Publication::Exact {
+                    timestamp: TimestampNs::from_unix_nanos(published_at_ns),
+                },
+            },
+            legal_name: Some(name.name.clone()),
+        })
+    }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -119,10 +188,24 @@ pub struct Lifecycle {
     /// First date on which new entry is prohibited; no last-price liquidation.
     pub termination: Option<LifecycleFact>,
     pub attributes: Vec<AttributeFact>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_start: Option<NaiveDate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_end_exclusive: Option<NaiveDate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_table_first_seen: Option<NaiveDate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_table_last_seen: Option<NaiveDate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_table_exit_date: Option<NaiveDate>,
 }
 impl Lifecycle {
+    fn identity_start(&self) -> NaiveDate {
+        self.identity_start.unwrap_or(self.listing.effective_date)
+    }
+
     pub fn instrument_id(&self) -> Result<InstrumentId> {
-        if !scoped(&self.native_symbol) || !raw_hash(&self.contract_raw_sha256) {
+        if !valid_szse_code(&self.native_symbol) || !raw_hash(&self.contract_raw_sha256) {
             return Err(error("invalid SZSE code or contract hash"));
         }
         // 6 + 1 + 8 + 1 + 48 = 64 ASCII characters. Full contract hash remains
@@ -130,14 +213,15 @@ impl Lifecycle {
         let symbol = format!(
             "{}-{}-{}",
             self.native_symbol,
-            self.listing.effective_date.format("%Y%m%d"),
+            self.identity_start().format("%Y%m%d"),
             self.contract_raw_sha256[7..55].to_ascii_uppercase()
         );
         InstrumentId::new(symbol, VenueId::new("SZSE").expect("static venue"))
             .map_err(|e| error(e.to_string()))
     }
     fn contains(&self, date: NaiveDate) -> bool {
-        date >= self.listing.effective_date
+        date >= self.listing.effective_date.max(self.identity_start())
+            && self.identity_end_exclusive.is_none_or(|end| date < end)
             && self
                 .termination
                 .as_ref()
@@ -162,6 +246,37 @@ pub struct ScanObservation {
     pub raw_sha256: String,
     pub first_observed: Option<NaiveDate>,
     pub last_observed: Option<NaiveDate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_start: Option<NaiveDate>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CodeRange {
+    pub start: u32,
+    pub end: u32,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CodeTableSnapshot {
+    pub session_date: NaiveDate,
+    pub raw_sha256: String,
+    pub symbols: BTreeSet<String>,
+    pub code_ranges: Vec<CodeRange>,
+}
+
+impl From<prajna_data::TdxCodeTableRow> for CodeTableSnapshot {
+    fn from(row: prajna_data::TdxCodeTableRow) -> Self {
+        Self {
+            session_date: row.session_date,
+            raw_sha256: row.source_raw_sha256,
+            symbols: row.native_symbols.into_iter().collect(),
+            code_ranges: row
+                .code_ranges
+                .into_iter()
+                .map(|(start, end)| CodeRange { start, end })
+                .collect(),
+        }
+    }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -190,6 +305,15 @@ pub struct BroadIndexList {
     /// Stable provider-qualified domestic broad equity index IDs, not fund names.
     pub index_ids: BTreeSet<String>,
     pub evidence: Vec<Evidence>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub named_indices: Vec<BroadIndexName>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BroadIndexName {
+    pub index_id: String,
+    pub official_name: String,
+    pub aliases: BTreeSet<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -205,6 +329,10 @@ pub struct CatalogInput {
     pub lifecycles: Vec<Lifecycle>,
     pub scans: Vec<ScanObservation>,
     pub broad_indices: BroadIndexList,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_ranges: Option<Vec<CodeRange>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub code_tables: Vec<CodeTableSnapshot>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Difference {
@@ -221,9 +349,269 @@ pub struct HistoricalCatalog {
     gaps: BTreeSet<String>,
 }
 
+fn validate_v2_code_tables(input: &mut CatalogInput) -> Result<BTreeSet<String>> {
+    let ranges = input
+        .code_ranges
+        .as_mut()
+        .ok_or_else(|| error("Catalog v2 requires configured code ranges"))?;
+    ranges.sort_by_key(|range| (range.start, range.end));
+    if ranges.is_empty()
+        || ranges
+            .iter()
+            .any(|range| range.start < 100_000 || range.start > range.end || range.end > 999_999)
+        || ranges.windows(2).any(|pair| pair[0].end >= pair[1].start)
+    {
+        return Err(error("invalid or overlapping six-digit code ranges"));
+    }
+    if input.code_tables.is_empty() {
+        return Err(error(
+            "Catalog v2 requires daily TDX code-table observations",
+        ));
+    }
+    input
+        .code_tables
+        .sort_by_key(|snapshot| snapshot.session_date);
+    let covered_sessions: Vec<_> = input
+        .sessions
+        .iter()
+        .filter(|session| {
+            session.session_date() >= input.coverage.start
+                && session.session_date() <= input.coverage.end
+        })
+        .map(Session::session_date)
+        .collect();
+    let table_sessions: Vec<_> = input
+        .code_tables
+        .iter()
+        .map(|snapshot| snapshot.session_date)
+        .collect();
+    if covered_sessions != table_sessions {
+        return Err(error(
+            "TDX code tables must cover every declared Session exactly once",
+        ));
+    }
+    let mut gaps = BTreeSet::new();
+    let mut present = BTreeMap::<String, Vec<bool>>::new();
+    for (snapshot_index, snapshot) in input.code_tables.iter().enumerate() {
+        if !raw_hash(&snapshot.raw_sha256) {
+            return Err(error("invalid TDX code-table Raw SHA-256"));
+        }
+        if snapshot.code_ranges.as_slice() != ranges.as_slice() {
+            return Err(error(
+                "TDX code-table range configuration differs from the Catalog scope",
+            ));
+        }
+        for symbol in &snapshot.symbols {
+            if !in_code_scope(symbol, ranges) {
+                return Err(error(format!(
+                    "TDX code-table symbol {symbol} is outside configured code ranges"
+                )));
+            }
+        }
+        for (symbol, occurrences) in &mut present {
+            occurrences.push(snapshot.symbols.contains(symbol));
+        }
+        for symbol in &snapshot.symbols {
+            if let Some(value) = present
+                .entry(symbol.clone())
+                .or_insert_with(|| vec![false; snapshot_index + 1])
+                .last_mut()
+            {
+                *value = true;
+            }
+        }
+    }
+    for (symbol, occurrences) in &mut present {
+        if occurrences.len() != covered_sessions.len() {
+            return Err(error(format!("invalid code-table series for {symbol}")));
+        }
+    }
+
+    let mut life_keys = BTreeMap::<(String, NaiveDate), Vec<usize>>::new();
+    for (index, life) in input.lifecycles.iter().enumerate() {
+        if !in_code_scope(&life.native_symbol, ranges) {
+            return Err(error(format!(
+                "lifecycle {} is outside configured code ranges",
+                life.native_symbol
+            )));
+        }
+        match life.identity_start {
+            Some(start) => life_keys
+                .entry((life.native_symbol.clone(), start))
+                .or_default()
+                .push(index),
+            None => {
+                gaps.insert(format!(
+                    "lifecycle_identity_start_missing:{}",
+                    life.native_symbol
+                ));
+            }
+        }
+    }
+
+    let mut expected = BTreeMap::<
+        (String, NaiveDate),
+        (NaiveDate, NaiveDate, Option<NaiveDate>, Option<NaiveDate>),
+    >::new();
+    for (symbol, occurrences) in &present {
+        let mut names = BTreeMap::<NaiveDate, BTreeSet<Option<String>>>::new();
+        for life in input
+            .lifecycles
+            .iter()
+            .filter(|life| life.native_symbol == *symbol)
+        {
+            for fact in &life.attributes {
+                names
+                    .entry(fact.effective_date)
+                    .or_default()
+                    .insert(fact.legal_name.clone());
+            }
+        }
+        for (index, occurrence) in occurrences.iter().enumerate() {
+            if !occurrence || index > 0 && occurrences[index - 1] {
+                continue;
+            }
+            let run_start = index;
+            let run_end = occurrences[index..]
+                .iter()
+                .position(|present| !present)
+                .map_or(occurrences.len() - 1, |offset| index + offset - 1);
+            let table_exit = if run_end + 1 < covered_sessions.len() {
+                Some(covered_sessions[run_end + 1])
+            } else {
+                None
+            };
+            let first_seen = covered_sessions[run_start];
+            let last_seen = covered_sessions[run_end];
+            let mut boundaries = vec![first_seen];
+            let mut previous_name =
+                names
+                    .range(..=first_seen)
+                    .next_back()
+                    .and_then(|(_, values)| {
+                        (values.len() == 1)
+                            .then(|| values.first().cloned().flatten())
+                            .flatten()
+                    });
+            if names
+                .get(&first_seen)
+                .is_some_and(|values| values.len() > 1)
+            {
+                gaps.insert(format!("conflicting_legal_names:{symbol}:{first_seen}"));
+            }
+            for (effective_date, values) in names.range((
+                std::ops::Bound::Excluded(first_seen),
+                std::ops::Bound::Included(last_seen),
+            )) {
+                if values.len() != 1 {
+                    gaps.insert(format!("conflicting_legal_names:{symbol}:{effective_date}"));
+                    continue;
+                }
+                let name = values.first().cloned().flatten();
+                if name != previous_name {
+                    boundaries.push(*effective_date);
+                }
+                previous_name = name;
+            }
+            for (boundary_index, start) in boundaries.iter().enumerate() {
+                let end = boundaries.get(boundary_index + 1).copied().or(table_exit);
+                expected.insert(
+                    (symbol.clone(), *start),
+                    (first_seen, last_seen, table_exit, end),
+                );
+            }
+        }
+    }
+    for ((symbol, start), (first_seen, last_seen, table_exit, identity_end)) in &expected {
+        match life_keys.get(&(symbol.clone(), *start)) {
+            Some(indices) if indices.len() == 1 => {
+                let life = &mut input.lifecycles[indices[0]];
+                if life
+                    .identity_end_exclusive
+                    .is_some_and(|existing| Some(existing) != *identity_end)
+                {
+                    return Err(error(format!(
+                        "incorrect lifecycle end for {symbol} at {start}"
+                    )));
+                }
+                life.identity_end_exclusive = *identity_end;
+                life.code_table_first_seen = Some(*first_seen);
+                life.code_table_last_seen = Some(*last_seen);
+                life.code_table_exit_date = *table_exit;
+            }
+            Some(_) => {
+                gaps.insert(format!("duplicate_lifecycle_identity:{symbol}:{start}"));
+            }
+            None => {
+                gaps.insert(format!("lifecycle_missing:{symbol}:{start}"));
+            }
+        };
+    }
+    for ((symbol, start), _) in life_keys {
+        if !expected.contains_key(&(symbol.clone(), start)) {
+            gaps.insert(format!(
+                "lifecycle_without_code_table_identity:{symbol}:{start}"
+            ));
+        }
+    }
+    let mut price_scans = BTreeMap::new();
+    for scan in &input.scans {
+        let Some(identity_start) = scan.identity_start else {
+            gaps.insert(format!(
+                "price_scan_identity_missing:{}",
+                scan.native_symbol
+            ));
+            continue;
+        };
+        if price_scans
+            .insert((scan.native_symbol.clone(), identity_start), scan)
+            .is_some()
+        {
+            return Err(error("duplicate lifecycle price scan"));
+        }
+    }
+    for ((symbol, start), (_, _, _, end)) in &expected {
+        let Some(scan) = price_scans.get(&(symbol.clone(), *start)) else {
+            gaps.insert(format!("price_scan_missing:{symbol}:{start}"));
+            continue;
+        };
+        if scan.status == ScanStatus::Unresolved {
+            gaps.insert(format!("price_scan_unresolved:{symbol}:{start}"));
+        }
+        if scan.status == ScanStatus::Observed {
+            let (Some(first), Some(last)) = (scan.first_observed, scan.last_observed) else {
+                return Err(error(
+                    "observed lifecycle price scan requires both endpoints",
+                ));
+            };
+            if first > last
+                || first < *start
+                || end.is_some_and(|identity_end| last >= identity_end)
+                || [first, last].into_iter().any(|date| {
+                    !input.code_tables.iter().any(|snapshot| {
+                        snapshot.session_date == date && snapshot.symbols.contains(symbol)
+                    })
+                })
+            {
+                gaps.insert(format!("price_scan_outside_lifecycle:{symbol}:{start}"));
+            }
+        } else if scan.first_observed.is_some() || scan.last_observed.is_some() {
+            return Err(error(
+                "non-observed lifecycle scan must not have price dates",
+            ));
+        }
+    }
+    for ((symbol, start), _) in price_scans {
+        if !expected.contains_key(&(symbol.clone(), start)) {
+            gaps.insert(format!("price_scan_without_lifecycle:{symbol}:{start}"));
+        }
+    }
+    Ok(gaps)
+}
+
 impl HistoricalCatalog {
     pub fn build(mut input: CatalogInput, raw: &RawStore) -> Result<Self> {
-        if input.schema_version != 1
+        if !matches!(input.schema_version, 1 | 2)
             || input.rule_version.trim().is_empty()
             || input.broad_indices.version.trim().is_empty()
         {
@@ -242,7 +630,6 @@ impl HistoricalCatalog {
             || input.coverage.announcement_method.trim().is_empty()
             || input.coverage.announcement_raw_sha256.is_empty()
             || input.calendar_raw_sha256.is_empty()
-            || input.broad_indices.index_ids.is_empty()
             || input.broad_indices.evidence.is_empty()
             || input
                 .broad_indices
@@ -253,6 +640,26 @@ impl HistoricalCatalog {
             return Err(error(
                 "coverage and index list require explicit methods and evidence",
             ));
+        }
+        if input.schema_version == 1 && input.broad_indices.index_ids.is_empty()
+            || input.schema_version == 2 && input.broad_indices.named_indices.is_empty()
+        {
+            return Err(error(
+                "Catalog requires a nonempty versioned broad-index list",
+            ));
+        }
+        let mut broad_index_ids = BTreeSet::new();
+        for index in &input.broad_indices.named_indices {
+            let terms: BTreeSet<_> = std::iter::once(&index.official_name)
+                .chain(index.aliases.iter())
+                .map(|term| normalized_name(term))
+                .collect();
+            if index.index_id.trim().is_empty()
+                || !broad_index_ids.insert(index.index_id.clone())
+                || terms.iter().any(String::is_empty)
+            {
+                return Err(error("invalid/duplicate broad-index name or alias"));
+            }
         }
         input.sessions.sort_by_key(Session::session_date);
         for (i, s) in input.sessions.iter().enumerate() {
@@ -277,12 +684,31 @@ impl HistoricalCatalog {
         }
         input
             .lifecycles
-            .sort_by_key(|life| (life.native_symbol.clone(), life.listing.effective_date));
+            .sort_by_key(|life| (life.native_symbol.clone(), life.identity_start()));
+        let mut gaps = if input.schema_version == 2 {
+            validate_v2_code_tables(&mut input)?
+        } else {
+            if input.code_ranges.is_some() || !input.code_tables.is_empty() {
+                return Err(error(
+                    "Catalog v1 cannot contain Catalog v2 code-table inputs",
+                ));
+            }
+            BTreeSet::new()
+        };
         let mut ids = BTreeSet::new();
         let mut hashes = input.calendar_raw_sha256.clone();
         hashes.extend(input.coverage.announcement_raw_sha256.iter().cloned());
+        hashes.extend(
+            input
+                .code_tables
+                .iter()
+                .map(|snapshot| snapshot.raw_sha256.clone()),
+        );
         let mut evidence = input.broad_indices.evidence.clone();
         for (i, life) in input.lifecycles.iter_mut().enumerate() {
+            if input.schema_version == 1 && !scoped(&life.native_symbol) {
+                return Err(error("Catalog v1 only accepts 159xxx lifecycles"));
+            }
             if !ids.insert(life.instrument_id()?) {
                 return Err(error("duplicate lifecycle identity"));
             }
@@ -302,27 +728,58 @@ impl HistoricalCatalog {
                 .sort_by_cached_key(|a| serde_json::to_string(a).expect("serializable attribute"));
             life.attributes.dedup();
             for a in &life.attributes {
-                if a.index_id.trim().is_empty() || a.effective_date < life.listing.effective_date {
+                if input.schema_version == 1 && a.index_id.trim().is_empty()
+                    || a.effective_date < life.listing.effective_date
+                {
                     return Err(error(format!("invalid attribute at lifecycle {i}")));
                 }
                 evidence.push(a.evidence.clone());
             }
         }
         for pair in input.lifecycles.windows(2) {
-            if pair[0].native_symbol == pair[1].native_symbol
-                && pair[0]
-                    .termination
-                    .as_ref()
-                    .is_none_or(|end| end.effective_date > pair[1].listing.effective_date)
-            {
-                return Err(error("overlapping reused-code lifecycles"));
+            if pair[0].native_symbol == pair[1].native_symbol {
+                let overlaps = if input.schema_version == 1 {
+                    pair[0]
+                        .termination
+                        .as_ref()
+                        .is_none_or(|end| end.effective_date > pair[1].listing.effective_date)
+                } else {
+                    pair[0]
+                        .identity_end_exclusive
+                        .is_none_or(|end| end > pair[1].identity_start())
+                };
+                if overlaps {
+                    return Err(error(format!(
+                        "overlapping reused-code lifecycles for {}: {:?}..{:?} and {:?}",
+                        pair[0].native_symbol,
+                        pair[0].identity_start(),
+                        pair[0].identity_end_exclusive,
+                        pair[1].identity_start()
+                    )));
+                }
             }
         }
         let mut scans = BTreeMap::new();
         for scan in &input.scans {
-            if !scoped(&scan.native_symbol)
-                || scans.insert(scan.native_symbol.clone(), scan).is_some()
-            {
+            let in_scope = if input.schema_version == 1 {
+                scoped(&scan.native_symbol)
+            } else {
+                input
+                    .code_ranges
+                    .as_deref()
+                    .is_some_and(|ranges| in_code_scope(&scan.native_symbol, ranges))
+            };
+            let scan_key = if input.schema_version == 1 {
+                scan.native_symbol.clone()
+            } else {
+                format!(
+                    "{}@{}",
+                    scan.native_symbol,
+                    scan.identity_start
+                        .map_or_else(|| "missing".to_owned(), |date| date.to_string())
+                )
+            };
+            if !in_scope || scans.insert(scan_key, scan).is_some() {
                 return Err(error("invalid or duplicate scanned code"));
             }
             if scan.status == ScanStatus::Observed {
@@ -342,11 +799,19 @@ impl HistoricalCatalog {
             }
             hashes.insert(scan.raw_sha256.clone());
         }
-        let mut gaps = input.coverage.gaps.clone();
+        gaps.extend(input.coverage.gaps.iter().cloned());
         let mut differences = Vec::new();
         let mut resolutions = BTreeMap::new();
         for resolution in &input.coverage.resolutions {
-            if !scoped(&resolution.native_symbol)
+            let in_scope = if input.schema_version == 1 {
+                scoped(&resolution.native_symbol)
+            } else {
+                input
+                    .code_ranges
+                    .as_deref()
+                    .is_some_and(|ranges| in_code_scope(&resolution.native_symbol, ranges))
+            };
+            if !in_scope
                 || resolution.explanation.trim().is_empty()
                 || resolutions
                     .insert(resolution.native_symbol.clone(), resolution.clone())
@@ -356,42 +821,44 @@ impl HistoricalCatalog {
             }
             evidence.push(resolution.evidence.clone());
         }
-        for code in 159000..=159999 {
-            let code = code.to_string();
-            let known = input.lifecycles.iter().any(|l| {
-                l.native_symbol == code
-                    && l.listing.effective_date <= input.coverage.end
-                    && l.termination
-                        .as_ref()
-                        .is_none_or(|t| t.effective_date > input.coverage.start)
-            });
-            let kind = match scans.get(&code) {
-                None => {
-                    gaps.insert(format!("scan_missing:{code}"));
-                    continue;
-                }
-                Some(s) if s.status == ScanStatus::Unresolved => {
-                    gaps.insert(format!("scan_unresolved:{code}"));
-                    continue;
-                }
-                Some(s) if s.status == ScanStatus::Observed && !known => Some("scan_only"),
-                Some(s) if s.status == ScanStatus::NoRows && known => Some("announcement_only"),
-                _ => None,
-            };
-            if let Some(kind) = kind {
-                let resolution = resolutions.remove(&code);
-                if resolution.is_none() {
-                    gaps.insert(format!("unresolved_difference:{code}:{kind}"));
-                }
-                differences.push(Difference {
-                    native_symbol: code,
-                    kind: kind.into(),
-                    resolution,
+        if input.schema_version == 1 {
+            for code in 159000..=159999 {
+                let code = code.to_string();
+                let known = input.lifecycles.iter().any(|l| {
+                    l.native_symbol == code
+                        && l.listing.effective_date <= input.coverage.end
+                        && l.termination
+                            .as_ref()
+                            .is_none_or(|t| t.effective_date > input.coverage.start)
                 });
+                let kind = match scans.get(&code) {
+                    None => {
+                        gaps.insert(format!("scan_missing:{code}"));
+                        continue;
+                    }
+                    Some(s) if s.status == ScanStatus::Unresolved => {
+                        gaps.insert(format!("scan_unresolved:{code}"));
+                        continue;
+                    }
+                    Some(s) if s.status == ScanStatus::Observed && !known => Some("scan_only"),
+                    Some(s) if s.status == ScanStatus::NoRows && known => Some("announcement_only"),
+                    _ => None,
+                };
+                if let Some(kind) = kind {
+                    let resolution = resolutions.remove(&code);
+                    if resolution.is_none() {
+                        gaps.insert(format!("unresolved_difference:{code}:{kind}"));
+                    }
+                    differences.push(Difference {
+                        native_symbol: code,
+                        kind: kind.into(),
+                        resolution,
+                    });
+                }
             }
         }
         for scan in &input.scans {
-            if scan.status == ScanStatus::Observed {
+            if scan.status == ScanStatus::Observed && input.schema_version == 1 {
                 for date in [scan.first_observed, scan.last_observed]
                     .into_iter()
                     .flatten()
@@ -577,7 +1044,12 @@ impl HistoricalCatalog {
                     None => Some("missing_attributes"),
                     Some(first)
                         if latest.iter().any(|a| {
-                            a.category != first.category || a.index_id != first.index_id
+                            a.category != first.category
+                                || if self.input.schema_version == 1 {
+                                    a.index_id != first.index_id
+                                } else {
+                                    a.legal_name != first.legal_name
+                                }
                         }) =>
                     {
                         Some("attribute_conflict")
@@ -586,7 +1058,26 @@ impl HistoricalCatalog {
                         Some("not_equity_fund")
                     }
                     Some(first)
-                        if !self.input.broad_indices.index_ids.contains(&first.index_id) =>
+                        if self.input.schema_version == 1
+                            && !self.input.broad_indices.index_ids.contains(&first.index_id) =>
+                    {
+                        Some("not_domestic_broad_index")
+                    }
+                    Some(first)
+                        if self.input.schema_version == 2
+                            && first
+                                .legal_name
+                                .as_deref()
+                                .is_none_or(|name| name.trim().is_empty()) =>
+                    {
+                        Some("missing_legal_name")
+                    }
+                    Some(first)
+                        if self.input.schema_version == 2
+                            && !broad_index_matches(
+                                &self.input.broad_indices,
+                                first.legal_name.as_deref().unwrap_or_default(),
+                            ) =>
                     {
                         Some("not_domestic_broad_index")
                     }
@@ -594,7 +1085,9 @@ impl HistoricalCatalog {
                 }
             };
             if let Some(reason) = reason {
-                if matches!(reason, "missing_attributes" | "attribute_conflict") {
+                if self.input.schema_version == 1
+                    && matches!(reason, "missing_attributes" | "attribute_conflict")
+                {
                     session_gaps.insert(format!(
                         "membership_unresolved:{id}:{session_date}:{reason}"
                     ));
@@ -642,6 +1135,12 @@ impl HistoricalCatalog {
         let mut hashes = self.input.calendar_raw_sha256.clone();
         hashes.extend(self.input.coverage.announcement_raw_sha256.iter().cloned());
         hashes.extend(self.input.scans.iter().map(|s| s.raw_sha256.clone()));
+        hashes.extend(
+            self.input
+                .code_tables
+                .iter()
+                .map(|snapshot| snapshot.raw_sha256.clone()),
+        );
         hashes.extend(
             self.input
                 .broad_indices
