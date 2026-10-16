@@ -132,6 +132,7 @@ fn data(catalog: &HistoricalCatalog) -> (NormalizedTables, MarketEvidence) {
     let batch = bars_to_record_batch(&bars).unwrap();
     (
         NormalizedTables {
+            bar_sources: None,
             instruments: batch.clone(),
             sessions: prajna_data::sessions_to_record_batch(&cat_sessions(catalog)).unwrap(),
             bars: batch,
@@ -725,6 +726,56 @@ fn eligibility_61_60_20_boundary_threshold_and_late_data() {
     .unwrap();
     assert!(changed.members.is_empty());
     assert_ne!(eligible.version, changed.version);
+    // A fallback-like Bar with unknown amount cannot count as zero, shorten
+    // the 20-Session window to 19, or pass even a zero liquidity threshold.
+    let mut missing_tables = tables.clone();
+    let mut bars = bars_from_record_batch(&tables.bars, &cat.input().sessions).unwrap();
+    let native = &cat
+        .input()
+        .lifecycles
+        .iter()
+        .find(|l| l.instrument_id().unwrap() == eligible.members[0])
+        .unwrap()
+        .native_symbol;
+    let bar = bars
+        .iter_mut()
+        .find(|b| b.instrument_id().symbol() == native && b.session_date() == date(50))
+        .unwrap();
+    *bar = Bar::new(
+        BarData {
+            instrument_id: bar.instrument_id().clone(),
+            bar_spec: bar.bar_spec(),
+            session_date: bar.session_date(),
+            ts_open: bar.ts_open(),
+            ts_close: bar.ts_close(),
+            open: bar.open(),
+            high: bar.high(),
+            low: bar.low(),
+            close: bar.close(),
+            volume: bar.volume(),
+            amount: None,
+            available_at: bar.available_at(),
+        },
+        Some(&cat.input().sessions[49]),
+    )
+    .unwrap();
+    missing_tables.bars = bars_to_record_batch(&bars).unwrap();
+    let missing_market = build(&cat, &raw, &missing_tables, e.clone());
+    let missing_tri = tri(&missing_market, &cat, &raw);
+    let missing = EligibleSet::build(
+        &cat,
+        &missing_market,
+        &missing_tri,
+        date(61),
+        EligibilityParams {
+            minimum_average_amount: Notional::ZERO,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(missing.members.len(), 2);
+    assert!(missing.excluded[&eligible.members[0]].contains("amount_missing_input"));
+
     // HALTED amount is zero, so the equal-threshold historical window no longer qualifies.
     let at = e
         .openings

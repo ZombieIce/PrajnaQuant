@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 
 mod synthetic_etf_daily;
 mod szse_etf_frozen;
+pub use szse_etf_frozen::SzseEtfFrozen;
 
 use crate::SourceKind;
 
@@ -68,6 +69,7 @@ pub struct NormalizedTables {
     pub source_crosscheck: Option<RecordBatch>,
     pub announcements: Option<RecordBatch>,
     pub corporate_actions: Option<RecordBatch>,
+    pub bar_sources: Option<RecordBatch>,
 }
 
 /// A versioned conversion from immutable raw bytes to the normalized contract.
@@ -103,6 +105,7 @@ impl NormalizerRegistry {
         registry.register(synthetic_etf_daily::SyntheticEtfDaily::v3());
         registry.register(szse_etf_frozen::SzseEtfFrozen::v1());
         registry.register(szse_etf_frozen::SzseEtfFrozen::v2());
+        registry.register(SzseEtfFrozen::v3(vec![(158000, 159999)]).expect("builtin ranges"));
         registry
     }
 

@@ -2,6 +2,24 @@
 
 实现位置为 `prajna-research::{etf_market, etf_eligible, etf_momentum}`；对应 #176、#171 P9～P14 与 ADR 0022。它是离线证据输入构建契约，不是实时开盘状态源。旧 D7、旧 Factor、现有 Engine/Experiment API 不变；#177 负责逐 Session Engine/Run Spec 消费，#178 负责 Python。真实来源覆盖、授权与完整公告提取仍受 #172 门禁约束。
 
+## 行情输入 v3（#201）
+
+`NormalizerRegistry::with_builtins()` 新增 `szse-etf-frozen@3`（默认范围 158000–159999）。v1/v2 的配置 hash、schema 和结果不变。v3 使用 `SzseEtfFrozen::v3(Vec<(u32,u32)>)` 配置六位代码的闭区间；排序规范化后进入配置 hash，空/重叠/非法范围拒绝。自定义配置须在空 `NormalizerRegistry::new()` 中登记，并用同一配置发布/重建；内置配置不匹配时重建明确报 `ConfigHashMismatch`。调用者应将范围配置与运行输入一起冻结，不用默认 registry 重建自定义 DSV。
+
+v3 Bars 仍为原始价 D7 schema，另有 `bar_sources@1` Parquet：主键 `(instrument_id, session_date)`，每根 Bar 恰有一行，字段 `source`（`tdx` / `tencent_fallback`）、`source_raw_sha256`、可空 Decimal128(38,18) `reference_price`。后者解码 TDX `.md1` offset 4 的昨收，按 0.001 价格刻度校验，是交易所除权参考价；分红/折算跳变不得用上一 close 替代。来源表进入 Manifest、DSV、发布校验和 Raw 重放；无成交记录不产生 Bar。裸代码仍需 Catalog 映射为生命周期身份。
+
+逐格选择：有 TDX 记录优先（含无成交）；仅无该代码/日期记录时，腾讯正成交未复权 `day` 可补位。腾讯不能覆盖 TDX，也不再作为 v3 发布门槛。`source_crosscheck` 只保存诊断，不将腾讯补位伪称 TDX 匹配。TDX 主源 Bar 成交额取 offset 72；补位 `amount=null`、`reference_price=null`，不估算成交额或参考价。最近 20 Session 成交额任一缺失使窗口不可用；不得改成最近 20 根非空 Bar 或以 19 Session 均值通过筛选。`available_at` 仍 Unknown，不以本地 `observed_at` 倒填历史可用时刻。TDX 源内价格/成交额/参考价修订冲突报错；修订原文须单独生成新 DSV。
+
+本票只实现行情数据层，下面的 `szse-derived-open@1`、Catalog 与 TRI 消费逻辑仍是原契约。#203/#205 将接入新名录/状态和参考价；#204 接新浪事件与三方一致；不能将新 DSV 发布成功称为新执行状态或真实总回报验收通过。v3 暂保留 v2 的结构化 `corporateActions` 校验，不增加 PDF 解析器。
+
+补位采集命令（只在本机真实数据任务运行，本票测试不联网）：
+
+```sh
+python3 scripts/collect_tencent_fallback.py /local/missing-cells.json --network-path '实际国内直连路径'
+```
+
+本地 plan 为 `[{"symbol":"158001","session":"2026-01-05","tdx_observation":"missing"}]`，由 TDX 缺格规划器提供；无成交不能标为 missing。请求仅一个代码/Session、空复权参数；`--code-range FIRST-LAST` 可重复，与 Normalizer 范围保持一致。响应原文（含失败）保存 `~/PrajnaData/mvp-6/raw/tencent-responses/`，逐请求日志保存 `acceptance/tencent-requests.jsonl`，均不可入库公开。成功文件再交 `freeze_raw`（工具本身不冒充 RawStore）。工具禁用环境代理与重定向，单实例串行 ≥1 秒、指数退避最多 3 次重试，连续两次 403/501/验证码后本实例停源为 unresolved；每次请求记录 URL/参数/观察时间/HTTP 状态/字节数/hash/实际网络路径。只运行一个该域采集实例；不得通过重启绕过访问拦截。国内网络路径须由运行环境保证，字符串说明本身不证明出口归属。
+
 ## 构建与冻结
 
 1. `HistoricalCatalog::build/load` 验证 #175 Catalog、生命周期身份和 Raw 原文。

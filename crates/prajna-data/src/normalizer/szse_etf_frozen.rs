@@ -7,11 +7,12 @@
 //!   little-endian u16 at offset 32 indexes a 512-byte `.md1` block (OHLC f64 at
 //!   12/20/28/36, volume u64 shares at 56, amount f64 at 72). Primary Bars.
 //! - Tencent `fqkline` JSON: unadjusted `day` rows `[date, open, close, high,
-//!   low, lots, ...]`. Secondary, comparison only.
+//!   low, lots, ...]`. V1/v2 comparison only; v3 fills absent TDX cells.
 //! - cninfo `hisAnnouncement/query` JSON: announcement index only.
 //!
 //! The Dataset Version is therefore a pure function of the original bytes and
-//! this Normalizer's version/config. Only codes 159000–159999 are in scope.
+//! this Normalizer's version/config. V1/v2 scope is 159000–159999; v3 uses
+//! configured inclusive code ranges (builtin: 158000–159999).
 //! Missing Bars are never interpreted as halts; no execution status is derived.
 
 use std::{
@@ -41,7 +42,7 @@ use super::{Normalizer, RawInput};
 const NORMALIZER_ID: &str = "szse-etf-frozen";
 const CONFIG_V1: &str = r#"{"announcement_available_at":"close_of_first_session_after_announced_date_calendar_covered","announcement_category":"title_keyword_rules_v1_else_unclassified","announcement_date":"announcementTime_ms_in_Asia/Shanghai","bar_available_at":"unknown_null","bar_spec":"1d@session","bars":"tdx_g4day_sz_cod150_md1_512","code_scope":"159000-159999","crosscheck":"tencent_fqkline_day_exact_ohlc_shares","execution_status":"not_derived","identical_duplicate_facts":"deduplicated_min_raw_sha256","inputs":"vendor_originals_only","instrument_kind":"Etf","lot_size":100,"price_increment":"0.001","session_close":"15:00:00+08:00","session_open":"09:30:00+08:00","tdx_amount":"f64@72_fixed10","tdx_no_trade":"close<=0_or_open_high_low_all_zero_keyed_no_bar","tdx_revision":"trade_vs_no_trade_conflict","tdx_price":"f64_rounded_to_0.001_tolerance_1e-6","tencent_volume":"lots*100","timezone":"Asia/Shanghai","venue":"SZSE","volume":"shares"}"#;
 const CONFIG_V2: &str = r#"{"actions":"cninfo_corporateActions_structured_v1","action_dates":"ISO-8601","action_unknown_fields":"reject","announcement_available_at":"close_of_first_session_after_announced_date_calendar_covered","announcement_category":"title_keyword_rules_v1_else_unclassified","announcement_date":"announcementTime_ms_in_Asia/Shanghai","bar_available_at":"unknown_null","bar_spec":"1d@session","bars":"tdx_g4day_sz_cod150_md1_512","code_scope":"159000-159999","crosscheck":"tencent_fqkline_day_exact_ohlc_shares","execution_status":"not_derived","identical_duplicate_facts":"deduplicated_min_raw_sha256","inputs":"vendor_originals_only","instrument_kind":"Etf","lot_size":100,"price_increment":"0.001","session_close":"15:00:00+08:00","session_open":"09:30:00+08:00","tdx_amount":"f64@72_fixed10","tdx_no_trade":"close<=0_or_open_high_low_all_zero_keyed_no_bar","tdx_revision":"trade_vs_no_trade_conflict","tdx_price":"f64_rounded_to_0.001_tolerance_1e-6","tencent_volume":"lots*100","timezone":"Asia/Shanghai","venue":"SZSE","volume":"shares"}"#;
-const CODE_PREFIX: &str = "159";
+
 const MAX_MEMBER_BYTES: u64 = 256 * 1024 * 1024;
 const UNCLASSIFIED: &str = "unclassified";
 /// Ordered title rules; the first category whose keyword occurs in the title wins.
@@ -57,16 +58,48 @@ const CATEGORY_RULES: [(&str, &[&str]); 9] = [
     ("fund_contract", &["基金合同"]),
 ];
 
-pub(super) struct SzseEtfFrozen {
+pub struct SzseEtfFrozen {
     version: &'static str,
+    code_ranges: Vec<(u32, u32)>,
 }
 
 impl SzseEtfFrozen {
-    pub(super) const fn v1() -> Self {
-        Self { version: "1" }
+    pub(super) fn v1() -> Self {
+        Self {
+            version: "1",
+            code_ranges: vec![(159000, 159999)],
+        }
     }
-    pub(super) const fn v2() -> Self {
-        Self { version: "2" }
+    pub(super) fn v2() -> Self {
+        Self {
+            version: "2",
+            code_ranges: vec![(159000, 159999)],
+        }
+    }
+    /// Configure inclusive Shenzhen ETF code ranges. The canonical ranges enter
+    /// config_sha256; replay requires registering the same configuration.
+    pub fn v3(mut code_ranges: Vec<(u32, u32)>) -> Result<Self, String> {
+        code_ranges.sort_unstable();
+        if code_ranges.is_empty()
+            || code_ranges
+                .iter()
+                .any(|&(a, b)| a < 100000 || a > b || b > 999999)
+            || code_ranges.windows(2).any(|w| w[0].1 >= w[1].0)
+        {
+            return Err("code ranges must be nonempty, six-digit, ordered and disjoint".into());
+        }
+        Ok(Self {
+            version: "3",
+            code_ranges,
+        })
+    }
+
+    fn scoped(&self, code: &str) -> bool {
+        code.len() == 6
+            && code.bytes().all(|b| b.is_ascii_digit())
+            && code
+                .parse::<u32>()
+                .is_ok_and(|n| self.code_ranges.iter().any(|&(a, b)| (a..=b).contains(&n)))
     }
 }
 
@@ -80,6 +113,20 @@ impl Normalizer for SzseEtfFrozen {
     }
 
     fn config_sha256(&self) -> String {
+        if self.version == "3" {
+            let mut config: Value = serde_json::from_str(CONFIG_V2).expect("static config");
+            config["code_scope"] = json!(self.code_ranges);
+            config["bars"] = json!("tdx_primary_tencent_missing_cell_only@1");
+            config["reference_price"] = json!("tdx_f64@4_exchange_ex_rights_reference");
+            config["source_table"] = json!("bar_sources@1");
+            config["crosscheck"] = json!("diagnostic_only");
+            config["fallback_amount"] = json!("null_missing_session_not_zero");
+            config["tdx_no_trade"] = json!("tdx_key_blocks_fallback_including_zero_volume");
+            return format!(
+                "sha256:{:x}",
+                Sha256::digest(crate::restricted_jcs(&config).expect("static config"))
+            );
+        }
         let config = if self.version == "1" {
             CONFIG_V1
         } else {
@@ -96,7 +143,7 @@ impl Normalizer for SzseEtfFrozen {
         &self,
         raw_inputs: &[RawInput],
     ) -> Result<NormalizationOutput, Vec<NormalizationIssue>> {
-        normalize(raw_inputs, self.version == "2")
+        normalize(raw_inputs, self)
     }
 }
 
@@ -114,7 +161,9 @@ struct Ohlcv {
 #[derive(Clone, PartialEq, Eq)]
 struct Primary {
     ohlcv: Ohlcv,
-    amount: Notional,
+    amount: Option<Notional>,
+    reference_price: Option<Price>,
+    source: &'static str,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -218,8 +267,10 @@ fn insert_fact<K: Ord + std::fmt::Debug, V: PartialEq>(
 
 fn normalize(
     raw_inputs: &[RawInput],
-    include_actions: bool,
+    config: &SzseEtfFrozen,
 ) -> Result<NormalizationOutput, Vec<NormalizationIssue>> {
+    let include_actions = config.version != "1";
+    let v3 = config.version == "3";
     let venue = VenueId::new("SZSE").expect("static venue is valid");
     let mut acc = Acc::default();
     let mut duplicates = 0_u64;
@@ -240,7 +291,7 @@ fn normalize(
             continue;
         }
         if raw.bytes.starts_with(b"PK\x03\x04") {
-            decode_tdx(raw, &path, &mut acc, &mut duplicates);
+            decode_tdx(raw, &path, &mut acc, &mut duplicates, config);
             continue;
         }
         let Ok(Value::Object(object)) = serde_json::from_slice::<Value>(&raw.bytes) else {
@@ -252,18 +303,11 @@ fn normalize(
             continue;
         };
         if object.contains_key("announcements") {
-            decode_cninfo(
-                &object,
-                raw,
-                &path,
-                &mut acc,
-                &mut duplicates,
-                include_actions,
-            );
+            decode_cninfo(&object, raw, &path, &mut acc, &mut duplicates, config);
         } else if object.get("data").is_some_and(Value::is_array) {
             decode_calendar(&object, raw, &path, &mut acc, &mut duplicates);
         } else if object.contains_key("code") && object.get("data").is_some_and(Value::is_object) {
-            decode_tencent(&object, raw, &path, &mut acc, &mut duplicates);
+            decode_tencent(&object, raw, &path, &mut acc, &mut duplicates, config);
         } else {
             acc.push(
                 "unrecognized_original",
@@ -277,7 +321,7 @@ fn normalize(
         mut issues,
         kind_counts,
         calendar,
-        primary,
+        mut primary,
         secondary,
         announcements,
         corporate_actions: action_drafts,
@@ -384,6 +428,24 @@ fn normalize(
         return Err(issues);
     }
 
+    // Insert only genuinely absent cells. A keyed TDX no-trade fact blocks
+    // fallback even if Tencent reports a positive trade for that cell.
+    if v3 {
+        for (key, secondary) in &secondary {
+            if secondary.value.shares > Quantity::ZERO {
+                primary.entry(key.clone()).or_insert_with(|| Sourced {
+                    value: Some(Primary {
+                        ohlcv: secondary.value.clone(),
+                        amount: None,
+                        reference_price: None,
+                        source: "tencent_fallback",
+                    }),
+                    raw: secondary.raw.clone(),
+                });
+            }
+        }
+    }
+
     // No-trade facts participate in conflict detection but never become Bars,
     // instruments or positive primary crosscheck observations.
     let primary: BTreeMap<_, _> = primary
@@ -451,7 +513,7 @@ fn normalize(
             low: fact.value.ohlcv.low,
             close: fact.value.ohlcv.close,
             volume: fact.value.ohlcv.shares,
-            amount: Some(fact.value.amount),
+            amount: fact.value.amount,
             // No vendor availability evidence: stays Unknown (ADR 0015 §3.4).
             available_at: None,
         };
@@ -468,7 +530,10 @@ fn normalize(
     let mut crosscheck_counts: BTreeMap<&str, u64> = BTreeMap::new();
     let keys: BTreeSet<_> = primary.keys().chain(secondary.keys()).cloned().collect();
     for key in keys {
-        let (status, fields, p_raw, s_raw) = match (primary.get(&key), secondary.get(&key)) {
+        let (status, fields, p_raw, s_raw) = match (
+            primary.get(&key).filter(|p| p.value.source == "tdx"),
+            secondary.get(&key),
+        ) {
             (Some(p), Some(s)) => {
                 let fields = mismatch_fields(&p.value.ohlcv, &s.value);
                 let status = if fields.is_empty() {
@@ -517,6 +582,22 @@ fn normalize(
     let convert =
         |error: crate::DataError| vec![issue("table_conversion_failed", "$", error.to_string())];
     let tables = NormalizedTables {
+        bar_sources: v3
+            .then(|| {
+                let rows = primary
+                    .iter()
+                    .map(|((symbol, date), fact)| crate::BarSourceRow {
+                        instrument_id: InstrumentId::new(symbol.clone(), venue.clone())
+                            .expect("validated"),
+                        session_date: *date,
+                        source: fact.value.source.into(),
+                        source_raw_sha256: fact.raw.clone(),
+                        reference_price: fact.value.reference_price,
+                    })
+                    .collect::<Vec<_>>();
+                crate::bar_sources_to_record_batch(&rows).map_err(convert)
+            })
+            .transpose()?,
         instruments: instruments_to_record_batch(&specs).map_err(convert)?,
         sessions: sessions_to_record_batch(&sessions).map_err(convert)?,
         bars: bars_to_record_batch(&bars).map_err(convert)?,
@@ -621,7 +702,13 @@ fn decode_calendar(
     }
 }
 
-fn decode_tdx(raw: &RawInput, path: &str, acc: &mut Acc, duplicates: &mut u64) {
+fn decode_tdx(
+    raw: &RawInput,
+    path: &str,
+    acc: &mut Acc,
+    duplicates: &mut u64,
+    config: &SzseEtfFrozen,
+) {
     *acc.kind_counts.entry("tdx_daily").or_default() += 1;
     let invalid = |acc: &mut Acc, message: String| acc.push("invalid_tdx_package", path, message);
     let mut archive = match ZipArchive::new(Cursor::new(raw.bytes.as_slice())) {
@@ -688,7 +775,7 @@ fn decode_tdx(raw: &RawInput, path: &str, acc: &mut Acc, duplicates: &mut u64) {
             );
             continue;
         }
-        if !code.starts_with(CODE_PREFIX) {
+        if !config.scoped(code) {
             acc.count("tdx_out_of_scope_records");
             continue;
         }
@@ -711,7 +798,11 @@ fn decode_tdx(raw: &RawInput, path: &str, acc: &mut Acc, duplicates: &mut u64) {
             continue;
         }
         // No trade: either no close, or a carried close with an empty intraday range.
-        if close <= 0.0 || [open, high, low].iter().all(|value| *value == 0.0) {
+        if close <= 0.0
+            || [open, high, low].iter().all(|value| *value == 0.0)
+            || (config.version == "3"
+                && u64::from_le_bytes(block[56..64].try_into().expect("8 bytes")) == 0)
+        {
             acc.count("tdx_no_trade_records");
             insert_fact(
                 &mut acc.primary,
@@ -724,6 +815,21 @@ fn decode_tdx(raw: &RawInput, path: &str, acc: &mut Acc, duplicates: &mut u64) {
             );
             continue;
         }
+        let reference_price = if config.version == "3" {
+            match f64_price(read(4)).filter(|p| *p > Price::ZERO) {
+                Some(price) => Some(price),
+                None => {
+                    acc.push(
+                        "invalid_reference_price",
+                        &record_path,
+                        "TDX reference price must be positive and on tick",
+                    );
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
         let shares = u64::from_le_bytes(block[56..64].try_into().expect("8 bytes"));
         let prices = [open, high, low, close].map(f64_price);
         let shares = Quantity::parse(&shares.to_string()).ok();
@@ -744,7 +850,12 @@ fn decode_tdx(raw: &RawInput, path: &str, acc: &mut Acc, duplicates: &mut u64) {
         insert_fact(
             &mut acc.primary,
             (code.to_owned(), date),
-            Some(Primary { ohlcv, amount }),
+            Some(Primary {
+                ohlcv,
+                amount: Some(amount),
+                reference_price,
+                source: "tdx",
+            }),
             &raw.raw_sha256,
             &record_path,
             &mut acc.issues,
@@ -759,6 +870,7 @@ fn decode_tencent(
     path: &str,
     acc: &mut Acc,
     duplicates: &mut u64,
+    config: &SzseEtfFrozen,
 ) {
     *acc.kind_counts.entry("tencent_kline").or_default() += 1;
     if object.get("code").and_then(cell_text).as_deref() != Some("0") {
@@ -770,10 +882,14 @@ fn decode_tencent(
         let node_path = format!("{path}.data.{key}");
         let Some(symbol) = key
             .strip_prefix("sz")
-            .filter(|code| is_scoped_code(code))
+            .filter(|code| config.scoped(code))
             .map(str::to_owned)
         else {
-            acc.push("invalid_symbol", &node_path, "Tencent key must be sz159xxx");
+            acc.push(
+                "invalid_symbol",
+                &node_path,
+                "Tencent key must be a configured sz ETF code",
+            );
             continue;
         };
         // Only the unadjusted array is a comparable price source.
@@ -836,8 +952,9 @@ fn decode_cninfo(
     path: &str,
     acc: &mut Acc,
     duplicates: &mut u64,
-    include_actions: bool,
+    config: &SzseEtfFrozen,
 ) {
+    let include_actions = config.version != "1";
     *acc.kind_counts.entry("cninfo_announcements").or_default() += 1;
     let items = match &object["announcements"] {
         Value::Null => return,
@@ -871,7 +988,7 @@ fn decode_cninfo(
             acc.push("invalid_symbol", &item_path, "secCode is not six digits");
             continue;
         }
-        if !code.starts_with(CODE_PREFIX) {
+        if !config.scoped(&code) {
             acc.count("announcements_out_of_scope");
             continue;
         }
@@ -1062,10 +1179,6 @@ fn parse_action(value: &Value, source: ActionSource<'_>) -> Result<ActionDraft, 
         liquidation_cash_per_share,
         source_raw_sha256: source.source_raw_sha256.to_owned(),
     })
-}
-
-fn is_scoped_code(code: &str) -> bool {
-    code.len() == 6 && code.bytes().all(|b| b.is_ascii_digit()) && code.starts_with(CODE_PREFIX)
 }
 
 fn cell_text(value: &Value) -> Option<String> {
