@@ -159,7 +159,7 @@ struct Ohlcv {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-struct Primary {
+struct SelectedBar {
     ohlcv: Ohlcv,
     amount: Option<Notional>,
     reference_price: Option<Price>,
@@ -213,7 +213,7 @@ struct Acc {
     kind_counts: BTreeMap<&'static str, u64>,
     calendar: BTreeMap<NaiveDate, Sourced<bool>>,
     // None is a keyed no-trade observation, retained until revision validation.
-    primary: BTreeMap<Key, Sourced<Option<Primary>>>,
+    primary: BTreeMap<Key, Sourced<Option<SelectedBar>>>,
     secondary: BTreeMap<Key, Sourced<Ohlcv>>,
     announcements: BTreeMap<String, Sourced<Announcement>>,
     corporate_actions: Vec<ActionDraft>,
@@ -434,7 +434,7 @@ fn normalize(
         for (key, secondary) in &secondary {
             if secondary.value.shares > Quantity::ZERO {
                 primary.entry(key.clone()).or_insert_with(|| Sourced {
-                    value: Some(Primary {
+                    value: Some(SelectedBar {
                         ohlcv: secondary.value.clone(),
                         amount: None,
                         reference_price: None,
@@ -850,7 +850,7 @@ fn decode_tdx(
         insert_fact(
             &mut acc.primary,
             (code.to_owned(), date),
-            Some(Primary {
+            Some(SelectedBar {
                 ohlcv,
                 amount: Some(amount),
                 reference_price,

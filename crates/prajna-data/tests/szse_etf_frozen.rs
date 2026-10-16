@@ -865,7 +865,10 @@ fn v3_primary_fallback_no_trade_reference_and_replay() {
             ("szse-calendar", calendar()),
             (
                 "tdx",
-                with_reference(tdx_package("260105", &[rec("158001", 1.05)], None), 1.0),
+                with_reference(
+                    tdx_package("260105", &[rec("158001", 1.05), rec("159002", 1.0)], None),
+                    1.0,
+                ),
             ),
             (
                 "tdx",
@@ -901,13 +904,16 @@ fn v3_primary_fallback_no_trade_reference_and_replay() {
                     ],
                 ),
             ),
-            // Completely missing primary instrument, not merely a missing date.
+            // Existing primary instrument: only its missing Jan-06 cell is filled.
             (
                 "tencent",
                 tencent_doc(
                     "sz159002",
                     "day",
-                    &[["2026-01-05", "1.0", "1.0", "1.1", "0.9", "200"]],
+                    &[
+                        ["2026-01-05", "1.0", "1.0", "1.1", "0.9", "200"],
+                        ["2026-01-06", "1.0", "1.0", "1.1", "0.9", "200"],
+                    ],
                 ),
             ),
             (
@@ -937,7 +943,7 @@ fn v3_primary_fallback_no_trade_reference_and_replay() {
     let sessions = sessions_from_record_batch(&batches("sessions")[0]).unwrap();
     let bars = bars_from_record_batch(&batches("bars")[0], &sessions).unwrap();
     let sources = bar_sources_from_record_batch(&batches("bar_sources")[0]).unwrap();
-    assert_eq!(bars.len(), 5);
+    assert_eq!(bars.len(), 6);
     assert_eq!(sources.len(), bars.len());
     assert_eq!(bars[0].close().to_string(), "1.05"); // Tencent mismatch never overrides.
     assert_eq!(sources[1].reference_price.unwrap().to_string(), "1");
@@ -958,6 +964,18 @@ fn v3_primary_fallback_no_trade_reference_and_replay() {
         rebuild_dataset(&frozen.store, &registry, &manifest).unwrap(),
         manifest.dsv
     );
+    let reversed = frozen.hashes.iter().rev().cloned().collect::<Vec<_>>();
+    let replay = publish_dataset(
+        dir.path(),
+        &frozen.store,
+        &registry,
+        ID,
+        "3",
+        &reversed,
+        OBSERVED,
+    )
+    .unwrap();
+    assert_eq!(manifest.dsv, replay.dsv);
 }
 
 #[test]
@@ -978,6 +996,16 @@ fn v3_config_identity_and_legacy_regression() {
         ],
     );
     let registry = NormalizerRegistry::with_builtins();
+    // Pinned from main before v3, independently of the new config builder.
+    assert_eq!(
+        registry.get(ID, "1").unwrap().config_sha256(),
+        "sha256:49d7475ca2ac715ae1f8d8c0071b6901f8b26b313b04a43f229dc8b4b7f88810"
+    );
+    assert_eq!(
+        registry.get(ID, "2").unwrap().config_sha256(),
+        "sha256:79ea1b64dd4522a24125dbb412a938f86717ea1c3fc1cbdcb742be9190a20a34"
+    );
+
     let publish_version = |registry: &NormalizerRegistry, v: &str| {
         publish_dataset(
             dir.path(),
@@ -1056,5 +1084,32 @@ fn v3_config_identity_and_legacy_regression() {
         vec![(158000, 159000), (159000, 159999)],
     ] {
         assert!(SzseEtfFrozen::v3(ranges).is_err());
+    }
+}
+
+#[test]
+fn v3_invalid_tdx_reference_fails_closed_without_changing_legacy_decoding() {
+    use prajna_data::RawInput;
+    let registry = NormalizerRegistry::with_builtins();
+    for reference in [0.0, -1.0, f64::NAN, 1.0005] {
+        let inputs = [
+            RawInput::from_bytes(calendar()),
+            RawInput::from_bytes(with_reference(
+                tdx_package("260105", &[rec("159901", 1.05)], None),
+                reference,
+            )),
+        ];
+        for v in ["1", "2"] {
+            assert!(registry.get(ID, v).unwrap().normalize(&inputs).is_ok());
+        }
+        assert!(
+            registry
+                .get(ID, "3")
+                .unwrap()
+                .normalize(&inputs)
+                .unwrap_err()
+                .iter()
+                .any(|e| e.code == "invalid_reference_price")
+        );
     }
 }

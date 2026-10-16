@@ -8,7 +8,7 @@
 
 v3 Bars 仍为原始价 D7 schema，另有 `bar_sources@1` Parquet：主键 `(instrument_id, session_date)`，每根 Bar 恰有一行，字段 `source`（`tdx` / `tencent_fallback`）、`source_raw_sha256`、可空 Decimal128(38,18) `reference_price`。后者解码 TDX `.md1` offset 4 的昨收，按 0.001 价格刻度校验，是交易所除权参考价；分红/折算跳变不得用上一 close 替代。来源表进入 Manifest、DSV、发布校验和 Raw 重放；无成交记录不产生 Bar。裸代码仍需 Catalog 映射为生命周期身份。
 
-逐格选择：有 TDX 记录优先（含无成交）；仅无该代码/日期记录时，腾讯正成交未复权 `day` 可补位。腾讯不能覆盖 TDX，也不再作为 v3 发布门槛。`source_crosscheck` 只保存诊断，不将腾讯补位伪称 TDX 匹配。TDX 主源 Bar 成交额取 offset 72；补位 `amount=null`、`reference_price=null`，不估算成交额或参考价。最近 20 Session 成交额任一缺失使窗口不可用；不得改成最近 20 根非空 Bar 或以 19 Session 均值通过筛选。`available_at` 仍 Unknown，不以本地 `observed_at` 倒填历史可用时刻。TDX 源内价格/成交额/参考价修订冲突报错；修订原文须单独生成新 DSV。
+逐格选择：有 TDX 记录优先（含无成交）；仅无该代码/日期记录时，腾讯正成交未复权 `day` 可补位。腾讯不能覆盖 TDX，也不再作为 v3 发布门槛。`source_crosscheck` 只保存诊断，不将腾讯补位伪称 TDX 匹配。TDX 主源 Bar 成交额取 offset 72；补位 `amount=null`、`reference_price=null`，不估算成交额或参考价。最近 20 Session 成交额任一缺失使窗口不可用；不得改成最近 20 根非空 Bar 或以 19 Session 均值通过筛选。`available_at` 仍 Unknown，不以本地 `observed_at` 倒填历史可用时刻。正成交 TDX 行缺少正数、有效 tick 的参考价时以 `invalid_reference_price` 拒绝规范化（源字段损坏不伪称可用）；腾讯补位的参考价缺失则保留 null，交下游 UNKNOWN 门禁。TDX 源内价格/成交额/参考价修订冲突报错；修订原文须单独生成新 DSV。
 
 本票只实现行情数据层，下面的 `szse-derived-open@1`、Catalog 与 TRI 消费逻辑仍是原契约。#203/#205 将接入新名录/状态和参考价；#204 接新浪事件与三方一致；不能将新 DSV 发布成功称为新执行状态或真实总回报验收通过。v3 暂保留 v2 的结构化 `corporateActions` 校验，不增加 PDF 解析器。
 
