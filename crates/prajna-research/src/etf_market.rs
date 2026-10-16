@@ -4,8 +4,9 @@ use crate::pit_universe::{CatalogError, Evidence, HistoricalCatalog};
 use arrow_array::{Array, Date32Array, RecordBatch, StringArray};
 use chrono::NaiveDate;
 use prajna_data::{
-    NormalizedTables, NormalizerRegistry, RawInput, RawStore, bars_from_record_batch, logical_hash,
-    read_manifest, restricted_jcs,
+    BarSourceRow, NormalizedTables, NormalizerRegistry, RawInput, RawStore,
+    bar_sources_from_record_batch, bars_from_record_batch, logical_hash, read_manifest,
+    restricted_jcs,
 };
 use prajna_domain::{Bar, InstrumentId, Notional, Price, Quantity, Session, TimestampNs};
 use serde::{Deserialize, Serialize};
@@ -44,6 +45,18 @@ pub struct HaltEvidence {
     pub scope: HaltScope,
     pub evidence: Evidence,
 }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum ExecutionStatusVersion {
+    #[serde(rename = "szse-derived-open@2")]
+    V2,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OfficialLimitRule {
+    pub document_number: String,
+    /// Explicit PIT fund/rule category, not inferred from the trading symbol.
+    pub fund_category: String,
+}
 /// Per-lifecycle PIT rule selection, including documented first-day applicability.
 /// Only nearest-tick half-up rounding is currently supported; no implicit IPO exemption.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +70,8 @@ pub struct LimitRule {
     pub rounding: String,
     pub applies_on_first_session: bool,
     pub evidence: Evidence,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub official_rule: Option<OfficialLimitRule>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -94,6 +109,8 @@ impl OpeningEvidence {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MarketEvidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_version: Option<ExecutionStatusVersion>,
     pub rule_version: String,
     pub start: NaiveDate,
     pub end: NaiveDate,
@@ -172,7 +189,7 @@ impl DerivedMarket {
             .normalize(&inputs)
             .map_err(|e| err(format!("normalization failed: {e:?}")))?;
         let t = &output.tables;
-        let tables = [
+        let mut tables = vec![
             ("instruments", &t.instruments, vec!["instrument_id"]),
             ("sessions", &t.sessions, vec!["venue_id", "session_date"]),
             ("bars", &t.bars, vec!["instrument_id", "session_date"]),
@@ -184,6 +201,18 @@ impl DerivedMarket {
                 vec!["instrument_id", "session_date"],
             ),
         ];
+        if evidence.semantic_version.is_some() {
+            if !matches!(manifest.core.normalizer.version.as_str(), "3" | "4") {
+                return Err(err("v2 execution requires szse-etf-frozen@3 or @4"));
+            }
+            tables.push((
+                "bar_sources",
+                t.bar_sources
+                    .as_ref()
+                    .ok_or_else(|| err("missing bar_sources"))?,
+                vec!["instrument_id", "session_date"],
+            ));
+        }
         for (name, batch, keys) in tables {
             let expected = manifest
                 .core
@@ -232,6 +261,7 @@ impl DerivedMarket {
         let dates: BTreeSet<_> = sessions.iter().map(Session::session_date).collect();
         let source_sessions =
             prajna_data::sessions_from_record_batch(&tables.sessions).map_err(err)?;
+        let v2 = evidence.semantic_version.is_some();
         for session in &sessions {
             if !source_sessions.contains(session) {
                 return Err(err("Dataset calendar differs from Catalog"));
@@ -273,6 +303,29 @@ impl DerivedMarket {
             let id = catalog.resolve_row(bar.instrument_id().symbol(), bar.session_date())?;
             bars.insert((id, bar.session_date()), bar);
         }
+        let mut sources = BTreeMap::new();
+        if v2 {
+            for source in bar_sources_from_record_batch(
+                tables
+                    .bar_sources
+                    .as_ref()
+                    .ok_or_else(|| err("missing bar_sources"))?,
+            )
+            .map_err(err)?
+            {
+                if !dates.contains(&source.session_date) {
+                    continue;
+                }
+                raw.get(&source.source_raw_sha256).map_err(err)?;
+                let id = catalog.resolve_row(source.instrument_id.symbol(), source.session_date)?;
+                if sources.insert((id, source.session_date), source).is_some() {
+                    return Err(err("duplicate Bar source"));
+                }
+            }
+            if sources.keys().ne(bars.keys()) {
+                return Err(err("Bar source keys differ from Bars"));
+            }
+        }
         let checks = crosschecks(
             tables
                 .source_crosscheck
@@ -281,7 +334,7 @@ impl DerivedMarket {
             catalog,
             &dates,
         )?;
-        for session in &sessions {
+        for session in sessions.iter().filter(|_| !v2) {
             if !checks
                 .iter()
                 .any(|((_, d), c)| *d == session.session_date() && c.has_primary)
@@ -308,16 +361,34 @@ impl DerivedMarket {
                 {
                     continue;
                 }
+                if v2
+                    && (life.identity_start.is_some_and(|start| date < start)
+                        || life.identity_end_exclusive.is_some_and(|end| date >= end))
+                {
+                    continue;
+                }
                 let key = (id.clone(), date);
-                let cell = derive(
-                    (&id, life.listing.effective_date),
-                    session,
-                    bars.get(&key),
-                    checks.get(&key),
-                    openings.get(&key).copied(),
-                    catalog,
-                    &evidence.rule_version,
-                )?;
+                let cell = if v2 {
+                    derive_v2(
+                        (&id, life.listing.effective_date),
+                        session,
+                        bars.get(&key),
+                        sources.get(&key),
+                        openings.get(&key).copied(),
+                        catalog,
+                        &evidence.rule_version,
+                    )?
+                } else {
+                    derive(
+                        (&id, life.listing.effective_date),
+                        session,
+                        bars.get(&key),
+                        checks.get(&key),
+                        openings.get(&key).copied(),
+                        catalog,
+                        &evidence.rule_version,
+                    )?
+                };
                 cells.insert(key, cell);
             }
         }
@@ -328,7 +399,11 @@ impl DerivedMarket {
         let version = identity(
             "derived-market",
             &(
-                "szse-derived-open@1",
+                if v2 {
+                    "szse-derived-open@2"
+                } else {
+                    "szse-derived-open@1"
+                },
                 dsv,
                 &catalog_version,
                 &evidence,
@@ -612,6 +687,144 @@ fn limit(reference: Price, tick: Price, bps: u32) -> Option<Price> {
     Price::from_mantissa(units.checked_mul(tick.mantissa())?)
         .ok()
         .filter(|p| *p > Price::ZERO)
+}
+fn derive_v2(
+    identity: (&InstrumentId, NaiveDate),
+    session: &Session,
+    bar: Option<&Bar>,
+    source: Option<&BarSourceRow>,
+    opening: Option<&OpeningEvidence>,
+    catalog: &HistoricalCatalog,
+    version: &str,
+) -> Result<MarketCell> {
+    let (id, listing) = identity;
+    let mut cell = MarketCell {
+        instrument_id: id.clone(),
+        session_date: session.session_date(),
+        state: TradeState::Unknown,
+        can_buy: false,
+        can_sell: false,
+        reasons: BTreeSet::new(),
+        available_at: None,
+        close: bar.map(Bar::close),
+        amount: bar.and_then(Bar::amount),
+        upper_limit: None,
+        lower_limit: None,
+        sources: source.iter().map(|s| s.source_raw_sha256.clone()).collect(),
+        rule_version: version.into(),
+        limit_rule_version: opening.and_then(|o| o.limit_rule.as_ref().map(|r| r.version.clone())),
+    };
+    let Some(o) = opening else {
+        cell.reasons.insert("missing_opening_evidence".into());
+        return Ok(cell);
+    };
+    let mut times = Vec::new();
+    for doc in o
+        .announcement_coverage
+        .iter()
+        .chain(o.halt.iter().map(|h| &h.evidence))
+        .chain(o.limit_rule.iter().map(|r| &r.evidence))
+    {
+        cell.sources.insert(doc.raw_sha256.clone());
+        times.push(doc.available_at(catalog.input())?);
+    }
+    cell.available_at = o.market_available_at.map(|at| {
+        times
+            .iter()
+            .copied()
+            .fold(at.max(session.ts_close()), TimestampNs::max)
+    });
+    // The normalized TDX field is the only reference authority. A caller's
+    // legacy ReferencePrice cannot repair or override a missing source field.
+    let reference = source
+        .filter(|s| s.source == "tdx")
+        .and_then(|s| s.reference_price);
+    let rule = o.limit_rule.as_ref().filter(|r| {
+        !r.version.trim().is_empty()
+            && r.effective_from <= session.session_date()
+            && r.effective_until
+                .is_none_or(|end| session.session_date() < end)
+            && r.rate_bps > 0
+            && r.rate_bps < 10000
+            && r.tick > Price::ZERO
+            && r.rounding == "nearest_tick_half_up"
+            && (listing != session.session_date() || r.applies_on_first_session)
+            && r.official_rule.as_ref().is_some_and(|rule| {
+                !rule.document_number.trim().is_empty() && !rule.fund_category.trim().is_empty()
+            })
+    });
+    let rule = match rule {
+        Some(r) if r.evidence.available_at(catalog.input())? < session.ts_open() => Some(r),
+        _ => None,
+    };
+    let limits = rule.zip(reference).and_then(|(r, p)| {
+        Some((
+            limit(p, r.tick, 10000 + r.rate_bps)?,
+            limit(p, r.tick, 10000 - r.rate_bps)?,
+        ))
+    });
+    if let Some((upper, lower)) = limits {
+        cell.upper_limit = Some(upper);
+        cell.lower_limit = Some(lower);
+        if let Some(b) = bar {
+            let tick = rule.expect("limits require rule").tick;
+            if [b.open(), b.high(), b.low(), b.close()]
+                .iter()
+                .any(|p| !p.is_aligned_to(tick).unwrap_or(false) || *p > upper || *p < lower)
+            {
+                return Err(err(format!(
+                    "prices_outside_pit_rule: {id} {}",
+                    session.session_date()
+                )));
+            }
+            cell.can_buy = b.open() < upper;
+            cell.can_sell = b.open() > lower;
+        }
+    }
+    if let Some(halt) = &o.halt {
+        cell.can_buy = false;
+        cell.can_sell = false;
+        let at = halt.evidence.available_at(catalog.input())?;
+        cell.available_at = Some(at.max(session.ts_close()));
+        if at >= session.ts_open() {
+            cell.reasons.insert("halt_not_known_before_open".into());
+        } else if halt.scope == HaltScope::FullSession
+            && bar.is_some_and(|b| b.volume() > Quantity::ZERO)
+        {
+            cell.reasons.insert("halt_trade_conflict".into());
+        } else {
+            cell.state = TradeState::Halted;
+            cell.amount = Some(Notional::ZERO);
+            cell.reasons.insert("official_opening_halt".into());
+        }
+        return Ok(cell);
+    }
+    if o.announcement_coverage.is_none() {
+        cell.reasons.insert("missing_announcement_coverage".into());
+    }
+    if !bar.is_some_and(|b| b.volume() > Quantity::ZERO) {
+        cell.reasons.insert("missing_positive_trade".into());
+    }
+    if cell.available_at.is_none() {
+        cell.reasons.insert("unknown_availability".into());
+    }
+    if limits.is_none() {
+        cell.reasons
+            .insert("unknown_price_limit_rule_or_reference".into());
+    }
+    if cell.reasons.is_empty() {
+        cell.state = TradeState::Tradable;
+        if !cell.can_buy {
+            cell.reasons.insert("opening_upper_limit".into());
+        }
+        if !cell.can_sell {
+            cell.reasons.insert("opening_lower_limit".into());
+        }
+    } else {
+        cell.can_buy = false;
+        cell.can_sell = false;
+    }
+    Ok(cell)
 }
 
 #[cfg(test)]

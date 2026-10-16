@@ -105,12 +105,20 @@ Run 还将投资持仓、可用现金、分红/清算应收分桶，并用连续
 Vector `executions[].pit_sizing` 保存计划的权益、费用、目标数量和必需方向；
 延期计划不代表已成交。手算回归见 `prajna-research/tests/pit_sides.rs`。
 
-Risk Notice 类型为 `vote_suspension`、`termination_proposal`、`liquidation_notice`、
+Risk Notice 类型为 `holders_meeting`、`vote_suspension`、`termination_proposal`、`liquidation_notice`、
 `official_termination`、`low_nav_warning`；最后一种只标注。Exact 发布时间沿用原时刻，
 DateOnly(D) 沿用 #175 的 D 后下一 Session close。风险退出在信息已知后的下一
 **严格晚于可用时刻、明确可卖** open 单独清掉风险持仓；HALTED/UNKNOWN/跌停持续等待，
 普通 cadence、新信号或 Universe 移除都不能取消它。只卖风险腿，不调整其他持仓数量；
 常规延期目标仍可由新 close 决策替换。风险收益暂存现金，只有实际执行常规目标时再分配。
+
+#205 增加可选 `pit.cninfo_index`（#202 的 `IndexDataset`），与手填 `risk_notices`
+共同构建 Rust RiskSignals。检查分类版本、窗口覆盖、unknown 和 Raw 引用；
+公告毫秒时间保守取上海当地日期，再按 P6 推到下一 Session close，不以采集时间倒填。
+大会/计票停牌/终止/清算分类触发风险提示，不据标题推断实际停牌时段。
+`pit.market.semantic_version = "szse-derived-open@2"` 显式选择 TDX 主源状态，
+只消费 v3/v4 DSV 的 TDX 昨收及带官方文号/类别的 PIT 限价规则；省略仍保留旧版。
+完整字段、缺失处理及合成序列见 [派生输入契约](../../docs/derived-etf-input-contract.md)。
 
 Run Spec 保存 Catalog/市场/TRI/规则/风险身份、逐 Session Universe/Eligible 与排除原因、
 以及 HALTED/UNKNOWN/方向受限格子的 `execution_exclusions`。`execution.json` 的 PIT

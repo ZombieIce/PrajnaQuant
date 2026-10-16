@@ -317,6 +317,7 @@ fn fixture_with_prices(
                     evidence: evidence("halt", time(4, 16)),
                 }),
                 limit_rule: Some(LimitRule {
+                    official_rule: None,
                     version: "synthetic-10pct@1".into(),
                     effective_from: date(1),
                     effective_until: None,
@@ -335,6 +336,7 @@ fn fixture_with_prices(
         })
         .collect();
     let market_input = MarketEvidence {
+        semantic_version: None,
         rule_version: "synthetic-execution@1".into(),
         start: date(1),
         end: date(10),

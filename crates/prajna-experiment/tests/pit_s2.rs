@@ -24,6 +24,91 @@ fn definition(f: &fixture::Fixture, engine: &str) -> Value {
 }
 
 #[test]
+fn cninfo_risk_input_is_bound_to_run_and_exits_on_next_sellable_open() {
+    use prajna_data::{
+        RawStore, SourceKind, SourceRecordInput,
+        cninfo::{FundIndex, IndexDataset, PageSet},
+    };
+    let lake = fixture::lake();
+    let f = fixture::fixture(lake.path());
+    let raw = RawStore::open(lake.path()).unwrap();
+    let bytes = serde_json::to_vec(&json!({"totalAnnouncement":1,"announcements":[{
+        "announcementId":"synthetic-termination", "secCode":"159001","orgId":"synthetic",
+        "announcementTitle":"合成沪深300交易型开放式指数证券投资基金终止基金合同议案",
+        "announcementTime":1672704000000_i64
+    }]}))
+    .unwrap();
+    let hash = raw
+        .put(
+            &bytes,
+            SourceRecordInput {
+                content_type: "application/json".into(),
+                source_kind: SourceKind::FileImport,
+                source_id: "synthetic".into(),
+                request: json!({}),
+                observed_at: "2026-10-16T00:00:00Z".into(),
+                ingested_by: "test".into(),
+            },
+        )
+        .unwrap();
+    let mut pages = PageSet::default();
+    pages.push(1, &bytes).unwrap();
+    let mut index = IndexDataset::new(fixture::date(1), fixture::date(10)).unwrap();
+    index.source_raw_sha256.insert(hash);
+    index
+        .funds
+        .push(FundIndex::new("159001".into(), pages.finish().unwrap().0));
+    for engine in ["vector", "fast_event"] {
+        let mut input = definition(&f, engine);
+        input["pit"]["risk_notices"] = json!([]);
+        let old = Experiment::parse(&input.to_string(), lake.path()).unwrap();
+        input["pit"]["cninfo_index"] = json!(index);
+        let experiment = Experiment::parse(&input.to_string(), lake.path()).unwrap();
+        let runs = experiment.expand(lake.path()).unwrap();
+        assert_ne!(runs[0].run_id, old.expand(lake.path()).unwrap()[0].run_id);
+        assert_eq!(
+            runs[0].run_spec["pit"]["risk_signals"]["signals"][0]["available_at"],
+            json!(fixture::time(4, 15))
+        );
+        let report = experiment.execute(lake.path(), 1).unwrap();
+        assert_eq!(
+            report.runs[0].status,
+            RunStatus::Completed,
+            "{:?}",
+            report.runs[0].error
+        );
+        let exits: Vec<_> = if engine == "vector" {
+            report.runs[0]
+                .result
+                .as_ref()
+                .unwrap()
+                .risk_exits
+                .iter()
+                .collect()
+        } else {
+            report.runs[0]
+                .fast_event_result
+                .as_ref()
+                .unwrap()
+                .risk_exits
+                .iter()
+                .map(|(_, exit)| exit)
+                .collect()
+        };
+        assert!(
+            exits
+                .iter()
+                .any(|exit| exit.executed && exit.session_date == fixture::date(8))
+        );
+        assert!(
+            !exits
+                .iter()
+                .any(|exit| exit.session_date < fixture::date(5))
+        );
+    }
+}
+
+#[test]
 fn pit_experiment_identity_engine_results_and_persistence() {
     let lake = fixture::lake();
     let f = fixture::fixture(lake.path());

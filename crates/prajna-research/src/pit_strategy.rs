@@ -20,6 +20,7 @@ pub const SEMANTIC_VERSION: &str = "pit-s2@4";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RiskKind {
+    HoldersMeeting,
     VoteSuspension,
     TerminationProposal,
     LiquidationNotice,
@@ -46,6 +47,83 @@ pub struct RiskSignals {
     pub signals: Vec<RiskSignal>,
 }
 impl RiskSignals {
+    /// #202 metadata has unresolved publication precision. Conservatively apply
+    /// P6 to its Shanghai-local date, never to local collection time.
+    pub fn build_from_cninfo(
+        catalog: &HistoricalCatalog,
+        mut notices: Vec<RiskNotice>,
+        index: &prajna_data::cninfo::IndexDataset,
+        raw: &RawStore,
+    ) -> Result<Self, CatalogError> {
+        use crate::pit_universe::Publication;
+        use chrono::{DateTime, FixedOffset};
+        use prajna_data::cninfo::{RULES_VERSION, classify};
+        if index.rules_version != RULES_VERSION
+            || !index.unknown.is_empty()
+            || index.window_start > catalog.input().coverage.start
+            || index.window_end < catalog.input().coverage.end
+        {
+            return Err(CatalogError(
+                "unknown cninfo rules or incomplete index".into(),
+            ));
+        }
+        for hash in &index.source_raw_sha256 {
+            raw.get(hash).map_err(|e| CatalogError(e.to_string()))?;
+        }
+        let mut seen = BTreeSet::new();
+        for fund in &index.funds {
+            fund.require_usable()
+                .map_err(|e| CatalogError(e.to_string()))?;
+            for announcement in &fund.announcements {
+                if announcement.code != fund.code
+                    || !seen.insert(announcement.id.clone())
+                    || !index
+                        .source_raw_sha256
+                        .contains(&announcement.source_raw_sha256)
+                    || announcement.categories != classify(&announcement.title)
+                {
+                    return Err(CatalogError(
+                        "conflicting cninfo announcement identity/classification".into(),
+                    ));
+                }
+                let category = |name: &str| announcement.categories.iter().any(|c| c == name);
+                let kind = if category("termination") {
+                    Some(RiskKind::TerminationProposal)
+                } else if category("liquidation") {
+                    Some(RiskKind::LiquidationNotice)
+                } else if category("suspension")
+                    && (category("holders_meeting") || announcement.title.contains("计票"))
+                {
+                    Some(RiskKind::VoteSuspension)
+                } else if category("holders_meeting") {
+                    Some(RiskKind::HoldersMeeting)
+                } else {
+                    None
+                };
+                let Some(kind) = kind else { continue };
+                let date = DateTime::from_timestamp_millis(announcement.announced_ms)
+                    .ok_or_else(|| CatalogError("invalid cninfo publication timestamp".into()))?
+                    .with_timezone(&FixedOffset::east_opt(8 * 3600).expect("Shanghai offset"))
+                    .date_naive();
+                if date < index.window_start || date > index.window_end {
+                    return Err(CatalogError("cninfo notice outside declared window".into()));
+                }
+                let instrument_id = catalog.resolve_row(&fund.code, date)?;
+                notices.push(RiskNotice {
+                    instrument_id,
+                    kind,
+                    evidence: Evidence {
+                        raw_sha256: announcement.source_raw_sha256.clone(),
+                        announcement_id: announcement.id.clone(),
+                        locator: format!("{RULES_VERSION}:risk-exit-date-only@1"),
+                        publication: Publication::DateOnly { date },
+                    },
+                });
+            }
+        }
+        Self::build(catalog, notices, raw)
+    }
+
     pub fn build(
         catalog: &HistoricalCatalog,
         mut notices: Vec<RiskNotice>,

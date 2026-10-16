@@ -10,7 +10,30 @@ v3 Bars 仍为原始价 D7 schema，另有 `bar_sources@1` Parquet：主键 `(in
 
 逐格选择：有 TDX 记录优先（含无成交）；仅无该代码/日期记录时，腾讯正成交未复权 `day` 可补位。腾讯不能覆盖 TDX，也不再作为 v3 发布门槛。`source_crosscheck` 只保存诊断，不将腾讯补位伪称 TDX 匹配。TDX 主源 Bar 成交额取 offset 72；补位 `amount=null`、`reference_price=null`，不估算成交额或参考价。最近 20 Session 成交额任一缺失使窗口不可用；不得改成最近 20 根非空 Bar 或以 19 Session 均值通过筛选。`available_at` 仍 Unknown，不以本地 `observed_at` 倒填历史可用时刻。正成交 TDX 行缺少正数、有效 tick 的参考价时以 `invalid_reference_price` 拒绝规范化（源字段损坏不伪称可用）；腾讯补位的参考价缺失则保留 null，交下游 UNKNOWN 门禁。TDX 源内价格/成交额/参考价修订冲突报错；修订原文须单独生成新 DSV。
 
-本票只实现行情数据层，下面的 `szse-derived-open@1`、Catalog 与 TRI 消费逻辑仍是原契约。#203/#205 将接入新名录/状态和参考价；#204 接新浪事件与三方一致；不能将新 DSV 发布成功称为新执行状态或真实总回报验收通过。v3 暂保留 v2 的结构化 `corporateActions` 校验，不增加 PDF 解析器。
+`szse-derived-open@1` 的双源逻辑保留不变；#203 已接入 v4 代码表与 Catalog v2，#205 的显式 v2 状态消费见下节。#204 接新浪事件与三方一致；不能将新 DSV 发布成功称为真实执行状态或真实总回报验收通过。v3 暂保留 v2 的结构化 `corporateActions` 校验，不增加 PDF 解析器。
+
+## 执行状态 v2（#205，显式 opt-in）
+
+`MarketEvidence.semantic_version = "szse-derived-open@2"` 选择新契约；字段省略或 null 仍使用原 `szse-derived-open@1`，且序列化时不增加字段，旧身份不回改。不识别的非空版本拒绝反序列化。v2 仅接受 `szse-etf-frozen@3/@4`；从冻结 Raw 重建并校验原有四表及 `bar_sources` logical hash，来源逐格与 Bars 一一对应。v4/Catalog v2 的代码复用、名称变更身份边界限制格子日期，不生成跨生命周期的状态。市场日历必须与 Catalog 相同；不再以缺腾讯或当日全市场没有正成交推断覆盖失败，生命周期内缺 Bar 单独保留 UNKNOWN。
+
+- 正成交 TDX 或腾讯补位 Bar、公告覆盖证据、已知 PIT 限价规则及来源参考价齐备，且无已知开盘停牌，才为 TRADABLE。取消双源匹配与来源独立性门槛；`source_crosscheck` 仅诊断。`source_independence` / 手填 `reference` 不能替代 v2 所需证据。
+- 参考价**只读 TDX `bar_sources.reference_price`**，不是前一 close；旧 `OpeningEvidence.reference` 不参与 v2 限价计算。腾讯补位无参考价，保持 UNKNOWN，不能用手填参考价修复。成交额仍为 null，不填零、估算或跳过 Session。
+- `LimitRule` 保留版本、半开生效区间 `[effective_from, effective_until)`、比例 bps、tick、首日适用及舍入，v2 另要求 `official_rule: {"document_number": "...", "fund_category": "..."}` 和对应官方条文 `Evidence`。规则证据必须在开盘前可知；缺文号/类别、未生效/已废止/迟到或未知规则均 UNKNOWN。规则按生命周期/日期显式提供，不从代码猜类别，不默认套 10%/20%；本票不提供未经核验的真实规则表。
+- 用来源参考价精确计算并按 tick 四舍五入。开盘涨停不买、开盘跌停不卖；不改成双向 HALTED。另对已有 Bar 的 OHLC 校验 tick 与上下限，越界直接报 `prices_outside_pit_rule`，即使另有开盘停牌证据也不能吞掉价格矛盾。
+- 官方证据在开盘前已知且明确覆盖开盘时，HALTED，金额按 0。`OpeningOnly` 可与下午成交协调；`FullSession` 与正成交矛盾为 UNKNOWN。未在开盘前可知的停牌证据不用于宣称已知停牌，保持 UNKNOWN；无 Bar/无公告不能当停牌。
+- 规则/覆盖/行情可用时刻缺失或冲突时不成交。日线状态的 `available_at` 最早为当天 close，并取相关依赖最晚时刻；HALTED 不需要行情可用时刻，以停牌证据与当日 close 为界。`known_by` 仍保护收盘输入，`permits` 仍只是离线执行复核，**不是开盘前可知状态**。
+
+Eligible Set 沿用 P9 的 61/60/20 Session 和 1,000 万阈值，以及完整固定 Session 窗口；任一 UNKNOWN 或缺成交额使该窗口不可用。v2 市场身份进入 TRI、Factor Cache、Eligible Set 与 PIT Run 身份；不改旧动量或引擎账户/成本算法。
+
+### cninfo Risk Exit 连接
+
+`RiskSignals::build_from_cninfo(catalog, notices, index, raw)` 消费 #202 的 `IndexDataset`；Experiment 的 `pit.cninfo_index` 可选字段连接到同一构建器，CLI/Python 宿主共用 Rust 结果。省略字段仍走原 `risk_notices` 路径。要求支持的分类版本、覆盖 Catalog 的公告窗口、无索引/基金 unknown、有效 Raw 引用，以及一致的代码/公告 ID/分类。未知分类版本、覆盖缺口、无法唯一归属生命周期均明确报错，不就近连接代码复用期间。
+
+分类中的持有人大会产生 `holders_meeting`，大会停牌或计票停牌产生 `vote_suspension`，合同终止产生 `termination_proposal`，清算提示产生 `liquidation_notice`；正式终止仍可由 Catalog 生命周期补入。普通报告/普通停复牌不单独触发风险退出，`low_nav_warning` 仍只标注。这里的标题类别仅用于风险提示，**不据此推断实际开盘停牌区间或清算金额**。
+
+#202 的毫秒公告时间尚无可用时刻/精度证明，转换为上海当地日期 D，再按 P6 取 D 后下一 Session close；不直接把 `announced_ms` 或 `observed_at` 当可用时刻。分类与日期规则写入风险证据 locator，公告 Raw/ID/可用时刻随 RiskSignal 进入 Run 身份。已有持久风险退出逻辑不变：在严格晚于可用时刻的下一明确可卖 open 退出，HALTED/UNKNOWN/跌停持续等待；普通调仓不得恢复风险持仓。
+
+合成事件序列：S3 日期的终止议案在 S4 close 可用；S4 open 可以执行 S3 close 已形成的买入，不能偷看 S4 close 风险。S5 HALTED、S6 UNKNOWN、S7 跌停，均不卖；S8 open 明确可卖后才退出。该输入在 Experiment 的 Vector/Fast Event 两条路径均验证；不改变费用、现金、持仓、NAV 或原有 next-open 时序。真实规则、公告提取、来源正确性与全集性没有由合成测试证明。
 
 补位采集命令（只在本机真实数据任务运行，本票测试不联网）：
 
@@ -20,7 +43,7 @@ python3 scripts/collect_tencent_fallback.py /local/missing-cells.json --network-
 
 本地 plan 为 `[{"symbol":"158001","session":"2026-01-05","tdx_observation":"missing"}]`，由 TDX 缺格规划器提供；无成交不能标为 missing。请求仅一个代码/Session、空复权参数；`--code-range FIRST-LAST` 可重复，与 Normalizer 范围保持一致。响应原文（含失败）保存 `~/PrajnaData/mvp-6/raw/tencent-responses/`，逐请求日志保存 `acceptance/tencent-requests.jsonl`，均不可入库公开。成功文件再交 `freeze_raw`（工具本身不冒充 RawStore）。工具禁用环境代理与重定向，单实例串行 ≥1 秒、指数退避最多 3 次重试，连续两次 403/501/验证码后本实例停源为 unresolved；每次请求记录 URL/参数/观察时间/HTTP 状态/字节数/hash/实际网络路径。只运行一个该域采集实例；不得通过重启绕过访问拦截。国内网络路径须由运行环境保证，字符串说明本身不证明出口归属。
 
-## 构建与冻结
+## 构建与冻结（v1 原契约）
 
 1. `HistoricalCatalog::build/load` 验证 #175 Catalog、生命周期身份和 Raw 原文。
 2. `DerivedMarket::from_dataset(lake_root, dsv, catalog, MarketEvidence)` 读取冻结 Manifest，从 Raw 重跑 #174 `szse-etf-frozen` Normalizer，核对 instruments/sessions/bars/source_crosscheck logical hash。规范化价格按 0.001，腾讯手数乘 100 转份，与 TDX OHLC/份数精确一致；成交额仅取 TDX。代码按当日生命周期映射，不跨代码复用连接。Dataset 与 Catalog 的 Session 时间必须一致。
@@ -29,7 +52,7 @@ python3 scripts/collect_tencent_fallback.py /local/missing-cells.json --network-
 
 `MarketEvidence.start/end` 必须处于 Catalog 覆盖内；非空 `coverage_gaps`、全市场任一 Session 缺 TDX 行、日历不符、无归属行情或重复裁决都会报错。单标的缺行/来源冲突不会被补成停牌。空 Eligible Set 可以成功，但缺市场 Session 不可以成功。
 
-## 开盘状态与方向
+## 开盘状态与方向（v1 原契约）
 
 - 两源精确匹配、有正成交、公告覆盖与来源独立性有证据、PIT 限价规则明确时，才能推导 TRADABLE。
 - 官方明确开盘停牌为 HALTED。`OpeningOnly` 可以与下午成交协调；`FullSession` 与正成交冲突为 UNKNOWN。HALTED 成交额按 0 参与流动性窗口。
