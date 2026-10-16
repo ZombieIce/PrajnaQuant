@@ -1,9 +1,10 @@
 # prajna-account
 
-MVP-3 的单 Venue、单记账币种、长仓、无杠杆、全额成交账本。只依赖
-`prajna-domain` 与 Serde，不读取行情、不生成信号、不决定可交易性、数量或费率。
+MVP-3 的单 Venue、单记账币种、长仓、无杠杆、全额成交账本；#181 增加分红/清算应收
+和公司行动数量变更原语。只依赖 `prajna-domain` 与 Serde，不读取行情、不生成信号、
+不决定可交易性、数量或费率。
 现由 [`fast_event::run_fast_event`](../prajna-research/src/fast_event.rs) 接入；
-Run Spec 与 ResultLevel 的持久化仍由后续票据实现。
+PIT 公司行动事件由 Research Engine 排程，并随 ResultLevel 账本输出。
 
 ## 使用契约
 
@@ -12,6 +13,10 @@ TradingAccount::new(currency, venue, initial_cash, VP allocations)
   submit_order(Order::new(id, VP, instrument, side, quantity, submitted_at))
   apply_fill(Fill::new(order, executed_at, raw_price, pricing, costs))
   apply_fee_settlement(ParityFeeSettlement::new(...))  # fee-only F8 leg, no trade
+  add_receivable(VP, Dividend|Liquidation, amount)
+  settle_receivable(VP, Dividend|Liquidation, amount)
+  convert_quantity(VP, instrument, new_quantity)
+  liquidate_position(VP, instrument, receivable)
   value(explicit valuation prices) -> AccountValuation
   AccountValuation::validate() -> exact reconciliation
 ```
@@ -32,6 +37,9 @@ TradingAccount::new(currency, venue, initial_cash, VP allocations)
   不支持 FX、乘数、衍生品结算或杠杆。
 - 账本余额只读；快照字段可读写并可 `validate`，修改快照不回写账本。
   Order / Fill / Fee-only Settlement / VP 和估值快照可 Serialize；不提供绕过校验的 Deserialize。
+- 公司行动只通过 Research Engine 调用的显式账本操作改变数量或应收；应收不得用于
+  下单预算，只有 `settle_receivable` 才转为现金。结算金额、权益时点、公告可用时刻与
+  Return Basis 不由本 crate 推断。
 
 ## Parity Fee-only Settlement
 
@@ -76,10 +84,11 @@ raw_notional=1000、trade_notional=1010、slippage=10、total_fees=17、cash_del
 VP mark            = round_half_even(VP quantity * price, 18)
 Account mark       = round_half_even(sum(VP quantity) * price, 18)
                    = sum(VP marks)  // checked, failure is an error
-VP equity          = VP cash + sum(VP marks)
+VP equity          = VP cash + dividend receivable + liquidation receivable + sum(VP marks)
 Account cash       = sum(VP cash) + Unallocated Capital
 Account quantities = sum(VP quantities), per instrument
-Account equity     = Account cash + sum(Account marks)
+Account receivables= sum(VP receivables), by type
+Account equity     = Account cash + Account receivables + sum(Account marks)
                    = sum(VP equity) + Unallocated Capital
 ```
 

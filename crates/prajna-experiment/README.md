@@ -52,7 +52,7 @@ exe_b=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["exe"])'
 cd "$repo"
 ```
 
-新 Execution 保存于 `<lake>/experiments/<exp-hex>/executions/<exe-hex>/`。Summary 不创建 `runs/`。Standard 添加 `sessions`、`executions`；Full 再添加权重、排名及 pending 表。每 Run 的 manifest 区分未保存与 Engine 不产生的表；不把缺表解释为零。
+新 Execution 保存于 `<lake>/experiments/<exp-hex>/executions/<exe-hex>/`。Summary 不创建 `runs/`。Vector Standard 添加 `sessions`、`executions`、`corporate_actions`；Full 再添加权重、排名及 pending 表。没有公司行动的运行仍保存空的 `corporate_actions` 表。每 Run 的 manifest 区分未保存与 Engine 不产生的表；不把缺表解释为零。
 
 ## MVP-6 离线 PIT S2（#177）
 
@@ -69,6 +69,7 @@ DSV 可来自 `szse-etf-frozen@1`（6a）或 `@2`（含结构化公司行动表�
 | `market` | #176 `MarketEvidence`；从冻结 DSV Raw 重建并核对表 hash |
 | `empty_actions` | `@1` 必需的 #176 `EmptyActionCoverage`；`@2` 有 `corporate_actions` 表时忽略 |
 | `corporate_action_rules` | `@2` 必需；绑定 TRI 跳变阈值/语义版本，进入 PIT、Cache 与 Run 身份 |
+| `dividend_tax_rate` | 可选 scale-18 十进制字符串（如 `"0.03"`），默认 `"0"`；`@2` 进入 Corporate Action schedule 与 Run 身份 |
 | `eligibility` | 可省略；默认上市 61 Session、金额窗口 20、日均 1 千万元；`momentum_sessions` 由每 Run 的 `lookback` 覆盖 |
 | `risk_notices` | 可省略；`instrument_id` 为生命周期 ID，`kind` 与 `evidence` 引用冻结官方附件；Catalog 正式终止事实自动加入 |
 
@@ -94,8 +95,13 @@ Native DSV 价格按 Catalog 拆成生命周期面板，不把复用代码的另
 PIT Vector/Fast 共用 F8 **金额与数量** sizing：按实际权益算逐项费用，再按扣费后权益
 及原始价格算目标数量，所有操作按 Domain scale-18/half-even 的相同次序进行，
 不先对归一化费用或目标市值舍入。只有数量精确不变才回退到 fee-only 的 fee_side，
-不设 no-trade epsilon。Vector 保留精确 sizing 输入状态，但不提交订单或结算账本，
-仍独立计算浮点绩效；Fast 仍是账本权威。`pit-s2@4` 记录此语义和资本契约。
+不设 no-trade epsilon。Vector 保留精确 sizing 输入状态，不提交订单或成交账本；含公司行动的 `@2` PIT
+Run 还将投资持仓、可用现金、分红/清算应收分桶，并用连续份额口径与 Fast Event
+逐日对拍。Fast Event 的定点现金、持仓、应收和绩效账本仍是权威；
+`CorporateActionSchedule`、税率、Return Basis 和逐标的覆盖状态进入 Run Spec。
+覆盖仅为 `observed_raw_set_only` 或 UNKNOWN 时，Summary 明确标记总回报不完整。
+`pit-s2@4` 仍记录原 PIT sizing/capital 语义；公司行动账本使用独立 `fast_event@2`
+与 `corporate_action_ledger@1` 版本。
 Vector `executions[].pit_sizing` 保存计划的权益、费用、目标数量和必需方向；
 延期计划不代表已成交。手算回归见 `prajna-research/tests/pit_sides.rs`。
 
@@ -113,10 +119,14 @@ Vector `executions` 与 Fast Full `orders` 附风险尝试及期末等待记录�
 `pending_at_end` 同时包含未退出风险腿。旧 Run 不新增此可选 manifest 字段。
 
 3 ETF × 10 Session 的供应商格式合成 Raw、逐日手算现金/持仓/费用/开收盘 NAV 和
-Vector/Fast 日对拍见两 crate 的 `tests/pit_s2.rs`。#180 的 `@2` 公司行动/TRI 仅有
-独立合成研究层测试；当前 Normalizer 需要结构化 `corporateActions` 字段，保留源发布时间并
-单独计算保守可用时刻，但不解析原始 cninfo 附件或证明公告全集。6b 账户应收/现金账本仍由后续范围处理；#178 Python PIT
-视图复用同一 Rust 输入和执行层，见 [`prajna-py`](../prajna-py/README.md)。
+Vector/Fast 日对拍见 [`prajna-research/tests/pit_s2.rs`](../prajna-research/tests/pit_s2.rs)；
+公司行动 golden 在 [`corporate_actions.rs`](../prajna-research/tests/corporate_actions.rs)
+覆盖分红登记/除息/发放、应收不投资、
+折算取整、终止清算和未知金额。Summary/Vector Result 声明 Return Basis、税率、
+覆盖报告及不完整原因；Standard 结果另保存公司行动事件行。当前 Normalizer 仍只接受
+结构化 `corporateActions` 字段，不解析 cninfo 附件或证明公告全集；真实覆盖、历史
+控制样本与 P0-2 验收仍未通过。#178 Python PIT 视图复用同一 Rust 输入和执行层，
+见 [`prajna-py`](../prajna-py/README.md)。
 
 ## stdout JSON 与退出码
 

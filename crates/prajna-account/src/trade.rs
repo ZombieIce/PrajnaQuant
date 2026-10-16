@@ -1,8 +1,8 @@
 use crate::{LedgerError, add, notional, subtract};
 use prajna_domain::{InstrumentId, Notional, Price, Quantity, TimestampNs};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct VirtualPortfolioId(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct OrderId(pub u64);

@@ -1965,7 +1965,7 @@ mod tests {
         assert!(!stored.path.join("runs").exists());
         assert_eq!(stored.manifest.runs.len(), 1);
         assert!(stored.manifest.runs[0].table_hashes.is_empty());
-        assert_eq!(stored.manifest.runs[0].not_saved.len(), 6);
+        assert_eq!(stored.manifest.runs[0].not_saved.len(), 7);
         assert_eq!(
             stored.manifest.runs[0].not_produced_by_engine,
             ["orders", "fills", "cash_ledger"]
@@ -2291,7 +2291,7 @@ mod tests {
             .find(|run| run.run_id != *target)
             .unwrap();
         assert_eq!(target_record.result_level, ResultLevel::Full);
-        assert_eq!(target_record.table_hashes.len(), 6);
+        assert_eq!(target_record.table_hashes.len(), 7);
         assert!(target_record.not_saved.is_empty());
         assert_eq!(other_record.result_level, ResultLevel::Summary);
         assert!(other_record.table_hashes.is_empty());

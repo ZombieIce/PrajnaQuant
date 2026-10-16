@@ -58,6 +58,7 @@ pub struct TotalReturnIndex {
     identity: Value,
     version: String,
     market_identity: String,
+    actions: Vec<CorporateActionRow>,
     integrity: Vec<InstrumentActionIntegrity>,
 }
 
@@ -188,12 +189,28 @@ impl TotalReturnIndex {
         let canonical = prajna_data::restricted_jcs(&identity)
             .map_err(|e| FactorError::Evaluation(e.to_string()))?;
         let version = format!("etf-tri-input:sha256:{:x}", Sha256::digest(canonical));
+        let integrity = empty_actions.map_or_else(Vec::new, |coverage| {
+            coverage
+                .instruments
+                .iter()
+                .map(|instrument_id| InstrumentActionIntegrity {
+                    instrument_id: instrument_id.clone(),
+                    start: coverage.start,
+                    end: coverage.end,
+                    observed_actions: 0,
+                    unapplied_action_dates: Vec::new(),
+                    unexplained_price_jumps: Vec::new(),
+                    coverage_status: ActionCoverageStatus::ObservedRawSetOnly,
+                })
+                .collect()
+        });
         Ok(Self {
             points,
             identity,
             version,
             market_identity: market.version().into(),
-            integrity: Vec::new(),
+            actions: Vec::new(),
+            integrity,
         })
     }
 
@@ -350,6 +367,7 @@ impl TotalReturnIndex {
             identity,
             version,
             market_identity: market.version().into(),
+            actions: actions.to_vec(),
             integrity,
         })
     }
@@ -427,6 +445,10 @@ impl TotalReturnIndex {
     }
     pub fn integrity(&self) -> &[InstrumentActionIntegrity] {
         &self.integrity
+    }
+
+    pub fn actions(&self) -> &[CorporateActionRow] {
+        &self.actions
     }
 }
 

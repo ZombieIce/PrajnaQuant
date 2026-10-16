@@ -29,14 +29,20 @@ use prajna_research::vector::VectorResult;
 
 static NEXT_STAGE: AtomicU64 = AtomicU64::new(0);
 const NOT_PRODUCED_BY_ENGINE: [&str; 3] = ["orders", "fills", "cash_ledger"];
-const FAST_STANDARD: [&str; 2] = ["account_valuations", "portfolio_valuations"];
-const FAST_FULL: [&str; 5] = [
+const FAST_STANDARD: [&str; 3] = [
+    "account_valuations",
+    "portfolio_valuations",
+    "corporate_actions",
+];
+const FAST_FULL: [&str; 6] = [
     "account_valuations",
     "portfolio_valuations",
     "orders",
     "fills",
     "fee_settlements",
+    "corporate_actions",
 ];
+const ACCURATE_STANDARD: [&str; 2] = ["account_valuations", "portfolio_valuations"];
 const ACCURATE_FULL: [&str; 8] = [
     "account_valuations",
     "portfolio_valuations",
@@ -47,10 +53,11 @@ const ACCURATE_FULL: [&str; 8] = [
     "backend_events",
     "backend_comparisons",
 ];
-const STANDARD_TABLES: [&str; 2] = ["sessions", "executions"];
-const FULL_TABLES: [&str; 6] = [
+const STANDARD_TABLES: [&str; 3] = ["sessions", "executions", "corporate_actions"];
+const FULL_TABLES: [&str; 7] = [
     "sessions",
     "executions",
+    "corporate_actions",
     "target_weights",
     "weights_after_execution",
     "decisions",
@@ -70,6 +77,9 @@ impl ResultLevel {
         if run.is_event() {
             match self {
                 Self::Summary => &[],
+                Self::Standard if run.run_spec["engine"]["kind"] == "accurate_event" => {
+                    &ACCURATE_STANDARD
+                }
                 Self::Standard => &FAST_STANDARD,
                 Self::Full if run.run_spec["engine"]["kind"] == "accurate_event" => &ACCURATE_FULL,
                 Self::Full => &FAST_FULL,
@@ -1313,9 +1323,17 @@ fn result_rows(
 ) -> Result<Vec<(String, String)>, ExperimentError> {
     let mut rows = Vec::new();
     match table {
+        "corporate_actions" => {
+            for (index, entry) in result.corporate_action_ledger.iter().enumerate() {
+                let mut payload =
+                    serde_json::to_value(entry).map_err(|error| err(error.to_string()))?;
+                payload["record_type"] = "corporate_action".into();
+                rows.push((format!("event|{index:020}"), json_payload(&payload)?));
+            }
+        }
         "sessions" => {
             for session in &result.sessions {
-                let payload = serde_json::json!({
+                let mut payload = serde_json::json!({
                     "session_date": session.session_date,
                     "nav": session.nav,
                     "gross_return": session.gross_return,
@@ -1324,6 +1342,12 @@ fn result_rows(
                     "cost": session.cost,
                     "valuation_carried": session.valuation_carried,
                 });
+                if let Some(components) = &session.portfolio_components {
+                    payload["portfolio_components"] = serde_json::json!(components);
+                }
+                if let Some(components) = &session.portfolio_components_close {
+                    payload["portfolio_components_close"] = serde_json::json!(components);
+                }
                 rows.push((
                     session.session_date.clone(),
                     serde_json::to_string(&payload).map_err(|error| err(error.to_string()))?,
@@ -2287,7 +2311,7 @@ fn fast_rows(
                                     id: Option<u64>,
                                     value: &prajna_account::PortfolioValuation|
                      -> Result<(), ExperimentError> {
-                        let payload = serde_json::json!({"session_date":session.session.session_date.to_string(),"valuation_point":point,"scope":scope,"portfolio_id":id,"cash":value.cash,"positions":value.positions,"equity":value.equity,"price_sources":source,"unallocated_capital":if scope=="account" {Some(valuation.unallocated_capital)} else {None},"accounting_verified":true});
+                        let payload = serde_json::json!({"session_date":session.session.session_date.to_string(),"valuation_point":point,"scope":scope,"portfolio_id":id,"cash":value.cash,"dividend_receivable":value.dividend_receivable,"liquidation_receivable":value.liquidation_receivable,"positions":value.positions,"equity":value.equity,"price_sources":source,"unallocated_capital":if scope=="account" {Some(valuation.unallocated_capital)} else {None},"accounting_verified":true});
                         rows.push((
                             format!(
                                 "{}|{point}|{scope}|{}",
@@ -2306,6 +2330,14 @@ fn fast_rows(
                         }
                     }
                 }
+            }
+        }
+        "corporate_actions" => {
+            for (index, entry) in result.corporate_action_ledger.iter().enumerate() {
+                let mut payload =
+                    serde_json::to_value(entry).map_err(|error| err(error.to_string()))?;
+                payload["record_type"] = "corporate_action".into();
+                rows.push((format!("event|{index:020}"), json_payload(&payload)?));
             }
         }
         "orders" => {

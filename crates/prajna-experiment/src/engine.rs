@@ -726,6 +726,15 @@ pub(super) fn execute(
                 })
                 .collect::<Vec<_>>();
             let result = if let Some(identity) = &experiment.engine.backend {
+                if experiment
+                    .pit
+                    .as_ref()
+                    .is_some_and(|pit| pit.has_corporate_action_table)
+                {
+                    return Err(
+                        "Accurate Event does not implement the corporate-action ledger".into(),
+                    );
+                }
                 let factory = experiment
                     .backend_factory
                     .as_ref()
@@ -754,13 +763,26 @@ pub(super) fn execute(
                 result.execution
             } else {
                 if let Some(pit) = &experiment.pit {
-                    fast_event::run_fast_event_pit(
-                        panel,
-                        &pit.market,
-                        &pit.risk,
-                        config,
-                        &portfolios,
-                    )
+                    match pit
+                        .corporate_action_schedule(panel)
+                        .map_err(|e| e.to_string())?
+                    {
+                        Some(actions) => fast_event::run_fast_event_pit_with_actions(
+                            panel,
+                            &pit.market,
+                            &pit.risk,
+                            config,
+                            &portfolios,
+                            &actions,
+                        ),
+                        None => fast_event::run_fast_event_pit(
+                            panel,
+                            &pit.market,
+                            &pit.risk,
+                            config,
+                            &portfolios,
+                        ),
+                    }
                 } else {
                     fast_event::run_fast_event(panel, statuses, config, &portfolios)
                 }
@@ -803,17 +825,32 @@ pub(super) fn execute(
             let decisions = decisions(engine, run, factors, panel, members, assumption)?;
             execution.result = Some(
                 if let Some(pit) = &experiment.pit {
-                    prajna_research::vector::run_vector_pit(
-                        panel,
-                        &decisions,
-                        &pit.market,
-                        &pit.risk,
-                        costs,
-                        experiment
-                            .engine
-                            .vector_pit_capital
-                            .ok_or("missing Vector PIT capital")?,
-                    )
+                    let capital = experiment
+                        .engine
+                        .vector_pit_capital
+                        .ok_or("missing Vector PIT capital")?;
+                    match pit
+                        .corporate_action_schedule(panel)
+                        .map_err(|e| e.to_string())?
+                    {
+                        Some(actions) => prajna_research::vector::run_vector_pit_with_actions(
+                            panel,
+                            &decisions,
+                            &pit.market,
+                            &pit.risk,
+                            costs,
+                            capital,
+                            &actions,
+                        ),
+                        None => prajna_research::vector::run_vector_pit(
+                            panel,
+                            &decisions,
+                            &pit.market,
+                            &pit.risk,
+                            costs,
+                            capital,
+                        ),
+                    }
                 } else {
                     run_vector_with_policy(
                         panel,

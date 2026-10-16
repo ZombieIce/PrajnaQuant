@@ -227,7 +227,7 @@ fn fast_levels_threads_replay_and_promotion_preserve_exact_content() {
         .unwrap();
         assert!(!summary.path.join("runs").exists());
         assert_eq!(summary.manifest.runs[0].accounting_verified, Some(true));
-        assert_eq!(summary.manifest.runs[0].not_saved.len(), 5);
+        assert_eq!(summary.manifest.runs[0].not_saved.len(), 6);
         assert!(summary.manifest.runs[0].not_produced_by_engine.is_empty());
         let ids = a.runs.iter().map(|r| r.run_id.clone()).collect::<Vec<_>>();
         let standard = storage::promote(
@@ -240,7 +240,7 @@ fn fast_levels_threads_replay_and_promotion_preserve_exact_content() {
             1,
         )
         .unwrap();
-        assert_eq!(standard.manifest.runs[0].table_hashes.len(), 2);
+        assert_eq!(standard.manifest.runs[0].table_hashes.len(), 3);
         assert_eq!(
             standard.manifest.runs[0].not_saved,
             vec!["orders", "fills", "fee_settlements"]
@@ -255,7 +255,7 @@ fn fast_levels_threads_replay_and_promotion_preserve_exact_content() {
             4,
         )
         .unwrap();
-        assert_eq!(full.manifest.runs[0].table_hashes.len(), 5);
+        assert_eq!(full.manifest.runs[0].table_hashes.len(), 6);
         assert!(full.manifest.runs[0].not_saved.is_empty());
         assert_eq!(
             summary.manifest.summary_logical_hash,

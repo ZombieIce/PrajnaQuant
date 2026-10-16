@@ -36,6 +36,7 @@ pub enum LedgerError {
     AlreadyFilled(OrderId),
     FillBeforeOrder,
     MissingPrice(InstrumentId),
+    InvalidReceivable,
     InvalidFeeSettlement,
     DuplicateFeeSettlement,
     Invariant(&'static str),
@@ -78,11 +79,19 @@ pub(crate) fn notional(
         .checked_mul_decimal(Notional::from_mantissa(quantity.mantissa())?)?)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReceivableKind {
+    Dividend,
+    Liquidation,
+}
+
 /// Independent subaccount; capital cannot be reassigned after construction.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct VirtualPortfolio {
     initial_capital: Notional,
     cash: Notional,
+    dividend_receivable: Notional,
+    liquidation_receivable: Notional,
     positions: BTreeMap<InstrumentId, Quantity>,
 }
 impl VirtualPortfolio {
@@ -91,6 +100,12 @@ impl VirtualPortfolio {
     }
     pub fn cash(&self) -> Notional {
         self.cash
+    }
+    pub fn dividend_receivable(&self) -> Notional {
+        self.dividend_receivable
+    }
+    pub fn liquidation_receivable(&self) -> Notional {
+        self.liquidation_receivable
     }
     pub fn positions(&self) -> &BTreeMap<InstrumentId, Quantity> {
         &self.positions
@@ -143,6 +158,8 @@ impl TradingAccount {
                 VirtualPortfolio {
                     initial_capital: capital,
                     cash: capital,
+                    dividend_receivable: Notional::ZERO,
+                    liquidation_receivable: Notional::ZERO,
                     positions: BTreeMap::new(),
                 },
             );
@@ -193,6 +210,159 @@ impl TradingAccount {
     }
     pub fn fee_settlements(&self) -> &[ParityFeeSettlement] {
         &self.fee_settlements
+    }
+
+    pub fn add_receivable(
+        &mut self,
+        id: VirtualPortfolioId,
+        kind: ReceivableKind,
+        amount: Notional,
+    ) -> Result<(), LedgerError> {
+        if amount < Notional::ZERO {
+            return Err(LedgerError::InvalidReceivable);
+        }
+        let mut portfolio = self
+            .portfolios
+            .get(&id)
+            .ok_or(LedgerError::UnknownPortfolio(id))?
+            .clone();
+        match kind {
+            ReceivableKind::Dividend => {
+                portfolio.dividend_receivable = add(portfolio.dividend_receivable, amount)?;
+            }
+            ReceivableKind::Liquidation => {
+                portfolio.liquidation_receivable = add(portfolio.liquidation_receivable, amount)?;
+            }
+        }
+        let mut portfolios = self.portfolios.clone();
+        portfolios.insert(id, portfolio);
+        reconcile(self.cash, &self.positions, self.unallocated, &portfolios)?;
+        self.portfolios = portfolios;
+        Ok(())
+    }
+
+    pub fn settle_receivable(
+        &mut self,
+        id: VirtualPortfolioId,
+        kind: ReceivableKind,
+        amount: Notional,
+    ) -> Result<(), LedgerError> {
+        if amount < Notional::ZERO {
+            return Err(LedgerError::InvalidReceivable);
+        }
+        let mut portfolio = self
+            .portfolios
+            .get(&id)
+            .ok_or(LedgerError::UnknownPortfolio(id))?
+            .clone();
+        let receivable = match kind {
+            ReceivableKind::Dividend => &mut portfolio.dividend_receivable,
+            ReceivableKind::Liquidation => &mut portfolio.liquidation_receivable,
+        };
+        if *receivable < amount {
+            return Err(LedgerError::InvalidReceivable);
+        }
+        *receivable = subtract(*receivable, amount)?;
+        portfolio.cash = add(portfolio.cash, amount)?;
+        let cash = add(self.cash, amount)?;
+        let mut portfolios = self.portfolios.clone();
+        portfolios.insert(id, portfolio);
+        reconcile(cash, &self.positions, self.unallocated, &portfolios)?;
+        self.cash = cash;
+        self.portfolios = portfolios;
+        Ok(())
+    }
+
+    pub fn convert_quantity(
+        &mut self,
+        id: VirtualPortfolioId,
+        instrument: &InstrumentId,
+        quantity: Quantity,
+    ) -> Result<Quantity, LedgerError> {
+        if instrument.venue() != &self.venue {
+            return Err(LedgerError::WrongVenue);
+        }
+        if quantity < Quantity::ZERO {
+            return Err(LedgerError::NonPositiveQuantity);
+        }
+        let mut portfolio = self
+            .portfolios
+            .get(&id)
+            .ok_or(LedgerError::UnknownPortfolio(id))?
+            .clone();
+        let previous = portfolio
+            .positions
+            .get(instrument)
+            .copied()
+            .unwrap_or(Quantity::ZERO);
+        update_position(
+            &mut portfolio.positions,
+            instrument,
+            Quantity::from_mantissa(
+                quantity
+                    .mantissa()
+                    .checked_sub(previous.mantissa())
+                    .ok_or(FixedPointError::Overflow)?,
+            )?,
+        )?;
+        let mut positions = self.positions.clone();
+        update_position(
+            &mut positions,
+            instrument,
+            Quantity::from_mantissa(
+                quantity
+                    .mantissa()
+                    .checked_sub(previous.mantissa())
+                    .ok_or(FixedPointError::Overflow)?,
+            )?,
+        )?;
+        let mut portfolios = self.portfolios.clone();
+        portfolios.insert(id, portfolio);
+        reconcile(self.cash, &positions, self.unallocated, &portfolios)?;
+        self.positions = positions;
+        self.portfolios = portfolios;
+        Ok(previous)
+    }
+
+    pub fn liquidate_position(
+        &mut self,
+        id: VirtualPortfolioId,
+        instrument: &InstrumentId,
+        receivable: Notional,
+    ) -> Result<Quantity, LedgerError> {
+        if instrument.venue() != &self.venue {
+            return Err(LedgerError::WrongVenue);
+        }
+        if receivable < Notional::ZERO {
+            return Err(LedgerError::InvalidReceivable);
+        }
+        let mut portfolio = self
+            .portfolios
+            .get(&id)
+            .ok_or(LedgerError::UnknownPortfolio(id))?
+            .clone();
+        let quantity = portfolio
+            .positions
+            .remove(instrument)
+            .ok_or(LedgerError::InsufficientPosition)?;
+        portfolio.liquidation_receivable = add(portfolio.liquidation_receivable, receivable)?;
+        let mut positions = self.positions.clone();
+        update_position(
+            &mut positions,
+            instrument,
+            Quantity::from_mantissa(
+                quantity
+                    .mantissa()
+                    .checked_neg()
+                    .ok_or(FixedPointError::Overflow)?,
+            )?,
+        )?;
+        let mut portfolios = self.portfolios.clone();
+        portfolios.insert(id, portfolio);
+        reconcile(self.cash, &positions, self.unallocated, &portfolios)?;
+        self.positions = positions;
+        self.portfolios = portfolios;
+        Ok(quantity)
     }
 
     /// Atomically charge an F8 fee-only leg. Quantities, Orders and Fills do not change.
@@ -325,6 +495,11 @@ fn reconcile(
     for portfolio in portfolios.values() {
         if portfolio.cash < Notional::ZERO {
             return Err(LedgerError::NegativeCash);
+        }
+        if portfolio.dividend_receivable < Notional::ZERO
+            || portfolio.liquidation_receivable < Notional::ZERO
+        {
+            return Err(LedgerError::InvalidReceivable);
         }
         total_cash = add(total_cash, portfolio.cash)?;
         for (id, quantity) in &portfolio.positions {
