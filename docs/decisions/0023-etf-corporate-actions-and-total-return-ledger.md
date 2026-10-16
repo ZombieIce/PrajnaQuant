@@ -1,12 +1,14 @@
 # ADR 0023：ETF 公司行动、顺序总回报指数与权威账本
 
-- 状态：Accepted as target architecture，2026-10-14（spec [#171](https://github.com/ZombieIce/PrajnaQuant/issues/171) P19～P22，设计票据 [#173](https://github.com/ZombieIce/PrajnaQuant/issues/173)）。#180 实现合成验证的数据层 v2 结构化事件表与顺序 TRI；#181 接入 action-aware PIT Fast Event/Vector 账本、非投资应收权重、覆盖/不完整声明与逐日合成对拍。**真实 cninfo 附件解析、公告完整性证明和真实数据验收仍未实现**。扩展 [ADR 0019](0019-fast-event-ledger-and-vector-parity.md) 的权益恒等式与 Vector 共同语义，不改写旧价格收益入口。
+- 状态：Accepted as target architecture，2026-10-14（spec [#171](https://github.com/ZombieIce/PrajnaQuant/issues/171) P19～P22，设计票据 [#173](https://github.com/ZombieIce/PrajnaQuant/issues/173)）。#180 实现合成验证的数据层 v2 结构化事件表与顺序 TRI；#181 接入 action-aware PIT Fast Event/Vector 账本、非投资应收权重、覆盖/不完整声明与逐日合成对拍。#204 增加合成验证的 `szse-etf-frozen@5`：新浪 qfq/hfq 精确因子与 TDX 参考价、cninfo 结构化行动三方核对，按 Catalog 生命周期处理复用代码，并将缺少发放日/清算金额列入覆盖缺口。研究侧回放按 Catalog 在行动日期映射生命周期身份。**未用真实新浪/行情/公告数据验收，公告完整性证明和真实收益验收仍未实现**。扩展 [ADR 0019](0019-fast-event-ledger-and-vector-parity.md) 的权益恒等式与 Vector 共同语义，不改写旧价格收益入口。
 
 ## 背景与边界
 
 原始价格收益会将除息/折算机械变化当损益，前复权序列则会因未来事件改写历史。[ADR 0022](0022-historical-etf-catalog-and-derived-execution-status.md) 定义历史身份、状态与可用时刻，本 ADR 定义公司行动如何进入研究和账户。Rust 保持因子、成交、成本与绩效权威，不在 Python 或浏览器建立第二套量化核心。
 
 6a 只做价格收益工程验收，不解释为策略历史业绩；6b 加分红、折算、清算和总回报对拍。来源为 cninfo 官方公告及附件，不能从行情跳变反推一条“已确认事件”。[#172 审计](../research/mvp-6-source-gate-audit.md)未证明公告完整性、控制样本事件链或许可，故本设计不放行 ingestion、真实总回报或备份/重放验收。
+
+MVP-6b 的合成实现要求 qfq 与 hfq 派生事件完全一致，并将每份现金/份额比例直接从新浪字段精确解析；TDX 除权参考变化、因子事件和 cninfo 对应公告须三方匹配。v5 的验证仅说明冻结合成原文可以经同一规范化路径重放，不构成真实行情、来源完整性或公告字段完整性的证据。
 
 ## 决定
 

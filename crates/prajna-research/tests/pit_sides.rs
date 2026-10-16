@@ -5,6 +5,7 @@ use prajna_account::VirtualPortfolioId;
 use prajna_domain::{InstrumentId, Quantity};
 use prajna_research::{
     etf_market::{DerivedMarket, MarketEvidence},
+    etf_momentum::{CorporateActionRules, TotalReturnIndex},
     fast_event::{
         FastEventConfig, FastEventCosts, FastEventResult, PortfolioRun, Rebalance, Sizing,
         run_fast_event_pit,
@@ -14,6 +15,87 @@ use prajna_research::{
     vector::{VectorCosts, run_vector_pit},
 };
 use std::collections::BTreeMap;
+
+#[test]
+fn dataset_actions_are_mapped_to_the_catalog_lifecycle_identity() {
+    let lake = fixture::lake();
+    let f = fixture::fixture_options(lake.path(), 1.0, true);
+    let factor_lifecycle = f
+        .catalog
+        .sina_factor_lifecycles()
+        .into_iter()
+        .find(|life| life.native_symbol == "159001")
+        .unwrap();
+    assert_eq!(factor_lifecycle.end_exclusive, Some(fixture::date(8)));
+    let raw = prajna_data::RawStore::open(lake.path()).unwrap();
+    let mut hashes = prajna_data::read_manifest(lake.path(), &f.dsv)
+        .unwrap()
+        .core
+        .inputs
+        .into_iter()
+        .map(|input| input.raw_sha256)
+        .collect::<Vec<_>>();
+    let announced_at = chrono::DateTime::parse_from_rfc3339("2023-01-02T00:00:00+08:00")
+        .unwrap()
+        .timestamp_millis();
+    let action_bytes = serde_json::to_vec(&serde_json::json!({
+        "announcements": [{
+            "announcementId": "SYN-ACTION-1",
+            "secCode": "159001",
+            "secName": "Synthetic ETF",
+            "announcementTitle": "Synthetic ETF dividend",
+            "announcementTime": announced_at,
+            "corporateActions": [{
+                "type": "dividend",
+                "recordDate": "2023-01-03",
+                "exDate": "2023-01-04",
+                "payDate": "2023-01-08",
+                "cashPerShare": "0.05"
+            }]
+        }],
+        "totalRecordNum": 1,
+        "hasMore": false
+    }))
+    .unwrap();
+    hashes.push(
+        raw.put(
+            &action_bytes,
+            prajna_data::SourceRecordInput {
+                content_type: "application/json".into(),
+                source_kind: prajna_data::SourceKind::FileImport,
+                source_id: "synthetic-cninfo-actions".into(),
+                request: serde_json::json!({}),
+                observed_at: "2026-10-15T00:00:00Z".into(),
+                ingested_by: "pit-sides-test".into(),
+            },
+        )
+        .unwrap(),
+    );
+    let manifest = prajna_data::publish_dataset(
+        lake.path(),
+        &raw,
+        &prajna_data::NormalizerRegistry::with_builtins(),
+        "szse-etf-frozen",
+        "2",
+        &hashes,
+        "2026-10-15T00:00:00Z",
+    )
+    .unwrap();
+    let evidence: MarketEvidence = serde_json::from_value(f.input["market"].clone()).unwrap();
+    let market =
+        DerivedMarket::from_dataset(lake.path(), &manifest.dsv, &f.catalog, evidence).unwrap();
+    let rules = CorporateActionRules {
+        version: "synthetic-tri-rules@1".into(),
+        unexplained_jump_threshold_bps: 1_000,
+    };
+    let tri = TotalReturnIndex::build_from_dataset(&market, lake.path(), &rules, &raw).unwrap();
+
+    assert_eq!(tri.actions().len(), 1);
+    assert_eq!(
+        tri.actions()[0].instrument_id,
+        f.catalog.resolve_row("159001", fixture::date(4)).unwrap()
+    );
+}
 
 fn case(
     initial: f64,

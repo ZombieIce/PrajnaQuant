@@ -171,16 +171,18 @@ pub fn publish_dataset(
     let raw_inputs = raw_sha256s
         .iter()
         .map(|hash| {
+            let source_records = raw_store.sources(hash)?;
             Ok(RawInput {
                 raw_sha256: hash.clone(),
                 bytes: raw_store.get(hash)?,
+                source_records,
             })
         })
         .collect::<Result<Vec<_>, RawStoreError>>()?;
     for raw_input in &raw_inputs {
         let accepted = normalizer.accepted_source_kinds();
-        if !raw_store
-            .sources(&raw_input.raw_sha256)?
+        if !raw_input
+            .source_records
             .iter()
             .any(|record| accepted.contains(&record.source_kind))
         {
@@ -366,6 +368,9 @@ pub fn rebuild_dataset(
             Ok(RawInput {
                 raw_sha256: input.raw_sha256.clone(),
                 bytes,
+                source_records: raw_store
+                    .sources(&input.raw_sha256)
+                    .map_err(RebuildError::Raw)?,
             })
         })
         .collect::<Result<Vec<_>, RebuildError>>()?;

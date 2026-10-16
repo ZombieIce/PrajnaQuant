@@ -110,6 +110,18 @@ fn tdx_0105(close_159901: f64, comment: Option<&str>) -> Vec<u8> {
     )
 }
 
+fn rec_valid(code: &'static str, close: f64) -> TdxRecord {
+    (
+        code,
+        close,
+        close + 0.01,
+        close - 0.01,
+        close,
+        20_000,
+        21_000.5,
+    )
+}
+
 /// Tencent `fqkline` rows: date, open, close, high, low, lots.
 fn tencent_doc(key: &str, array: &str, rows: &[[&str; 6]]) -> Vec<u8> {
     let mut node = json!({"qt": {}, "version": "16"});
@@ -218,6 +230,139 @@ fn publish(root: &Path, frozen: &Frozen) -> Result<Manifest, PublishError> {
         &frozen.hashes,
         OBSERVED,
     )
+}
+
+fn sina_factor_doc(variable: &str, points: &[(&str, &str, &str)]) -> Vec<u8> {
+    let rows: Vec<_> = points
+        .iter()
+        .map(|(date, cash, shares)| json!({"d": date, "u": cash, "s": shares}))
+        .collect();
+    format!("var {variable} = {};", json!({"data": rows})).into_bytes()
+}
+
+fn store_sina_pair(store: &RawStore, symbol: &str, points: &[(&str, &str, &str)]) -> [String; 2] {
+    ["qfq", "hfq"].map(|kind| {
+        let bytes = sina_factor_doc(kind, points);
+        store
+            .put(
+                &bytes,
+                SourceRecordInput {
+                    content_type: "application/javascript".into(),
+                    source_kind: SourceKind::VendorApi,
+                    source_id: "sina_adjust_factor".into(),
+                    request: json!({
+                        "url": format!("https://finance.sina.com.cn/realstock/company/{symbol}/{kind}.js"),
+                        "symbol": symbol,
+                        "adjustment_kind": kind,
+                        "window_start": "2026-01-01",
+                        "window_end": "2026-01-31",
+                        "http_status": 200,
+                        "byte_len": bytes.len(),
+                        "attempt": 0,
+                        "network_path": "direct_no_proxy"
+                    }),
+                    observed_at: "synthetic".into(),
+                    ingested_by: "synthetic-test".into(),
+                },
+            )
+            .unwrap()
+    })
+}
+
+fn cninfo_actions(actions: &[(&str, &str, &str)]) -> Vec<u8> {
+    let announcements: Vec<_> = actions
+        .iter()
+        .enumerate()
+        .map(|(index, (ex_date, kind, amount))| {
+            let action = match *kind {
+                "dividend" if amount.is_empty() => {
+                    json!({"type":"dividend","exDate":ex_date,"payDate":"2026-01-08"})
+                }
+                "dividend" => json!({
+                    "type":"dividend","exDate":ex_date,"payDate":"2026-01-08","cashPerShare":amount
+                }),
+                "dividend_missing_pay_date" => {
+                    json!({"type":"dividend","exDate":ex_date})
+                }
+                "share_conversion" if amount.is_empty() => {
+                    json!({"type":"share_conversion","effectiveDate":ex_date})
+                }
+                "share_conversion" => json!({
+                    "type":"share_conversion","effectiveDate":ex_date,"shareRatio":amount
+                }),
+                "liquidation_missing_amount" => {
+                    json!({"type":"liquidation","effectiveDate":ex_date})
+                }
+                other => panic!("unsupported synthetic action {other}"),
+            };
+            json!({
+                "announcementId": format!("SYN-{index}"),
+                "secCode": "159901",
+                "secName": "合成ETF",
+                "announcementTitle": match *kind {
+                    "dividend" | "dividend_missing_pay_date" => "合成ETF收益分配公告",
+                    "liquidation_missing_amount" => "合成ETF终止上市公告",
+                    _ => "合成ETF份额折算公告",
+                },
+                "announcementTime": millis("2026-01-05T00:00:00+08:00"),
+                "corporateActions": [action]
+            })
+        })
+        .collect();
+    serde_json::to_vec(&json!({
+        "announcements": announcements,
+        "totalRecordNum": announcements.len(),
+        "hasMore": false
+    }))
+    .unwrap()
+}
+
+fn v5_fixture(
+    root: &Path,
+    factor_points: &[(&str, &str, &str)],
+    actions: &[(&str, &str, &str)],
+    tdx_rows: &[(&str, f64, f64)],
+) -> Frozen {
+    let mut docs = vec![("szse-calendar", calendar())];
+    docs.extend(tdx_rows.iter().map(|(day, close, reference)| {
+        (
+            "tdx",
+            with_reference(
+                tdx_package(day, &[rec_valid("159901", *close)], None),
+                *reference,
+            ),
+        )
+    }));
+    docs.push(("cninfo", cninfo_actions(actions)));
+    let mut frozen = freeze_all(root, &docs);
+    let [qfq, hfq] = store_sina_pair(&frozen.store, "sz159901", factor_points);
+    frozen.hashes.extend([qfq, hfq]);
+    frozen
+}
+
+fn publish_v5(
+    root: &Path,
+    frozen: &Frozen,
+    lifecycles: Vec<prajna_data::LifecycleRange>,
+) -> Result<Manifest, PublishError> {
+    let registry = NormalizerRegistry::with_sina_adjustment_v5(lifecycles).unwrap();
+    publish_dataset(
+        root,
+        &frozen.store,
+        &registry,
+        ID,
+        "5",
+        &frozen.hashes,
+        OBSERVED,
+    )
+}
+
+fn lifecycle(start: &str, end_exclusive: Option<&str>) -> prajna_data::LifecycleRange {
+    prajna_data::LifecycleRange {
+        native_symbol: "159901".into(),
+        start: start.parse().unwrap(),
+        end_exclusive: end_exclusive.map(|date| date.parse().unwrap()),
+    }
 }
 
 fn table_path(root: &Path, dsv: &str, table: &str) -> std::path::PathBuf {
@@ -371,6 +516,286 @@ fn vendor_originals_decode_to_bars_gaps_crosscheck_and_announcements() {
     );
     let serialized = coverage.to_string();
     assert!(!serialized.contains("1.05") && !serialized.contains("21000"));
+}
+
+#[test]
+fn v5_derives_actions_from_sina_factors_and_checks_tdx_cninfo_without_rounding() {
+    let dir = tempfile::tempdir().unwrap();
+    let precise_cash = "0.050000000000000001";
+    let frozen = v5_fixture(
+        dir.path(),
+        &[
+            ("2026-01-05", "0", "1"),
+            ("2026-01-06", precise_cash, "1"),
+            ("2026-01-07", precise_cash, "2"),
+            ("2026-01-08", precise_cash, "2"),
+        ],
+        &[
+            ("2026-01-06", "dividend", ""),
+            ("2026-01-07", "share_conversion", ""),
+        ],
+        &[
+            ("260105", 1.05, 1.00),
+            ("260106", 1.01, 1.00),
+            ("260107", 0.51, 0.505),
+            ("260108", 0.52, 0.51),
+        ],
+    );
+    let registry =
+        NormalizerRegistry::with_sina_adjustment_v5(vec![lifecycle("2026-01-05", None)]).unwrap();
+    let manifest = publish_dataset(
+        dir.path(),
+        &frozen.store,
+        &registry,
+        ID,
+        "5",
+        &frozen.hashes,
+        OBSERVED,
+    )
+    .unwrap();
+    let batch = read_parquet(
+        table_path(dir.path(), &manifest.dsv, "corporate_actions"),
+        "corporate_actions",
+        "1",
+    )
+    .unwrap();
+    let rows = corporate_actions_from_record_batch(batch.first().unwrap()).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].cash_per_share.as_deref(), Some(precise_cash));
+    assert_eq!(rows[0].record_date, Some("2026-01-05".parse().unwrap()));
+    assert_eq!(rows[0].pay_date, Some("2026-01-08".parse().unwrap()));
+    assert_eq!(rows[1].share_ratio.as_deref(), Some("2"));
+    assert_eq!(rows[1].record_date, Some("2026-01-06".parse().unwrap()));
+    assert_eq!(
+        manifest.provenance.coverage["sina_adjust_factor"]["events"],
+        json!(2)
+    );
+    let lifecycle_coverage =
+        &manifest.provenance.coverage["sina_adjust_factor"]["lifecycle_coverage"][0];
+    assert_eq!(lifecycle_coverage["native_symbol"], "159901");
+    assert_eq!(lifecycle_coverage["factor_events"], 2);
+    assert_eq!(lifecycle_coverage["tdx_reference_checks"], 3);
+    assert_eq!(lifecycle_coverage["tdx_reference_jumps"], 2);
+    assert_eq!(lifecycle_coverage["corporate_actions"], 2);
+    assert!(lifecycle_coverage["qfq_raw_sha256"].is_string());
+    assert!(lifecycle_coverage["hfq_raw_sha256"].is_string());
+    assert_eq!(
+        rebuild_dataset(
+            &frozen.store,
+            &NormalizerRegistry::with_sina_adjustment_v5(vec![lifecycle("2026-01-05", None)])
+                .unwrap(),
+            &manifest
+        )
+        .unwrap(),
+        manifest.dsv
+    );
+}
+
+#[test]
+fn v5_fails_closed_for_missing_announcements_and_factor_events() {
+    let no_announcement_dir = tempfile::tempdir().unwrap();
+    let no_announcement = v5_fixture(
+        no_announcement_dir.path(),
+        &[("2026-01-05", "0", "1"), ("2026-01-06", "0.05", "1")],
+        &[],
+        &[("260105", 1.05, 1.00), ("260106", 1.01, 1.00)],
+    );
+    assert!(
+        issue_codes(
+            publish_v5(
+                no_announcement_dir.path(),
+                &no_announcement,
+                vec![lifecycle("2026-01-05", None)]
+            )
+            .unwrap_err()
+        )
+        .contains(&"sina_announcement_mismatch".into())
+    );
+
+    let no_factor_dir = tempfile::tempdir().unwrap();
+    let no_factor = v5_fixture(
+        no_factor_dir.path(),
+        &[("2026-01-05", "0", "1"), ("2026-01-06", "0", "1")],
+        &[("2026-01-06", "dividend", "")],
+        &[("260105", 1.05, 1.00), ("260106", 1.01, 1.00)],
+    );
+    let codes = issue_codes(
+        publish_v5(
+            no_factor_dir.path(),
+            &no_factor,
+            vec![lifecycle("2026-01-05", None)],
+        )
+        .unwrap_err(),
+    );
+    assert!(codes.contains(&"sina_event_missing".into()));
+    assert!(codes.contains(&"p21_reference_factor_mismatch".into()));
+
+    let missing_reference_dir = tempfile::tempdir().unwrap();
+    let mut missing_reference = freeze_all(
+        missing_reference_dir.path(),
+        &[
+            ("szse-calendar", calendar()),
+            (
+                "tdx",
+                with_reference(
+                    tdx_package("260105", &[rec_valid("159901", 1.05)], None),
+                    1.00,
+                ),
+            ),
+            (
+                "tdx",
+                tdx_package("260106", &[rec_valid("159901", 1.01)], None),
+            ),
+            ("cninfo", cninfo_actions(&[])),
+        ],
+    );
+    let [qfq, hfq] = store_sina_pair(
+        &missing_reference.store,
+        "sz159901",
+        &[("2026-01-05", "0", "1"), ("2026-01-06", "0", "1")],
+    );
+    missing_reference.hashes.extend([qfq, hfq]);
+    let codes = issue_codes(
+        publish_v5(
+            missing_reference_dir.path(),
+            &missing_reference,
+            vec![lifecycle("2026-01-05", None)],
+        )
+        .unwrap_err(),
+    );
+    assert!(
+        codes.contains(&"invalid_reference_price".into())
+            || codes.contains(&"p21_reference_missing".into()),
+        "unexpected normalizer issues: {codes:?}"
+    );
+}
+
+#[test]
+fn v5_marks_missing_payment_and_liquidation_fields_in_coverage() {
+    let dir = tempfile::tempdir().unwrap();
+    let frozen = v5_fixture(
+        dir.path(),
+        &[
+            ("2026-01-05", "0", "1"),
+            ("2026-01-06", "0.05", "1"),
+            ("2026-01-08", "0.05", "1"),
+        ],
+        &[
+            ("2026-01-06", "dividend_missing_pay_date", ""),
+            ("2026-01-08", "liquidation_missing_amount", ""),
+        ],
+        &[
+            ("260105", 1.05, 1.00),
+            ("260106", 1.01, 1.00),
+            ("260107", 1.02, 1.01),
+            ("260108", 1.03, 1.02),
+        ],
+    );
+    let manifest = publish_v5(dir.path(), &frozen, vec![lifecycle("2026-01-05", None)]).unwrap();
+    let missing = &manifest.provenance.coverage["corporate_actions_with_missing_fields"];
+    assert_eq!(missing.as_array().unwrap().len(), 2);
+    assert_eq!(missing[0]["missing_fields"], json!(["pay_date"]));
+    assert_eq!(
+        missing[1]["missing_fields"],
+        json!(["liquidation_cash_per_share"])
+    );
+    assert_eq!(
+        manifest.provenance.coverage["sina_adjust_factor"]["lifecycle_coverage"][0]
+            ["actions_with_missing_fields"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn v5_reports_unexplained_reference_jumps_and_never_carries_prices_across_reused_codes() {
+    let jump_dir = tempfile::tempdir().unwrap();
+    let unexplained_jump = v5_fixture(
+        jump_dir.path(),
+        &[("2026-01-05", "0", "1"), ("2026-01-06", "0", "1")],
+        &[],
+        &[("260105", 1.05, 1.00), ("260106", 1.01, 1.00)],
+    );
+    assert!(
+        issue_codes(
+            publish_v5(
+                jump_dir.path(),
+                &unexplained_jump,
+                vec![lifecycle("2026-01-05", None)]
+            )
+            .unwrap_err()
+        )
+        .contains(&"p21_reference_factor_mismatch".into())
+    );
+
+    let reuse_dir = tempfile::tempdir().unwrap();
+    let reused_code = v5_fixture(
+        reuse_dir.path(),
+        &[
+            ("2026-01-05", "0", "1"),
+            ("2026-01-06", "0.05", "1"),
+            ("2026-01-08", "0.10", "1"),
+        ],
+        &[("2026-01-06", "dividend", "")],
+        &[
+            ("260105", 1.05, 1.00),
+            ("260106", 1.01, 1.00),
+            ("260107", 1.02, 1.01),
+            ("260108", 1.03, 1.00),
+        ],
+    );
+    let manifest = publish_v5(
+        reuse_dir.path(),
+        &reused_code,
+        vec![
+            lifecycle("2026-01-05", Some("2026-01-08")),
+            lifecycle("2026-01-08", None),
+        ],
+    )
+    .unwrap();
+    let lifecycles = &manifest.provenance.coverage["sina_adjust_factor"]["lifecycle_coverage"];
+    assert_eq!(lifecycles[0]["factor_events"], 1);
+    assert_eq!(lifecycles[1]["factor_events"], 0);
+    assert_eq!(lifecycles[1]["tdx_reference_checks"], 0);
+}
+
+#[test]
+fn v5_coverage_keeps_reused_code_factor_events_in_their_lifecycle() {
+    let dir = tempfile::tempdir().unwrap();
+    let frozen = v5_fixture(
+        dir.path(),
+        &[
+            ("2026-01-05", "0", "1"),
+            ("2026-01-06", "0.05", "1"),
+            ("2026-01-07", "0.05", "1"),
+            ("2026-01-08", "0.05", "1"),
+        ],
+        &[("2026-01-06", "dividend", "")],
+        &[
+            ("260105", 1.05, 1.00),
+            ("260106", 1.01, 1.00),
+            ("260107", 1.02, 1.01),
+            ("260108", 1.03, 1.02),
+        ],
+    );
+    let manifest = publish_v5(
+        dir.path(),
+        &frozen,
+        vec![
+            lifecycle("2026-01-05", Some("2026-01-08")),
+            lifecycle("2026-01-08", None),
+        ],
+    )
+    .unwrap();
+    let lifecycles = &manifest.provenance.coverage["sina_adjust_factor"]["lifecycle_coverage"];
+    assert_eq!(lifecycles.as_array().unwrap().len(), 2);
+    assert_eq!(lifecycles[0]["factor_events"], 1);
+    assert_eq!(lifecycles[0]["tdx_reference_checks"], 2);
+    assert_eq!(lifecycles[0]["tdx_reference_jumps"], 1);
+    assert_eq!(lifecycles[1]["factor_events"], 0);
+    assert_eq!(lifecycles[1]["tdx_reference_checks"], 0);
 }
 
 #[test]
@@ -1199,6 +1624,7 @@ fn v4_publishes_full_configured_tdx_code_tables_including_no_trade_and_empty_ses
                 .map(|hash| RawInput {
                     raw_sha256: hash.clone(),
                     bytes: frozen.store.get(hash).unwrap(),
+                    source_records: frozen.store.sources(hash).unwrap(),
                 })
                 .collect::<Vec<_>>(),
         )

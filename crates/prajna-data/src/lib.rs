@@ -7,11 +7,12 @@ mod normalized;
 mod normalizer;
 mod publish;
 mod raw;
+pub mod sina_adjust_factor;
 
 pub use frozen::{FrozenSourceMeta, freeze_raw};
 pub use normalizer::{
-    NormalizationIssue, NormalizationOutput, NormalizedTables, Normalizer, NormalizerRegistry,
-    RawInput, SzseEtfFrozen,
+    LifecycleRange, NormalizationIssue, NormalizationOutput, NormalizedTables, Normalizer,
+    NormalizerRegistry, RawInput, SzseEtfFrozen,
 };
 pub use publish::{PublishError, RebuildError, publish_dataset, rebuild_dataset};
 

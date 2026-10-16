@@ -154,6 +154,7 @@ pub struct DerivedMarket {
     dsv: String,
     catalog_version: String,
     evidence: MarketEvidence,
+    catalog: HistoricalCatalog,
 }
 impl DerivedMarket {
     /// Rebuild #174 originals and verify every normalized logical hash. Caller-supplied
@@ -168,7 +169,12 @@ impl DerivedMarket {
         if manifest.core.normalizer.id != "szse-etf-frozen" {
             return Err(err("requires frozen SZSE ETF Dataset"));
         }
-        let registry = NormalizerRegistry::with_builtins();
+        let registry = if manifest.core.normalizer.version == "5" {
+            NormalizerRegistry::with_sina_adjustment_v5(catalog.sina_factor_lifecycles())
+                .map_err(err)?
+        } else {
+            NormalizerRegistry::with_builtins()
+        };
         let normalizer = registry
             .get(
                 &manifest.core.normalizer.id,
@@ -183,7 +189,13 @@ impl DerivedMarket {
             .core
             .inputs
             .iter()
-            .map(|x| Ok(RawInput::from_bytes(raw.get(&x.raw_sha256).map_err(err)?)))
+            .map(|input| {
+                Ok(RawInput {
+                    raw_sha256: input.raw_sha256.clone(),
+                    bytes: raw.get(&input.raw_sha256).map_err(err)?,
+                    source_records: raw.sources(&input.raw_sha256).map_err(err)?,
+                })
+            })
             .collect::<Result<Vec<_>>>()?;
         let output = normalizer
             .normalize(&inputs)
@@ -417,6 +429,7 @@ impl DerivedMarket {
             dsv: dsv.into(),
             catalog_version,
             evidence,
+            catalog: catalog.clone(),
         })
     }
     /// ADR 0005 preflight for an Engine's already computed required sell legs.
@@ -472,6 +485,13 @@ impl DerivedMarket {
     }
     pub fn catalog_version(&self) -> &str {
         &self.catalog_version
+    }
+    pub(crate) fn resolve_native_row(
+        &self,
+        native_symbol: &str,
+        date: NaiveDate,
+    ) -> Result<InstrumentId> {
+        self.catalog.resolve_row(native_symbol, date)
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

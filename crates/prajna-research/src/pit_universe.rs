@@ -940,6 +940,24 @@ impl HistoricalCatalog {
     pub fn input(&self) -> &CatalogInput {
         &self.input
     }
+    pub fn sina_factor_lifecycles(&self) -> Vec<prajna_data::LifecycleRange> {
+        self.input
+            .lifecycles
+            .iter()
+            .map(|life| {
+                let end_exclusive = life
+                    .identity_end_exclusive
+                    .into_iter()
+                    .chain(life.termination.iter().map(|end| end.effective_date))
+                    .min();
+                prajna_data::LifecycleRange {
+                    native_symbol: life.native_symbol.clone(),
+                    start: life.listing.effective_date.max(life.identity_start()),
+                    end_exclusive,
+                }
+            })
+            .collect()
+    }
     pub fn differences(&self) -> &[Difference] {
         &self.differences
     }

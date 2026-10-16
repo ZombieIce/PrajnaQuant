@@ -427,7 +427,20 @@ impl TotalReturnIndex {
             .map_err(|e| FactorError::Evaluation(e.to_string()))?
             .into_iter()
             .flatten()
-            .collect::<Vec<_>>();
+            .map(|mut action| {
+                let date = action.ex_date.or(action.effective_date).ok_or_else(|| {
+                    FactorError::Evaluation(
+                        "corporate action cannot be assigned to a lifecycle without an ex-date"
+                            .into(),
+                    )
+                })?;
+                let native_symbol = action.instrument_id.symbol().to_owned();
+                action.instrument_id = market
+                    .resolve_native_row(&native_symbol, date)
+                    .map_err(|e| FactorError::Evaluation(e.to_string()))?;
+                Ok(action)
+            })
+            .collect::<Result<Vec<_>, FactorError>>()?;
         Self::build_with_actions(market, &actions, rules, market.dsv(), raw)
     }
 
