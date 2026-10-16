@@ -1,5 +1,6 @@
 //! Arrow and Parquet data layer for Prajna Quant.
 
+pub mod cninfo;
 mod frozen;
 mod manifest;
 mod normalized;
