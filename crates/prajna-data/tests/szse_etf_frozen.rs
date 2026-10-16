@@ -830,3 +830,286 @@ fn source_record_keeps_media_type_endpoint_observation_terms_coverage_and_gaps()
     assert_eq!(records[0].request["gaps"], json!([]));
     assert_eq!(records[0].request["endpoint"], "synthetic://tdx");
 }
+
+/// Replace only offset 4 in synthetic price blocks; no real vendor bytes.
+fn with_reference(bytes: Vec<u8>, reference: f64) -> Vec<u8> {
+    use std::io::Read;
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut members = Vec::new();
+    for i in 0..zip.len() {
+        let mut file = zip.by_index(i).unwrap();
+        let name = file.name().to_owned();
+        let mut data = Vec::new();
+        file.read_to_end(&mut data).unwrap();
+        if name.ends_with(".md1") {
+            for block in data.chunks_exact_mut(512) {
+                block[4..12].copy_from_slice(&reference.to_le_bytes());
+            }
+        }
+        members.push((name, data));
+    }
+    zip_members(&members, None)
+}
+
+#[test]
+fn v3_primary_fallback_no_trade_reference_and_replay() {
+    use prajna_data::{
+        bar_sources_from_record_batch, bars_from_record_batch, sessions_from_record_batch,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    // Hand example: previous close 1.05; dividend 0.05 -> reference 1.00;
+    // then 2-for-1 conversion -> reference 0.50. Not a previous-close shift.
+    let frozen = freeze_all(
+        dir.path(),
+        &[
+            ("szse-calendar", calendar()),
+            (
+                "tdx",
+                with_reference(
+                    tdx_package("260105", &[rec("158001", 1.05), rec("159002", 1.0)], None),
+                    1.0,
+                ),
+            ),
+            (
+                "tdx",
+                with_reference(tdx_package("260106", &[rec("158001", 1.0)], None), 1.0),
+            ),
+            (
+                "tdx",
+                with_reference(
+                    tdx_package(
+                        "260107",
+                        &[("158001", 0.5, 0.5, 0.5, 0.5, 20000, 10000.0)],
+                        None,
+                    ),
+                    0.5,
+                ),
+            ),
+            // A keyed no-trade record blocks Tencent, even with positive OHLC.
+            (
+                "tdx",
+                with_reference(
+                    tdx_package("260108", &[("158001", 1.0, 1.1, 0.9, 1.0, 0, 0.0)], None),
+                    0.5,
+                ),
+            ),
+            (
+                "tencent",
+                tencent_doc(
+                    "sz158001",
+                    "day",
+                    &[
+                        ["2026-01-05", "1.0", "1.06", "1.1", "0.9", "200"],
+                        ["2026-01-08", "1.0", "1.0", "1.1", "0.9", "200"],
+                    ],
+                ),
+            ),
+            // Existing primary instrument: only its missing Jan-06 cell is filled.
+            (
+                "tencent",
+                tencent_doc(
+                    "sz159002",
+                    "day",
+                    &[
+                        ["2026-01-05", "1.0", "1.0", "1.1", "0.9", "200"],
+                        ["2026-01-06", "1.0", "1.0", "1.1", "0.9", "200"],
+                    ],
+                ),
+            ),
+            (
+                "tencent",
+                tencent_doc(
+                    "sz158002",
+                    "day",
+                    &[["2026-01-06", "1.0", "1.0", "1.1", "0.9", "200"]],
+                ),
+            ),
+        ],
+    );
+    let registry = NormalizerRegistry::with_builtins();
+    let manifest = publish_dataset(
+        dir.path(),
+        &frozen.store,
+        &registry,
+        ID,
+        "3",
+        &frozen.hashes,
+        OBSERVED,
+    )
+    .unwrap();
+    let batches = |table: &str| {
+        read_parquet(table_path(dir.path(), &manifest.dsv, table), table, "1").unwrap()
+    };
+    let sessions = sessions_from_record_batch(&batches("sessions")[0]).unwrap();
+    let bars = bars_from_record_batch(&batches("bars")[0], &sessions).unwrap();
+    let sources = bar_sources_from_record_batch(&batches("bar_sources")[0]).unwrap();
+    assert_eq!(bars.len(), 6);
+    assert_eq!(sources.len(), bars.len());
+    assert_eq!(bars[0].close().to_string(), "1.05"); // Tencent mismatch never overrides.
+    assert_eq!(sources[1].reference_price.unwrap().to_string(), "1");
+    assert_eq!(sources[2].reference_price.unwrap().to_string(), "0.5");
+    for (bar, source) in bars.iter().zip(&sources) {
+        assert_eq!(bar.instrument_id(), &source.instrument_id);
+        assert_eq!(bar.session_date(), source.session_date);
+        assert_eq!(bar.available_at(), None);
+        if source.source == "tencent_fallback" {
+            assert_eq!(bar.amount(), None);
+            assert_eq!(source.reference_price, None);
+        } else {
+            assert!(bar.amount().is_some());
+            assert_eq!(source.source, "tdx");
+        }
+    }
+    assert_eq!(
+        rebuild_dataset(&frozen.store, &registry, &manifest).unwrap(),
+        manifest.dsv
+    );
+    let reversed = frozen.hashes.iter().rev().cloned().collect::<Vec<_>>();
+    let replay = publish_dataset(
+        dir.path(),
+        &frozen.store,
+        &registry,
+        ID,
+        "3",
+        &reversed,
+        OBSERVED,
+    )
+    .unwrap();
+    assert_eq!(manifest.dsv, replay.dsv);
+}
+
+#[test]
+fn v3_config_identity_and_legacy_regression() {
+    use prajna_data::{RawInput, SzseEtfFrozen};
+    let dir = tempfile::tempdir().unwrap();
+    let frozen = freeze_all(
+        dir.path(),
+        &[
+            ("szse-calendar", calendar()),
+            (
+                "tdx",
+                with_reference(
+                    tdx_package("260105", &[rec("159901", 1.05), rec("158001", 1.0)], None),
+                    1.0,
+                ),
+            ),
+        ],
+    );
+    let registry = NormalizerRegistry::with_builtins();
+    // Pinned from main before v3, independently of the new config builder.
+    assert_eq!(
+        registry.get(ID, "1").unwrap().config_sha256(),
+        "sha256:49d7475ca2ac715ae1f8d8c0071b6901f8b26b313b04a43f229dc8b4b7f88810"
+    );
+    assert_eq!(
+        registry.get(ID, "2").unwrap().config_sha256(),
+        "sha256:79ea1b64dd4522a24125dbb412a938f86717ea1c3fc1cbdcb742be9190a20a34"
+    );
+
+    let publish_version = |registry: &NormalizerRegistry, v: &str| {
+        publish_dataset(
+            dir.path(),
+            &frozen.store,
+            registry,
+            ID,
+            v,
+            &frozen.hashes,
+            OBSERVED,
+        )
+        .unwrap()
+    };
+    let v1 = publish_version(&registry, "1");
+    let v2 = publish_version(&registry, "2");
+    let v3 = publish_version(&registry, "3");
+    assert_ne!(v1.dsv, v2.dsv);
+    assert_ne!(v2.dsv, v3.dsv);
+    // Legacy table rows and schema stay identical, except v2's action table.
+    for table in &v1.core.tables {
+        assert_eq!(
+            Some(table),
+            v2.core.tables.iter().find(|t| t.table == table.table)
+        );
+    }
+    assert_eq!(
+        read_strings(dir.path(), &v1.dsv, "instruments", 0),
+        ["159901.SZSE"]
+    );
+    assert_eq!(
+        read_strings(dir.path(), &v3.dsv, "instruments", 0),
+        ["158001.SZSE", "159901.SZSE"]
+    );
+    let mut custom = NormalizerRegistry::new();
+    custom.register(SzseEtfFrozen::v3(vec![(159000, 159999)]).unwrap());
+    let changed = publish_version(&custom, "3");
+    assert_ne!(changed.dsv, v3.dsv);
+    assert_ne!(
+        changed.core.normalizer.config_sha256,
+        v3.core.normalizer.config_sha256
+    );
+    assert!(matches!(
+        rebuild_dataset(&frozen.store, &registry, &changed),
+        Err(RebuildError::ConfigHashMismatch { .. })
+    ));
+    assert_eq!(
+        rebuild_dataset(&frozen.store, &custom, &changed).unwrap(),
+        changed.dsv
+    );
+    // A reference-only revision is ignored by v1/v2, but conflicts in v3.
+    let inputs = [
+        RawInput::from_bytes(calendar()),
+        RawInput::from_bytes(with_reference(
+            tdx_package("260105", &[rec("159901", 1.05)], None),
+            1.0,
+        )),
+        RawInput::from_bytes(with_reference(
+            tdx_package("260105", &[rec("159901", 1.05)], None),
+            0.5,
+        )),
+    ];
+    for v in ["1", "2"] {
+        assert!(registry.get(ID, v).unwrap().normalize(&inputs).is_ok());
+    }
+    assert!(
+        registry
+            .get(ID, "3")
+            .unwrap()
+            .normalize(&inputs)
+            .unwrap_err()
+            .iter()
+            .any(|e| e.code == "source_revision_conflict")
+    );
+    for ranges in [
+        vec![],
+        vec![(159999, 158000)],
+        vec![(158000, 159000), (159000, 159999)],
+    ] {
+        assert!(SzseEtfFrozen::v3(ranges).is_err());
+    }
+}
+
+#[test]
+fn v3_invalid_tdx_reference_fails_closed_without_changing_legacy_decoding() {
+    use prajna_data::RawInput;
+    let registry = NormalizerRegistry::with_builtins();
+    for reference in [0.0, -1.0, f64::NAN, 1.0005] {
+        let inputs = [
+            RawInput::from_bytes(calendar()),
+            RawInput::from_bytes(with_reference(
+                tdx_package("260105", &[rec("159901", 1.05)], None),
+                reference,
+            )),
+        ];
+        for v in ["1", "2"] {
+            assert!(registry.get(ID, v).unwrap().normalize(&inputs).is_ok());
+        }
+        assert!(
+            registry
+                .get(ID, "3")
+                .unwrap()
+                .normalize(&inputs)
+                .unwrap_err()
+                .iter()
+                .any(|e| e.code == "invalid_reference_price")
+        );
+    }
+}

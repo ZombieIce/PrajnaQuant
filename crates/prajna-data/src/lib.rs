@@ -1,5 +1,6 @@
 //! Arrow and Parquet data layer for Prajna Quant.
 
+pub mod cninfo;
 mod frozen;
 mod manifest;
 mod normalized;
@@ -10,7 +11,7 @@ mod raw;
 pub use frozen::{FrozenSourceMeta, freeze_raw};
 pub use normalizer::{
     NormalizationIssue, NormalizationOutput, NormalizedTables, Normalizer, NormalizerRegistry,
-    RawInput,
+    RawInput, SzseEtfFrozen,
 };
 pub use publish::{PublishError, RebuildError, publish_dataset, rebuild_dataset};
 
@@ -19,15 +20,16 @@ pub use manifest::{
     ManifestTable, NormalizerIdentity, read_manifest, write_manifest,
 };
 pub use normalized::{
-    AnnouncementRow, CorporateActionKind, CorporateActionRow, DataError, ExecutionStatusRow,
-    ParquetWriteOptions, SourceCrosscheckRow, announcements_schema, announcements_to_record_batch,
-    bars_from_record_batch, bars_schema, bars_to_record_batch, corporate_actions_from_record_batch,
-    corporate_actions_schema, corporate_actions_to_record_batch,
-    execution_status_from_record_batch, execution_status_schema, execution_status_to_record_batch,
-    instruments_from_record_batch, instruments_schema, instruments_to_record_batch,
-    parquet_write_options, read_parquet, sessions_from_record_batch, sessions_schema,
-    sessions_to_record_batch, source_crosscheck_schema, source_crosscheck_to_record_batch,
-    write_parquet,
+    AnnouncementRow, BarSourceRow, CorporateActionKind, CorporateActionRow, DataError,
+    ExecutionStatusRow, ParquetWriteOptions, SourceCrosscheckRow, announcements_schema,
+    announcements_to_record_batch, bar_sources_from_record_batch, bar_sources_schema,
+    bar_sources_to_record_batch, bars_from_record_batch, bars_schema, bars_to_record_batch,
+    corporate_actions_from_record_batch, corporate_actions_schema,
+    corporate_actions_to_record_batch, execution_status_from_record_batch, execution_status_schema,
+    execution_status_to_record_batch, instruments_from_record_batch, instruments_schema,
+    instruments_to_record_batch, parquet_write_options, read_parquet, sessions_from_record_batch,
+    sessions_schema, sessions_to_record_batch, source_crosscheck_schema,
+    source_crosscheck_to_record_batch, write_parquet,
 };
 pub use raw::{RawStore, RawStoreError, SourceKind, SourceRecord, SourceRecordInput};
 

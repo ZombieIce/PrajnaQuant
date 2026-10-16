@@ -676,6 +676,7 @@ fn normalize_fixture(
     });
     let batch_result = (|| -> Result<NormalizedTables, String> {
         Ok(NormalizedTables {
+            bar_sources: None,
             instruments: instruments_to_record_batch(&specs).map_err(|error| error.to_string())?,
             sessions: sessions_to_record_batch(&sessions).map_err(|error| error.to_string())?,
             bars: bars_to_record_batch(&bars).map_err(|error| error.to_string())?,
