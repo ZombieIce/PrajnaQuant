@@ -384,6 +384,19 @@ fn pagination_follows_declared_pages_even_when_unique_total_already_matches() {
         .unwrap();
     assert!(!pages.needs_more());
     assert_eq!(pages.finish().unwrap().0.len(), 1);
+    let mut empty = first.clone();
+    empty["announcements"] = json!([]);
+    empty["totalpages"] = json!(3);
+    first["totalpages"] = json!(3);
+    let mut premature = PageSet::default();
+    premature
+        .push(1, &serde_json::to_vec(&first).unwrap())
+        .unwrap();
+    assert!(
+        premature
+            .push(2, &serde_json::to_vec(&empty).unwrap())
+            .is_err()
+    );
     first["totalpages"] = json!(1);
     assert!(
         PageSet::default()

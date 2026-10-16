@@ -119,6 +119,14 @@ impl PageSet {
                 return Err("conflicting pagination declarations".into());
             }
         }
+        if items.is_empty()
+            && (has_more == Some(true)
+                || declared_pages
+                    .or(self.declared_pages)
+                    .is_some_and(|n| page < n))
+        {
+            return Err("empty page declares remaining pages".into());
+        }
         self.declared_pages = declared_pages.or(self.declared_pages);
         self.has_more = has_more;
         self.empty_page = items.is_empty();
