@@ -70,7 +70,15 @@ fn broad_index_matches(indices: &BroadIndexList, legal_name: &str) -> bool {
         std::iter::once(&index.official_name)
             .chain(index.aliases.iter())
             .map(|term| normalized_name(term))
-            .any(|term| !term.is_empty() && name.contains(&term))
+            .any(|term| {
+                !term.is_empty()
+                    && name.match_indices(&term).any(|(start, matched)| {
+                        name[start + matched.len()..]
+                            .chars()
+                            .next()
+                            .is_none_or(|next| !next.is_ascii_digit())
+                    })
+            })
     })
 }
 
@@ -144,6 +152,8 @@ pub struct AttributeFact {
     pub legal_name: Option<String>,
 }
 impl AttributeFact {
+    /// Uses the Shanghai-local publication date as the effective date; exact
+    /// publication time still gates point-in-time availability.
     pub fn from_cninfo_name(
         name: &prajna_data::cninfo::NameFact,
         category: FundCategory,
@@ -625,6 +635,11 @@ impl HistoricalCatalog {
             || input.sessions.is_empty()
         {
             return Err(error("invalid coverage/calendar interval"));
+        }
+        if input.schema_version == 2 && !input.coverage.resolutions.is_empty() {
+            return Err(error(
+                "Catalog v2 uses daily code tables; coverage resolutions are v1-only",
+            ));
         }
         if input.coverage.scan_method.trim().is_empty()
             || input.coverage.announcement_method.trim().is_empty()

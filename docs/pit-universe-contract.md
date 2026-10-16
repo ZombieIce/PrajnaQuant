@@ -83,25 +83,32 @@ authoritative for code presence within its configured scope; each lifecycle
 has a separate first/last-priced-Session observation. Missing/unresolved v1
 scans create gaps. `NoRows` never proves that a fund did not exist.
 
-Two-way crosscheck reports `scan_only` and `announcement_only`. Each difference
-needs a nonempty explanation and official evidence. Resolutions of nonexistent
-differences, duplicate codes and malformed dates/hashes are errors. Any coverage
-gap blocks **all** Universe builds; an empty member set cannot hide coverage
-failure. Raw verification and scan endpoint checking are necessary checks,
-not independent proof of attachment pagination or of every interior price row.
+Catalog v1's two-way crosscheck reports `scan_only` and `announcement_only`.
+Each difference needs a nonempty explanation and official evidence. These
+resolutions apply to Catalog v1's scan crosscheck; Catalog v2 uses its daily
+code tables as the authority and requires `coverage.resolutions` to be empty.
+Resolutions of nonexistent differences, duplicate codes and malformed
+dates/hashes are errors.
+Any coverage gap blocks **all** Universe builds; an empty member set cannot hide
+coverage failure. Raw verification and scan endpoint checking are necessary
+checks, not independent proof of attachment pagination or of every interior
+price row.
 
 V1 broad-index membership uses provider-qualified IDs. V2 uses an explicitly
 versioned `BroadIndexList` of official scale-index names and curated aliases,
 backed by official evidence; its provider-qualified IDs must match the named
 entries used for classification. The current repository does not silently provide
 or claim a real, independently verified whitelist. The latest known legal fund
-full name must contain an exact configured name/alias after whitespace
-normalization; no venue abbreviation, inferred keyword, or `secName` is used.
-The #202 `NameFact.announced_ms` is retained as exact publication evidence and
-is evaluated at that timestamp, never at local `observed_at`. Missing or
-unmatched names are excluded and reported for that Session. A list whose
-evidence is unavailable at the decision is rejected. Scope/list revisions
-change the Catalog and Universe identities; they do not rewrite prior inputs.
+full name must contain a configured name/alias after whitespace normalization.
+A match immediately followed by another ASCII digit is rejected to prevent
+shorter numeric names from matching a different index (for example,
+`中证100` matching `中证1000`). No venue abbreviation, inferred keyword, or
+`secName` is used. The #202 `NameFact.announced_ms` is retained as exact
+publication evidence and is evaluated at that timestamp, never at local
+`observed_at`. Missing or unmatched names are excluded and reported for that
+Session. A list whose evidence is unavailable at the decision is rejected.
+Scope/list revisions change the Catalog and Universe identities; they do not
+rewrite prior inputs.
 
 Catalog v1 content hash includes its canonical sorted facts, sessions, scan
 outcomes, source references, rule/index versions and coverage. Catalog v2

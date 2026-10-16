@@ -426,6 +426,69 @@ fn tdx_code_tables_rebuild_configured_158xxx_lifecycles_and_name_based_pit_unive
 
     let catalog = HistoricalCatalog::build(input.clone(), &raw).unwrap();
     assert!(catalog.coverage_gaps().is_empty());
+
+    let mut csi_100_input = input.clone();
+    csi_100_input
+        .lifecycles
+        .iter_mut()
+        .find(|life| life.native_symbol == "159002")
+        .unwrap()
+        .attributes[0]
+        .legal_name = Some("合成中证1000ETF".into());
+    csi_100_input.broad_indices.index_ids = BTreeSet::from(["CSI:100".into()]);
+    csi_100_input.broad_indices.named_indices = vec![BroadIndexName {
+        index_id: "CSI:100".into(),
+        official_name: "中证100".into(),
+        aliases: BTreeSet::new(),
+    }];
+    let csi_100_catalog = HistoricalCatalog::build(csi_100_input, &raw).unwrap();
+    let csi_1000_id = csi_100_catalog.resolve_row("159002", date(5)).unwrap();
+    let csi_1000_universe = csi_100_catalog.universe(date(5)).unwrap();
+    assert_eq!(
+        csi_1000_universe
+            .excluded
+            .get(&csi_1000_id)
+            .map(String::as_str),
+        Some("not_domestic_broad_index")
+    );
+
+    let mut sse_50_input = input.clone();
+    sse_50_input
+        .lifecycles
+        .iter_mut()
+        .find(|life| life.native_symbol == "159002" && life.identity_start == Some(date(6)))
+        .unwrap()
+        .attributes[0]
+        .legal_name = Some("合成上证500ETF".into());
+    sse_50_input.broad_indices.index_ids = BTreeSet::from(["SSE:50".into()]);
+    sse_50_input.broad_indices.named_indices = vec![BroadIndexName {
+        index_id: "SSE:50".into(),
+        official_name: "上证50".into(),
+        aliases: BTreeSet::new(),
+    }];
+    let sse_50_catalog = HistoricalCatalog::build(sse_50_input, &raw).unwrap();
+    let sse_500_id = sse_50_catalog.resolve_row("159002", date(7)).unwrap();
+    assert_eq!(
+        sse_50_catalog
+            .universe(date(7))
+            .unwrap()
+            .excluded
+            .get(&sse_500_id)
+            .map(String::as_str),
+        Some("not_domestic_broad_index")
+    );
+
+    let mut v2_with_resolution = input.clone();
+    v2_with_resolution
+        .coverage
+        .resolutions
+        .push(DifferenceResolution {
+            native_symbol: "159001".into(),
+            explanation: "synthetic legacy scan resolution".into(),
+            evidence: input.lifecycles[0].listing.evidence.clone(),
+        });
+    assert!(HistoricalCatalog::build(v2_with_resolution, &raw).is_err());
+
     let id_158001 = catalog.resolve_row("158001", date(2)).unwrap();
     assert!(id_158001.symbol().starts_with("158001-"));
     let old_code_life = catalog
