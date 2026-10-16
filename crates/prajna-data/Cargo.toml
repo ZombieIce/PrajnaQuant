@@ -11,8 +11,11 @@ publish = false
 arrow-cast = "=58.4.0"
 arrow-array = "=58.4.0"
 arrow-schema = "=58.4.0"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+tempfile = "3.14"
 fs2 = "=0.4.3"
-chrono = { version = "0.4", default-features = false, features = ["std"] }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 chrono-tz = "0.10"
 parquet = { version = "=58.4.0", default-features = false, features = ["arrow", "zstd"] }
 prajna-domain = { path = "../prajna-domain" }
