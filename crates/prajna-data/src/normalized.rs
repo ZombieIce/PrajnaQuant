@@ -160,6 +160,89 @@ pub fn instruments_schema() -> SchemaRef {
         ],
     )
 }
+/// V3 provenance keyed one-to-one with daily Bars. Reference is the exchange
+/// ex-rights reference, never the previous observed close or a fill price.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BarSourceRow {
+    pub instrument_id: InstrumentId,
+    pub session_date: NaiveDate,
+    pub source: String,
+    pub source_raw_sha256: String,
+    pub reference_price: Option<Price>,
+}
+
+pub fn bar_sources_schema() -> SchemaRef {
+    schema(
+        "bar_sources",
+        vec![
+            utf8("instrument_id", false),
+            date("session_date"),
+            utf8("source", false),
+            utf8("source_raw_sha256", false),
+            decimal("reference_price", true),
+        ],
+    )
+}
+
+pub fn bar_sources_to_record_batch(rows: &[BarSourceRow]) -> Result<RecordBatch, DataError> {
+    let mut rows = rows.iter().collect::<Vec<_>>();
+    rows.sort_by_key(|r| (r.instrument_id.to_string(), r.session_date));
+    let batch = RecordBatch::try_new(
+        bar_sources_schema(),
+        vec![
+            Arc::new(StringArray::from_iter_values(
+                rows.iter().map(|r| r.instrument_id.to_string()),
+            )),
+            Arc::new(Date32Array::from(
+                rows.iter()
+                    .map(|r| date32(r.session_date))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            Arc::new(StringArray::from_iter_values(
+                rows.iter().map(|r| r.source.as_str()),
+            )),
+            Arc::new(StringArray::from_iter_values(
+                rows.iter().map(|r| r.source_raw_sha256.as_str()),
+            )),
+            decimal_array(
+                rows.iter()
+                    .map(|r| r.reference_price.map(|p| p.mantissa()))
+                    .collect(),
+            )?,
+        ],
+    )?;
+    check_primary_key_order(&batch, "bar_sources")?;
+    Ok(batch)
+}
+
+pub fn bar_sources_from_record_batch(batch: &RecordBatch) -> Result<Vec<BarSourceRow>, DataError> {
+    check_batch(batch, "bar_sources")?;
+    check_primary_key_order(batch, "bar_sources")?;
+    let mut rows = Vec::new();
+    for row in 0..batch.num_rows() {
+        rows.push(BarSourceRow {
+            instrument_id: string_at(batch, 0, row)?
+                .parse()
+                .map_err(|e| err(format!("{e}")))?,
+            session_date: naive_date(
+                batch
+                    .column(1)
+                    .as_any()
+                    .downcast_ref::<Date32Array>()
+                    .ok_or_else(|| err("expected Date32"))?
+                    .value(row),
+            )?,
+            source: string_at(batch, 2, row)?.into(),
+            source_raw_sha256: string_at(batch, 3, row)?.into(),
+            reference_price: optional_decimal(batch, 4, row)?
+                .map(Price::from_mantissa)
+                .transpose()
+                .map_err(|e| err(e.to_string()))?,
+        });
+    }
+    Ok(rows)
+}
+
 pub fn bars_schema() -> SchemaRef {
     schema(
         "bars",
@@ -994,6 +1077,7 @@ fn expected_schema(table: &str) -> Result<SchemaRef, DataError> {
     match table {
         "instruments" => Ok(instruments_schema()),
         "bars" => Ok(bars_schema()),
+        "bar_sources" => Ok(bar_sources_schema()),
         "sessions" => Ok(sessions_schema()),
         "execution_status" => Ok(execution_status_schema()),
         "source_crosscheck" => Ok(source_crosscheck_schema()),
@@ -1023,7 +1107,7 @@ fn check_primary_key_order(batch: &RecordBatch, table: &str) -> Result<(), DataE
         "instruments" => &[0],
         "bars" => &[0, 1, 3],
         "sessions" => &[0, 1],
-        "execution_status" | "source_crosscheck" => &[0, 1],
+        "execution_status" | "source_crosscheck" | "bar_sources" => &[0, 1],
         "announcements" => &[0],
         "corporate_actions" => &[0, 1],
         _ => return Err(err("unsupported normalized table")),
