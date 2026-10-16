@@ -95,11 +95,18 @@ impl<T: Transport> Collector<T> {
                 Ok(r) => (r.status, r.content_type, r.bytes),
                 Err(_) => (0, "application/octet-stream".into(), Vec::new()),
             };
-            let hash = self.raw.put(&bytes, SourceRecordInput {
+            let stored = self.raw.put(&bytes, SourceRecordInput {
                 content_type, source_kind: SourceKind::VendorApi, source_id:"cninfo".into(),
                 request:json!({"url":request.url,"params":request.form,"http_status":status,"attempt":attempt,"network_path":"direct_no_proxy","outcome":if status == 0 {"transport_error"} else {"http_response"}}),
                 observed_at:observed, ingested_by:"prajna-cninfo/1".into(),
-            })?;
+            });
+            let hash = match stored {
+                Ok(hash) => hash,
+                Err(error) => {
+                    self.stopped = true;
+                    return Err(error.into());
+                }
+            };
             self.captured.insert(hash.clone());
             let text = String::from_utf8_lossy(&bytes).to_lowercase();
             // Conservative: stop on the first access denial rather than probe
@@ -146,23 +153,8 @@ impl<T: Transport> Collector<T> {
                 form,
             })?;
             pages.push(page, &bytes)?;
-            if pages.total().is_some_and(|n| pages.len() == n) {
+            if !pages.needs_more() {
                 return pages.finish();
-            }
-            // Declared page count can exceed unique ID count after overlap;
-            // never loop indefinitely on a source that repeats the last page.
-            let value: serde_json::Value = serde_json::from_slice(&bytes)?;
-            if value["hasMore"] == false
-                || value["announcements"]
-                    .as_array()
-                    .is_some_and(|a| a.is_empty())
-            {
-                return pages.finish();
-            }
-            if let Some(total_pages) = value["totalpages"].as_u64() {
-                if page >= total_pages as usize {
-                    return pages.finish();
-                }
             }
         }
         Err("pagination safety limit exceeded".into())
@@ -221,6 +213,16 @@ impl<T: Transport> Collector<T> {
                 match self.pages(&window, &format!("{code},{org}")) {
                     Ok((items, raw)) => {
                         dataset.source_raw_sha256.extend(raw);
+                        let found: BTreeSet<_> = items.iter().map(|a| a.id.as_str()).collect();
+                        if fund
+                            .announcements
+                            .iter()
+                            .filter(|a| a.org_id.as_deref() == Some(&org))
+                            .any(|a| !found.contains(a.id.as_str()))
+                        {
+                            fund.unknown
+                                .push("fund_query_missing_discovered_announcement".into());
+                        }
                         for item in items {
                             if item.code != *code || item.org_id.as_deref() != Some(&org) {
                                 fund.unknown.push("fund_query_identity_mismatch".into());

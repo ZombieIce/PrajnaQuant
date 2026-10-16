@@ -70,6 +70,9 @@ pub struct Announcement {
 pub struct PageSet {
     total: Option<usize>,
     next: usize,
+    declared_pages: Option<usize>,
+    has_more: Option<bool>,
+    empty_page: bool,
     items: BTreeMap<String, Announcement>,
     raw: BTreeSet<String>,
 }
@@ -91,6 +94,34 @@ impl PageSet {
             Value::Null if total == 0 => &[],
             _ => return Err("missing announcements".into()),
         };
+        let declared_pages = body
+            .get("totalpages")
+            .or_else(|| body.get("totalPages"))
+            .map(|v| v.as_u64().ok_or("invalid total pages").map(|n| n as usize))
+            .transpose()?;
+        let has_more = body
+            .get("hasMore")
+            .map(|v| v.as_bool().ok_or("invalid hasMore"))
+            .transpose()?;
+        if self
+            .declared_pages
+            .zip(declared_pages)
+            .is_some_and(|(a, b)| a != b)
+        {
+            return Err("changing page count".into());
+        }
+        if let Some(pages) = declared_pages.or(self.declared_pages) {
+            if (pages == 0 && total != 0)
+                || (pages != 0 && page > pages)
+                || (has_more == Some(true) && page >= pages)
+                || (has_more == Some(false) && page < pages)
+            {
+                return Err("conflicting pagination declarations".into());
+            }
+        }
+        self.declared_pages = declared_pages.or(self.declared_pages);
+        self.has_more = has_more;
+        self.empty_page = items.is_empty();
         let raw = hash(bytes);
         for row in items {
             let text = |key| {
@@ -132,6 +163,14 @@ impl PageSet {
         self.total = Some(total);
         Ok(())
     }
+    pub fn needs_more(&self) -> bool {
+        if self.has_more == Some(false) || self.empty_page {
+            return false;
+        }
+        self.has_more == Some(true)
+            || self.declared_pages.is_some_and(|n| self.next < n)
+            || self.total.is_some_and(|n| self.items.len() < n)
+    }
     pub fn total(&self) -> Option<usize> {
         self.total
     }
@@ -142,7 +181,7 @@ impl PageSet {
         self.items.is_empty()
     }
     pub fn finish(self) -> Result<(Vec<Announcement>, BTreeSet<String>)> {
-        if self.total != Some(self.items.len()) {
+        if self.needs_more() || self.total != Some(self.items.len()) {
             return Err("unique IDs differ from declared total".into());
         }
         Ok((self.items.into_values().collect(), self.raw))
@@ -246,7 +285,7 @@ fn legal_name(title: &str) -> Option<String> {
             name.push_str(suffix);
         }
     }
-    if name.starts_with("关于") || name.is_empty() {
+    if name.contains("关于") || name.is_empty() {
         return None;
     }
     Some(name)

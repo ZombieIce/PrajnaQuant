@@ -11,8 +11,7 @@ fn announcement(id: &str, code: &str, org: Value, title: &str) -> Value {
     json!({"announcementId":id,"secCode":code,"orgId":org,"announcementTitle":title,"announcementTime":1767571200000_i64,"adjunctUrl":"finalpage/2026-01-05/synthetic.PDF"})
 }
 fn page(total: usize, rows: Vec<Value>) -> Vec<u8> {
-    serde_json::to_vec(&json!({"totalAnnouncement":total,"announcements":rows,"hasMore":false}))
-        .unwrap()
+    serde_json::to_vec(&json!({"totalAnnouncement":total,"announcements":rows})).unwrap()
 }
 fn name() -> &'static str {
     "合成甲宽基交易型开放式指数证券投资基金"
@@ -306,4 +305,115 @@ fn collection_connects_pdf_evidence_to_events_and_manifest_inputs() {
             .contains(&"dividend".into())
     );
     assert!(dataset.funds[0].full_names[0].available_at.is_none());
+}
+
+#[test]
+fn raw_persistence_failure_stops_all_further_requests() {
+    struct BreakRaw {
+        mock: Mock,
+        root: std::path::PathBuf,
+        calls: usize,
+    }
+    impl Transport for BreakRaw {
+        fn send(&mut self, request: &Request) -> Result<HttpReply> {
+            self.calls += 1;
+            let reply = self.mock.send(request)?;
+            if self.calls == 2 {
+                std::fs::remove_dir_all(&self.root).unwrap();
+                std::fs::write(&self.root, b"synthetic non-directory").unwrap();
+            }
+            Ok(reply)
+        }
+    }
+    let row = announcement(
+        "dividend-a",
+        "158001",
+        json!("manager"),
+        &format!("{}收益分配公告", name()),
+    );
+    let bytes = page(1, vec![row]);
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("raw");
+    let store = RawStore::open(&root).unwrap();
+    let mock = Mock {
+        replies: vec![
+            reply(bytes.clone()),
+            reply(bytes),
+            reply(SYNTHETIC_PDF.to_vec()),
+        ]
+        .into(),
+        requests: requests.clone(),
+    };
+    let mut collector = Collector::new(
+        BreakRaw {
+            mock,
+            root,
+            calls: 0,
+        },
+        store,
+    );
+    let dataset = collector.collect(dataset(), &["158001".into()], &mut BadPdf);
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    assert!(
+        dataset.funds[0]
+            .unknown
+            .contains(&"fund_pagination_unresolved".into())
+    );
+    assert!(
+        dataset.funds[0]
+            .unknown
+            .iter()
+            .any(|s| s.contains("pdf_unavailable"))
+    );
+}
+
+#[test]
+fn pagination_follows_declared_pages_even_when_unique_total_already_matches() {
+    let row = announcement("a", "158001", json!("manager"), &title());
+    let mut first: Value = serde_json::from_slice(&page(1, vec![row.clone()])).unwrap();
+    first["hasMore"] = json!(true);
+    first["totalpages"] = json!(2);
+    let mut second = first.clone();
+    second["hasMore"] = json!(false);
+    let mut pages = PageSet::default();
+    pages.push(1, &serde_json::to_vec(&first).unwrap()).unwrap();
+    assert!(pages.needs_more());
+    pages
+        .push(2, &serde_json::to_vec(&second).unwrap())
+        .unwrap();
+    assert!(!pages.needs_more());
+    assert_eq!(pages.finish().unwrap().0.len(), 1);
+    first["totalpages"] = json!(1);
+    assert!(
+        PageSet::default()
+            .push(1, &serde_json::to_vec(&first).unwrap())
+            .is_err()
+    );
+    first["hasMore"] = json!(false);
+    first["totalpages"] = json!(2);
+    assert!(
+        PageSet::default()
+            .push(1, &serde_json::to_vec(&first).unwrap())
+            .is_err()
+    );
+}
+
+#[test]
+fn missing_fund_query_rows_do_not_become_verified_discovery_facts() {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let row = announcement("a", "158001", json!("manager"), &title());
+    let mock = Mock {
+        replies: vec![reply(page(1, vec![row])), reply(page(0, vec![]))].into(),
+        requests,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let mut collector = Collector::new(mock, RawStore::open(dir.path()).unwrap());
+    let dataset = collector.collect(dataset(), &["158001".into()], &mut BadPdf);
+    assert!(
+        dataset.funds[0]
+            .unknown
+            .contains(&"fund_query_missing_discovered_announcement".into())
+    );
+    assert!(dataset.funds[0].require_usable().is_err());
 }

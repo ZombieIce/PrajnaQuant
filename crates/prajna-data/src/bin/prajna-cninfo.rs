@@ -5,7 +5,11 @@ use prajna_data::{
     write_manifest,
 };
 use serde_json::json;
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 fn main() {
     if run().is_err() {
@@ -61,20 +65,37 @@ fn run() -> prajna_data::cninfo::Result<()> {
         .join("acceptance/cninfo")
         .join(manifest.dsv.trim_start_matches("dsv:sha256:"));
     fs::create_dir_all(&acceptance)?;
-    let report = acceptance.join("coverage.json");
-    if !report.exists() {
-        fs::write(report, serde_json::to_vec_pretty(&dataset)?)?;
-    }
-    let table = acceptance.join("cninfo_index.parquet");
-    if !table.exists() {
-        let mut writer =
-            parquet::arrow::ArrowWriter::try_new(fs::File::create(&table)?, batch.schema(), None)?;
-        writer.write(&batch)?;
-        writer.close()?;
-    }
+    install_local(
+        &acceptance.join("coverage.json"),
+        &serde_json::to_vec_pretty(&dataset)?,
+    )?;
+    let mut parquet_bytes = Vec::new();
+    let mut writer =
+        parquet::arrow::ArrowWriter::try_new(&mut parquet_bytes, batch.schema(), None)?;
+    writer.write(&batch)?;
+    writer.close()?;
+    install_local(&acceptance.join("cninfo_index.parquet"), &parquet_bytes)?;
     write_manifest(&acceptance, &manifest)?;
     if !complete {
         return Err("local coverage report contains unknowns".into());
     }
     Ok(())
+}
+
+// Stage complete bytes before installation; never accept a truncated prior file.
+fn install_local(path: &Path, bytes: &[u8]) -> prajna_data::cninfo::Result<()> {
+    let mut stage = tempfile::NamedTempFile::new_in(path.parent().ok_or("missing parent")?)?;
+    stage.write_all(bytes)?;
+    stage.as_file().sync_all()?;
+    match stage.persist_noclobber(path) {
+        Ok(_) => Ok(()),
+        Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+            if fs::read(path)? == bytes {
+                Ok(())
+            } else {
+                Err("existing local artifact conflicts with DSV".into())
+            }
+        }
+        Err(error) => Err(error.error.into()),
+    }
 }
