@@ -3,6 +3,7 @@
 pub mod cninfo;
 mod frozen;
 mod manifest;
+mod mvp6_coverage;
 mod normalized;
 mod normalizer;
 mod publish;
@@ -20,6 +21,7 @@ pub use manifest::{
     Manifest, ManifestCore, ManifestError, ManifestFile, ManifestInput, ManifestProvenance,
     ManifestTable, NormalizerIdentity, read_manifest, write_manifest,
 };
+pub use mvp6_coverage::lock_mvp6_coverage_report;
 pub use normalized::{
     AnnouncementRow, BarSourceRow, CorporateActionKind, CorporateActionRow, DataError,
     ExecutionStatusRow, ParquetWriteOptions, SourceCrosscheckRow, TdxCodeTableRow,

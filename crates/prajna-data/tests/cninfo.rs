@@ -207,9 +207,13 @@ fn fund_lookup_uses_manager_id_retains_missing_candidates_and_freezes_request_ev
         assert!(
             sources
                 .iter()
-                .all(|s| s.request["network_path"] == "direct_no_proxy")
+                .all(|s| s.request["network_path"] == "injected_transport")
         );
         assert!(sources.iter().all(|s| s.request["http_status"] == 200));
+        assert!(sources.iter().all(|s| {
+            s.request["terms_conclusion"]
+                == "issue_172_owner_authorization_for_local_noncommercial_research"
+        }));
     }
     assert!(requests.iter().all(|(r, _)| !r.url.contains("topSearch")));
 }
@@ -237,6 +241,10 @@ fn access_denial_stops_source_and_keeps_failure_raw_local() {
     let hash = dataset.source_raw_sha256.iter().next().unwrap();
     assert_eq!(store.get(hash).unwrap(), b"synthetic denial");
     assert_eq!(store.sources(hash).unwrap()[0].request["http_status"], 403);
+    assert_eq!(
+        store.sources(hash).unwrap()[0].request["terms_conclusion"],
+        "issue_172_owner_authorization_for_local_noncommercial_research"
+    );
 }
 
 #[test]

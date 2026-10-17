@@ -2944,6 +2944,7 @@ dependencies = [
  "arrow-schema",
  "chrono",
  "chrono-tz",
+ "csv",
  "fs2",
  "parquet",
  "prajna-domain",
