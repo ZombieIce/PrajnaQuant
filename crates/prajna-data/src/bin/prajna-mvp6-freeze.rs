@@ -249,7 +249,7 @@ fn import_tencent_fallback(
                 || record
                     .get("network_path")
                     .and_then(Value::as_str)
-                    .is_none_or(str::is_empty)
+                    .is_none_or(|path| path.trim().is_empty())
             {
                 issues.push(json!({"symbol": symbol, "session": session, "reason": "request_provenance_incomplete"}));
             }

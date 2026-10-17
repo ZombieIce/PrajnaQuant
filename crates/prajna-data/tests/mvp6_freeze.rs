@@ -482,6 +482,66 @@ fn local_capture_import_rejects_unrequested_tencent_symbols() {
 }
 
 #[test]
+fn local_capture_import_rejects_whitespace_only_tencent_network_provenance() {
+    let root = TempDir::new().unwrap();
+    let tdx = tdx_package();
+    let failed = b"access denied";
+    let calendar = calendar_month();
+    let tdx_sha = sha256(&tdx);
+    let failed_sha = sha256(failed);
+    let calendar_sha = sha256(&calendar);
+    write_capture_tree(
+        root.path(),
+        &tdx,
+        failed,
+        &calendar,
+        &tdx_sha,
+        &failed_sha,
+        &calendar_sha,
+    );
+    append_tencent_capture_with_network_path(
+        root.path(),
+        "159002",
+        &tencent_response("159002"),
+        "   ",
+    );
+    fs::write(
+        root.path().join("acceptance/tencent-fallback-plan.json"),
+        serde_json::to_vec(&serde_json::json!([{
+            "symbol": "159002",
+            "session": START,
+            "tdx_observation": "missing"
+        }]))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
+        .args([
+            "import-existing",
+            "--test-root",
+            root.path().to_str().unwrap(),
+            "--start",
+            START,
+            "--end",
+            END,
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(manifest_paths(root.path()).is_empty());
+    let report = coverage_report(root.path());
+    assert!(
+        report["tencent_fallback_issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["reason"] == "request_provenance_incomplete")
+    );
+}
+
+#[test]
 fn cninfo_cli_rejects_a_shortened_collection_window_before_network_access() {
     let root = TempDir::new().unwrap();
     let codes = root.path().join("codes.txt");
@@ -616,6 +676,20 @@ fn write_tencent_capture(root: &Path, symbol: &str, response: &[u8]) -> String {
 }
 
 fn append_tencent_capture(root: &Path, symbol: &str, response: &[u8]) -> String {
+    append_tencent_capture_with_network_path(
+        root,
+        symbol,
+        response,
+        "operator-confirmed direct domestic route",
+    )
+}
+
+fn append_tencent_capture_with_network_path(
+    root: &Path,
+    symbol: &str,
+    response: &[u8],
+    network_path: &str,
+) -> String {
     let digest = sha256(response);
     fs::create_dir_all(root.join("raw/tencent-responses")).unwrap();
     fs::write(
@@ -634,7 +708,7 @@ fn append_tencent_capture(root: &Path, symbol: &str, response: &[u8]) -> String 
         "http_status": 200,
         "byte_len": response.len(),
         "sha256": digest,
-        "network_path": "operator-confirmed direct domestic route",
+        "network_path": network_path,
         "terms_conclusion": "issue_172_owner_authorization_for_local_noncommercial_research",
         "error": null,
         "outcome": "success"
