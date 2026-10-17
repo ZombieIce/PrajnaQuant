@@ -20,7 +20,7 @@ fn main() {
 fn run() -> Result<(), Box<dyn Error>> {
     let args = parse_args()?;
     let root = args.root.canonicalize()?;
-    if root != args.root || !root.ends_with("PrajnaData/mvp-6") {
+    if root != args.root || root != default_root() {
         return Err(
             invalid("collection root must be the non-symlink local MVP-6 directory").into(),
         );

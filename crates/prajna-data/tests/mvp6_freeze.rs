@@ -37,7 +37,7 @@ fn local_capture_import_publishes_v4_and_keeps_failed_responses_out_of_dataset_i
     let output = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
         .args([
             "import-existing",
-            "--root",
+            "--test-root",
             root.path().to_str().unwrap(),
             "--start",
             START,
@@ -95,7 +95,7 @@ fn local_capture_import_publishes_v4_and_keeps_failed_responses_out_of_dataset_i
     assert!(!input_hashes.contains(&failed_id.as_str()));
 
     let export = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-export-codes"))
-        .arg(root.path())
+        .args(["--test-root", root.path().to_str().unwrap()])
         .output()
         .unwrap();
     assert!(!export.status.success());
@@ -109,7 +109,7 @@ fn local_capture_import_publishes_v4_and_keeps_failed_responses_out_of_dataset_i
     let rerun = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
         .args([
             "import-existing",
-            "--root",
+            "--test-root",
             root.path().to_str().unwrap(),
             "--start",
             START,
@@ -126,6 +126,51 @@ fn local_capture_import_publishes_v4_and_keeps_failed_responses_out_of_dataset_i
         "CLI failed: {}; report={}",
         String::from_utf8_lossy(&rerun.stderr),
         fs::read_to_string(root.path().join("acceptance/mvp6-coverage.json")).unwrap_or_default()
+    );
+
+    let report_path = root.path().join("acceptance/mvp6-coverage.json");
+    let mut previous: Value = serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
+    previous["source_status"]["sina_adjustment_factors"] =
+        serde_json::json!("captured_raw_pairs_not_normalized");
+    previous["source_status"]["cninfo"] = serde_json::json!("captured_index_with_unknowns");
+    previous["sina_failures"] = serde_json::json!(["sz159900"]);
+    previous["p21_mismatches"] = serde_json::json!(["synthetic discrepancy"]);
+    let previous_dsv = previous["dsv"].clone();
+    fs::write(&report_path, serde_json::to_vec_pretty(&previous).unwrap()).unwrap();
+    fs::remove_file(root.path().join("acceptance/tdx-daily-requests.csv")).unwrap();
+
+    let failed_import = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
+        .args([
+            "import-existing",
+            "--test-root",
+            root.path().to_str().unwrap(),
+            "--start",
+            START,
+            "--end",
+            END,
+        ])
+        .output()
+        .unwrap();
+    assert!(!failed_import.status.success());
+    let after_failure = coverage_report(root.path());
+    assert_eq!(after_failure["import_status"], "unresolved");
+    assert_eq!(after_failure["dsv"], previous_dsv);
+    assert_eq!(after_failure["dataset_published"], true);
+    assert_eq!(
+        after_failure["source_status"]["sina_adjustment_factors"],
+        "captured_raw_pairs_not_normalized"
+    );
+    assert_eq!(
+        after_failure["source_status"]["cninfo"],
+        "captured_index_with_unknowns"
+    );
+    assert_eq!(
+        after_failure["sina_failures"],
+        serde_json::json!(["sz159900"])
+    );
+    assert_eq!(
+        after_failure["p21_mismatches"],
+        serde_json::json!(["synthetic discrepancy"])
     );
 }
 
@@ -151,7 +196,7 @@ fn local_capture_import_fails_closed_when_a_requested_session_has_no_valid_packa
     let output = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
         .args([
             "import-existing",
-            "--root",
+            "--test-root",
             root.path().to_str().unwrap(),
             "--start",
             START,
@@ -207,7 +252,7 @@ fn local_capture_import_rejects_a_tdx_package_with_the_wrong_embedded_session() 
     let output = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
         .args([
             "import-existing",
-            "--root",
+            "--test-root",
             root.path().to_str().unwrap(),
             "--start",
             START,
@@ -254,7 +299,7 @@ fn local_capture_import_accepts_only_explicit_tencent_cells_absent_from_tdx_pack
     let output = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
         .args([
             "import-existing",
-            "--root",
+            "--test-root",
             root.path().to_str().unwrap(),
             "--start",
             START,
@@ -313,7 +358,7 @@ fn local_capture_import_rejects_tencent_when_tdx_key_exists() {
     let output = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
         .args([
             "import-existing",
-            "--root",
+            "--test-root",
             root.path().to_str().unwrap(),
             "--start",
             START,
@@ -361,7 +406,7 @@ fn local_capture_import_rejects_conflicting_successful_tencent_revisions() {
     let output = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
         .args([
             "import-existing",
-            "--root",
+            "--test-root",
             root.path().to_str().unwrap(),
             "--start",
             START,
@@ -414,7 +459,7 @@ fn local_capture_import_rejects_unrequested_tencent_symbols() {
     let output = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
         .args([
             "import-existing",
-            "--root",
+            "--test-root",
             root.path().to_str().unwrap(),
             "--start",
             START,

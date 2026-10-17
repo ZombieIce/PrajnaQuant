@@ -91,10 +91,9 @@ fn update_mvp6_coverage(
 ) -> prajna_data::cninfo::Result<()> {
     let _coverage_lock = lock_mvp6_coverage_report(root)?;
     let path = root.join("acceptance/mvp6-coverage.json");
-    let Ok(bytes) = fs::read(&path) else {
+    let Some(mut report) = read_coverage_report(&path)? else {
         return Ok(());
     };
-    let mut report: serde_json::Value = serde_json::from_slice(&bytes)?;
     let missing_org_ids: Vec<_> = dataset
         .funds
         .iter()
@@ -123,6 +122,14 @@ fn update_mvp6_coverage(
     write_local(&path, &serde_json::to_vec_pretty(&report)?)
 }
 
+fn read_coverage_report(path: &Path) -> prajna_data::cninfo::Result<Option<serde_json::Value>> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
 // Stage complete bytes before installation; never accept a truncated prior file.
 fn install_local(path: &Path, bytes: &[u8]) -> prajna_data::cninfo::Result<()> {
     let mut stage = tempfile::NamedTempFile::new_in(path.parent().ok_or("missing parent")?)?;
@@ -149,4 +156,24 @@ fn write_local(path: &Path, bytes: &[u8]) -> prajna_data::cninfo::Result<()> {
     stage.as_file().sync_all()?;
     stage.persist(path).map_err(|error| error.error)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::read_coverage_report;
+
+    #[test]
+    fn only_missing_coverage_report_is_treated_as_absent() {
+        let root = tempdir().unwrap();
+        let missing = root.path().join("missing.json");
+        assert!(read_coverage_report(&missing).unwrap().is_none());
+
+        let directory = root.path().join("directory");
+        fs::create_dir(&directory).unwrap();
+        assert!(read_coverage_report(&directory).is_err());
+    }
 }

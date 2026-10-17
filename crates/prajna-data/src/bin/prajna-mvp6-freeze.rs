@@ -57,11 +57,24 @@ fn main() {
 fn run() -> AppResult<()> {
     let args = parse_args()?;
     let is_default_root = args.root.is_none();
+    let is_test_root = args.test_root;
     let requested_root = args.root.unwrap_or_else(default_root);
+    if !is_default_root && !is_test_root && requested_root != default_root() {
+        return Err(invalid("MVP-6 data must use ~/PrajnaData/mvp-6"));
+    }
+    let temp_root = std::env::temp_dir().canonicalize()?;
+    if is_test_root && !requested_root.canonicalize()?.starts_with(&temp_root) {
+        return Err(invalid(
+            "--test-root is limited to the system temp directory",
+        ));
+    }
     fs::create_dir_all(&requested_root)?;
     let root = requested_root.canonicalize()?;
-    if is_default_root && root != requested_root {
-        return Err(invalid("default MVP-6 root must not contain symlinks"));
+    if (!is_test_root && root != requested_root) || (is_test_root && !root.starts_with(&temp_root))
+    {
+        return Err(invalid(
+            "MVP-6 data must use ~/PrajnaData/mvp-6; --test-root is limited to the system temp directory",
+        ));
     }
     let lock = OpenOptionsExt::lock(&root.join("mvp6-freeze.lock"))?;
     let _lock = lock;
@@ -82,14 +95,29 @@ fn run() -> AppResult<()> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.into()),
     };
-    if result.is_ok()
-        && report.get("dsv").and_then(Value::as_str).is_some()
-        && latest_report
-            .as_ref()
-            .and_then(|previous| previous.get("dsv"))
-            == report.get("dsv")
-    {
-        preserve_collection_coverage(latest_report.as_ref().expect("checked"), &mut report);
+    if let Some(previous) = latest_report.as_ref() {
+        if result.is_ok()
+            && report.get("dsv").and_then(Value::as_str).is_some()
+            && previous.get("dsv") == report.get("dsv")
+        {
+            preserve_collection_coverage(previous, &mut report);
+        } else if result.is_err() && previous["dataset_published"] == true {
+            preserve_collection_coverage(previous, &mut report);
+            report["failed_import_window"] = report["window"].clone();
+            for key in [
+                "window",
+                "dsv",
+                "dataset_published",
+                "spec_window_complete",
+                "mvp6_complete",
+                "input_hashes",
+                "coverage",
+            ] {
+                if let Some(value) = previous.get(key) {
+                    report[key] = value.clone();
+                }
+            }
+        }
     }
     write_json(&coverage_path, &report)?;
     drop(coverage_lock);
@@ -473,6 +501,7 @@ fn tdx_package_matches_session(bytes: &[u8], session: NaiveDate) -> bool {
 
 struct Args {
     root: Option<PathBuf>,
+    test_root: bool,
     start: NaiveDate,
     end: NaiveDate,
 }
@@ -485,6 +514,7 @@ fn parse_args() -> AppResult<Args> {
         ));
     }
     let mut root = None;
+    let mut test_root = false;
     let mut start = date(SPEC_START)?;
     let mut end = date(SPEC_END)?;
     while let Some(option) = args.next() {
@@ -493,6 +523,10 @@ fn parse_args() -> AppResult<Args> {
             .ok_or_else(|| invalid("option requires a value"))?;
         match option.as_str() {
             "--root" => root = Some(PathBuf::from(value)),
+            "--test-root" => {
+                root = Some(PathBuf::from(value));
+                test_root = true;
+            }
             "--start" => start = date(&value)?,
             "--end" => end = date(&value)?,
             _ => return Err(invalid("unknown option")),
@@ -503,7 +537,12 @@ fn parse_args() -> AppResult<Args> {
             "window must be ordered and inside the MVP-6 specification range",
         ));
     }
-    Ok(Args { root, start, end })
+    Ok(Args {
+        root,
+        test_root,
+        start,
+        end,
+    })
 }
 
 fn default_root() -> PathBuf {

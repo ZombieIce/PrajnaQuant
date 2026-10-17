@@ -13,10 +13,30 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
-    let mut args = std::env::args().skip(1);
-    let root = args.next().map(PathBuf::from).unwrap_or_else(default_root);
-    if args.next().is_some() {
-        return Err(invalid("usage: prajna-mvp6-export-codes [MVP6_ROOT]").into());
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    let is_test_root = args.first().is_some_and(|arg| arg == "--test-root");
+    let root = match (is_test_root, args.as_slice()) {
+        (true, [_, path]) => PathBuf::from(path),
+        (false, []) => default_root(),
+        (false, [path]) => PathBuf::from(path),
+        _ => {
+            return Err(invalid(
+                "usage: prajna-mvp6-export-codes [MVP6_ROOT | --test-root TEMP_DIR]",
+            )
+            .into());
+        }
+    };
+    if args.len() > 2 {
+        return Err(
+            invalid("usage: prajna-mvp6-export-codes [MVP6_ROOT | --test-root TEMP_DIR]").into(),
+        );
+    }
+    let canonical_root = root.canonicalize()?;
+    let temp_root = std::env::temp_dir().canonicalize()?;
+    if (!is_test_root && (canonical_root != root || root != default_root()))
+        || (is_test_root && !canonical_root.starts_with(&temp_root))
+    {
+        return Err(invalid("MVP-6 export root must be ~/PrajnaData/mvp-6; --test-root is limited to the system temp directory").into());
     }
     let coverage: Value =
         serde_json::from_slice(&fs::read(root.join("acceptance/mvp6-coverage.json"))?)?;
