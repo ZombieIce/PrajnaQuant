@@ -5,10 +5,10 @@ Raw bytes are saved unchanged for later freeze_raw ingestion (not a RawStore).
 """
 import argparse
 import datetime as dt
+import fcntl
 import hashlib
 import json
 from pathlib import Path
-import threading
 import time
 import urllib.error
 import urllib.parse
@@ -25,12 +25,13 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class Collector:
-    def __init__(self, root, network_path, *, opener=None, clock=time.monotonic,
-                 sleep=time.sleep, code_ranges=((158000, 159999),)):
+    def __init__(self, root, network_path, *, opener=None, sleep=time.sleep,
+                 code_ranges=((158000, 159999),)):
         self.root = Path(root).expanduser().resolve()
         allowed = (Path.home() / "PrajnaData/mvp-6").resolve()
         if not self.root.is_relative_to(allowed):
             raise ValueError("output must stay below ~/PrajnaData/mvp-6")
+        self.pacing_path = allowed / "acceptance/tencent-pacing.lock"
         if not network_path.strip():
             raise ValueError("record the actual direct domestic network path")
         self.code_ranges = tuple(sorted(code_ranges))
@@ -40,9 +41,7 @@ class Collector:
         # Explicitly ignore proxy environment variables; never send browser cookies.
         self.opener = opener or urllib.request.build_opener(
             urllib.request.ProxyHandler({}), NoRedirect())
-        self.clock, self.sleep = clock, sleep
-        self.last_request = None
-        self.lock = threading.Lock()
+        self.sleep = sleep
         self.stopped = False
         self.access_failures = 0
 
@@ -74,55 +73,66 @@ class Collector:
             raise ValueError("cell outside declared MVP-6 scope")
         params = {"param": f"sz{symbol},day,{day},{day},1,"}
         url = HOST + "?" + urllib.parse.urlencode(params)
-        with self.lock:
-            if self.stopped:
-                raise RuntimeError("source stopped: unresolved access restriction")
-            for attempt in range(4):  # initial request + at most three retries
-                if self.last_request is not None:
-                    self.sleep(max(0, 1 - (self.clock() - self.last_request)))
-                self.last_request = self.clock()
-                request = urllib.request.Request(url, headers={
-                    "User-Agent": "PrajnaQuant/0.1 (personal MVP-6 research collector)"})
-                status, body, error = None, b"", None
-                try:
-                    with self.opener.open(request, timeout=30) as response:
-                        status = response.status
-                        body = response.read()
-                except urllib.error.HTTPError as exc:
-                    status, body = exc.code, exc.read()
-                    error = f"http_{status}"
-                except (OSError, urllib.error.URLError) as exc:
-                    error = type(exc).__name__
-                text = body.decode("utf-8", errors="replace").lower()
-                blocked = status in (403, 501) or any(
-                    word in text for word in ("captcha", "验证码", "访问验证"))
-                if blocked:
-                    self.access_failures += 1
-                    error = "access_restriction"
-                    if self.access_failures >= 2:
-                        self.stopped = True
-                else:
-                    self.access_failures = 0
-                if error is None:
-                    try:
-                        data = json.loads(body)
-                        rows = data["data"][f"sz{symbol}"]["day"]
-                        if str(data["code"]) != "0" or not isinstance(rows, list):
-                            raise ValueError("bad unadjusted day response")
-                        if any(not isinstance(row, list) or len(row) < 6 or row[0] != session for row in rows):
-                            raise ValueError("response outside requested session")
-                        if not rows:
-                            error = "missing_cell"  # Empty is not a successful Bar.
-                    except (ValueError, KeyError, TypeError):
-                        error = "invalid_unadjusted_response"
-                destination = self._record(url, params, status, body, error)
-                if error is None:
-                    return destination
+        self.pacing_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.pacing_path.open("a+", encoding="ascii") as pacing:
+            fcntl.flock(pacing.fileno(), fcntl.LOCK_EX)
+            try:
+                pacing.seek(0)
+                has_requested = bool(pacing.read().strip())
                 if self.stopped:
-                    break
-                if attempt < 3:
-                    self.sleep(2 ** attempt)
-            raise RuntimeError("Tencent cell unresolved; see local request log")
+                    raise RuntimeError("source stopped: unresolved access restriction")
+                for attempt in range(4):  # initial request + at most three retries
+                    if has_requested:
+                        self.sleep(1)
+                    pacing.seek(0)
+                    pacing.truncate()
+                    pacing.write("requested\n")
+                    pacing.flush()
+                    has_requested = True
+                    request = urllib.request.Request(url, headers={
+                        "User-Agent": "PrajnaQuant/0.1 (personal MVP-6 research collector)"})
+                    status, body, error = None, b"", None
+                    try:
+                        with self.opener.open(request, timeout=30) as response:
+                            status = response.status
+                            body = response.read()
+                    except urllib.error.HTTPError as exc:
+                        status, body = exc.code, exc.read()
+                        error = f"http_{status}"
+                    except (OSError, urllib.error.URLError) as exc:
+                        error = type(exc).__name__
+                    text = body.decode("utf-8", errors="replace").lower()
+                    blocked = status in (403, 501) or any(
+                        word in text for word in ("captcha", "验证码", "访问验证"))
+                    if blocked:
+                        self.access_failures += 1
+                        error = "access_restriction"
+                        if self.access_failures >= 2:
+                            self.stopped = True
+                    else:
+                        self.access_failures = 0
+                    if error is None:
+                        try:
+                            data = json.loads(body)
+                            rows = data["data"][f"sz{symbol}"]["day"]
+                            if str(data["code"]) != "0" or not isinstance(rows, list):
+                                raise ValueError("bad unadjusted day response")
+                            if any(not isinstance(row, list) or len(row) < 6 or row[0] != session for row in rows):
+                                raise ValueError("response outside requested session")
+                            if not rows:
+                                error = "missing_cell"  # Empty is not a successful Bar.
+                        except (ValueError, KeyError, TypeError):
+                            error = "invalid_unadjusted_response"
+                    destination = self._record(url, params, status, body, error)
+                    if error is None:
+                        return destination
+                    if self.stopped:
+                        break
+                    if attempt < 3:
+                        self.sleep(2 ** attempt)
+                raise RuntimeError("Tencent cell unresolved; see local request log")
+            finally:
+                fcntl.flock(pacing.fileno(), fcntl.LOCK_UN)
 
 
 def main():

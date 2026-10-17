@@ -2,8 +2,12 @@
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 import urllib.error
@@ -39,7 +43,6 @@ class CollectorTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name)
-        self.now = 0
         self.sleeps = []
         self.home_patch = patch.object(Path, "home", return_value=self.home)
         self.home_patch.start()
@@ -47,14 +50,12 @@ class CollectorTests(unittest.TestCase):
 
     def sleep(self, seconds):
         self.sleeps.append(seconds)
-        self.now += seconds
 
     def client(self, replies, **kwargs):
         self.opener = Opener(replies)
         self.root = self.home / "PrajnaData/mvp-6"
         return collector.Collector(self.root, "synthetic domestic direct path",
-                                   opener=self.opener, clock=lambda: self.now,
-                                   sleep=self.sleep, **kwargs)
+                                   opener=self.opener, sleep=self.sleep, **kwargs)
 
     def logs(self):
         return [json.loads(line) for line in (self.root / "acceptance/tencent-requests.jsonl").read_text().splitlines()]
@@ -76,6 +77,61 @@ class CollectorTests(unittest.TestCase):
             self.logs()[0]["terms_conclusion"],
             "issue_172_owner_authorization_for_local_noncommercial_research",
         )
+
+    def test_request_interval_is_shared_across_collector_instances(self):
+        self.client([GOOD]).collect("158001", "2026-01-05")
+        self.client([GOOD]).collect("158001", "2026-01-05")
+        self.assertEqual(self.sleeps, [1])
+
+    def test_concurrent_processes_share_domain_pacing(self):
+        root = self.home / "PrajnaData/mvp-6"
+        starts = root / "acceptance/request-starts.txt"
+        starts.parent.mkdir(parents=True)
+        launch_at = time.monotonic() + 1
+        script = """
+import io
+import json
+from pathlib import Path
+import sys
+import time
+sys.path.insert(0, sys.argv[1])
+import collect_tencent_fallback as collector
+session, launch_at = sys.argv[2], float(sys.argv[3])
+while time.monotonic() < launch_at:
+    time.sleep(launch_at - time.monotonic())
+class Response(io.BytesIO):
+    status = 200
+class Opener:
+    def open(self, request, timeout):
+        with (Path.home() / "PrajnaData/mvp-6/acceptance/request-starts.txt").open("a") as out:
+            print(f"{time.monotonic():.9f}", file=out)
+        body = json.dumps({"code": 0, "data": {
+            "sz158001": {"day": [[session, "1", "1", "1", "1", "1"]]}}
+        }).encode()
+        return Response(body)
+collector.Collector(
+    Path.home() / "PrajnaData/mvp-6", "synthetic", opener=Opener()
+).collect("158001", session)
+"""
+        env = os.environ.copy()
+        env["HOME"] = str(self.home)
+        script_dir = str(Path(__file__).resolve().parents[1] / "scripts")
+        processes = [
+            subprocess.Popen(
+                [sys.executable, "-c", script, script_dir, session, str(launch_at)],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for session in ("2026-01-05", "2026-01-06")
+        ]
+        for process in processes:
+            _, stderr = process.communicate(timeout=10)
+            self.assertEqual(process.returncode, 0, stderr)
+        starts_at = [float(line) for line in starts.read_text().splitlines()]
+        self.assertEqual(len(starts_at), 2)
+        self.assertGreaterEqual(abs(starts_at[0] - starts_at[1]), 1)
 
     def test_maximum_three_retries_exponential_backoff_and_failure_logs(self):
         client = self.client([OSError("synthetic")] * 4)
