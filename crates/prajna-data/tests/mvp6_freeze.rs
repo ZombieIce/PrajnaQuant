@@ -175,6 +175,133 @@ fn local_capture_import_publishes_v4_and_keeps_failed_responses_out_of_dataset_i
 }
 
 #[test]
+fn local_capture_import_accepts_python_csv_boolean_fields() {
+    let root = TempDir::new().unwrap();
+    let tdx = tdx_package();
+    let failed = b"access denied";
+    let calendar = calendar_month();
+    let tdx_sha = sha256(&tdx);
+    let failed_sha = sha256(failed);
+    let calendar_sha = sha256(&calendar);
+
+    write_capture_tree(
+        root.path(),
+        &tdx,
+        failed,
+        &calendar,
+        &tdx_sha,
+        &failed_sha,
+        &calendar_sha,
+    );
+    let validation_path = root.path().join("acceptance/tdx-daily-validation.csv");
+    let validation = fs::read_to_string(&validation_path).unwrap();
+    let python_validation = validation.replace(
+        ",true,true,true,1,1,1,1,true",
+        ",True,True,True,1,1,1,1,True",
+    );
+    assert_ne!(python_validation, validation);
+    fs::write(&validation_path, python_validation).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
+        .args([
+            "import-existing",
+            "--test-root",
+            root.path().to_str().unwrap(),
+            "--start",
+            START,
+            "--end",
+            END,
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}; report={}",
+        String::from_utf8_lossy(&output.stderr),
+        fs::read_to_string(root.path().join("acceptance/mvp6-coverage.json")).unwrap_or_default()
+    );
+    let report = coverage_report(root.path());
+    assert_eq!(report["tdx_sessions_imported"], 1);
+    assert_eq!(report["invalid_tdx_sessions"], serde_json::json!([]));
+    assert_eq!(report["dataset_published"], true);
+}
+
+#[test]
+fn local_capture_import_preserves_incomplete_http_200_bodies_as_failed_raw() {
+    let root = TempDir::new().unwrap();
+    let tdx = tdx_package();
+    let failed = b"access denied";
+    let partial = b"incomplete zip body";
+    let calendar = calendar_month();
+    let tdx_sha = sha256(&tdx);
+    let failed_sha = sha256(failed);
+    let partial_sha = sha256(partial);
+    let calendar_sha = sha256(&calendar);
+
+    write_capture_tree(
+        root.path(),
+        &tdx,
+        failed,
+        &calendar,
+        &tdx_sha,
+        &failed_sha,
+        &calendar_sha,
+    );
+    fs::write(
+        root.path().join("raw/tdx-daily/20221010-attempt3.partial"),
+        partial,
+    )
+    .unwrap();
+    let request_path = root.path().join("acceptance/tdx-daily-requests.csv");
+    let mut requests = fs::read_to_string(&request_path).unwrap();
+    requests.push_str(&format!(
+        "2022-10-10,3,2026-10-15T11:02:00Z,https://www.tdx.com.cn/products/data/data/g4day/20221010.zip,200,IncompleteRead_partial_bytes={},{},{}\n",
+        partial.len(),
+        partial.len(),
+        partial_sha
+    ));
+    fs::write(request_path, requests).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
+        .args([
+            "import-existing",
+            "--test-root",
+            root.path().to_str().unwrap(),
+            "--start",
+            START,
+            "--end",
+            END,
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}; report={}",
+        String::from_utf8_lossy(&output.stderr),
+        fs::read_to_string(root.path().join("acceptance/mvp6-coverage.json")).unwrap_or_default()
+    );
+    let store = RawStore::open(root.path()).unwrap();
+    let partial_id = format!("sha256:{partial_sha}");
+    assert_eq!(store.get(&partial_id).unwrap(), partial);
+    let source = store.sources(&partial_id).unwrap().remove(0);
+    assert_eq!(source.request["outcome"], "failed_response");
+    let report = coverage_report(root.path());
+    assert_eq!(report["missing_response_bodies"], serde_json::json!([]));
+    assert_eq!(report["invalid_tdx_sessions"], serde_json::json!([]));
+    let manifest: Manifest =
+        serde_json::from_slice(&fs::read(&manifest_paths(root.path())[0]).unwrap()).unwrap();
+    assert!(
+        !manifest
+            .core
+            .inputs
+            .iter()
+            .any(|input| input.raw_sha256 == partial_id)
+    );
+}
+
+#[test]
 fn local_capture_import_fails_closed_when_a_requested_session_has_no_valid_package() {
     let root = TempDir::new().unwrap();
     let calendar = calendar_month();

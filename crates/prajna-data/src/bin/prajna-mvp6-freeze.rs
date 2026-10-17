@@ -692,12 +692,23 @@ fn import_existing(
                 .push(json!({"session": session.to_string(), "reason": "byte_length_mismatch"}));
             continue;
         }
+        let request_failed = row.get("error").is_some_and(|error| !error.is_empty());
         let id = put_once(
             &store,
             &body,
-            request_record(TDX_SOURCE_ID, row, &sha, status, "application/zip"),
+            request_record(
+                TDX_SOURCE_ID,
+                row,
+                &sha,
+                status,
+                if status == 200 && !request_failed {
+                    "application/zip"
+                } else {
+                    "application/octet-stream"
+                },
+            ),
         )?;
-        if status == 200 {
+        if status == 200 && !request_failed {
             let reason = if !validation_passes(validation.get(&(session, sha.clone()))) {
                 Some("package_validation_missing_or_failed")
             } else if !tdx_package_matches_session(&body, session) {
@@ -1126,7 +1137,7 @@ fn request_record(
             "error": row.get("error").filter(|value| !value.is_empty()),
             "bytes": row.get("bytes"),
             "sha256": sha,
-            "outcome": if status == 200 { "response" } else { "failed_response" },
+            "outcome": if status == 200 && row.get("error").is_none_or(String::is_empty) { "response" } else { "failed_response" },
             "network_path": "unverified_local_capture",
             "terms_conclusion": "issue_172_owner_authorization_for_local_noncommercial_research"
         }),
@@ -1181,7 +1192,10 @@ fn collect_files(directory: &Path) -> AppResult<Vec<PathBuf>> {
                 stack.push(path);
             } else if file_type.is_file()
                 && path.extension().is_some_and(|extension| {
-                    matches!(extension.to_str(), Some("zip" | "body" | "json"))
+                    matches!(
+                        extension.to_str(),
+                        Some("zip" | "body" | "json" | "partial")
+                    )
                 })
             {
                 paths.push(path);
@@ -1251,7 +1265,7 @@ fn validation_passes(row: Option<&CsvRow>) -> bool {
     .iter()
     .all(|field| {
         row.get(*field)
-            .is_some_and(|value| value == "true" || value == "1")
+            .is_some_and(|value| value.eq_ignore_ascii_case("true") || value == "1")
     }) && parse_u64(row.get("cod_records").map(String::as_str).unwrap_or("")).ok()
         == parse_u64(row.get("md1_blocks").map(String::as_str).unwrap_or("")).ok()
         && parse_u64(row.get("scope_codes").map(String::as_str).unwrap_or("")).ok()

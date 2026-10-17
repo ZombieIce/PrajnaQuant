@@ -12,6 +12,9 @@ logged byte lengths and SHA-256 values, preserves successful and failed
 responses in the local Raw Store, then publishes `szse-etf-frozen@4` only when
 the requested open sessions, complete calendar months, and local open-date
 inventory agree.
+Validation booleans written by Python's CSV writer are accepted, and captured
+`.partial` response bodies are retained as failed Raw objects rather than DSV
+inputs.
 
 ```sh
 cargo run -p prajna-data --bin prajna-mvp6-freeze -- import-existing \
