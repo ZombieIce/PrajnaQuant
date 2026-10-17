@@ -137,6 +137,18 @@ fn local_capture_import_publishes_v4_and_keeps_failed_responses_out_of_dataset_i
     previous["p21_mismatches"] = serde_json::json!(["synthetic discrepancy"]);
     let previous_dsv = previous["dsv"].clone();
     fs::write(&report_path, serde_json::to_vec_pretty(&previous).unwrap()).unwrap();
+    let inventory_path = root.path().join("acceptance/mvp6-raw-inventory.json");
+    let previous_inventory: Value =
+        serde_json::from_slice(&fs::read(&inventory_path).unwrap()).unwrap();
+    let previous_records = previous_inventory["request_records"].as_array().unwrap();
+    for id in [&tdx_id, &failed_id, &calendar_id] {
+        assert!(
+            previous_records
+                .iter()
+                .any(|record| record["sha256"].as_str() == id.strip_prefix("sha256:")),
+            "inventory before failure lacks {id}"
+        );
+    }
     fs::remove_file(root.path().join("acceptance/tdx-daily-requests.csv")).unwrap();
 
     let failed_import = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
@@ -172,6 +184,9 @@ fn local_capture_import_publishes_v4_and_keeps_failed_responses_out_of_dataset_i
         after_failure["p21_mismatches"],
         serde_json::json!(["synthetic discrepancy"])
     );
+    let inventory_after_failure: Value =
+        serde_json::from_slice(&fs::read(&inventory_path).unwrap()).unwrap();
+    assert_eq!(inventory_after_failure, previous_inventory);
 }
 
 #[test]

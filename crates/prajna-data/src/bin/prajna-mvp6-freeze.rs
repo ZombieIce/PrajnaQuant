@@ -6,7 +6,7 @@
 //! session coverage is closed for the requested window.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     error::Error,
     fs::{self, File},
     io::{self, Cursor, Read},
@@ -121,14 +121,41 @@ fn run() -> AppResult<()> {
     }
     write_json(&coverage_path, &report)?;
     drop(coverage_lock);
+    let inventory_path = root.join("acceptance/mvp6-raw-inventory.json");
+    if result.is_err() {
+        inventory = merge_previous_inventory(&inventory_path, inventory)?;
+    }
     write_json(
-        &root.join("acceptance/mvp6-raw-inventory.json"),
+        &inventory_path,
         &json!({
             "contract": "mvp-6/#206",
             "request_records": inventory,
         }),
     )?;
     result
+}
+
+/// A failed import may stop before re-listing earlier Raw objects; keep every
+/// previously frozen request record and append only records not yet present.
+fn merge_previous_inventory(path: &Path, current: Vec<Value>) -> AppResult<Vec<Value>> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(current),
+        Err(error) => return Err(error.into()),
+    };
+    let previous: Value = serde_json::from_slice(&bytes)?;
+    let mut merged = previous
+        .get("request_records")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| invalid("existing Raw inventory lacks request_records"))?;
+    let mut seen: HashSet<String> = merged.iter().map(Value::to_string).collect();
+    for record in current {
+        if seen.insert(record.to_string()) {
+            merged.push(record);
+        }
+    }
+    Ok(merged)
 }
 
 fn preserve_collection_coverage(previous: &Value, current: &mut Value) {

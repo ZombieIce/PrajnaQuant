@@ -30,7 +30,9 @@ be used to complete MVP-6. The local
 `acceptance/mvp6-coverage.json` records `import_status`, the last validation stage,
 source status, and unresolved gaps; the adjacent
 `mvp6-raw-inventory.json` preserves the request URL, query, observation time,
-status, byte length, and SHA-256. Failed response objects are retained for
+status, byte length, and SHA-256. A failed import keeps every previously
+inventoried request record and appends only new ones, so earlier Raw objects
+stay listed. Failed response objects are retained for
 audit and are excluded from DSV inputs.
 Freeze, Sina, and cninfo serialize coverage-report updates through the local
 `mvp6-coverage.lock`; freeze reloads the latest report while holding that lock
