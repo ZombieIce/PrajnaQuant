@@ -16,7 +16,8 @@ use std::{
 use chrono::{Datelike, NaiveDate};
 use fs2::FileExt;
 use prajna_data::{
-    NormalizerRegistry, PublishError, RawStore, SourceKind, SourceRecordInput, publish_dataset,
+    NormalizerRegistry, PublishError, RawStore, SourceKind, SourceRecordInput,
+    lock_mvp6_coverage_report, publish_dataset,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -65,10 +66,6 @@ fn run() -> AppResult<()> {
     let lock = OpenOptionsExt::lock(&root.join("mvp6-freeze.lock"))?;
     let _lock = lock;
 
-    let coverage_path = root.join("acceptance/mvp6-coverage.json");
-    let previous_report = fs::read(&coverage_path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
     let mut report = base_report(args.start, args.end);
     let mut inventory = Vec::new();
     report["import_status"] = json!("running");
@@ -78,15 +75,24 @@ fn run() -> AppResult<()> {
     } else {
         "unresolved"
     });
+    let coverage_lock = lock_mvp6_coverage_report(&root)?;
+    let coverage_path = root.join("acceptance/mvp6-coverage.json");
+    let latest_report = match fs::read(&coverage_path) {
+        Ok(bytes) => Some(serde_json::from_slice::<Value>(&bytes)?),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
     if result.is_ok()
-        && previous_report
+        && report.get("dsv").and_then(Value::as_str).is_some()
+        && latest_report
             .as_ref()
             .and_then(|previous| previous.get("dsv"))
             == report.get("dsv")
     {
-        preserve_collection_coverage(previous_report.as_ref().expect("checked"), &mut report);
+        preserve_collection_coverage(latest_report.as_ref().expect("checked"), &mut report);
     }
     write_json(&coverage_path, &report)?;
+    drop(coverage_lock);
     write_json(
         &root.join("acceptance/mvp6-raw-inventory.json"),
         &json!({
@@ -331,8 +337,10 @@ fn import_tencent_fallback(
         return Ok(BTreeSet::new());
     }
     for cell in &planned {
-        if !successful.contains_key(cell) {
-            issues.push(json!({"symbol": cell.1, "session": cell.0, "reason": "planned_cell_has_no_successful_response"}));
+        match successful.get(cell) {
+            None => issues.push(json!({"symbol": cell.1, "session": cell.0, "reason": "planned_cell_has_no_successful_response"})),
+            Some(ids) if ids.len() > 1 => issues.push(json!({"symbol": cell.1, "session": cell.0, "reason": "planned_cell_has_conflicting_successful_response_revisions"})),
+            Some(_) => {}
         }
         let Some(tdx_ids) = tdx_sessions.get(&cell.0).filter(|ids| ids.len() == 1) else {
             issues.push(json!({"symbol": cell.1, "session": cell.0, "reason": "tdx_session_package_missing_or_conflicting"}));
@@ -411,9 +419,14 @@ fn tencent_response_is_exact(bytes: &[u8], symbol: &str, session: NaiveDate) -> 
         Value::Number(value) => value.to_string(),
         _ => String::new(),
     });
-    let Some(rows) = value
-        .get("data")
-        .and_then(|data| data.get(format!("sz{symbol}").as_str()))
+    let Some(data) = value.get("data").and_then(Value::as_object) else {
+        return false;
+    };
+    if data.len() != 1 || !data.contains_key(format!("sz{symbol}").as_str()) {
+        return false;
+    }
+    let Some(rows) = data
+        .get(format!("sz{symbol}").as_str())
         .and_then(|node| node.get("day"))
         .and_then(Value::as_array)
     else {
@@ -441,6 +454,21 @@ fn tdx_package_has_symbol(bytes: &[u8], session: NaiveDate, symbol: &str) -> App
     Ok(contents
         .chunks_exact(150)
         .any(|record| record.get(..6) == Some(symbol.as_bytes())))
+}
+
+fn tdx_package_matches_session(bytes: &[u8], session: NaiveDate) -> bool {
+    let Ok(archive) = ZipArchive::new(Cursor::new(bytes)) else {
+        return false;
+    };
+    let day_key = session.format("%y%m%d").to_string();
+    let expected_cod = format!("sz{day_key}.cod");
+    let expected_md1 = format!("sz{day_key}.md1");
+    let code_members = archive
+        .file_names()
+        .filter(|name| name.starts_with("sz") && name.ends_with(".cod"))
+        .collect::<Vec<_>>();
+    code_members.as_slice() == [expected_cod.as_str()]
+        && archive.file_names().any(|name| name == expected_md1)
 }
 
 struct Args {
@@ -630,11 +658,22 @@ fn import_existing(
             &body,
             request_record(TDX_SOURCE_ID, row, &sha, status, "application/zip"),
         )?;
-        if status == 200 && validation_passes(validation.get(&(session, sha.clone()))) {
-            tdx_valid.entry(session).or_default().insert(id);
-        } else if status == 200 {
-            report["invalid_tdx_sessions"].as_array_mut().expect("array")
-                .push(json!({"session": session.to_string(), "reason": "package_validation_missing_or_failed"}));
+        if status == 200 {
+            let reason = if !validation_passes(validation.get(&(session, sha.clone()))) {
+                Some("package_validation_missing_or_failed")
+            } else if !tdx_package_matches_session(&body, session) {
+                Some("package_session_members_missing_or_mismatched")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                report["invalid_tdx_sessions"]
+                    .as_array_mut()
+                    .expect("array")
+                    .push(json!({"session": session.to_string(), "reason": reason}));
+            } else {
+                tdx_valid.entry(session).or_default().insert(id);
+            }
         }
     }
 

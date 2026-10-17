@@ -7,7 +7,7 @@ use std::{
 };
 
 use chrono::NaiveDate;
-use prajna_data::{RawStore, sina_adjust_factor::Collector};
+use prajna_data::{RawStore, lock_mvp6_coverage_report, sina_adjust_factor::Collector};
 use serde_json::{Value, json};
 
 fn main() {
@@ -143,6 +143,7 @@ fn update_coverage(
     complete: bool,
     failed_symbol: Option<&str>,
 ) -> Result<(), Box<dyn Error>> {
+    let _coverage_lock = lock_mvp6_coverage_report(root)?;
     let path = root.join("acceptance/mvp6-coverage.json");
     let mut report: Value = serde_json::from_slice(&fs::read(&path)?)?;
     report["source_status"]["sina_adjustment_factors"] = json!(if complete {

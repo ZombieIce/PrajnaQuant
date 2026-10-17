@@ -29,6 +29,9 @@ source status, and unresolved gaps; the adjacent
 `mvp6-raw-inventory.json` preserves the request URL, query, observation time,
 status, byte length, and SHA-256. Failed response objects are retained for
 audit and are excluded from DSV inputs.
+Freeze, Sina, and cninfo serialize coverage-report updates through the local
+`mvp6-coverage.lock`; freeze reloads the latest report while holding that lock
+before preserving collector coverage and writing its import results.
 
 The command intentionally fails closed when a requested SZSE session has no
 validated TDX package, a month is incomplete, response bytes do not match the

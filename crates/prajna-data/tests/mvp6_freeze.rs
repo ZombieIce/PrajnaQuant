@@ -186,6 +186,51 @@ fn local_capture_import_fails_closed_when_a_requested_session_has_no_valid_packa
 }
 
 #[test]
+fn local_capture_import_rejects_a_tdx_package_with_the_wrong_embedded_session() {
+    let root = TempDir::new().unwrap();
+    let tdx = tdx_package_for("221011");
+    let failed = b"access denied";
+    let calendar = calendar_month();
+    let tdx_sha = sha256(&tdx);
+    let failed_sha = sha256(failed);
+    let calendar_sha = sha256(&calendar);
+    write_capture_tree(
+        root.path(),
+        &tdx,
+        failed,
+        &calendar,
+        &tdx_sha,
+        &failed_sha,
+        &calendar_sha,
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
+        .args([
+            "import-existing",
+            "--root",
+            root.path().to_str().unwrap(),
+            "--start",
+            START,
+            "--end",
+            END,
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(manifest_paths(root.path()).is_empty());
+    let report = coverage_report(root.path());
+    assert_eq!(report["missing_tdx_sessions"], serde_json::json!([START]));
+    assert!(
+        report["invalid_tdx_sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["reason"] == "package_session_members_missing_or_mismatched")
+    );
+}
+
+#[test]
 fn local_capture_import_accepts_only_explicit_tencent_cells_absent_from_tdx_package() {
     let root = TempDir::new().unwrap();
     let tdx = tdx_package();
@@ -287,6 +332,107 @@ fn local_capture_import_rejects_tencent_when_tdx_key_exists() {
             .unwrap()
             .iter()
             .any(|issue| issue["reason"] == "tdx_keyed_observation_blocks_tencent_fallback")
+    );
+}
+
+#[test]
+fn local_capture_import_rejects_conflicting_successful_tencent_revisions() {
+    let root = TempDir::new().unwrap();
+    let tdx = tdx_package();
+    let failed = b"access denied";
+    let calendar = calendar_month();
+    let tdx_sha = sha256(&tdx);
+    let failed_sha = sha256(failed);
+    let calendar_sha = sha256(&calendar);
+    write_capture_tree(
+        root.path(),
+        &tdx,
+        failed,
+        &calendar,
+        &tdx_sha,
+        &failed_sha,
+        &calendar_sha,
+    );
+    let first = tencent_response("159002");
+    write_tencent_capture(root.path(), "159002", &first);
+    let second = tencent_response_with_close("159002", "1.025");
+    append_tencent_capture(root.path(), "159002", &second);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
+        .args([
+            "import-existing",
+            "--root",
+            root.path().to_str().unwrap(),
+            "--start",
+            START,
+            "--end",
+            END,
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(manifest_paths(root.path()).is_empty());
+    let report = coverage_report(root.path());
+    assert_eq!(report["tencent_fallback_plan_status"], "unresolved");
+    assert!(
+        report["tencent_fallback_issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["reason"]
+                == "planned_cell_has_conflicting_successful_response_revisions")
+    );
+}
+
+#[test]
+fn local_capture_import_rejects_unrequested_tencent_symbols() {
+    let root = TempDir::new().unwrap();
+    let tdx = tdx_package();
+    let failed = b"access denied";
+    let calendar = calendar_month();
+    let tdx_sha = sha256(&tdx);
+    let failed_sha = sha256(failed);
+    let calendar_sha = sha256(&calendar);
+    write_capture_tree(
+        root.path(),
+        &tdx,
+        failed,
+        &calendar,
+        &tdx_sha,
+        &failed_sha,
+        &calendar_sha,
+    );
+    let mut response: Value = serde_json::from_slice(&tencent_response("159002")).unwrap();
+    response["data"]["sz159003"] = response["data"]["sz159002"].clone();
+    write_tencent_capture(
+        root.path(),
+        "159002",
+        &serde_json::to_vec(&response).unwrap(),
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
+        .args([
+            "import-existing",
+            "--root",
+            root.path().to_str().unwrap(),
+            "--start",
+            START,
+            "--end",
+            END,
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(manifest_paths(root.path()).is_empty());
+    let report = coverage_report(root.path());
+    assert!(
+        report["tencent_fallback_issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["reason"] == "response_not_one_exact_unadjusted_cell")
     );
 }
 
@@ -403,14 +549,13 @@ fn tencent_response(symbol: &str) -> Vec<u8> {
     .unwrap()
 }
 
+fn tencent_response_with_close(symbol: &str, close: &str) -> Vec<u8> {
+    let mut response: Value = serde_json::from_slice(&tencent_response(symbol)).unwrap();
+    response["data"][format!("sz{symbol}")]["day"][0][1] = Value::String(close.to_owned());
+    serde_json::to_vec(&response).unwrap()
+}
+
 fn write_tencent_capture(root: &Path, symbol: &str, response: &[u8]) -> String {
-    let digest = sha256(response);
-    fs::create_dir_all(root.join("raw/tencent-responses")).unwrap();
-    fs::write(
-        root.join(format!("raw/tencent-responses/{digest}")),
-        response,
-    )
-    .unwrap();
     fs::create_dir_all(root.join("acceptance")).unwrap();
     fs::write(
         root.join("acceptance/tencent-fallback-plan.json"),
@@ -420,6 +565,17 @@ fn write_tencent_capture(root: &Path, symbol: &str, response: &[u8]) -> String {
             "tdx_observation": "missing"
         }]))
         .unwrap(),
+    )
+    .unwrap();
+    append_tencent_capture(root, symbol, response)
+}
+
+fn append_tencent_capture(root: &Path, symbol: &str, response: &[u8]) -> String {
+    let digest = sha256(response);
+    fs::create_dir_all(root.join("raw/tencent-responses")).unwrap();
+    fs::write(
+        root.join(format!("raw/tencent-responses/{digest}")),
+        response,
     )
     .unwrap();
     let parameter = format!("sz{symbol},day,{START},{START},1,");
@@ -438,15 +594,21 @@ fn write_tencent_capture(root: &Path, symbol: &str, response: &[u8]) -> String {
         "error": null,
         "outcome": "success"
     });
-    fs::write(
-        root.join("acceptance/tencent-requests.jsonl"),
-        format!("{}\n", serde_json::to_string(&record).unwrap()),
-    )
-    .unwrap();
+    use std::io::Write as _;
+    let mut log = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(root.join("acceptance/tencent-requests.jsonl"))
+        .unwrap();
+    writeln!(log, "{}", serde_json::to_string(&record).unwrap()).unwrap();
     digest
 }
 
 fn tdx_package() -> Vec<u8> {
+    tdx_package_for("221010")
+}
+
+fn tdx_package_for(day_key: &str) -> Vec<u8> {
     let mut code = vec![0_u8; 150];
     code[..6].copy_from_slice(b"159001");
     code[32..34].copy_from_slice(&0_u16.to_le_bytes());
@@ -465,11 +627,11 @@ fn tdx_package() -> Vec<u8> {
     bar[56..64].copy_from_slice(&100_000_u64.to_le_bytes());
     let mut writer = ZipWriter::new(std::io::Cursor::new(Vec::new()));
     writer
-        .start_file("sz221010.cod", SimpleFileOptions::default())
+        .start_file(format!("sz{day_key}.cod"), SimpleFileOptions::default())
         .unwrap();
     writer.write_all(&code).unwrap();
     writer
-        .start_file("sz221010.md1", SimpleFileOptions::default())
+        .start_file(format!("sz{day_key}.md1"), SimpleFileOptions::default())
         .unwrap();
     writer.write_all(&bar).unwrap();
     writer.finish().unwrap().into_inner()

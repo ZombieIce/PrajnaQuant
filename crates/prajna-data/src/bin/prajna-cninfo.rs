@@ -2,7 +2,7 @@
 use prajna_data::{
     ManifestProvenance, RawStore,
     cninfo::{Collector, IndexDataset, Poppler},
-    write_manifest,
+    lock_mvp6_coverage_report, write_manifest,
 };
 use serde_json::json;
 use std::{
@@ -89,6 +89,7 @@ fn update_mvp6_coverage(
     dataset: &IndexDataset,
     complete: bool,
 ) -> prajna_data::cninfo::Result<()> {
+    let _coverage_lock = lock_mvp6_coverage_report(root)?;
     let path = root.join("acceptance/mvp6-coverage.json");
     let Ok(bytes) = fs::read(&path) else {
         return Ok(());
