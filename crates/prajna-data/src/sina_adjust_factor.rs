@@ -123,11 +123,50 @@ pub struct AdjustmentPair {
     pub hfq_raw_sha256: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CollectionStatus {
+    Complete,
+    CompletedWithGaps,
+    SourceStopped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum SymbolOutcome {
+    Completed {
+        symbol: String,
+        qfq_raw_sha256: String,
+        hfq_raw_sha256: String,
+    },
+    Gap {
+        symbol: String,
+        reason: String,
+    },
+    NotAttempted {
+        symbol: String,
+        source_stop_reason: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CollectionReport {
+    pub status: CollectionStatus,
+    pub outcomes: Vec<SymbolOutcome>,
+    pub source_stop_reason: Option<String>,
+}
+
+enum FetchOutcome {
+    Success { raw_sha256: String, bytes: Vec<u8> },
+    Gap(String),
+    Stopped(String),
+}
+
 pub struct Collector<T> {
     transport: T,
     raw: RawStore,
     network_path: String,
-    stopped: bool,
+    stopped: Option<String>,
 }
 
 impl Collector<reqwest::blocking::Client> {
@@ -165,7 +204,7 @@ impl<T: Transport> Collector<T> {
             transport,
             raw,
             network_path: "injected_transport".into(),
-            stopped: false,
+            stopped: None,
         }
     }
 
@@ -174,9 +213,9 @@ impl<T: Transport> Collector<T> {
         symbols: &[String],
         start: NaiveDate,
         end: NaiveDate,
-    ) -> Result<Vec<AdjustmentPair>> {
-        if self.stopped {
-            return Err(error("Sina source is stopped: unresolved"));
+    ) -> Result<CollectionReport> {
+        if let Some(reason) = &self.stopped {
+            return Err(error(format!("Sina source is stopped: {reason}")));
         }
         if start > end {
             return Err(error("Sina adjustment window start must not exceed end"));
@@ -193,21 +232,78 @@ impl<T: Transport> Collector<T> {
                 "Sina adjustment collection requires at least one symbol",
             ));
         }
-        let mut pairs = Vec::with_capacity(symbols.len());
-        for symbol in symbols {
-            let (qfq_raw_sha256, qfq) = self.fetch(&symbol, "qfq", start, end)?;
-            let (hfq_raw_sha256, hfq) = self.fetch(&symbol, "hfq", start, end)?;
-            if let Err(problem) = verify_paired_series(&qfq, &hfq) {
-                self.stopped = true;
-                return Err(problem);
+        let mut outcomes = Vec::with_capacity(symbols.len());
+        let mut source_stop_reason = None;
+        let mut symbols = symbols.into_iter();
+        for symbol in symbols.by_ref() {
+            let mut pair = Vec::with_capacity(2);
+            let mut gap_reason = None;
+            let mut stop_reason = None;
+            for kind in ["qfq", "hfq"] {
+                match self.fetch(&symbol, kind, start, end)? {
+                    FetchOutcome::Success { raw_sha256, bytes } => {
+                        pair.push((raw_sha256, bytes));
+                    }
+                    FetchOutcome::Gap(reason) => {
+                        gap_reason = Some(reason);
+                        break;
+                    }
+                    FetchOutcome::Stopped(reason) => {
+                        stop_reason = Some(reason);
+                        break;
+                    }
+                }
             }
-            pairs.push(AdjustmentPair {
+            if let Some(reason) = stop_reason {
+                self.stopped = Some(reason.clone());
+                outcomes.push(SymbolOutcome::Gap {
+                    symbol,
+                    reason: reason.clone(),
+                });
+                source_stop_reason = Some(reason);
+                break;
+            }
+            if let Some(reason) = gap_reason {
+                outcomes.push(SymbolOutcome::Gap { symbol, reason });
+                continue;
+            }
+            let [(qfq_raw_sha256, qfq), (hfq_raw_sha256, hfq)] = pair
+                .try_into()
+                .map_err(|_| error("Sina adjustment pair is incomplete"))?;
+            if let Err(problem) = verify_paired_series(&qfq, &hfq) {
+                outcomes.push(SymbolOutcome::Gap {
+                    symbol,
+                    reason: problem.to_string(),
+                });
+                continue;
+            }
+            outcomes.push(SymbolOutcome::Completed {
                 symbol,
                 qfq_raw_sha256,
                 hfq_raw_sha256,
             });
         }
-        Ok(pairs)
+        if let Some(reason) = &source_stop_reason {
+            outcomes.extend(symbols.map(|symbol| SymbolOutcome::NotAttempted {
+                symbol,
+                source_stop_reason: reason.clone(),
+            }));
+        }
+        let status = if source_stop_reason.is_some() {
+            CollectionStatus::SourceStopped
+        } else if outcomes
+            .iter()
+            .any(|outcome| matches!(outcome, SymbolOutcome::Gap { .. }))
+        {
+            CollectionStatus::CompletedWithGaps
+        } else {
+            CollectionStatus::Complete
+        };
+        Ok(CollectionReport {
+            status,
+            outcomes,
+            source_stop_reason,
+        })
     }
 
     fn fetch(
@@ -216,10 +312,7 @@ impl<T: Transport> Collector<T> {
         kind: &str,
         start: NaiveDate,
         end: NaiveDate,
-    ) -> Result<(String, Vec<u8>)> {
-        if self.stopped {
-            return Err(error("Sina source is stopped: unresolved"));
-        }
+    ) -> Result<FetchOutcome> {
         let url = format!("{SINA_HOST}/realstock/company/{symbol}/{kind}.js");
         for attempt in 0..=3 {
             let observed_at = chrono::Utc::now().to_rfc3339();
@@ -233,6 +326,10 @@ impl<T: Transport> Collector<T> {
                     Some(problem.to_string()),
                 ),
             };
+            let last_failure = transport_error
+                .as_ref()
+                .map(|problem| format!("transport error: {problem}"))
+                .unwrap_or_else(|| format!("HTTP {status}"));
             let raw_sha256 = self
                 .raw
                 .put(
@@ -260,34 +357,54 @@ impl<T: Transport> Collector<T> {
                     },
                 )
                 .map_err(|e| error(format!("could not store Sina Raw response: {e}")))?;
-            if status == 200 {
-                if let Err(problem) = points(&bytes) {
-                    self.stopped = true;
-                    return Err(problem);
-                }
-                return Ok((raw_sha256, bytes));
+            if let Some(reason) = access_control_reason(status, &content_type, &bytes) {
+                return Ok(FetchOutcome::Stopped(format!("{symbol} {kind}: {reason}")));
             }
-            let text = String::from_utf8_lossy(&bytes).to_lowercase();
-            let access_control = matches!(status, 301..=399 | 401 | 403 | 429 | 501)
-                || text.contains("验证码")
-                || text.contains("captcha")
-                || (text.contains("<html") && (text.contains("登录") || text.contains("login")));
-            if access_control {
-                self.stopped = true;
-                return Err(error(format!(
-                    "Sina access control or redirect returned HTTP {status}; source stopped"
+            if status == 404 {
+                return Ok(FetchOutcome::Gap(format!(
+                    "{symbol} {kind}: deterministic not found (HTTP 404)"
                 )));
             }
+            if status == 200 {
+                return match points(&bytes) {
+                    Ok(_) => Ok(FetchOutcome::Success { raw_sha256, bytes }),
+                    Err(problem) => Ok(FetchOutcome::Gap(format!(
+                        "{symbol} {kind}: invalid HTTP 200 adjustment response: {problem}"
+                    ))),
+                };
+            }
             if attempt == 3 {
-                self.stopped = true;
-                return Err(error(format!(
-                    "Sina request exhausted retries after HTTP {status}; source stopped"
+                return Ok(FetchOutcome::Stopped(format!(
+                    "{symbol} {kind}: Sina retries exhausted after {} attempts; last failure: {last_failure}",
+                    attempt + 1
                 )));
             }
             thread::sleep(Duration::from_secs(1_u64 << attempt));
         }
-        unreachable!("the retry loop returns on success or exhaustion")
+        unreachable!("the retry loop returns on success, gap, or source stop")
     }
+}
+
+fn access_control_reason(status: u16, content_type: &str, bytes: &[u8]) -> Option<String> {
+    if (300..=399).contains(&status) {
+        return Some(format!("redirect returned HTTP {status}; source stopped"));
+    }
+    if matches!(status, 401 | 403 | 429 | 501) {
+        return Some(format!(
+            "access control returned HTTP {status}; source stopped"
+        ));
+    }
+    let text = String::from_utf8_lossy(bytes).to_lowercase();
+    if text.contains("验证码") || text.contains("captcha") {
+        return Some(format!(
+            "captcha response returned HTTP {status}; source stopped"
+        ));
+    }
+    let is_html = content_type.to_ascii_lowercase().contains("text/html") || text.contains("<html");
+    if is_html && (text.contains("登录") || text.contains("login")) {
+        return Some(format!("login page returned HTTP {status}; source stopped"));
+    }
+    None
 }
 
 fn validate_symbol(symbol: &str) -> Result<()> {

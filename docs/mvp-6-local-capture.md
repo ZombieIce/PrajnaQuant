@@ -82,9 +82,21 @@ historical collection plan.
 
 The Sina command requires an operator-supplied description of the confirmed
 direct domestic egress path. It disables proxies and redirects, uses serial
-requests and the collector's retry/stop rules, and writes responses only to
-the local Raw Store. If access control is returned, it stops the source and
-records the unresolved symbol in the local acceptance report.
+requests with the existing one-second minimum spacing, retry/backoff and
+stop rules, and writes every response (including failures) only to the local
+Raw Store. A deterministic 404, an invalid/empty HTTP 200 response, or a
+qfq/hfq mismatch records a reason for that symbol and continues with the next
+candidate. Redirects, access-control/captcha/login responses, and exhausted
+transport retries stop the source.
+
+`acceptance/sina/collection.json` records one terminal result per candidate:
+`completed`, `gap` with its reason, or `not_attempted` with the source-stop
+reason. The coverage report distinguishes all pairs captured
+(`captured_raw_pairs_not_normalized`), per-symbol gaps
+(`captured_with_symbol_gaps`), and a source stop
+(`source_stopped_unresolved`). These are collection outcomes only; they do not
+claim factor normalization, real-source completeness, or successful MVP-6
+acceptance.
 
 ```sh
 cargo run -p prajna-data --bin prajna-mvp6-collect-sina -- \
