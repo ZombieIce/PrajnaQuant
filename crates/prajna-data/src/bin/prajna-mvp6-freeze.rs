@@ -119,6 +119,9 @@ fn run() -> AppResult<()> {
             }
         }
     }
+    if report["historical_capture_status"] == "unresolved" {
+        report["mvp6_complete"] = json!(false);
+    }
     write_json(&coverage_path, &report)?;
     drop(coverage_lock);
     let inventory_path = root.join("acceptance/mvp6-raw-inventory.json");
@@ -627,6 +630,17 @@ fn import_existing(
         }
         tdx_seen_dates.insert(session);
         inventory.push(inventory_record_raw(TDX_SOURCE_ID, row));
+        if row.get("error").is_some_and(|error| !error.is_empty()) {
+            import_failed_tdx_capture(
+                &store,
+                &tdx_response_files,
+                session,
+                row,
+                &validation,
+                report,
+            )?;
+            continue;
+        }
         let status = match row
             .get("http_status")
             .filter(|value| !value.is_empty())
@@ -698,7 +712,13 @@ fn import_existing(
             put_once(
                 &store,
                 &[],
-                request_record(TDX_SOURCE_ID, row, &sha, status, "application/octet-stream"),
+                request_record(
+                    TDX_SOURCE_ID,
+                    row,
+                    &sha,
+                    Some(status),
+                    "application/octet-stream",
+                ),
             )?;
             continue;
         }
@@ -719,7 +739,25 @@ fn import_existing(
                 .push(json!({"session": session.to_string(), "reason": "byte_length_mismatch"}));
             continue;
         }
-        let request_failed = row.get("error").is_some_and(|error| !error.is_empty());
+        let validation_passed = validation_passes(validation.get(&(session, sha.clone())));
+        if status == 200 && validate_zip_archive(&body).is_err() {
+            let mut source = request_record(
+                TDX_SOURCE_ID,
+                row,
+                &sha,
+                Some(status),
+                "application/octet-stream",
+            );
+            source.request["outcome"] = json!("failed_response");
+            source.request["validation_error"] = json!("invalid_zip_archive");
+            put_once(&store, &body, source)?;
+            if validation_passed {
+                record_tdx_archive_integrity_mismatch(report, session);
+            } else {
+                historical_capture_issue(report, row, "invalid_zip_archive");
+            }
+            continue;
+        }
         let id = put_once(
             &store,
             &body,
@@ -727,16 +765,16 @@ fn import_existing(
                 TDX_SOURCE_ID,
                 row,
                 &sha,
-                status,
-                if status == 200 && !request_failed {
+                Some(status),
+                if status == 200 {
                     "application/zip"
                 } else {
                     "application/octet-stream"
                 },
             ),
         )?;
-        if status == 200 && !request_failed {
-            let reason = if !validation_passes(validation.get(&(session, sha.clone()))) {
+        if status == 200 {
+            let reason = if !validation_passed {
                 Some("package_validation_missing_or_failed")
             } else if !tdx_package_matches_session(&body, session) {
                 Some("package_session_members_missing_or_mismatched")
@@ -753,6 +791,14 @@ fn import_existing(
             }
         }
     }
+    report["historical_capture_status"] = json!(if report["historical_capture_issues"]
+        .as_array()
+        .is_some_and(Vec::is_empty)
+    {
+        "complete"
+    } else {
+        "unresolved"
+    });
 
     report["import_stage"] = json!("validate_szse_calendar_captures");
     let calendar_rows = calendar_requests
@@ -862,7 +908,7 @@ fn import_existing(
                     CALENDAR_SOURCE_ID,
                     row,
                     &sha,
-                    status,
+                    Some(status),
                     "application/octet-stream",
                 ),
             )?;
@@ -885,7 +931,13 @@ fn import_existing(
         let id = put_once(
             &store,
             &body,
-            request_record(CALENDAR_SOURCE_ID, row, &sha, status, "application/json"),
+            request_record(
+                CALENDAR_SOURCE_ID,
+                row,
+                &sha,
+                Some(status),
+                "application/json",
+            ),
         )?;
         if status != 200 {
             continue;
@@ -1125,6 +1177,8 @@ fn base_report(start: NaiveDate, end: NaiveDate) -> Value {
         "invalid_calendar_months": [],
         "invalid_tdx_requests": [],
         "invalid_tdx_sessions": [],
+        "historical_capture_issues": [],
+        "historical_capture_status": "not_checked",
         "missing_tdx_sessions": [],
         "tdx_revision_conflict_sessions": [],
         "missing_response_bodies": [],
@@ -1147,7 +1201,7 @@ fn request_record(
     source_id: &str,
     row: &CsvRow,
     sha: &str,
-    status: u16,
+    status: Option<u16>,
     content_type: &str,
 ) -> SourceRecordInput {
     let url = row.get("url").cloned().unwrap_or_default();
@@ -1161,10 +1215,11 @@ fn request_record(
             "url": url,
             "params": params,
             "http_status": status,
+            "logged_http_status": row.get("http_status"),
             "error": row.get("error").filter(|value| !value.is_empty()),
             "bytes": row.get("bytes"),
             "sha256": sha,
-            "outcome": if status == 200 && row.get("error").is_none_or(String::is_empty) { "response" } else { "failed_response" },
+            "outcome": if status == Some(200) && row.get("error").is_none_or(String::is_empty) { "response" } else { "failed_response" },
             "network_path": "unverified_local_capture",
             "terms_conclusion": "issue_172_owner_authorization_for_local_noncommercial_research"
         }),
@@ -1173,9 +1228,126 @@ fn request_record(
     }
 }
 
+fn historical_capture_issue(report: &mut Value, row: &CsvRow, reason: &'static str) {
+    report["historical_capture_issues"]
+        .as_array_mut()
+        .expect("array")
+        .push(json!({
+            "source": TDX_SOURCE_ID,
+            "session": row.get("session"),
+            "attempt": row.get("attempt"),
+            "reason": reason,
+            "error": row.get("error"),
+            "outcome": "unresolved"
+        }));
+}
+
+fn record_tdx_archive_integrity_mismatch(report: &mut Value, session: NaiveDate) {
+    report["invalid_tdx_sessions"]
+        .as_array_mut()
+        .expect("array")
+        .push(json!({
+            "session": session.to_string(),
+            "reason": "package_archive_integrity_mismatch"
+        }));
+}
+
+fn validate_zip_archive(bytes: &[u8]) -> AppResult<()> {
+    let mut archive = ZipArchive::new(Cursor::new(bytes))?;
+    if archive.is_empty() {
+        return Err(invalid("TDX archive is empty"));
+    }
+    for index in 0..archive.len() {
+        io::copy(&mut archive.by_index(index)?, &mut io::sink())?;
+    }
+    Ok(())
+}
+
+fn import_failed_tdx_capture(
+    store: &RawStore,
+    files: &[PathBuf],
+    session: NaiveDate,
+    row: &CsvRow,
+    validation: &BTreeMap<(NaiveDate, String), CsvRow>,
+    report: &mut Value,
+) -> AppResult<()> {
+    let expected_url = format!(
+        "https://www.tdx.com.cn/products/data/data/g4day/{}.zip",
+        session.format("%Y%m%d")
+    );
+    if row.get("url") != Some(&expected_url) {
+        historical_capture_issue(report, row, "source_or_url_mismatch");
+        return Ok(());
+    }
+    if required(row, "observed_at")
+        .and_then(validate_observed_at)
+        .is_err()
+    {
+        historical_capture_issue(report, row, "invalid_or_missing_observed_at");
+        return Ok(());
+    }
+    let status = match row.get("http_status").map(String::as_str) {
+        None | Some("") => {
+            historical_capture_issue(report, row, "missing_http_status");
+            None
+        }
+        Some(value) => match parse_u16(value) {
+            Ok(status) => Some(status),
+            Err(_) => {
+                historical_capture_issue(report, row, "invalid_http_status");
+                None
+            }
+        },
+    };
+    let sha = match required(row, "sha256").and_then(normalize_hash) {
+        Ok(sha) => sha,
+        Err(_) => {
+            historical_capture_issue(report, row, "invalid_or_missing_sha256");
+            return Ok(());
+        }
+    };
+    let bytes = match required(row, "bytes").and_then(parse_u64) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            historical_capture_issue(report, row, "invalid_or_missing_byte_length");
+            return Ok(());
+        }
+    };
+    let body = if bytes == 0 {
+        if sha != format!("sha256:{}", sha256(&[])) {
+            historical_capture_issue(report, row, "empty_response_hash_mismatch");
+            return Ok(());
+        }
+        Vec::new()
+    } else if let Some(body) = find_logged_body(files, &session.format("%Y%m%d").to_string(), &sha)?
+    {
+        body
+    } else {
+        historical_capture_issue(report, row, "missing_response_body");
+        return Ok(());
+    };
+    if body.len() as u64 != bytes {
+        historical_capture_issue(report, row, "byte_length_mismatch");
+        return Ok(());
+    }
+    if status == Some(200)
+        && validation_passes(validation.get(&(session, sha.clone())))
+        && validate_zip_archive(&body).is_err()
+    {
+        record_tdx_archive_integrity_mismatch(report, session);
+    }
+    put_once(
+        store,
+        &body,
+        request_record(TDX_SOURCE_ID, row, &sha, status, "application/octet-stream"),
+    )?;
+    Ok(())
+}
+
 fn inventory_record_raw(source_id: &str, row: &CsvRow) -> Value {
     json!({
         "source_id": source_id,
+        "capture_record": row,
         "url": row.get("url"),
         "params": row.get("url").and_then(|url| url.split_once('?').map(|(_, query)| query.to_owned())),
         "observed_at": row.get("observed_at"),

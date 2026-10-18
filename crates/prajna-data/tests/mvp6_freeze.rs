@@ -317,6 +317,302 @@ fn local_capture_import_preserves_incomplete_http_200_bodies_as_failed_raw() {
 }
 
 #[test]
+fn local_capture_import_preserves_legacy_failed_provenance_without_blocking_valid_retry() {
+    let root = TempDir::new().unwrap();
+    let tdx = tdx_package();
+    let calendar = calendar_month();
+    write_capture_tree(
+        root.path(),
+        &tdx,
+        b"access denied",
+        &calendar,
+        &sha256(&tdx),
+        &sha256(b"access denied"),
+        &sha256(&calendar),
+    );
+    let request_path = root.path().join("acceptance/tdx-daily-requests.csv");
+    let mut requests = fs::read_to_string(&request_path).unwrap();
+    requests.push_str(&format!(
+        "2022-10-10,3,2026-10-15T11:02:00Z,https://www.tdx.com.cn/products/data/data/g4day/20221010.zip,,TimeoutError,0,{}\n",
+        sha256(b"")
+    ));
+    requests.push_str(
+        "2022-10-10,4,2026-10-15T11:03:00Z,https://www.tdx.com.cn/products/data/data/g4day/20221010.zip,200,IncompleteRead,12,\n",
+    );
+    fs::write(&request_path, &requests).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
+        .args([
+            "import-existing",
+            "--test-root",
+            root.path().to_str().unwrap(),
+            "--start",
+            START,
+            "--end",
+            END,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "CLI failed: {}; report={}",
+        String::from_utf8_lossy(&output.stderr),
+        coverage_report(root.path())
+    );
+    assert_eq!(fs::read_to_string(request_path).unwrap(), requests);
+    let report = coverage_report(root.path());
+    assert_eq!(report["dataset_published"], true);
+    assert_eq!(report["mvp6_complete"], false);
+    assert_eq!(report["historical_capture_status"], "unresolved");
+    let issues = report["historical_capture_issues"].as_array().unwrap();
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["reason"] == "missing_http_status")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["reason"] == "invalid_or_missing_sha256")
+    );
+    let empty_id = format!("sha256:{}", sha256(b""));
+    let store = RawStore::open(root.path()).unwrap();
+    let source = store.sources(&empty_id).unwrap().remove(0);
+    assert!(source.request["http_status"].is_null());
+    assert_eq!(source.request["outcome"], "failed_response");
+    let manifest: Manifest =
+        serde_json::from_slice(&fs::read(&manifest_paths(root.path())[0]).unwrap()).unwrap();
+    assert!(
+        !manifest
+            .core
+            .inputs
+            .iter()
+            .any(|input| input.raw_sha256 == empty_id)
+    );
+    let inventory: Value = serde_json::from_slice(
+        &fs::read(root.path().join("acceptance/mvp6-raw-inventory.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        inventory["request_records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|record| record["error"] == "IncompleteRead"
+                && record["sha256"] == ""
+                && record["capture_record"]["bytes"] == "12"
+                && record["capture_record"]["attempt"] == "4")
+    );
+    let report_path = root.path().join("acceptance/mvp6-coverage.json");
+    let mut previous = report;
+    previous["mvp6_complete"] = serde_json::json!(true);
+    fs::write(&report_path, serde_json::to_vec(&previous).unwrap()).unwrap();
+    let rerun = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
+        .args([
+            "import-existing",
+            "--test-root",
+            root.path().to_str().unwrap(),
+            "--start",
+            START,
+            "--end",
+            END,
+        ])
+        .output()
+        .unwrap();
+    assert!(rerun.status.success());
+    assert_eq!(coverage_report(root.path())["mvp6_complete"], false);
+}
+
+#[test]
+fn local_capture_import_excludes_truncated_archives_but_still_requires_a_valid_retry() {
+    let root = TempDir::new().unwrap();
+    let tdx = tdx_package();
+    let calendar = calendar_month();
+    write_capture_tree(
+        root.path(),
+        &tdx,
+        b"access denied",
+        &calendar,
+        &sha256(&tdx),
+        &sha256(b"access denied"),
+        &sha256(&calendar),
+    );
+    let truncated = &tdx[..tdx.len() / 2];
+    fs::write(
+        root.path().join("raw/tdx-daily/20221010-attempt3.zip"),
+        truncated,
+    )
+    .unwrap();
+    let request_path = root.path().join("acceptance/tdx-daily-requests.csv");
+    let original = fs::read_to_string(&request_path).unwrap();
+    let corrupt_row = format!(
+        "2022-10-10,3,2026-10-15T11:02:00Z,https://www.tdx.com.cn/products/data/data/g4day/20221010.zip,200,,{},{}\n",
+        truncated.len(),
+        sha256(truncated)
+    );
+    fs::write(&request_path, format!("{original}{corrupt_row}")).unwrap();
+    let import = || {
+        Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
+            .args([
+                "import-existing",
+                "--test-root",
+                root.path().to_str().unwrap(),
+                "--start",
+                START,
+                "--end",
+                END,
+            ])
+            .output()
+            .unwrap()
+    };
+    assert!(
+        import().status.success(),
+        "{}",
+        coverage_report(root.path())
+    );
+    let report = coverage_report(root.path());
+    assert_eq!(report["historical_capture_status"], "unresolved");
+    assert!(
+        report["historical_capture_issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["reason"] == "invalid_zip_archive")
+    );
+    let truncated_id = format!("sha256:{}", sha256(truncated));
+    let store = RawStore::open(root.path()).unwrap();
+    assert_eq!(store.get(&truncated_id).unwrap(), truncated);
+    let source = store.sources(&truncated_id).unwrap().remove(0);
+    assert_eq!(source.request["outcome"], "failed_response");
+    assert_eq!(source.request["validation_error"], "invalid_zip_archive");
+    assert!(source.request["error"].is_null());
+    let manifest: Manifest =
+        serde_json::from_slice(&fs::read(&manifest_paths(root.path())[0]).unwrap()).unwrap();
+    assert!(
+        !manifest
+            .core
+            .inputs
+            .iter()
+            .any(|input| input.raw_sha256 == truncated_id)
+    );
+    let without_success = original
+        .lines()
+        .filter(|line| !line.starts_with("2022-10-10,1,"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(&request_path, format!("{without_success}\n{corrupt_row}")).unwrap();
+    assert!(!import().status.success());
+    let report = coverage_report(root.path());
+    assert_eq!(report["import_status"], "unresolved");
+    assert_eq!(report["missing_tdx_sessions"], serde_json::json!([START]));
+}
+
+#[test]
+fn local_capture_import_never_quarantines_invalid_success_provenance_or_valid_revisions() {
+    for scenario in [
+        "missing_status",
+        "missing_sha256",
+        "missing_body",
+        "length_mismatch",
+        "missing_validation",
+        "conflicting_revision",
+        "validated_corrupt_archive",
+        "validated_corrupt_archive_with_request_error",
+    ] {
+        let root = TempDir::new().unwrap();
+        let tdx = tdx_package();
+        let calendar = calendar_month();
+        write_capture_tree(
+            root.path(),
+            &tdx,
+            b"access denied",
+            &calendar,
+            &sha256(&tdx),
+            &sha256(b"access denied"),
+            &sha256(&calendar),
+        );
+        let mut other = tdx.clone();
+        other.extend_from_slice(b"synthetic revision");
+        if matches!(
+            scenario,
+            "validated_corrupt_archive" | "validated_corrupt_archive_with_request_error"
+        ) {
+            other.truncate(other.len() / 2);
+        }
+        let other_sha = sha256(&other);
+        fs::write(
+            root.path().join("raw/tdx-daily/20221010-attempt3.zip"),
+            &other,
+        )
+        .unwrap();
+        let (status, bytes, digest) = match scenario {
+            "missing_status" => ("", tdx.len(), sha256(&tdx)),
+            "missing_sha256" => ("200", tdx.len(), String::new()),
+            "missing_body" => ("200", 12, sha256(b"not captured")),
+            "length_mismatch" => ("200", tdx.len() + 1, sha256(&tdx)),
+            _ => ("200", other.len(), other_sha.clone()),
+        };
+        let request_error = if scenario == "validated_corrupt_archive_with_request_error" {
+            "capture reported an error"
+        } else {
+            ""
+        };
+        let request_path = root.path().join("acceptance/tdx-daily-requests.csv");
+        let mut requests = fs::read_to_string(&request_path).unwrap();
+        requests.push_str(&format!(
+            "2022-10-10,3,2026-10-15T11:02:00Z,https://www.tdx.com.cn/products/data/data/g4day/20221010.zip,{status},{request_error},{bytes},{digest}\n"
+        ));
+        fs::write(request_path, requests).unwrap();
+        if matches!(
+            scenario,
+            "conflicting_revision"
+                | "validated_corrupt_archive"
+                | "validated_corrupt_archive_with_request_error"
+        ) {
+            let path = root.path().join("acceptance/tdx-daily-validation.csv");
+            let mut validations = fs::read_to_string(&path).unwrap();
+            validations.push_str(&format!(
+                "2022-10-10,{other_sha},true,true,true,1,1,1,1,true\n"
+            ));
+            fs::write(path, validations).unwrap();
+        }
+        let output = Command::new(env!("CARGO_BIN_EXE_prajna-mvp6-freeze"))
+            .args([
+                "import-existing",
+                "--test-root",
+                root.path().to_str().unwrap(),
+                "--start",
+                START,
+                "--end",
+                END,
+            ])
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "scenario: {scenario}");
+        let report = coverage_report(root.path());
+        assert_eq!(report["dataset_published"], false, "scenario: {scenario}");
+        assert!(
+            manifest_paths(root.path()).is_empty(),
+            "scenario: {scenario}"
+        );
+        assert_eq!(
+            report["historical_capture_issues"],
+            serde_json::json!([]),
+            "scenario: {scenario}"
+        );
+        if scenario.starts_with("validated_corrupt_archive") {
+            assert!(
+                report["invalid_tdx_sessions"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|issue| issue["reason"] == "package_archive_integrity_mismatch"),
+                "scenario: {scenario}"
+            );
+        }
+    }
+}
+
+#[test]
 fn local_capture_import_fails_closed_when_a_requested_session_has_no_valid_package() {
     let root = TempDir::new().unwrap();
     let calendar = calendar_month();
