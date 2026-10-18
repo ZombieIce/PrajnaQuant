@@ -133,7 +133,15 @@ fn local_capture_import_publishes_v4_and_keeps_failed_responses_out_of_dataset_i
     previous["source_status"]["sina_adjustment_factors"] =
         serde_json::json!("captured_raw_pairs_not_normalized");
     previous["source_status"]["cninfo"] = serde_json::json!("captured_index_with_unknowns");
-    previous["sina_failures"] = serde_json::json!(["sz159900"]);
+    previous["sina_failures"] = serde_json::json!([{
+        "symbol": "sz159900",
+        "reason": "synthetic Sina gap"
+    }]);
+    previous["sina_not_attempted"] = serde_json::json!([{
+        "symbol": "sz159901",
+        "source_stop_reason": "synthetic Sina stop"
+    }]);
+    previous["sina_source_stop_reason"] = serde_json::json!("synthetic Sina stop");
     previous["p21_mismatches"] = serde_json::json!(["synthetic discrepancy"]);
     let previous_dsv = previous["dsv"].clone();
     fs::write(&report_path, serde_json::to_vec_pretty(&previous).unwrap()).unwrap();
@@ -178,7 +186,21 @@ fn local_capture_import_publishes_v4_and_keeps_failed_responses_out_of_dataset_i
     );
     assert_eq!(
         after_failure["sina_failures"],
-        serde_json::json!(["sz159900"])
+        serde_json::json!([{
+            "symbol": "sz159900",
+            "reason": "synthetic Sina gap"
+        }])
+    );
+    assert_eq!(
+        after_failure["sina_not_attempted"],
+        serde_json::json!([{
+            "symbol": "sz159901",
+            "source_stop_reason": "synthetic Sina stop"
+        }])
+    );
+    assert_eq!(
+        after_failure["sina_source_stop_reason"],
+        "synthetic Sina stop"
     );
     assert_eq!(
         after_failure["p21_mismatches"],

@@ -1,18 +1,22 @@
 //! Explicitly collects Sina qfq/hfq Raw for the local v4 candidate universe.
 
 use std::{
+    collections::BTreeSet,
     error::Error,
     fs, io,
     path::{Path, PathBuf},
 };
 
 use chrono::NaiveDate;
-use prajna_data::{RawStore, lock_mvp6_coverage_report, sina_adjust_factor::Collector};
+use prajna_data::{
+    RawStore, lock_mvp6_coverage_report,
+    sina_adjust_factor::{CollectionReport, CollectionStatus, Collector, SymbolOutcome},
+};
 use serde_json::{Value, json};
 
 fn main() {
-    if run().is_err() {
-        eprintln!("Sina collection unresolved; consult local acceptance files");
+    if let Err(error) = run() {
+        eprintln!("Sina collection unresolved: {error}");
         std::process::exit(1);
     }
 }
@@ -33,62 +37,51 @@ fn run() -> Result<(), Box<dyn Error>> {
         .filter(|symbol| !symbol.is_empty())
         .map(str::to_owned)
         .collect::<Vec<_>>();
+    let unique_symbols = symbols.iter().collect::<BTreeSet<_>>();
     if symbols.is_empty() || symbols.iter().any(|symbol| !valid_symbol(symbol)) {
         return Err(invalid("candidate symbol file is missing or outside the v4 TDX scope").into());
     }
+    if unique_symbols.len() != symbols.len() {
+        return Err(invalid("candidate symbol file contains duplicate symbols").into());
+    }
+    let mut symbols = symbols;
+    symbols.sort();
     let raw = RawStore::open(&root)?;
     let mut collector = Collector::direct_with_network_path(raw, args.network_path.clone())?;
-    let mut pairs = Vec::new();
-    let mut failure = None;
-    for symbol in &symbols {
-        match collector.collect(std::slice::from_ref(symbol), args.start, args.end) {
-            Ok(mut completed) => pairs.append(&mut completed),
-            Err(_) => {
-                failure = Some(symbol.clone());
-                break;
-            }
-        }
-    }
-
-    let complete = failure.is_none() && pairs.len() == symbols.len();
-    let completed_symbols = pairs
-        .iter()
-        .map(|pair| pair.symbol.as_str())
-        .collect::<std::collections::BTreeSet<_>>();
-    let remaining = symbols
-        .iter()
-        .filter(|symbol| {
-            !completed_symbols.contains(symbol.as_str())
-                && failure.as_deref() != Some(symbol.as_str())
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    let pair_records = pairs
-        .iter()
-        .map(|pair| {
-            json!({
-                "symbol": pair.symbol,
-                "qfq_raw_sha256": pair.qfq_raw_sha256,
-                "hfq_raw_sha256": pair.hfq_raw_sha256
-            })
-        })
-        .collect::<Vec<_>>();
+    let report = collector.collect(&symbols, args.start, args.end)?;
     let local_result = json!({
-        "contract": "mvp-6/#206",
+        "contract": "mvp-6/#215",
         "window": {"start": args.start.to_string(), "end": args.end.to_string()},
         "network_path": args.network_path,
-        "status": if complete { "complete" } else { "source_stopped_unresolved" },
+        "status": report.status,
         "candidate_symbols": symbols,
-        "completed_pairs": pair_records,
-        "failed_symbol": failure,
-        "remaining_symbols_not_attempted": remaining
+        "candidate_results": &report.outcomes,
+        "source_stop_reason": &report.source_stop_reason
     });
     write_json(&root.join("acceptance/sina/collection.json"), &local_result)?;
-    update_coverage(&root, complete, failure.as_deref())?;
-    if complete {
-        Ok(())
-    } else {
-        Err(invalid("Sina source did not complete every symbol").into())
+    update_coverage(&root, &report)?;
+    match report.status {
+        CollectionStatus::Complete => Ok(()),
+        CollectionStatus::CompletedWithGaps => {
+            let gaps = report
+                .outcomes
+                .iter()
+                .filter_map(|outcome| match outcome {
+                    SymbolOutcome::Gap { symbol, reason } => Some(format!("{symbol}: {reason}")),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            Err(io::Error::other(format!("Sina collection has per-symbol gaps: {gaps}")).into())
+        }
+        CollectionStatus::SourceStopped => Err(io::Error::other(format!(
+            "Sina source stopped: {}",
+            report
+                .source_stop_reason
+                .as_deref()
+                .unwrap_or("unresolved source stop")
+        ))
+        .into()),
     }
 }
 
@@ -138,24 +131,44 @@ fn valid_symbol(symbol: &str) -> bool {
         && matches!(&symbol[2..5], "158" | "159")
 }
 
-fn update_coverage(
-    root: &Path,
-    complete: bool,
-    failed_symbol: Option<&str>,
-) -> Result<(), Box<dyn Error>> {
+fn update_coverage(root: &Path, collection: &CollectionReport) -> Result<(), Box<dyn Error>> {
     let _coverage_lock = lock_mvp6_coverage_report(root)?;
     let path = root.join("acceptance/mvp6-coverage.json");
     let mut report: Value = serde_json::from_slice(&fs::read(&path)?)?;
-    report["source_status"]["sina_adjustment_factors"] = json!(if complete {
-        "captured_raw_pairs_not_normalized"
-    } else {
-        "source_stopped_unresolved"
+    report["source_status"]["sina_adjustment_factors"] = json!(match collection.status {
+        CollectionStatus::Complete => "captured_raw_pairs_not_normalized",
+        CollectionStatus::CompletedWithGaps => "captured_with_symbol_gaps",
+        CollectionStatus::SourceStopped => "source_stopped_unresolved",
     });
-    if let Some(symbol) = failed_symbol {
-        report["sina_failures"] = json!([symbol]);
-    } else {
-        report["sina_failures"] = json!([]);
-    }
+    report["sina_failures"] = json!(
+        collection
+            .outcomes
+            .iter()
+            .filter_map(|outcome| match outcome {
+                SymbolOutcome::Gap { symbol, reason } => {
+                    Some(json!({"symbol": symbol, "reason": reason}))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    );
+    report["sina_not_attempted"] = json!(
+        collection
+            .outcomes
+            .iter()
+            .filter_map(|outcome| match outcome {
+                SymbolOutcome::NotAttempted {
+                    symbol,
+                    source_stop_reason,
+                } => Some(json!({
+                    "symbol": symbol,
+                    "source_stop_reason": source_stop_reason
+                })),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    );
+    report["sina_source_stop_reason"] = json!(collection.source_stop_reason);
     write_json(&path, &report)
 }
 
@@ -196,4 +209,88 @@ fn parse_date(value: &str) -> Result<NaiveDate, Box<dyn Error>> {
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn coverage_report_distinguishes_complete_gaps_and_source_stop() {
+        let root = tempfile::tempdir().unwrap();
+        let acceptance = root.path().join("acceptance");
+        fs::create_dir_all(&acceptance).unwrap();
+        let path = acceptance.join("mvp6-coverage.json");
+        let cases = [
+            (
+                CollectionReport {
+                    status: CollectionStatus::Complete,
+                    outcomes: vec![SymbolOutcome::Completed {
+                        symbol: "sz159901".into(),
+                        qfq_raw_sha256: "qfq".into(),
+                        hfq_raw_sha256: "hfq".into(),
+                    }],
+                    source_stop_reason: None,
+                },
+                "captured_raw_pairs_not_normalized",
+                0,
+                0,
+                Value::Null,
+            ),
+            (
+                CollectionReport {
+                    status: CollectionStatus::CompletedWithGaps,
+                    outcomes: vec![SymbolOutcome::Gap {
+                        symbol: "sz159901".into(),
+                        reason: "HTTP 404".into(),
+                    }],
+                    source_stop_reason: None,
+                },
+                "captured_with_symbol_gaps",
+                1,
+                0,
+                Value::Null,
+            ),
+            (
+                CollectionReport {
+                    status: CollectionStatus::SourceStopped,
+                    outcomes: vec![
+                        SymbolOutcome::Gap {
+                            symbol: "sz159901".into(),
+                            reason: "access control returned HTTP 403".into(),
+                        },
+                        SymbolOutcome::NotAttempted {
+                            symbol: "sz159902".into(),
+                            source_stop_reason: "access control returned HTTP 403".into(),
+                        },
+                    ],
+                    source_stop_reason: Some("access control returned HTTP 403".into()),
+                },
+                "source_stopped_unresolved",
+                1,
+                1,
+                json!("access control returned HTTP 403"),
+            ),
+        ];
+
+        for (collection, expected_status, failure_count, not_attempted_count, stop_reason) in cases
+        {
+            fs::write(&path, br#"{"source_status":{}}"#).unwrap();
+            update_coverage(root.path(), &collection).unwrap();
+            let report: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            assert_eq!(
+                report["source_status"]["sina_adjustment_factors"],
+                expected_status
+            );
+            assert_eq!(
+                report["sina_failures"].as_array().unwrap().len(),
+                failure_count
+            );
+            assert_eq!(
+                report["sina_not_attempted"].as_array().unwrap().len(),
+                not_attempted_count
+            );
+            assert_eq!(report["sina_source_stop_reason"], stop_reason);
+        }
+    }
 }
