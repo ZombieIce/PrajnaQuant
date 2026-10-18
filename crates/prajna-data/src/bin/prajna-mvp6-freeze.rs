@@ -1334,17 +1334,15 @@ fn import_failed_tdx_capture(
         historical_capture_issue(report, row, "byte_length_mismatch");
         return Ok(());
     }
-    if status == Some(200)
-        && validation_passes(validation.get(&(session, sha.clone())))
-        && validate_zip_archive(&body).is_err()
-    {
+    let invalid_zip_archive = status == Some(200) && validate_zip_archive(&body).is_err();
+    if invalid_zip_archive && validation_passes(validation.get(&(session, sha.clone()))) {
         record_tdx_archive_integrity_mismatch(report, session);
     }
-    put_once(
-        store,
-        &body,
-        request_record(TDX_SOURCE_ID, row, &sha, status, "application/octet-stream"),
-    )?;
+    let mut source = request_record(TDX_SOURCE_ID, row, &sha, status, "application/octet-stream");
+    if invalid_zip_archive {
+        source.request["validation_error"] = json!("invalid_zip_archive");
+    }
+    put_once(store, &body, source)?;
     Ok(())
 }
 

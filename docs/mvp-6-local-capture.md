@@ -23,8 +23,10 @@ Missing or malformed failed-attempt metadata and unavailable failed bodies stay
 in `historical_capture_issues` with `historical_capture_status=unresolved`; the
 original CSV rows remain in the Raw inventory and are never rewritten.
 Recoverable failed bodies are still verified by length and SHA-256 before being
-stored. HTTP-200 bodies that fail ZIP integrity checks are retained as failed
-Raw with a separate `validation_error`, without inventing a transport error.
+stored. For both ordinary request rows and rows carrying a logged request
+error, HTTP-200 bodies that fail ZIP integrity checks are retained as failed
+Raw with a separate `validation_error`; the captured error and HTTP status are
+preserved without inventing a transport error.
 These historical failures never enter Dataset inputs and do not block a
 validated successful retry. Every requested session must still have a validated
 successful package; invalid successful provenance, missing validation for a

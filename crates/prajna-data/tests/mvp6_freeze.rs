@@ -631,6 +631,19 @@ fn local_capture_import_never_quarantines_invalid_success_provenance_or_valid_re
                 "scenario: {scenario}"
             );
         }
+        if scenario == "validated_corrupt_archive_with_request_error" {
+            let source_id = format!("sha256:{other_sha}");
+            let source = RawStore::open(root.path())
+                .unwrap()
+                .sources(&source_id)
+                .unwrap()
+                .remove(0);
+            assert_eq!(source.request["http_status"], 200);
+            assert_eq!(source.request["logged_http_status"], "200");
+            assert_eq!(source.request["error"], "capture reported an error");
+            assert_eq!(source.request["outcome"], "failed_response");
+            assert_eq!(source.request["validation_error"], "invalid_zip_archive");
+        }
     }
 }
 
