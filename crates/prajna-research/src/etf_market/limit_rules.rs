@@ -88,19 +88,15 @@ impl FundLimitRuleTable {
             return Ok(None);
         }
 
-        let mut matching_assignments = assignments.iter().filter(|assignment| {
+        let Some(assignment) = unique_match(assignments.iter().filter(|assignment| {
             assignment.instrument_id == *instrument_id
                 && assignment.effective_from <= session_date
                 && assignment
                     .effective_until
                     .is_none_or(|end| session_date < end)
-        });
-        let Some(assignment) = matching_assignments.next() else {
+        })) else {
             return Ok(None);
         };
-        if matching_assignments.next().is_some() {
-            return Ok(None);
-        }
         assignment.evidence.validate()?;
         if assignment.document_number.trim().is_empty()
             || assignment.document_number != assignment.evidence.announcement_id
@@ -112,17 +108,13 @@ impl FundLimitRuleTable {
             return Err(CatalogError("invalid fund-category assignment".into()));
         }
 
-        let mut matching_records = self.records.iter().filter(|record| {
+        let Some(record) = unique_match(self.records.iter().filter(|record| {
             record.fund_category == assignment.fund_category
                 && record.effective_from <= session_date
                 && record.effective_until.is_none_or(|end| session_date < end)
-        });
-        let Some(record) = matching_records.next() else {
+        })) else {
             return Ok(None);
         };
-        if matching_records.next().is_some() {
-            return Ok(None);
-        }
 
         Ok(Some(LimitRule {
             version: format!("{}/{}", self.version, record.id),
@@ -200,16 +192,14 @@ impl FundLimitRuleTable {
             return false;
         }
 
-        let mut matching_records = self.records.iter().filter(|record| {
+        let Some(record) = unique_match(self.records.iter().filter(|record| {
             record.fund_category == official_rule.fund_category
                 && record.effective_from <= session_date
                 && record.effective_until.is_none_or(|end| session_date < end)
-        });
-        let Some(record) = matching_records.next() else {
+        })) else {
             return false;
         };
-        matching_records.next().is_none()
-            && rule.version == format!("{}/{}", self.version, record.id)
+        rule.version == format!("{}/{}", self.version, record.id)
             && rule.effective_from == record.effective_from
             && rule.effective_until == record.effective_until
             && rule.rate_bps == record.rate_bps
@@ -349,6 +339,11 @@ impl FundLimitRuleTable {
     }
 }
 
+fn unique_match<T>(mut matches: impl Iterator<Item = T>) -> Option<T> {
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
+}
+
 fn intervals_overlap(
     first_start: NaiveDate,
     first_end: Option<NaiveDate>,
@@ -389,6 +384,47 @@ mod tests {
                     timestamp: "2023-04-09T08:00:00+08:00".parse::<TimestampNs>().unwrap(),
                 },
             },
+        }
+    }
+
+    #[test]
+    fn unique_match_requires_exactly_one_item() {
+        assert_eq!(unique_match(std::iter::empty::<u8>()), None);
+        assert_eq!(unique_match([1].into_iter()), Some(1));
+        assert_eq!(unique_match([1, 2].into_iter()), None);
+        assert_eq!(unique_match([1, 2, 3].into_iter()), None);
+    }
+
+    #[test]
+    fn missing_or_overlapping_rule_records_are_unresolved_and_unsupported() {
+        let table = FundLimitRuleTable::official_v1().unwrap();
+        let instrument_id = "159001.SZSE".parse().unwrap();
+        let session_date = date("2023-04-10");
+        let assignments = [category_assignment(
+            &instrument_id,
+            "szse-fund-default-10pct",
+            "2022-10-01",
+            None,
+            "SYNTHETIC-LIST-A",
+        )];
+        let rule = table
+            .rule_for_with_assignments(&instrument_id, session_date, &assignments)
+            .unwrap()
+            .unwrap();
+        assert!(table.supports(&rule, &instrument_id, session_date));
+
+        let mut overlapping = table.clone();
+        overlapping.records.extend(table.records.iter().cloned());
+        let mut missing = table;
+        missing.records.clear();
+        for unresolved in [missing, overlapping] {
+            assert!(
+                unresolved
+                    .rule_for_with_assignments(&instrument_id, session_date, &assignments)
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(!unresolved.supports(&rule, &instrument_id, session_date));
         }
     }
 
