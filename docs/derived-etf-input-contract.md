@@ -18,8 +18,8 @@ v3 Bars 仍为原始价 D7 schema，另有 `bar_sources@1` Parquet：主键 `(in
 
 - 正成交 TDX 或腾讯补位 Bar、公告覆盖证据、已知 PIT 限价规则及来源参考价齐备，且无已知开盘停牌，才为 TRADABLE。取消双源匹配与来源独立性门槛；`source_crosscheck` 仅诊断。`source_independence` / 手填 `reference` 不能替代 v2 所需证据。
 - 参考价**只读 TDX `bar_sources.reference_price`**，不是前一 close；旧 `OpeningEvidence.reference` 不参与 v2 限价计算。腾讯补位无参考价，保持 UNKNOWN，不能用手填参考价修复。成交额仍为 null，不填零、估算或跳过 Session。
-- `LimitRule` 保留版本、半开生效区间 `[effective_from, effective_until)`、比例 bps、tick、首日适用及舍入，v2 另要求 `official_rule: {"document_number": "...", "fund_category": "..."}` 和对应官方条文 `Evidence`。规则证据必须在开盘前可知；缺文号/类别、未生效/已废止/迟到或未知规则均 UNKNOWN。规则按生命周期/日期显式提供，不从代码猜类别，不默认套 10%/20%；本票不提供未经核验的真实规则表。
-- 用来源参考价精确计算并按 tick 四舍五入。开盘涨停不买、开盘跌停不卖；不改成双向 HALTED。另对已有 Bar 的 OHLC 校验 tick 与上下限，越界直接报 `prices_outside_pit_rule`，即使另有开盘停牌证据也不能吞掉价格矛盾。
+- `LimitRule` 保留版本、半开生效区间 `[effective_from, effective_until)`、比例 bps、tick、首日适用及舍入，v2 另要求 `official_rule` 中的官方文号、显式类别及类别赋值文号/生效区间/`Evidence`。`FundLimitRuleTable::official_v1()` 提供覆盖 `[2022-10-01, 2026-10-01)` 的 SZSE 官方法规行；内容、章节、PDF hash 与未验证的基金级类别成员缺口见 [SZSE 基金限价规则目录](szse-fund-limit-rules.md)。类别成员表目前为空，不能据法规类别描述推导某只基金成员。规则/类别证据必须在开盘前可知；缺失、未知、重叠、未生效、已废止或迟到的类别赋值/规则均 UNKNOWN，不默认套 10%/20%。
+- 用来源参考价精确计算并按 tick 四舍五入；另执行交易所的最小一 tick 价差及最低正 tick 下限。官方规则规定首个交易日参考前一日基金份额净值，目录据此记录 `first_session_reference = previous_net_asset_value`；v2 仍只消费 TDX `bar_sources.reference_price`，不从 close 或浏览器输入推算。开盘涨停不买、开盘跌停不卖；不改成双向 HALTED。另对已有 Bar 的 OHLC 校验 tick 与上下限，越界直接报 `prices_outside_pit_rule`，即使另有开盘停牌证据也不能吞掉价格矛盾。
 - 官方证据在开盘前已知且明确覆盖开盘时，HALTED，金额按 0。`OpeningOnly` 可与下午成交协调；`FullSession` 与正成交矛盾为 UNKNOWN。未在开盘前可知的停牌证据不用于宣称已知停牌，保持 UNKNOWN；无 Bar/无公告不能当停牌。
 - 规则/覆盖/行情可用时刻缺失或冲突时不成交。日线状态的 `available_at` 最早为当天 close，并取相关依赖最晚时刻；HALTED 不需要行情可用时刻，以停牌证据与当日 close 为界。`known_by` 仍保护收盘输入，`permits` 仍只是离线执行复核，**不是开盘前可知状态**。
 

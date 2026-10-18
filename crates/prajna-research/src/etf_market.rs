@@ -1,5 +1,7 @@
 //! MVP-6 offline opening evidence. Daily crosschecks are never backdated to open.
 //! The existing D7/execution path is unchanged; #177 consumes directional gates.
+pub mod limit_rules;
+
 use crate::pit_universe::{CatalogError, Evidence, HistoricalCatalog};
 use arrow_array::{Array, Date32Array, RecordBatch, StringArray};
 use chrono::NaiveDate;
@@ -56,6 +58,16 @@ pub struct OfficialLimitRule {
     pub document_number: String,
     /// Explicit PIT fund/rule category, not inferred from the trading symbol.
     pub fund_category: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category_evidence: Option<FundCategoryEvidence>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FundCategoryEvidence {
+    pub document_number: String,
+    pub effective_from: NaiveDate,
+    pub effective_until: Option<NaiveDate>,
+    pub evidence: Evidence,
 }
 /// Per-lifecycle PIT rule selection, including documented first-day applicability.
 /// Only nearest-tick half-up rounding is currently supported; no implicit IPO exemption.
@@ -69,9 +81,27 @@ pub struct LimitRule {
     pub tick: Price,
     pub rounding: String,
     pub applies_on_first_session: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_session_reference: Option<String>,
     pub evidence: Evidence,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supporting_evidence: Vec<Evidence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub official_rule: Option<OfficialLimitRule>,
+}
+impl LimitRule {
+    fn documents(&self) -> Vec<&Evidence> {
+        let mut documents = vec![&self.evidence];
+        documents.extend(self.supporting_evidence.iter());
+        if let Some(category_evidence) = self
+            .official_rule
+            .as_ref()
+            .and_then(|rule| rule.category_evidence.as_ref())
+        {
+            documents.push(&category_evidence.evidence);
+        }
+        documents
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -101,7 +131,7 @@ impl OpeningEvidence {
             .chain(self.source_independence.iter())
             .collect();
         out.extend(self.halt.iter().map(|x| &x.evidence));
-        out.extend(self.limit_rule.iter().map(|x| &x.evidence));
+        out.extend(self.limit_rule.iter().flat_map(LimitRule::documents));
         out.extend(self.reference.iter().map(|x| &x.evidence));
         out
     }
@@ -274,6 +304,11 @@ impl DerivedMarket {
         let source_sessions =
             prajna_data::sessions_from_record_batch(&tables.sessions).map_err(err)?;
         let v2 = evidence.semantic_version.is_some();
+        let limit_rule_table = if v2 {
+            Some(limit_rules::FundLimitRuleTable::official_v1()?)
+        } else {
+            None
+        };
         for session in &sessions {
             if !source_sessions.contains(session) {
                 return Err(err("Dataset calendar differs from Catalog"));
@@ -291,10 +326,35 @@ impl DerivedMarket {
             {
                 return Err(err("opening outside lifecycle/calendar"));
             }
+            let rule_table = limit_rule_table.as_ref();
+            let supported_rule = opening.limit_rule.as_ref().filter(|rule| {
+                rule_table.is_some_and(|table| table.supports(rule, opening.session_date))
+            });
+            let session_open = sessions
+                .iter()
+                .find(|session| session.session_date() == opening.session_date)
+                .expect("opening date was checked against selected sessions")
+                .ts_open();
             for doc in opening.documents() {
                 doc.validate()?;
                 raw.get(&doc.raw_sha256).map_err(err)?;
-                doc.available_at(catalog.input())?;
+                let is_rule_document = opening
+                    .limit_rule
+                    .as_ref()
+                    .is_some_and(|rule| rule.documents().contains(&doc));
+                if is_rule_document {
+                    if let (Some(rule), Some(table)) = (supported_rule, rule_table) {
+                        table.evidence_available_at(
+                            rule,
+                            doc,
+                            opening.session_date,
+                            session_open,
+                            catalog.input(),
+                        )?;
+                    }
+                } else {
+                    doc.available_at(catalog.input())?;
+                }
             }
             if openings
                 .insert(
@@ -387,8 +447,13 @@ impl DerivedMarket {
                         bars.get(&key),
                         sources.get(&key),
                         openings.get(&key).copied(),
-                        catalog,
-                        &evidence.rule_version,
+                        V2DerivationContext {
+                            catalog,
+                            limit_rule_table: limit_rule_table
+                                .as_ref()
+                                .ok_or_else(|| err("missing v2 limit-rule table"))?,
+                            version: &evidence.rule_version,
+                        },
                     )?
                 } else {
                     derive(
@@ -408,20 +473,30 @@ impl DerivedMarket {
             .openings
             .sort_by_key(|o| (o.instrument_id.clone(), o.session_date));
         let catalog_version = catalog.version()?;
-        let version = identity(
-            "derived-market",
-            &(
-                if v2 {
-                    "szse-derived-open@2"
-                } else {
-                    "szse-derived-open@1"
-                },
-                dsv,
-                &catalog_version,
-                &evidence,
-                cells.values().collect::<Vec<_>>(),
-            ),
-        )?;
+        let version = if let Some(table) = &limit_rule_table {
+            identity(
+                "derived-market",
+                &(
+                    "szse-derived-open@2",
+                    dsv,
+                    &catalog_version,
+                    &table.version,
+                    &evidence,
+                    cells.values().collect::<Vec<_>>(),
+                ),
+            )?
+        } else {
+            identity(
+                "derived-market",
+                &(
+                    "szse-derived-open@1",
+                    dsv,
+                    &catalog_version,
+                    &evidence,
+                    cells.values().collect::<Vec<_>>(),
+                ),
+            )?
+        };
         Ok(Self {
             sessions,
             cells,
@@ -706,7 +781,7 @@ fn derive(
     Ok(cell)
 }
 fn limit(reference: Price, tick: Price, bps: u32) -> Option<Price> {
-    if reference <= Price::ZERO || tick <= Price::ZERO {
+    if reference <= Price::ZERO || tick <= Price::ZERO || bps == 10000 {
         return None;
     }
     let numerator = reference.mantissa().checked_mul(i128::from(bps))?;
@@ -714,18 +789,32 @@ fn limit(reference: Price, tick: Price, bps: u32) -> Option<Price> {
     let units = numerator
         .checked_add(denominator / 2)?
         .checked_div(denominator)?;
-    Price::from_mantissa(units.checked_mul(tick.mantissa())?)
+    let rounded = units.checked_mul(tick.mantissa())?;
+    let direction = if bps > 10000 { 1 } else { -1 };
+    let mut price = rounded.max(tick.mantissa());
+    if price.checked_sub(reference.mantissa())?.checked_abs()? < tick.mantissa() {
+        price = reference
+            .mantissa()
+            .checked_add(tick.mantissa().checked_mul(direction)?)?
+            .max(tick.mantissa());
+    }
+    Price::from_mantissa(price)
         .ok()
         .filter(|p| *p > Price::ZERO)
 }
+struct V2DerivationContext<'a> {
+    catalog: &'a HistoricalCatalog,
+    limit_rule_table: &'a limit_rules::FundLimitRuleTable,
+    version: &'a str,
+}
+
 fn derive_v2(
     identity: (&InstrumentId, NaiveDate),
     session: &Session,
     bar: Option<&Bar>,
     source: Option<&BarSourceRow>,
     opening: Option<&OpeningEvidence>,
-    catalog: &HistoricalCatalog,
-    version: &str,
+    context: V2DerivationContext<'_>,
 ) -> Result<MarketCell> {
     let (id, listing) = identity;
     let mut cell = MarketCell {
@@ -741,7 +830,7 @@ fn derive_v2(
         upper_limit: None,
         lower_limit: None,
         sources: source.iter().map(|s| s.source_raw_sha256.clone()).collect(),
-        rule_version: version.into(),
+        rule_version: context.version.into(),
         limit_rule_version: opening.and_then(|o| o.limit_rule.as_ref().map(|r| r.version.clone())),
     };
     let Some(o) = opening else {
@@ -753,10 +842,28 @@ fn derive_v2(
         .announcement_coverage
         .iter()
         .chain(o.halt.iter().map(|h| &h.evidence))
-        .chain(o.limit_rule.iter().map(|r| &r.evidence))
     {
         cell.sources.insert(doc.raw_sha256.clone());
-        times.push(doc.available_at(catalog.input())?);
+        times.push(doc.available_at(context.catalog.input())?);
+    }
+    let supported_rule = o.limit_rule.as_ref().filter(|rule| {
+        context
+            .limit_rule_table
+            .supports(rule, session.session_date())
+    });
+    if let Some(rule) = &o.limit_rule {
+        for doc in rule.documents() {
+            cell.sources.insert(doc.raw_sha256.clone());
+            if supported_rule.is_some() {
+                times.push(context.limit_rule_table.evidence_available_at(
+                    rule,
+                    doc,
+                    session.session_date(),
+                    session.ts_open(),
+                    context.catalog.input(),
+                )?);
+            }
+        }
     }
     cell.available_at = o.market_available_at.map(|at| {
         times
@@ -770,22 +877,29 @@ fn derive_v2(
         .filter(|s| s.source == "tdx")
         .and_then(|s| s.reference_price);
     let rule = o.limit_rule.as_ref().filter(|r| {
-        !r.version.trim().is_empty()
-            && r.effective_from <= session.session_date()
-            && r.effective_until
-                .is_none_or(|end| session.session_date() < end)
-            && r.rate_bps > 0
-            && r.rate_bps < 10000
-            && r.tick > Price::ZERO
-            && r.rounding == "nearest_tick_half_up"
+        context.limit_rule_table.supports(r, session.session_date())
             && (listing != session.session_date() || r.applies_on_first_session)
-            && r.official_rule.as_ref().is_some_and(|rule| {
-                !rule.document_number.trim().is_empty() && !rule.fund_category.trim().is_empty()
-            })
     });
     let rule = match rule {
-        Some(r) if r.evidence.available_at(catalog.input())? < session.ts_open() => Some(r),
-        _ => None,
+        Some(rule) => {
+            let available_before_open = rule
+                .documents()
+                .iter()
+                .map(|evidence| {
+                    context.limit_rule_table.evidence_available_at(
+                        rule,
+                        evidence,
+                        session.session_date(),
+                        session.ts_open(),
+                        context.catalog.input(),
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?
+                .iter()
+                .all(|available_at| *available_at < session.ts_open());
+            available_before_open.then_some(rule)
+        }
+        None => None,
     };
     let limits = rule.zip(reference).and_then(|(r, p)| {
         Some((
@@ -814,7 +928,7 @@ fn derive_v2(
     if let Some(halt) = &o.halt {
         cell.can_buy = false;
         cell.can_sell = false;
-        let at = halt.evidence.available_at(catalog.input())?;
+        let at = halt.evidence.available_at(context.catalog.input())?;
         cell.available_at = Some(at.max(session.ts_close()));
         if at >= session.ts_open() {
             cell.reasons.insert("halt_not_known_before_open".into());
@@ -855,6 +969,41 @@ fn derive_v2(
         cell.can_sell = false;
     }
     Ok(cell)
+}
+
+#[cfg(test)]
+mod limit_price_tests {
+    use super::*;
+
+    #[test]
+    fn official_minimum_tick_gap_is_applied_after_rounding() {
+        let tick = Price::parse("0.001").unwrap();
+        assert_eq!(
+            limit(Price::parse("0.002").unwrap(), tick, 11000),
+            Some(Price::parse("0.003").unwrap())
+        );
+        assert_eq!(
+            limit(Price::parse("0.002").unwrap(), tick, 9000),
+            Some(Price::parse("0.001").unwrap())
+        );
+    }
+
+    #[test]
+    fn limit_prices_round_to_ticks_and_do_not_fall_below_one_tick() {
+        let tick = Price::parse("0.001").unwrap();
+        assert_eq!(
+            limit(Price::parse("1").unwrap(), tick, 11000),
+            Some(Price::parse("1.1").unwrap())
+        );
+        assert_eq!(
+            limit(Price::parse("1").unwrap(), tick, 9000),
+            Some(Price::parse("0.9").unwrap())
+        );
+        assert_eq!(
+            limit(Price::parse("0.0005").unwrap(), tick, 9000),
+            Some(tick)
+        );
+    }
 }
 
 #[cfg(test)]

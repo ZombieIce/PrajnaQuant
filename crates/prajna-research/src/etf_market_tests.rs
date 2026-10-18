@@ -135,7 +135,9 @@ fn data(catalog: &HistoricalCatalog) -> (NormalizedTables, MarketEvidence) {
                     tick: Price::parse("0.001").unwrap(),
                     rounding: "nearest_tick_half_up".into(),
                     applies_on_first_session: true,
+                    first_session_reference: None,
                     evidence: doc.clone(),
+                    supporting_evidence: vec![],
                     official_rule: None,
                 }),
                 reference: Some(ReferencePrice {
@@ -1009,12 +1011,66 @@ fn v2_evidence(catalog: &HistoricalCatalog) -> MarketEvidence {
     for opening in value["openings"].as_array_mut().unwrap() {
         opening["source_independence"] = serde_json::Value::Null;
         opening["reference"] = serde_json::Value::Null;
+        let mut category_evidence = opening["announcement_coverage"].clone();
+        category_evidence["announcement_id"] = serde_json::json!("SYNTHETIC-CATEGORY-LIST");
+        category_evidence["locator"] = serde_json::json!("synthetic category-list row");
+        opening["limit_rule"]["version"] =
+            serde_json::json!("szse-fund-limit-rules@1/fund-default-10pct-2021");
+        opening["limit_rule"]["effective_from"] = serde_json::json!("2021-04-06");
+        opening["limit_rule"]["effective_until"] = serde_json::json!("2023-04-10");
+        opening["limit_rule"]["first_session_reference"] =
+            serde_json::json!("previous_net_asset_value");
+        opening["limit_rule"]["evidence"]["announcement_id"] =
+            serde_json::json!("深证上〔2021〕337号");
+        opening["limit_rule"]["evidence"]["locator"] = serde_json::json!(
+            "https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020210331716400647184.pdf §§3.3.11, 3.3.15-3.3.16, 5.2.3(3)"
+        );
         opening["limit_rule"]["official_rule"] = serde_json::json!({
-            "document_number": "SYNTHETIC-EXCHANGE-2023-1",
-            "fund_category": "synthetic_domestic_equity_etf"
+            "document_number": "深证上〔2021〕337号",
+            "fund_category": "szse-fund-default-10pct",
+            "category_evidence": {
+                "document_number": "SYNTHETIC-CATEGORY-LIST",
+                "effective_from": "2022-10-01",
+                "effective_until": null,
+                "evidence": category_evidence
+            }
         });
     }
     serde_json::from_value(value).unwrap()
+}
+
+#[test]
+fn official_pre_window_rule_sources_are_available_for_the_scoped_period() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (raw, input) = fixture(tmp.path());
+    let cat = HistoricalCatalog::build(input, &raw).unwrap();
+    let table = limit_rules::FundLimitRuleTable::official_v1().unwrap();
+    let instrument_id: InstrumentId = "159001.SZSE".parse().unwrap();
+    let mut category_evidence = cat.input().lifecycles[0].listing.evidence.clone();
+    category_evidence.announcement_id = "SYNTHETIC-CATEGORY-LIST".into();
+    category_evidence.locator = "synthetic category-list row".into();
+    let assignment = limit_rules::FundCategoryAssignment {
+        instrument_id: instrument_id.clone(),
+        fund_category: "szse-chinext-index-etf-lof-class-b-20pct".into(),
+        effective_from: NaiveDate::from_ymd_opt(2022, 10, 1).unwrap(),
+        effective_until: None,
+        document_number: "SYNTHETIC-CATEGORY-LIST".into(),
+        evidence: category_evidence,
+    };
+    let rule = table
+        .rule_for_with_assignments(&instrument_id, date(1), &[assignment])
+        .unwrap()
+        .unwrap();
+    let available_at = table
+        .evidence_available_at(
+            &rule,
+            &rule.supporting_evidence[0],
+            date(1),
+            time(1, 9),
+            cat.input(),
+        )
+        .unwrap();
+    assert!(available_at < time(1, 9));
 }
 
 #[test]
@@ -1145,8 +1201,8 @@ fn v2_frozen_openings_use_tdx_ex_rights_reference_and_fail_closed() {
     assert!(eligible.excluded[&id].contains("amount_missing_input"));
     assert_eq!(eligible.universe.members.len(), 3);
 
-    // Unknown/expired/future rules, absent official category and coverage cannot trade.
-    for variant in 0..5 {
+    // Unknown/expired/future rules, absent category evidence and coverage cannot trade.
+    for variant in 0..7 {
         let mut missing = e.clone();
         let opening = &mut missing.openings[0];
         match variant {
@@ -1158,8 +1214,34 @@ fn v2_frozen_openings_use_tdx_ex_rights_reference_and_fail_closed() {
                 }
             }
             3 => opening.announcement_coverage = None,
-            _ => {
+            4 => {
                 missing.openings.remove(0);
+            }
+            5 => {
+                opening
+                    .limit_rule
+                    .as_mut()
+                    .unwrap()
+                    .official_rule
+                    .as_mut()
+                    .unwrap()
+                    .category_evidence
+                    .as_mut()
+                    .unwrap()
+                    .evidence
+                    .publication = Publication::Exact {
+                    timestamp: time(2, 8),
+                }
+            }
+            _ => {
+                opening
+                    .limit_rule
+                    .as_mut()
+                    .unwrap()
+                    .official_rule
+                    .as_mut()
+                    .unwrap()
+                    .fund_category = "unknown_category".into()
             }
         }
         let m = DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, missing).unwrap();

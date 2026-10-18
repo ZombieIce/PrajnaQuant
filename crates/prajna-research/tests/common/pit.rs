@@ -325,7 +325,9 @@ fn fixture_with_prices(
                     tick: "0.001".parse().unwrap(),
                     rounding: "nearest_tick_half_up".into(),
                     applies_on_first_session: true,
+                    first_session_reference: None,
                     evidence: known.clone(),
+                    supporting_evidence: vec![],
                 }),
                 reference: Some(ReferencePrice {
                     adjusted_previous_close: reference_price.to_string().parse().unwrap(),
