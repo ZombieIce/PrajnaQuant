@@ -135,7 +135,10 @@ fn data(catalog: &HistoricalCatalog) -> (NormalizedTables, MarketEvidence) {
                     tick: Price::parse("0.001").unwrap(),
                     rounding: "nearest_tick_half_up".into(),
                     applies_on_first_session: true,
+                    first_session_reference: None,
                     evidence: doc.clone(),
+                    supporting_evidence: vec![],
+                    rule_evidence: vec![],
                     official_rule: None,
                 }),
                 reference: Some(ReferencePrice {
@@ -336,6 +339,49 @@ fn availability_is_not_backdated_and_evidence_changes_identity() {
     assert!(!unknown_time.cells()[&(id.clone(), date(1))].can_buy);
 
     assert!(!build(&cat, &raw, &tables, e).cells()[&(id, date(1))].known_by(time(10, 15)));
+}
+
+#[test]
+fn date_only_membership_evidence_before_truncated_calendar_is_not_backdated_to_open() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_raw, mut input) = fixture(tmp.path());
+    let table = limit_rules::FundLimitRuleTable::official_v1().unwrap();
+    let instrument_id: InstrumentId = "159001.SZSE".parse().unwrap();
+    let mut assignment = limit_rules::FundCategoryAssignment {
+        instrument_id: instrument_id.clone(),
+        fund_category: "szse-fund-default-10pct".into(),
+        effective_from: date(1),
+        effective_until: None,
+        document_number: "SYNTHETIC-CATEGORY-LIST".into(),
+        evidence: input.broad_indices.evidence[0].clone(),
+        evidence_level: limit_rules::EvidenceLevel::Primary,
+    };
+    assignment.evidence.announcement_id = assignment.document_number.clone();
+    assignment.evidence.locator = "synthetic category-list row".into();
+    assignment.evidence.publication = Publication::DateOnly {
+        date: NaiveDate::from_ymd_opt(2022, 12, 31).unwrap(),
+    };
+    let rule = table
+        .rule_for_with_assignments(&instrument_id, date(1), &[assignment])
+        .unwrap()
+        .unwrap();
+
+    // The publication date predates this truncated calendar, so availability is unknown.
+    input.calendar_start = date(1);
+    assert!(
+        table
+            .evidence_available_at(&rule, &instrument_id, &rule.evidence, date(1), &input)
+            .is_err()
+    );
+
+    // With the publication date covered, the date-only fact becomes available at the
+    // first following session's close, never before that session's open.
+    input.calendar_start = NaiveDate::from_ymd_opt(2022, 12, 31).unwrap();
+    let available_at = table
+        .evidence_available_at(&rule, &instrument_id, &rule.evidence, date(1), &input)
+        .unwrap();
+    assert_eq!(available_at, time(1, 15));
+    assert!(available_at > time(1, 9));
 }
 
 fn cat_sessions(catalog: &HistoricalCatalog) -> Vec<Session> {
@@ -1009,12 +1055,93 @@ fn v2_evidence(catalog: &HistoricalCatalog) -> MarketEvidence {
     for opening in value["openings"].as_array_mut().unwrap() {
         opening["source_independence"] = serde_json::Value::Null;
         opening["reference"] = serde_json::Value::Null;
+        let mut category_evidence = opening["announcement_coverage"].clone();
+        category_evidence["announcement_id"] = serde_json::json!("SYNTHETIC-CATEGORY-LIST");
+        category_evidence["locator"] = serde_json::json!("synthetic category-list row");
+        let category_assignment = limit_rules::FundCategoryAssignment {
+            instrument_id: serde_json::from_value(opening["instrument_id"].clone()).unwrap(),
+            fund_category: "szse-fund-default-10pct".into(),
+            effective_from: NaiveDate::from_ymd_opt(2022, 10, 1).unwrap(),
+            effective_until: None,
+            document_number: "SYNTHETIC-CATEGORY-LIST".into(),
+            evidence: serde_json::from_value(category_evidence.clone()).unwrap(),
+            evidence_level: limit_rules::EvidenceLevel::Primary,
+        };
+        opening["limit_rule"]["version"] =
+            serde_json::json!("szse-fund-limit-rules@1/fund-default-10pct-2021");
+        opening["limit_rule"]["effective_from"] = serde_json::json!("2021-04-06");
+        opening["limit_rule"]["effective_until"] = serde_json::json!("2023-04-10");
+        opening["limit_rule"]["first_session_reference"] =
+            serde_json::json!("previous_trading_day_net_asset_value");
+        let table = limit_rules::FundLimitRuleTable::official_v1().unwrap();
+        opening["limit_rule"]["rule_evidence"] =
+            serde_json::to_value([table.records[0].evidence.clone()]).unwrap();
+        opening["limit_rule"]["evidence"] = category_evidence.clone();
         opening["limit_rule"]["official_rule"] = serde_json::json!({
-            "document_number": "SYNTHETIC-EXCHANGE-2023-1",
-            "fund_category": "synthetic_domestic_equity_etf"
+            "document_number": "深证上〔2021〕337号",
+            "fund_category": "szse-fund-default-10pct",
+            "category_evidence": {
+                "document_number": "SYNTHETIC-CATEGORY-LIST",
+                "instrument_id": opening["instrument_id"].clone(),
+                "fund_category": "szse-fund-default-10pct",
+                "assignment_identity": category_assignment.identity().unwrap(),
+                "effective_from": "2022-10-01",
+                "effective_until": null,
+                "evidence": category_evidence,
+                "evidence_level": "primary"
+            }
         });
     }
     serde_json::from_value(value).unwrap()
+}
+
+fn refresh_assignment_identity(category_evidence: &mut FundCategoryEvidence) {
+    let assignment = limit_rules::FundCategoryAssignment {
+        instrument_id: category_evidence.instrument_id.clone(),
+        fund_category: category_evidence.fund_category.clone(),
+        effective_from: category_evidence.effective_from,
+        effective_until: category_evidence.effective_until,
+        document_number: category_evidence.document_number.clone(),
+        evidence: category_evidence.evidence.clone(),
+        evidence_level: category_evidence.evidence_level,
+    };
+    category_evidence.assignment_identity = assignment.identity().unwrap();
+}
+
+#[test]
+fn official_pre_window_rule_sources_are_available_for_the_scoped_period() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (raw, input) = fixture(tmp.path());
+    let cat = HistoricalCatalog::build(input, &raw).unwrap();
+    let table = limit_rules::FundLimitRuleTable::official_v1().unwrap();
+    let instrument_id: InstrumentId = "159001.SZSE".parse().unwrap();
+    let mut category_evidence = cat.input().lifecycles[0].listing.evidence.clone();
+    category_evidence.announcement_id = "SYNTHETIC-CATEGORY-LIST".into();
+    category_evidence.locator = "synthetic category-list row".into();
+    let assignment = limit_rules::FundCategoryAssignment {
+        instrument_id: instrument_id.clone(),
+        fund_category: "szse-chinext-index-etf-lof-class-b-20pct".into(),
+        effective_from: NaiveDate::from_ymd_opt(2022, 10, 1).unwrap(),
+        effective_until: None,
+        document_number: "SYNTHETIC-CATEGORY-LIST".into(),
+        evidence: category_evidence,
+        evidence_level: limit_rules::EvidenceLevel::Secondary,
+    };
+    let rule = table
+        .rule_for_with_assignments(&instrument_id, date(1), &[assignment])
+        .unwrap()
+        .unwrap();
+    let available_at = table
+        .rule_evidence_available_at(
+            &rule,
+            &instrument_id,
+            &rule.rule_evidence[0],
+            date(1),
+            time(1, 9),
+            cat.input(),
+        )
+        .unwrap();
+    assert!(available_at < time(1, 9));
 }
 
 #[test]
@@ -1106,6 +1233,9 @@ fn v2_frozen_openings_use_tdx_ex_rights_reference_and_fail_closed() {
     e.openings[9].market_available_at = None;
     let market = DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, e.clone()).unwrap();
     let cell = |d| &market.cells()[&(id.clone(), date(d))];
+    // The listing-session rule applies and uses that session's TDX previous-NAV reference.
+    assert_eq!(cell(1).upper_limit, Some(Price::parse("1.1").unwrap()));
+    assert_eq!(cell(1).lower_limit, Some(Price::parse("0.9").unwrap()));
     // Prior close = 1, but TDX's ex-rights reference is 0.9: upper = 0.99.
     assert_eq!(cell(2).upper_limit, Some(Price::parse("0.99").unwrap()));
     assert!(cell(2).permits(true));
@@ -1145,8 +1275,8 @@ fn v2_frozen_openings_use_tdx_ex_rights_reference_and_fail_closed() {
     assert!(eligible.excluded[&id].contains("amount_missing_input"));
     assert_eq!(eligible.universe.members.len(), 3);
 
-    // Unknown/expired/future rules, absent official category and coverage cannot trade.
-    for variant in 0..5 {
+    // Unknown/expired/future rules, absent category evidence and coverage cannot trade.
+    for variant in 0..7 {
         let mut missing = e.clone();
         let opening = &mut missing.openings[0];
         match variant {
@@ -1158,8 +1288,37 @@ fn v2_frozen_openings_use_tdx_ex_rights_reference_and_fail_closed() {
                 }
             }
             3 => opening.announcement_coverage = None,
-            _ => {
+            4 => {
                 missing.openings.remove(0);
+            }
+            5 => {
+                let category_evidence = opening
+                    .limit_rule
+                    .as_mut()
+                    .unwrap()
+                    .official_rule
+                    .as_mut()
+                    .unwrap()
+                    .category_evidence
+                    .as_mut()
+                    .unwrap();
+                category_evidence.evidence.publication = Publication::Exact {
+                    timestamp: time(2, 8),
+                };
+                refresh_assignment_identity(category_evidence);
+            }
+            _ => {
+                let rule = opening
+                    .limit_rule
+                    .as_mut()
+                    .unwrap()
+                    .official_rule
+                    .as_mut()
+                    .unwrap();
+                rule.fund_category = "unknown_category".into();
+                let category_evidence = rule.category_evidence.as_mut().unwrap();
+                category_evidence.fund_category = "unknown_category".into();
+                refresh_assignment_identity(category_evidence);
             }
         }
         let m = DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, missing).unwrap();
