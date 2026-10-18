@@ -752,13 +752,7 @@ fn import_existing(
             source.request["validation_error"] = json!("invalid_zip_archive");
             put_once(&store, &body, source)?;
             if validation_passed {
-                report["invalid_tdx_sessions"]
-                    .as_array_mut()
-                    .expect("array")
-                    .push(json!({
-                        "session": session.to_string(),
-                        "reason": "package_archive_integrity_mismatch"
-                    }));
+                record_tdx_archive_integrity_mismatch(report, session);
             } else {
                 historical_capture_issue(report, row, "invalid_zip_archive");
             }
@@ -1248,6 +1242,16 @@ fn historical_capture_issue(report: &mut Value, row: &CsvRow, reason: &'static s
         }));
 }
 
+fn record_tdx_archive_integrity_mismatch(report: &mut Value, session: NaiveDate) {
+    report["invalid_tdx_sessions"]
+        .as_array_mut()
+        .expect("array")
+        .push(json!({
+            "session": session.to_string(),
+            "reason": "package_archive_integrity_mismatch"
+        }));
+}
+
 fn validate_zip_archive(bytes: &[u8]) -> AppResult<()> {
     let mut archive = ZipArchive::new(Cursor::new(bytes))?;
     if archive.is_empty() {
@@ -1330,13 +1334,7 @@ fn import_failed_tdx_capture(
         && validation_passes(validation.get(&(session, sha.clone())))
         && validate_zip_archive(&body).is_err()
     {
-        report["invalid_tdx_sessions"]
-            .as_array_mut()
-            .expect("array")
-            .push(json!({
-                "session": session.to_string(),
-                "reason": "package_archive_integrity_mismatch"
-            }));
+        record_tdx_archive_integrity_mismatch(report, session);
     }
     put_once(
         store,
