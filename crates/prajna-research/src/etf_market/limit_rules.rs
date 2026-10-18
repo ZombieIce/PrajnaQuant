@@ -19,6 +19,12 @@ pub struct FundCategoryAssignment {
     pub evidence: Evidence,
 }
 
+impl FundCategoryAssignment {
+    pub fn identity(&self) -> std::result::Result<String, CatalogError> {
+        super::identity("fund-category-assignment@1", self)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FundLimitRuleRecord {
@@ -139,6 +145,7 @@ impl FundLimitRuleTable {
                 category_evidence: Some(FundCategoryEvidence {
                     instrument_id: assignment.instrument_id.clone(),
                     fund_category: assignment.fund_category.clone(),
+                    assignment_identity: assignment.identity()?,
                     document_number: assignment.document_number.clone(),
                     effective_from: assignment.effective_from,
                     effective_until: assignment.effective_until,
@@ -163,6 +170,20 @@ impl FundLimitRuleTable {
         let Some(category_evidence) = official_rule.category_evidence.as_ref() else {
             return false;
         };
+        let assignment = FundCategoryAssignment {
+            instrument_id: category_evidence.instrument_id.clone(),
+            fund_category: category_evidence.fund_category.clone(),
+            effective_from: category_evidence.effective_from,
+            effective_until: category_evidence.effective_until,
+            document_number: category_evidence.document_number.clone(),
+            evidence: category_evidence.evidence.clone(),
+        };
+        if !assignment
+            .identity()
+            .is_ok_and(|identity| identity == category_evidence.assignment_identity)
+        {
+            return false;
+        }
         if category_evidence.document_number.trim().is_empty()
             || category_evidence.instrument_id != *instrument_id
             || category_evidence.fund_category != official_rule.fund_category
@@ -411,6 +432,16 @@ mod tests {
             Some(FirstSessionReference::PreviousNetAssetValue)
         );
         assert_ne!(before.version, after.version);
+        let mut altered_interval = after.clone();
+        altered_interval
+            .official_rule
+            .as_mut()
+            .unwrap()
+            .category_evidence
+            .as_mut()
+            .unwrap()
+            .effective_from = date("2022-10-01");
+        assert!(!table.supports(&altered_interval, &instrument_id, date("2023-04-10")));
         let mut reassigned = after.clone();
         reassigned
             .official_rule

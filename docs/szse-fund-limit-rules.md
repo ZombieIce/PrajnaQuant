@@ -65,7 +65,10 @@ unsupported or late evidence yields UNKNOWN. Pre-window date-only regulatory
 evidence is treated as known immediately before the evaluated open only when
 its publication date precedes its documented effective date and that effective
 date precedes the evaluated session. This does not relax availability checks
-for fund membership evidence.
+for fund membership evidence. The assignment identity hashes the instrument,
+category, half-open interval, document number, and evidence together; altering
+one component without rebuilding the assignment identity is rejected. This
+integrity binding does not replace source-text adjudication.
 
 CI uses only synthetic assignments and synthetic market inputs. Passing those
 tests verifies fail-closed resolution, date boundaries, price arithmetic, and

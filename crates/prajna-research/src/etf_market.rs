@@ -66,6 +66,7 @@ pub struct OfficialLimitRule {
 pub struct FundCategoryEvidence {
     pub instrument_id: InstrumentId,
     pub fund_category: String,
+    pub assignment_identity: String,
     pub document_number: String,
     pub effective_from: NaiveDate,
     pub effective_until: Option<NaiveDate>,

@@ -1014,6 +1014,14 @@ fn v2_evidence(catalog: &HistoricalCatalog) -> MarketEvidence {
         let mut category_evidence = opening["announcement_coverage"].clone();
         category_evidence["announcement_id"] = serde_json::json!("SYNTHETIC-CATEGORY-LIST");
         category_evidence["locator"] = serde_json::json!("synthetic category-list row");
+        let category_assignment = limit_rules::FundCategoryAssignment {
+            instrument_id: serde_json::from_value(opening["instrument_id"].clone()).unwrap(),
+            fund_category: "szse-fund-default-10pct".into(),
+            effective_from: NaiveDate::from_ymd_opt(2022, 10, 1).unwrap(),
+            effective_until: None,
+            document_number: "SYNTHETIC-CATEGORY-LIST".into(),
+            evidence: serde_json::from_value(category_evidence.clone()).unwrap(),
+        };
         opening["limit_rule"]["version"] =
             serde_json::json!("szse-fund-limit-rules@1/fund-default-10pct-2021");
         opening["limit_rule"]["effective_from"] = serde_json::json!("2021-04-06");
@@ -1032,6 +1040,7 @@ fn v2_evidence(catalog: &HistoricalCatalog) -> MarketEvidence {
                 "document_number": "SYNTHETIC-CATEGORY-LIST",
                 "instrument_id": opening["instrument_id"].clone(),
                 "fund_category": "szse-fund-default-10pct",
+                "assignment_identity": category_assignment.identity().unwrap(),
                 "effective_from": "2022-10-01",
                 "effective_until": null,
                 "evidence": category_evidence
@@ -1039,6 +1048,18 @@ fn v2_evidence(catalog: &HistoricalCatalog) -> MarketEvidence {
         });
     }
     serde_json::from_value(value).unwrap()
+}
+
+fn refresh_assignment_identity(category_evidence: &mut FundCategoryEvidence) {
+    let assignment = limit_rules::FundCategoryAssignment {
+        instrument_id: category_evidence.instrument_id.clone(),
+        fund_category: category_evidence.fund_category.clone(),
+        effective_from: category_evidence.effective_from,
+        effective_until: category_evidence.effective_until,
+        document_number: category_evidence.document_number.clone(),
+        evidence: category_evidence.evidence.clone(),
+    };
+    category_evidence.assignment_identity = assignment.identity().unwrap();
 }
 
 #[test]
@@ -1221,7 +1242,7 @@ fn v2_frozen_openings_use_tdx_ex_rights_reference_and_fail_closed() {
                 missing.openings.remove(0);
             }
             5 => {
-                opening
+                let category_evidence = opening
                     .limit_rule
                     .as_mut()
                     .unwrap()
@@ -1230,32 +1251,24 @@ fn v2_frozen_openings_use_tdx_ex_rights_reference_and_fail_closed() {
                     .unwrap()
                     .category_evidence
                     .as_mut()
-                    .unwrap()
-                    .evidence
-                    .publication = Publication::Exact {
+                    .unwrap();
+                category_evidence.evidence.publication = Publication::Exact {
                     timestamp: time(2, 8),
-                }
+                };
+                refresh_assignment_identity(category_evidence);
             }
             _ => {
-                opening
+                let rule = opening
                     .limit_rule
                     .as_mut()
                     .unwrap()
                     .official_rule
                     .as_mut()
-                    .unwrap()
-                    .fund_category = "unknown_category".into();
-                opening
-                    .limit_rule
-                    .as_mut()
-                    .unwrap()
-                    .official_rule
-                    .as_mut()
-                    .unwrap()
-                    .category_evidence
-                    .as_mut()
-                    .unwrap()
-                    .fund_category = "unknown_category".into()
+                    .unwrap();
+                rule.fund_category = "unknown_category".into();
+                let category_evidence = rule.category_evidence.as_mut().unwrap();
+                category_evidence.fund_category = "unknown_category".into();
+                refresh_assignment_identity(category_evidence);
             }
         }
         let m = DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, missing).unwrap();
