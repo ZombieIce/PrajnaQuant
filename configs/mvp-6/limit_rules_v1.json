@@ -1,0 +1,274 @@
+{
+  "version": "szse-fund-limit-rules@1",
+  "coverage_start": "2022-10-01",
+  "coverage_end_exclusive": "2026-10-01",
+  "records": [
+    {
+      "id": "fund-default-10pct-2021",
+      "fund_category": "szse-fund-default-10pct",
+      "category_description": "Other officially classified funds not designated for a special 20% limit; requires a PIT category assignment source.",
+      "effective_from": "2021-04-06",
+      "effective_until": "2023-04-10",
+      "rate_bps": 1000,
+      "tick": "0.001",
+      "rounding": "nearest_tick_half_up",
+      "applies_on_first_session": true,
+      "first_session_reference": "previous_net_asset_value",
+      "document_number": "深证上〔2021〕337号",
+      "evidence": {
+        "evidence_level": "primary",
+        "announcement_id": "深证上〔2021〕337号",
+        "locator": "https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020210331716400647184.pdf §§3.3.11, 3.3.15-3.3.16, 5.2.3(3)",
+        "publication": {
+          "precision": "date_only",
+          "date": "2021-03-31"
+        }
+      }
+    },
+    {
+      "id": "chinext-index-fund-20pct-2020",
+      "fund_category": "szse-chinext-index-etf-lof-class-b-20pct",
+      "category_description": "Index ETFs, LOFs or class-B structured-fund shares whose index constituents are exclusively ChiNext or other 20%-limit stocks.",
+      "effective_from": "2020-08-24",
+      "effective_until": "2023-04-10",
+      "rate_bps": 2000,
+      "tick": "0.001",
+      "rounding": "nearest_tick_half_up",
+      "applies_on_first_session": true,
+      "first_session_reference": "previous_net_asset_value",
+      "document_number": "深证上〔2020〕515号",
+      "evidence": {
+        "evidence_level": "primary",
+        "announcement_id": "深证上〔2020〕515号",
+        "locator": "https://www.szse.cn/lawrules/rule/repeal/rules/P020231230545310237980.pdf §2.9",
+        "publication": {
+          "precision": "date_only",
+          "date": "2020-06-12"
+        }
+      },
+      "supporting_evidence": [
+        {
+          "effective_from": "2021-04-06",
+          "evidence": {
+            "evidence_level": "primary",
+            "announcement_id": "深证上〔2021〕337号",
+            "locator": "https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020210331716400647184.pdf §§3.3.11, 3.3.15-3.3.16, 5.2.3(3)",
+            "publication": {
+              "precision": "date_only",
+              "date": "2021-03-31"
+            }
+          },
+          "document_number": "深证上〔2021〕337号"
+        }
+      ]
+    },
+    {
+      "id": "chinext-80pct-lof-20pct-2020",
+      "fund_category": "szse-chinext-80pct-lof-20pct",
+      "category_description": "LOFs with at least 80% of non-cash assets invested in ChiNext or other 20%-limit stocks.",
+      "effective_from": "2020-08-24",
+      "effective_until": "2023-04-10",
+      "rate_bps": 2000,
+      "tick": "0.001",
+      "rounding": "nearest_tick_half_up",
+      "applies_on_first_session": true,
+      "first_session_reference": "previous_net_asset_value",
+      "document_number": "深证上〔2020〕515号",
+      "evidence": {
+        "evidence_level": "primary",
+        "announcement_id": "深证上〔2020〕515号",
+        "locator": "https://www.szse.cn/lawrules/rule/repeal/rules/P020231230545310237980.pdf §2.9",
+        "publication": {
+          "precision": "date_only",
+          "date": "2020-06-12"
+        }
+      },
+      "supporting_evidence": [
+        {
+          "effective_from": "2021-04-06",
+          "evidence": {
+            "evidence_level": "primary",
+            "announcement_id": "深证上〔2021〕337号",
+            "locator": "https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020210331716400647184.pdf §§3.3.11, 3.3.15-3.3.16, 5.2.3(3)",
+            "publication": {
+              "precision": "date_only",
+              "date": "2021-03-31"
+            }
+          },
+          "document_number": "深证上〔2021〕337号"
+        }
+      ]
+    },
+    {
+      "id": "fund-default-10pct-2023",
+      "fund_category": "szse-fund-default-10pct",
+      "category_description": "Other officially classified funds not designated for a special 20% limit; requires a PIT category assignment source.",
+      "effective_from": "2023-04-10",
+      "effective_until": "2026-07-06",
+      "rate_bps": 1000,
+      "tick": "0.001",
+      "rounding": "nearest_tick_half_up",
+      "applies_on_first_session": true,
+      "first_session_reference": "previous_net_asset_value",
+      "document_number": "深证上〔2023〕98号",
+      "evidence": {
+        "evidence_level": "primary",
+        "announcement_id": "深证上〔2023〕98号",
+        "locator": "https://docs.static.szse.cn/www/lawrules/rule/repeal/rules/W020230217564423808793.pdf §§3.3.11, 3.3.13-3.3.15, 3.3.19, 5.2.3(3); notice https://www.szse.cn/lawrules/rule/repeal/rules/t20230217_598773.html",
+        "publication": {
+          "precision": "date_only",
+          "date": "2023-02-17"
+        }
+      }
+    },
+    {
+      "id": "chinext-index-fund-20pct-2023",
+      "fund_category": "szse-20pct-index-etf-lof",
+      "category_description": "Index ETFs and LOFs tracking indexes whose constituents are exclusively ChiNext or other 20%-limit securities.",
+      "effective_from": "2023-04-10",
+      "effective_until": "2026-07-06",
+      "rate_bps": 2000,
+      "tick": "0.001",
+      "rounding": "nearest_tick_half_up",
+      "applies_on_first_session": true,
+      "first_session_reference": "previous_net_asset_value",
+      "document_number": "深证上〔2023〕98号",
+      "evidence": {
+        "evidence_level": "primary",
+        "announcement_id": "深证上〔2023〕98号",
+        "locator": "https://docs.static.szse.cn/www/lawrules/rule/repeal/rules/W020230217564423808793.pdf §§3.3.13-3.3.15, 3.3.19, 5.2.3(3); effective date confirmed by https://www.szse.cn/aboutus/trends/news/t20230411_599874.html",
+        "publication": {
+          "precision": "date_only",
+          "date": "2023-02-17"
+        }
+      }
+    },
+    {
+      "id": "chinext-80pct-lof-20pct-2023",
+      "fund_category": "szse-20pct-80pct-lof",
+      "category_description": "LOFs with at least 80% of non-cash assets invested in ChiNext or other 20%-limit securities.",
+      "effective_from": "2023-04-10",
+      "effective_until": "2026-07-06",
+      "rate_bps": 2000,
+      "tick": "0.001",
+      "rounding": "nearest_tick_half_up",
+      "applies_on_first_session": true,
+      "first_session_reference": "previous_net_asset_value",
+      "document_number": "深证上〔2023〕98号",
+      "evidence": {
+        "evidence_level": "primary",
+        "announcement_id": "深证上〔2023〕98号",
+        "locator": "https://docs.static.szse.cn/www/lawrules/rule/repeal/rules/W020230217564423808793.pdf §§3.3.13-3.3.15, 3.3.19, 5.2.3(3); effective date confirmed by https://www.szse.cn/aboutus/trends/news/t20230411_599874.html",
+        "publication": {
+          "precision": "date_only",
+          "date": "2023-02-17"
+        }
+      }
+    },
+    {
+      "id": "fund-default-10pct-2026",
+      "fund_category": "szse-fund-default-10pct",
+      "category_description": "Other officially classified funds not designated for a special 20% limit; requires a PIT category assignment source.",
+      "effective_from": "2026-07-06",
+      "effective_until": null,
+      "rate_bps": 1000,
+      "tick": "0.001",
+      "rounding": "nearest_tick_half_up",
+      "applies_on_first_session": true,
+      "first_session_reference": "previous_net_asset_value",
+      "document_number": "深证上〔2026〕551号",
+      "evidence": {
+        "evidence_level": "primary",
+        "announcement_id": "深证上〔2026〕551号",
+        "locator": "https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020260424690713155663.pdf §§3.3.11, 3.3.13-3.3.15, 3.3.19, 5.2.3(3); notice https://www.szse.cn/lawrules/rule/trade/current/t20260424_620190.html",
+        "publication": {
+          "precision": "date_only",
+          "date": "2026-04-24"
+        }
+      }
+    },
+    {
+      "id": "chinext-index-fund-20pct-2026",
+      "fund_category": "szse-20pct-index-etf-lof",
+      "category_description": "Index ETFs and LOFs tracking indexes whose constituents are exclusively ChiNext or other 20%-limit securities.",
+      "effective_from": "2026-07-06",
+      "effective_until": null,
+      "rate_bps": 2000,
+      "tick": "0.001",
+      "rounding": "nearest_tick_half_up",
+      "applies_on_first_session": true,
+      "first_session_reference": "previous_net_asset_value",
+      "document_number": "深证上〔2026〕551号",
+      "evidence": {
+        "evidence_level": "primary",
+        "announcement_id": "深证上〔2026〕551号",
+        "locator": "https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020260424690713155663.pdf §§3.3.13-3.3.15, 3.3.19, 5.2.3(3); notice https://www.szse.cn/lawrules/rule/trade/current/t20260424_620190.html",
+        "publication": {
+          "precision": "date_only",
+          "date": "2026-04-24"
+        }
+      }
+    },
+    {
+      "id": "chinext-80pct-lof-20pct-2026",
+      "fund_category": "szse-20pct-80pct-lof",
+      "category_description": "LOFs with at least 80% of non-cash assets invested in ChiNext or other 20%-limit securities.",
+      "effective_from": "2026-07-06",
+      "effective_until": null,
+      "rate_bps": 2000,
+      "tick": "0.001",
+      "rounding": "nearest_tick_half_up",
+      "applies_on_first_session": true,
+      "first_session_reference": "previous_net_asset_value",
+      "document_number": "深证上〔2026〕551号",
+      "evidence": {
+        "evidence_level": "primary",
+        "announcement_id": "深证上〔2026〕551号",
+        "locator": "https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020260424690713155663.pdf §§3.3.13-3.3.15, 3.3.19, 5.2.3(3); notice https://www.szse.cn/lawrules/rule/trade/current/t20260424_620190.html",
+        "publication": {
+          "precision": "date_only",
+          "date": "2026-04-24"
+        }
+      }
+    }
+  ],
+  "category_assignments": [],
+  "unresolved_memberships": [
+    {
+      "native_symbol": "159919",
+      "effective_from": "2022-10-01",
+      "effective_until": "2026-10-01",
+      "status": "unknown",
+      "reason": "No source-backed point-in-time fund-category assignment is available in the committed evidence set; no limit percentage is inferred."
+    },
+    {
+      "native_symbol": "159560",
+      "effective_from": "2022-10-01",
+      "effective_until": "2026-10-01",
+      "status": "unknown",
+      "reason": "No source-backed point-in-time fund-category assignment is available in the committed evidence set; no limit percentage is inferred."
+    },
+    {
+      "native_symbol": "159522",
+      "effective_from": "2022-10-01",
+      "effective_until": "2026-10-01",
+      "status": "unknown",
+      "reason": "No source-backed point-in-time fund-category assignment is available in the committed evidence set; no limit percentage is inferred."
+    },
+    {
+      "native_symbol": "159612",
+      "effective_from": "2022-10-01",
+      "effective_until": "2026-10-01",
+      "status": "unknown",
+      "reason": "No source-backed point-in-time fund-category assignment is available in the committed evidence set; no limit percentage is inferred."
+    },
+    {
+      "native_symbol": "159952",
+      "effective_from": "2022-10-01",
+      "effective_until": "2026-10-01",
+      "status": "unknown",
+      "reason": "No source-backed point-in-time fund-category assignment is available in the committed evidence set; no limit percentage is inferred."
+    }
+  ],
+  "membership_scope": "coverage_window_not_lifecycle"
+}
