@@ -515,6 +515,7 @@ fn local_capture_import_never_quarantines_invalid_success_provenance_or_valid_re
         "length_mismatch",
         "missing_validation",
         "conflicting_revision",
+        "validated_corrupt_archive",
     ] {
         let root = TempDir::new().unwrap();
         let tdx = tdx_package();
@@ -530,6 +531,9 @@ fn local_capture_import_never_quarantines_invalid_success_provenance_or_valid_re
         );
         let mut other = tdx.clone();
         other.extend_from_slice(b"synthetic revision");
+        if scenario == "validated_corrupt_archive" {
+            other.truncate(other.len() / 2);
+        }
         let other_sha = sha256(&other);
         fs::write(
             root.path().join("raw/tdx-daily/20221010-attempt3.zip"),
@@ -549,7 +553,10 @@ fn local_capture_import_never_quarantines_invalid_success_provenance_or_valid_re
             "2022-10-10,3,2026-10-15T11:02:00Z,https://www.tdx.com.cn/products/data/data/g4day/20221010.zip,{status},,{bytes},{digest}\n"
         ));
         fs::write(request_path, requests).unwrap();
-        if scenario == "conflicting_revision" {
+        if matches!(
+            scenario,
+            "conflicting_revision" | "validated_corrupt_archive"
+        ) {
             let path = root.path().join("acceptance/tdx-daily-validation.csv");
             let mut validations = fs::read_to_string(&path).unwrap();
             validations.push_str(&format!(

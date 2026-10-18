@@ -29,7 +29,9 @@ These historical failures never enter Dataset inputs and do not block a
 validated successful retry. Every requested session must still have a validated
 successful package; invalid successful provenance, missing validation for a
 readable archive, wrong embedded sessions and conflicting successful revisions
-remain publication blockers. Publication does not resolve historical audit gaps
+remain publication blockers. A corrupt archive whose validation log claims
+success is a blocking integrity contradiction, not a quarantinable historical
+failure. Publication does not resolve historical audit gaps
 or establish complete #206 acceptance.
 
 ```sh

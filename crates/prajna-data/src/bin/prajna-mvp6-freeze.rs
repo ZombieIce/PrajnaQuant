@@ -732,8 +732,8 @@ fn import_existing(
                 .push(json!({"session": session.to_string(), "reason": "byte_length_mismatch"}));
             continue;
         }
-        let request_failed = row.get("error").is_some_and(|error| !error.is_empty());
-        if status == 200 && !request_failed && validate_zip_archive(&body).is_err() {
+        let validation_passed = validation_passes(validation.get(&(session, sha.clone())));
+        if status == 200 && validate_zip_archive(&body).is_err() {
             let mut source = request_record(
                 TDX_SOURCE_ID,
                 row,
@@ -744,7 +744,17 @@ fn import_existing(
             source.request["outcome"] = json!("failed_response");
             source.request["validation_error"] = json!("invalid_zip_archive");
             put_once(&store, &body, source)?;
-            historical_capture_issue(report, row, "invalid_zip_archive");
+            if validation_passed {
+                report["invalid_tdx_sessions"]
+                    .as_array_mut()
+                    .expect("array")
+                    .push(json!({
+                        "session": session.to_string(),
+                        "reason": "package_archive_integrity_mismatch"
+                    }));
+            } else {
+                historical_capture_issue(report, row, "invalid_zip_archive");
+            }
             continue;
         }
         let id = put_once(
@@ -755,15 +765,15 @@ fn import_existing(
                 row,
                 &sha,
                 Some(status),
-                if status == 200 && !request_failed {
+                if status == 200 {
                     "application/zip"
                 } else {
                     "application/octet-stream"
                 },
             ),
         )?;
-        if status == 200 && !request_failed {
-            let reason = if !validation_passes(validation.get(&(session, sha.clone()))) {
+        if status == 200 {
+            let reason = if !validation_passed {
                 Some("package_validation_missing_or_failed")
             } else if !tdx_package_matches_session(&body, session) {
                 Some("package_session_members_missing_or_mismatched")
