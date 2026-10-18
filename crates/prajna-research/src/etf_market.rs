@@ -76,7 +76,8 @@ pub struct FundCategoryEvidence {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FirstSessionReference {
-    PreviousNetAssetValue,
+    PreviousTradingDayNetAssetValue,
+    MostRecentlyPublishedNetAssetValue,
 }
 /// Per-lifecycle PIT rule selection, including documented first-day applicability.
 /// Only nearest-tick half-up rounding is currently supported; no implicit IPO exemption.
@@ -362,7 +363,6 @@ impl DerivedMarket {
                             &opening.instrument_id,
                             doc,
                             opening.session_date,
-                            session_open,
                             catalog.input(),
                         )?;
                     }
@@ -886,7 +886,6 @@ fn derive_v2(
                     id,
                     doc,
                     session.session_date(),
-                    session.ts_open(),
                     context.catalog.input(),
                 )?);
             }
@@ -932,7 +931,6 @@ fn derive_v2(
                         id,
                         evidence,
                         session.session_date(),
-                        session.ts_open(),
                         context.catalog.input(),
                     )
                 })

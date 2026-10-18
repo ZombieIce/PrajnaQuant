@@ -278,7 +278,6 @@ impl FundLimitRuleTable {
         instrument_id: &InstrumentId,
         evidence: &Evidence,
         session_date: NaiveDate,
-        session_open: TimestampNs,
         calendar: &CatalogInput,
     ) -> Result<TimestampNs> {
         if !self.supports(rule, instrument_id, session_date) {
@@ -286,34 +285,7 @@ impl FundLimitRuleTable {
                 "cannot resolve availability for an unsupported limit rule".into(),
             ));
         }
-        if let Ok(available_at) = evidence.available_at(calendar) {
-            return Ok(available_at);
-        }
-        let Some(official_rule) = rule.official_rule.as_ref() else {
-            return evidence.available_at(calendar);
-        };
-        let Some(category_evidence) = official_rule.category_evidence.as_ref() else {
-            return evidence.available_at(calendar);
-        };
-        let effective_from =
-            (category_evidence.evidence == *evidence).then_some(category_evidence.effective_from);
-        let Some(effective_from) = effective_from else {
-            return evidence.available_at(calendar);
-        };
-        let Publication::DateOnly { date } = evidence.publication else {
-            return evidence.available_at(calendar);
-        };
-        if date >= calendar.calendar_start
-            || date >= effective_from
-            || effective_from > session_date
-        {
-            return evidence.available_at(calendar);
-        }
-        let nanos = session_open
-            .as_unix_nanos()
-            .checked_sub(1)
-            .ok_or_else(|| CatalogError("session open timestamp underflow".into()))?;
-        Ok(TimestampNs::from_unix_nanos(nanos))
+        evidence.available_at(calendar)
     }
 
     pub fn rule_evidence_available_at(
@@ -604,7 +576,7 @@ mod tests {
         assert!(after.applies_on_first_session);
         assert_eq!(
             after.first_session_reference,
-            Some(FirstSessionReference::PreviousNetAssetValue)
+            Some(FirstSessionReference::MostRecentlyPublishedNetAssetValue)
         );
         assert_ne!(before.version, after.version);
         let mut altered_interval = after.clone();
@@ -630,6 +602,37 @@ mod tests {
         assert_eq!(
             after.official_rule.as_ref().unwrap().fund_category,
             "szse-20pct-index-etf-lof"
+        );
+    }
+
+    #[test]
+    fn default_rule_switches_first_session_reference_definition_on_2023_effective_date() {
+        let table = FundLimitRuleTable::official_v1().unwrap();
+        let instrument_id = "159001.SZSE".parse().unwrap();
+        let assignments = [category_assignment(
+            &instrument_id,
+            "szse-fund-default-10pct",
+            "2022-10-01",
+            None,
+            "SYNTHETIC-LIST-A",
+        )];
+
+        let before = table
+            .rule_for_with_assignments(&instrument_id, date("2023-04-09"), &assignments)
+            .unwrap()
+            .unwrap();
+        let after = table
+            .rule_for_with_assignments(&instrument_id, date("2023-04-10"), &assignments)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            before.first_session_reference,
+            Some(FirstSessionReference::PreviousTradingDayNetAssetValue)
+        );
+        assert_eq!(
+            after.first_session_reference,
+            Some(FirstSessionReference::MostRecentlyPublishedNetAssetValue)
         );
     }
 

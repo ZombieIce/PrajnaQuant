@@ -23,13 +23,21 @@ The 2026 rules take effect on 2026-07-06 and supersede the 2023 rules. The
 catalogue keeps the original legal effective dates while limiting resolution to
 the stated v1 coverage interval.
 
+For a fund's first trading session, the 2020 special rules and 2021 Trading
+Rules define the reference as the previous trading day's net asset value. The
+2023 and 2026 Trading Rules instead define it as the net asset value most
+recently published by the fund manager. The versioned rows encode this change
+at 2023-04-10. The current execution path still consumes TDX's
+`reference_price`; this catalogue field records the legal reference definition
+and does not derive or substitute a price.
+
 All listed rows use a 0.001 CNY tick, nearest-tick half-up rounding, and the
 exchange minimum one-tick difference between reference and limit price. When
 the rounded difference is less than one tick, the limit is moved to one tick
 from reference; a computed lower limit below one tick is raised to one tick.
-The first trading session is subject to the stated fund limit and uses the
-previous net asset value as its reference price; no stock IPO first-day
-exemption is inferred.
+The first trading session is subject to the applicable fund limit and its
+period-specific reference definition; no stock IPO first-day exemption is
+inferred.
 
 ## Primary sources
 
@@ -79,9 +87,12 @@ all rule and category evidence to be available before the session open;
 unsupported or late evidence yields UNKNOWN. Pre-window date-only regulatory
 evidence is treated as known immediately before the evaluated open only when
 its publication date precedes its documented effective date and that effective
-date precedes the evaluated session. This does not relax availability checks
-for fund membership evidence. The assignment identity hashes the instrument,
-category, half-open interval, document number, and evidence together; altering
+date precedes the evaluated session. This exception applies only to regulatory
+rule citations. Fund-membership evidence always uses `Evidence::available_at`;
+if its publication date falls outside the covered calendar, availability
+cannot be established and the rule cannot be resolved from that evidence. The
+assignment identity hashes the instrument, category, half-open interval,
+document number, and evidence together; altering
 one component without rebuilding the assignment identity is rejected. This
 integrity binding does not replace source-text adjudication.
 

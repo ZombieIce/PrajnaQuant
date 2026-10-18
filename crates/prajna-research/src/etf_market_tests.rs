@@ -341,6 +341,49 @@ fn availability_is_not_backdated_and_evidence_changes_identity() {
     assert!(!build(&cat, &raw, &tables, e).cells()[&(id, date(1))].known_by(time(10, 15)));
 }
 
+#[test]
+fn date_only_membership_evidence_before_truncated_calendar_is_not_backdated_to_open() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_raw, mut input) = fixture(tmp.path());
+    let table = limit_rules::FundLimitRuleTable::official_v1().unwrap();
+    let instrument_id: InstrumentId = "159001.SZSE".parse().unwrap();
+    let mut assignment = limit_rules::FundCategoryAssignment {
+        instrument_id: instrument_id.clone(),
+        fund_category: "szse-fund-default-10pct".into(),
+        effective_from: date(1),
+        effective_until: None,
+        document_number: "SYNTHETIC-CATEGORY-LIST".into(),
+        evidence: input.broad_indices.evidence[0].clone(),
+        evidence_level: limit_rules::EvidenceLevel::Primary,
+    };
+    assignment.evidence.announcement_id = assignment.document_number.clone();
+    assignment.evidence.locator = "synthetic category-list row".into();
+    assignment.evidence.publication = Publication::DateOnly {
+        date: NaiveDate::from_ymd_opt(2022, 12, 31).unwrap(),
+    };
+    let rule = table
+        .rule_for_with_assignments(&instrument_id, date(1), &[assignment])
+        .unwrap()
+        .unwrap();
+
+    // The publication date predates this truncated calendar, so availability is unknown.
+    input.calendar_start = date(1);
+    assert!(
+        table
+            .evidence_available_at(&rule, &instrument_id, &rule.evidence, date(1), &input)
+            .is_err()
+    );
+
+    // With the publication date covered, the date-only fact becomes available at the
+    // first following session's close, never before that session's open.
+    input.calendar_start = NaiveDate::from_ymd_opt(2022, 12, 31).unwrap();
+    let available_at = table
+        .evidence_available_at(&rule, &instrument_id, &rule.evidence, date(1), &input)
+        .unwrap();
+    assert_eq!(available_at, time(1, 15));
+    assert!(available_at > time(1, 9));
+}
+
 fn cat_sessions(catalog: &HistoricalCatalog) -> Vec<Session> {
     catalog.input().sessions.clone()
 }
@@ -1029,7 +1072,7 @@ fn v2_evidence(catalog: &HistoricalCatalog) -> MarketEvidence {
         opening["limit_rule"]["effective_from"] = serde_json::json!("2021-04-06");
         opening["limit_rule"]["effective_until"] = serde_json::json!("2023-04-10");
         opening["limit_rule"]["first_session_reference"] =
-            serde_json::json!("previous_net_asset_value");
+            serde_json::json!("previous_trading_day_net_asset_value");
         let table = limit_rules::FundLimitRuleTable::official_v1().unwrap();
         opening["limit_rule"]["rule_evidence"] =
             serde_json::to_value([table.records[0].evidence.clone()]).unwrap();
