@@ -1167,18 +1167,7 @@ impl HistoricalCatalog {
                 members.push(id);
             }
         }
-        let mut active_codes = BTreeSet::new();
-        for id in &members {
-            let life = self
-                .input
-                .lifecycles
-                .iter()
-                .find(|life| life.instrument_id().as_ref() == Ok(id))
-                .expect("member from Catalog");
-            if !active_codes.insert(life.native_symbol.clone()) {
-                return Err(error("as-of code reuse identity conflict"));
-            }
-        }
+        self.validate_active_code_uniqueness(&members)?;
         members.sort();
         let run_spec = UniverseRunSpec {
             semantic_version: "szse-fixed-list-universe@1".into(),
@@ -1330,20 +1319,7 @@ impl HistoricalCatalog {
                 members.push(id);
             }
         }
-        let mut active_codes = BTreeMap::new();
-        for id in &members {
-            let code = self
-                .input
-                .lifecycles
-                .iter()
-                .find(|l| l.instrument_id().as_ref() == Ok(id))
-                .expect("member from Catalog")
-                .native_symbol
-                .clone();
-            if active_codes.insert(code, id.clone()).is_some() {
-                return Err(error("as-of code reuse identity conflict"));
-            }
-        }
+        self.validate_active_code_uniqueness(&members)?;
         members.sort();
         let run_spec = UniverseRunSpec {
             semantic_version: "szse-pit-universe@1".into(),
@@ -1367,6 +1343,21 @@ impl HistoricalCatalog {
             members,
             excluded,
         })
+    }
+    fn validate_active_code_uniqueness(&self, members: &[InstrumentId]) -> Result<()> {
+        let mut active_codes = BTreeSet::new();
+        for id in members {
+            let life = self
+                .input
+                .lifecycles
+                .iter()
+                .find(|life| life.instrument_id().as_ref() == Ok(id))
+                .ok_or_else(|| error("Universe member has no Catalog lifecycle"))?;
+            if !active_codes.insert(&life.native_symbol) {
+                return Err(error("as-of code reuse identity conflict"));
+            }
+        }
+        Ok(())
     }
     fn sources(&self) -> BTreeSet<String> {
         let mut hashes = self.input.calendar_raw_sha256.clone();
