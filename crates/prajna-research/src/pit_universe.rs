@@ -42,6 +42,49 @@ fn scoped(code: &str) -> bool {
     code.len() == 6 && code.starts_with("159") && code.bytes().all(|b| b.is_ascii_digit())
 }
 
+pub const MVP6_FIXED_ETF_CODES: [&str; 5] = ["159919", "159560", "159522", "159612", "159952"];
+
+/// A named, immutable code list. Catalog lifecycle evidence still gates each
+/// decision Session; the list itself is a retrospective static selection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FixedUniverseSpec {
+    pub version: String,
+    pub codes: BTreeSet<String>,
+}
+impl FixedUniverseSpec {
+    pub fn new(version: impl Into<String>, codes: BTreeSet<String>) -> Result<Self> {
+        let spec = Self {
+            version: version.into(),
+            codes,
+        };
+        spec.validate()?;
+        Ok(spec)
+    }
+
+    pub fn mvp6() -> Self {
+        Self {
+            version: "mvp6-fixed-etf@1".into(),
+            codes: MVP6_FIXED_ETF_CODES
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+        }
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self.version.trim().is_empty()
+            || self.codes.is_empty()
+            || self.codes.iter().any(|code| !scoped(code))
+        {
+            return Err(error(
+                "invalid fixed Universe version or SZSE ETF code list",
+            ));
+        }
+        Ok(())
+    }
+}
+
 fn valid_szse_code(code: &str) -> bool {
     code.len() == 6 && code.bytes().all(|b| b.is_ascii_digit())
 }
@@ -338,7 +381,8 @@ pub struct CatalogInput {
     pub coverage: Coverage,
     pub lifecycles: Vec<Lifecycle>,
     pub scans: Vec<ScanObservation>,
-    pub broad_indices: BroadIndexList,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broad_indices: Option<BroadIndexList>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_ranges: Option<Vec<CodeRange>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -621,13 +665,15 @@ fn validate_v2_code_tables(input: &mut CatalogInput) -> Result<BTreeSet<String>>
 
 impl HistoricalCatalog {
     pub fn build(mut input: CatalogInput, raw: &RawStore) -> Result<Self> {
-        if !matches!(input.schema_version, 1 | 2)
-            || input.rule_version.trim().is_empty()
-            || input.broad_indices.version.trim().is_empty()
+        if !matches!(input.schema_version, 1 | 2) || input.rule_version.trim().is_empty() {
+            return Err(error("unsupported/empty Catalog rule version"));
+        }
+        if input
+            .broad_indices
+            .as_ref()
+            .is_some_and(|indices| indices.version.trim().is_empty())
         {
-            return Err(error(
-                "unsupported/empty Catalog or broad-index rule version",
-            ));
+            return Err(error("empty broad-index rule version"));
         }
         if input.coverage.start > input.coverage.end
             || input.calendar_start > input.coverage.start
@@ -645,26 +691,26 @@ impl HistoricalCatalog {
             || input.coverage.announcement_method.trim().is_empty()
             || input.coverage.announcement_raw_sha256.is_empty()
             || input.calendar_raw_sha256.is_empty()
-            || input.broad_indices.evidence.is_empty()
-            || input
-                .broad_indices
-                .index_ids
-                .iter()
-                .any(|id| id.trim().is_empty())
         {
-            return Err(error(
-                "coverage and index list require explicit methods and evidence",
-            ));
+            return Err(error("coverage requires explicit methods and evidence"));
         }
-        if input.schema_version == 1 && input.broad_indices.index_ids.is_empty()
-            || input.schema_version == 2 && input.broad_indices.named_indices.is_empty()
-        {
-            return Err(error(
-                "Catalog requires a nonempty versioned broad-index list",
-            ));
+        if let Some(indices) = &input.broad_indices {
+            if indices.evidence.is_empty()
+                || indices.index_ids.iter().any(|id| id.trim().is_empty())
+                || input.schema_version == 1 && indices.index_ids.is_empty()
+                || input.schema_version == 2 && indices.named_indices.is_empty()
+            {
+                return Err(error(
+                    "Catalog broad-index list requires version and evidence",
+                ));
+            }
         }
         let mut broad_index_ids = BTreeSet::new();
-        for index in &input.broad_indices.named_indices {
+        for index in input
+            .broad_indices
+            .iter()
+            .flat_map(|indices| &indices.named_indices)
+        {
             let terms: BTreeSet<_> = std::iter::once(&index.official_name)
                 .chain(index.aliases.iter())
                 .map(|term| normalized_name(term))
@@ -677,8 +723,9 @@ impl HistoricalCatalog {
             }
         }
         if input.schema_version == 2
-            && input.broad_indices.index_ids
-                != broad_index_ids.iter().cloned().collect::<BTreeSet<_>>()
+            && input.broad_indices.as_ref().is_some_and(|indices| {
+                indices.index_ids != broad_index_ids.iter().cloned().collect::<BTreeSet<_>>()
+            })
         {
             return Err(error(
                 "Catalog v2 broad-index IDs must match the named index entries",
@@ -727,7 +774,11 @@ impl HistoricalCatalog {
                 .iter()
                 .map(|snapshot| snapshot.raw_sha256.clone()),
         );
-        let mut evidence = input.broad_indices.evidence.clone();
+        let mut evidence = input
+            .broad_indices
+            .as_ref()
+            .map(|indices| indices.evidence.clone())
+            .unwrap_or_default();
         for (i, life) in input.lifecycles.iter_mut().enumerate() {
             if input.schema_version == 1 && !scoped(&life.native_symbol) {
                 return Err(error("Catalog v1 only accepts 159xxx lifecycles"));
@@ -923,11 +974,12 @@ impl HistoricalCatalog {
             .coverage
             .resolutions
             .sort_by_key(|r| r.native_symbol.clone());
-        input
-            .broad_indices
-            .evidence
-            .sort_by_cached_key(|e| serde_json::to_string(e).expect("serializable evidence"));
-        input.broad_indices.evidence.dedup();
+        if let Some(indices) = &mut input.broad_indices {
+            indices
+                .evidence
+                .sort_by_cached_key(|e| serde_json::to_string(e).expect("serializable evidence"));
+            indices.evidence.dedup();
+        }
         Ok(Self {
             input,
             differences,
@@ -1059,6 +1111,98 @@ impl HistoricalCatalog {
         }
         Ok(result)
     }
+    /// Resolve a fixed code list against evidenced Catalog lifecycles. This
+    /// selector deliberately ignores fund classification and broad-index lists.
+    pub fn fixed_universe(
+        &self,
+        session_date: NaiveDate,
+        fixed: &FixedUniverseSpec,
+    ) -> Result<UniverseBuildResult> {
+        fixed.validate()?;
+        if !self.gaps.is_empty() {
+            return Err(error(format!(
+                "incomplete historical coverage: {:?}",
+                self.gaps
+            )));
+        }
+        if session_date < self.input.coverage.start || session_date > self.input.coverage.end {
+            return Err(error("decision outside Catalog coverage"));
+        }
+        let session = self
+            .input
+            .sessions
+            .iter()
+            .find(|s| s.session_date() == session_date)
+            .ok_or_else(|| error("decision is not a covered Session"))?;
+        let now = session.ts_close();
+        let mut members = Vec::new();
+        let mut excluded = BTreeMap::new();
+        for life in &self.input.lifecycles {
+            let id = life.instrument_id()?;
+            let reason = if !fixed.codes.contains(&life.native_symbol) {
+                Some("outside_fixed_list")
+            } else if session_date < life.listing.effective_date.max(life.identity_start()) {
+                Some("before_listing")
+            } else if life.listing.evidence.available_at(&self.input)? > now {
+                Some("listing_not_known")
+            } else if life
+                .identity_end_exclusive
+                .is_some_and(|end| session_date >= end)
+            {
+                Some("outside_catalog_lifecycle")
+            } else if life.termination.as_ref().is_some_and(|termination| {
+                session_date >= termination.effective_date
+                    && termination
+                        .evidence
+                        .available_at(&self.input)
+                        .is_ok_and(|at| at <= now)
+            }) {
+                Some("terminated")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                excluded.insert(id, reason.into());
+            } else {
+                members.push(id);
+            }
+        }
+        let mut active_codes = BTreeSet::new();
+        for id in &members {
+            let life = self
+                .input
+                .lifecycles
+                .iter()
+                .find(|life| life.instrument_id().as_ref() == Ok(id))
+                .expect("member from Catalog");
+            if !active_codes.insert(life.native_symbol.clone()) {
+                return Err(error("as-of code reuse identity conflict"));
+            }
+        }
+        members.sort();
+        let run_spec = UniverseRunSpec {
+            semantic_version: "szse-fixed-list-universe@1".into(),
+            catalog_version: self.version()?,
+            broad_index_version: None,
+            fixed_list_version: Some(fixed.version.clone()),
+            fixed_list: Some(fixed.codes.clone()),
+            history_claim: Some("retrospective_static".into()),
+            warnings: Some(BTreeSet::from(["survivorship_bias".into()])),
+            rule_version: self.input.rule_version.clone(),
+            coverage: self.input.coverage.clone(),
+            coverage_gaps: BTreeSet::new(),
+            sources: self.sources(),
+            decision_session: session_date,
+            decision_at: now,
+        };
+        let universe_version = hash("pit-uni", &(&run_spec, &members, &excluded))?;
+        Ok(UniverseBuildResult {
+            universe_version,
+            run_spec,
+            members,
+            excluded,
+        })
+    }
     /// Diagnostic report has no successful Universe identity or usable member pool.
     pub fn diagnose_membership(&self, session_date: NaiveDate) -> Result<MembershipDiagnostics> {
         let result = self.evaluate_membership(session_date)?;
@@ -1085,9 +1229,12 @@ impl HistoricalCatalog {
             .ok_or_else(|| error("decision is not a covered Session"))?;
         let now = session.ts_close();
         // Every constituent of the list must itself be historically available.
-        if self
+        let broad_indices = self
             .input
             .broad_indices
+            .as_ref()
+            .ok_or_else(|| error("broad-index PIT selection requires a versioned list"))?;
+        if broad_indices
             .evidence
             .iter()
             .any(|e| e.available_at(&self.input).is_ok_and(|t| t > now))
@@ -1145,7 +1292,7 @@ impl HistoricalCatalog {
                     }
                     Some(first)
                         if self.input.schema_version == 1
-                            && !self.input.broad_indices.index_ids.contains(&first.index_id) =>
+                            && !broad_indices.index_ids.contains(&first.index_id) =>
                     {
                         Some("not_domestic_broad_index")
                     }
@@ -1161,7 +1308,7 @@ impl HistoricalCatalog {
                     Some(first)
                         if self.input.schema_version == 2
                             && !broad_index_matches(
-                                &self.input.broad_indices,
+                                broad_indices,
                                 first.legal_name.as_deref().unwrap_or_default(),
                             ) =>
                     {
@@ -1201,7 +1348,11 @@ impl HistoricalCatalog {
         let run_spec = UniverseRunSpec {
             semantic_version: "szse-pit-universe@1".into(),
             catalog_version: self.version()?,
-            broad_index_version: hash("broad-index", &self.input.broad_indices)?,
+            broad_index_version: Some(hash("broad-index", broad_indices)?),
+            fixed_list_version: None,
+            fixed_list: None,
+            history_claim: None,
+            warnings: None,
             rule_version: self.input.rule_version.clone(),
             coverage: self.input.coverage.clone(),
             coverage_gaps: session_gaps,
@@ -1230,9 +1381,8 @@ impl HistoricalCatalog {
         hashes.extend(
             self.input
                 .broad_indices
-                .evidence
                 .iter()
-                .map(|e| e.raw_sha256.clone()),
+                .flat_map(|indices| indices.evidence.iter().map(|e| e.raw_sha256.clone())),
         );
         hashes.extend(
             self.input
@@ -1283,7 +1433,16 @@ impl HistoricalCatalog {
 pub struct UniverseRunSpec {
     pub semantic_version: String,
     pub catalog_version: String,
-    pub broad_index_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broad_index_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_list_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_list: Option<BTreeSet<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_claim: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warnings: Option<BTreeSet<String>>,
     pub rule_version: String,
     pub coverage: Coverage,
     pub coverage_gaps: BTreeSet<String>,

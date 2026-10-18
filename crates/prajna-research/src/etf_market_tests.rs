@@ -68,7 +68,7 @@ fn fixture(root: &std::path::Path) -> (RawStore, CatalogInput) {
         coverage: Coverage { start: date(1), end: date(10), scan_method: "synthetic 159000..159999 full-window scan".into(), announcement_method: "synthetic full listings/contracts/terminations + attachments and pre-window identities".into(), announcement_raw_sha256: BTreeSet::from([h.clone()]), gaps: BTreeSet::new(), resolutions: vec![] },
         lifecycles: vec![life("159001", 1, None), life("159002", 1, None), life("159003", 1, None)],
         scans: (159000..=159999).map(|c| ScanObservation { native_symbol: c.to_string(), status: if (159001..=159003).contains(&c) { ScanStatus::Observed } else { ScanStatus::NoRows }, raw_sha256: h.clone(), first_observed: ((159001..=159003).contains(&c)).then(|| date(1)), last_observed: ((159001..=159003).contains(&c)).then(|| date(10)), identity_start: None }).collect(),
-        broad_indices: BroadIndexList { version: "synthetic-domestic@1".into(), index_ids: BTreeSet::from(["CSI:300".into()]), evidence: vec![evidence("index-scope")], named_indices: vec![] },
+        broad_indices: Some(BroadIndexList { version: "synthetic-domestic@1".into(), index_ids: BTreeSet::from(["CSI:300".into()]), evidence: vec![evidence("index-scope")], named_indices: vec![] }),
         code_ranges: None,
         code_tables: vec![],
     };
@@ -353,7 +353,7 @@ fn date_only_membership_evidence_before_truncated_calendar_is_not_backdated_to_o
         effective_from: date(1),
         effective_until: None,
         document_number: "SYNTHETIC-CATEGORY-LIST".into(),
-        evidence: input.broad_indices.evidence[0].clone(),
+        evidence: input.broad_indices.as_ref().unwrap().evidence[0].clone(),
         evidence_level: limit_rules::EvidenceLevel::Primary,
     };
     assignment.evidence.announcement_id = assignment.document_number.clone();
@@ -778,6 +778,41 @@ fn eligibility_61_60_20_boundary_threshold_and_late_data() {
     )
     .unwrap();
     assert_eq!(eligible.members.len(), 3);
+    let fixed = crate::pit_universe::FixedUniverseSpec::new(
+        "synthetic-fixed@1",
+        ["159001", "159002", "159003"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+    )
+    .unwrap();
+    assert!(
+        EligibleSet::build_with_fixed_universe(
+            &cat,
+            &market,
+            &index,
+            date(60),
+            EligibilityParams::default(),
+            Some(&fixed),
+        )
+        .unwrap()
+        .members
+        .is_empty()
+    );
+    assert_eq!(
+        EligibleSet::build_with_fixed_universe(
+            &cat,
+            &market,
+            &index,
+            date(61),
+            EligibilityParams::default(),
+            Some(&fixed),
+        )
+        .unwrap()
+        .members
+        .len(),
+        3
+    );
     let changed = EligibleSet::build(
         &cat,
         &market,
@@ -1410,7 +1445,7 @@ fn v2_consumes_v4_catalog_lifecycle_boundaries_without_cross_identity_cells() {
             .into_iter()
             .map(Into::into)
             .collect();
-    input.broad_indices.named_indices = vec![BroadIndexName {
+    input.broad_indices.as_mut().unwrap().named_indices = vec![BroadIndexName {
         index_id: "CSI:300".into(),
         official_name: "SYNTHETIC-INDEX".into(),
         aliases: BTreeSet::new(),

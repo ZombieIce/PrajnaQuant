@@ -64,7 +64,7 @@ fn fixture(root: &std::path::Path) -> (RawStore, CatalogInput) {
         coverage: Coverage { start: date(1), end: date(10), scan_method: "synthetic 159000..159999 full-window scan".into(), announcement_method: "synthetic full listings/contracts/terminations + attachments and pre-window identities".into(), announcement_raw_sha256: BTreeSet::from([h.clone()]), gaps: BTreeSet::new(), resolutions: vec![] },
         lifecycles: vec![life("159001", 2, Some(5)), life("159001", 7, None), life("159002", 1, None)],
         scans: (159000..=159999).map(|c| ScanObservation { native_symbol: c.to_string(), status: if c == 159001 || c == 159002 { ScanStatus::Observed } else { ScanStatus::NoRows }, raw_sha256: h.clone(), first_observed: (c == 159001 || c == 159002).then(|| date(if c == 159001 {2} else {1})), last_observed: (c == 159001 || c == 159002).then(|| date(10)), identity_start: None }).collect(),
-        broad_indices: BroadIndexList { version: "synthetic-domestic@1".into(), index_ids: BTreeSet::from(["CSI:300".into()]), evidence: vec![evidence("index-scope")], named_indices: vec![] },
+        broad_indices: Some(BroadIndexList { version: "synthetic-domestic@1".into(), index_ids: BTreeSet::from(["CSI:300".into()]), evidence: vec![evidence("index-scope")], named_indices: vec![] }),
         code_ranges: None,
         code_tables: vec![],
     };
@@ -417,12 +417,13 @@ fn tdx_code_tables_rebuild_configured_158xxx_lifecycles_and_name_based_pit_unive
         scan("159002", 6, 6, 10),
         scan("158001", 1, 1, 10),
     ];
-    input.broad_indices.named_indices = vec![BroadIndexName {
+    let broad_indices = input.broad_indices.as_mut().unwrap();
+    broad_indices.named_indices = vec![BroadIndexName {
         index_id: "CSI:300".into(),
         official_name: "沪深300指数".into(),
         aliases: BTreeSet::from(["沪深300".into()]),
     }];
-    input.broad_indices.version = "synthetic-official-scale-list@1".into();
+    broad_indices.version = "synthetic-official-scale-list@1".into();
     input.code_tables = (1..=10)
         .map(|day| {
             let mut symbols = BTreeSet::from(["158001".to_owned(), "159002".to_owned()]);
@@ -439,7 +440,12 @@ fn tdx_code_tables_rebuild_configured_158xxx_lifecycles_and_name_based_pit_unive
         .collect();
 
     let mut inconsistent_index_ids = input.clone();
-    inconsistent_index_ids.broad_indices.named_indices[0].index_id = "CSI:500".into();
+    inconsistent_index_ids
+        .broad_indices
+        .as_mut()
+        .unwrap()
+        .named_indices[0]
+        .index_id = "CSI:500".into();
     assert!(HistoricalCatalog::build(inconsistent_index_ids, &raw).is_err());
 
     let catalog = HistoricalCatalog::build(input.clone(), &raw).unwrap();
@@ -453,8 +459,8 @@ fn tdx_code_tables_rebuild_configured_158xxx_lifecycles_and_name_based_pit_unive
         .unwrap()
         .attributes[0]
         .legal_name = Some("合成中证1000ETF".into());
-    csi_100_input.broad_indices.index_ids = BTreeSet::from(["CSI:100".into()]);
-    csi_100_input.broad_indices.named_indices = vec![BroadIndexName {
+    csi_100_input.broad_indices.as_mut().unwrap().index_ids = BTreeSet::from(["CSI:100".into()]);
+    csi_100_input.broad_indices.as_mut().unwrap().named_indices = vec![BroadIndexName {
         index_id: "CSI:100".into(),
         official_name: "中证100".into(),
         aliases: BTreeSet::new(),
@@ -478,8 +484,8 @@ fn tdx_code_tables_rebuild_configured_158xxx_lifecycles_and_name_based_pit_unive
         .unwrap()
         .attributes[0]
         .legal_name = Some("合成上证500ETF".into());
-    sse_50_input.broad_indices.index_ids = BTreeSet::from(["SSE:50".into()]);
-    sse_50_input.broad_indices.named_indices = vec![BroadIndexName {
+    sse_50_input.broad_indices.as_mut().unwrap().index_ids = BTreeSet::from(["SSE:50".into()]);
+    sse_50_input.broad_indices.as_mut().unwrap().named_indices = vec![BroadIndexName {
         index_id: "SSE:50".into(),
         official_name: "上证50".into(),
         aliases: BTreeSet::new(),
@@ -558,7 +564,7 @@ fn tdx_code_tables_rebuild_configured_158xxx_lifecycles_and_name_based_pit_unive
     );
 
     let mut changed_list = input;
-    changed_list.broad_indices.version = "synthetic-official-scale-list@2".into();
+    changed_list.broad_indices.as_mut().unwrap().version = "synthetic-official-scale-list@2".into();
     let changed_catalog = HistoricalCatalog::build(changed_list, &raw).unwrap();
     assert_ne!(
         catalog.universe(date(5)).unwrap().universe_version,
@@ -575,7 +581,7 @@ fn tdx_catalog_rejects_missing_sessions_and_unconfigured_codes() {
         start: 159_000,
         end: 159_999,
     }]);
-    input.broad_indices.named_indices = vec![BroadIndexName {
+    input.broad_indices.as_mut().unwrap().named_indices = vec![BroadIndexName {
         index_id: "CSI:300".into(),
         official_name: "沪深300指数".into(),
         aliases: BTreeSet::from(["沪深300".into()]),

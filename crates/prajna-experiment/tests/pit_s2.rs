@@ -327,17 +327,38 @@ fn pit_rejects_ambiguous_coverage_and_legacy_override() {
 fn pit_cli_grid_replays_and_experiment_vector_parity_matches_daily() {
     let lake = fixture::lake();
     let f = fixture::fixture(lake.path());
-    let vector_input = definition(&f, "vector");
+    let mut vector_input = definition(&f, "vector");
     let mut fast_input = definition(&f, "fast_event");
+    let fixed = json!({
+        "version":"synthetic-fixed-etfs@1",
+        "codes":["159001","159002"]
+    });
+    vector_input["pit"]["fixed_universe"] = fixed.clone();
+    fast_input["pit"]["fixed_universe"] = fixed;
     fast_input["fast_event"]["sizing"] = json!("vector_parity");
-    let vector = Experiment::parse(&vector_input.to_string(), lake.path())
-        .unwrap()
-        .execute(lake.path(), 1)
-        .unwrap();
-    let fast = Experiment::parse(&fast_input.to_string(), lake.path())
-        .unwrap()
-        .execute(lake.path(), 2)
-        .unwrap();
+    let vector_experiment = Experiment::parse(&vector_input.to_string(), lake.path()).unwrap();
+    let fast_experiment = Experiment::parse(&fast_input.to_string(), lake.path()).unwrap();
+    let mut revised_input = vector_input.clone();
+    revised_input["pit"]["fixed_universe"]["codes"] = json!(["159001"]);
+    let revised = Experiment::parse(&revised_input.to_string(), lake.path()).unwrap();
+    assert_ne!(vector_experiment.id().unwrap(), revised.id().unwrap());
+    let vector_run = &vector_experiment.expand(lake.path()).unwrap()[0];
+    let revised_run = &revised.expand(lake.path()).unwrap()[0];
+    assert_ne!(vector_run.run_id, revised_run.run_id);
+    assert_eq!(
+        vector_run.run_spec["pit"]["fixed_universe"]["version"],
+        "synthetic-fixed-etfs@1"
+    );
+    assert_eq!(
+        vector_run.run_spec["session_inputs"][3]["eligible"]["universe"]["run_spec"]["history_claim"],
+        "retrospective_static"
+    );
+    assert_eq!(
+        vector_run.run_spec["session_inputs"][3]["eligible"]["universe"]["run_spec"]["fixed_list"],
+        json!(["159001", "159002"])
+    );
+    let vector = vector_experiment.execute(lake.path(), 1).unwrap();
+    let fast = fast_experiment.execute(lake.path(), 2).unwrap();
     assert_eq!(vector.runs[0].status, RunStatus::Completed);
     assert_eq!(fast.runs[0].status, RunStatus::Completed);
     for (v, f) in vector.runs[0]
@@ -388,4 +409,40 @@ fn pit_cli_grid_replays_and_experiment_vector_parity_matches_daily() {
     assert_eq!(first["exp"], replay["exp"]);
     assert_eq!(first["exe"], replay["exe"]);
     assert_eq!(replay["action"], "replayed");
+}
+
+#[test]
+fn pit_defaults_to_versioned_mvp6_fixed_universe() {
+    let lake = fixture::lake();
+    let f = fixture::fixture(lake.path());
+    let mut mvp6_input = definition(&f, "vector");
+    mvp6_input["pit"]
+        .as_object_mut()
+        .unwrap()
+        .remove("fixed_universe");
+    let mvp6 = Experiment::parse(&mvp6_input.to_string(), lake.path()).unwrap();
+    let mvp6_run = &mvp6.expand(lake.path()).unwrap()[0];
+
+    let legacy_input = definition(&f, "vector");
+    let legacy = Experiment::parse(&legacy_input.to_string(), lake.path()).unwrap();
+    let legacy_run = &legacy.expand(lake.path()).unwrap()[0];
+
+    assert_ne!(mvp6.id().unwrap(), legacy.id().unwrap());
+    assert_ne!(mvp6_run.run_id, legacy_run.run_id);
+    assert_eq!(
+        mvp6_run.run_spec["pit"]["fixed_universe"]["version"],
+        "mvp6-fixed-etf@1"
+    );
+    assert_eq!(
+        mvp6_run.run_spec["session_inputs"][3]["eligible"]["universe"]["run_spec"]["fixed_list"],
+        json!(["159522", "159560", "159612", "159919", "159952"])
+    );
+    assert_eq!(
+        mvp6_run.run_spec["session_inputs"][3]["eligible"]["universe"]["run_spec"]["fixed_list_version"],
+        "mvp6-fixed-etf@1"
+    );
+    assert_eq!(
+        mvp6_run.run_spec["session_inputs"][3]["eligible"]["universe"]["run_spec"]["history_claim"],
+        "retrospective_static"
+    );
 }

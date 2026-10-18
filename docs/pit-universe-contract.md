@@ -33,6 +33,11 @@ or price rows in this public repository.
 
 ## Input and identity
 
+The broad-index list is required only for the legacy broad-index PIT selector.
+`CatalogInput.broad_indices` may be omitted for fixed-list MVP-6 builds; those
+builds still require complete Catalog lifecycle and coverage evidence. The
+existing broad-index selector rejects a Catalog without its versioned list.
+
 `CatalogInput.schema_version = 1` uses the legacy scan contract. Schema v2
 requires explicit, disjoint six-digit `code_ranges` matching the TDX normalizer
 configuration and one `CodeTableSnapshot` per covered Session. Each snapshot
@@ -161,11 +166,31 @@ results. Empty successful Universes retain all provenance. Incomplete coverage
 produces Catalog diagnostics, never a successful build result.
 
 This is an **input-build Run Spec fragment**, not an executed backtest Run.
-The existing `prajna-experiment` Engine Run Specs/results still use Static
-Universe. Per-Session Engine consumption belongs to #177, Python views to #178,
-Eligible Set/liquidity/execution state to #176. This module does not enforce
+Per-Session Engine consumption belongs to #177, Python views to #178, Eligible
+Set/liquidity/execution state to #176. This module does not itself enforce
 61/60/20-Session eligibility, execute trades, compute performance, or assert
 accounting/cost validation. These are downstream contracts, not completed here.
+
+### Fixed-list MVP-6 selector (#231)
+
+`FixedUniverseSpec` provides the separate `retrospective_static` selection path
+for the five MVP-6 codes: 159919, 159560, 159522, 159612, and 159952. It
+intersects the versioned list with Catalog lifecycle evidence known at each
+decision close: pre-listing and post-termination Sessions are excluded, while
+fund-category and broad-index classification are ignored. Its Universe Run
+Spec contains the list, list version, Catalog identity, decision Session,
+`history_claim=retrospective_static`, and the `survivorship_bias` warning.
+The fixed list and its version also enter Experiment and Run identity. The
+MVP-6 codes are the default when `pit.fixed_universe` is omitted; an explicit
+`null` selects the existing broad-index PIT path and keeps its serialized
+identity unchanged. Eligible Set then applies the same 61/60/20-Session and
+execution-state rules.
+This label and warning disclose the selected-list survivor bias; they do not
+turn the fixed list into a complete or verified PIT universe.
+
+Synthetic tests cover listing before/after eligibility, termination, codes
+outside the list, list-sensitive identities, the 61-Session boundary, and
+Vector/Fast Event daily parity. They do not use real ETF facts.
 
 Synthetic tests cover v1 compatibility and v2 code ranges/snapshots, code-table
 gaps and reuse, legal-name identity changes, exact #202 publication mapping,

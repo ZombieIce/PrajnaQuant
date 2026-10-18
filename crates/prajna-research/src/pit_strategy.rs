@@ -11,7 +11,7 @@ use crate::{
     etf_eligible::{EligibilityParams, EligibleSet},
     etf_market::{DerivedMarket, identity},
     etf_momentum::{EtfMomentum, TotalReturnIndex},
-    pit_universe::{CatalogError, Evidence, HistoricalCatalog},
+    pit_universe::{CatalogError, Evidence, FixedUniverseSpec, HistoricalCatalog},
     strategy::Decision,
 };
 
@@ -211,27 +211,58 @@ pub struct PitPlan {
     pub version: String,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct PitUniverseSelection<'a> {
+    pub eligibility: EligibilityParams,
+    pub fixed_universe: Option<&'a FixedUniverseSpec>,
+}
+
 pub fn plan(
     catalog: &HistoricalCatalog,
     market: &DerivedMarket,
     tri: &TotalReturnIndex,
     risk: &RiskSignals,
-    mut eligibility: EligibilityParams,
+    eligibility: EligibilityParams,
     params: &PitS2Params,
     sessions: &[PanelSession],
 ) -> Result<PitPlan, CatalogError> {
+    plan_with_fixed_universe(
+        catalog,
+        market,
+        tri,
+        risk,
+        params,
+        PitUniverseSelection {
+            eligibility,
+            fixed_universe: None,
+        },
+        sessions,
+    )
+}
+
+pub fn plan_with_fixed_universe(
+    catalog: &HistoricalCatalog,
+    market: &DerivedMarket,
+    tri: &TotalReturnIndex,
+    risk: &RiskSignals,
+    params: &PitS2Params,
+    universe_selection: PitUniverseSelection<'_>,
+    sessions: &[PanelSession],
+) -> Result<PitPlan, CatalogError> {
     params.validate()?;
+    let mut eligibility = universe_selection.eligibility;
     eligibility.momentum_sessions = params.lookback;
     validate_sessions(sessions, market)?;
     let mut decisions = Vec::new();
     let mut inputs = Vec::new();
     for (i, session) in sessions.iter().enumerate() {
-        let eligible = EligibleSet::build(
+        let eligible = EligibleSet::build_with_fixed_universe(
             catalog,
             market,
             tri,
             session.session_date,
             eligibility.clone(),
+            universe_selection.fixed_universe,
         )?;
         let risk_excluded = risk.active(session.ts_close);
         if i % params.rebalance_every as usize == 0 {

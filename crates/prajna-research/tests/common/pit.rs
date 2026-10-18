@@ -177,12 +177,12 @@ fn fixture_with_prices(
                 }
             })
             .collect(),
-        broad_indices: BroadIndexList {
+        broad_indices: Some(BroadIndexList {
             version: "synthetic-domestic@1".into(),
             index_ids: BTreeSet::from(["CSI:300".into()]),
             evidence: vec![evidence("scope", time(1, 8))],
             named_indices: vec![],
-        },
+        }),
         code_ranges: None,
         code_tables: vec![],
     };
@@ -369,7 +369,7 @@ fn fixture_with_prices(
         minimum_average_amount: "10000000".parse().unwrap(),
     };
     let input = json!({"catalog":catalog_input,"market":market_input,"empty_actions":empty_actions,
-        "risk_notices":notices,"eligibility":eligibility});
+        "risk_notices":notices,"eligibility":eligibility,"fixed_universe":null});
     Fixture {
         dsv,
         catalog,

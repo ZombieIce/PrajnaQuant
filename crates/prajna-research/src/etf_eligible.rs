@@ -2,7 +2,7 @@
 use crate::{
     etf_market::{DerivedMarket, TradeState, identity},
     etf_momentum::{EtfMomentum, TotalReturnIndex},
-    pit_universe::{CatalogError, HistoricalCatalog, UniverseBuildResult},
+    pit_universe::{CatalogError, FixedUniverseSpec, HistoricalCatalog, UniverseBuildResult},
 };
 use chrono::NaiveDate;
 use prajna_domain::{InstrumentId, Notional};
@@ -47,6 +47,17 @@ impl EligibleSet {
         date: NaiveDate,
         params: EligibilityParams,
     ) -> Result<Self, CatalogError> {
+        Self::build_with_fixed_universe(catalog, market, tri, date, params, None)
+    }
+
+    pub fn build_with_fixed_universe(
+        catalog: &HistoricalCatalog,
+        market: &DerivedMarket,
+        tri: &TotalReturnIndex,
+        date: NaiveDate,
+        params: EligibilityParams,
+        fixed_universe: Option<&FixedUniverseSpec>,
+    ) -> Result<Self, CatalogError> {
         let error = |s: &str| CatalogError(s.into());
         if params.minimum_listing_sessions == 0
             || params.amount_sessions == 0
@@ -57,7 +68,10 @@ impl EligibleSet {
         if catalog.version()? != market.catalog_version() {
             return Err(error("market/Catalog identity mismatch"));
         }
-        let universe = catalog.universe(date)?;
+        let universe = match fixed_universe {
+            Some(fixed) => catalog.fixed_universe(date, fixed)?,
+            None => catalog.universe(date)?,
+        };
         let i = market
             .sessions()
             .iter()
