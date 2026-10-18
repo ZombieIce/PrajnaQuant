@@ -16,6 +16,22 @@ Validation booleans written by Python's CSV writer are accepted, and captured
 `.partial` response bodies are retained as failed Raw objects rather than DSV
 inputs.
 
+Historical failed-attempt provenance is separate from successful-input coverage
+(#206 owner-approved continuation policy). Explicit transport failures with no
+HTTP status retain a null status rather than a fabricated HTTP response code.
+Missing or malformed failed-attempt metadata and unavailable failed bodies stay
+in `historical_capture_issues` with `historical_capture_status=unresolved`; the
+original CSV rows remain in the Raw inventory and are never rewritten.
+Recoverable failed bodies are still verified by length and SHA-256 before being
+stored. HTTP-200 bodies that fail ZIP integrity checks are retained as failed
+Raw with a separate `validation_error`, without inventing a transport error.
+These historical failures never enter Dataset inputs and do not block a
+validated successful retry. Every requested session must still have a validated
+successful package; invalid successful provenance, missing validation for a
+readable archive, wrong embedded sessions and conflicting successful revisions
+remain publication blockers. Publication does not resolve historical audit gaps
+or establish complete #206 acceptance.
+
 ```sh
 cargo run -p prajna-data --bin prajna-mvp6-freeze -- import-existing \
   --root "$HOME/PrajnaData/mvp-6" \
@@ -40,7 +56,7 @@ before preserving collector coverage and writing its import results.
 
 The command intentionally fails closed when a requested SZSE session has no
 validated TDX package, a month is incomplete, response bytes do not match the
-capture log, or the captured open-date list disagrees with the monthly source.
+successful capture log, or the captured open-date list disagrees with the monthly source.
 It does not infer that a missing TDX row means a halt.
 
 ## Prepare historical candidate files
