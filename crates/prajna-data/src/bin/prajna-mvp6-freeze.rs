@@ -631,7 +631,14 @@ fn import_existing(
         tdx_seen_dates.insert(session);
         inventory.push(inventory_record_raw(TDX_SOURCE_ID, row));
         if row.get("error").is_some_and(|error| !error.is_empty()) {
-            import_failed_tdx_capture(&store, &tdx_response_files, session, row, report)?;
+            import_failed_tdx_capture(
+                &store,
+                &tdx_response_files,
+                session,
+                row,
+                &validation,
+                report,
+            )?;
             continue;
         }
         let status = match row
@@ -1257,6 +1264,7 @@ fn import_failed_tdx_capture(
     files: &[PathBuf],
     session: NaiveDate,
     row: &CsvRow,
+    validation: &BTreeMap<(NaiveDate, String), CsvRow>,
     report: &mut Value,
 ) -> AppResult<()> {
     let expected_url = format!(
@@ -1317,6 +1325,18 @@ fn import_failed_tdx_capture(
     if body.len() as u64 != bytes {
         historical_capture_issue(report, row, "byte_length_mismatch");
         return Ok(());
+    }
+    if status == Some(200)
+        && validation_passes(validation.get(&(session, sha.clone())))
+        && validate_zip_archive(&body).is_err()
+    {
+        report["invalid_tdx_sessions"]
+            .as_array_mut()
+            .expect("array")
+            .push(json!({
+                "session": session.to_string(),
+                "reason": "package_archive_integrity_mismatch"
+            }));
     }
     put_once(
         store,

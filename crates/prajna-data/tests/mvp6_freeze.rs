@@ -516,6 +516,7 @@ fn local_capture_import_never_quarantines_invalid_success_provenance_or_valid_re
         "missing_validation",
         "conflicting_revision",
         "validated_corrupt_archive",
+        "validated_corrupt_archive_with_request_error",
     ] {
         let root = TempDir::new().unwrap();
         let tdx = tdx_package();
@@ -531,7 +532,10 @@ fn local_capture_import_never_quarantines_invalid_success_provenance_or_valid_re
         );
         let mut other = tdx.clone();
         other.extend_from_slice(b"synthetic revision");
-        if scenario == "validated_corrupt_archive" {
+        if matches!(
+            scenario,
+            "validated_corrupt_archive" | "validated_corrupt_archive_with_request_error"
+        ) {
             other.truncate(other.len() / 2);
         }
         let other_sha = sha256(&other);
@@ -547,15 +551,22 @@ fn local_capture_import_never_quarantines_invalid_success_provenance_or_valid_re
             "length_mismatch" => ("200", tdx.len() + 1, sha256(&tdx)),
             _ => ("200", other.len(), other_sha.clone()),
         };
+        let request_error = if scenario == "validated_corrupt_archive_with_request_error" {
+            "capture reported an error"
+        } else {
+            ""
+        };
         let request_path = root.path().join("acceptance/tdx-daily-requests.csv");
         let mut requests = fs::read_to_string(&request_path).unwrap();
         requests.push_str(&format!(
-            "2022-10-10,3,2026-10-15T11:02:00Z,https://www.tdx.com.cn/products/data/data/g4day/20221010.zip,{status},,{bytes},{digest}\n"
+            "2022-10-10,3,2026-10-15T11:02:00Z,https://www.tdx.com.cn/products/data/data/g4day/20221010.zip,{status},{request_error},{bytes},{digest}\n"
         ));
         fs::write(request_path, requests).unwrap();
         if matches!(
             scenario,
-            "conflicting_revision" | "validated_corrupt_archive"
+            "conflicting_revision"
+                | "validated_corrupt_archive"
+                | "validated_corrupt_archive_with_request_error"
         ) {
             let path = root.path().join("acceptance/tdx-daily-validation.csv");
             let mut validations = fs::read_to_string(&path).unwrap();
@@ -588,6 +599,16 @@ fn local_capture_import_never_quarantines_invalid_success_provenance_or_valid_re
             serde_json::json!([]),
             "scenario: {scenario}"
         );
+        if scenario.starts_with("validated_corrupt_archive") {
+            assert!(
+                report["invalid_tdx_sessions"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|issue| issue["reason"] == "package_archive_integrity_mismatch"),
+                "scenario: {scenario}"
+            );
+        }
     }
 }
 
