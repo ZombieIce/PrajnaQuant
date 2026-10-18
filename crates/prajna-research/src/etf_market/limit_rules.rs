@@ -1,4 +1,4 @@
-use super::{FundCategoryEvidence, LimitRule, OfficialLimitRule};
+use super::{FirstSessionReference, FundCategoryEvidence, LimitRule, OfficialLimitRule};
 use crate::pit_universe::{CatalogError, CatalogInput, Evidence, Publication};
 use chrono::NaiveDate;
 use prajna_domain::{InstrumentId, Price, TimestampNs};
@@ -31,7 +31,7 @@ pub struct FundLimitRuleRecord {
     pub tick: Price,
     pub rounding: String,
     pub applies_on_first_session: bool,
-    pub first_session_reference: String,
+    pub first_session_reference: FirstSessionReference,
     pub document_number: String,
     pub evidence: Evidence,
     #[serde(default)]
@@ -126,7 +126,7 @@ impl FundLimitRuleTable {
             tick: record.tick,
             rounding: record.rounding.clone(),
             applies_on_first_session: record.applies_on_first_session,
-            first_session_reference: Some(record.first_session_reference.clone()),
+            first_session_reference: Some(record.first_session_reference),
             evidence: record.evidence.clone(),
             supporting_evidence: record
                 .supporting_evidence
@@ -137,6 +137,8 @@ impl FundLimitRuleTable {
                 document_number: record.document_number.clone(),
                 fund_category: record.fund_category.clone(),
                 category_evidence: Some(FundCategoryEvidence {
+                    instrument_id: assignment.instrument_id.clone(),
+                    fund_category: assignment.fund_category.clone(),
                     document_number: assignment.document_number.clone(),
                     effective_from: assignment.effective_from,
                     effective_until: assignment.effective_until,
@@ -146,7 +148,12 @@ impl FundLimitRuleTable {
         }))
     }
 
-    pub fn supports(&self, rule: &LimitRule, session_date: NaiveDate) -> bool {
+    pub fn supports(
+        &self,
+        rule: &LimitRule,
+        instrument_id: &InstrumentId,
+        session_date: NaiveDate,
+    ) -> bool {
         if session_date < self.coverage_start || session_date >= self.coverage_end_exclusive {
             return false;
         }
@@ -157,6 +164,8 @@ impl FundLimitRuleTable {
             return false;
         };
         if category_evidence.document_number.trim().is_empty()
+            || category_evidence.instrument_id != *instrument_id
+            || category_evidence.fund_category != official_rule.fund_category
             || category_evidence.document_number != category_evidence.evidence.announcement_id
             || category_evidence.evidence.validate().is_err()
             || category_evidence.effective_from > session_date
@@ -186,8 +195,7 @@ impl FundLimitRuleTable {
             && rule.tick == record.tick
             && rule.rounding == record.rounding
             && rule.applies_on_first_session == record.applies_on_first_session
-            && rule.first_session_reference.as_deref()
-                == Some(record.first_session_reference.as_str())
+            && rule.first_session_reference == Some(record.first_session_reference)
             && official_rule.document_number == record.document_number
             && rule.evidence.announcement_id == record.evidence.announcement_id
             && rule.evidence.locator == record.evidence.locator
@@ -206,12 +214,13 @@ impl FundLimitRuleTable {
     pub fn evidence_available_at(
         &self,
         rule: &LimitRule,
+        instrument_id: &InstrumentId,
         evidence: &Evidence,
         session_date: NaiveDate,
         session_open: TimestampNs,
         calendar: &CatalogInput,
     ) -> Result<TimestampNs> {
-        if !self.supports(rule, session_date) {
+        if !self.supports(rule, instrument_id, session_date) {
             return Err(CatalogError(
                 "cannot resolve availability for an unsupported limit rule".into(),
             ));
@@ -278,6 +287,7 @@ impl FundLimitRuleTable {
                 || record.fund_category.trim().is_empty()
                 || record.category_description.trim().is_empty()
                 || record.document_number.trim().is_empty()
+                || record.document_number != record.evidence.announcement_id
                 || record
                     .effective_until
                     .is_some_and(|end| end <= record.effective_from)
@@ -286,7 +296,6 @@ impl FundLimitRuleTable {
                 || record.tick <= Price::ZERO
                 || record.rounding != "nearest_tick_half_up"
                 || !record.applies_on_first_session
-                || record.first_session_reference != "previous_net_asset_value"
             {
                 return Err(CatalogError(format!(
                     "invalid fund limit-rule record {}",
@@ -398,10 +407,20 @@ mod tests {
         assert!(after.effective_until.is_some());
         assert!(after.applies_on_first_session);
         assert_eq!(
-            after.first_session_reference.as_deref(),
-            Some("previous_net_asset_value")
+            after.first_session_reference,
+            Some(FirstSessionReference::PreviousNetAssetValue)
         );
         assert_ne!(before.version, after.version);
+        let mut reassigned = after.clone();
+        reassigned
+            .official_rule
+            .as_mut()
+            .unwrap()
+            .category_evidence
+            .as_mut()
+            .unwrap()
+            .instrument_id = "159002.SZSE".parse().unwrap();
+        assert!(!table.supports(&reassigned, &instrument_id, date("2023-04-10")));
         assert_eq!(
             after.official_rule.as_ref().unwrap().fund_category,
             "szse-20pct-index-etf-lof"
@@ -504,5 +523,12 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn rule_document_number_must_match_its_evidence_identity() {
+        let mut table = FundLimitRuleTable::official_v1().unwrap();
+        table.records[0].document_number = "wrong-document".into();
+        assert!(table.validate().is_err());
     }
 }

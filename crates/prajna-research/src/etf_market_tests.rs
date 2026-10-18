@@ -1030,6 +1030,8 @@ fn v2_evidence(catalog: &HistoricalCatalog) -> MarketEvidence {
             "fund_category": "szse-fund-default-10pct",
             "category_evidence": {
                 "document_number": "SYNTHETIC-CATEGORY-LIST",
+                "instrument_id": opening["instrument_id"].clone(),
+                "fund_category": "szse-fund-default-10pct",
                 "effective_from": "2022-10-01",
                 "effective_until": null,
                 "evidence": category_evidence
@@ -1064,6 +1066,7 @@ fn official_pre_window_rule_sources_are_available_for_the_scoped_period() {
     let available_at = table
         .evidence_available_at(
             &rule,
+            &instrument_id,
             &rule.supporting_evidence[0],
             date(1),
             time(1, 9),
@@ -1239,6 +1242,17 @@ fn v2_frozen_openings_use_tdx_ex_rights_reference_and_fail_closed() {
                     .as_mut()
                     .unwrap()
                     .official_rule
+                    .as_mut()
+                    .unwrap()
+                    .fund_category = "unknown_category".into();
+                opening
+                    .limit_rule
+                    .as_mut()
+                    .unwrap()
+                    .official_rule
+                    .as_mut()
+                    .unwrap()
+                    .category_evidence
                     .as_mut()
                     .unwrap()
                     .fund_category = "unknown_category".into()

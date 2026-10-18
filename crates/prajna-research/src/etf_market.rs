@@ -64,10 +64,17 @@ pub struct OfficialLimitRule {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FundCategoryEvidence {
+    pub instrument_id: InstrumentId,
+    pub fund_category: String,
     pub document_number: String,
     pub effective_from: NaiveDate,
     pub effective_until: Option<NaiveDate>,
     pub evidence: Evidence,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FirstSessionReference {
+    PreviousNetAssetValue,
 }
 /// Per-lifecycle PIT rule selection, including documented first-day applicability.
 /// Only nearest-tick half-up rounding is currently supported; no implicit IPO exemption.
@@ -82,7 +89,7 @@ pub struct LimitRule {
     pub rounding: String,
     pub applies_on_first_session: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub first_session_reference: Option<String>,
+    pub first_session_reference: Option<FirstSessionReference>,
     pub evidence: Evidence,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub supporting_evidence: Vec<Evidence>,
@@ -328,7 +335,9 @@ impl DerivedMarket {
             }
             let rule_table = limit_rule_table.as_ref();
             let supported_rule = opening.limit_rule.as_ref().filter(|rule| {
-                rule_table.is_some_and(|table| table.supports(rule, opening.session_date))
+                rule_table.is_some_and(|table| {
+                    table.supports(rule, &opening.instrument_id, opening.session_date)
+                })
             });
             let session_open = sessions
                 .iter()
@@ -346,6 +355,7 @@ impl DerivedMarket {
                     if let (Some(rule), Some(table)) = (supported_rule, rule_table) {
                         table.evidence_available_at(
                             rule,
+                            &opening.instrument_id,
                             doc,
                             opening.session_date,
                             session_open,
@@ -849,7 +859,7 @@ fn derive_v2(
     let supported_rule = o.limit_rule.as_ref().filter(|rule| {
         context
             .limit_rule_table
-            .supports(rule, session.session_date())
+            .supports(rule, id, session.session_date())
     });
     if let Some(rule) = &o.limit_rule {
         for doc in rule.documents() {
@@ -857,6 +867,7 @@ fn derive_v2(
             if supported_rule.is_some() {
                 times.push(context.limit_rule_table.evidence_available_at(
                     rule,
+                    id,
                     doc,
                     session.session_date(),
                     session.ts_open(),
@@ -877,7 +888,9 @@ fn derive_v2(
         .filter(|s| s.source == "tdx")
         .and_then(|s| s.reference_price);
     let rule = o.limit_rule.as_ref().filter(|r| {
-        context.limit_rule_table.supports(r, session.session_date())
+        context
+            .limit_rule_table
+            .supports(r, id, session.session_date())
             && (listing != session.session_date() || r.applies_on_first_session)
     });
     let rule = match rule {
@@ -888,6 +901,7 @@ fn derive_v2(
                 .map(|evidence| {
                     context.limit_rule_table.evidence_available_at(
                         rule,
+                        id,
                         evidence,
                         session.session_date(),
                         session.ts_open(),

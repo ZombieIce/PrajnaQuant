@@ -47,6 +47,15 @@ dataset for the covered window. Consequently, the embedded
 `category_assignments` array is empty. It contains no inferred memberships,
 fund names, or ticker-based classifications.
 
+The unresolved instrument-level assignments are explicit for each regime:
+
+| Period | Category/period coverage still unknown |
+| --- | --- |
+| 2022-10-01–2023-04-10 | Which funds are default 10%; which index ETFs, LOFs, class-B structured-fund shares, or qualifying 80%-asset LOFs meet either 20% criterion |
+| 2023-04-10–2026-07-06 | Which funds are default 10%; which qualifying ChiNext/20%-limit-stock index ETFs or LOFs, and which qualifying 80%-asset LOFs, receive 20% |
+| 2026-07-06–2026-10-01 | The same instrument-level assignments under the 2026 rules |
+| Any date in scope | Any category not enumerated in the applicable SZSE rule row, or any interval for which the official rule cannot be established |
+
 Callers must supply an explicit lifecycle-specific category assignment with
 its half-open effective interval, official document number, and frozen
 evidence. The resolver returns no rule for missing, unknown, overlapping,
