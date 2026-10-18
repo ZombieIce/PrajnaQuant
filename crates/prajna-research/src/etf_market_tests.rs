@@ -1190,6 +1190,9 @@ fn v2_frozen_openings_use_tdx_ex_rights_reference_and_fail_closed() {
     e.openings[9].market_available_at = None;
     let market = DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, e.clone()).unwrap();
     let cell = |d| &market.cells()[&(id.clone(), date(d))];
+    // The listing-session rule applies and uses that session's TDX previous-NAV reference.
+    assert_eq!(cell(1).upper_limit, Some(Price::parse("1.1").unwrap()));
+    assert_eq!(cell(1).lower_limit, Some(Price::parse("0.9").unwrap()));
     // Prior close = 1, but TDX's ex-rights reference is 0.9: upper = 0.99.
     assert_eq!(cell(2).upper_limit, Some(Price::parse("0.99").unwrap()));
     assert!(cell(2).permits(true));
