@@ -320,6 +320,31 @@ impl Lifecycle {
     }
 }
 
+/// The official lifetime end used by fixed-list membership and UNKNOWN
+/// coverage: the official termination or the next same-code identity's official
+/// listing, whichever is earlier. The physical TDX `identity_end_exclusive` is
+/// not a legal end.
+pub(crate) fn official_end(life: &Lifecycle, lifecycles: &[Lifecycle]) -> Option<NaiveDate> {
+    let own_start = life.identity_start.unwrap_or(life.listing.effective_date);
+    let successor_listing = lifecycles
+        .iter()
+        .filter(|other| {
+            other.native_symbol == life.native_symbol
+                && other.identity_start.unwrap_or(other.listing.effective_date) > own_start
+        })
+        .map(|other| other.listing.effective_date)
+        .min();
+    match (
+        life.termination.as_ref().map(|end| end.effective_date),
+        successor_listing,
+    ) {
+        (Some(termination), Some(successor)) => Some(termination.min(successor)),
+        (Some(termination), None) => Some(termination),
+        (None, Some(successor)) => Some(successor),
+        (None, None) => None,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScanStatus {
@@ -589,7 +614,7 @@ fn validate_v2_code_tables(input: &mut CatalogInput) -> Result<BTreeSet<String>>
             // This matters when an official listing (and its attribute) is
             // later than the first TDX code-table appearance: it must not
             // invent a second identity boundary.
-            let initial_name_date = if previous_name.is_none() {
+            let mut initial_name_date = if previous_name.is_none() {
                 names.iter().next().map(|(date, _)| *date)
             } else {
                 None
@@ -600,6 +625,27 @@ fn validate_v2_code_tables(input: &mut CatalogInput) -> Result<BTreeSet<String>>
                         .then(|| values.first().cloned().flatten())
                         .flatten()
                 });
+            }
+            // A reused code's successor run may also start before the new
+            // fund's official listing. The name at/before `first_seen` then
+            // belongs to the previous identity, so use the run's own first
+            // attribute as the initial name instead of inventing a change.
+            if run_start > 0
+                && let Some(attribute) = input
+                    .lifecycles
+                    .iter()
+                    .find(|life| {
+                        life.native_symbol == *symbol && life.identity_start() == first_seen
+                    })
+                    .and_then(|life| {
+                        life.attributes
+                            .iter()
+                            .min_by_key(|attribute| attribute.effective_date)
+                    })
+                && attribute.effective_date > first_seen
+            {
+                previous_name = attribute.legal_name.clone();
+                initial_name_date = Some(attribute.effective_date);
             }
             if names
                 .get(&first_seen)
@@ -1250,6 +1296,21 @@ impl HistoricalCatalog {
         }
         for life in &self.input.lifecycles {
             let id = life.instrument_id()?;
+            // Fixed-list membership follows the official lifetime. A bare
+            // TDX exit before the official termination is a missing-market
+            // gap; only the next same-code identity's official listing (a name
+            // change or reuse) bounds the earlier identity.
+            let own_start = life.identity_start.unwrap_or(life.listing.effective_date);
+            let successor_listing = self
+                .input
+                .lifecycles
+                .iter()
+                .filter(|other| {
+                    other.native_symbol == life.native_symbol
+                        && other.identity_start.unwrap_or(other.listing.effective_date) > own_start
+                })
+                .map(|other| other.listing.effective_date)
+                .min();
             let reason = if let Some(reason) = effective_exclusions.get(&life.native_symbol) {
                 Some(reason.as_str())
             } else if !effective_codes.contains(&life.native_symbol) {
@@ -1261,10 +1322,7 @@ impl HistoricalCatalog {
                 Some("before_listing")
             } else if life.listing.evidence.available_at(&self.input)? > now {
                 Some("listing_not_known")
-            } else if life
-                .identity_end_exclusive
-                .is_some_and(|end| session_date >= end)
-            {
+            } else if successor_listing.is_some_and(|end| session_date >= end) {
                 Some("outside_catalog_lifecycle")
             } else if life.termination.as_ref().is_some_and(|termination| {
                 session_date >= termination.effective_date

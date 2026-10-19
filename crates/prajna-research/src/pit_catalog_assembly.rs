@@ -743,9 +743,11 @@ fn align_runs(
                             "{code}: change_kind=legal_name_change cannot follow a terminated identity"
                         ));
                     }
-                    if row.listing > runs[next].first
-                        || row.termination.is_some_and(|end| end <= runs[next].first)
-                    {
+                    // The successor may appear in the code table before its
+                    // official listing. That is a disclosed listing-date
+                    // difference, not an exclusion: only a priced Bar outside
+                    // the official lifetime excludes it (P27-19).
+                    if row.termination.is_some_and(|end| end <= runs[next].first) {
                         return Err(format!(
                             "{code}: reused-code lifecycle does not align with the code-table absence"
                         ));

@@ -67,7 +67,10 @@ For v2, `identity_start` is derived from the first code-table appearance in the
 covered history, each reappearance after a table-absence gap, and each
 time-versioned legal full-name change. The earliest known name is the initial
 identity even when its effective date falls after the first code-table
-appearance; only a later, different name creates a change boundary. The builder
+appearance; only a later, different name creates a change boundary. The same
+rule applies to a reused code's successor run: when its first attribute is
+later than the run's first appearance, that attribute is the successor's
+initial name rather than a name change from the previous fund. The builder
 checks that lifecycle identities match those boundaries, derives each identity's
 exclusive end and code-table exit date, and retains each lifecycle's first/last
 code-table appearance. Per-lifecycle `ScanObservation` values retain first/last priced
@@ -179,7 +182,12 @@ accounting/cost validation. These are downstream contracts, not completed here.
 for the five MVP-6 codes: 159919, 159560, 159522, 159612, and 159952. It
 intersects the versioned list with Catalog lifecycle evidence known at each
 decision close: pre-listing and post-termination Sessions are excluded, while
-fund-category and broad-index classification are ignored. Its Universe Run
+fund-category and broad-index classification are ignored. A bare TDX
+code-table exit before the official termination does not end fixed-list
+membership; the ETF remains a member through the gap and the missing-market
+Sessions are reported as UNKNOWN. Membership ends at the official termination
+or the next same-code identity's official listing, whichever is earlier; the
+TDX `identity_end_exclusive` is only the physical price boundary. Its Universe Run
 Spec contains the list, list version, Catalog identity, decision Session,
 `history_claim=retrospective_static`, and the `survivorship_bias` warning.
 The fixed list and its version also enter Experiment and Run identity. The
@@ -236,10 +244,16 @@ An official listing date earlier than the first TDX code-table appearance stays
 in `Lifecycle.listing`; the physical `identity_start` remains the TDX
 appearance, so `resolve_row` has no price row before it. The fixed-list selector
 uses the listing date for membership (P27-19), so that Session can be a member
-with no price row and is reported as UNKNOWN by the coverage layer. A TDX
-presence before the official listing is likewise disclosed as an
-`IdentityDifference` rather than excluded; official dates win, and only a
-priced Bar outside the official lifetime excludes the whole code. An identity
+with no price row and is reported as UNKNOWN by the coverage layer. The same
+applies to a reused code's successor run: a TDX appearance before the
+successor's official listing is a disclosed `listing_date_vs_code_table_first`
+difference, not an exclusion. A TDX presence before the official listing is
+likewise disclosed as an `IdentityDifference` rather than excluded; official
+dates win, and only a priced Bar outside the official lifetime excludes the
+whole code. A bare TDX exit before the official termination keeps the identity
+in the fixed list until the official termination or the next identity's
+official listing, whichever is earlier; the coverage grid reports the gap as
+UNKNOWN. An identity
 row with an empty `org_id` is excluded as `org_id_unresolved` (P27-19) instead
 of failing the run.
 

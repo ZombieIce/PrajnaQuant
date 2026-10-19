@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     etf_market::{DerivedMarket, TradeState},
-    pit_universe::{HistoricalCatalog, Lifecycle},
+    pit_universe::{HistoricalCatalog, Lifecycle, official_end},
 };
 
 pub const UNKNOWN_COVERAGE_VERSION: &str = "mvp6-unknown-coverage@1";
@@ -376,38 +376,19 @@ pub fn evaluate_derived_market(
 /// The coverage denominator is the ETF's legal lifetime, not the TDX code-table
 /// presence. An official listing before the first code-table appearance and a
 /// TDX exit before the official termination stay inside the lifetime, so their
-/// missing price cells are reported as UNKNOWN (P27-6/P27-19). A same-code
-/// successor identity (evidenced legal-name change or code reuse) still bounds
-/// the earlier identity, so its sessions are never counted twice.
+/// missing price cells are reported as UNKNOWN (P27-6/P27-19). The shared
+/// `official_end` helper also bounds the identity at the next same-code
+/// successor's official listing, so its sessions are never counted twice.
 fn coverage_lifecycle(
     life: &Lifecycle,
     lifecycles: &[Lifecycle],
 ) -> Result<CoverageLifecycle, String> {
     let instrument_id = life.instrument_id().map_err(|error| error.to_string())?;
-    let own_start = life.identity_start.unwrap_or(life.listing.effective_date);
-    // Use the successor's official listing date, not its TDX identity_start:
-    // a pre-TDX official listing would otherwise start before the predecessor
-    // ends and count the same Instrument x Session twice.
-    let next_start = lifecycles
-        .iter()
-        .filter(|other| other.native_symbol == life.native_symbol)
-        .map(|other| other.listing.effective_date)
-        .filter(|start| *start > own_start)
-        .min();
-    let terminated_on = match (
-        life.termination.as_ref().map(|end| end.effective_date),
-        next_start,
-    ) {
-        (Some(termination), Some(next)) => Some(termination.min(next)),
-        (Some(termination), None) => Some(termination),
-        (None, Some(next)) => Some(next),
-        (None, None) => None,
-    };
     Ok(CoverageLifecycle {
         instrument_id,
         native_symbol: life.native_symbol.clone(),
         listed_on: life.listing.effective_date,
-        terminated_on,
+        terminated_on: official_end(life, lifecycles),
     })
 }
 
