@@ -1,10 +1,11 @@
 use super::{
-    Announcement, FundIndex, IndexDataset, PageSet, PdfText, Result, classify, extract_fields,
-    scoped_code,
+    Announcement, FixedListResult, FundCandidate, FundIndex, IndexDataset, OrgIdResolution,
+    PageSet, PdfText, Result, classify, extract_fields, scoped_code, should_download_pdf,
 };
 use crate::{RawStore, SourceKind, SourceRecordInput};
 use chrono::{DateTime, Utc};
-use serde_json::json;
+use chrono::{Duration as ChronoDuration, NaiveDate};
+use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
     time::{Duration, Instant},
@@ -151,6 +152,216 @@ impl<T: Transport> Collector<T> {
         window: &str,
         stock: &str,
     ) -> Result<(Vec<Announcement>, BTreeSet<String>)> {
+        self.pages_for(window, stock, "")
+    }
+
+    /// Resolve and index an explicit fixed list without the old all-window
+    /// discovery query. The existing `collect` contract remains unchanged.
+    pub fn collect_fixed_list(
+        &mut self,
+        candidates: &[FundCandidate],
+        explicit_pdf_categories: &BTreeSet<String>,
+        converter: &mut impl PdfText,
+    ) -> FixedListResult {
+        let mut result = FixedListResult {
+            resolutions: Vec::new(),
+            announcements: BTreeMap::new(),
+            pdf_raw_sha256_by_announcement: BTreeMap::new(),
+            unresolved: Vec::new(),
+        };
+        for candidate in candidates {
+            if !scoped_code(&candidate.code) || candidate.active_start > candidate.active_end {
+                result
+                    .unresolved
+                    .push(format!("{}:invalid_candidate", candidate.code));
+                continue;
+            }
+            let resolution = match self.resolve_fixed_org_ids(candidate) {
+                Ok(value) if !value.is_empty() => OrgIdResolution {
+                    code: candidate.code.clone(),
+                    org_ids: value,
+                    status: "resolved".into(),
+                },
+                Ok(_) => OrgIdResolution {
+                    code: candidate.code.clone(),
+                    org_ids: Vec::new(),
+                    status: "org_id_unresolved".into(),
+                },
+                Err(_) => OrgIdResolution {
+                    code: candidate.code.clone(),
+                    org_ids: Vec::new(),
+                    status: "org_id_unresolved".into(),
+                },
+            };
+            if resolution.org_ids.is_empty() {
+                result
+                    .unresolved
+                    .push(format!("{}:org_id_unresolved", candidate.code));
+                result.resolutions.push(resolution);
+                continue;
+            }
+            for org_id in &resolution.org_ids {
+                let mut by_id = BTreeMap::<String, Announcement>::new();
+                let mut pagination_incomplete = false;
+                for (start, end) in year_segments(candidate.active_start, candidate.active_end) {
+                    let window = format!("{}~{}", start, end);
+                    match self.pages_for(&window, &format!("{},{}", candidate.code, org_id), "") {
+                        Ok((items, _)) => {
+                            for item in items {
+                                if item.code != candidate.code
+                                    || item.org_id.as_deref() != Some(org_id)
+                                {
+                                    pagination_incomplete = true;
+                                    continue;
+                                }
+                                by_id.insert(item.id.clone(), item);
+                            }
+                        }
+                        Err(_) => pagination_incomplete = true,
+                    }
+                }
+                if pagination_incomplete {
+                    result
+                        .unresolved
+                        .push(format!("{}:{org_id}:pagination_incomplete", candidate.code));
+                }
+                let mut items = by_id.into_values().collect::<Vec<_>>();
+                items.sort_by(|a, b| (a.announced_ms, &a.id).cmp(&(b.announced_ms, &b.id)));
+                for item in &mut items {
+                    item.categories = classify_mvp6(&item.title);
+                }
+                let mut listing_notice_status = Vec::new();
+                for item in &items {
+                    if item.categories.iter().any(|c| c == "listing_notice") {
+                        if let Some(path) = item.attachment.as_deref().filter(|p| valid_pdf_path(p))
+                        {
+                            match self.fetch(Request {
+                                url: format!("{PDF}{path}"),
+                                form: BTreeMap::new(),
+                            }) {
+                                Ok((bytes, hash)) if bytes.starts_with(b"%PDF-") => {
+                                    let complete = converter
+                                        .text(&bytes)
+                                        .is_ok_and(|text| listing_notice_covers_metadata(&text));
+                                    listing_notice_status.push((item.announced_ms, complete));
+                                    result
+                                        .pdf_raw_sha256_by_announcement
+                                        .entry(item.id.clone())
+                                        .or_default()
+                                        .push(hash);
+                                }
+                                _ => result
+                                    .unresolved
+                                    .push(format!("{}:pdf_unavailable", item.id)),
+                            }
+                        }
+                    } else if should_download_pdf(&item.categories, false, false)
+                        && !item
+                            .categories
+                            .iter()
+                            .any(|c| c == "fund_contract" || c == "prospectus")
+                    {
+                        self.download_mvp6_pdf(item, &mut result);
+                    }
+                }
+                for item in &items {
+                    let explicitly_requested = item
+                        .categories
+                        .iter()
+                        .any(|c| explicit_pdf_categories.contains(c));
+                    let listing_notice_complete = listing_notice_status
+                        .iter()
+                        .filter(|(announced_ms, _)| *announced_ms <= item.announced_ms)
+                        .max_by_key(|(announced_ms, _)| *announced_ms)
+                        .is_some_and(|(_, complete)| *complete);
+                    if !item
+                        .categories
+                        .iter()
+                        .any(|c| c == "fund_contract" || c == "prospectus")
+                        || !should_download_pdf(
+                            &item.categories,
+                            listing_notice_complete,
+                            explicitly_requested,
+                        )
+                        || result.pdf_raw_sha256_by_announcement.contains_key(&item.id)
+                    {
+                        continue;
+                    }
+                    self.download_mvp6_pdf(item, &mut result);
+                }
+                result
+                    .announcements
+                    .insert((candidate.code.clone(), org_id.clone()), items);
+            }
+            result.resolutions.push(resolution);
+        }
+        result.unresolved.sort();
+        result.unresolved.dedup();
+        result
+    }
+
+    fn download_mvp6_pdf(&mut self, item: &Announcement, result: &mut FixedListResult) {
+        let Some(path) = item.attachment.as_deref().filter(|p| valid_pdf_path(p)) else {
+            result
+                .unresolved
+                .push(format!("{}:pdf_unavailable", item.id));
+            return;
+        };
+        match self.fetch(Request {
+            url: format!("{PDF}{path}"),
+            form: BTreeMap::new(),
+        }) {
+            Ok((bytes, hash)) if bytes.starts_with(b"%PDF-") => {
+                result
+                    .pdf_raw_sha256_by_announcement
+                    .entry(item.id.clone())
+                    .or_default()
+                    .push(hash);
+            }
+            _ => result
+                .unresolved
+                .push(format!("{}:pdf_unavailable", item.id)),
+        }
+    }
+
+    fn resolve_fixed_org_ids(&mut self, candidate: &FundCandidate) -> Result<Vec<String>> {
+        const TOP_SEARCH: &str = "https://www.cninfo.com.cn/new/information/topSearch/query";
+        let request = Request {
+            url: TOP_SEARCH.into(),
+            form: BTreeMap::from([
+                ("keyWord".into(), candidate.code.clone()),
+                ("maxNum".into(), "10".into()),
+                ("plate".into(), "fund".into()),
+            ]),
+        };
+        let (bytes, _) = self.fetch(request)?;
+        let value: Value = serde_json::from_slice(&bytes)?;
+        let mut found = BTreeSet::new();
+        collect_exact_suggestions(&value, &candidate.code, &mut found);
+        if !found.is_empty() {
+            return Ok(found.into_iter().collect());
+        }
+        if candidate.short_name.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        for (start, end) in year_segments(candidate.active_start, candidate.active_end) {
+            let window = format!("{start}~{end}");
+            let (items, _) = self.pages_for(&window, "", &candidate.short_name)?;
+            for item in items.into_iter().filter(|a| a.code == candidate.code) {
+                if let Some(org) = item.org_id {
+                    found.insert(org);
+                }
+            }
+        }
+        Ok(found.into_iter().collect())
+    }
+
+    fn pages_for(
+        &mut self,
+        window: &str,
+        stock: &str,
+        searchkey: &str,
+    ) -> Result<(Vec<Announcement>, BTreeSet<String>)> {
         let mut pages = PageSet::default();
         for page in 1..=10000 {
             let form = BTreeMap::from([
@@ -160,7 +371,7 @@ impl<T: Transport> Collector<T> {
                 ("tabName".into(), "fulltext".into()),
                 ("seDate".into(), window.into()),
                 ("stock".into(), stock.into()),
-                ("searchkey".into(), "".into()),
+                ("searchkey".into(), searchkey.into()),
                 ("sortName".into(), "time".into()),
                 ("sortType".into(), "asc".into()),
                 ("isHLtitle".into(), "false".into()),
@@ -319,4 +530,78 @@ impl<T: Transport> Collector<T> {
             .extend(self.captured.iter().cloned());
         dataset
     }
+}
+
+fn year_segments(start: NaiveDate, end: NaiveDate) -> Vec<(NaiveDate, NaiveDate)> {
+    let mut segments = Vec::new();
+    let mut cursor = start;
+    while cursor <= end {
+        let segment_end = (cursor + ChronoDuration::days(364)).min(end);
+        segments.push((cursor, segment_end));
+        cursor = segment_end + ChronoDuration::days(1);
+    }
+    segments
+}
+
+fn collect_exact_suggestions(value: &Value, code: &str, output: &mut BTreeSet<String>) {
+    match value {
+        Value::Array(rows) => {
+            for row in rows {
+                collect_exact_suggestions(row, code, output);
+            }
+        }
+        Value::Object(object) => {
+            let row_code = object.get("code").and_then(Value::as_str);
+            if row_code == Some(code) {
+                if let Some(org_id) = object
+                    .get("orgId")
+                    .and_then(Value::as_str)
+                    .filter(|v| !v.trim().is_empty())
+                {
+                    output.insert(org_id.to_owned());
+                }
+            }
+            for child in object.values() {
+                collect_exact_suggestions(child, code, output);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn classify_mvp6(title: &str) -> Vec<String> {
+    let mut categories = classify(title);
+    let extra = [
+        (
+            "conversion",
+            &["份额拆分", "基金份额拆分", "拆分"] as &[&str],
+        ),
+        ("holders_meeting", &["计票结果", "表决结果", "表决情况"]),
+        ("termination", &["终止上市", "终止基金合同"]),
+        ("liquidation_report", &["清算报告"]),
+        ("fund_contract", &["基金合同"]),
+        ("prospectus", &["招募说明书"]),
+    ];
+    for (category, words) in extra {
+        if words.iter().any(|word| title.contains(word))
+            && !categories.iter().any(|c| c == category)
+        {
+            categories.push(category.into());
+        }
+    }
+    categories.sort();
+    categories.dedup();
+    categories
+}
+
+fn valid_pdf_path(path: &str) -> bool {
+    path.starts_with("finalpage/")
+        && !path.contains("..")
+        && (path.ends_with(".PDF") || path.ends_with(".pdf"))
+}
+
+fn listing_notice_covers_metadata(text: &str) -> bool {
+    let has_index = text.contains("标的指数") || text.contains("跟踪指数");
+    let has_category = text.contains("基金类别") || text.contains("基金类型");
+    has_index && has_category
 }
