@@ -42,44 +42,82 @@ fn scoped(code: &str) -> bool {
     code.len() == 6 && code.starts_with("159") && code.bytes().all(|b| b.is_ascii_digit())
 }
 
-pub const MVP6_FIXED_ETF_CODES: [&str; 5] = ["159919", "159560", "159522", "159612", "159952"];
+pub const MVP6_FIXED_ETF_CANDIDATES: [&str; 5] = ["159919", "159560", "159522", "159612", "159952"];
 
-/// A named, immutable code list. Catalog lifecycle evidence still gates each
-/// decision Session; the list itself is a retrospective static selection.
+/// A named, immutable code list with explicit exclusions. Catalog lifecycle
+/// evidence still gates each decision Session; selection is retrospective static.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FixedUniverseSpec {
     pub version: String,
     pub codes: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub excluded_codes: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum_code_count: Option<usize>,
 }
 impl FixedUniverseSpec {
     pub fn new(version: impl Into<String>, codes: BTreeSet<String>) -> Result<Self> {
         let spec = Self {
             version: version.into(),
             codes,
+            excluded_codes: BTreeMap::new(),
+            minimum_code_count: None,
         };
         spec.validate()?;
         Ok(spec)
     }
 
     pub fn mvp6() -> Self {
+        let excluded_codes = MVP6_FIXED_ETF_CANDIDATES
+            .into_iter()
+            .map(|code| {
+                (
+                    code.to_owned(),
+                    "unknown_limit_rule_across_evidenced_window:szse-fund-limit-rules@1".to_owned(),
+                )
+            })
+            .collect();
         Self {
-            version: "mvp6-fixed-etf@1".into(),
-            codes: MVP6_FIXED_ETF_CODES
-                .into_iter()
-                .map(str::to_owned)
-                .collect(),
+            version: "mvp6-fixed-etf@2".into(),
+            codes: BTreeSet::new(),
+            excluded_codes,
+            minimum_code_count: Some(3),
         }
     }
 
     fn validate(&self) -> Result<()> {
         if self.version.trim().is_empty()
-            || self.codes.is_empty()
             || self.codes.iter().any(|code| !scoped(code))
+            || self.excluded_codes.keys().any(|code| !scoped(code))
+            || self
+                .codes
+                .iter()
+                .any(|code| self.excluded_codes.contains_key(code))
+            || self
+                .excluded_codes
+                .values()
+                .any(|reason| reason.trim().is_empty())
+            || self.codes.is_empty() && self.excluded_codes.is_empty()
+            || self.minimum_code_count.is_some_and(|count| count == 0)
         {
             return Err(error(
                 "invalid fixed Universe version or SZSE ETF code list",
             ));
+        }
+        Ok(())
+    }
+
+    pub fn validate_escalation_threshold(&self) -> Result<()> {
+        self.validate()?;
+        if let Some(minimum) = self.minimum_code_count
+            && self.codes.len() < minimum
+        {
+            return Err(error(format!(
+                "P27-19 escalation: fixed Universe has {} included codes below the minimum {minimum}; excluded codes: {:?}",
+                self.codes.len(),
+                self.excluded_codes
+            )));
         }
         Ok(())
     }
@@ -1139,7 +1177,9 @@ impl HistoricalCatalog {
         let mut excluded = BTreeMap::new();
         for life in &self.input.lifecycles {
             let id = life.instrument_id()?;
-            let reason = if !fixed.codes.contains(&life.native_symbol) {
+            let reason = if let Some(reason) = fixed.excluded_codes.get(&life.native_symbol) {
+                Some(reason.as_str())
+            } else if !fixed.codes.contains(&life.native_symbol) {
                 Some("outside_fixed_list")
             } else if session_date < life.listing.effective_date.max(life.identity_start()) {
                 Some("before_listing")
@@ -1169,14 +1209,23 @@ impl HistoricalCatalog {
         }
         self.validate_active_code_uniqueness(&members)?;
         members.sort();
+        let mut warnings = BTreeSet::from(["survivorship_bias".into()]);
+        if fixed
+            .minimum_code_count
+            .is_some_and(|minimum| fixed.codes.len() < minimum)
+        {
+            warnings.insert("p27_19_minimum_fixed_list_not_met".into());
+        }
         let run_spec = UniverseRunSpec {
-            semantic_version: "szse-fixed-list-universe@1".into(),
+            semantic_version: "szse-fixed-list-universe@2".into(),
             catalog_version: self.version()?,
             broad_index_version: None,
             fixed_list_version: Some(fixed.version.clone()),
             fixed_list: Some(fixed.codes.clone()),
+            fixed_list_exclusions: Some(fixed.excluded_codes.clone()),
+            fixed_list_minimum_code_count: fixed.minimum_code_count,
             history_claim: Some("retrospective_static".into()),
-            warnings: Some(BTreeSet::from(["survivorship_bias".into()])),
+            warnings: Some(warnings),
             rule_version: self.input.rule_version.clone(),
             coverage: self.input.coverage.clone(),
             coverage_gaps: BTreeSet::new(),
@@ -1327,6 +1376,8 @@ impl HistoricalCatalog {
             broad_index_version: Some(hash("broad-index", broad_indices)?),
             fixed_list_version: None,
             fixed_list: None,
+            fixed_list_exclusions: None,
+            fixed_list_minimum_code_count: None,
             history_claim: None,
             warnings: None,
             rule_version: self.input.rule_version.clone(),
@@ -1430,6 +1481,10 @@ pub struct UniverseRunSpec {
     pub fixed_list_version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fixed_list: Option<BTreeSet<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_list_exclusions: Option<BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_list_minimum_code_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history_claim: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

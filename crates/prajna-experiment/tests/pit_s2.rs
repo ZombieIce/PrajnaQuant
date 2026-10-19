@@ -475,7 +475,8 @@ fn pit_defaults_to_versioned_mvp6_fixed_universe() {
         .unwrap()
         .remove("fixed_universe");
     let mvp6 = Experiment::parse(&mvp6_input.to_string(), lake.path()).unwrap();
-    let mvp6_run = &mvp6.expand(lake.path()).unwrap()[0];
+    let mvp6_runs = mvp6.expand(lake.path()).unwrap();
+    let mvp6_run = &mvp6_runs[0];
 
     let legacy_input = definition(&f, "vector");
     let legacy = Experiment::parse(&legacy_input.to_string(), lake.path()).unwrap();
@@ -485,18 +486,58 @@ fn pit_defaults_to_versioned_mvp6_fixed_universe() {
     assert_ne!(mvp6_run.run_id, legacy_run.run_id);
     assert_eq!(
         mvp6_run.run_spec["pit"]["fixed_universe"]["version"],
-        "mvp6-fixed-etf@1"
+        "mvp6-fixed-etf@2"
+    );
+    assert_eq!(
+        mvp6_run.run_spec["pit"]["fixed_universe"]["codes"],
+        json!([])
+    );
+    assert_eq!(
+        mvp6_run.run_spec["pit"]["fixed_universe"]["excluded_codes"],
+        json!({
+            "159919":"unknown_limit_rule_across_evidenced_window:szse-fund-limit-rules@1",
+            "159560":"unknown_limit_rule_across_evidenced_window:szse-fund-limit-rules@1",
+            "159522":"unknown_limit_rule_across_evidenced_window:szse-fund-limit-rules@1",
+            "159612":"unknown_limit_rule_across_evidenced_window:szse-fund-limit-rules@1",
+            "159952":"unknown_limit_rule_across_evidenced_window:szse-fund-limit-rules@1"
+        })
+    );
+    assert_eq!(
+        mvp6_run.run_spec["pit"]["fixed_universe"]["minimum_code_count"],
+        3
     );
     assert_eq!(
         mvp6_run.run_spec["session_inputs"][3]["eligible"]["universe"]["run_spec"]["fixed_list"],
-        json!(["159522", "159560", "159612", "159919", "159952"])
+        json!([])
     );
     assert_eq!(
         mvp6_run.run_spec["session_inputs"][3]["eligible"]["universe"]["run_spec"]["fixed_list_version"],
-        "mvp6-fixed-etf@1"
+        "mvp6-fixed-etf@2"
+    );
+    assert_eq!(
+        mvp6_run.run_spec["session_inputs"][3]["eligible"]["universe"]["run_spec"]["fixed_list_exclusions"]
+            ["159919"],
+        "unknown_limit_rule_across_evidenced_window:szse-fund-limit-rules@1"
+    );
+    assert_eq!(
+        mvp6_run.run_spec["session_inputs"][3]["eligible"]["universe"]["run_spec"]["warnings"],
+        json!(["p27_19_minimum_fixed_list_not_met", "survivorship_bias"])
     );
     assert_eq!(
         mvp6_run.run_spec["session_inputs"][3]["eligible"]["universe"]["run_spec"]["history_claim"],
         "retrospective_static"
+    );
+    let report = mvp6.execute(lake.path(), 1).unwrap();
+    assert_eq!(report.runs[0].status, RunStatus::Failed);
+    assert!(
+        report.runs[0]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("P27-19 escalation")
+    );
+    assert_eq!(
+        report.runs[0].run_spec["pit"]["fixed_universe"]["codes"],
+        json!([])
     );
 }
