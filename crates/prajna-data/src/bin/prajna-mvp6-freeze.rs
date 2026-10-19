@@ -169,6 +169,12 @@ fn preserve_collection_coverage(previous: &Value, current: &mut Value) {
         "sina_not_attempted",
         "sina_source_stop_reason",
         "p21_mismatches",
+        "p21",
+        "corporate_action_dataset",
+        "corporate_actions_with_missing_fields",
+        "excluded_etfs",
+        "sina_optional_crosscheck",
+        "sina_input_selection",
         "unknown_rule_sessions",
         "cninfo_unknown_facts",
         "mvp6_complete",
@@ -182,6 +188,8 @@ fn preserve_collection_coverage(previous: &Value, current: &mut Value) {
         "sina_adjustment_factors",
         "cninfo",
         "p21_crosscheck",
+        "p21_evaluated",
+        "corporate_actions",
         "unknown_rule_sessions",
     ] {
         if let Some(value) = previous
