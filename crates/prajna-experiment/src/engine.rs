@@ -717,6 +717,27 @@ pub(super) fn execute(
             fixed
                 .validate_escalation_threshold()
                 .map_err(|error| error.to_string())?;
+            if let Some(minimum) = fixed.minimum_code_count
+                && run
+                    .run_spec
+                    .get("session_inputs")
+                    .and_then(Value::as_array)
+                    .is_some_and(|sessions| {
+                        sessions.iter().any(|input| {
+                            input
+                                .get("eligible")
+                                .and_then(|eligible| eligible.get("universe"))
+                                .and_then(|universe| universe.get("run_spec"))
+                                .and_then(|spec| spec.get("fixed_list"))
+                                .and_then(Value::as_array)
+                                .is_some_and(|codes| codes.len() < minimum)
+                        })
+                    })
+            {
+                return Err(format!(
+                    "P27-19 escalation: effective fixed Universe has fewer than {minimum} codes"
+                ));
+            }
         }
         let engine = experiment.engine.selection();
         if let RunStrategy::Native(strategy) = &run.strategy {

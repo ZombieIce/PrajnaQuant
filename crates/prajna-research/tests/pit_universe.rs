@@ -451,6 +451,57 @@ fn tdx_code_tables_rebuild_configured_158xxx_lifecycles_and_name_based_pit_unive
     let catalog = HistoricalCatalog::build(input.clone(), &raw).unwrap();
     assert!(catalog.coverage_gaps().is_empty());
 
+    let mut lifecycle_conflict_input = input.clone();
+    lifecycle_conflict_input
+        .scans
+        .iter_mut()
+        .find(|scan| scan.native_symbol == "159001" && scan.identity_start == Some(date(1)))
+        .unwrap()
+        .last_observed = Some(date(5));
+    let lifecycle_conflict_catalog =
+        HistoricalCatalog::build(lifecycle_conflict_input, &raw).unwrap();
+    assert!(
+        lifecycle_conflict_catalog
+            .coverage_gaps()
+            .contains("price_scan_outside_lifecycle:159001:2023-01-01")
+    );
+    let fixed = FixedUniverseSpec::new(
+        "synthetic-fixed@1",
+        BTreeSet::from(["159001".into(), "159002".into()]),
+    )
+    .unwrap();
+    let fixed_result = lifecycle_conflict_catalog
+        .fixed_universe(date(7), &fixed)
+        .unwrap();
+    assert!(
+        fixed_result
+            .members
+            .iter()
+            .all(|id| id.symbol().starts_with("159002-"))
+    );
+    assert_eq!(
+        fixed_result.run_spec.fixed_list,
+        Some(BTreeSet::from(["159002".into()]))
+    );
+    assert_eq!(
+        fixed_result
+            .run_spec
+            .fixed_list_exclusions
+            .as_ref()
+            .unwrap()["159001"],
+        "price_scan_outside_lifecycle:2023-01-01"
+    );
+    assert!(fixed_result.run_spec.coverage_gaps.is_empty());
+    assert!(lifecycle_conflict_catalog.universe(date(7)).is_err());
+
+    let mut global_gap_input = input.clone();
+    global_gap_input
+        .coverage
+        .gaps
+        .insert("synthetic global coverage gap".into());
+    let global_gap_catalog = HistoricalCatalog::build(global_gap_input, &raw).unwrap();
+    assert!(global_gap_catalog.fixed_universe(date(7), &fixed).is_err());
+
     let mut csi_100_input = input.clone();
     csi_100_input
         .lifecycles

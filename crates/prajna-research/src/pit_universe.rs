@@ -1157,10 +1157,36 @@ impl HistoricalCatalog {
         fixed: &FixedUniverseSpec,
     ) -> Result<UniverseBuildResult> {
         fixed.validate()?;
-        if !self.gaps.is_empty() {
+        let fixed_codes: BTreeSet<_> = fixed
+            .codes
+            .iter()
+            .chain(fixed.excluded_codes.keys())
+            .cloned()
+            .collect();
+        let mut lifecycle_conflicts: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let mut blocking_gaps = BTreeSet::new();
+        for gap in &self.gaps {
+            if let Some(detail) = gap.strip_prefix("price_scan_outside_lifecycle:")
+                && let Some((code, start)) = detail.split_once(':')
+                && scoped(code)
+            {
+                if fixed_codes.contains(code) {
+                    lifecycle_conflicts
+                        .entry(code.to_owned())
+                        .or_default()
+                        .insert(format!("price_scan_outside_lifecycle:{start}"));
+                }
+                // A price scan that crosses one instrument's evidenced lifecycle is
+                // candidate-specific. It must not turn an otherwise usable Catalog
+                // into a run-wide coverage failure.
+                continue;
+            }
+            blocking_gaps.insert(gap.clone());
+        }
+        if !blocking_gaps.is_empty() {
             return Err(error(format!(
                 "incomplete historical coverage: {:?}",
-                self.gaps
+                blocking_gaps
             )));
         }
         if session_date < self.input.coverage.start || session_date > self.input.coverage.end {
@@ -1175,11 +1201,24 @@ impl HistoricalCatalog {
         let now = session.ts_close();
         let mut members = Vec::new();
         let mut excluded = BTreeMap::new();
+        let mut effective_codes = fixed.codes.clone();
+        let mut effective_exclusions = fixed.excluded_codes.clone();
+        for (code, reasons) in lifecycle_conflicts {
+            effective_codes.remove(&code);
+            let reason = reasons.into_iter().collect::<Vec<_>>().join(",");
+            effective_exclusions
+                .entry(code)
+                .and_modify(|existing| {
+                    existing.push(';');
+                    existing.push_str(&reason);
+                })
+                .or_insert(reason);
+        }
         for life in &self.input.lifecycles {
             let id = life.instrument_id()?;
-            let reason = if let Some(reason) = fixed.excluded_codes.get(&life.native_symbol) {
+            let reason = if let Some(reason) = effective_exclusions.get(&life.native_symbol) {
                 Some(reason.as_str())
-            } else if !fixed.codes.contains(&life.native_symbol) {
+            } else if !effective_codes.contains(&life.native_symbol) {
                 Some("outside_fixed_list")
             } else if session_date < life.listing.effective_date.max(life.identity_start()) {
                 Some("before_listing")
@@ -1212,7 +1251,7 @@ impl HistoricalCatalog {
         let mut warnings = BTreeSet::from(["survivorship_bias".into()]);
         if fixed
             .minimum_code_count
-            .is_some_and(|minimum| fixed.codes.len() < minimum)
+            .is_some_and(|minimum| effective_codes.len() < minimum)
         {
             warnings.insert("p27_19_minimum_fixed_list_not_met".into());
         }
@@ -1221,8 +1260,8 @@ impl HistoricalCatalog {
             catalog_version: self.version()?,
             broad_index_version: None,
             fixed_list_version: Some(fixed.version.clone()),
-            fixed_list: Some(fixed.codes.clone()),
-            fixed_list_exclusions: Some(fixed.excluded_codes.clone()),
+            fixed_list: Some(effective_codes),
+            fixed_list_exclusions: Some(effective_exclusions),
             fixed_list_minimum_code_count: fixed.minimum_code_count,
             history_claim: Some("retrospective_static".into()),
             warnings: Some(warnings),
