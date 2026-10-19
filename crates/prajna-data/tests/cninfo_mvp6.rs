@@ -1,8 +1,18 @@
 //! Synthetic-only tests for the public MVP-6 fixed-list contract.
-use prajna_data::{RawStore, cninfo::*};
+use arrow_array::RecordBatch;
+use chrono::NaiveDate;
+use prajna_data::{
+    BarSourceRow, Manifest, ManifestCore, ManifestProvenance, ManifestTable, RawStore, SourceKind,
+    SourceRecordInput, TdxCodeTableRow, bar_sources_to_record_batch, bars_to_record_batch,
+    cninfo::*, logical_hash, schema_fingerprint, sessions_to_record_batch,
+    tdx_code_table_to_record_batch, write_manifest, write_parquet,
+};
+use prajna_domain::{Bar, BarData, InstrumentId, Price, Quantity, Session, TimestampNs, VenueId};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeSet, VecDeque},
+    fs,
+    path::Path,
     sync::{Arc, Mutex},
     time::Instant,
 };
@@ -305,25 +315,23 @@ fn facts() -> Mvp6Facts {
         }],
     }
 }
-fn citation(id: &str, fields: &[&str]) -> RawCitation {
-    RawCitation {
-        announcement_id: id.into(),
-        page: 1,
-        evidenced_fields: fields.iter().map(|s| s.to_string()).collect(),
+fn evidence_fields(fields: &[&str]) -> BTreeSet<String> {
+    fields.iter().map(|field| (*field).to_owned()).collect()
+}
+fn source_record(id: &str) -> SourceRecordInput {
+    SourceRecordInput {
+        content_type: "application/json".into(),
+        source_kind: SourceKind::Fixture,
+        source_id: "cninfo".into(),
+        request: json!({"url": format!("https://example.test/{id}")}),
+        observed_at: "synthetic".into(),
+        ingested_by: "cninfo-mvp6-test".into(),
     }
 }
-fn calendar() -> BTreeSet<chrono::NaiveDate> {
-    ["2026-01-05", "2026-01-06", "2026-01-07"]
-        .into_iter()
-        .map(|s| s.parse().unwrap())
-        .collect()
-}
-fn date(value: &str) -> chrono::NaiveDate {
-    value.parse().unwrap()
-}
-fn raw() -> Vec<RawCitation> {
-    vec![
-        citation(
+fn citation_fixture(store: &RawStore) -> Vec<RawCitation> {
+    let mut citations = Vec::new();
+    for (id, fields) in [
+        (
             "identity",
             &[
                 "code",
@@ -331,10 +339,13 @@ fn raw() -> Vec<RawCitation> {
                 "legal_name",
                 "listing_date",
                 "fund_category",
-            ],
+            ][..],
         ),
-        citation("action", &["code", "kind", "announcement_date", "ex_date"]),
-        citation(
+        (
+            "action",
+            &["code", "kind", "announcement_date", "ex_date"][..],
+        ),
+        (
             "event",
             &[
                 "code",
@@ -342,30 +353,71 @@ fn raw() -> Vec<RawCitation> {
                 "announcement_date",
                 "effective_date",
                 "session_part",
-            ],
+            ][..],
         ),
-    ]
+    ] {
+        let bytes = serde_json::to_vec(&json!({"announcementId": id})).unwrap();
+        let hash = store.put(&bytes, source_record(id)).unwrap();
+        citations
+            .push(RawCitation::from_store(store, id, 1, hash, evidence_fields(fields)).unwrap());
+    }
+    citations
+}
+fn raw_fixture() -> (tempfile::TempDir, RawStore, Vec<RawCitation>) {
+    let dir = tempfile::tempdir().unwrap();
+    let store = RawStore::open(dir.path()).unwrap();
+    let citations = citation_fixture(&store);
+    (dir, store, citations)
+}
+fn calendar() -> BTreeSet<NaiveDate> {
+    ["2026-01-05", "2026-01-06", "2026-01-07"]
+        .into_iter()
+        .map(|s| s.parse().unwrap())
+        .collect()
+}
+fn date(value: &str) -> NaiveDate {
+    value.parse().unwrap()
+}
+fn price(value: &str) -> Price {
+    Price::parse(value).unwrap()
 }
 
 #[test]
 fn public_facts_validate_raw_calendar_lifecycle_required_fields_and_explicit_evidence() {
+    let (_dir, store, evidence) = raw_fixture();
     let f = facts();
-    let converted = validate_and_convert(&f, &raw(), &calendar()).unwrap();
+    let converted = validate_and_convert(&f, &store, &evidence, &calendar()).unwrap();
     assert_eq!(
         converted.corporate_actions.schema,
         "cninfo_corporateActions_structured_v2"
     );
     assert_eq!(converted.risk_events[0].session_part, "full_day");
     assert!(
-        validate_and_convert(&f, &raw()[1..], &calendar())
+        validate_and_convert(&f, &store, &evidence[1..], &calendar())
             .unwrap_err()
             .to_string()
             .contains("missing Raw citation")
     );
+    let mut missing_raw = evidence.clone();
+    missing_raw[0].raw_sha256 = format!("sha256:{}", "0".repeat(64));
+    assert!(
+        validate_and_convert(&f, &store, &missing_raw, &calendar())
+            .unwrap_err()
+            .to_string()
+            .contains("unavailable")
+    );
+    let mut fabricated = evidence.clone();
+    fabricated[2].announcement_id = "invented".into();
+    assert!(
+        validate_and_convert(&f, &store, &fabricated, &calendar())
+            .unwrap_err()
+            .to_string()
+            .contains("does not reference")
+    );
     let mut outside = f.clone();
     outside.events[0].effective_date = "2026-01-08".into();
     assert!(
-        validate_and_convert(&outside, &raw(), &calendar())
+        validate_and_convert(&outside, &store, &evidence, &calendar())
             .unwrap_err()
             .to_string()
             .contains("outside frozen calendar")
@@ -376,7 +428,7 @@ fn public_facts_validate_raw_calendar_lifecycle_required_fields_and_explicit_evi
     second.source_announcement_id = "identity".into();
     overlap.identities.push(second);
     assert!(
-        validate_and_convert(&overlap, &raw(), &calendar())
+        validate_and_convert(&overlap, &store, &evidence, &calendar())
             .unwrap_err()
             .to_string()
             .contains("overlapping lifecycle")
@@ -384,7 +436,7 @@ fn public_facts_validate_raw_calendar_lifecycle_required_fields_and_explicit_evi
     let mut missing = f.clone();
     missing.identities[0].legal_name.clear();
     assert!(
-        validate_and_convert(&missing, &raw(), &calendar())
+        validate_and_convert(&missing, &store, &evidence, &calendar())
             .unwrap_err()
             .to_string()
             .contains("legal_name")
@@ -392,29 +444,31 @@ fn public_facts_validate_raw_calendar_lifecycle_required_fields_and_explicit_evi
     let mut inferred = f;
     inferred.identities[0].tracked_index = "synthetic-index".into();
     assert!(
-        validate_and_convert(&inferred, &raw(), &calendar())
+        validate_and_convert(&inferred, &store, &evidence, &calendar())
             .unwrap_err()
             .to_string()
             .contains("not evidenced")
     );
     let mut reversed = facts();
     reversed.identities[0].termination_date = "2025-12-31".into();
-    let mut evidence = raw();
-    evidence[0]
+    let mut reversed_evidence = evidence.clone();
+    reversed_evidence[0]
         .evidenced_fields
         .insert("termination_date".into());
     assert!(
-        validate_and_convert(&reversed, &evidence, &calendar())
+        validate_and_convert(&reversed, &store, &reversed_evidence, &calendar())
             .unwrap_err()
             .to_string()
             .contains("precedes")
     );
     let mut malformed = facts();
     malformed.actions[0].cash_per_share = "1e-3".into();
-    let mut evidence = raw();
-    evidence[1].evidenced_fields.insert("cash_per_share".into());
+    let mut decimal_evidence = evidence.clone();
+    decimal_evidence[1]
+        .evidenced_fields
+        .insert("cash_per_share".into());
     assert!(
-        validate_and_convert(&malformed, &evidence, &calendar())
+        validate_and_convert(&malformed, &store, &decimal_evidence, &calendar())
             .unwrap_err()
             .to_string()
             .contains("invalid decimal")
@@ -422,10 +476,50 @@ fn public_facts_validate_raw_calendar_lifecycle_required_fields_and_explicit_evi
     let mut bad_code = facts();
     bad_code.identities[0].code = "160001".into();
     assert!(
-        validate_and_convert(&bad_code, &raw(), &calendar())
+        validate_and_convert(&bad_code, &store, &evidence, &calendar())
             .unwrap_err()
             .to_string()
             .contains("invalid fund code")
+    );
+}
+
+#[test]
+fn citation_csv_binds_each_row_to_a_frozen_raw_object_and_rejects_duplicates() {
+    let (_dir, store, evidence) = raw_fixture();
+    let csv = format!(
+        "announcement_id,page,raw_sha256,evidenced_fields\n\
+         identity,1,{},code;org_id;legal_name;listing_date;fund_category\n\
+         action,1,{},code;kind;announcement_date;ex_date\n\
+         event,1,{},code;kind;announcement_date;effective_date;session_part\n",
+        evidence[0].raw_sha256, evidence[1].raw_sha256, evidence[2].raw_sha256
+    );
+    let citations = read_citations_csv(&csv, &store).unwrap();
+    assert_eq!(citations.len(), 3);
+    let action = citations
+        .iter()
+        .find(|citation| citation.announcement_id == "action")
+        .unwrap();
+    assert!(action.evidenced_fields.contains("ex_date"));
+
+    let missing = csv.replace(
+        &evidence[0].raw_sha256,
+        &format!("sha256:{}", "0".repeat(64)),
+    );
+    assert!(
+        read_citations_csv(&missing, &store)
+            .unwrap_err()
+            .to_string()
+            .contains("unavailable")
+    );
+    let duplicate = format!(
+        "{csv}identity,1,{},code;org_id;legal_name;listing_date;fund_category\n",
+        evidence[0].raw_sha256
+    );
+    assert!(
+        read_citations_csv(&duplicate, &store)
+            .unwrap_err()
+            .to_string()
+            .contains("duplicate citation")
     );
 }
 
@@ -437,23 +531,26 @@ fn crosscheck_detects_listing_action_and_suspension_disagreements() {
     let bars = vec![
         V4DailyBar {
             code: "159001".into(),
-            date: "2026-01-05".parse().unwrap(),
-            close: Some(1.0),
-            previous_close: Some(1.0),
-            keyed_no_trade: true,
-        },
-        V4DailyBar {
-            code: "159001".into(),
-            date: "2026-01-06".parse().unwrap(),
-            close: Some(1.0),
-            previous_close: Some(1.0),
+            date: date("2026-01-05"),
+            close: Some(price("1.0")),
+            previous_close: Some(price("1.0")),
+            reference_price: Some(price("1.0")),
             keyed_no_trade: false,
         },
         V4DailyBar {
             code: "159001".into(),
-            date: "2026-01-07".parse().unwrap(),
-            close: Some(1.0),
-            previous_close: Some(1.0),
+            date: date("2026-01-06"),
+            close: Some(price("1.0")),
+            previous_close: Some(price("1.0")),
+            reference_price: Some(price("1.0")),
+            keyed_no_trade: false,
+        },
+        V4DailyBar {
+            code: "159001".into(),
+            date: date("2026-01-07"),
+            close: Some(price("1.0")),
+            previous_close: Some(price("1.0")),
+            reference_price: Some(price("1.0")),
             keyed_no_trade: false,
         },
     ];
@@ -465,10 +562,10 @@ fn crosscheck_detects_listing_action_and_suspension_disagreements() {
         .collect::<BTreeSet<_>>();
     assert!(kinds.contains("listing_vs_first_bar"));
     assert!(kinds.contains("termination_vs_last_bar"));
-    assert!(kinds.contains("action_date_vs_previous_close_jump"));
+    assert!(kinds.contains("action_date_vs_reference_price_jump"));
     assert!(kinds.contains("suspension_vs_keyed_no_trade"));
-    assert!(kinds.contains("keyed_no_trade_vs_suspension"));
-    let converted = validate_and_convert(&facts(), &raw(), &calendar()).unwrap();
+    let (_dir, store, evidence) = raw_fixture();
+    let converted = validate_and_convert(&facts(), &store, &evidence, &calendar()).unwrap();
     let manual = Mvp6Session {
         catalog_lifecycles: vec![CatalogLifecycle {
             code: "159001".into(),
@@ -669,5 +766,280 @@ fn fixed_collector_reports_unreadable_listing_notice_as_unresolved() {
             .unresolved
             .iter()
             .any(|gap| gap == "listing:pdf_unavailable")
+    );
+}
+
+fn v4_session(value: &str) -> Session {
+    let date: NaiveDate = value.parse().unwrap();
+    let open = TimestampNs::parse(&format!("{date}T09:30:00+08:00")).unwrap();
+    let close = TimestampNs::parse(&format!("{date}T15:00:00+08:00")).unwrap();
+    Session::new(VenueId::new("SZSE").unwrap(), date, open, close).unwrap()
+}
+fn v4_bar(session: &Session, close: &str) -> Bar {
+    Bar::new(
+        BarData {
+            instrument_id: InstrumentId::new("159001", VenueId::new("SZSE").unwrap()).unwrap(),
+            bar_spec: "1d@session".parse().unwrap(),
+            session_date: session.session_date(),
+            ts_open: session.ts_open(),
+            ts_close: session.ts_close(),
+            open: Price::parse(close).unwrap(),
+            high: Price::parse(close).unwrap(),
+            low: Price::parse(close).unwrap(),
+            close: Price::parse(close).unwrap(),
+            volume: Quantity::parse("100").unwrap(),
+            amount: None,
+            available_at: None,
+        },
+        Some(session),
+    )
+    .unwrap()
+}
+fn manifest_table(name: &str, batch: &RecordBatch, primary_key: &[&str]) -> ManifestTable {
+    ManifestTable {
+        table: name.into(),
+        schema_version: 1,
+        schema_fingerprint: schema_fingerprint(batch.schema().as_ref()).unwrap(),
+        logical_hash: logical_hash(
+            name,
+            batch.schema().as_ref(),
+            std::slice::from_ref(batch),
+            primary_key,
+        )
+        .unwrap(),
+        row_count: batch.num_rows() as u64,
+    }
+}
+fn publish_synthetic_v4(
+    root: &Path,
+    sessions: &[Session],
+    bars: &[Bar],
+    code_tables: &[TdxCodeTableRow],
+) -> String {
+    let sessions_batch = sessions_to_record_batch(sessions).unwrap();
+    let bars_batch = bars_to_record_batch(bars).unwrap();
+    let bar_sources_batch = bar_sources_to_record_batch(
+        &bars
+            .iter()
+            .map(|bar| BarSourceRow {
+                instrument_id: bar.instrument_id().clone(),
+                session_date: bar.session_date(),
+                source: "tdx".into(),
+                source_raw_sha256: format!("sha256:{}", "3".repeat(64)),
+                reference_price: Some(bar.close()),
+            })
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    let code_batch = tdx_code_table_to_record_batch(code_tables).unwrap();
+    let manifest = Manifest::new(
+        ManifestCore {
+            manifest_version: 1,
+            normalizer: prajna_data::NormalizerIdentity {
+                id: "szse-etf-frozen".into(),
+                version: "4".into(),
+                config_sha256: format!("sha256:{}", "2".repeat(64)),
+            },
+            inputs: Vec::new(),
+            tables: vec![
+                manifest_table(
+                    "bar_sources",
+                    &bar_sources_batch,
+                    &["instrument_id", "session_date"],
+                ),
+                manifest_table(
+                    "bars",
+                    &bars_batch,
+                    &["instrument_id", "bar_spec", "session_date"],
+                ),
+                manifest_table("sessions", &sessions_batch, &["venue_id", "session_date"]),
+                manifest_table("tdx_code_table", &code_batch, &["session_date"]),
+            ],
+        },
+        ManifestProvenance {
+            files: Vec::new(),
+            writer: json!({"name": "synthetic-test"}),
+            created_at: "synthetic".into(),
+            git_rev: None,
+            git_dirty: None,
+            host: None,
+            synthetic_assumptions: vec!["synthetic v4 projection".into()],
+            coverage: json!({}),
+            ignored_input_fields: Vec::new(),
+        },
+    )
+    .unwrap();
+    write_manifest(root, &manifest).unwrap();
+    let hex = manifest.dsv.strip_prefix("dsv:sha256:").unwrap();
+    for (name, batch) in [
+        ("bar_sources", &bar_sources_batch),
+        ("bars", &bars_batch),
+        ("sessions", &sessions_batch),
+        ("tdx_code_table", &code_batch),
+    ] {
+        let directory = root.join("normalized").join(name).join(hex);
+        fs::create_dir_all(&directory).unwrap();
+        write_parquet(directory.join("part-00000.parquet"), batch, &manifest.dsv).unwrap();
+    }
+    manifest.dsv
+}
+
+#[test]
+fn local_acceptance_loads_v4_projection_and_persists_the_crosscheck_report() {
+    let (dir, store, evidence) = raw_fixture();
+    let root = dir.path();
+    let sessions = [
+        v4_session("2026-01-05"),
+        v4_session("2026-01-06"),
+        v4_session("2026-01-07"),
+    ];
+    let bars = [v4_bar(&sessions[0], "1.0"), v4_bar(&sessions[1], "1.0")];
+    let code_tables = sessions
+        .iter()
+        .map(|session| TdxCodeTableRow {
+            session_date: session.session_date(),
+            native_symbols: vec!["159001".into()],
+            code_ranges: vec![(158000, 159999)],
+            source_raw_sha256: format!("sha256:{}", "1".repeat(64)),
+        })
+        .collect::<Vec<_>>();
+    let dsv = publish_synthetic_v4(root, &sessions, &bars, &code_tables);
+    let acceptance_dir = root.join("acceptance/cninfo-fixed/synthetic");
+    let acceptance =
+        write_facts_acceptance(&acceptance_dir, root, &dsv, &facts(), &evidence, &store).unwrap();
+
+    assert!(acceptance.facts_session_path.exists());
+    assert_eq!(acceptance.report.mismatches.len(), 1);
+    assert_eq!(
+        acceptance.report.mismatches[0].kind,
+        "action_date_vs_reference_price_jump"
+    );
+    let report: Value =
+        serde_json::from_slice(&fs::read(&acceptance.crosscheck_path).unwrap()).unwrap();
+    assert_eq!(report["contract"], "mvp-6-cninfo-crosscheck-v1");
+    assert_eq!(report["dsv"], dsv);
+    assert_eq!(report["mismatch_count"], 1);
+    assert_eq!(report["facts_rows"]["identities"], 1);
+
+    let projection = load_v4_projection(root, &dsv, &facts()).unwrap();
+    let keyed = projection
+        .bars
+        .iter()
+        .find(|bar| bar.date == date("2026-01-07"))
+        .unwrap();
+    assert!(keyed.keyed_no_trade);
+    assert!(keyed.close.is_none());
+    assert_eq!(projection.calendar.len(), 3);
+}
+
+#[test]
+fn local_fixed_list_workflow_writes_collection_facts_and_crosscheck_reports() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let store = RawStore::open(root).unwrap();
+    let citations = citation_fixture(&store);
+    let sessions = [
+        v4_session("2026-01-05"),
+        v4_session("2026-01-06"),
+        v4_session("2026-01-07"),
+    ];
+    let bars = [v4_bar(&sessions[0], "1.0"), v4_bar(&sessions[1], "1.0")];
+    let code_tables = sessions
+        .iter()
+        .map(|session| TdxCodeTableRow {
+            session_date: session.session_date(),
+            native_symbols: vec!["159001".into()],
+            code_ranges: vec![(158000, 159999)],
+            source_raw_sha256: format!("sha256:{}", "1".repeat(64)),
+        })
+        .collect::<Vec<_>>();
+    let dsv = publish_synthetic_v4(root, &sessions, &bars, &code_tables);
+
+    let facts_dir = root.join("facts");
+    fs::create_dir_all(&facts_dir).unwrap();
+    fs::write(
+        facts_dir.join("identity.csv"),
+        "code,org_id,legal_name,listing_date,termination_date,fund_category,tracked_index,evidence_level,source_announcement_id,source_page\n\
+         159001,org,合成ETF,2026-01-05,,index,,official,identity,1\n",
+    )
+    .unwrap();
+    fs::write(
+        facts_dir.join("actions.csv"),
+        "code,kind,announcement_date,record_date,ex_date,pay_date,cash_per_share,split_ratio,liquidation_per_share,evidence_level,source_announcement_id,source_page\n\
+         159001,dividend,2026-01-05,,2026-01-06,,,,,official,action,1\n",
+    )
+    .unwrap();
+    fs::write(
+        facts_dir.join("events.csv"),
+        "code,kind,announcement_date,effective_date,session_part,evidence_level,source_announcement_id,source_page\n\
+         159001,suspension,2026-01-05,2026-01-07,full_day,official,event,1\n",
+    )
+    .unwrap();
+    fs::write(
+        facts_dir.join("citations.csv"),
+        format!(
+            "announcement_id,page,raw_sha256,evidenced_fields\n\
+             identity,1,{},code;org_id;legal_name;listing_date;fund_category\n\
+             action,1,{},code;kind;announcement_date;ex_date\n\
+             event,1,{},code;kind;announcement_date;effective_date;session_part\n",
+            citations[0].raw_sha256, citations[1].raw_sha256, citations[2].raw_sha256
+        ),
+    )
+    .unwrap();
+    fs::create_dir_all(root.join("acceptance")).unwrap();
+    fs::write(
+        root.join("acceptance/mvp6-coverage.json"),
+        serde_json::to_vec(&json!({"dataset_published": true, "dsv": dsv})).unwrap(),
+    )
+    .unwrap();
+
+    let (mut collector, requests) = make_collector(
+        vec![
+            top(json!([{"code":"159001","orgId":"synthetic-org"}])),
+            page(0, vec![]),
+        ],
+        root,
+    );
+    let acceptance = collect_and_accept(
+        root,
+        &store,
+        &mut collector,
+        &[candidate()],
+        &BTreeSet::new(),
+        &mut NoopPdf,
+    )
+    .unwrap();
+
+    assert!(acceptance.collection_path.exists());
+    assert!(acceptance.unresolved.is_empty());
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    let facts = acceptance.facts.unwrap();
+    assert!(facts.facts_session_path.exists());
+    assert!(facts.crosscheck_path.exists());
+    assert_eq!(facts.report.mismatches.len(), 1);
+    let report: Value = serde_json::from_slice(&fs::read(&facts.crosscheck_path).unwrap()).unwrap();
+    assert_eq!(report["mismatch_count"], 1);
+    assert_eq!(
+        report["mismatches"][0]["kind"],
+        "action_date_vs_reference_price_jump"
+    );
+}
+
+#[test]
+fn crosscheck_accepts_a_one_tick_action_jump() {
+    let bars = vec![V4DailyBar {
+        code: "159001".into(),
+        date: date("2026-01-06"),
+        close: Some(price("1.001")),
+        previous_close: Some(price("1.0")),
+        reference_price: Some(price("1.001")),
+        keyed_no_trade: false,
+    }];
+    let report = crosscheck_v4(&facts(), &bars);
+    assert!(
+        !report
+            .mismatches
+            .iter()
+            .any(|mismatch| mismatch.kind == "action_date_vs_reference_price_jump")
     );
 }

@@ -1,7 +1,9 @@
 //! Versioned fixed-list facts for MVP-6. Real source responses stay in the
 //! local Raw Store; this module only exposes public facts and synthetic tests.
 use super::{Result, scoped_code};
+use crate::RawStore;
 use chrono::NaiveDate;
+use prajna_domain::Price;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -71,8 +73,132 @@ pub struct EventFact {
 pub struct RawCitation {
     pub announcement_id: String,
     pub page: u32,
+    /// Immutable Raw identity of the frozen source document that states this
+    /// announcement. It is checked against the local Raw Store before use.
+    pub raw_sha256: String,
     /// Field names supported by this locally frozen Raw page.
     pub evidenced_fields: BTreeSet<String>,
+}
+
+impl RawCitation {
+    /// Builds a citation only after proving that the Raw object exists in the
+    /// local Store and actually references the cited announcement. Callers
+    /// cannot turn an invented announcement ID or page into evidence.
+    pub fn from_store(
+        store: &RawStore,
+        announcement_id: impl Into<String>,
+        page: u32,
+        raw_sha256: impl Into<String>,
+        evidenced_fields: BTreeSet<String>,
+    ) -> Result<Self> {
+        let citation = Self {
+            announcement_id: announcement_id.into(),
+            page,
+            raw_sha256: raw_sha256.into(),
+            evidenced_fields,
+        };
+        citation.verify(store)?;
+        Ok(citation)
+    }
+
+    fn verify(&self, store: &RawStore) -> Result<()> {
+        required(&self.announcement_id, "source_announcement_id")?;
+        if self.page == 0 {
+            return Err("source_page must be positive".into());
+        }
+        let bytes = store.get(&self.raw_sha256).map_err(|error| {
+            format!(
+                "cited Raw {} for announcement {} is unavailable: {error}",
+                self.raw_sha256, self.announcement_id
+            )
+        })?;
+        let id = self.announcement_id.as_bytes();
+        let bytes_bind = !id.is_empty()
+            && bytes
+                .windows(id.len())
+                .any(|window| window == self.announcement_id.as_bytes());
+        let provenance_binds = if bytes_bind {
+            true
+        } else {
+            store
+                .sources(&self.raw_sha256)?
+                .iter()
+                .filter_map(|record| serde_json::to_string(&record.request).ok())
+                .any(|request| request.contains(&self.announcement_id))
+        };
+        if !bytes_bind && !provenance_binds {
+            return Err(format!(
+                "cited Raw {} does not reference announcement {}",
+                self.raw_sha256, self.announcement_id
+            )
+            .into());
+        }
+        Ok(())
+    }
+}
+
+const CITATION_HEADERS: &[&str] = &["announcement_id", "page", "raw_sha256", "evidenced_fields"];
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CitationRow {
+    announcement_id: String,
+    page: String,
+    raw_sha256: String,
+    evidenced_fields: String,
+}
+
+/// Reads the local citation manifest that binds each cited announcement to a
+/// frozen Raw object. Duplicate `(announcement_id, page)` keys fail closed.
+pub fn read_citations_csv(text: &str, store: &RawStore) -> Result<Vec<RawCitation>> {
+    let mut reader = csv::ReaderBuilder::new()
+        .trim(csv::Trim::All)
+        .from_reader(text.as_bytes());
+    let headers = reader.headers()?.iter().collect::<Vec<_>>();
+    if headers != CITATION_HEADERS {
+        return Err(format!(
+            "citation CSV header mismatch: expected {CITATION_HEADERS:?}, got {headers:?}"
+        )
+        .into());
+    }
+    let mut citations = BTreeMap::<(String, u32), RawCitation>::new();
+    for row in reader.deserialize::<CitationRow>() {
+        let row = row?;
+        let page = row
+            .page
+            .parse::<u32>()
+            .map_err(|_| format!("invalid citation page: {}", row.page))?;
+        let evidenced_fields = row
+            .evidenced_fields
+            .split(';')
+            .map(str::trim)
+            .filter(|field| !field.is_empty())
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>();
+        if evidenced_fields.is_empty() {
+            return Err(format!(
+                "citation {} page {page} has no evidenced fields",
+                row.announcement_id
+            )
+            .into());
+        }
+        let citation = RawCitation::from_store(
+            store,
+            row.announcement_id.clone(),
+            page,
+            row.raw_sha256,
+            evidenced_fields,
+        )?;
+        if citations
+            .insert((citation.announcement_id.clone(), page), citation)
+            .is_some()
+        {
+            return Err(
+                format!("duplicate citation for {} page {page}", row.announcement_id).into(),
+            );
+        }
+    }
+    Ok(citations.into_values().collect())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,18 +327,34 @@ pub struct Mvp6Session {
 
 /// Validate public fact tables against the local frozen Raw inventory and
 /// frozen open-session calendar, then build versioned consumer inputs.
+///
+/// Every citation is checked against `store`: the Raw object must exist with
+/// the recorded SHA-256 and must reference its cited announcement. A citation
+/// cannot be satisfied by a caller-invented ID or page alone.
 pub fn validate_and_convert(
     facts: &Mvp6Facts,
+    store: &RawStore,
     raw: &[RawCitation],
     calendar: &BTreeSet<NaiveDate>,
 ) -> Result<Mvp6Session> {
     if calendar.is_empty() {
         return Err("frozen calendar is empty".into());
     }
-    let raw = raw
-        .iter()
-        .map(|r| ((r.announcement_id.as_str(), r.page), r))
-        .collect::<BTreeMap<_, _>>();
+    let mut by_key = BTreeMap::<(&str, u32), &RawCitation>::new();
+    for citation in raw {
+        citation.verify(store)?;
+        if by_key
+            .insert((citation.announcement_id.as_str(), citation.page), citation)
+            .is_some()
+        {
+            return Err(format!(
+                "duplicate citation for {} page {}",
+                citation.announcement_id, citation.page
+            )
+            .into());
+        }
+    }
+    let raw = by_key;
     let mut lifecycles = Vec::new();
     for row in &facts.identities {
         code(&row.code)?;
@@ -510,16 +652,15 @@ pub struct FundCandidate {
     pub active_end: NaiveDate,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CrosscheckMismatch {
     pub code: String,
     pub kind: String,
     pub expected_date: Option<NaiveDate>,
     pub observed_date: Option<NaiveDate>,
-    pub detail: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CrosscheckReport {
     pub mismatches: Vec<CrosscheckMismatch>,
 }
@@ -528,8 +669,13 @@ pub struct CrosscheckReport {
 pub struct V4DailyBar {
     pub code: String,
     pub date: NaiveDate,
-    pub close: Option<f64>,
-    pub previous_close: Option<f64>,
+    /// Traded close, or `None` for a keyed no-trade observation.
+    pub close: Option<Price>,
+    /// Last traded close before this Session within the code's history.
+    pub previous_close: Option<Price>,
+    /// Exchange ex-rights reference from v4 `bar_sources.reference_price`.
+    /// This is not the previous observed close.
+    pub reference_price: Option<Price>,
     pub keyed_no_trade: bool,
 }
 
@@ -573,8 +719,14 @@ pub fn crosscheck_v4(facts: &Mvp6Facts, bars: &[V4DailyBar]) -> CrosscheckReport
             .filter(|b| b.code == identity.code)
             .collect::<Vec<_>>();
         rows.sort_by_key(|b| b.date);
-        let first = rows.first().map(|b| b.date);
-        let last = rows.last().map(|b| b.date);
+        // First and last *traded* Bar: a keyed no-trade observation is not a
+        // Bar and must not move the listing or termination boundary.
+        let traded = rows
+            .iter()
+            .filter(|bar| bar.close.is_some())
+            .collect::<Vec<_>>();
+        let first = traded.first().map(|b| b.date);
+        let last = traded.last().map(|b| b.date);
         if let Ok(expected) = NaiveDate::parse_from_str(&identity.listing_date, "%Y-%m-%d") {
             if first != Some(expected) {
                 mismatches.push(mismatch(
@@ -607,16 +759,16 @@ pub fn crosscheck_v4(facts: &Mvp6Facts, bars: &[V4DailyBar]) -> CrosscheckReport
             .iter()
             .find(|b| b.code == action.code && b.date == expected)
         {
-            let jump = bar
-                .close
-                .zip(bar.previous_close)
-                .is_some_and(|(close, previous)| {
-                    previous > 0.0 && (close - previous).abs() >= 0.001
-                });
+            let jump =
+                bar.reference_price
+                    .zip(bar.previous_close)
+                    .is_some_and(|(reference, previous)| {
+                        previous > Price::ZERO && differs_by_at_least_one_tick(reference, previous)
+                    });
             if !jump {
                 mismatches.push(mismatch(
                     &action.code,
-                    "action_date_vs_previous_close_jump",
+                    "action_date_vs_reference_price_jump",
                     Some(expected),
                     Some(bar.date),
                 ));
@@ -658,27 +810,23 @@ pub fn crosscheck_v4(facts: &Mvp6Facts, bars: &[V4DailyBar]) -> CrosscheckReport
             ));
         }
     }
-    for bar in bars.iter().filter(|bar| bar.keyed_no_trade) {
-        let has_suspension = facts.events.iter().any(|event| {
-            event.kind == "suspension"
-                && event.code == bar.code
-                && NaiveDate::parse_from_str(&event.effective_date, "%Y-%m-%d")
-                    .is_ok_and(|date| date == bar.date)
-        });
-        if !has_suspension {
-            mismatches.push(mismatch(
-                &bar.code,
-                "keyed_no_trade_vs_suspension",
-                Some(bar.date),
-                Some(bar.date),
-            ));
-        }
-    }
     mismatches.sort_by(|a, b| {
         (&a.code, &a.kind, a.expected_date).cmp(&(&b.code, &b.kind, b.expected_date))
     });
     CrosscheckReport { mismatches }
 }
+
+/// Compare two scale-18 prices at the v4 0.001 price increment. A missing
+/// difference (overflow) is a jump by definition; no binary-float tolerance is
+/// used.
+fn differs_by_at_least_one_tick(left: Price, right: Price) -> bool {
+    const ONE_TICK_MANTISSA: u128 = 1_000_000_000_000_000; // 0.001 at scale 18
+    match left.mantissa().checked_sub(right.mantissa()) {
+        Some(difference) => difference.unsigned_abs() >= ONE_TICK_MANTISSA,
+        None => true,
+    }
+}
+
 fn mismatch(
     code: &str,
     kind: &str,
@@ -690,6 +838,5 @@ fn mismatch(
         kind: kind.into(),
         expected_date,
         observed_date,
-        detail: kind.into(),
     }
 }

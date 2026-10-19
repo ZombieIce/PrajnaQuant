@@ -1,11 +1,10 @@
 //! Local-only fixed-list cninfo collector for MVP-6. Never used in CI.
 use prajna_data::{
     RawStore,
-    cninfo::{Collector, FundCandidate, Poppler, Result},
+    cninfo::{Collector, FundCandidate, Poppler, Result, collect_and_accept},
 };
 use serde::Deserialize;
-use serde_json::json;
-use std::{collections::BTreeSet, fs, io::Write, path::PathBuf};
+use std::{collections::BTreeSet, fs, path::PathBuf};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -17,13 +16,13 @@ struct CandidateRow {
 }
 
 fn main() {
-    if run().is_err() {
-        eprintln!("fixed-list cninfo collection unresolved; consult local acceptance files");
+    if let Err(error) = run() {
+        eprintln!("fixed-list cninfo unresolved: {error}; consult local acceptance files");
         std::process::exit(1);
     }
 }
 
-fn run() -> prajna_data::cninfo::Result<()> {
+fn run() -> Result<()> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if !(2..=3).contains(&args.len()) {
         return Err(
@@ -79,37 +78,23 @@ fn run() -> prajna_data::cninfo::Result<()> {
         })
         .unwrap_or_else(BTreeSet::new);
     let raw = RawStore::open(root.clone())?;
+    let store = raw.clone();
     let mut collector = Collector::direct_with_network_path(raw, args[1].clone())?;
-    let result = collector.collect_fixed_list(&candidates, &explicit, &mut Poppler);
-
-    let announcements = result
-        .announcements
-        .iter()
-        .map(|((code, org_id), rows)| {
-            json!({
-                "code": code, "org_id": org_id, "announcements": rows,
-            })
-        })
-        .collect::<Vec<_>>();
-    let has_gaps = !result.unresolved.is_empty();
-    let report = json!({
-        "contract":"mvp-6-fixed-cninfo-v1",
-        "resolutions":result.resolutions,
-        "announcements":announcements,
-        "pdf_raw_sha256_by_announcement":result.pdf_raw_sha256_by_announcement,
-        "unresolved":result.unresolved,
-    });
-    let dir = root
-        .join("acceptance/cninfo-fixed")
-        .join(chrono::Utc::now().format("%Y%m%dT%H%M%S%.3fZ").to_string());
-    fs::create_dir_all(&dir)?;
-    let bytes = serde_json::to_vec_pretty(&report)?;
-    let mut file = tempfile::NamedTempFile::new_in(&dir)?;
-    file.write_all(&bytes)?;
-    file.as_file().sync_all()?;
-    file.persist(dir.join("collection.json"))
-        .map_err(|error| error.error)?;
-    if has_gaps {
+    let acceptance = collect_and_accept(
+        &root,
+        &store,
+        &mut collector,
+        &candidates,
+        &explicit,
+        &mut Poppler,
+    )?;
+    if let Some(facts) = &acceptance.facts {
+        eprintln!(
+            "local facts validated; v4 cross-check mismatches: {}",
+            facts.report.mismatches.len()
+        );
+    }
+    if !acceptance.unresolved.is_empty() {
         return Err("local fixed-list report contains unresolved gaps".into());
     }
     Ok(())

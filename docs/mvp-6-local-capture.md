@@ -127,6 +127,46 @@ entries state that the TDX observation is `missing`. Do not include a keyed TDX
 no-trade observation in that plan. The tool requires the confirmed direct
 domestic network path and keeps its JSONL request log and response bytes local.
 
+## Validate public facts and cross-check v4
+
+Put the three public fact tables and the citation manifest under the local data
+root; none of these files belong in the repository. The candidate CSV is passed
+as the command argument and stays wherever the operator keeps it.
+
+```text
+~/PrajnaData/mvp-6/facts/identity.csv
+~/PrajnaData/mvp-6/facts/actions.csv
+~/PrajnaData/mvp-6/facts/events.csv
+~/PrajnaData/mvp-6/facts/citations.csv
+```
+
+`citations.csv` has the header
+`announcement_id,page,raw_sha256,evidenced_fields`; separate multiple fields
+with `;`. A citation is accepted only when its Raw object exists in the local
+Store and its bytes or request provenance reference the announcement ID. Build
+the hash from the `source_raw_sha256` or `pdf_raw_sha256_by_announcement` values
+already written to the local cninfo `collection.json`. The page and field list
+remain operator assertions about the source page; the validator checks Raw
+existence and announcement binding, not PDF text semantics.
+
+```sh
+cargo run -p prajna-data --bin prajna-cninfo-fixed --locked --offline -- \
+  /absolute/local/path/fixed-candidates.csv \
+  "<operator-confirmed direct domestic egress description>" \
+  "fund_contract,prospectus"
+```
+
+When `facts/` exists, the command reads the published v4 DSV from
+`acceptance/mvp6-coverage.json`, loads the `sessions`, `bars`, `bar_sources` and
+`tdx_code_table` tables, validates the fact tables, and writes
+`facts-session.json` plus the local-only `crosscheck.json` next to
+`collection.json`. A code-table observation inside any fact lifecycle with no
+Bar is treated as a keyed no-trade observation; dates outside all lifecycles
+for that code are not invented. The cross-check compares listing and termination
+with traded Bars, action ex-dates with `bar_sources.reference_price` against the
+previous traded close at the 0.001 tick, and suspension facts with keyed
+no-trade observations. It never edits the facts or the v4 Dataset.
+
 The coverage report must keep P21 comparisons and unknown rule sessions marked
 unresolved until the corresponding source facts and rule evidence have been
 checked. Publishing the v4 market DSV alone is not full MVP-6 acceptance.

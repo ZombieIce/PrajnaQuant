@@ -295,36 +295,14 @@ impl<T: Transport> Collector<T> {
             .iter()
             .filter(|item| item.categories.iter().any(|c| c == "listing_notice"))
         {
-            let Some(path) = item
-                .attachment
-                .as_deref()
-                .filter(|path| valid_pdf_path(path))
-            else {
-                result
-                    .unresolved
-                    .push(format!("{}:pdf_unavailable", item.id));
+            let Some((bytes, _)) = self.fetch_mvp6_pdf(item, result) else {
                 continue;
             };
-            match self.fetch(Request {
-                url: format!("{PDF}{path}"),
-                form: BTreeMap::new(),
-            }) {
-                Ok((bytes, hash)) if bytes.starts_with(b"%PDF-") => {
-                    match converter.text(&bytes) {
-                        Ok(text) => {
-                            listing_notice_complete |= listing_notice_covers_metadata(&text);
-                        }
-                        Err(_) => result
-                            .unresolved
-                            .push(format!("{}:pdf_unavailable", item.id)),
-                    }
-                    result
-                        .pdf_raw_sha256_by_announcement
-                        .entry(item.id.clone())
-                        .or_default()
-                        .push(hash);
+            match converter.text(&bytes) {
+                Ok(text) => {
+                    listing_notice_complete |= listing_notice_covers_metadata(&text);
                 }
-                _ => result
+                Err(_) => result
                     .unresolved
                     .push(format!("{}:pdf_unavailable", item.id)),
             }
@@ -341,7 +319,7 @@ impl<T: Transport> Collector<T> {
                     .any(|c| c == "fund_contract" || c == "prospectus")
                 && !item.categories.iter().any(|c| c == "listing_notice")
         }) {
-            self.download_mvp6_pdf(item, result);
+            let _ = self.fetch_mvp6_pdf(item, result);
         }
     }
 
@@ -369,17 +347,24 @@ impl<T: Transport> Collector<T> {
                 )
                 && !result.pdf_raw_sha256_by_announcement.contains_key(&item.id);
             if should_download {
-                self.download_mvp6_pdf(item, result);
+                let _ = self.fetch_mvp6_pdf(item, result);
             }
         }
     }
 
-    fn download_mvp6_pdf(&mut self, item: &Announcement, result: &mut FixedListResult) {
+    /// Shared PDF path validation, fetch, magic check, hash recording and
+    /// `pdf_unavailable` reporting for both listing notices and other MVP-6
+    /// PDF categories.
+    fn fetch_mvp6_pdf(
+        &mut self,
+        item: &Announcement,
+        result: &mut FixedListResult,
+    ) -> Option<(Vec<u8>, String)> {
         let Some(path) = item.attachment.as_deref().filter(|p| valid_pdf_path(p)) else {
             result
                 .unresolved
                 .push(format!("{}:pdf_unavailable", item.id));
-            return;
+            return None;
         };
         match self.fetch(Request {
             url: format!("{PDF}{path}"),
@@ -390,11 +375,15 @@ impl<T: Transport> Collector<T> {
                     .pdf_raw_sha256_by_announcement
                     .entry(item.id.clone())
                     .or_default()
-                    .push(hash);
+                    .push(hash.clone());
+                Some((bytes, hash))
             }
-            _ => result
-                .unresolved
-                .push(format!("{}:pdf_unavailable", item.id)),
+            _ => {
+                result
+                    .unresolved
+                    .push(format!("{}:pdf_unavailable", item.id));
+                None
+            }
         }
     }
 

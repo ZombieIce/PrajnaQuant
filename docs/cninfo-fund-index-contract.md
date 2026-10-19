@@ -64,7 +64,11 @@ cargo run -p prajna-data --bin prajna-cninfo --locked --offline -- \
 
 新增入口识别上市交易公告书、基金合同/招募说明书、份额折算/拆分、持有人大会计票/表决结果、终止上市/终止基金合同与清算报告。定期报告被排除。基金合同/招募说明书只在上市交易公告书的 PDF 文本没有同时出现基金类别和标的指数，或调用方显式请求对应类别时下载。附件仍要求 `finalpage/` 路径且禁止 `..`。访问控制与限速沿用同一 `fetch` 实现。
 
-`configs/mvp-6/{identity,actions,events}.csv` 目前只定义 Issue #229 指定的列头，**没有带入未经证据复核的真实事实**。公开事实表可收录公告中的身份与公司行动；Raw 对象、请求日志和 hash 不得进入仓库。`Mvp6Facts::from_csv` 检查固定列，`validate_and_convert` 要求本机 Raw 引用、证据字段与冻结开市日历一致，并产出 Catalog 生命周期、`cninfo_corporateActions_structured_v2` 与风险事件。原文未支持的可选字段必须为空。`crosscheck_v4` 只返回上市/终止、除息或折算日收盘相对昨收至少变动一个 0.001 价格刻度、停牌与 keyed-no-trade 的差异，不改输入。
+`configs/mvp-6/{identity,actions,events}.csv` 目前只定义 Issue #229 指定的列头，**没有带入未经证据复核的真实事实**。公开事实表可收录公告中的身份与公司行动；Raw 对象、请求日志和 hash 不得进入仓库。`Mvp6Facts::from_csv` 检查固定列。`validate_and_convert` 除检查证据字段与冻结开市日历外，还要求每条引用指向本机 Raw Store 中真实存在且确实包含该公告 ID 的对象：`RawCitation` 必须带 `raw_sha256`，校验器会重新读取并验 hash；`RawCitation::from_store` 和 `read_citations_csv` 是只能从已验证 Raw 生成引用的适配器。`source_page` 与 `evidenced_fields` 仍是操作者对来源页的声明，校验器只验证 Raw 存在和公告 ID 绑定，不解析 PDF 文本语义。原文未支持的可选字段必须为空。
+
+`validate_and_convert` 产出 `Mvp6Session`：`catalog_lifecycles`（`code, org_id, legal_name, listing_date, termination_date, fund_category, tracked_index, evidence_level, source_announcement_id, source_page`）、`corporate_actions` 和 `risk_events`。`corporate_actions` 使用独立的新版本 envelope `{"schema":"cninfo_corporateActions_structured_v2","version":2,"actions":[...]}`；每个 action 含 `code, kind, announcement_date, record_date, ex_date, pay_date, cash_per_share, split_ratio, liquidation_per_share, evidence_level, source_announcement_id, source_page`，日期为 ISO-8601、可选值为 null。`risk_events` 每行含 `code, kind, announcement_date, effective_date, session_part, evidence_level, source_announcement_id, source_page`，`session_part` ∈ `open/morning/full_day`。这与上文 #202 `IndexDataset` 的 v1 `cninfo_corporateActions_structured_v1`/`corporateActions` envelope 是不同版本，不复用其字段命名。
+
+`crosscheck_v4` 只返回以下差异：上市日 vs 首个有成交 Bar、终止日 vs 最后有成交 Bar、除息/折算日 `bar_sources.reference_price` 相对前一有成交 close 至少变动一个 0.001 价格刻度、停牌生效日是否对应 keyed no-trade。它不改输入；keyed no-trade 观测不移动上市/终止边界。
 
 本机固定名单命令读取 `code,short_name,active_start,active_end` CSV，结果和 Raw 都写入 `~/PrajnaData/mvp-6/`：
 
@@ -75,4 +79,6 @@ cargo run -p prajna-data --bin prajna-cninfo-fixed --locked --offline -- \
   "fund_contract,prospectus"
 ```
 
-合成边界测试位于 `cargo test -p prajna-data --test cninfo_mvp6 --locked --offline`；它使用 mock HTTP 和合成事实，不连接真实来源。`crosscheck_v4` 当前接受规范化后的 v4 行投影，不读取 v4 DSV 路径本身。
+公开事实表的本地工作流使用 `~/PrajnaData/mvp-6/facts/`：`identity.csv`、`actions.csv`、`events.csv` 使用与 `configs/mvp-6/` 相同的列头；`citations.csv` 的列为 `announcement_id,page,raw_sha256,evidenced_fields`，`evidenced_fields` 以 `;` 分隔。`raw_sha256` 取 `collection.json` 中对应公告索引或 PDF 的冻结 hash。该目录存在时，上述命令在采集后读取 `acceptance/mvp6-coverage.json` 的已发布 v4 DSV，加载 `sessions`、`bars`、`tdx_code_table`，再写入同一 acceptance 子目录的 `facts-session.json` 与本机 `crosscheck.json`；facts 目录不存在时只写 `collection.json`。v4 中“在 code table 内但没有 Bar”且日期落在事实身份生命周期内的记录被视为 keyed no-trade；生命周期外不生成该观测。
+
+合成边界测试位于 `cargo test -p prajna-data --test cninfo_mvp6 --locked --offline`；它使用 mock HTTP、合成事实和手写 Parquet/manifest 的合成 v4 数据集，不连接真实来源。测试覆盖 Raw 不存在、公告 ID 不绑定、重复引用、v4 投影读取和 `crosscheck.json` 落盘。该测试不证明真实 v4 数据、真实公告或真实交叉核对结果。
