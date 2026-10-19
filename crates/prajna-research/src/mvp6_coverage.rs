@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     etf_market::{DerivedMarket, TradeState},
-    pit_universe::HistoricalCatalog,
+    pit_universe::{HistoricalCatalog, Lifecycle},
 };
 
 pub const UNKNOWN_COVERAGE_VERSION: &str = "mvp6-unknown-coverage@1";
@@ -316,26 +316,7 @@ pub fn evaluate_derived_market(
         .input()
         .lifecycles
         .iter()
-        .map(|life| {
-            let instrument_id = life.instrument_id().map_err(|error| error.to_string())?;
-            let listed_on = life
-                .listing
-                .effective_date
-                .max(life.identity_start.unwrap_or(life.listing.effective_date));
-            let terminated_on = life
-                .termination
-                .as_ref()
-                .map(|end| end.effective_date)
-                .into_iter()
-                .chain(life.identity_end_exclusive)
-                .min();
-            Ok(CoverageLifecycle {
-                instrument_id,
-                native_symbol: life.native_symbol.clone(),
-                listed_on,
-                terminated_on,
-            })
-        })
+        .map(|life| coverage_lifecycle(life, &catalog.input().lifecycles))
         .collect::<Result<Vec<_>, String>>()?;
     let openings: BTreeMap<_, _> = market
         .evidence()
@@ -390,6 +371,44 @@ pub fn evaluate_derived_market(
         observations: &observations,
         thresholds,
     }))
+}
+
+/// The coverage denominator is the ETF's legal lifetime, not the TDX code-table
+/// presence. An official listing before the first code-table appearance and a
+/// TDX exit before the official termination stay inside the lifetime, so their
+/// missing price cells are reported as UNKNOWN (P27-6/P27-19). A same-code
+/// successor identity (evidenced legal-name change or code reuse) still bounds
+/// the earlier identity, so its sessions are never counted twice.
+fn coverage_lifecycle(
+    life: &Lifecycle,
+    lifecycles: &[Lifecycle],
+) -> Result<CoverageLifecycle, String> {
+    let instrument_id = life.instrument_id().map_err(|error| error.to_string())?;
+    let own_start = life.identity_start.unwrap_or(life.listing.effective_date);
+    // Use the successor's official listing date, not its TDX identity_start:
+    // a pre-TDX official listing would otherwise start before the predecessor
+    // ends and count the same Instrument x Session twice.
+    let next_start = lifecycles
+        .iter()
+        .filter(|other| other.native_symbol == life.native_symbol)
+        .map(|other| other.listing.effective_date)
+        .filter(|start| *start > own_start)
+        .min();
+    let terminated_on = match (
+        life.termination.as_ref().map(|end| end.effective_date),
+        next_start,
+    ) {
+        (Some(termination), Some(next)) => Some(termination.min(next)),
+        (Some(termination), None) => Some(termination),
+        (None, Some(next)) => Some(next),
+        (None, None) => None,
+    };
+    Ok(CoverageLifecycle {
+        instrument_id,
+        native_symbol: life.native_symbol.clone(),
+        listed_on: life.listing.effective_date,
+        terminated_on,
+    })
 }
 
 fn classify_unknown_rule(
@@ -571,6 +590,159 @@ mod tests {
         assert_eq!(report.denominator_cells, 2);
         assert_eq!(report.instruments[1].cells, 0);
         assert_eq!(report.engineering_acceptance, EngineeringAcceptance::Passed);
+    }
+
+    fn coverage_evidence() -> crate::pit_universe::Evidence {
+        crate::pit_universe::Evidence {
+            raw_sha256: format!("sha256:{}", "a".repeat(64)),
+            announcement_id: "synthetic-announcement".into(),
+            locator: "synthetic p1".into(),
+            publication: crate::pit_universe::Publication::DateOnly { date: date(1) },
+        }
+    }
+
+    fn catalog_lifecycle(
+        code: &str,
+        listing: u32,
+        identity_start: Option<u32>,
+        termination: Option<u32>,
+        identity_end_exclusive: Option<u32>,
+    ) -> Lifecycle {
+        Lifecycle {
+            native_symbol: code.into(),
+            contract_raw_sha256: format!("sha256:{}", "a".repeat(64)),
+            listing: crate::pit_universe::LifecycleFact {
+                effective_date: date(listing),
+                evidence: coverage_evidence(),
+            },
+            termination: termination.map(|day| crate::pit_universe::LifecycleFact {
+                effective_date: date(day),
+                evidence: coverage_evidence(),
+            }),
+            attributes: Vec::new(),
+            identity_start: identity_start.map(date),
+            identity_end_exclusive: identity_end_exclusive.map(date),
+            code_table_first_seen: None,
+            code_table_last_seen: None,
+            code_table_exit_date: None,
+        }
+    }
+
+    #[test]
+    fn coverage_denominator_uses_the_official_listing_and_keeps_missing_cells_unknown() {
+        // Official listing S1, first TDX code-table presence S3.
+        let lifecycle = catalog_lifecycle("159001", 1, Some(3), None, None);
+        let mapped = coverage_lifecycle(&lifecycle, std::slice::from_ref(&lifecycle)).unwrap();
+        assert_eq!(mapped.listed_on, date(1));
+        // No successor and no termination: the legal lifetime runs to the
+        // window end, including Sessions after the last TDX presence.
+        assert_eq!(mapped.terminated_on, None);
+
+        let sessions = [date(1), date(2), date(3), date(4)];
+        let report = assess(&sessions, &[mapped], &[]);
+        assert_eq!(report.denominator_cells, 4);
+        assert_eq!(report.unknown_cells, 4);
+        assert_eq!(
+            report.unknowns[0].reason,
+            UnknownReason::MissingBarWithoutHaltNotice
+        );
+    }
+
+    #[test]
+    fn coverage_denominator_extends_to_official_termination_after_a_tdx_exit() {
+        // TDX presence ends S3, official termination is S5.
+        let lifecycle = catalog_lifecycle("159001", 1, Some(1), Some(5), Some(3));
+        let mapped = coverage_lifecycle(&lifecycle, std::slice::from_ref(&lifecycle)).unwrap();
+        assert_eq!(mapped.terminated_on, Some(date(5)));
+
+        let sessions = [date(1), date(2), date(3), date(4), date(5)];
+        let report = assess(&sessions, &[mapped], &[]);
+        // [S1, S5) is four Sessions even though TDX stopped observing at S3.
+        assert_eq!(report.denominator_cells, 4);
+        assert_eq!(report.unknown_cells, 4);
+    }
+
+    #[test]
+    fn coverage_denominator_is_disjoint_for_a_name_change() {
+        let old = catalog_lifecycle("159001", 1, Some(1), None, Some(3));
+        let new = catalog_lifecycle("159001", 3, Some(3), None, None);
+        let mapped = [
+            coverage_lifecycle(&old, &[old.clone(), new.clone()]).unwrap(),
+            coverage_lifecycle(&new, &[old.clone(), new.clone()]).unwrap(),
+        ];
+        let sessions = [date(1), date(2), date(3), date(4), date(5)];
+        let report = assess(&sessions, &mapped, &[]);
+        // Old S1..S3 (2 cells) plus new S3..window (3 cells); no double count.
+        assert_eq!(report.denominator_cells, 5);
+        assert_eq!(
+            report
+                .instruments
+                .iter()
+                .map(|instrument| instrument.cells)
+                .collect::<Vec<_>>(),
+            vec![2, 3]
+        );
+    }
+
+    #[test]
+    fn coverage_denominator_does_not_overlap_a_pre_tdx_reused_code_successor() {
+        // Old termination S5, old TDX presence ends S3. The reused code's new
+        // fund is officially listed S3 but first appears in TDX at S4.
+        let old = catalog_lifecycle("159001", 1, Some(1), Some(5), Some(3));
+        let new = catalog_lifecycle("159001", 3, Some(4), None, None);
+        let mapped = [
+            coverage_lifecycle(&old, &[old.clone(), new.clone()]).unwrap(),
+            coverage_lifecycle(&new, &[old.clone(), new.clone()]).unwrap(),
+        ];
+        assert_eq!(mapped[0].terminated_on, Some(date(3)));
+        assert_eq!(mapped[1].listed_on, date(3));
+        let sessions = [date(1), date(2), date(3), date(4), date(5)];
+        let report = assess(&sessions, &mapped, &[]);
+        // Old [S1, S3) + new [S3, window); S3 is counted exactly once.
+        assert_eq!(report.denominator_cells, 5);
+        assert_eq!(
+            report
+                .instruments
+                .iter()
+                .map(|instrument| instrument.cells)
+                .collect::<Vec<_>>(),
+            vec![2, 3]
+        );
+    }
+
+    #[test]
+    fn coverage_denominator_does_not_bridge_a_code_reuse_gap() {
+        let old = catalog_lifecycle("159001", 1, Some(1), Some(3), Some(3));
+        let new = catalog_lifecycle("159001", 5, Some(5), None, None);
+        let mapped = [
+            coverage_lifecycle(&old, &[old.clone(), new.clone()]).unwrap(),
+            coverage_lifecycle(&new, &[old.clone(), new.clone()]).unwrap(),
+        ];
+        let sessions = [date(1), date(2), date(3), date(4), date(5)];
+        let report = assess(&sessions, &mapped, &[]);
+        // Old [S1, S3) is two cells; S3/S4 belong to no lifecycle; new S5.
+        assert_eq!(report.denominator_cells, 3);
+        assert_eq!(
+            report
+                .instruments
+                .iter()
+                .map(|instrument| instrument.cells)
+                .collect::<Vec<_>>(),
+            vec![2, 1]
+        );
+    }
+
+    #[test]
+    fn coverage_denominator_ends_at_the_next_identity_for_a_legal_name_change() {
+        let old = catalog_lifecycle("159001", 1, Some(1), None, Some(3));
+        let new = catalog_lifecycle("159001", 3, Some(3), None, None);
+        let mapped = coverage_lifecycle(&old, &[old.clone(), new]).unwrap();
+        assert_eq!(mapped.listed_on, date(1));
+        assert_eq!(mapped.terminated_on, Some(date(3)));
+
+        let sessions = [date(1), date(2), date(3), date(4)];
+        let report = assess(&sessions, &[mapped], &[]);
+        assert_eq!(report.denominator_cells, 2);
     }
 
     #[test]

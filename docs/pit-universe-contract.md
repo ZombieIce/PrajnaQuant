@@ -65,10 +65,12 @@ For v1, internal ID remains
 `<code>-<listing YYYYMMDD>-<first 48 uppercase contract hash hex>.SZSE`.
 For v2, `identity_start` is derived from the first code-table appearance in the
 covered history, each reappearance after a table-absence gap, and each
-time-versioned legal full-name change. The builder checks that lifecycle
-identities match those boundaries, derives each identity's exclusive end and
-code-table exit date, and retains each lifecycle's first/last code-table
-appearance. Per-lifecycle `ScanObservation` values retain first/last priced
+time-versioned legal full-name change. The earliest known name is the initial
+identity even when its effective date falls after the first code-table
+appearance; only a later, different name creates a change boundary. The builder
+checks that lifecycle identities match those boundaries, derives each identity's
+exclusive end and code-table exit date, and retains each lifecycle's first/last
+code-table appearance. Per-lifecycle `ScanObservation` values retain first/last priced
 Sessions. Missing snapshots or missing/extra lifecycle boundaries create
 coverage gaps; they cannot silently join two code periods. V2 IDs use
 `<code>-<identity_start YYYYMMDD>-<first 48 uppercase contract hash hex>.SZSE`.
@@ -217,46 +219,65 @@ members of a claimed complete historical universe.
 
 Lifecycle boundaries follow the v2 code-table rules. A reused code needs a
 code-table absence gap between its rows. Continuous presence can only split on
-an evidenced legal-name change; a successor row that changes neither the name
-nor the code-table presence is rejected. A row whose code-table presence starts
-before an in-window listing, whose lifecycle spans an un-evidenced prior run, or
-that has no code-table presence is excluded and reported rather than joined to
-another identity. Pre-window listings are supported; a pre-window sequence of
-multiple identity rows is not representable and is rejected. A non-terminated
-successor row is accepted as an evidenced name-change boundary even though
-#229's overlapping-lifecycle validator does not model that shape; #203's v2
-builder re-derives the boundary and fails closed if the code table and name
-facts do not support it.
+an evidenced legal-name change, and that successor row must declare
+`change_kind=legal_name_change`, use a later date and a different legal name.
+#229's shared row validator accepts exactly that one non-terminated overlap;
+unmarked successors remain an overlapping-lifecycle error in both paths, and
+`szse-etf-frozen@4` ends the preceding normalized range at the declared change
+date. A row whose lifecycle spans an un-evidenced prior run, or that has no
+code-table presence, is excluded and reported rather than joined to another
+identity. Pre-window listings are supported; a pre-window sequence of multiple
+identity rows is not representable and is rejected. The v2 builder treats the
+earliest known legal name as the initial identity, so a first attribute whose
+effective date is later than the first code-table appearance does not invent a
+second identity boundary.
 
 An official listing date earlier than the first TDX code-table appearance stays
 in `Lifecycle.listing`; the physical `identity_start` remains the TDX
 appearance, so `resolve_row` has no price row before it. The fixed-list selector
 uses the listing date for membership (P27-19), so that Session can be a member
-with no price row and is reported as UNKNOWN by the coverage layer. An official
-listing later than an unexplained TDX presence cannot be represented without
-inventing a pre-listing identity, so the code is excluded.
-An identity row with an empty `org_id` is excluded as `org_id_unresolved`
-(P27-19) instead of failing the run.
+with no price row and is reported as UNKNOWN by the coverage layer. A TDX
+presence before the official listing is likewise disclosed as an
+`IdentityDifference` rather than excluded; official dates win, and only a
+priced Bar outside the official lifetime excludes the whole code. An identity
+row with an empty `org_id` is excluded as `org_id_unresolved` (P27-19) instead
+of failing the run.
 
 Each lifecycle's listing, termination and attribute evidence resolves to the
-frozen Raw cited for the field. The lifecycle's `contract_raw_sha256` is the
-Raw cited for the legal name; the identity table has no separate contract
-attachment field, so this assembly does not claim that document is the fund
-contract. The announcement date is read from the Raw's
+frozen Raw cited for the field, and the evidence locator is the cited
+`announcement_id` plus page. `AttributeFact` carries one evidence for the
+name/category/index tuple, so those citations must all resolve to the same Raw
+page or the assembly fails closed. The lifecycle's `contract_raw_sha256` is the
+Raw cited by the row's required `field=contract` citation, whose excerpt must
+state the legal name; it is not taken from the legal-name announcement. The
+announcement date is read from the Raw's
 cninfo `finalpage/YYYY-MM-DD/` path or from the matching `announcementTime` in a
 frozen JSON page; local `observed_at` and the fact's effective date are never
 substituted. Missing or ambiguous announcement dates fail closed. The resulting
 date-only publication uses the normal P6 rule (first close of a covered Session
 strictly after the announcement date). A publication date on or after the last
-covered Session is an error.
+covered Session is an error. A legal-name change whose publication is only
+usable at the next close leaves that one Session outside both identities: the
+successor is reported as `listing_not_known` rather than becoming a member under
+the old identity with new-name data. This is a conservative reported gap, not a
+future-information claim.
 
 The report records listing and termination differences from the TDX code table
 (`listing_date_vs_code_table_first`, `termination_vs_code_table_presence`,
-`code_table_exit_before_termination`) with the identity's evidence level.
-Official evidence wins and the difference is disclosed; a secondary identity
-that disagrees is excluded. A priced Bar outside every evidenced lifecycle
-excludes the code under P27-19 (including the interval between a code-table exit
-and a later termination). Every excluded code adds a code-scoped
+`code_table_exit_before_termination`, `code_table_presence_outside_lifecycle`)
+with the identity's evidence level; the kind and resolution are typed report
+enums. A bare TDX presence strictly before the first identity or strictly after
+the last one is reported as `code_table_presence_outside_lifecycle` and does not
+exclude the code when it has no priced Bar; a priced Bar there still excludes it
+under P27-19. Official evidence wins and the
+difference is disclosed; a secondary identity that disagrees is excluded. A
+priced Bar outside every evidenced lifecycle excludes the code under P27-19
+(including the interval between a code-table exit and a later termination).
+The UNKNOWN coverage denominator uses the legal lifetime: the official listing
+date (not `identity_start`) starts it, and it ends at the official termination
+or the next same-code identity boundary, so Sessions missing from the TDX code
+table still count as UNKNOWN and are not dropped. Every excluded code adds a
+code-scoped
 `mvp6_excluded:<code>:<reason>` coverage gap. `fixed_universe` turns that gap
 into a per-code exclusion and records the reason in
 `run_spec.fixed_list_exclusions`; other gaps remain run-wide failures. The local
@@ -264,12 +285,15 @@ assembly report also lists the reason in `excluded_codes`, and the report must b
 read alongside the Run Spec so the exclusion is auditable.
 
 Synthetic tests cover pre-window and in-window listing, post-termination, code
-reuse, legal-name change with P6 availability, missing identity rows, unresolved
-orgIds, TDX disagreements, secondary evidence exclusion, code-table absence
-differences, priced bars outside a lifecycle (including after a code-table
-exit), missing/ambiguous announcement dates, missing/invalid v4 input, invalid
-Raw references and equivalence with a handwritten `CatalogInput`. No
-real v4 Dataset, identity table or citation manifest is validated here.
+reuse, an explicitly declared legal-name change with P6 availability and its
+rejection when unmarked, contract evidence, shared attribute pages, missing
+identity rows, unresolved orgIds, TDX disagreements, secondary evidence
+exclusion, code-table absence differences, priced bars outside a lifecycle
+(including after a code-table exit), TDX presence before the official listing
+without a priced Bar, missing/ambiguous announcement dates, missing/invalid v4
+input, invalid Raw references, official-lifetime UNKNOWN coverage and
+equivalence with a handwritten `CatalogInput`. No real v4 Dataset, identity
+table or citation manifest is validated here.
 
 Synthetic tests cover v1 compatibility and v2 code ranges/snapshots, code-table
 gaps and reuse, legal-name identity changes, exact #202 publication mapping,

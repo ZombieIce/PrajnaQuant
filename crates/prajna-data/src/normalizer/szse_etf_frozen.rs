@@ -36,7 +36,7 @@ use crate::{
     AnnouncementRow, CorporateActionKind, CorporateActionRow, NormalizationIssue,
     NormalizationOutput, NormalizedTables, SourceCrosscheckRow, SourceKind, SourceRecord,
     announcements_to_record_batch, bars_to_record_batch,
-    cninfo::Mvp6Session,
+    cninfo::{LEGAL_NAME_CHANGE, Mvp6Session},
     corporate_actions_to_record_batch, instruments_to_record_batch, sessions_to_record_batch,
     sina_adjust_factor::{AdjustmentEvent, LifecycleRange, parse_adjustment_series_for_lifecycles},
     source_crosscheck_to_record_batch,
@@ -1103,6 +1103,14 @@ fn lifecycles_from_facts(
     let mut lifecycles = Vec::new();
     for identity in &session.catalog_lifecycles {
         let path = identity.code.clone();
+        if !identity.change_kind.is_empty() && identity.change_kind != LEGAL_NAME_CHANGE {
+            issues.push(issue(
+                "invalid_catalog_lifecycle",
+                path.clone(),
+                "catalog change_kind must be empty or legal_name_change",
+            ));
+            continue;
+        }
         if identity.code.len() != 6
             || !identity.code.bytes().all(|byte| byte.is_ascii_digit())
             || !(identity.code.starts_with("158") || identity.code.starts_with("159"))
@@ -1136,13 +1144,29 @@ fn lifecycles_from_facts(
             },
             None => None,
         };
-        lifecycles.push(LifecycleRange {
-            native_symbol: identity.code.clone(),
-            start: identity.listing_date,
-            end_exclusive,
-        });
+        lifecycles.push((
+            LifecycleRange {
+                native_symbol: identity.code.clone(),
+                start: identity.listing_date,
+                end_exclusive,
+            },
+            identity.change_kind.clone(),
+        ));
     }
-    lifecycles.sort_by_key(|life| (life.native_symbol.clone(), life.start));
+    lifecycles.sort_by_key(|(life, _)| (life.native_symbol.clone(), life.start));
+    // A declared legal-name change starts a new identity without terminating
+    // the preceding one; it ends that predecessor at its own start date.
+    for index in 1..lifecycles.len() {
+        if lifecycles[index].0.native_symbol != lifecycles[index - 1].0.native_symbol {
+            continue;
+        }
+        if lifecycles[index].1 == LEGAL_NAME_CHANGE
+            && lifecycles[index].0.start > lifecycles[index - 1].0.start
+            && lifecycles[index - 1].0.end_exclusive.is_none()
+        {
+            lifecycles[index - 1].0.end_exclusive = Some(lifecycles[index].0.start);
+        }
+    }
     if lifecycles.is_empty() {
         issues.push(issue(
             "empty_catalog_lifecycles",
@@ -1151,8 +1175,11 @@ fn lifecycles_from_facts(
         ));
     }
     if lifecycles.windows(2).any(|pair| {
-        pair[0].native_symbol == pair[1].native_symbol
-            && pair[0].end_exclusive.is_none_or(|end| end > pair[1].start)
+        pair[0].0.native_symbol == pair[1].0.native_symbol
+            && pair[0]
+                .0
+                .end_exclusive
+                .is_none_or(|end| end > pair[1].0.start)
     }) {
         issues.push(issue(
             "overlapping_catalog_lifecycles",
@@ -1161,7 +1188,7 @@ fn lifecycles_from_facts(
         ));
     }
     if issues.is_empty() {
-        Ok(lifecycles)
+        Ok(lifecycles.into_iter().map(|(life, _)| life).collect())
     } else {
         Err(issues)
     }
@@ -3321,4 +3348,76 @@ fn issue(
     message: impl Into<String>,
 ) -> NormalizationIssue {
     NormalizationIssue::new(code, path, message)
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use crate::cninfo::{CatalogLifecycle, EvidenceLevel, StructuredCorporateActionsV2};
+
+    fn lifecycle(
+        code: &str,
+        listing: &str,
+        termination: Option<&str>,
+        change_kind: &str,
+    ) -> CatalogLifecycle {
+        CatalogLifecycle {
+            code: code.into(),
+            org_id: "org".into(),
+            legal_name: format!("name-{listing}"),
+            listing_date: listing.parse().unwrap(),
+            termination_date: termination.map(|date| date.parse().unwrap()),
+            fund_category: "index".into(),
+            tracked_index: String::new(),
+            evidence_level: EvidenceLevel::Official,
+            source_announcement_id: "announcement".into(),
+            source_page: 1,
+            change_kind: change_kind.into(),
+        }
+    }
+
+    fn session(lifecycles: Vec<CatalogLifecycle>) -> Mvp6Session {
+        Mvp6Session {
+            catalog_lifecycles: lifecycles,
+            corporate_actions: StructuredCorporateActionsV2 {
+                schema: "cninfo_corporateActions_structured_v2".into(),
+                version: 2,
+                actions: Vec::new(),
+            },
+            risk_events: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn legal_name_change_ends_the_preceding_range_without_an_overlap_issue() {
+        let ranges = lifecycles_from_facts(&session(vec![
+            lifecycle("159001", "2026-01-05", None, ""),
+            lifecycle(
+                "159001",
+                "2026-01-06",
+                Some("2026-01-07"),
+                LEGAL_NAME_CHANGE,
+            ),
+        ]))
+        .unwrap();
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(ranges[0].start, "2026-01-05".parse().unwrap());
+        assert_eq!(ranges[0].end_exclusive, Some("2026-01-06".parse().unwrap()));
+        assert_eq!(ranges[1].start, "2026-01-06".parse().unwrap());
+        assert_eq!(ranges[1].end_exclusive, Some("2026-01-08".parse().unwrap()));
+    }
+
+    #[test]
+    fn unmarked_overlap_is_still_rejected() {
+        let error = lifecycles_from_facts(&session(vec![
+            lifecycle("159001", "2026-01-05", None, ""),
+            lifecycle("159001", "2026-01-06", None, ""),
+        ]))
+        .unwrap_err();
+        assert!(
+            error
+                .iter()
+                .any(|issue| issue.code == "overlapping_catalog_lifecycles")
+        );
+    }
 }

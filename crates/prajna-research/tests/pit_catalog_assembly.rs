@@ -4,7 +4,7 @@
 use arrow_array::RecordBatch;
 use chrono::NaiveDate;
 use prajna_data::cninfo::{
-    Citation, CitationInput, EvidenceLevel, IdentityFact, Mvp6Facts, PdfText,
+    Citation, CitationInput, EvidenceLevel, IdentityFact, LEGAL_NAME_CHANGE, Mvp6Facts, PdfText,
 };
 use prajna_data::{
     Manifest, ManifestCore, ManifestInput, ManifestProvenance, ManifestTable, NormalizerIdentity,
@@ -13,7 +13,9 @@ use prajna_data::{
     write_parquet,
 };
 use prajna_domain::{Bar, BarData, InstrumentId, Price, Quantity, Session, TimestampNs, VenueId};
-use prajna_research::pit_catalog_assembly::assemble_mvp6_catalog;
+use prajna_research::pit_catalog_assembly::{
+    IdentityDifferenceKind, IdentityDifferenceResolution, assemble_mvp6_catalog,
+};
 use prajna_research::pit_universe::{
     AttributeFact, CatalogInput, CodeRange, CodeTableSnapshot, Coverage, Evidence,
     FixedUniverseSpec, FundCategory, Lifecycle, LifecycleFact, Publication, ScanObservation,
@@ -57,6 +59,14 @@ struct RowInput {
     tracked_index: String,
     evidence_level: String,
     announcement: NaiveDate,
+    change_kind: String,
+}
+
+impl RowInput {
+    fn legal_name_change(mut self) -> Self {
+        self.change_kind = LEGAL_NAME_CHANGE.into();
+        self
+    }
 }
 
 fn row(
@@ -76,6 +86,7 @@ fn row(
         tracked_index: index.into(),
         evidence_level: evidence_level.into(),
         announcement: d(announcement),
+        change_kind: String::new(),
     }
 }
 
@@ -333,6 +344,13 @@ fn facts_for(raw: &RawStore, rows: &[RowInput]) -> (Mvp6Facts, Vec<Citation>) {
             "fund_category",
             "基金类型：指数型基金",
         ));
+        citations.push(cite(
+            raw,
+            &hash,
+            &source,
+            "contract",
+            &format!("基金全称：{}", row.legal_name),
+        ));
         if !row.tracked_index.is_empty() {
             citations.push(cite(
                 raw,
@@ -356,6 +374,7 @@ fn facts_for(raw: &RawStore, rows: &[RowInput]) -> (Mvp6Facts, Vec<Citation>) {
             evidence_level: row.evidence_level.clone(),
             source_announcement_id: source,
             source_page: "1".into(),
+            change_kind: row.change_kind.clone(),
         });
     }
     (
@@ -405,7 +424,7 @@ fn assembles_listing_termination_code_reuse_and_legal_name_change() {
             row("159560", "合成中证500ETF-A", 1, Some(6), 1, "", "official"),
             row("159560", "合成中证500ETF-B", 7, None, 6, "", "official"),
             row("159522", "合成创业板ETF-A", 1, None, 1, "", "official"),
-            row("159522", "合成创业板ETF-B", 5, None, 4, "", "official"),
+            row("159522", "合成创业板ETF-B", 5, None, 4, "", "official").legal_name_change(),
             row("159612", "合成红利ETF", 3, None, 2, "", "official"),
             row("159952", "合成科创ETF", 4, None, 3, "", "official"),
         ],
@@ -573,12 +592,16 @@ fn listing_and_termination_disagreements_are_graded_by_evidence() {
         .differences
         .iter()
         .find(|difference| {
-            difference.code == "159919" && difference.kind == "listing_date_vs_code_table_first"
+            difference.code == "159919"
+                && difference.kind == IdentityDifferenceKind::ListingDateVsCodeTableFirst
         })
         .expect("listing difference is reported");
     assert_eq!(listing.expected_date, Some(d(2)));
     assert_eq!(listing.observed_date, Some(d(3)));
-    assert_eq!(listing.resolution, "accepted_identity");
+    assert_eq!(
+        listing.resolution,
+        IdentityDifferenceResolution::AcceptedIdentity
+    );
     assert_eq!(listing.evidence_level, Some(EvidenceLevel::Official));
 
     let termination = assembly
@@ -586,12 +609,16 @@ fn listing_and_termination_disagreements_are_graded_by_evidence() {
         .differences
         .iter()
         .find(|difference| {
-            difference.code == "159612" && difference.kind == "termination_vs_code_table_presence"
+            difference.code == "159612"
+                && difference.kind == IdentityDifferenceKind::TerminationVsCodeTablePresence
         })
         .expect("termination difference is reported");
     assert_eq!(termination.expected_date, Some(d(6)));
     assert_eq!(termination.observed_date, Some(d(10)));
-    assert_eq!(termination.resolution, "accepted_identity");
+    assert_eq!(
+        termination.resolution,
+        IdentityDifferenceResolution::AcceptedIdentity
+    );
 
     assert_eq!(
         assembly
@@ -705,7 +732,7 @@ fn legal_name_change_is_known_only_after_its_publication_date() {
     let world = world(
         &[
             row("159919", "合成ETF-A", 1, None, 1, "", "official"),
-            row("159919", "合成ETF-B", 2, None, 2, "", "official"),
+            row("159919", "合成ETF-B", 2, None, 2, "", "official").legal_name_change(),
         ],
         &[(1, &["159919"]), (2, &["159919"]), (3, &["159919"])],
         &[("159919", &[1, 2, 3])],
@@ -796,8 +823,8 @@ fn identity_without_code_table_presence_is_excluded() {
     );
     assert!(assembly.report.differences.iter().any(|difference| {
         difference.code == "159952"
-            && difference.kind == "code_table_absent"
-            && difference.resolution == "excluded"
+            && difference.kind == IdentityDifferenceKind::CodeTableAbsent
+            && difference.resolution == IdentityDifferenceResolution::Excluded
     }));
     assert!(assembly.report.included_codes.contains("159919"));
 }
@@ -978,6 +1005,320 @@ fn unresolved_org_id_is_excluded_instead_of_failing_the_run() {
 }
 
 #[test]
+fn successor_identity_must_declare_a_legal_name_change() {
+    let world = world(
+        &[
+            row("159919", "合成ETF-A", 1, None, 1, "", "official"),
+            row("159919", "合成ETF-B", 2, None, 2, "", "official"),
+            row("159612", "合成红利ETF", 1, None, 1, "", "official"),
+        ],
+        &[
+            (1, &["159919", "159612"]),
+            (2, &["159919", "159612"]),
+            (3, &["159919", "159612"]),
+        ],
+        &[("159919", &[1, 2, 3]), ("159612", &[1, 2, 3])],
+    );
+    let assembly =
+        assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations).unwrap();
+    // The unmarked successor is no longer inferred as a name change; the
+    // shared #229 row contract requires an explicit change_kind.
+    assert!(
+        assembly.report.excluded_codes["159919"]
+            .contains("must declare change_kind=legal_name_change")
+    );
+    assert!(!assembly.report.included_codes.contains("159919"));
+    assert!(assembly.report.included_codes.contains("159612"));
+}
+
+#[test]
+fn code_table_presence_before_listing_without_a_priced_bar_is_disclosed_not_excluded() {
+    // The TDX code table starts on S1 but the official listing is S3. No priced
+    // Bar exists before S3, so official dates win: the code stays in the Catalog
+    // and the difference is reported (P27-19). Only a priced Bar outside the
+    // official interval excludes a code.
+    let world = world(
+        &[row("159919", "合成沪深300ETF", 3, None, 2, "", "official")],
+        &[
+            (1, &["159919"]),
+            (2, &["159919"]),
+            (3, &["159919"]),
+            (4, &["159919"]),
+        ],
+        &[("159919", &[3, 4])],
+    );
+    let assembly =
+        assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations).unwrap();
+    assert!(assembly.report.included_codes.contains("159919"));
+    let difference = assembly
+        .report
+        .differences
+        .iter()
+        .find(|difference| {
+            difference.code == "159919"
+                && difference.kind == IdentityDifferenceKind::ListingDateVsCodeTableFirst
+        })
+        .expect("pre-listing TDX presence is disclosed");
+    assert_eq!(difference.expected_date, Some(d(3)));
+    assert_eq!(difference.observed_date, Some(d(1)));
+    assert_eq!(
+        difference.resolution,
+        IdentityDifferenceResolution::AcceptedIdentity
+    );
+    // The lifecycle identity still begins at the TDX appearance, but no price
+    // row resolves before the official listing.
+    assert!(assembly.catalog.resolve_row("159919", d(2)).is_err());
+    assert!(assembly.catalog.resolve_row("159919", d(3)).is_ok());
+}
+
+#[test]
+fn bare_pre_listing_code_table_run_without_a_priced_bar_is_reported_not_excluded() {
+    // TDX contains the code on S1-S2, drops it on S3, then shows it on S4-S5.
+    // The official listing is S5 and the only priced Bar is S5. The bare S1-S2
+    // presence must not exclude the code; it is reported as outside the
+    // evidenced lifecycle (P27-19).
+    let world = world(
+        &[row("159919", "合成沪深300ETF", 5, None, 4, "", "official")],
+        &[
+            (1, &["159919"]),
+            (2, &["159919"]),
+            (3, &[]),
+            (4, &["159919"]),
+            (5, &["159919"]),
+        ],
+        &[("159919", &[5])],
+    );
+    let assembly =
+        assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations).unwrap();
+    assert!(assembly.report.included_codes.contains("159919"));
+    let presence = assembly
+        .report
+        .differences
+        .iter()
+        .find(|difference| {
+            difference.kind == IdentityDifferenceKind::CodeTablePresenceOutsideLifecycle
+        })
+        .expect("bare pre-listing presence is reported");
+    assert_eq!(presence.observed_date, Some(d(1)));
+    assert_eq!(
+        presence.resolution,
+        IdentityDifferenceResolution::Unresolved
+    );
+}
+
+#[test]
+fn bare_post_termination_code_table_run_without_a_priced_bar_is_reported_not_excluded() {
+    // The code is present on S1-S2, drops on S3, and reappears on S4-S5 without
+    // a priced Bar. The official termination is S3, so the reappearance is a
+    // bare TDX presence, not a reason to exclude the code.
+    let world = world(
+        &[row(
+            "159919",
+            "合成沪深300ETF",
+            1,
+            Some(3),
+            1,
+            "",
+            "official",
+        )],
+        &[
+            (1, &["159919"]),
+            (2, &["159919"]),
+            (3, &[]),
+            (4, &["159919"]),
+            (5, &["159919"]),
+        ],
+        &[("159919", &[1, 2])],
+    );
+    let assembly =
+        assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations).unwrap();
+    assert!(assembly.report.included_codes.contains("159919"));
+    let presence = assembly
+        .report
+        .differences
+        .iter()
+        .find(|difference| {
+            difference.kind == IdentityDifferenceKind::CodeTablePresenceOutsideLifecycle
+        })
+        .expect("bare post-termination presence is reported");
+    assert_eq!(presence.observed_date, Some(d(4)));
+}
+
+#[test]
+fn contract_citation_is_required_and_must_state_the_legal_name() {
+    let world = world(
+        &[row("159919", "合成沪深300ETF", 1, None, 1, "", "official")],
+        &[(1, &["159919"]), (2, &["159919"])],
+        &[("159919", &[1, 2])],
+    );
+    let without_contract = world
+        .citations
+        .iter()
+        .filter(|citation| citation.field() != "contract")
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(
+        assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &without_contract)
+            .unwrap_err()
+            .to_string()
+            .contains("field contract")
+    );
+
+    let raw = RawStore::open(&world.root).unwrap();
+    let contract = world
+        .citations
+        .iter()
+        .find(|citation| citation.field() == "contract")
+        .unwrap();
+    let mut citations = without_contract;
+    citations.push(cite(
+        &raw,
+        contract.raw_sha256(),
+        "src-159919-0",
+        "contract",
+        "基金类型：指数型基金",
+    ));
+    assert!(
+        assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &citations)
+            .unwrap_err()
+            .to_string()
+            .contains("does not state its legal name")
+    );
+}
+
+#[test]
+fn contract_raw_sha256_comes_from_its_own_attachment() {
+    let world = world(
+        &[row("159919", "合成沪深300ETF", 1, None, 1, "", "official")],
+        &[(1, &["159919"]), (2, &["159919"])],
+        &[("159919", &[1, 2])],
+    );
+    let raw = RawStore::open(&world.root).unwrap();
+    let source = "src-159919-0";
+    let contract_document = format!("公告编号：{source}\n基金合同\n基金全称：合成沪深300ETF");
+    let contract_hash = raw
+        .put(
+            contract_document.as_bytes(),
+            SourceRecordInput {
+                content_type: "application/pdf".into(),
+                source_kind: SourceKind::Fixture,
+                source_id: "cninfo".into(),
+                request: json!({
+                    "url": format!("https://static.cninfo.com.cn/finalpage/2023-01-01/{source}-contract.PDF"),
+                    "announcement_id": source,
+                }),
+                observed_at: "synthetic".into(),
+                ingested_by: "synthetic".into(),
+            },
+        )
+        .unwrap();
+    let mut citations = world
+        .citations
+        .iter()
+        .filter(|citation| citation.field() != "contract")
+        .cloned()
+        .collect::<Vec<_>>();
+    citations.push(cite(
+        &raw,
+        &contract_hash,
+        source,
+        "contract",
+        "基金合同\n基金全称：合成沪深300ETF",
+    ));
+    let assembly =
+        assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &citations).unwrap();
+    let lifecycle = &assembly.input.lifecycles[0];
+    assert_eq!(lifecycle.contract_raw_sha256, contract_hash);
+    assert_ne!(
+        lifecycle.contract_raw_sha256,
+        lifecycle.attributes[0].evidence.raw_sha256
+    );
+}
+
+#[test]
+fn category_citation_must_support_the_declared_category() {
+    let world = world(
+        &[row("159919", "合成沪深300ETF", 1, None, 1, "", "official")],
+        &[(1, &["159919"]), (2, &["159919"])],
+        &[("159919", &[1, 2])],
+    );
+    let raw = RawStore::open(&world.root).unwrap();
+    let original = world
+        .citations
+        .iter()
+        .find(|citation| citation.field() == "fund_category")
+        .unwrap();
+    let mut citations = world
+        .citations
+        .iter()
+        .filter(|citation| citation.field() != "fund_category")
+        .cloned()
+        .collect::<Vec<_>>();
+    citations.push(cite(
+        &raw,
+        original.raw_sha256(),
+        "src-159919-0",
+        "fund_category",
+        "基金代码：159919",
+    ));
+    assert!(
+        assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &citations)
+            .unwrap_err()
+            .to_string()
+            .contains("fund_category 指数型基金 for 159919")
+    );
+}
+
+#[test]
+fn attribute_citations_must_share_one_raw_page() {
+    let world = world(
+        &[row("159919", "合成沪深300ETF", 1, None, 1, "", "official")],
+        &[(1, &["159919"]), (2, &["159919"])],
+        &[("159919", &[1, 2])],
+    );
+    let raw = RawStore::open(&world.root).unwrap();
+    let source = "src-159919-0";
+    let document = format!("公告编号：{source}\n基金类型：指数型基金");
+    let hash = raw
+        .put(
+            document.as_bytes(),
+            SourceRecordInput {
+                content_type: "application/octet-stream".into(),
+                source_kind: SourceKind::Fixture,
+                source_id: "cninfo".into(),
+                request: json!({
+                    "url": format!("https://static.cninfo.com.cn/finalpage/2023-01-01/{source}.PDF"),
+                    "announcement_id": source,
+                }),
+                observed_at: "synthetic".into(),
+                ingested_by: "synthetic".into(),
+            },
+        )
+        .unwrap();
+    let mut citations = world
+        .citations
+        .iter()
+        .filter(|citation| citation.field() != "fund_category")
+        .cloned()
+        .collect::<Vec<_>>();
+    citations.push(cite(
+        &raw,
+        &hash,
+        source,
+        "fund_category",
+        "基金类型：指数型基金",
+    ));
+    // AttributeFact carries one Evidence, so citations on another Raw page are
+    // rejected instead of being attributed to the legal-name page.
+    assert!(
+        assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &citations)
+            .unwrap_err()
+            .to_string()
+            .contains("not evidenced by the same Raw page")
+    );
+}
+
+#[test]
 fn assembled_input_matches_an_equivalent_handwritten_input() {
     let world = world(
         &[row("159919", "合成沪深300ETF", 1, None, 1, "", "official")],
@@ -1022,14 +1363,14 @@ fn assembled_input_matches_an_equivalent_handwritten_input() {
             contract_raw_sha256: hash.clone(),
             listing: LifecycleFact {
                 effective_date: d(1),
-                evidence: evidence("identity.csv listing_date"),
+                evidence: evidence("src-159919-0:p1"),
             },
             termination: None,
             attributes: vec![AttributeFact {
                 effective_date: d(1),
                 category: FundCategory::Equity,
                 index_id: String::new(),
-                evidence: evidence("identity.csv legal_name"),
+                evidence: evidence("src-159919-0:p1"),
                 legal_name: Some("合成沪深300ETF".into()),
             }],
             identity_start: Some(d(1)),

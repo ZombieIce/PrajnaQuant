@@ -18,6 +18,15 @@
 //! effective date. Each identity field resolves to a Raw object whose frozen
 //! provenance or announcement JSON carries the announcement date; a missing or
 //! ambiguous date fails closed.
+//!
+//! A continuous code whose legal full name changes needs two rows: the
+//! successor declares `change_kind=legal_name_change` and #229's shared
+//! validator accepts that one non-terminated overlap. Every row also carries a
+//! local `contract` citation whose Raw hash becomes `contract_raw_sha256`;
+//! name, category and index citations must share one Raw page because
+//! `AttributeFact` has one evidence. The coverage layer measures UNKNOWN over
+//! the official listing/termination lifetime, not the TDX code-table presence
+//! bounds.
 
 use crate::pit_universe::{
     AttributeFact, CatalogError, CatalogInput, CodeRange, CodeTableSnapshot, Coverage, Evidence,
@@ -25,7 +34,7 @@ use crate::pit_universe::{
     Publication, ScanObservation, ScanStatus, in_code_scope, raw_hash,
 };
 use chrono::{DateTime, FixedOffset, NaiveDate};
-use prajna_data::cninfo::{Citation, EvidenceLevel, Mvp6Facts};
+use prajna_data::cninfo::{Citation, EvidenceLevel, LEGAL_NAME_CHANGE, Mvp6Facts};
 use prajna_data::{
     RawStore, TdxCodeTableRow, bars_from_record_batch, read_dataset_table, read_manifest,
     sessions_from_record_batch, tdx_code_table_from_record_batch,
@@ -57,14 +66,33 @@ fn error(message: impl Into<String>) -> CatalogError {
 /// (official evidence wins and the difference is disclosed), `excluded`
 /// (the code is removed from this Catalog), or `unresolved` (no Catalog
 /// lifecycle can be evidenced).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityDifferenceKind {
+    CodeTableAbsent,
+    ListingDateVsCodeTableFirst,
+    TerminationVsCodeTablePresence,
+    CodeTableExitBeforeTermination,
+    PricedBarOutsideLifecycle,
+    CodeTablePresenceOutsideLifecycle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityDifferenceResolution {
+    AcceptedIdentity,
+    Excluded,
+    Unresolved,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IdentityDifference {
     pub code: String,
-    pub kind: String,
+    pub kind: IdentityDifferenceKind,
     pub expected_date: Option<NaiveDate>,
     pub observed_date: Option<NaiveDate>,
     pub evidence_level: Option<EvidenceLevel>,
-    pub resolution: String,
+    pub resolution: IdentityDifferenceResolution,
 }
 
 /// Local-only assembly report. It contains dates and no market values, source
@@ -113,6 +141,8 @@ struct IdentitySeed {
     tracked_index: String,
     category: FundCategory,
     evidence_level: EvidenceLevel,
+    legal_name_change: bool,
+    contract_raw_sha256: String,
     listing_evidence: Evidence,
     termination_evidence: Option<Evidence>,
     attribute_evidence: Evidence,
@@ -148,7 +178,7 @@ impl IdentitySeed {
         };
         Ok(Lifecycle {
             native_symbol: self.code.clone(),
-            contract_raw_sha256: self.attribute_evidence.raw_sha256.clone(),
+            contract_raw_sha256: self.contract_raw_sha256.clone(),
             listing: LifecycleFact {
                 effective_date: self.listing,
                 evidence: self.listing_evidence.clone(),
@@ -441,6 +471,16 @@ fn parse_identities(
             )));
         }
         let evidence_level = parse_evidence_level(&fact.evidence_level, &fact.code)?;
+        let legal_name_change = match fact.change_kind.trim() {
+            "" => false,
+            LEGAL_NAME_CHANGE => true,
+            other => {
+                return Err(error(format!(
+                    "invalid change_kind {other} for {}",
+                    fact.code
+                )));
+            }
+        };
         let code_citation = citation(citations, &fact.source_announcement_id, "code")?;
         if !without_whitespace(code_citation.excerpt()).contains(&without_whitespace(&fact.code)) {
             return Err(error(format!(
@@ -462,7 +502,7 @@ fn parse_identities(
                 fact.code
             )));
         }
-        let listing_evidence = evidence(raw, listing_citation, "identity.csv listing_date")?;
+        let listing_evidence = evidence(raw, listing_citation)?;
         let termination_evidence = match termination {
             Some(date) => {
                 let citation =
@@ -473,17 +513,33 @@ fn parse_identities(
                         fact.code
                     )));
                 }
-                Some(evidence(raw, citation, "identity.csv termination_date")?)
+                Some(evidence(raw, citation)?)
             }
             None => None,
         };
         let attribute = citation(citations, &fact.source_announcement_id, "legal_name")?;
-        let attribute_evidence = evidence(raw, attribute, "identity.csv legal_name")?;
         if !without_whitespace(attribute.excerpt()).contains(&without_whitespace(&fact.legal_name))
         {
             return Err(error(format!(
                 "legal_name {} is not supported by its cited excerpt",
                 fact.legal_name
+            )));
+        }
+        let attribute_evidence = evidence(raw, attribute)?;
+        // AttributeFact carries one Evidence for the whole
+        // name/category/index tuple. Emitting the legal-name page for all three
+        // is only faithful when the citations are demonstrably the same page.
+        let category = citation(citations, &fact.source_announcement_id, "fund_category")?;
+        if !category_supported(&fact.fund_category, category.excerpt()) {
+            return Err(error(format!(
+                "fund_category {} for {} is not supported by its cited excerpt",
+                fact.fund_category, fact.code
+            )));
+        }
+        if evidence(raw, category)? != attribute_evidence {
+            return Err(error(format!(
+                "legal_name and fund_category for {} are not evidenced by the same Raw page",
+                fact.code
             )));
         }
         if !fact.tracked_index.trim().is_empty() {
@@ -496,10 +552,27 @@ fn parse_identities(
                     fact.tracked_index
                 )));
             }
-            citation(citations, &fact.source_announcement_id, "fund_category")?;
-        } else {
-            citation(citations, &fact.source_announcement_id, "fund_category")?;
+            if evidence(raw, index)? != attribute_evidence {
+                return Err(error(format!(
+                    "legal_name and tracked_index for {} are not evidenced by the same Raw page",
+                    fact.code
+                )));
+            }
         }
+        // The fund contract is cited as its own field rather than derived from
+        // the legal-name field. It may be the same Raw only when the row's
+        // source document is itself the contract; its page must state the legal
+        // fund name.
+        let contract = citation(citations, &fact.source_announcement_id, "contract")?;
+        if !without_whitespace(contract.excerpt()).contains(&without_whitespace(&fact.legal_name)) {
+            return Err(error(format!(
+                "contract evidence for {} does not state its legal name",
+                fact.code
+            )));
+        }
+        raw.get(contract.raw_sha256())
+            .map_err(|e| error(e.to_string()))?;
+        let contract_raw_sha256 = contract.raw_sha256().to_owned();
         seeds.push(IdentitySeed {
             code: fact.code.clone(),
             listing,
@@ -508,6 +581,8 @@ fn parse_identities(
             tracked_index: fact.tracked_index.clone(),
             category: fund_category(&fact.fund_category),
             evidence_level,
+            legal_name_change,
+            contract_raw_sha256,
             listing_evidence,
             termination_evidence,
             attribute_evidence,
@@ -586,11 +661,11 @@ fn plan(v4: &V4Data, seeds: &[IdentitySeed]) -> Result<Plan> {
             for row in &rows {
                 differences.push(IdentityDifference {
                     code: code.clone(),
-                    kind: "code_table_absent".into(),
+                    kind: IdentityDifferenceKind::CodeTableAbsent,
                     expected_date: Some(row.listing),
                     observed_date: None,
                     evidence_level: Some(row.evidence_level),
-                    resolution: "excluded".into(),
+                    resolution: IdentityDifferenceResolution::Excluded,
                 });
             }
             notes.push(format!(
@@ -663,6 +738,11 @@ fn align_runs(
                 .map(|(candidate, _)| candidate);
             match (previous_terminated, next_run) {
                 (true, Some(next)) => {
+                    if row.legal_name_change {
+                        return Err(format!(
+                            "{code}: change_kind=legal_name_change cannot follow a terminated identity"
+                        ));
+                    }
                     if row.listing > runs[next].first
                         || row.termination.is_some_and(|end| end <= runs[next].first)
                     {
@@ -695,6 +775,11 @@ fn align_runs(
             }
         };
         if assigned.iter().any(|(run, _, _, _)| *run == run_index) {
+            if !row.legal_name_change {
+                return Err(format!(
+                    "{code}: successor identity must declare change_kind=legal_name_change"
+                ));
+            }
             let name_change = rows[index - 1].legal_name != row.legal_name;
             if !name_change {
                 return Err(format!(
@@ -709,23 +794,36 @@ fn align_runs(
             }
             assigned.push((run_index, row.listing, true, index));
         } else {
-            let run = runs[run_index];
-            if run.first < row.listing && row.listing >= v4.first_session {
-                return Err(format!(
-                    "{code}: code table contains the code before the evidenced listing date"
-                ));
-            }
-            assigned.push((run_index, run.first, false, index));
+            assigned.push((run_index, runs[run_index].first, false, index));
         }
     }
 
-    // Every run with an identity must have a row; a run that starts before the
-    // first evidenced identity is an un-evidenced prior lifecycle.
+    // Every run with an identity must have a row. A run strictly before the
+    // first evidenced identity or strictly after the last one is a bare TDX
+    // presence: keep the code when it has no priced Bar (P27-19) and report the
+    // presence; a priced Bar there is excluded by `outside_lifecycle_bar`. A run
+    // between assigned runs remains an un-evidenced prior lifecycle.
+    let assigned_first = assigned
+        .iter()
+        .map(|(run_index, _, _, _)| runs[*run_index].first)
+        .min()
+        .expect("at least one assigned identity row");
+    let assigned_last = assigned
+        .iter()
+        .map(|(run_index, _, _, _)| runs[*run_index].last)
+        .max()
+        .expect("at least one assigned identity row");
+    let mut ignored_runs = Vec::new();
     for (index, run) in runs.iter().enumerate() {
-        if !assigned
+        if assigned
             .iter()
             .any(|(run_index, _, _, _)| *run_index == index)
         {
+            continue;
+        }
+        if run.last < assigned_first || run.first > assigned_last {
+            ignored_runs.push(*run);
+        } else {
             return Err(format!(
                 "{code}: code-table run starting {} has no identity evidence",
                 run.first
@@ -763,14 +861,14 @@ fn align_runs(
         {
             differences.push(IdentityDifference {
                 code: code.to_owned(),
-                kind: "listing_date_vs_code_table_first".into(),
+                kind: IdentityDifferenceKind::ListingDateVsCodeTableFirst,
                 expected_date: Some(seed.listing),
                 observed_date: Some(lifecycle.run.first),
                 evidence_level: Some(seed.evidence_level),
                 resolution: if seed.evidence_level == EvidenceLevel::Official {
-                    "accepted_identity".into()
+                    IdentityDifferenceResolution::AcceptedIdentity
                 } else {
-                    "unresolved".into()
+                    IdentityDifferenceResolution::Unresolved
                 },
             });
             if seed.evidence_level == EvidenceLevel::Secondary {
@@ -792,13 +890,13 @@ fn align_runs(
             let observed = lifecycle.run.last;
             let mismatch = if termination < observed {
                 Some((
-                    "termination_vs_code_table_presence",
+                    IdentityDifferenceKind::TerminationVsCodeTablePresence,
                     Some(termination),
                     Some(observed),
                 ))
             } else if lifecycle.run.exit.is_some_and(|exit| termination > exit) {
                 Some((
-                    "code_table_exit_before_termination",
+                    IdentityDifferenceKind::CodeTableExitBeforeTermination,
                     Some(termination),
                     lifecycle.run.exit,
                 ))
@@ -808,14 +906,14 @@ fn align_runs(
             if let Some((kind, expected, observed)) = mismatch {
                 differences.push(IdentityDifference {
                     code: code.to_owned(),
-                    kind: kind.into(),
+                    kind,
                     expected_date: expected,
                     observed_date: observed,
                     evidence_level: Some(seed.evidence_level),
                     resolution: if seed.evidence_level == EvidenceLevel::Official {
-                        "accepted_identity".into()
+                        IdentityDifferenceResolution::AcceptedIdentity
                     } else {
-                        "unresolved".into()
+                        IdentityDifferenceResolution::Unresolved
                     },
                 });
                 if seed.evidence_level == EvidenceLevel::Secondary {
@@ -833,17 +931,28 @@ fn align_runs(
     if let Some(date) = outside_lifecycle_bar(code, &lifecycles, v4) {
         differences.push(IdentityDifference {
             code: code.to_owned(),
-            kind: "priced_bar_outside_lifecycle".into(),
+            kind: IdentityDifferenceKind::PricedBarOutsideLifecycle,
             expected_date: None,
             observed_date: Some(date),
             evidence_level: None,
-            resolution: "excluded".into(),
+            resolution: IdentityDifferenceResolution::Excluded,
         });
         return Ok((
             Vec::new(),
             Some(format!("priced_bar_outside_lifecycle:{date}")),
             Vec::new(),
         ));
+    }
+
+    for run in ignored_runs {
+        differences.push(IdentityDifference {
+            code: code.to_owned(),
+            kind: IdentityDifferenceKind::CodeTablePresenceOutsideLifecycle,
+            expected_date: None,
+            observed_date: Some(run.first),
+            evidence_level: None,
+            resolution: IdentityDifferenceResolution::Unresolved,
+        });
     }
 
     Ok((lifecycles, None, Vec::new()))
@@ -977,6 +1086,7 @@ fn build_input(v4: &V4Data, plan: &Plan, citations: &[Citation]) -> Result<Catal
                     | "legal_name"
                     | "fund_category"
                     | "tracked_index"
+                    | "contract"
             )
         })
         .map(|citation| citation.raw_sha256().to_owned())
@@ -1086,12 +1196,12 @@ fn presence_runs(v4: &V4Data, code: &str) -> Vec<PresenceRun> {
     runs
 }
 
-fn evidence(raw: &RawStore, citation: &Citation, locator: &str) -> Result<Evidence> {
+fn evidence(raw: &RawStore, citation: &Citation) -> Result<Evidence> {
     let date = publication_date(raw, citation)?;
     Ok(Evidence {
         raw_sha256: citation.raw_sha256().to_owned(),
         announcement_id: citation.announcement_id().to_owned(),
-        locator: locator.to_owned(),
+        locator: format!("{}:p{}", citation.announcement_id(), citation.page()),
         publication: Publication::DateOnly { date },
     })
 }
@@ -1222,28 +1332,44 @@ fn parse_date(value: &str, field: &str, code: &str) -> Result<NaiveDate> {
 /// The identity table records an explicit fund-category fact. Values outside
 /// the small documented vocabulary are treated as `Other`; MVP-6 fixed-list
 /// selection ignores the category, and a non-equity default is conservative.
+const EQUITY_CATEGORY_TOKENS: &[&str] = &[
+    "equity",
+    "stock",
+    "index",
+    "etf",
+    "指数",
+    "指数型",
+    "指数基金",
+    "指数型基金",
+    "股票",
+    "股票型",
+    "股票基金",
+    "股票型基金",
+];
+
 fn fund_category(value: &str) -> FundCategory {
     let value = value.trim();
-    if [
-        "equity",
-        "stock",
-        "index",
-        "etf",
-        "指数",
-        "指数型",
-        "指数基金",
-        "指数型基金",
-        "股票",
-        "股票型",
-        "股票基金",
-        "股票型基金",
-    ]
-    .iter()
-    .any(|token| value.eq_ignore_ascii_case(token))
+    if EQUITY_CATEGORY_TOKENS
+        .iter()
+        .any(|token| value.eq_ignore_ascii_case(token))
     {
         FundCategory::Equity
     } else {
         FundCategory::Other
+    }
+}
+
+/// The category is a coded field, so the excerpt need not repeat a machine
+/// token verbatim. It must still contain a category statement: any documented
+/// equity token, or the declared value for an unrecognised category.
+fn category_supported(value: &str, excerpt: &str) -> bool {
+    let excerpt = without_whitespace(excerpt);
+    if fund_category(value) == FundCategory::Equity {
+        EQUITY_CATEGORY_TOKENS
+            .iter()
+            .any(|token| excerpt.contains(&without_whitespace(token)))
+    } else {
+        excerpt.contains(&without_whitespace(value))
     }
 }
 

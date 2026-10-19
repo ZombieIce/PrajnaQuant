@@ -7,7 +7,7 @@
 //! to a populated field, and rejects a row whose `source_page` is not bound to
 //! any of its field citations.
 
-use super::mvp6::{classify_mvp6, parse_page, required, strip_whitespace};
+use super::mvp6::{LEGAL_NAME_CHANGE, classify_mvp6, parse_page, required, strip_whitespace};
 use super::{
     CatalogLifecycle, Citation, CorporateActionV2, EvidenceLevel, Mvp6Facts, Mvp6Session, Result,
     RiskEventV1, StructuredCorporateActionsV2,
@@ -60,6 +60,11 @@ pub fn validate_and_convert(
         required(&row.fund_category, "fund_category")?;
         let listing = parse_date(&row.listing_date, "listing_date")?;
         let termination = parse_optional_date(&row.termination_date, "termination_date")?;
+        let change_kind = match row.change_kind.trim() {
+            "" => String::new(),
+            LEGAL_NAME_CHANGE => LEGAL_NAME_CHANGE.to_owned(),
+            other => return Err(format!("invalid change_kind: {other}").into()),
+        };
         if termination.is_some_and(|date| date < listing) {
             return Err(format!("termination_date precedes listing_date for {}", row.code).into());
         }
@@ -82,6 +87,15 @@ pub fn validate_and_convert(
             ],
             &mut used,
         )?;
+        // The contract attachment is local evidence for the legal identity. It
+        // has no identity.csv column, so #229 consumes it when present and
+        // #221 requires it to populate `contract_raw_sha256`.
+        if let Some(contract) =
+            index.get(&(row.source_announcement_id.clone(), "contract".to_owned()))
+        {
+            field_supported("legal_name", &row.legal_name, contract.excerpt())?;
+            used.insert((row.source_announcement_id.clone(), "contract".to_owned()));
+        }
         lifecycles.push(CatalogLifecycle {
             code: row.code.clone(),
             org_id: row.org_id.clone(),
@@ -93,15 +107,27 @@ pub fn validate_and_convert(
             evidence_level: EvidenceLevel::parse(&row.evidence_level)?,
             source_announcement_id: row.source_announcement_id.clone(),
             source_page: parse_page(&row.source_page)?,
+            change_kind,
         });
     }
     lifecycles.sort_by(|a, b| (&a.code, a.listing_date).cmp(&(&b.code, b.listing_date)));
     for pair in lifecycles.windows(2) {
-        if pair[0].code == pair[1].code
-            && pair[0]
-                .termination_date
-                .is_none_or(|end| pair[1].listing_date <= end)
-        {
+        if pair[0].code != pair[1].code {
+            continue;
+        }
+        let overlaps = pair[0]
+            .termination_date
+            .is_none_or(|end| pair[1].listing_date <= end);
+        if !overlaps {
+            continue;
+        }
+        // The one shared exception: an explicitly declared legal-name change
+        // may start on a later date without terminating the preceding row.
+        let legal_name_change = pair[1].change_kind == LEGAL_NAME_CHANGE
+            && pair[0].termination_date.is_none()
+            && pair[1].listing_date > pair[0].listing_date
+            && pair[0].legal_name != pair[1].legal_name;
+        if !legal_name_change {
             return Err(format!("overlapping lifecycle for {}", pair[0].code).into());
         }
     }

@@ -31,6 +31,8 @@ const CITATION_HEADERS: &[&str] = &[
 
 /// Every fact-table field that must carry its own cited evidence. Provenance
 /// ratings (`evidence_level`) are not source facts and are not cited.
+/// `contract` is the fund-contract attachment that proves the legal identity;
+/// it is attached to an identity row but has no column of its own.
 const CITED_FIELDS: &[&str] = &[
     "code",
     "org_id",
@@ -39,6 +41,7 @@ const CITED_FIELDS: &[&str] = &[
     "termination_date",
     "fund_category",
     "tracked_index",
+    "contract",
     "kind",
     "announcement_date",
     "record_date",

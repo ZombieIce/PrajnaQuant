@@ -12,6 +12,11 @@ pub enum EvidenceLevel {
     Secondary,
 }
 
+/// The only accepted non-empty `change_kind`: the row starts a new instrument
+/// identity because the legal full name changed. The preceding same-code row
+/// must be unterminated and carry a different legal name.
+pub const LEGAL_NAME_CHANGE: &str = "legal_name_change";
+
 impl EvidenceLevel {
     pub(super) fn parse(value: &str) -> Result<Self> {
         match value {
@@ -35,6 +40,11 @@ pub struct IdentityFact {
     pub evidence_level: String,
     pub source_announcement_id: String,
     pub source_page: String,
+    /// Empty for an initial identity, or `legal_name_change` when this row
+    /// starts a new instrument identity because the legal full name changed.
+    /// #229 permits that one shape to overlap the preceding unterminated row.
+    #[serde(default)]
+    pub change_kind: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,7 +87,7 @@ pub struct Mvp6Facts {
 impl Mvp6Facts {
     pub fn from_csv(identity: &str, actions: &str, events: &str) -> Result<Self> {
         Ok(Self {
-            identities: read_csv(identity, IDENTITY_HEADERS)?,
+            identities: read_identity_csv(identity)?,
             actions: read_csv(actions, ACTION_HEADERS)?,
             events: read_csv(events, EVENT_HEADERS)?,
         })
@@ -85,6 +95,19 @@ impl Mvp6Facts {
 }
 
 const IDENTITY_HEADERS: &[&str] = &[
+    "code",
+    "org_id",
+    "legal_name",
+    "listing_date",
+    "termination_date",
+    "fund_category",
+    "tracked_index",
+    "evidence_level",
+    "source_announcement_id",
+    "source_page",
+    "change_kind",
+];
+const IDENTITY_HEADERS_LEGACY: &[&str] = &[
     "code",
     "org_id",
     "legal_name",
@@ -121,6 +144,26 @@ const EVENT_HEADERS: &[&str] = &[
     "source_page",
 ];
 
+/// The `change_kind` column is an additive extension of the #229 header. A
+/// local table written before the column existed still parses as an initial
+/// identity; rows that need a legal-name change must add the column.
+fn read_identity_csv(text: &str) -> Result<Vec<IdentityFact>> {
+    let mut reader = csv::ReaderBuilder::new()
+        .trim(csv::Trim::All)
+        .from_reader(text.as_bytes());
+    let headers = reader.headers()?.iter().collect::<Vec<_>>();
+    if headers != IDENTITY_HEADERS && headers != IDENTITY_HEADERS_LEGACY {
+        return Err(format!(
+            "CSV header mismatch: expected {IDENTITY_HEADERS:?} or the legacy header without change_kind, got {headers:?}"
+        )
+        .into());
+    }
+    reader
+        .deserialize()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
 fn read_csv<T: for<'de> Deserialize<'de>>(text: &str, expected: &[&str]) -> Result<Vec<T>> {
     let mut reader = csv::ReaderBuilder::new()
         .trim(csv::Trim::All)
@@ -147,6 +190,10 @@ pub struct CatalogLifecycle {
     pub evidence_level: EvidenceLevel,
     pub source_announcement_id: String,
     pub source_page: u32,
+    /// Empty for an initial identity, or `legal_name_change`. Serialized only
+    /// when set so existing facts-session JSON stays unchanged.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub change_kind: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -585,6 +585,22 @@ fn validate_v2_code_tables(input: &mut CatalogInput) -> Result<BTreeSet<String>>
                             .then(|| values.first().cloned().flatten())
                             .flatten()
                     });
+            // The earliest known name is the initial identity, not a change.
+            // This matters when an official listing (and its attribute) is
+            // later than the first TDX code-table appearance: it must not
+            // invent a second identity boundary.
+            let initial_name_date = if previous_name.is_none() {
+                names.iter().next().map(|(date, _)| *date)
+            } else {
+                None
+            };
+            if let Some(date) = initial_name_date {
+                previous_name = names.get(&date).and_then(|values| {
+                    (values.len() == 1)
+                        .then(|| values.first().cloned().flatten())
+                        .flatten()
+                });
+            }
             if names
                 .get(&first_seen)
                 .is_some_and(|values| values.len() > 1)
@@ -597,6 +613,9 @@ fn validate_v2_code_tables(input: &mut CatalogInput) -> Result<BTreeSet<String>>
             )) {
                 if values.len() != 1 {
                     gaps.insert(format!("conflicting_legal_names:{symbol}:{effective_date}"));
+                    continue;
+                }
+                if Some(*effective_date) == initial_name_date {
                     continue;
                 }
                 let name = values.first().cloned().flatten();
