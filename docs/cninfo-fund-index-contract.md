@@ -57,3 +57,22 @@ cargo run -p prajna-data --bin prajna-cninfo --locked --offline -- \
 ## 合成验证
 
 `cargo test -p prajna-data --test cninfo --locked --offline` 使用虚构元数据、固定 PDF 转换器边界、Mock HTTP，不联网；覆盖 orgId 查询参数、请求间隔、访问拒绝留痕、分页冲突/重复、158xxx、中文年份季度、多标签、全称变更序列、PDF 字段缺失/冲突及来源 hash、完整采集到事件/Manifest 的连接、版本影响 DSV。Poppler 外部工具及真实 PDF 排版不由该合成测试认证。
+
+## MVP-6 固定名单 v1（#229）
+
+`Collector::collect_fixed_list` 是新增入口，不改变既有 `Collector::collect`、`IndexDataset`、Normalizer 或 Catalog 身份。调用方提供明确候选代码、TDX 简称与存续期；代码必须在 158xxx/159xxx 范围。它先用 `topSearch` 的完全匹配建议解析全部 `orgId`，没有精确结果时才按简称和最多 365 日窗口分页查公告，并只保留完全匹配 `secCode` 的行。每个 `(code, orgId)` 独立按最多 365 日窗口查询；每个区间的 `PageSet` 必须完整，否则返回 `pagination_incomplete`。响应仍只冻结进本机 Raw Store，含请求参数和 `observed_at`。
+
+新增入口识别上市交易公告书、基金合同/招募说明书、份额折算/拆分、持有人大会计票/表决结果、终止上市/终止基金合同与清算报告。定期报告被排除。基金合同/招募说明书只在上市交易公告书的 PDF 文本没有同时出现基金类别和标的指数，或调用方显式请求对应类别时下载。附件仍要求 `finalpage/` 路径且禁止 `..`。访问控制与限速沿用同一 `fetch` 实现。
+
+`configs/mvp-6/{identity,actions,events}.csv` 目前只定义 Issue #229 指定的列头，**没有带入未经证据复核的真实事实**。公开事实表可收录公告中的身份与公司行动；Raw 对象、请求日志和 hash 不得进入仓库。`Mvp6Facts::from_csv` 检查固定列，`validate_and_convert` 要求本机 Raw 引用、证据字段与冻结开市日历一致，并产出 Catalog 生命周期、`cninfo_corporateActions_structured_v2` 与风险事件。原文未支持的可选字段必须为空。`crosscheck_v4` 只返回上市/终止、除息或折算日收盘相对昨收至少变动一个 0.001 价格刻度、停牌与 keyed-no-trade 的差异，不改输入。
+
+本机固定名单命令读取 `code,short_name,active_start,active_end` CSV，结果和 Raw 都写入 `~/PrajnaData/mvp-6/`：
+
+```sh
+cargo run -p prajna-data --bin prajna-cninfo-fixed --locked --offline -- \
+  /absolute/local/path/fixed-candidates.csv \
+  "<operator-confirmed direct domestic egress description>" \
+  "fund_contract,prospectus"
+```
+
+合成边界测试位于 `cargo test -p prajna-data --test cninfo_mvp6 --locked --offline`；它使用 mock HTTP 和合成事实，不连接真实来源。`crosscheck_v4` 当前接受规范化后的 v4 行投影，不读取 v4 DSV 路径本身。
