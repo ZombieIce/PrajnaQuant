@@ -254,6 +254,10 @@ impl<T: Transport> Collector<T> {
                                     .unresolved
                                     .push(format!("{}:pdf_unavailable", item.id)),
                             }
+                        } else {
+                            result
+                                .unresolved
+                                .push(format!("{}:pdf_unavailable", item.id));
                         }
                     } else if should_download_pdf(&item.categories, false, false)
                         && !item
