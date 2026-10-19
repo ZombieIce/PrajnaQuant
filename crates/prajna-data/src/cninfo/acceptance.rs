@@ -4,7 +4,7 @@
 //! network access, real facts, or hashes are committed to the repository.
 
 use super::{
-    Collector, CrosscheckReport, FundCandidate, Mvp6Facts, PdfText, RawCitation, Result, Transport,
+    Citation, Collector, CrosscheckReport, FundCandidate, Mvp6Facts, PdfText, Result, Transport,
     V4DailyBar, crosscheck_v4, read_citations_csv, validate_and_convert,
 };
 use crate::{
@@ -121,20 +121,12 @@ pub fn load_v4_projection(lake_root: &Path, dsv: &str, facts: &Mvp6Facts) -> Res
                 code,
                 date: bar.session_date(),
                 close: Some(bar.close()),
-                previous_close: None,
                 reference_price: reference_prices.get(&key).copied(),
                 keyed_no_trade: false,
             });
         }
     }
     bars.sort_by(|left, right| (&left.code, left.date).cmp(&(&right.code, right.date)));
-    let mut previous_close = BTreeMap::<String, Price>::new();
-    for bar in &mut bars {
-        bar.previous_close = previous_close.get(&bar.code).copied();
-        if let Some(close) = bar.close {
-            previous_close.insert(bar.code.clone(), close);
-        }
-    }
 
     let mut keyed = BTreeSet::new();
     for batch in table_batches(lake_root, &manifest, "tdx_code_table")? {
@@ -169,7 +161,6 @@ pub fn load_v4_projection(lake_root: &Path, dsv: &str, facts: &Mvp6Facts) -> Res
                         code: code.clone(),
                         date: table.session_date,
                         close: None,
-                        previous_close: None,
                         reference_price: None,
                         keyed_no_trade: true,
                     });
@@ -192,11 +183,10 @@ pub fn write_facts_acceptance(
     lake_root: &Path,
     dsv: &str,
     facts: &Mvp6Facts,
-    citations: &[RawCitation],
-    store: &RawStore,
+    citations: &[Citation],
 ) -> Result<FactsAcceptance> {
     let projection = load_v4_projection(lake_root, dsv, facts)?;
-    let session = validate_and_convert(facts, store, citations, &projection.calendar)?;
+    let session = validate_and_convert(facts, citations, &projection.calendar)?;
     let report = crosscheck_v4(facts, &projection.bars);
     fs::create_dir_all(directory)?;
 
@@ -276,15 +266,17 @@ pub fn collect_and_accept<T: Transport>(
             &fs::read_to_string(facts_dir.join("actions.csv"))?,
             &fs::read_to_string(facts_dir.join("events.csv"))?,
         )?;
-        let citations =
-            read_citations_csv(&fs::read_to_string(facts_dir.join("citations.csv"))?, store)?;
+        let citations = read_citations_csv(
+            &fs::read_to_string(facts_dir.join("citations.csv"))?,
+            store,
+            converter,
+        )?;
         Some(write_facts_acceptance(
             &directory,
             root,
             &published_local_dsv(root)?,
             &facts,
             &citations,
-            store,
         )?)
     } else {
         None

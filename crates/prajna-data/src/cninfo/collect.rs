@@ -1,3 +1,4 @@
+use super::mvp6::classify_mvp6;
 use super::{
     Announcement, FixedListResult, FundCandidate, FundIndex, IndexDataset, OrgIdResolution,
     PageSet, PdfText, Result, classify, extract_fields, scoped_code, should_download_pdf,
@@ -99,6 +100,13 @@ impl<T: Transport> Collector<T> {
         }
     }
     fn fetch(&mut self, request: Request) -> Result<(Vec<u8>, String)> {
+        self.fetch_with(request, Value::Null)
+    }
+
+    /// Fetches and freezes a response. `provenance` is merged into the frozen
+    /// source record so a downloaded PDF can be bound to its announcement ID
+    /// without trusting the fact manifest.
+    fn fetch_with(&mut self, request: Request, provenance: Value) -> Result<(Vec<u8>, String)> {
         if self.stopped {
             return Err("cninfo source stopped: unresolved".into());
         }
@@ -113,11 +121,23 @@ impl<T: Transport> Collector<T> {
                 Ok(r) => (r.status, r.content_type, r.bytes),
                 Err(_) => (0, "application/octet-stream".into(), Vec::new()),
             };
-            let stored = self.raw.put(&bytes, SourceRecordInput {
-                content_type, source_kind: SourceKind::VendorApi, source_id:"cninfo".into(),
-                request:json!({"url":request.url,"params":request.form,"http_status":status,"attempt":attempt,"network_path":self.network_path.clone(),"terms_conclusion":"issue_172_owner_authorization_for_local_noncommercial_research","outcome":if status == 0 {"transport_error"} else {"http_response"}}),
-                observed_at:observed, ingested_by:"prajna-cninfo/1".into(),
-            });
+            let mut provenance_record = json!({"url":request.url,"params":request.form,"http_status":status,"attempt":attempt,"network_path":self.network_path.clone(),"terms_conclusion":"issue_172_owner_authorization_for_local_noncommercial_research","outcome":if status == 0 {"transport_error"} else {"http_response"}});
+            if let (Some(record), Value::Object(extra)) =
+                (provenance_record.as_object_mut(), provenance.clone())
+            {
+                record.extend(extra);
+            }
+            let stored = self.raw.put(
+                &bytes,
+                SourceRecordInput {
+                    content_type,
+                    source_kind: SourceKind::VendorApi,
+                    source_id: "cninfo".into(),
+                    request: provenance_record,
+                    observed_at: observed,
+                    ingested_by: "prajna-cninfo/1".into(),
+                },
+            );
             let hash = match stored {
                 Ok(hash) => hash,
                 Err(error) => {
@@ -366,10 +386,13 @@ impl<T: Transport> Collector<T> {
                 .push(format!("{}:pdf_unavailable", item.id));
             return None;
         };
-        match self.fetch(Request {
-            url: format!("{PDF}{path}"),
-            form: BTreeMap::new(),
-        }) {
+        match self.fetch_with(
+            Request {
+                url: format!("{PDF}{path}"),
+                form: BTreeMap::new(),
+            },
+            json!({"purpose": "mvp6_pdf", "announcement_id": item.id}),
+        ) {
             Ok((bytes, hash)) if bytes.starts_with(b"%PDF-") => {
                 result
                     .pdf_raw_sha256_by_announcement
@@ -630,31 +653,6 @@ fn collect_exact_suggestions(value: &Value, code: &str, output: &mut BTreeSet<St
         }
         _ => {}
     }
-}
-
-fn classify_mvp6(title: &str) -> Vec<String> {
-    let mut categories = classify(title);
-    let extra = [
-        (
-            "conversion",
-            &["份额拆分", "基金份额拆分", "拆分"] as &[&str],
-        ),
-        ("holders_meeting", &["计票结果", "表决结果", "表决情况"]),
-        ("termination", &["终止上市", "终止基金合同"]),
-        ("liquidation_report", &["清算报告"]),
-        ("fund_contract", &["基金合同"]),
-        ("prospectus", &["招募说明书"]),
-    ];
-    for (category, words) in extra {
-        if words.iter().any(|word| title.contains(word))
-            && !categories.iter().any(|c| c == category)
-        {
-            categories.push(category.into());
-        }
-    }
-    categories.sort();
-    categories.dedup();
-    categories
 }
 
 fn valid_pdf_path(path: &str) -> bool {

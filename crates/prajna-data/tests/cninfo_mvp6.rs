@@ -201,6 +201,14 @@ fn fixed_index_flags_incomplete_totals_and_downloads_new_pdf_categories_only() {
             .iter()
             .any(|s| s.contains("pagination_incomplete"))
     );
+    // The collector binds the frozen PDF to its announcement ID, so a later
+    // citation can prove the document belongs to that announcement.
+    let store = RawStore::open(dir.path()).unwrap();
+    let pdf_hash = &result.pdf_raw_sha256_by_announcement["split"][0];
+    assert!(store.sources(pdf_hash).unwrap().iter().any(|record| {
+        record.request["announcement_id"] == json!("split")
+            && record.request["purpose"] == json!("mvp6_pdf")
+    }));
 
     let dir = tempfile::tempdir().unwrap();
     let (mut collector, _) = make_collector(
@@ -315,12 +323,9 @@ fn facts() -> Mvp6Facts {
         }],
     }
 }
-fn evidence_fields(fields: &[&str]) -> BTreeSet<String> {
-    fields.iter().map(|field| (*field).to_owned()).collect()
-}
 fn source_record(id: &str) -> SourceRecordInput {
     SourceRecordInput {
-        content_type: "application/json".into(),
+        content_type: "text/plain".into(),
         source_kind: SourceKind::Fixture,
         source_id: "cninfo".into(),
         request: json!({"url": format!("https://example.test/{id}")}),
@@ -328,46 +333,111 @@ fn source_record(id: &str) -> SourceRecordInput {
         ingested_by: "cninfo-mvp6-test".into(),
     }
 }
-fn citation_fixture(store: &RawStore) -> Vec<RawCitation> {
+const IDENTITY_DOC: &str = "基金代码：159001
+基金管理人登记代码：synthetic-org
+基金简称：合成ETF
+上市日期：2026-01-05
+基金类型：指数基金";
+const ACTION_DOC: &str = "基金代码：159001
+公告标题：收益分配公告
+公告日期：2026-01-05
+除息日：2026-01-06";
+const EVENT_DOC: &str = "基金代码：159001
+公告标题：停牌公告
+公告日期：2026-01-05
+停牌起始日：2026-01-07
+停牌时段：全天";
+fn verified_citation(
+    store: &RawStore,
+    fact_source: &str,
+    field: &str,
+    announcement: &str,
+    raw_sha256: &str,
+    excerpt: &str,
+) -> Citation {
+    Citation::from_store(
+        store,
+        &mut NoopPdf,
+        CitationInput {
+            fact_source: fact_source.into(),
+            field: field.into(),
+            announcement_id: announcement.into(),
+            page: 1,
+            raw_sha256: raw_sha256.into(),
+            excerpt: excerpt.into(),
+            verified_by: "synthetic-reviewer".into(),
+            verified_at: "2026-02-01T00:00:00Z".into(),
+        },
+    )
+    .unwrap()
+}
+fn citation_fixture(store: &RawStore) -> Vec<Citation> {
     let mut citations = Vec::new();
-    for (id, fields) in [
+    for (id, document, fields) in [
         (
             "identity",
+            IDENTITY_DOC,
             &[
-                "code",
-                "org_id",
-                "legal_name",
-                "listing_date",
-                "fund_category",
+                ("code", "基金代码：159001"),
+                ("org_id", "基金管理人登记代码：synthetic-org"),
+                ("legal_name", "基金简称：合成ETF"),
+                ("listing_date", "上市日期：2026-01-05"),
+                ("fund_category", "基金类型：指数基金"),
             ][..],
         ),
         (
             "action",
-            &["code", "kind", "announcement_date", "ex_date"][..],
+            ACTION_DOC,
+            &[
+                ("code", "基金代码：159001"),
+                ("kind", "公告标题：收益分配公告"),
+                ("announcement_date", "公告日期：2026-01-05"),
+                ("ex_date", "除息日：2026-01-06"),
+            ][..],
         ),
         (
             "event",
+            EVENT_DOC,
             &[
-                "code",
-                "kind",
-                "announcement_date",
-                "effective_date",
-                "session_part",
+                ("code", "基金代码：159001"),
+                ("kind", "公告标题：停牌公告"),
+                ("announcement_date", "公告日期：2026-01-05"),
+                ("effective_date", "停牌起始日：2026-01-07"),
+                ("session_part", "停牌时段：全天"),
             ][..],
         ),
     ] {
-        let bytes = serde_json::to_vec(&json!({"announcementId": id})).unwrap();
-        let hash = store.put(&bytes, source_record(id)).unwrap();
-        citations
-            .push(RawCitation::from_store(store, id, 1, hash, evidence_fields(fields)).unwrap());
+        let hash = store.put(document.as_bytes(), source_record(id)).unwrap();
+        for (field, excerpt) in fields {
+            citations.push(verified_citation(store, id, field, id, &hash, excerpt));
+        }
     }
     citations
 }
-fn raw_fixture() -> (tempfile::TempDir, RawStore, Vec<RawCitation>) {
+fn raw_fixture() -> (tempfile::TempDir, RawStore, Vec<Citation>) {
     let dir = tempfile::tempdir().unwrap();
     let store = RawStore::open(dir.path()).unwrap();
     let citations = citation_fixture(&store);
     (dir, store, citations)
+}
+fn citation_csv(citations: &[Citation]) -> String {
+    let mut csv = String::from(
+        "fact_source,field,announcement_id,page,raw_sha256,excerpt,verified_by,verified_at\n",
+    );
+    for citation in citations {
+        csv.push_str(&format!(
+            "{},{},{},{},{},\"{}\",{},{}\n",
+            citation.fact_source(),
+            citation.field(),
+            citation.announcement_id(),
+            citation.page(),
+            citation.raw_sha256(),
+            citation.excerpt(),
+            citation.verified_by(),
+            citation.verified_at(),
+        ));
+    }
+    csv
 }
 fn calendar() -> BTreeSet<NaiveDate> {
     ["2026-01-05", "2026-01-06", "2026-01-07"]
@@ -383,92 +453,146 @@ fn price(value: &str) -> Price {
 }
 
 #[test]
-fn public_facts_validate_raw_calendar_lifecycle_required_fields_and_explicit_evidence() {
+fn public_facts_validate_calendar_lifecycle_required_fields_and_cited_evidence() {
     let (_dir, store, evidence) = raw_fixture();
     let f = facts();
-    let converted = validate_and_convert(&f, &store, &evidence, &calendar()).unwrap();
+    let converted = validate_and_convert(&f, &evidence, &calendar()).unwrap();
     assert_eq!(
         converted.corporate_actions.schema,
         "cninfo_corporateActions_structured_v2"
     );
     assert_eq!(converted.risk_events[0].session_part, "full_day");
+
+    let without_action = evidence
+        .iter()
+        .filter(|citation| citation.fact_source() != "action")
+        .cloned()
+        .collect::<Vec<_>>();
     assert!(
-        validate_and_convert(&f, &store, &evidence[1..], &calendar())
+        validate_and_convert(&f, &without_action, &calendar())
             .unwrap_err()
             .to_string()
-            .contains("missing Raw citation")
+            .contains("missing Raw citation for action")
     );
-    let mut missing_raw = evidence.clone();
-    missing_raw[0].raw_sha256 = format!("sha256:{}", "0".repeat(64));
-    assert!(
-        validate_and_convert(&f, &store, &missing_raw, &calendar())
-            .unwrap_err()
-            .to_string()
-            .contains("unavailable")
-    );
-    let mut fabricated = evidence.clone();
-    fabricated[2].announcement_id = "invented".into();
-    assert!(
-        validate_and_convert(&f, &store, &fabricated, &calendar())
-            .unwrap_err()
-            .to_string()
-            .contains("does not reference")
-    );
+
     let mut outside = f.clone();
     outside.events[0].effective_date = "2026-01-08".into();
     assert!(
-        validate_and_convert(&outside, &store, &evidence, &calendar())
+        validate_and_convert(&outside, &evidence, &calendar())
             .unwrap_err()
             .to_string()
             .contains("outside frozen calendar")
     );
+
     let mut overlap = f.clone();
     let mut second = overlap.identities[0].clone();
-    second.org_id = "another".into();
     second.source_announcement_id = "identity".into();
     overlap.identities.push(second);
     assert!(
-        validate_and_convert(&overlap, &store, &evidence, &calendar())
+        validate_and_convert(&overlap, &evidence, &calendar())
             .unwrap_err()
             .to_string()
             .contains("overlapping lifecycle")
     );
+
     let mut missing = f.clone();
     missing.identities[0].legal_name.clear();
     assert!(
-        validate_and_convert(&missing, &store, &evidence, &calendar())
+        validate_and_convert(&missing, &evidence, &calendar())
             .unwrap_err()
             .to_string()
             .contains("legal_name")
     );
-    let mut inferred = f;
+
+    // An inferred field without any citation is rejected.
+    let mut inferred = f.clone();
     inferred.identities[0].tracked_index = "synthetic-index".into();
     assert!(
-        validate_and_convert(&inferred, &store, &evidence, &calendar())
+        validate_and_convert(&inferred, &evidence, &calendar())
             .unwrap_err()
             .to_string()
-            .contains("not evidenced")
+            .contains("missing Raw citation for identity field tracked_index")
     );
+    // A citation whose verbatim excerpt does not state the inhabited value is
+    // rejected even though it is on the cited page.
+    let identity_raw = evidence
+        .iter()
+        .find(|citation| citation.fact_source() == "identity" && citation.field() == "code")
+        .unwrap()
+        .raw_sha256()
+        .to_owned();
+    let mut unsupported = evidence.clone();
+    unsupported.push(verified_citation(
+        &store,
+        "identity",
+        "tracked_index",
+        "identity",
+        &identity_raw,
+        "基金类型：指数基金",
+    ));
+    assert!(
+        validate_and_convert(&inferred, &unsupported, &calendar())
+            .unwrap_err()
+            .to_string()
+            .contains("not supported by its cited excerpt")
+    );
+
+    // A citation for a field the row leaves empty is an unsupported claim.
+    let action_raw = evidence
+        .iter()
+        .find(|citation| citation.fact_source() == "action" && citation.field() == "code")
+        .unwrap()
+        .raw_sha256()
+        .to_owned();
+    let mut unused = evidence.clone();
+    unused.push(verified_citation(
+        &store,
+        "action",
+        "pay_date",
+        "action",
+        &action_raw,
+        "公告日期：2026-01-05",
+    ));
+    assert!(
+        validate_and_convert(&f, &unused, &calendar())
+            .unwrap_err()
+            .to_string()
+            .contains("does not match a populated fact field")
+    );
+
+    // A classification that the cited announcement excerpt does not support is
+    // rejected even when the excerpt itself is on the frozen page.
+    let mut wrong_kind = f.clone();
+    wrong_kind.actions[0].kind = "suspension".into();
+    assert!(
+        validate_and_convert(&wrong_kind, &evidence, &calendar())
+            .unwrap_err()
+            .to_string()
+            .contains("not supported by its cited excerpt")
+    );
+
+    // The row's own source_page must be bound to one of its citations.
+    let mut wrong_page = f.clone();
+    wrong_page.identities[0].source_page = "2".into();
+    assert!(
+        validate_and_convert(&wrong_page, &evidence, &calendar())
+            .unwrap_err()
+            .to_string()
+            .contains("is not bound to any cited field")
+    );
+
     let mut reversed = facts();
     reversed.identities[0].termination_date = "2025-12-31".into();
-    let mut reversed_evidence = evidence.clone();
-    reversed_evidence[0]
-        .evidenced_fields
-        .insert("termination_date".into());
     assert!(
-        validate_and_convert(&reversed, &store, &reversed_evidence, &calendar())
+        validate_and_convert(&reversed, &evidence, &calendar())
             .unwrap_err()
             .to_string()
             .contains("precedes")
     );
     let mut malformed = facts();
     malformed.actions[0].cash_per_share = "1e-3".into();
-    let mut decimal_evidence = evidence.clone();
-    decimal_evidence[1]
-        .evidenced_fields
-        .insert("cash_per_share".into());
     assert!(
-        validate_and_convert(&malformed, &store, &decimal_evidence, &calendar())
+        validate_and_convert(&malformed, &evidence, &calendar())
             .unwrap_err()
             .to_string()
             .contains("invalid decimal")
@@ -476,7 +600,7 @@ fn public_facts_validate_raw_calendar_lifecycle_required_fields_and_explicit_evi
     let mut bad_code = facts();
     bad_code.identities[0].code = "160001".into();
     assert!(
-        validate_and_convert(&bad_code, &store, &evidence, &calendar())
+        validate_and_convert(&bad_code, &evidence, &calendar())
             .unwrap_err()
             .to_string()
             .contains("invalid fund code")
@@ -484,88 +608,328 @@ fn public_facts_validate_raw_calendar_lifecycle_required_fields_and_explicit_evi
 }
 
 #[test]
-fn citation_csv_binds_each_row_to_a_frozen_raw_object_and_rejects_duplicates() {
+fn citation_csv_binds_each_row_to_a_frozen_document_page_excerpt_and_verifier() {
     let (_dir, store, evidence) = raw_fixture();
-    let csv = format!(
-        "announcement_id,page,raw_sha256,evidenced_fields\n\
-         identity,1,{},code;org_id;legal_name;listing_date;fund_category\n\
-         action,1,{},code;kind;announcement_date;ex_date\n\
-         event,1,{},code;kind;announcement_date;effective_date;session_part\n",
-        evidence[0].raw_sha256, evidence[1].raw_sha256, evidence[2].raw_sha256
-    );
-    let citations = read_citations_csv(&csv, &store).unwrap();
-    assert_eq!(citations.len(), 3);
+    let csv = citation_csv(&evidence);
+    let citations = read_citations_csv(&csv, &store, &mut NoopPdf).unwrap();
+    assert_eq!(citations.len(), evidence.len());
     let action = citations
         .iter()
-        .find(|citation| citation.announcement_id == "action")
+        .find(|citation| citation.fact_source() == "action" && citation.field() == "ex_date")
         .unwrap();
-    assert!(action.evidenced_fields.contains("ex_date"));
+    assert_eq!(action.announcement_id(), "action");
 
-    let missing = csv.replace(
-        &evidence[0].raw_sha256,
+    assert!(
+        read_citations_csv(
+            "announcement_id,page,raw_sha256,evidenced_fields\n",
+            &store,
+            &mut NoopPdf,
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("header mismatch")
+    );
+
+    let missing = csv.replacen(
+        evidence[0].raw_sha256(),
         &format!("sha256:{}", "0".repeat(64)),
+        1,
     );
     assert!(
-        read_citations_csv(&missing, &store)
+        read_citations_csv(&missing, &store, &mut NoopPdf)
             .unwrap_err()
             .to_string()
             .contains("unavailable")
     );
-    let duplicate = format!(
-        "{csv}identity,1,{},code;org_id;legal_name;listing_date;fund_category\n",
-        evidence[0].raw_sha256
-    );
+
+    let first_row = csv.lines().nth(1).unwrap().to_owned();
+    let duplicate = format!("{csv}{first_row}\n");
     assert!(
-        read_citations_csv(&duplicate, &store)
+        read_citations_csv(&duplicate, &store, &mut NoopPdf)
             .unwrap_err()
             .to_string()
             .contains("duplicate citation")
     );
+
+    let unknown_field = csv.replacen("identity,code,", "identity,bogus,", 1);
+    assert!(
+        read_citations_csv(&unknown_field, &store, &mut NoopPdf)
+            .unwrap_err()
+            .to_string()
+            .contains("unknown cited field")
+    );
+
+    let page_out_of_range = csv.replacen(",1,", ",999,", 1);
+    assert!(
+        read_citations_csv(&page_out_of_range, &store, &mut NoopPdf)
+            .unwrap_err()
+            .to_string()
+            .contains("can only be cited on page 1")
+    );
+
+    let anonymous = csv.replacen("synthetic-reviewer", "unknown", 1);
+    assert!(
+        read_citations_csv(&anonymous, &store, &mut NoopPdf)
+            .unwrap_err()
+            .to_string()
+            .contains("must name the verifier")
+    );
+
+    let identity_raw = evidence
+        .iter()
+        .find(|citation| citation.fact_source() == "identity" && citation.field() == "code")
+        .unwrap()
+        .raw_sha256()
+        .to_owned();
+    let fabricated = Citation::from_store(
+        &store,
+        &mut NoopPdf,
+        CitationInput {
+            fact_source: "identity".into(),
+            field: "code".into(),
+            announcement_id: "invented".into(),
+            page: 1,
+            raw_sha256: identity_raw.clone(),
+            excerpt: "基金代码：159001".into(),
+            verified_by: "synthetic-reviewer".into(),
+            verified_at: "2026-02-01T00:00:00Z".into(),
+        },
+    );
+    assert!(
+        fabricated
+            .unwrap_err()
+            .to_string()
+            .contains("does not reference")
+    );
+    let empty_excerpt = Citation::from_store(
+        &store,
+        &mut NoopPdf,
+        CitationInput {
+            fact_source: "identity".into(),
+            field: "code".into(),
+            announcement_id: "identity".into(),
+            page: 1,
+            raw_sha256: identity_raw,
+            excerpt: "   ".into(),
+            verified_by: "synthetic-reviewer".into(),
+            verified_at: "2026-02-01T00:00:00Z".into(),
+        },
+    );
+    assert!(
+        empty_excerpt
+            .unwrap_err()
+            .to_string()
+            .contains("excerpt is empty")
+    );
+
+    // Verification cannot predate the local capture of the document.
+    let mut observed = source_record("observed");
+    observed.observed_at = "2026-01-05T00:00:00Z".into();
+    let observed_hash = store.put("观测于 159001".as_bytes(), observed).unwrap();
+    let before_capture = Citation::from_store(
+        &store,
+        &mut NoopPdf,
+        CitationInput {
+            fact_source: "identity".into(),
+            field: "code".into(),
+            announcement_id: "observed".into(),
+            page: 1,
+            raw_sha256: observed_hash.clone(),
+            excerpt: "159001".into(),
+            verified_by: "synthetic-reviewer".into(),
+            verified_at: "2026-01-04T00:00:00Z".into(),
+        },
+    );
+    assert!(
+        before_capture
+            .unwrap_err()
+            .to_string()
+            .contains("verified before the Raw object was captured")
+    );
+    let zero_page = Citation::from_store(
+        &store,
+        &mut NoopPdf,
+        CitationInput {
+            fact_source: "identity".into(),
+            field: "code".into(),
+            announcement_id: "observed".into(),
+            page: 0,
+            raw_sha256: observed_hash,
+            excerpt: "159001".into(),
+            verified_by: "synthetic-reviewer".into(),
+            verified_at: "2026-02-01T00:00:00Z".into(),
+        },
+    );
+    assert!(
+        zero_page
+            .unwrap_err()
+            .to_string()
+            .contains("cited page must be positive")
+    );
+}
+
+struct PagedPdf;
+impl PdfText for PagedPdf {
+    fn text(&mut self, _: &[u8]) -> Result<String> {
+        Ok("第一页：基金代码 159001\u{c}第二页：上市日期 2026-01-05".into())
+    }
 }
 
 #[test]
-fn crosscheck_detects_listing_action_and_suspension_disagreements() {
-    let mut f = facts();
-    f.identities[0].listing_date = "2026-01-06".into();
-    f.identities[0].termination_date = "2026-01-06".into();
-    let bars = vec![
-        V4DailyBar {
-            code: "159001".into(),
-            date: date("2026-01-05"),
-            close: Some(price("1.0")),
-            previous_close: Some(price("1.0")),
-            reference_price: Some(price("1.0")),
-            keyed_no_trade: false,
-        },
-        V4DailyBar {
-            code: "159001".into(),
-            date: date("2026-01-06"),
-            close: Some(price("1.0")),
-            previous_close: Some(price("1.0")),
-            reference_price: Some(price("1.0")),
-            keyed_no_trade: false,
-        },
-        V4DailyBar {
-            code: "159001".into(),
-            date: date("2026-01-07"),
-            close: Some(price("1.0")),
-            previous_close: Some(price("1.0")),
-            reference_price: Some(price("1.0")),
-            keyed_no_trade: false,
-        },
-    ];
-    let report = crosscheck_v4(&f, &bars);
-    let kinds = report
+fn pdf_citation_is_bounded_by_the_frozen_document_pages_and_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = RawStore::open(dir.path()).unwrap();
+    let mut record = source_record("pdf-ann");
+    record.content_type = "application/pdf".into();
+    let hash = store.put(b"%PDF-1.4 synthetic", record).unwrap();
+    let input = |page: u32, excerpt: &str| CitationInput {
+        fact_source: "identity".into(),
+        field: "listing_date".into(),
+        announcement_id: "pdf-ann".into(),
+        page,
+        raw_sha256: hash.clone(),
+        excerpt: excerpt.into(),
+        verified_by: "synthetic-reviewer".into(),
+        verified_at: "2026-02-01T00:00:00Z".into(),
+    };
+    assert!(Citation::from_store(&store, &mut PagedPdf, input(2, "上市日期 2026-01-05")).is_ok());
+    assert!(
+        Citation::from_store(&store, &mut PagedPdf, input(3, "上市日期 2026-01-05"))
+            .unwrap_err()
+            .to_string()
+            .contains("exceeds the 2 frozen page(s)")
+    );
+    assert!(
+        Citation::from_store(&store, &mut PagedPdf, input(1, "上市日期 2026-01-05"))
+            .unwrap_err()
+            .to_string()
+            .contains("not present on page 1")
+    );
+    assert!(
+        Citation::from_store(&store, &mut UnreadablePdf, input(1, "第一页"))
+            .unwrap_err()
+            .to_string()
+            .contains("text is unavailable")
+    );
+    // The PDF provenance binds the document to its announcement ID.
+    let mut other = input(1, "第一页");
+    other.announcement_id = "other-ann".into();
+    assert!(
+        Citation::from_store(&store, &mut PagedPdf, other)
+            .unwrap_err()
+            .to_string()
+            .contains("does not reference announcement other-ann")
+    );
+}
+
+fn bar(day: &str, close: &str, reference: &str) -> V4DailyBar {
+    V4DailyBar {
+        code: "159001".into(),
+        date: date(day),
+        close: Some(price(close)),
+        reference_price: Some(price(reference)),
+        keyed_no_trade: false,
+    }
+}
+fn no_trade(day: &str) -> V4DailyBar {
+    V4DailyBar {
+        code: "159001".into(),
+        date: date(day),
+        close: None,
+        reference_price: None,
+        keyed_no_trade: true,
+    }
+}
+fn mismatch_kinds(report: &CrosscheckReport) -> BTreeSet<String> {
+    report
         .mismatches
         .iter()
-        .map(|m| m.kind.as_str())
-        .collect::<BTreeSet<_>>();
-    assert!(kinds.contains("listing_vs_first_bar"));
-    assert!(kinds.contains("termination_vs_last_bar"));
+        .map(|mismatch| mismatch.kind.clone())
+        .collect()
+}
+
+#[test]
+fn crosscheck_detects_action_and_suspension_disagreements_inside_the_lifecycle() {
+    let mut f = facts();
+    f.identities[0].termination_date = "2026-01-07".into();
+    let bars = vec![
+        bar("2026-01-05", "1.0", "1.0"),
+        bar("2026-01-06", "1.0", "1.0"),
+        bar("2026-01-07", "1.0", "1.0"),
+    ];
+    let kinds = mismatch_kinds(&crosscheck_v4(&f, &bars));
     assert!(kinds.contains("action_date_vs_reference_price_jump"));
     assert!(kinds.contains("suspension_vs_keyed_no_trade"));
-    let (_dir, store, evidence) = raw_fixture();
-    let converted = validate_and_convert(&facts(), &store, &evidence, &calendar()).unwrap();
+    assert!(!kinds.contains("listing_vs_first_bar"));
+    assert!(!kinds.contains("termination_vs_last_bar"));
+
+    // A first traded Bar after the listing date is a listing mismatch.
+    let mut f = facts();
+    f.identities[0].termination_date = "2026-01-06".into();
+    let kinds = mismatch_kinds(&crosscheck_v4(&f, &[bar("2026-01-06", "1.0", "1.0")]));
+    assert!(kinds.contains("listing_vs_first_bar"));
+
+    // A last traded Bar before the termination date is a termination mismatch.
+    let mut f = facts();
+    f.identities[0].termination_date = "2026-01-07".into();
+    let kinds = mismatch_kinds(&crosscheck_v4(&f, &[bar("2026-01-05", "1.0", "1.0")]));
+    assert!(kinds.contains("termination_vs_last_bar"));
+}
+
+#[test]
+fn crosscheck_scopes_a_reused_code_to_each_lifecycle() {
+    let mut f = facts();
+    f.identities[0].termination_date = "2026-01-06".into();
+    let mut second = f.identities[0].clone();
+    second.org_id = "org-b".into();
+    second.listing_date = "2026-01-07".into();
+    second.termination_date = "2026-01-08".into();
+    second.source_announcement_id = "identity-b".into();
+    f.identities.push(second);
+    f.events.clear();
+    // The action belongs to the second lifecycle and has no prior close there;
+    // the first lifecycle's 1.0 close must not become its baseline.
+    f.actions[0].ex_date = "2026-01-07".into();
+    let bars = vec![
+        bar("2026-01-05", "1.0", "1.0"),
+        bar("2026-01-06", "1.0", "1.0"),
+        bar("2026-01-07", "2.0", "2.0"),
+        bar("2026-01-08", "2.0", "2.0"),
+    ];
+    let kinds = mismatch_kinds(&crosscheck_v4(&f, &bars));
+    assert!(
+        !kinds.contains("listing_vs_first_bar"),
+        "first trading day of the second lifecycle must not be compared with the first one"
+    );
+    assert!(
+        !kinds.contains("termination_vs_last_bar"),
+        "last trading day of the first lifecycle must not be compared with the second one"
+    );
+    assert!(kinds.contains("action_without_prior_close"));
+    assert!(
+        !kinds.contains("action_date_vs_reference_price_jump"),
+        "the first lifecycle's close must not be used as the second lifecycle's baseline"
+    );
+
+    // A keyed no-trade observation only satisfies a suspension in its own
+    // lifecycle.
+    f.events = facts().events;
+    f.events[0].effective_date = "2026-01-08".into();
+    let bars = vec![
+        bar("2026-01-05", "1.0", "1.0"),
+        bar("2026-01-06", "1.0", "1.0"),
+        bar("2026-01-07", "2.0", "2.0"),
+        no_trade("2026-01-08"),
+    ];
+    let kinds = mismatch_kinds(&crosscheck_v4(&f, &bars));
+    assert!(!kinds.contains("suspension_vs_keyed_no_trade"));
+    assert!(!kinds.contains("suspension_missing_bar"));
+}
+
+#[test]
+fn converted_session_matches_manually_built_inputs() {
+    let (_dir, _store, evidence) = raw_fixture();
+    let converted = validate_and_convert(&facts(), &evidence, &calendar()).unwrap();
     let manual = Mvp6Session {
         catalog_lifecycles: vec![CatalogLifecycle {
             code: "159001".into(),
@@ -886,7 +1250,7 @@ fn publish_synthetic_v4(
 
 #[test]
 fn local_acceptance_loads_v4_projection_and_persists_the_crosscheck_report() {
-    let (dir, store, evidence) = raw_fixture();
+    let (dir, _store, evidence) = raw_fixture();
     let root = dir.path();
     let sessions = [
         v4_session("2026-01-05"),
@@ -906,7 +1270,7 @@ fn local_acceptance_loads_v4_projection_and_persists_the_crosscheck_report() {
     let dsv = publish_synthetic_v4(root, &sessions, &bars, &code_tables);
     let acceptance_dir = root.join("acceptance/cninfo-fixed/synthetic");
     let acceptance =
-        write_facts_acceptance(&acceptance_dir, root, &dsv, &facts(), &evidence, &store).unwrap();
+        write_facts_acceptance(&acceptance_dir, root, &dsv, &facts(), &evidence).unwrap();
 
     assert!(acceptance.facts_session_path.exists());
     assert_eq!(acceptance.report.mismatches.len(), 1);
@@ -975,17 +1339,7 @@ fn local_fixed_list_workflow_writes_collection_facts_and_crosscheck_reports() {
          159001,suspension,2026-01-05,2026-01-07,full_day,official,event,1\n",
     )
     .unwrap();
-    fs::write(
-        facts_dir.join("citations.csv"),
-        format!(
-            "announcement_id,page,raw_sha256,evidenced_fields\n\
-             identity,1,{},code;org_id;legal_name;listing_date;fund_category\n\
-             action,1,{},code;kind;announcement_date;ex_date\n\
-             event,1,{},code;kind;announcement_date;effective_date;session_part\n",
-            citations[0].raw_sha256, citations[1].raw_sha256, citations[2].raw_sha256
-        ),
-    )
-    .unwrap();
+    fs::write(facts_dir.join("citations.csv"), citation_csv(&citations)).unwrap();
     fs::create_dir_all(root.join("acceptance")).unwrap();
     fs::write(
         root.join("acceptance/mvp6-coverage.json"),
@@ -1027,14 +1381,10 @@ fn local_fixed_list_workflow_writes_collection_facts_and_crosscheck_reports() {
 
 #[test]
 fn crosscheck_accepts_a_one_tick_action_jump() {
-    let bars = vec![V4DailyBar {
-        code: "159001".into(),
-        date: date("2026-01-06"),
-        close: Some(price("1.001")),
-        previous_close: Some(price("1.0")),
-        reference_price: Some(price("1.001")),
-        keyed_no_trade: false,
-    }];
+    let bars = vec![
+        bar("2026-01-05", "1.0", "1.0"),
+        bar("2026-01-06", "1.001", "1.001"),
+    ];
     let report = crosscheck_v4(&facts(), &bars);
     assert!(
         !report
