@@ -225,7 +225,10 @@ another identity. Pre-window listings are supported; a pre-window sequence of
 multiple identity rows is not representable and is rejected.
 
 Each lifecycle's listing, termination and attribute evidence resolves to the
-frozen Raw cited for the field. The announcement date is read from the Raw's
+frozen Raw cited for the field. The lifecycle's `contract_raw_sha256` is the
+Raw cited for the legal name; the identity table has no separate contract
+attachment field, so this assembly does not claim that document is the fund
+contract. The announcement date is read from the Raw's
 cninfo `finalpage/YYYY-MM-DD/` path or from the matching `announcementTime` in a
 frozen JSON page; local `observed_at` and the fact's effective date are never
 substituted. Missing or ambiguous announcement dates fail closed. The resulting

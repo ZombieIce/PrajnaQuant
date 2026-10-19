@@ -264,8 +264,8 @@ fn facts_for(raw: &RawStore, rows: &[RowInput]) -> (Mvp6Facts, Vec<Citation>) {
     for (index, row) in rows.iter().enumerate() {
         let source = format!("src-{}-{index}", row.code);
         let mut document = format!(
-            "公告编号：{source}\n基金代码：{}\n基金全称：{}\n基金类型：指数型基金\n上市日期：{}\n",
-            row.code, row.legal_name, row.listing
+            "公告编号：{source}\n基金代码：{}\n基金管理人：org-{}\n基金全称：{}\n基金类型：指数型基金\n上市日期：{}\n",
+            row.code, row.code, row.legal_name, row.listing
         );
         if let Some(termination) = row.termination {
             document.push_str(&format!("终止日期：{termination}\n"));
@@ -298,6 +298,13 @@ fn facts_for(raw: &RawStore, rows: &[RowInput]) -> (Mvp6Facts, Vec<Citation>) {
             &source,
             "code",
             &format!("基金代码：{}", row.code),
+        ));
+        citations.push(cite(
+            raw,
+            &hash,
+            &source,
+            "org_id",
+            &format!("基金管理人：org-{}", row.code),
         ));
         citations.push(cite(
             raw,

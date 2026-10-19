@@ -357,6 +357,20 @@ fn parse_identities(
             )));
         }
         let evidence_level = parse_evidence_level(&fact.evidence_level, &fact.code)?;
+        let code_citation = citation(citations, &fact.source_announcement_id, "code")?;
+        if !normalized(code_citation.excerpt()).contains(&normalized(&fact.code)) {
+            return Err(error(format!(
+                "code {} is not supported by its cited excerpt",
+                fact.code
+            )));
+        }
+        let org_citation = citation(citations, &fact.source_announcement_id, "org_id")?;
+        if !normalized(org_citation.excerpt()).contains(&normalized(&fact.org_id)) {
+            return Err(error(format!(
+                "org_id for {} is not supported by its cited excerpt",
+                fact.code
+            )));
+        }
         let listing_citation = citation(citations, &fact.source_announcement_id, "listing_date")?;
         if !date_supported(listing_citation.excerpt(), listing) {
             return Err(error(format!(
@@ -1106,11 +1120,14 @@ fn fund_category(value: &str) -> FundCategory {
         "equity",
         "stock",
         "index",
+        "etf",
         "指数",
         "指数型",
+        "指数基金",
         "指数型基金",
         "股票",
         "股票型",
+        "股票基金",
         "股票型基金",
     ]
     .iter()
