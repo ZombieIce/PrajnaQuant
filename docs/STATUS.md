@@ -17,7 +17,6 @@
 2026-09-29 GitHub Issue #8 在分支 `8-prajna-domain-fixed-point` 实现并完成独立审查：新增轻量 `prajna-domain` workspace crate，提供固定 scale 18、`i128` 尾数且 `|mantissa| < 10^38` 的 `Price`、`Quantity` 与 `Notional`（`Amount` 为别名）。JSON 数字字面量文本直接解析，不经 `f64`；Serde 配置为字符串；测试覆盖规范化 round-trip、精度/边界拒绝、tick 对齐、整数倍溢出、比较和显式 `to_f64()`。轻量 CI 已加入此 crate 的 DuckDB 守卫、Clippy 与测试。`cargo fmt --all -- --check`、`cargo test --workspace --locked --offline` 与 `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 通过（vendor `polars-io` 保留既有 warnings）。此记录不表示 #7 的其他 Domain Core、Data Lake 或 Arrow/Parquet 契约已实现。当前另提供 `checked_mul_decimal(Self)` / `checked_div_decimal(Self)`：整数宽中间值、不经 `f64`、按 half-even 舍入到 scale 18，最终越界与除零显式报错，不做货币单位舍入；Domain 定向离线 test/clippy 通过，覆盖正负手算、.5 及两侧、极值宽中间值、独立 Python Decimal 预期、溢出与除零。契约见 [ADR 0015](decisions/0015-mvp-0-data-contracts.md) 与 [ADR 0019](decisions/0019-fast-event-ledger-and-vector-parity.md)；此数值原语不表示 Fast Event 账本、恒等式或真实市场语义已经验证。
 
 2026-09-28 POC-0 B2 正式结论（GitHub Issue #3）：`adopt`，范围限于固定 S2/S3 3×10、3×130 判定负载及 64×252 稳健性负载。四个负载的共同子集正确性均通过；在 Nautilus 2.0.0rc5、统一选定的 `cached_conversion_new_engine` 模式下，延迟中位、2-worker Runs/s 中位与 RSS 峰值和上界门槛均通过，预登记速度/RSS 预测成立。登记的判定与稳健性负载没有结论翻转；其他计时边界或未选模式的敏感性未测，保持 unresolved。最终原始样本、checksums、模式证据、provenance 与 build record 见[正式报告](../poc/poc0-benchmark/results/b2-formal-robustness-reset-selected-2026-09-28.json)、[release build](../poc/poc0-benchmark/results/b2-formal-release-build-2026-09-28.json)和[复跑说明](../poc/poc0-benchmark/README.md)。此结论不裁决 Nautilus 原生 reset（其错误日志触发统一 fallback）、ADR 0012 停牌生命周期、生产 Engine 选型或真实 ETF 业绩；MVP-3 开工前须由项目负责人审阅该结论及范围。2026-09-29 项目负责人已确认范围（Issue #25）：批准 MVP-3 自研 Fast Event L1 作为高吞吐事件层；该结论比较的是 Rust 引擎 + Rust 策略对 Nautilus + Python 策略，不是引擎核心性能，不否定 Nautilus 的 Accurate/Live 候选地位，也不评判维护成本。
-
 2026-09-28 B2 reset parity（GitHub Issue #2）已在固定 Nautilus `2.0.0rc5` 上实测：S2 3×10、S3 3×130 与 S2/S3 64×252 四个负载，各连续运行三次 reset Run；完整投影及引擎状态快照与新建引擎一致，两个判定负载 checksum 与先前经 Rust golden 字段对拍的 Nautilus projection checksum 一致。但每次 reset Run 均记录 Nautilus 原生 `Invalid state trigger READY -> INITIALIZE` 错误日志，因此按 fail-closed 规则统一选择 `cached_conversion_new_engine`。带模式证据重跑后 S2/S3 decision loads 为 registered `adopt`，完整数据见[决策负载报告](../poc/poc0-benchmark/results/b2-matched-decision-loads-reset-selected-2026-09-28.json)；reset 错误日志、输入 hash、checksum 与状态快照见[reset evidence](../poc/poc0-benchmark/results/b2-nautilus-reset-parity-2026-09-28.json)，复跑入口见[README](../poc/poc0-benchmark/README.md)。当时 64×252 robustness 未按所选模式 registered 复核的状态，已由 GitHub Issue #3 的正式重测与上方结论更新；没有据此得出生产 Engine 或真实 ETF 收益结论。
 
 实现扫描日期：2026-09-25；目标路线更新：2026-09-26。状态含义：Implemented=代码存在；Partially Implemented=只覆盖部分契约；Planned=有明确路线但无实现；Missing=未见实现；Unknown=仓库证据不足。**Implemented 不表示量化正确性已被充分测试或数据已被验收。**代码仓库已关联 GitHub `ZombieIce/PrajnaQuant`；本机被忽略的数据仍不是可交接资产。
@@ -37,7 +36,6 @@
 2026-09-28 B2 matched remeasure 票据 03 已完成（Issue #3 完成前的中间状态，已由顶部正式结论取代）：S2 3×10 与 S3 3×130 独立 correctness gate 均通过，并按 20 个单 worker 串行 Run、五组交替顺序的 2-worker × 6 Run 保存主计时及每 Run 冷端到端样本。fallback（缓存 QuoteTicks、每 Run 新建 Nautilus 引擎）下两负载都通过数值延迟/吞吐/RSS 门槛，先验预测成立；由于 reset parity 未验证，正式 decision 当时保持 `unresolved`，两个子负载仅为 exploratory。Rust/Nautilus 中位单 Run 延迟：S2 11,458 / 895,709 ns、S3 71,583 / 3,038,480 ns；五组并行 runs/s 中位：S2 61,224 / 1,219、S3 13,631 / 554；RSS：S2 11,534,336 / 145,965,056 bytes、S3 12,189,696 / 149,291,008 bytes（Nautilus 两 worker 峰值和上界）。空载 RSS 为 Rust --help 启动 8,650,752 bytes、Python 导入 Nautilus 后 50,593,792 bytes。报告、完整 provenance 和 10 GiB build record 见 [决策负载报告](../poc/poc0-benchmark/results/b2-matched-decision-loads-2026-09-28.json)、[build record](../poc/poc0-benchmark/results/b2-matched-decision-loads-release-build-2026-09-28.json)；reset 模式由票据 07 决定、64×252 稳健性由票据 04 补测、正式复测由票据 06 完成。
 
 2026-09-28 B2 matched remeasure 票据 02（探索性 S2 tracer）已完成。较早 S2 结果保留作历史证据；应以票据 03 两策略统一报告作为当前判定负载证据。旧报告和范围见 [票据 02](../.scratch/poc-0-b2-matched-remeasure/issues/02-s2-golden-matched-tracer.md)。
-
 2026-09-28 B2 matched remeasure 票据 05 已验收并标记 `resolved`：比较报告生成时记录 Fast Event POC / Nautilus Adapter 源行数、测试数、增量直接依赖、Nautilus 安装依赖闭包及 ADR 0012 语义差异引用；代理指标不参与纯判定函数。03 归档报告中的源文件范围计数为 3,857 / 1,221 非空非注释行、4 / 24 个对应测试，Rust 新增 crate 为 0，Python 直接依赖为 1（`nautilus_trader==2.0.0rc5`）。03 环境按 active marker 解析到 0 个传递发行包；四个 `visualization` extra 未启用，报告记录解析方法并注明它不是完整 lock。版本不满足声明或必需依赖元数据无法解析时标 `Unknown`。统计范围、验收验证及限制见 [票据 05](../.scratch/poc-0-b2-matched-remeasure/issues/05-maintenance-proxy-metrics.md) 与 [POC README](../poc/poc0-benchmark/README.md)；代理值不参与判定。
 
 2026-09-28 POC-0 票据 10 已实现 B3 基础对照：共享 fixture 的 29 个 bar event 按日期/symbol 顺序投递给 Rust Native 与 PyO3 Python `on_bar()`；逐事件比较决策日期、symbol 和目标列表，同日错误 bar 不会通过。Python S1 targets 进入同一个 Rust Fast Event 账户路径后，与独立预期对拍逐单/逐日现金持仓、成本、NAV 和 PortfolioResult。Python 3.12.2 / PyO3 0.29.0 的 release 五样本已记录，复跑命令、provenance 和构建资源见 [B3 ticket 10](../.scratch/poc-0-benchmark/issues/10-pyo3-basic-callback-comparison.md)。该 3 ETF × 10 session 样本太小，吞吐/规模边界结论仍 `unresolved`；不是 Python 研究包或生产策略接口。
@@ -57,7 +55,6 @@ POC-0 工作范围与验收已发布为本地 [`ready-for-agent` spec](../.scrat
 2026-09-27 实现与验收：票据 04 Polars 已由用户确认并标记 `resolved`。`--candidate polars` 通过 Polars lazy expressions 计算加权因子评分、排序、TopK、按实际入选数量均分的目标权重及下一交易日组合收益；正确性通过后才测量。报告保留五个原始样本、阶段计时、DataFrame 构造时间和投影 checksum。固定 3 ETF × 10 日 fixture 仅验证语义与 CLI，不支持布局决策。当前工作树也包含此前已有的 Arrow 候选改动，最终提交须保留其独立归属；验证状态以本轮 HANDOFF 为准。
 
 POC-0 票据 01 已验收：新增固定 3 ETF × 10 个交易日的版本化 fixture、独立排名/信号/事件账本金标准，以及 correctness-first 的 `benchmark-poc0` CLI。金标准通过后会记录 Rust 参考回测的原始耗时；不通过时输出差异报告并跳过计时。机器/代码/数据 provenance 已进入报告；该票据尚未测峰值 RSS，报告将其明确标为未知。这不是 B1 完整布局比较；当前实现位置和复跑方式见 [`POC-0 harness`](../poc/poc0-benchmark/README.md)。2026-09-27 复验：全工作区 83 项通过、1 项按既定条件跳过，格式、Clippy 与 release CLI 均通过。
-
 POC-0 B2 票据 07 已于 2026-09-27 复核验收并标记 `resolved`：最小 Fast Event S1 Buy & Hold 原型通过固定输入与变体 fixture 检查停牌拒单/重试、缺 bar 沿用估值、末日未执行目标、逐日 NAV 恒等式、重复账本 checksum 和固定成本（包括非零买入税）；报告分列初始化、事件处理和端到端五次耗时。独立手算金标准逐日现金/持仓/NAV 与非零买入税变体均与报告数值一致。它仍不是完整 Fast Event Engine，也只有微型合成样本，因此不能支持性能选型。
 
 POC-0 已按获确认的拆分发布为 [13 张本地执行票据](../.scratch/poc-0-benchmark/issues/01-fixed-dataset-and-benchmark-entry.md)。01–07 为 `resolved`；08 为 `unresolved`；03 的验收限于 Arrow 候选实现与正确性，release 结论由票据 06 的同条件 sweep 补齐。06 对本轮合成目标负载得出 `defer`，不是平台级布局裁决。07 是独立验收过的最小原型，不是完整 Fast Event。08 的 Nautilus 2.0.0rc5 固定场景中，Adapter 合成拒单与 Rust 项目事件对齐，但原生 Nautilus HALTED 拒单未验证；七项比较中六项通过、一项原生订单生命周期不一致。五次重复样本只支持内部稳定性，不支持跨引擎吞吐裁决。预检、原失败与复核证据见 [POC harness](../poc/poc0-benchmark/README.md#b2-nautilus-adapter-comparison-ticket-08)。
@@ -74,10 +71,9 @@ MVP-6 #201 新增 `szse-etf-frozen@3`：可配置代码段（默认含 158xxx）
 
 此前 A 股股票/ETF 日频 + Web 的初级产品路线已归档到 [`legacy-ashare-roadmap.md`](legacy-ashare-roadmap.md)；当前仍是本地 ETF Rotation MVP 加 A 股仓库。Batch 2 已有显式证券增量同步/失败恢复/不可变发布代码，隔离股票+ETF 真实小样本通过；已发布快照的只读证券/日线 API 和 K 线页面在合成目录通过。Batch 3 的日更身份导入与 ETF 诊断作业已有代码；生产同步/调度、真实状态、可信历史作业、Python 研究包和远程认证部署仍未验。五 ETF 真实状态覆盖不足，旧实验仍 `legacy_bar_only`，新 `status_gated` 占位跑全 UNKNOWN，P0-3 开放；股票回测没有开放。
 
-MVP-6 本机采集与冻结的当前验证边界：已执行完整窗口行情冻结、历史候选集导出和直连来源采集尝试；原文、身份、覆盖及请求证据仅留本机。导入器将历史失败证据缺口与成功输入覆盖分开：可验证的成功重试可推进，缺失有效包、成功对象来源/验证缺口和修订冲突仍阻断发布；旧日志不回写，历史缺口保留 `unresolved`，不能继承“完整验收”结论。新浪因子、cninfo orgId/法定全称、P21 三方核验和全期间规则仍未完成；新浪采集器现以合成用例验证逐标的 404、无效/空响应和 qfq/hfq 不一致缺口后继续，并在访问控制、重定向或传输重试耗尽时记录停源与未尝试原因；这不验证真实来源覆盖。不能据行情 Dataset 发布宣称 #206 或 MVP-6 验收通过。流程见 [`mvp-6-local-capture.md`](mvp-6-local-capture.md)。
+MVP-6 本机采集与冻结的当前验证边界：已执行完整窗口行情冻结、历史候选集导出和直连来源采集尝试；原文、身份、覆盖及请求证据仅留本机。导入器将历史失败证据缺口与成功输入覆盖分开：可验证的成功重试可推进，缺失有效包、成功对象来源/验证缺口和修订冲突仍阻断发布；旧日志不回写，历史缺口保留 `unresolved`，不能继承“完整验收”结论。新浪因子、cninfo orgId/法定全称、P21 三方核验和全期间规则仍未完成；新浪采集器现以合成用例验证逐标的 404、无效/空响应和 qfq/hfq 不一致缺口后继续，并在访问控制、重定向或传输重试耗尽时记录停源与未尝试原因；这不验证真实来源覆盖。不能据行情 Dataset 发布宣称 #206 或 MVP-6 验收通过。#229 增加固定名单采集入口、公告类别过滤、三张事实表 schema/校验器、版本化转换和双向 v4 行投影交叉核对；仅合成用例验证，公开事实表目前只有列头，真实公告事实、Raw 与本机 v4 交叉核对仍未验证。流程见 [`mvp-6-local-capture.md`](mvp-6-local-capture.md)。
 
 ### MVP-1 D7 面板与 Factor 定义模型
-
 `prajna-research` 的 `load_panel` 已能校验 DSV manifest 并读取 schema v1 的 instruments、sessions、bars，按 Venue 生成有序 Session/Instrument 列表及完整 instrument × session Polars 网格。缺 bar 保持价格 null 且 `has_bar=false`；`close_available_at` 保留源 available_at 的 UTC 纳秒值，不推定为 close。M6 Factor 定义模型实现了四种封闭的 v1 种类、强类型参数与窗口/有限权重校验；canonical JSON 将权重编码为 IEEE-754 bit pattern 十六进制字符串，区分 `0.0` 与 `-0.0`。`RotationScore` 依赖可拓扑排序、去重及检测环；status、Availability Assumption 字符串和 v1 Arrow/Polars 长表 schema 已定义。验证限于单元/集成契约测试与 `synthetic-etf-daily` v1 的 3×10 面板 fixture；`compute_base` 已用 Polars lazy 实现 momentum、样本 volatility 与 trend_filter，按完整 Session 网格计算所需窗口、状态优先级与输入最大可用时刻，支持显式 TreatUnknownAsTsClose 假设；`compute_composite` 已按 `(instrument_id, session_date)` 对齐依赖，传播 `insufficient_window > missing_input > unknown_availability`、计算加权 rotation_score 并在 trend=0 时过滤，所有行保留依赖中已知 available_at 的最大值（全部未知则 null）。依赖角色、schema、键网格和状态/值不一致显式报错；零权重不免除依赖，trend=None 不依赖 trend_filter。`compute` 按 FactorGraph 拓扑序直接计算整棵依赖树，同次调用复用共享定义，无持久缓存。3×10 v1 DSV 手算、状态组合、乱序键对齐、trend 过滤、缺失窗口和可用时刻测试覆盖其合成口径。尚未实现持久缓存或执行，不代表真实数据、PIT 或量化结果能力。
 
 M9 Factor Cache 身份键由 `cache::key::FactorKey` 确定性生成；`cache::store::FactorCache` 按依赖拓扑逐节点查缓存、仅计算未命中节点，并将 `values.parquet` 与含 key object、fv、字节 SHA-256 和行数的 `meta.json` 写入 staging 后 fsync、原子发布。命中校验键、文件 hash、schema 和行数；损坏返回 Integrity，不静默删除或重算。并发发布时逻辑内容相同则复用，内容不同时返回 Conflict；`compute_count` 支持观察实际计算次数。集成测试以合成 3×10 面板验证 rotation_score 的首次 4 节点计算、二次零计算、Parquet 字节稳定、损坏拒绝、并发相同/不同结果及 staging 清理。以上不代表真实数据或 point-in-time 能力。
@@ -97,7 +93,6 @@ MVP-2 的 `prajna-experiment`（Issue #99–#104）可解析并校验 `experimen
 `prajna-py` / `python/prajna` 现提供本地 Python 宿主扩展（PyO3 0.29.0、maturin 1.15.0、abi3-py312）、类型化 Experiment API、只读研究 API 及单 Run `generate_decisions`。Experiment 复用 Rust 的解析、规范化身份、执行与 ResultLevel 存储，真实调用期间释放 GIL；Python 3.12 全新 venv、S1/S2/S3 Grid/List 在 64×252 合成 fixture 上的 Python/CLI Experiment 与 Run 身份、Vector 和 Fast Event `lot + full_target` Full 表逐值 logical-hash 重放、三种 ResultLevel 与线程进展测试通过，既有 CLI 身份/金标准回归通过。Python `strategy_id@version` 引用可序列化与生成身份，但 CLI/Python `run` 仍显式报错 `requires Python host`。单 Run 策略声明版本、Bar 列、Rust Factor 依赖、完整 lookback 窗口和再平衡间隔；Rust 构造按 close 可用时刻与 Static Universe 限制的 As-of View，串行调用纯 Decision 函数并严格校验权重、Universe 与可选排序。安全裁剪复制受限窗口，Arrow PyCapsule 到 PyArrow 为零拷贝，不声称源面板切片零拷贝；真实扩展的合成 DSV 测试覆盖未知/延迟可用时刻、未来/未声明字段及底层 buffer 对抗、调度和非法输出。未知可用时刻须显式声明 assumption，Static Universe 不构成历史 PIT；纯函数是受信 Python 的使用契约而非 sandbox 保证。`read_dataset` / `read_factor` / `read_run` 与 `Factor(kind, params)` 保留，策略的命名依赖使用 `FactorDependency(name, kind, params)`，共用 Rust 定义解析与 Arrow 导出；完整研究面板不等于策略安全 View。轻量 CI 保留依赖图守卫并构建真实 CLI/fixture 后测试绑定。尚未接入 Python Decision 的 Engine 执行与源码/环境 Execution 复现，不表示 MVP-5、PIT/总回报或生产 Python 策略入口已完成；构建与测试见 [`prajna-py`](../crates/prajna-py/README.md)。
 
 ### MVP-3 独立 full_target / POC entry_only 金标准
-
 独立 Python oracle 另保存 `lot + entry_only` 的 S1/S2 3×10 与 S3 3×130 投影：S1 默认首 Session 信号与显式 POC `calendar.len()-5` 时点各一份，S3 显式策略 Universe `{A}`、使用卖出后现金预算；S1/S2/S3 与已提交 Rust POC preflight 的 Fill 日期/方向/数量、逐日 close 持仓/价格、现金/权益及费用总额对照通过（金额容差 1e-6 CNY）。S3 A 原 fixture 无缺口，无 fixture 引起的 ADR 0017 差异；合成缺口测试不跨缺口。订单诊断 schema/顺序与旧 POC、共享 any-held 阻塞及可用时间门禁差异显式登记在 README，不能宣称旧订单逐字节一致或新 Rust Engine 全面对拍通过；所有新投影核对两个估值点的现金/持仓恒等式，`entry_only + skip` 显式拒绝，平台/第三方对拍仍待 #122。
 
 [`poc/mvp3-golden`](../poc/mvp3-golden/README.md) 提供不导入 Rust、共享执行代码或 Nautilus 的 Python 标准库参考：S1/S2/S3 在 `lot` 与 `vector_parity` 下的 3×10、S3 3×130 和 1×3、2×4、2×6、fee-only 2×5 手算用例，保存两个估值点的现金、数量、权益与订单、Fill、费用分项；轻量 CI 逐值复算并核对现金/持仓与费用恒等式、时序、执行门禁、延期和 retry。#122 经负责人批准将 parity 账本改为独立 Decimal scale-18 / half-even，schema v2 保存精确数量字符串，移除 1e-12 no-trade 阈值；信号与 lot 参考仍用 float64。真实 Rust 策略生成决策后，16 组 full_target Fast Event runs 与独立 Python 的两个估值点、提交订单/Fill 数量及费用通过逐字段对拍，账户/VP 恒等式精确成立；八组 parity runs 的执行/延期/retry 轨迹及正确对齐的 Vector open NAV 按原 1e-9 相对误差对照。金额仍为原 1e-6 CNY 容差，数量不放宽；blocked/unaffordable oracle 订单诊断不冒充提交的 Domain Order。验证限单 VP 合成数据，不构成真实市场/PIT、总回报或 Experiment 接入验收；口径、来源 hash、容差及 S3/估值约定见 README。
@@ -118,7 +113,6 @@ Rust [`prajna-adapter`](../crates/prajna-adapter/README.md) 已提供与进程�
 
 总评**部分通过**；要求、代码/测试/真实样本/浏览器证据及限制见 [`handoffs/batch2-integration-acceptance.md`](handoffs/batch2-integration-acceptance.md)。A：241×5 状态格全 UNKNOWN，只有一条无交易所原文的盘中限制二级消息；同价面板/Universe 复跑 0 成交、24 个 unknown 拒单，只验证缺证拒单。B：仓库迁移 007 和 `sync-daily`/`publish-sync` 支持显式证券增量、修订回看、重试/断点、审计和不可变快照；隔离真实样本重复同步不增有效修订，生产状态 Unknown。C：新增 `/api/v1/instruments` 通用发布快照搜索、`/api/v1/daily-bars` 分页与 `/market` 页面；B 格式的发布指针与 C 只读 API 已接通并测试固定版本。B 真实小样本证券目录缺身份/分类，因此生产股票/ETF 行情页面仍未验。调度脚本未安装/启用。
 
-
 ## Batch 1 Integration Acceptance (2026-09-24)
 
 验收结论为**部分通过**，逐项代码/测试/真实数据/API/浏览器证据见 [`handoffs/batch1-integration-acceptance.md`](handoffs/batch1-integration-acceptance.md)。A 执行延期与审计、B 通用冻结快照/状态输入、C 发布版本/固定快照复跑在共享工作区完成集成。最终真实实验 `4e076758-8069-4e0e-9269-1d3f9d574159` 使用 Universe `d8811237-6c37-4189-86b8-9b05fbccc405` 的版本 `3fcfed9c-b8c1-4cce-a933-bc2b79ebf0da`、快照 `fe1dd8a3-d227-4e06-bb98-f0a6b3be0f34`；241 日、32 笔成交、逐日账本最大 NAV 误差 0。快照没有交易状态列，报告 `execution_status_mode=legacy_bar_only`，所以真实执行状态仍未验收。五 ETF 行情日期覆盖完整，但逐行来源缺失使总体审计为 `unverified`；Universe 成员是 `retrospective_static`，实验成员覆盖为 `gaps`，不升级为 verified PIT。
@@ -138,7 +132,6 @@ P0-1 历史 ETF PIT、P0-2 公司行动/总回报仍未解决；P0-3 超额持�
 ## P2 — Research Platform
 
 Signal Registry Lite、单因子 Pearson/Rank IC、分组/multi-horizon 报告、结果读取 API 与 ECharts 图已实现一部分；新增的 Universe 写 API 仅管理配置，不启动作业。通用因子版本、参数元数据、缓存、因子相关矩阵、因子值分布、组合换手、研究 Python 包、实验服务 API 均缺失。当前报告的自相关与 Top 分位成分更换率是部分诊断，不是组合换手。
-
 ## P3 — Future
 
 严格 PIT ETF/股票数据、财务披露时点、行业/指数历史成分、分钟/实盘、分布式执行、生产级数据发布和十年数据查询优化仍是未来方向；旧设计文件详述目标，不能视为当前状态。
@@ -157,7 +150,6 @@ Signal Registry Lite、单因子 Pearson/Rank IC、分组/multi-horizon 报告�
 ## In Progress
 
 Batch 2 的增量同步/行情页已有代码、隔离小样本和合成浏览器验收；仍待可信五 ETF 状态源的历史覆盖与可用时刻、带真实状态快照复跑、生产股票证券身份与日线验证、生产调度启用、历史 PIT 成员和公司行动。既有 `research-output/` 历史样本不自动升级为新规则结果。
-
 ## Missing
 
 - 历史 ETF 名录与上市/退市日期、可信历史交易状态源及可知时刻、涨跌停规则执行、公司行动/分红总回报。
@@ -177,8 +169,7 @@ Batch 2 的增量同步/行情页已有代码、隔离小样本和合成浏览�
 - 新增的固定样例覆盖真实 `rotation_scores`→Top-1→回测路径、D 收盘信号/下一行情日开盘成交、买卖与换仓、100 股手数、比例佣金/最低佣金、双向滑点、末日信号未执行、每日现金/整数持仓/最近收盘估值与 NAV 恒等式，以及缺单 ETF bar 时跳过卖出和沿用旧 close。固定场景手算成本为佣金 700、税 0、滑点 630、总成本 1,330；这些是合成数据回归值，不是实际数据验收。
 - 回测 JSON 现记录逐日证券持仓、市值及资金占用率曲线和逐标的盈亏归因。3 ETF×10 日固定账本校验每日现金+持仓市值=权益、占用率公式、加权平均成本归因，以及标的盈亏合计=组合期末权益变化；旧 JSON 缺字段时保持可读并显示无持仓快照提示。策略页展示占用率、标的持股数量曲线和盈亏表。盈亏契约见 `docs/decisions/0006-instrument-pnl-attribution.md`。
 - 仍缺：真实交易所状态源历史覆盖/可知时点、涨跌停 side-specific 成交限制、旧快照重跑与前端未执行订单展示；逐日权重与组合敞口报告/通用不变量接口；历史 universe、分红/拆分情境；真实交易所执行日验证。合成状态回测现覆盖 `UNKNOWN` 买单和 `HALTED` 卖单、状态缺失拒绝、延期恢复、逐腿原因和逐日现金/持仓/NAV；快照测试覆盖状态列读取与旧格式兼容。基准当前仅保存原始 close 点，测试只验证输入点保留，不证明日期对齐后的基准收益或超额收益。
-- 新增固定答案覆盖手算 Pearson/Rank IC、截面不足/null、分母 coverage、开盘标签的市场日历对齐与缺 ETF bar 留空、波动率首窗口完整收益；React 因子详情改为展示逐期前瞻标签，不复利。实际无日历文件时使用观察 bar 日期并集，无法识别所有 ETF 同日缺行情；报告契约见 `docs/decisions/0004-factor-evaluation-contract.md`。
-- 新增的 3 ETF 缺价目标切换手算用例先在旧实现上失败（D3 现金被买单用尽、实际持仓变成 2），修复后 D3 整次调仓延期、保留 A×100 和现金 4,000；最新信号 C 替换旧 B 目标，D4 卖 A 买 C×200、现金 2,000，逐日 NAV 10,000 且正仓数不超过 Top-1。回测报告记录延期目标/阻塞证券/日期/原因；策略详情展示末日实际正仓与延期记录。
+- 新增固定答案覆盖手算 Pearson/Rank IC、截面不足/null、分母 coverage、开盘标签的市场日历对齐与缺 ETF bar 留空、波动率首窗口完整收益；React 因子详情改为展示逐期前瞻标签，不复利。实际无日历文件时使用观察 bar 日期并集，无法识别所有 ETF 同日缺行情；报告契约见 `docs/decisions/0004-factor-evaluation-contract.md`。- 新增的 3 ETF 缺价目标切换手算用例先在旧实现上失败（D3 现金被买单用尽、实际持仓变成 2），修复后 D3 整次调仓延期、保留 A×100 和现金 4,000；最新信号 C 替换旧 B 目标，D4 卖 A 买 C×200、现金 2,000，逐日 NAV 10,000 且正仓数不超过 Top-1。回测报告记录延期目标/阻塞证券/日期/原因；策略详情展示末日实际正仓与延期记录。
 - Universe HTTP handler 的 test-only 3 证券×10 交易日合成 fixture 覆盖 D4 三成员、D10 空池、完整覆盖与能力阻断；该 fixture 的 `verified_pit` 仅代表合成真值。前端构建通过。真实历史成分和生产数据验证未完成。
 - 既有测试另覆盖仓库入库/版本/锁、基础 rolling、排名统计、手数及单笔成本、参数展开。
 
@@ -198,7 +189,6 @@ Batch 2 的增量同步/行情页已有代码、隔离小样本和合成浏览�
 - 本地数据目录被忽略，新 Agent 无法只凭 Git 仓库复现已有真实数据结果；需注明数据获取/快照来源与 hash。
 
 ## Open Questions
-
 1. 研究基准是 ETF 价格收益还是含分红总回报？需要具体 ETF 分红/拆分样本和数据源证据。
 2. 历史 ETF universe 的权威名录、上市/终止日期及可知时刻从何获得？未解决前结果只能限定为当前观察池实验。
 3. 缺 bar/状态不可交易时旧持仓如何处理？现选择缺旧仓卖出 open 或状态非 TRADABLE 时整笔延期、沿用最近 close 估值并用新周期信号替换延迟目标；目标买腿缺价/状态时跳过并记录逐腿原因。仍需决定旧快照是否强制重跑、报告 UI 展示方式，以及状态/涨跌停来源的验收标准。
@@ -217,8 +207,7 @@ Batch 2 的增量同步/行情页已有代码、隔离小样本和合成浏览�
 ## Universe Delivery — API/UI Integration (2026-09-23)
 
 - **Implemented in code:** 冻结契约与 ADR 0003；schema v5/v6 历史成员事实、加入/退出公告时间字段、覆盖底座与来源校验；Rust 不可变版本模型、公告/生效时间解析、严格覆盖拒绝、成员映射与日哈希；实验可选版本身份并保留旧 JSON 读取；Universe CRUD/发布/成员/覆盖/能力及结果过滤 API；loopback-only 本地配置单写者存储；ETF manual Universe 的 runner 入口和显式空池下一开盘清仓语义。新运行入口拒绝没有定义对象的 Universe 配置，避免静默忽略。
-- **Integrated:** React Universe 管理页面调用实际列表、创建草稿、草稿 PATCH、发布、成员快照、覆盖/能力、归档 API；策略目录及因子研究目录的已保存结果筛选调用实验/因子报告 API。新运行与筛选独立，因 `/api/v1/runs` 和作业状态存储未实现而禁用。前端不再内置 mock Universe 或假报告。旧 experiment 摘要显式标记 `legacy_universe_unknown`；旧因子报告缺少身份时显示 Universe 未知。
-- **Not integrated:** CLI 仍不能从 Universe 版本发起服务端新任务；异步运行队列/API 与历史成分 provider 未接入。runner 入口不是服务端可发起的新运行能力。
+- **Integrated:** React Universe 管理页面调用实际列表、创建草稿、草稿 PATCH、发布、成员快照、覆盖/能力、归档 API；策略目录及因子研究目录的已保存结果筛选调用实验/因子报告 API。新运行与筛选独立，因 `/api/v1/runs` 和作业状态存储未实现而禁用。前端不再内置 mock Universe 或假报告。旧 experiment 摘要显式标记 `legacy_universe_unknown`；旧因子报告缺少身份时显示 Universe 未知。- **Not integrated:** CLI 仍不能从 Universe 版本发起服务端新任务；异步运行队列/API 与历史成分 provider 未接入。runner 入口不是服务端可发起的新运行能力。
 - **Data blocked:** 已临时导入第三方 `index-constitution` CSI 300 CSV：1221 个可定界成员区间、覆盖声明 2016-01-01 至 2026-06-12；opt-in/opt-out 前 14 个自然日仅是模拟发布时间。成员均为 `unknown`，覆盖 `unverified`，4 条缺失 opt-in 的源行登记为缺口。原文与 SHA-256 已归档。本数据不满足官方公告/PIT 完整性要求，Universe 历史 provider 仍未接线；`sh000300` 仍只有指数价格。股票 ETF Rotation 运行仍被拒绝。
 - **Evidence:** `universe.rs` 和 API handler 的 test-only 合成 3 证券×10 日期 PIT fixture 覆盖加入/剔除、晚公告、D4 三成员、D10 空池、完整覆盖和股票回测能力阻断；runner/backtest 测试覆盖按版本应用 manual ETF、版本/hash 冻结、真实空池与无评分区分，以及原有逐日 cash/positions/NAV 恒等式。合成 fixture 的 `verified_pit` 只表示其已知测试真值，不是实际沪深300历史数据验证。
 - **Local HTTP check:** 经用户允许 loopback 端口后，以隔离输出目录在 `127.0.0.1:18787` 启动 Axum 并完成浏览器/API 联动：页面创建草稿、编辑简介、写入 3 个合成 ETF 成员、发布不可变版本、查询指定日期成员与覆盖/能力；页面显示 `retrospective_static`、`unverified`、覆盖缺口及策略/因子运行阻断。策略与因子页均加载实际 Universe；因子目录按 Universe 后再按不可变 version 精确筛选，显示临时合成报告身份。初次因子页检查发现坏形状的旧/损坏报告会使目录空白，React 现对缺少 `report.reports[0]` 的报告做防御并提供渲染错误边界，刷新后页面与筛选正常。临时服务和测试数据已停止/清理；这不验证真实市场数据或真实因子表现。
@@ -237,8 +226,7 @@ Batch 2 的增量同步/行情页已有代码、隔离小样本和合成浏览�
 - **User-selected scope:** 暂缓沪深300作为验证对象，使用 `513300`、`518880`、`159612`、`510320`、`159952` 五只 ETF。实验区间为 2025-09-23 至快照最后交易日 2026-09-21，名单按手工固定集合处理，报告标记 `retrospective_static`。
 - **Existing data found:** immutable ETF snapshot `research-output/snapshots/cb4697c7-6727-4e0b-83e9-3bf31db05371/etf_daily.parquet`，manifest SHA-256 `21ee38bbc955bce9130298ab228b18fe09c0f22cd9395f67e6e8ba5898a959d4`，范围 2016-01-04—2026-09-21。五只 ETF 在所选一年内各有 241 个交易日、无重复日期；检查的 OHLC 约束异常为 0。510320 的快照历史始于 2025-04-25，但所选一年覆盖齐全，因此无需再次抓取行情。快照在库当前 writer 持锁时读取，不触碰该在运行的回填进程。
 - **MVP run:** 可用 `cargo run --offline -p quant-research --example etf_universe_mvp` 重现；结果在 `research-output/experiments/1dfe2ade-072b-4ea5-94c8-c61e55ca5ef5/experiment.json`。输入包含 80 个交易日左右的历史预热行情；报告和成交只覆盖选定的 241 日。该次运行不传入沪深300 benchmark，报告 benchmark 为空。5 ETF 回测 32 笔成交、初始权益 1,000,000、最终权益 1,179,713.32、总成本 4,973.08；独立重建逐日现金与持仓市值，最大 NAV 差为 0。
-- **Runner correction:** 本次实际验证发现 Universe runner 曾把因子预热日期也作为交易日期。现保留完整输入行情作预热，但把成员快照、因子横截面和回测日期限制到配置区间；新增起始日期边界回归断言。
-- **Limits:** 这是技术/接线 smoke run，不作为投资业绩结论。数据是快照中未复权 OHLC；分红/拆分与总回报尚未核对。固定名单没有历史 PIT 含义。该一次性示例生成了带 version/hash 的实验结果，但没有通过 API 把 Universe 配置保存到 `UniverseStore`，现有网页也没有新运行队列。
+- **Runner correction:** 本次实际验证发现 Universe runner 曾把因子预热日期也作为交易日期。现保留完整输入行情作预热，但把成员快照、因子横截面和回测日期限制到配置区间；新增起始日期边界回归断言。- **Limits:** 这是技术/接线 smoke run，不作为投资业绩结论。数据是快照中未复权 OHLC；分红/拆分与总回报尚未核对。固定名单没有历史 PIT 含义。该一次性示例生成了带 version/hash 的实验结果，但没有通过 API 把 Universe 配置保存到 `UniverseStore`，现有网页也没有新运行队列。
 - **Verification:** `cargo fmt --all -- --check`、`cargo test --workspace --locked --offline`（9 仓库 + 25 研究）及 `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 均通过。详细数据与限制已记在 `HANDOFF.md`。
 
 ## Universe Management UX (2026-09-24)
@@ -257,7 +245,6 @@ Batch 2 的增量同步/行情页已有代码、隔离小样本和合成浏览�
 ## ETF MVP Default-Investable / Zero-Distribution Scenario (2026-09-24)
 
 按用户指定的 MVP 测试假设运行五 ETF 轮动：每只 ETF 仅在真实行情审计范围内默认可投资，审计前的行情只用于因子预热，不进入候选池；分红/派息现金流假设为 0，结果明确是原始价格收益，不是总回报。测试示例运行时还会重新执行官方日历覆盖审计并 fail closed：范围 `2025-09-23`—`2026-09-21`，五只各 241 根 bar，日历 241 个开市日，无缺失/非开市日/重复/OHLC 异常。成员有效区间按各自审计区间的首末行情日期动态生成；本次五只都为 `2025-09-23`—`2026-09-21`。成员状态仍为 `retrospective_static`，这是假设，不是已验证上市 PIT。
-
 此段早期场景记录由 2026-09-24 的 Batch 1 最终复跑取代；其准确命令与结果见 [`batch1-integration-acceptance.md`](handoffs/batch1-integration-acceptance.md)。早期结果文件：`research-output/experiments/42785f2f-06e8-42d6-a077-fe9db29ecc01/experiment.json`。原始价格测试净收益 17.97%，32 笔成交，总成本 4,973.08；241 个净值点的逐日现金＋持仓市值与 NAV 最大误差为 0。该数字只用于验证 MVP 数据/计算接线，不是含分红总回报，也不是历史无偏业绩。股票能力、ETF PIT 上市状态和公司行动处理仍未完成。
 
 最终验证：`cargo test --workspace --locked --offline`（9 warehouse + 36 research = 45 tests passed）、`cargo clippy --workspace --all-targets --locked --offline -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check` 均通过；指定 MVP 示例运行及其内置日历/成员行情审计通过。
