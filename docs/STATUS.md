@@ -169,7 +169,8 @@ Batch 2 的增量同步/行情页已有代码、隔离小样本和合成浏览�
 - 新增的固定样例覆盖真实 `rotation_scores`→Top-1→回测路径、D 收盘信号/下一行情日开盘成交、买卖与换仓、100 股手数、比例佣金/最低佣金、双向滑点、末日信号未执行、每日现金/整数持仓/最近收盘估值与 NAV 恒等式，以及缺单 ETF bar 时跳过卖出和沿用旧 close。固定场景手算成本为佣金 700、税 0、滑点 630、总成本 1,330；这些是合成数据回归值，不是实际数据验收。
 - 回测 JSON 现记录逐日证券持仓、市值及资金占用率曲线和逐标的盈亏归因。3 ETF×10 日固定账本校验每日现金+持仓市值=权益、占用率公式、加权平均成本归因，以及标的盈亏合计=组合期末权益变化；旧 JSON 缺字段时保持可读并显示无持仓快照提示。策略页展示占用率、标的持股数量曲线和盈亏表。盈亏契约见 `docs/decisions/0006-instrument-pnl-attribution.md`。
 - 仍缺：真实交易所状态源历史覆盖/可知时点、涨跌停 side-specific 成交限制、旧快照重跑与前端未执行订单展示；逐日权重与组合敞口报告/通用不变量接口；历史 universe、分红/拆分情境；真实交易所执行日验证。合成状态回测现覆盖 `UNKNOWN` 买单和 `HALTED` 卖单、状态缺失拒绝、延期恢复、逐腿原因和逐日现金/持仓/NAV；快照测试覆盖状态列读取与旧格式兼容。基准当前仅保存原始 close 点，测试只验证输入点保留，不证明日期对齐后的基准收益或超额收益。
-- 新增固定答案覆盖手算 Pearson/Rank IC、截面不足/null、分母 coverage、开盘标签的市场日历对齐与缺 ETF bar 留空、波动率首窗口完整收益；React 因子详情改为展示逐期前瞻标签，不复利。实际无日历文件时使用观察 bar 日期并集，无法识别所有 ETF 同日缺行情；报告契约见 `docs/decisions/0004-factor-evaluation-contract.md`。- 新增的 3 ETF 缺价目标切换手算用例先在旧实现上失败（D3 现金被买单用尽、实际持仓变成 2），修复后 D3 整次调仓延期、保留 A×100 和现金 4,000；最新信号 C 替换旧 B 目标，D4 卖 A 买 C×200、现金 2,000，逐日 NAV 10,000 且正仓数不超过 Top-1。回测报告记录延期目标/阻塞证券/日期/原因；策略详情展示末日实际正仓与延期记录。
+- 新增固定答案覆盖手算 Pearson/Rank IC、截面不足/null、分母 coverage、开盘标签的市场日历对齐与缺 ETF bar 留空、波动率首窗口完整收益；React 因子详情改为展示逐期前瞻标签，不复利。实际无日历文件时使用观察 bar 日期并集，无法识别所有 ETF 同日缺行情；报告契约见 `docs/decisions/0004-factor-evaluation-contract.md`。
+- 新增的 3 ETF 缺价目标切换手算用例先在旧实现上失败（D3 现金被买单用尽、实际持仓变成 2），修复后 D3 整次调仓延期、保留 A×100 和现金 4,000；最新信号 C 替换旧 B 目标，D4 卖 A 买 C×200、现金 2,000，逐日 NAV 10,000 且正仓数不超过 Top-1。回测报告记录延期目标/阻塞证券/日期/原因；策略详情展示末日实际正仓与延期记录。
 - Universe HTTP handler 的 test-only 3 证券×10 交易日合成 fixture 覆盖 D4 三成员、D10 空池、完整覆盖与能力阻断；该 fixture 的 `verified_pit` 仅代表合成真值。前端构建通过。真实历史成分和生产数据验证未完成。
 - 既有测试另覆盖仓库入库/版本/锁、基础 rolling、排名统计、手数及单笔成本、参数展开。
 
@@ -207,7 +208,8 @@ Batch 2 的增量同步/行情页已有代码、隔离小样本和合成浏览�
 ## Universe Delivery — API/UI Integration (2026-09-23)
 
 - **Implemented in code:** 冻结契约与 ADR 0003；schema v5/v6 历史成员事实、加入/退出公告时间字段、覆盖底座与来源校验；Rust 不可变版本模型、公告/生效时间解析、严格覆盖拒绝、成员映射与日哈希；实验可选版本身份并保留旧 JSON 读取；Universe CRUD/发布/成员/覆盖/能力及结果过滤 API；loopback-only 本地配置单写者存储；ETF manual Universe 的 runner 入口和显式空池下一开盘清仓语义。新运行入口拒绝没有定义对象的 Universe 配置，避免静默忽略。
-- **Integrated:** React Universe 管理页面调用实际列表、创建草稿、草稿 PATCH、发布、成员快照、覆盖/能力、归档 API；策略目录及因子研究目录的已保存结果筛选调用实验/因子报告 API。新运行与筛选独立，因 `/api/v1/runs` 和作业状态存储未实现而禁用。前端不再内置 mock Universe 或假报告。旧 experiment 摘要显式标记 `legacy_universe_unknown`；旧因子报告缺少身份时显示 Universe 未知。- **Not integrated:** CLI 仍不能从 Universe 版本发起服务端新任务；异步运行队列/API 与历史成分 provider 未接入。runner 入口不是服务端可发起的新运行能力。
+- **Integrated:** React Universe 管理页面调用实际列表、创建草稿、草稿 PATCH、发布、成员快照、覆盖/能力、归档 API；策略目录及因子研究目录的已保存结果筛选调用实验/因子报告 API。新运行与筛选独立，因 `/api/v1/runs` 和作业状态存储未实现而禁用。前端不再内置 mock Universe 或假报告。旧 experiment 摘要显式标记 `legacy_universe_unknown`；旧因子报告缺少身份时显示 Universe 未知。
+- **Not integrated:** CLI 仍不能从 Universe 版本发起服务端新任务；异步运行队列/API 与历史成分 provider 未接入。runner 入口不是服务端可发起的新运行能力。
 - **Data blocked:** 已临时导入第三方 `index-constitution` CSI 300 CSV：1221 个可定界成员区间、覆盖声明 2016-01-01 至 2026-06-12；opt-in/opt-out 前 14 个自然日仅是模拟发布时间。成员均为 `unknown`，覆盖 `unverified`，4 条缺失 opt-in 的源行登记为缺口。原文与 SHA-256 已归档。本数据不满足官方公告/PIT 完整性要求，Universe 历史 provider 仍未接线；`sh000300` 仍只有指数价格。股票 ETF Rotation 运行仍被拒绝。
 - **Evidence:** `universe.rs` 和 API handler 的 test-only 合成 3 证券×10 日期 PIT fixture 覆盖加入/剔除、晚公告、D4 三成员、D10 空池、完整覆盖和股票回测能力阻断；runner/backtest 测试覆盖按版本应用 manual ETF、版本/hash 冻结、真实空池与无评分区分，以及原有逐日 cash/positions/NAV 恒等式。合成 fixture 的 `verified_pit` 只表示其已知测试真值，不是实际沪深300历史数据验证。
 - **Local HTTP check:** 经用户允许 loopback 端口后，以隔离输出目录在 `127.0.0.1:18787` 启动 Axum 并完成浏览器/API 联动：页面创建草稿、编辑简介、写入 3 个合成 ETF 成员、发布不可变版本、查询指定日期成员与覆盖/能力；页面显示 `retrospective_static`、`unverified`、覆盖缺口及策略/因子运行阻断。策略与因子页均加载实际 Universe；因子目录按 Universe 后再按不可变 version 精确筛选，显示临时合成报告身份。初次因子页检查发现坏形状的旧/损坏报告会使目录空白，React 现对缺少 `report.reports[0]` 的报告做防御并提供渲染错误边界，刷新后页面与筛选正常。临时服务和测试数据已停止/清理；这不验证真实市场数据或真实因子表现。
@@ -226,7 +228,8 @@ Batch 2 的增量同步/行情页已有代码、隔离小样本和合成浏览�
 - **User-selected scope:** 暂缓沪深300作为验证对象，使用 `513300`、`518880`、`159612`、`510320`、`159952` 五只 ETF。实验区间为 2025-09-23 至快照最后交易日 2026-09-21，名单按手工固定集合处理，报告标记 `retrospective_static`。
 - **Existing data found:** immutable ETF snapshot `research-output/snapshots/cb4697c7-6727-4e0b-83e9-3bf31db05371/etf_daily.parquet`，manifest SHA-256 `21ee38bbc955bce9130298ab228b18fe09c0f22cd9395f67e6e8ba5898a959d4`，范围 2016-01-04—2026-09-21。五只 ETF 在所选一年内各有 241 个交易日、无重复日期；检查的 OHLC 约束异常为 0。510320 的快照历史始于 2025-04-25，但所选一年覆盖齐全，因此无需再次抓取行情。快照在库当前 writer 持锁时读取，不触碰该在运行的回填进程。
 - **MVP run:** 可用 `cargo run --offline -p quant-research --example etf_universe_mvp` 重现；结果在 `research-output/experiments/1dfe2ade-072b-4ea5-94c8-c61e55ca5ef5/experiment.json`。输入包含 80 个交易日左右的历史预热行情；报告和成交只覆盖选定的 241 日。该次运行不传入沪深300 benchmark，报告 benchmark 为空。5 ETF 回测 32 笔成交、初始权益 1,000,000、最终权益 1,179,713.32、总成本 4,973.08；独立重建逐日现金与持仓市值，最大 NAV 差为 0。
-- **Runner correction:** 本次实际验证发现 Universe runner 曾把因子预热日期也作为交易日期。现保留完整输入行情作预热，但把成员快照、因子横截面和回测日期限制到配置区间；新增起始日期边界回归断言。- **Limits:** 这是技术/接线 smoke run，不作为投资业绩结论。数据是快照中未复权 OHLC；分红/拆分与总回报尚未核对。固定名单没有历史 PIT 含义。该一次性示例生成了带 version/hash 的实验结果，但没有通过 API 把 Universe 配置保存到 `UniverseStore`，现有网页也没有新运行队列。
+- **Runner correction:** 本次实际验证发现 Universe runner 曾把因子预热日期也作为交易日期。现保留完整输入行情作预热，但把成员快照、因子横截面和回测日期限制到配置区间；新增起始日期边界回归断言。
+- **Limits:** 这是技术/接线 smoke run，不作为投资业绩结论。数据是快照中未复权 OHLC；分红/拆分与总回报尚未核对。固定名单没有历史 PIT 含义。该一次性示例生成了带 version/hash 的实验结果，但没有通过 API 把 Universe 配置保存到 `UniverseStore`，现有网页也没有新运行队列。
 - **Verification:** `cargo fmt --all -- --check`、`cargo test --workspace --locked --offline`（9 仓库 + 25 研究）及 `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` 均通过。详细数据与限制已记在 `HANDOFF.md`。
 
 ## Universe Management UX (2026-09-24)
