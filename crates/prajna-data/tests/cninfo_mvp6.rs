@@ -918,6 +918,18 @@ fn crosscheck_detects_action_and_suspension_disagreements_inside_the_lifecycle()
     assert!(!kinds.contains("listing_vs_first_bar"));
     assert!(!kinds.contains("termination_vs_last_bar"));
 
+    // Partial-day halts are not observable as keyed no-trade in daily Bars.
+    let mut partial = facts();
+    partial.events[0].session_part = "morning".into();
+    let kinds = mismatch_kinds(&crosscheck_v4(
+        &partial,
+        &[
+            bar("2026-01-05", "1.0", "1.0"),
+            bar("2026-01-07", "1.0", "1.0"),
+        ],
+    ));
+    assert!(!kinds.contains("suspension_vs_keyed_no_trade"));
+
     // A first traded Bar after the listing date is a listing mismatch.
     let mut f = facts();
     f.identities[0].termination_date = "2026-01-06".into();
@@ -1044,6 +1056,24 @@ fn csv_parser_enforces_headers_and_accepts_header_only_templates() {
             .to_string()
             .contains("header mismatch")
     );
+}
+
+#[test]
+fn committed_public_fact_tables_parse_and_cover_the_fixed_list() {
+    let facts = Mvp6Facts::from_csv(
+        include_str!("../../../configs/mvp-6/identity.csv"),
+        include_str!("../../../configs/mvp-6/actions.csv"),
+        include_str!("../../../configs/mvp-6/events.csv"),
+    )
+    .unwrap();
+    assert_eq!(facts.identities.len(), 5);
+    assert!(
+        facts
+            .identities
+            .iter()
+            .all(|row| !row.org_id.is_empty() && !row.listing_date.is_empty())
+    );
+    assert!(!facts.actions.is_empty() && !facts.events.is_empty());
 }
 
 #[test]

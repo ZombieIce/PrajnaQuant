@@ -103,13 +103,6 @@ impl PageSet {
             .get("hasMore")
             .map(|v| v.as_bool().ok_or("invalid hasMore"))
             .transpose()?;
-        if self
-            .declared_pages
-            .zip(declared_pages)
-            .is_some_and(|(a, b)| a != b)
-        {
-            return Err("changing page count".into());
-        }
         // cninfo's `totalpages` is not authoritative: it is 0 for a single page
         // whose total is below the page size, 1 even when a second page exists,
         // and may disagree with `hasMore`. Completeness is therefore decided by

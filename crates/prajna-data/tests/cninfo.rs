@@ -396,10 +396,13 @@ fn pagination_uses_has_more_and_unique_totals_over_unreliable_page_counts() {
     // cninfo reports `totalpages: 1` while a second page exists. The stable
     // total and the unique announcement IDs decide completeness, so the
     // understated page count must not fail the segment.
+    let second_row = announcement("b", "158001", json!("manager"), &title());
     let mut understated = first.clone();
+    understated["totalAnnouncement"] = json!(2);
     understated["hasMore"] = json!(true);
     understated["totalpages"] = json!(1);
     let mut last = understated.clone();
+    last["announcements"] = json!([second_row]);
     last["hasMore"] = json!(false);
     let mut pages = PageSet::default();
     pages
@@ -408,7 +411,7 @@ fn pagination_uses_has_more_and_unique_totals_over_unreliable_page_counts() {
     assert!(pages.needs_more());
     pages.push(2, &serde_json::to_vec(&last).unwrap()).unwrap();
     assert!(!pages.needs_more());
-    assert_eq!(pages.finish().unwrap().0.len(), 1);
+    assert_eq!(pages.finish().unwrap().0.len(), 2);
 
     // An early "no more" declaration is accepted only because the unique rows
     // already match the stable total; a short page still fails in `finish`.

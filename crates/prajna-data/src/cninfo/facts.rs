@@ -27,9 +27,7 @@ pub fn validate_and_convert(
     citations: &[Citation],
     calendar: &BTreeSet<NaiveDate>,
 ) -> Result<Mvp6Session> {
-    if calendar.is_empty() {
-        return Err("frozen calendar is empty".into());
-    }
+    calendar_bounds(calendar)?;
     let mut index = BTreeMap::<(String, String), &Citation>::new();
     for citation in citations {
         if index
@@ -266,6 +264,8 @@ fn field_supported(field: &str, value: &str, excerpt: &str) -> Result<()> {
             .any(|form| excerpt.contains(form.as_str()))
     } else if field == "cash_per_share" {
         cash_per_share_supported(value, &excerpt)
+    } else if field == "split_ratio" {
+        split_ratio_supported(value, &excerpt)
     } else if is_decimal_field(field) {
         let expected =
             Price::parse(value).map_err(|_| format!("invalid decimal for {field}: {value}"))?;
@@ -294,6 +294,29 @@ fn is_coded_field(field: &str) -> bool {
     matches!(field, "fund_category" | "session_part")
 }
 
+/// A split ratio is the number of new shares per old share. Bind its direction
+/// to the `old:new` pair on the page so a `2:1` reverse split cannot satisfy a
+/// recorded `2`. Ratios without an explicit pair are not accepted.
+fn split_ratio_supported(value: &str, excerpt: &str) -> bool {
+    let Ok(expected) = Price::parse(value) else {
+        return false;
+    };
+    static RATIO: OnceLock<Regex> = OnceLock::new();
+    let pattern = RATIO.get_or_init(|| {
+        Regex::new(r"(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)").expect("static ratio regex")
+    });
+    pattern.captures_iter(excerpt).any(|captures| {
+        let left = captures
+            .get(1)
+            .and_then(|value| Price::parse(value.as_str()).ok());
+        let right = captures
+            .get(2)
+            .and_then(|value| Price::parse(value.as_str()).ok());
+        matches!((left, right), (Some(left), Some(right))
+            if left.checked_mul_decimal(expected).ok() == Some(right))
+    })
+}
+
 fn is_date_field(field: &str) -> bool {
     matches!(
         field,
@@ -308,10 +331,7 @@ fn is_date_field(field: &str) -> bool {
 }
 
 fn is_decimal_field(field: &str) -> bool {
-    matches!(
-        field,
-        "cash_per_share" | "split_ratio" | "liquidation_per_share"
-    )
+    matches!(field, "split_ratio" | "liquidation_per_share")
 }
 
 /// cninfo distribution notices state the cash amount per ten fund shares
@@ -326,13 +346,20 @@ fn cash_per_share_supported(value: &str, excerpt: &str) -> bool {
     if decimal_tokens(excerpt).any(|token| Price::parse(token).ok() == Some(expected)) {
         return true;
     }
-    if !excerpt.contains("元/10份") {
+    static PER_TEN_SHARES: OnceLock<Regex> = OnceLock::new();
+    let pattern = PER_TEN_SHARES.get_or_init(|| {
+        Regex::new(r"元/10份[^0-9]{0,8}(\d+(?:\.\d+)?)").expect("static per-ten regex")
+    });
+    let Some(captured) = pattern
+        .captures(excerpt)
+        .and_then(|captures| captures.get(1))
+    else {
         return false;
-    }
+    };
     let Ok(per_ten_shares) = expected.checked_mul(10) else {
         return false;
     };
-    decimal_tokens(excerpt).any(|token| Price::parse(token).ok() == Some(per_ten_shares))
+    Price::parse(captured.as_str()).ok() == Some(per_ten_shares)
 }
 
 fn date_forms(date: NaiveDate) -> [String; 6] {
@@ -443,6 +470,13 @@ fn parse_optional_date(value: &str, field: &str) -> Result<Option<NaiveDate>> {
     }
 }
 
+fn calendar_bounds(calendar: &BTreeSet<NaiveDate>) -> Result<(NaiveDate, NaiveDate)> {
+    let (Some(&first), Some(&last)) = (calendar.first(), calendar.last()) else {
+        return Err("frozen calendar is empty".into());
+    };
+    Ok((first, last))
+}
+
 /// Publication dates are calendar dates, not exchange sessions: funds publish
 /// notices on weekends and holidays. The date must still fall inside the frozen
 /// observation window; trade-related dates use [`validate_date`].
@@ -451,9 +485,7 @@ fn validate_publication_date(
     calendar: &BTreeSet<NaiveDate>,
     field: &str,
 ) -> Result<()> {
-    let (Some(&first), Some(&last)) = (calendar.first(), calendar.last()) else {
-        return Err("frozen calendar is empty".into());
-    };
+    let (first, last) = calendar_bounds(calendar)?;
     if date >= first && date <= last {
         Ok(())
     } else {
@@ -480,9 +512,7 @@ fn validate_lifecycle_date(
     calendar: &BTreeSet<NaiveDate>,
     field: &str,
 ) -> Result<()> {
-    let (Some(&first), Some(&last)) = (calendar.first(), calendar.last()) else {
-        return Err("frozen calendar is empty".into());
-    };
+    let (first, last) = calendar_bounds(calendar)?;
     if calendar.contains(&date) || date < first || date > last {
         Ok(())
     } else {
@@ -518,7 +548,19 @@ mod tests {
         );
         assert!(field_supported("cash_per_share", "0.0453", "每份派发0.0453元").is_ok());
         assert!(field_supported("cash_per_share", "0.0453", "分红金额0.4530元").is_err());
-        assert!(field_supported("cash_per_share", "0.0453", "0.4530元/10份").is_ok());
+        // The number must follow the explicit per-ten unit, not merely share a page.
+        assert!(field_supported("cash_per_share", "1", "（单位：元/10份基金份额）").is_err());
+        assert!(field_supported("cash_per_share", "0.0453", "0.4530元/10份").is_err());
+        assert!(field_supported("cash_per_share", "0.0453", "0.4530元收益").is_err());
+    }
+
+    #[test]
+    fn split_ratio_binds_direction_to_the_old_new_pair() {
+        assert!(field_supported("split_ratio", "2", "本次拆分比例为1:2").is_ok());
+        assert!(field_supported("split_ratio", "1.5", "本次拆分比例为2:3").is_ok());
+        assert!(field_supported("split_ratio", "1.5", "本次拆分比例为3:2").is_err());
+        assert!(field_supported("split_ratio", "2", "本次拆分比例为2:1").is_err());
+        assert!(field_supported("split_ratio", "2", "每份基金份额拆分为2份").is_err());
     }
 
     #[test]
