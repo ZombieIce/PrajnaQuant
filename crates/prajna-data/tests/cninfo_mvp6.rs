@@ -1078,7 +1078,7 @@ fn fixed_collector_reads_listing_notice_before_applying_contract_download_gate()
 }
 
 #[test]
-fn fixed_collector_downloads_contract_when_listing_notice_values_are_blank() {
+fn fixed_collector_downloads_contract_when_listing_notice_values_are_unstated() {
     struct FixedText(&'static str);
     impl PdfText for FixedText {
         fn text(&mut self, _: &[u8]) -> Result<String> {
@@ -1094,6 +1094,17 @@ fn fixed_collector_downloads_contract_when_listing_notice_values_are_blank() {
         "基金类型：指数基金；标的指数：",
         "基金类型：\n标的指数：\n",
         "基金类型：基金类型：；标的指数：",
+        "标的指数：详见基金合同；基金类别：指数型基金",
+        "标的指数：参见招募说明书；基金类别：指数型基金",
+        "标的指数：见《基金合同》；基金类别：指数型基金",
+        "标的指数：合成指数；基金类别：详见基金合同",
+        "标的指数：合成指数；基金类别：参阅招募说明书",
+        "标的指数：待定；基金类别：指数型基金",
+        "标的指数：暂无；基金类别：指数型基金",
+        "标的指数：N/A；基金类别：指数型基金",
+        "标的指数：TBD；基金类别：指数型基金",
+        "标的指数：合成指数；基金类别：未知",
+        "标的指数：合成指数；基金类别：待披露",
     ] {
         let rows = vec![
             ann("listing", "上市交易公告书"),

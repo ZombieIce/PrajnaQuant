@@ -666,7 +666,8 @@ const LISTING_NOTICE_HEADINGS: &[&str] = &["标的指数", "跟踪指数", "基�
 /// The listing notice only counts as covering the fund metadata when it writes
 /// a nonempty value for both the tracked index and the fund category. A
 /// heading with a blank value (for example `基金类型：；标的指数：`) or a
-/// heading followed by another heading leaves the metadata unstated, so the
+/// heading followed by another heading, a cross-reference or a placeholder
+/// leaves the metadata unstated, so the
 /// contract/prospectus download is not suppressed.
 fn listing_notice_covers_metadata(text: &str) -> bool {
     states_listing_value(text, &["标的指数", "跟踪指数"])
@@ -675,7 +676,8 @@ fn listing_notice_covers_metadata(text: &str) -> bool {
 
 /// True when any occurrence of `headings` is followed by a value containing at
 /// least one alphanumeric character before the next line break, sentence
-/// separator or listing-notice heading.
+/// separator or listing-notice heading, without referring elsewhere or
+/// declaring the value unknown. Ambiguous references fail open for collection.
 fn states_listing_value(text: &str, headings: &[&str]) -> bool {
     headings.iter().any(|heading| {
         text.match_indices(heading).any(|(start, _)| {
@@ -691,7 +693,29 @@ fn states_listing_value(text: &str, headings: &[&str]) -> bool {
                 .filter_map(|other| value.find(other))
                 .min()
                 .unwrap_or(value.len());
-            value[..end].chars().any(char::is_alphanumeric)
+            is_stated_listing_value(&value[..end])
         })
     })
+}
+
+/// This is a conservative collection gate, not a fund metadata extractor.
+/// Even a value followed by a reference keeps supplementary evidence enabled.
+fn is_stated_listing_value(value: &str) -> bool {
+    let compact: String = value.chars().filter(|c| !c.is_whitespace()).collect();
+    if ["见", "参阅", "参考", "查阅", "查询", "合同", "招募说明书"]
+        .iter()
+        .any(|marker| compact.contains(marker))
+    {
+        return false;
+    }
+    let content: String = compact
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect();
+    !content.is_empty()
+        && !["待", "未", "暂无", "未知", "不详", "不适用", "另行"]
+            .iter()
+            .any(|marker| content.starts_with(marker))
+        && !["无", "na", "none", "null", "tbd", "unknown", "pending"].contains(&content.as_str())
 }
