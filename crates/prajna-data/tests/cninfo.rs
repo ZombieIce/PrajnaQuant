@@ -377,7 +377,7 @@ fn raw_persistence_failure_stops_all_further_requests() {
 }
 
 #[test]
-fn pagination_follows_declared_pages_even_when_unique_total_already_matches() {
+fn pagination_uses_has_more_and_unique_totals_over_unreliable_page_counts() {
     let row = announcement("a", "158001", json!("manager"), &title());
     let mut first: Value = serde_json::from_slice(&page(1, vec![row.clone()])).unwrap();
     first["hasMore"] = json!(true);
@@ -392,8 +392,40 @@ fn pagination_follows_declared_pages_even_when_unique_total_already_matches() {
         .unwrap();
     assert!(!pages.needs_more());
     assert_eq!(pages.finish().unwrap().0.len(), 1);
+
+    // cninfo reports `totalpages: 1` while a second page exists. The stable
+    // total and the unique announcement IDs decide completeness, so the
+    // understated page count must not fail the segment.
+    let mut understated = first.clone();
+    understated["hasMore"] = json!(true);
+    understated["totalpages"] = json!(1);
+    let mut last = understated.clone();
+    last["hasMore"] = json!(false);
+    let mut pages = PageSet::default();
+    pages
+        .push(1, &serde_json::to_vec(&understated).unwrap())
+        .unwrap();
+    assert!(pages.needs_more());
+    pages.push(2, &serde_json::to_vec(&last).unwrap()).unwrap();
+    assert!(!pages.needs_more());
+    assert_eq!(pages.finish().unwrap().0.len(), 1);
+
+    // An early "no more" declaration is accepted only because the unique rows
+    // already match the stable total; a short page still fails in `finish`.
+    let mut local_only = first.clone();
+    local_only["hasMore"] = json!(false);
+    local_only["totalpages"] = json!(2);
+    let mut pages = PageSet::default();
+    pages
+        .push(1, &serde_json::to_vec(&local_only).unwrap())
+        .unwrap();
+    assert!(!pages.needs_more());
+    assert_eq!(pages.finish().unwrap().0.len(), 1);
+
+    // A page that claims more results while containing none still fails.
     let mut empty = first.clone();
     empty["announcements"] = json!([]);
+    empty["hasMore"] = json!(true);
     empty["totalpages"] = json!(3);
     first["totalpages"] = json!(3);
     let mut premature = PageSet::default();
@@ -403,19 +435,6 @@ fn pagination_follows_declared_pages_even_when_unique_total_already_matches() {
     assert!(
         premature
             .push(2, &serde_json::to_vec(&empty).unwrap())
-            .is_err()
-    );
-    first["totalpages"] = json!(1);
-    assert!(
-        PageSet::default()
-            .push(1, &serde_json::to_vec(&first).unwrap())
-            .is_err()
-    );
-    first["hasMore"] = json!(false);
-    first["totalpages"] = json!(2);
-    assert!(
-        PageSet::default()
-            .push(1, &serde_json::to_vec(&first).unwrap())
             .is_err()
     );
 }

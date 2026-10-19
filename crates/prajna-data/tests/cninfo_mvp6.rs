@@ -232,6 +232,38 @@ fn fixed_index_flags_incomplete_totals_and_downloads_new_pdf_categories_only() {
 }
 
 #[test]
+fn single_page_with_zero_total_pages_is_a_complete_segment() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut collector, requests) = make_collector(
+        vec![
+            top(json!([{"code":"159001","orgId":"synthetic-org"}])),
+            json_reply(json!({
+                "totalAnnouncement":2,
+                "totalpages":0,
+                "hasMore":false,
+                "announcements":[
+                    ann("one", "乙类日常公告"),
+                    ann("two", "甲类日常公告"),
+                ]
+            })),
+        ],
+        dir.path(),
+    );
+    let result = collector.collect_fixed_list(&[candidate()], &BTreeSet::new(), &mut NoopPdf);
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    assert_eq!(
+        result.announcements[&("159001".into(), "synthetic-org".into())].len(),
+        2
+    );
+    assert!(
+        !result
+            .unresolved
+            .iter()
+            .any(|s| s.contains("pagination_incomplete"))
+    );
+}
+
+#[test]
 fn fixed_list_access_denial_stops_source_before_short_name_fallback() {
     let dir = tempfile::tempdir().unwrap();
     let denied = HttpReply {
@@ -746,6 +778,29 @@ fn citation_csv_binds_each_row_to_a_frozen_document_page_excerpt_and_verifier() 
             .to_string()
             .contains("verified before the Raw object was captured")
     );
+    // Re-capturing identical bytes later does not move the freeze time: the
+    // citation may still postdate the first observed capture.
+    let mut recaptured = source_record("observed");
+    recaptured.observed_at = "2026-01-06T00:00:00Z".into();
+    assert_eq!(
+        store.put("观测于 159001".as_bytes(), recaptured).unwrap(),
+        observed_hash
+    );
+    Citation::from_store(
+        &store,
+        &mut NoopPdf,
+        CitationInput {
+            fact_source: "identity".into(),
+            field: "code".into(),
+            announcement_id: "observed".into(),
+            page: 1,
+            raw_sha256: observed_hash.clone(),
+            excerpt: "159001".into(),
+            verified_by: "synthetic-reviewer".into(),
+            verified_at: "2026-01-05T12:00:00Z".into(),
+        },
+    )
+    .unwrap();
     let zero_page = Citation::from_store(
         &store,
         &mut NoopPdf,
@@ -976,15 +1031,15 @@ fn converted_session_matches_manually_built_inputs() {
 }
 
 #[test]
-fn csv_parser_enforces_headers_and_accepts_empty_templates_without_inventing_rows() {
-    let identity = include_str!("../../../configs/mvp-6/identity.csv");
-    let actions = include_str!("../../../configs/mvp-6/actions.csv");
-    let events = include_str!("../../../configs/mvp-6/events.csv");
-    let empty = Mvp6Facts::from_csv(identity, actions, events).unwrap();
+fn csv_parser_enforces_headers_and_accepts_header_only_templates() {
+    const IDENTITY: &str = "code,org_id,legal_name,listing_date,termination_date,fund_category,tracked_index,evidence_level,source_announcement_id,source_page\n";
+    const ACTIONS: &str = "code,kind,announcement_date,record_date,ex_date,pay_date,cash_per_share,split_ratio,liquidation_per_share,evidence_level,source_announcement_id,source_page\n";
+    const EVENTS: &str = "code,kind,announcement_date,effective_date,session_part,evidence_level,source_announcement_id,source_page\n";
+    let empty = Mvp6Facts::from_csv(IDENTITY, ACTIONS, EVENTS).unwrap();
     assert!(empty.identities.is_empty() && empty.actions.is_empty() && empty.events.is_empty());
     let invalid = "code,org_id\n159001,org\n";
     assert!(
-        Mvp6Facts::from_csv(invalid, actions, events)
+        Mvp6Facts::from_csv(invalid, ACTIONS, EVENTS)
             .unwrap_err()
             .to_string()
             .contains("header mismatch")

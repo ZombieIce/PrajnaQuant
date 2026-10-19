@@ -110,15 +110,14 @@ impl PageSet {
         {
             return Err("changing page count".into());
         }
-        if let Some(pages) = declared_pages.or(self.declared_pages) {
-            if (pages == 0 && total != 0)
-                || (pages != 0 && page > pages)
-                || (has_more == Some(true) && page >= pages)
-                || (has_more == Some(false) && page < pages)
-            {
-                return Err("conflicting pagination declarations".into());
-            }
-        }
+        // cninfo's `totalpages` is not authoritative: it is 0 for a single page
+        // whose total is below the page size, 1 even when a second page exists,
+        // and may disagree with `hasMore`. Completeness is therefore decided by
+        // the stable `totalAnnouncement` and the unique announcement IDs at
+        // `finish`; `hasMore` only drives whether another page is requested.
+        // Declared page counts are retained for the safety `needs_more` hint
+        // but never reject a response whose unique rows can still reach the
+        // declared total.
         if items.is_empty()
             && (has_more == Some(true)
                 || declared_pages
