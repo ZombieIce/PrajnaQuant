@@ -230,7 +230,7 @@ impl<T: Transport> Collector<T> {
                 for item in &mut items {
                     item.categories = classify_mvp6(&item.title);
                 }
-                let mut listing_notice_status = Vec::new();
+                let mut listing_notice_complete = false;
                 for item in &items {
                     if item.categories.iter().any(|c| c == "listing_notice") {
                         if let Some(path) = item.attachment.as_deref().filter(|p| valid_pdf_path(p))
@@ -240,10 +240,16 @@ impl<T: Transport> Collector<T> {
                                 form: BTreeMap::new(),
                             }) {
                                 Ok((bytes, hash)) if bytes.starts_with(b"%PDF-") => {
-                                    let complete = converter
-                                        .text(&bytes)
-                                        .is_ok_and(|text| listing_notice_covers_metadata(&text));
-                                    listing_notice_status.push((item.announced_ms, complete));
+                                    let complete = match converter.text(&bytes) {
+                                        Ok(text) => listing_notice_covers_metadata(&text),
+                                        Err(_) => {
+                                            result
+                                                .unresolved
+                                                .push(format!("{}:pdf_unavailable", item.id));
+                                            false
+                                        }
+                                    };
+                                    listing_notice_complete |= complete;
                                     result
                                         .pdf_raw_sha256_by_announcement
                                         .entry(item.id.clone())
@@ -273,11 +279,6 @@ impl<T: Transport> Collector<T> {
                         .categories
                         .iter()
                         .any(|c| explicit_pdf_categories.contains(c));
-                    let listing_notice_complete = listing_notice_status
-                        .iter()
-                        .filter(|(announced_ms, _)| *announced_ms <= item.announced_ms)
-                        .max_by_key(|(announced_ms, _)| *announced_ms)
-                        .is_some_and(|(_, complete)| *complete);
                     if !item
                         .categories
                         .iter()
