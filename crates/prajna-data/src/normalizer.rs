@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 mod synthetic_etf_daily;
 mod szse_etf_frozen;
 pub use crate::sina_adjust_factor::LifecycleRange;
+pub(crate) use szse_etf_frozen::FactsSessionDocument;
 pub use szse_etf_frozen::SzseEtfFrozen;
 
 use crate::{SourceKind, SourceRecord};
@@ -122,6 +123,17 @@ impl NormalizerRegistry {
         let normalizer = SzseEtfFrozen::v5(lifecycles)?;
         if !registry.register(normalizer) {
             return Err("Sina adjustment normalizer v5 is already registered".into());
+        }
+        Ok(registry)
+    }
+
+    /// Registers the v6 fixed-list corporate-action dataset Normalizer, bound
+    /// to the exact published v4 market Dataset Version it consumes.
+    pub fn with_corporate_actions_v6(market_dsv: impl Into<String>) -> Result<Self, String> {
+        let mut registry = Self::with_builtins();
+        let normalizer = SzseEtfFrozen::v6(market_dsv)?;
+        if !registry.register(normalizer) {
+            return Err("corporate action normalizer v6 is already registered".into());
         }
         Ok(registry)
     }
