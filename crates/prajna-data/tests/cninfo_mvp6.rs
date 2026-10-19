@@ -80,6 +80,12 @@ impl PdfText for CompleteListingPdf {
         Ok("基金类型：指数基金；标的指数：合成指数".into())
     }
 }
+struct UnreadablePdf;
+impl PdfText for UnreadablePdf {
+    fn text(&mut self, _: &[u8]) -> Result<String> {
+        Err("synthetic PDF parse failure".into())
+    }
+}
 
 #[test]
 fn top_search_keeps_only_exact_code_matches_and_preserves_multiple_org_ids() {
@@ -559,6 +565,30 @@ fn fixed_collector_reads_listing_notice_before_applying_contract_download_gate()
     assert_eq!(requests.lock().unwrap().len(), 3);
     assert!(requests.lock().unwrap()[2].url.ends_with("/listing.PDF"));
 
+    // A contract can be announced before its listing notice. The complete
+    // notice still supplies the fund metadata used by the download gate.
+    let mut earlier_contract = ann("contract", "基金合同");
+    earlier_contract["announcementTime"] = json!(1767484800000_i64);
+    let mut later_listing = ann("listing", "上市交易公告书");
+    later_listing["announcementTime"] = json!(1767571200000_i64);
+    let dir = tempfile::tempdir().unwrap();
+    let (mut collector, requests) = make_collector(
+        vec![
+            top(json!([{"code":"159001","orgId":"synthetic-org"}])),
+            page(2, vec![earlier_contract, later_listing]),
+            HttpReply {
+                status: 200,
+                content_type: "application/pdf".into(),
+                bytes: b"%PDF-1.4 synthetic listing".to_vec(),
+            },
+        ],
+        dir.path(),
+    );
+    collector.collect_fixed_list(&[candidate()], &BTreeSet::new(), &mut CompleteListingPdf);
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[2].url.ends_with("/listing.PDF"));
+
     let dir = tempfile::tempdir().unwrap();
     let (mut collector, requests) = make_collector(
         vec![
@@ -615,4 +645,29 @@ fn fixed_collector_reports_missing_or_invalid_listing_notice_pdf_as_unresolved()
         );
         assert_eq!(requests.lock().unwrap().len(), 2);
     }
+}
+
+#[test]
+fn fixed_collector_reports_unreadable_listing_notice_as_unresolved() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut collector, _) = make_collector(
+        vec![
+            top(json!([{"code":"159001","orgId":"synthetic-org"}])),
+            page(1, vec![ann("listing", "上市交易公告书")]),
+            HttpReply {
+                status: 200,
+                content_type: "application/pdf".into(),
+                bytes: b"%PDF-1.4 synthetic".to_vec(),
+            },
+        ],
+        dir.path(),
+    );
+    let result = collector.collect_fixed_list(&[candidate()], &BTreeSet::new(), &mut UnreadablePdf);
+
+    assert!(
+        result
+            .unresolved
+            .iter()
+            .any(|gap| gap == "listing:pdf_unavailable")
+    );
 }
