@@ -1078,6 +1078,82 @@ fn fixed_collector_reads_listing_notice_before_applying_contract_download_gate()
 }
 
 #[test]
+fn fixed_collector_downloads_contract_when_listing_notice_values_are_blank() {
+    struct FixedText(&'static str);
+    impl PdfText for FixedText {
+        fn text(&mut self, _: &[u8]) -> Result<String> {
+            Ok(self.0.into())
+        }
+    }
+
+    // A heading without a value leaves the fund metadata unstated, so the
+    // contract download must not be suppressed.
+    for text in [
+        "基金类型：；标的指数：",
+        "基金类型：；标的指数：合成指数",
+        "基金类型：指数基金；标的指数：",
+        "基金类型：\n标的指数：\n",
+        "基金类型：基金类型：；标的指数：",
+    ] {
+        let rows = vec![
+            ann("listing", "上市交易公告书"),
+            ann("contract", "基金合同"),
+        ];
+        let dir = tempfile::tempdir().unwrap();
+        let (mut collector, requests) = make_collector(
+            vec![
+                top(json!([{"code":"159001","orgId":"synthetic-org"}])),
+                page(2, rows),
+                HttpReply {
+                    status: 200,
+                    content_type: "application/pdf".into(),
+                    bytes: b"%PDF-1.4 synthetic listing".to_vec(),
+                },
+                HttpReply {
+                    status: 200,
+                    content_type: "application/pdf".into(),
+                    bytes: b"%PDF-1.4 synthetic contract".to_vec(),
+                },
+            ],
+            dir.path(),
+        );
+        collector.collect_fixed_list(&[candidate()], &BTreeSet::new(), &mut FixedText(text));
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 4, "listing text = {text}");
+        assert!(
+            requests[3].url.ends_with("/contract.PDF"),
+            "listing text = {text}"
+        );
+    }
+
+    // Values written without a colon or on separate lines still count.
+    for text in [
+        "基金类别：指数基金；跟踪指数：合成指数",
+        "基金类型\n指数基金\n标的指数\n合成指数",
+    ] {
+        let rows = vec![
+            ann("listing", "上市交易公告书"),
+            ann("contract", "基金合同"),
+        ];
+        let dir = tempfile::tempdir().unwrap();
+        let (mut collector, requests) = make_collector(
+            vec![
+                top(json!([{"code":"159001","orgId":"synthetic-org"}])),
+                page(2, rows),
+                HttpReply {
+                    status: 200,
+                    content_type: "application/pdf".into(),
+                    bytes: b"%PDF-1.4 synthetic listing".to_vec(),
+                },
+            ],
+            dir.path(),
+        );
+        collector.collect_fixed_list(&[candidate()], &BTreeSet::new(), &mut FixedText(text));
+        assert_eq!(requests.lock().unwrap().len(), 3, "listing text = {text}");
+    }
+}
+
+#[test]
 fn fixed_collector_reports_missing_or_invalid_listing_notice_pdf_as_unresolved() {
     for attachment in [None, Some("../outside.pdf")] {
         let mut listing = ann("listing", "上市交易公告书");

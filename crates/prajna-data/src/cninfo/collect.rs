@@ -661,8 +661,37 @@ fn valid_pdf_path(path: &str) -> bool {
         && (path.ends_with(".PDF") || path.ends_with(".pdf"))
 }
 
+const LISTING_NOTICE_HEADINGS: &[&str] = &["标的指数", "跟踪指数", "基金类别", "基金类型"];
+
+/// The listing notice only counts as covering the fund metadata when it writes
+/// a nonempty value for both the tracked index and the fund category. A
+/// heading with a blank value (for example `基金类型：；标的指数：`) or a
+/// heading followed by another heading leaves the metadata unstated, so the
+/// contract/prospectus download is not suppressed.
 fn listing_notice_covers_metadata(text: &str) -> bool {
-    let has_index = text.contains("标的指数") || text.contains("跟踪指数");
-    let has_category = text.contains("基金类别") || text.contains("基金类型");
-    has_index && has_category
+    states_listing_value(text, &["标的指数", "跟踪指数"])
+        && states_listing_value(text, &["基金类别", "基金类型"])
+}
+
+/// True when any occurrence of `headings` is followed by a value containing at
+/// least one alphanumeric character before the next line break, sentence
+/// separator or listing-notice heading.
+fn states_listing_value(text: &str, headings: &[&str]) -> bool {
+    headings.iter().any(|heading| {
+        text.match_indices(heading).any(|(start, _)| {
+            let after = &text[start + heading.len()..];
+            let value =
+                after.trim_start_matches(|c: char| c.is_whitespace() || c == ':' || c == '：');
+            let value = value
+                .split(['\n', '\r', '；', ';', '。'])
+                .next()
+                .unwrap_or_default();
+            let end = LISTING_NOTICE_HEADINGS
+                .iter()
+                .filter_map(|other| value.find(other))
+                .min()
+                .unwrap_or(value.len());
+            value[..end].chars().any(char::is_alphanumeric)
+        })
+    })
 }
