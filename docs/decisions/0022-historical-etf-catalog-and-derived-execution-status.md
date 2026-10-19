@@ -19,6 +19,10 @@
 
 #201 实现 `szse-etf-frozen@3`、独立来源/参考价表及受 #172 §3 约束的补位采集工具，只经合成数据验证。#203 实现 `szse-etf-frozen@4` 的逐 Session TDX 代码表和 Catalog v2 生命周期/法定全称消费；v1-v3 Normalizer 与 Catalog v1 身份保持不变。v2 只按明确版本化的法定全称/别名匹配宽基，真实名单仍需官方证据。以上未用真实数据重建或通过真实数据门禁。#202/#204 负责新版公告与公司行动契约，三方一致性不由行情 Normalizer 单独证明。采集须国内直连、同域串行间隔至少 1 秒、指数退避最多 3 次重试、如实 UA、无伪造 Cookie/Referer，连续访问拦截停源；真实字节、hash、覆盖与日志只存本机。
 
+## MVP-6 固定名单 Catalog 组装（#221）
+
+`pit_catalog_assembly` 只读本机已发布的 `szse-etf-frozen@4`、公开 `configs/mvp-6/identity.csv` 与本机 `facts/citations.csv`，离线生成 Catalog schema v2 输入并构建 Catalog。该组装是固定名单 Catalog：仅身份表中的代码进入 Catalog，日 TDX 代码表在 v2 边界推导前收窄到这些代码；名单代码缺身份行时记录排除，不虚构生命周期。代码复用须有代码表缺席间隔；连续存在只能由有证据的法定全称变更切分。公告日期来自冻结 Raw 的 `finalpage/YYYY-MM-DD/` 路径或匹配的 `announcementTime`，不使用本地 `observed_at` 或生效日；无法取得或存在歧义时失败。上市/终止与代码表差异按证据等级记录：官方证据优先并披露，二级不一致或生命周期外有价 Bar 则排除该 ETF。该组装不改变 #203 的 v1/v2 Catalog 身份或语义；仅合成测试验证，真实身份表与 v4 结果未验证。
+
 ## 背景与证据边界
 
 当前 `prajna-research` 使用 Static Universe；Domain 的 InstrumentId 已区分 Venue，但裸交易代码不能区分代码复用的不同生命周期。日线和当前在市名录不能证明历史成员、类别或开盘可成交性。交易所没有可下载的基金逐日官方行情/停复牌全集，选择以官方公告和双源行情推导，而不是等待不存在的状态产品。

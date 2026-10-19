@@ -1318,6 +1318,56 @@ pub fn read_parquet(
         .collect()
 }
 
+/// Reads one normalized table from a published dataset manifest.
+///
+/// This is the read-only counterpart of the publish path: the manifest names
+/// the table, its schema version and the DSV that addresses the Parquet file.
+/// Every returned batch must carry the same DSV in its schema metadata, so a
+/// local file cannot be substituted across dataset versions.
+pub fn read_dataset_table(
+    root: impl AsRef<Path>,
+    manifest: &crate::Manifest,
+    table_name: &str,
+) -> Result<Vec<RecordBatch>, DataError> {
+    let table = manifest
+        .core
+        .tables
+        .iter()
+        .find(|table| table.table == table_name)
+        .ok_or_else(|| err(format!("manifest is missing the {table_name} table")))?;
+    if table.schema_version != 1 {
+        return Err(err(format!(
+            "unsupported {table_name} schema version {}",
+            table.schema_version
+        )));
+    }
+    let hex = manifest
+        .dsv
+        .strip_prefix("dsv:sha256:")
+        .ok_or_else(|| err("invalid manifest DSV"))?;
+    let path = root
+        .as_ref()
+        .join("normalized")
+        .join(table_name)
+        .join(hex)
+        .join("part-00000.parquet");
+    let batches = read_parquet(&path, table_name, "1")?;
+    for batch in &batches {
+        if batch
+            .schema()
+            .metadata()
+            .get("prajna.dsv")
+            .map(String::as_str)
+            != Some(manifest.dsv.as_str())
+        {
+            return Err(err(format!(
+                "{table_name} Parquet DSV does not match the manifest"
+            )));
+        }
+    }
+    Ok(batches)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

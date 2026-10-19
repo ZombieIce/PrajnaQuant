@@ -86,4 +86,6 @@ cargo run -p prajna-data --bin prajna-cninfo-fixed --locked --offline -- \
 
 公开事实表的本地工作流使用 `~/PrajnaData/mvp-6/facts/`：`identity.csv`、`actions.csv`、`events.csv` 使用与 `configs/mvp-6/` 相同的列头；`citations.csv` 使用上面的字段级引用列，`excerpt` 是引用页上的逐字文本，`raw_sha256` 取 `collection.json` 中对应公告索引或 PDF 的冻结 hash。该目录存在时，上述命令在采集后读取 `acceptance/mvp6-coverage.json` 的已发布 v4 DSV，加载 `sessions`、`bars`、`tdx_code_table`，再写入同一 acceptance 子目录的 `facts-session.json` 与本机 `crosscheck.json`；facts 目录不存在时只写 `collection.json`。v4 中“在 code table 内但没有 Bar”且日期落在事实身份生命周期内的记录被视为 keyed no-trade；生命周期外不生成该观测。
 
+`identity.csv` 与 `citations.csv` 也是 #221 离线组装 Catalog 的输入：公告日期从同一冻结 Raw 取得（PDF 的 `finalpage/YYYY-MM-DD/` 路径或 JSON 的 `announcementTime`），不取本地 `observed_at`；身份与 TDX 代码表的差异按证据等级写入本机组装报告，无法判定的代码排除并记录。组装规则见 [`pit-universe-contract.md`](pit-universe-contract.md)。
+
 合成边界测试位于 `cargo test -p prajna-data --test cninfo_mvp6 --locked --offline`；它使用 mock HTTP、合成文本/PDF 引用、合成事实和手写 Parquet/manifest 的合成 v4 数据集，不连接真实来源。测试覆盖 Raw 不存在、公告 ID 不绑定、重复引用、页号越界、excerpt 不在引用页、excerpt 不支持记录值、空/未知字段引用、空验证者、验证时间早于采集、代码复用生命周期限定、v4 投影读取和 `crosscheck.json` 落盘。该测试不证明真实 v4 数据、真实公告、真实 PDF 排版或真实交叉核对结果。

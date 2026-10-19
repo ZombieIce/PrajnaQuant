@@ -192,6 +192,62 @@ Synthetic tests cover listing before/after eligibility, termination, codes
 outside the list, list-sensitive identities, the 61-Session boundary, and
 Vector/Fast Event daily parity. They do not use real ETF facts.
 
+### Fixed-list MVP-6 offline assembly (#221)
+
+`prajna_research::pit_catalog_assembly::assemble_mvp6_catalog` builds a Catalog
+schema-v2 input from local frozen inputs: a published `szse-etf-frozen@4`
+Dataset Version, the public `configs/mvp-6/identity.csv`, and the local
+`~/PrajnaData/mvp-6/facts/citations.csv` that binds each identity field to a
+frozen Raw announcement. The example writes the input, the built Catalog and a
+local-only assembly report:
+
+```sh
+cargo run -p prajna-research --example assemble_mvp6_catalog --locked --offline -- \
+  "$HOME/PrajnaData/mvp-6" "$DSV" "$HOME/PrajnaData/mvp-6/facts" \
+  "$HOME/PrajnaData/mvp-6/acceptance/catalog-assembly/$(date +%Y%m%dT%H%M%S)"
+```
+
+The Catalog is a **fixed-list** Catalog: only codes with an identity row enter
+it, and the daily TDX code-table snapshots are narrowed to those codes before
+the v2 validator derives lifecycle boundaries. A fixed-list code from
+`MVP6_FIXED_ETF_CANDIDATES` without an identity row is reported as an exclusion
+(`identity_missing`); it is not an un-evidenced lifecycle. Codes outside the
+identity table are out of scope for this `retrospective_static` Catalog, not
+members of a claimed complete historical universe.
+
+Lifecycle boundaries follow the v2 code-table rules. A reused code needs a
+code-table absence gap between its rows. Continuous presence can only split on
+an evidenced legal-name change; a successor row that changes neither the name
+nor the code-table presence is rejected. A row whose code-table presence starts
+before an in-window listing, whose lifecycle spans an un-evidenced prior run, or
+that has no code-table presence is excluded and reported rather than joined to
+another identity. Pre-window listings are supported; a pre-window sequence of
+multiple identity rows is not representable and is rejected.
+
+Each lifecycle's listing, termination and attribute evidence resolves to the
+frozen Raw cited for the field. The announcement date is read from the Raw's
+cninfo `finalpage/YYYY-MM-DD/` path or from the matching `announcementTime` in a
+frozen JSON page; local `observed_at` and the fact's effective date are never
+substituted. Missing or ambiguous announcement dates fail closed. The resulting
+date-only publication uses the normal P6 rule (first close of a covered Session
+strictly after the announcement date). A publication date on or after the last
+covered Session is an error.
+
+The report records listing and termination differences from the TDX code table
+(`listing_date_vs_code_table_first`, `termination_vs_code_table_presence`,
+`code_table_exit_before_termination`) with the identity's evidence level.
+Official evidence wins and the difference is disclosed; a secondary identity
+that disagrees is excluded. A priced Bar outside every evidenced lifecycle
+excludes the code under P27-19. `catalog_coverage_gaps` reports the v2 builder's
+remaining gaps; an excluded code's undecidable period is represented by the
+report's `excluded_codes` reason instead of a run-wide Catalog gap.
+
+Synthetic tests cover pre-listing, post-termination, code reuse, legal-name
+change with P6 availability, missing identity rows, TDX disagreements, secondary
+evidence exclusion, priced bars outside a lifecycle, missing/invalid v4 input,
+invalid Raw references and equivalence with a handwritten `CatalogInput`. No
+real v4 Dataset, identity table or citation manifest is validated here.
+
 Synthetic tests cover v1 compatibility and v2 code ranges/snapshots, code-table
 gaps and reuse, legal-name identity changes, exact #202 publication mapping,
 name-list matching and identity, as well as listing, termination, coverage,

@@ -8,10 +8,9 @@ use super::{
     V4DailyBar, crosscheck_v4, read_citations_csv, validate_and_convert,
 };
 use crate::{
-    Manifest, RawStore, bar_sources_from_record_batch, bars_from_record_batch, read_manifest,
-    read_parquet, sessions_from_record_batch, tdx_code_table_from_record_batch,
+    RawStore, bar_sources_from_record_batch, bars_from_record_batch, read_manifest,
+    sessions_from_record_batch, tdx_code_table_from_record_batch,
 };
-use arrow_array::RecordBatch;
 use chrono::NaiveDate;
 use prajna_domain::{Price, Session};
 use serde::Serialize;
@@ -66,7 +65,7 @@ pub fn load_v4_projection(lake_root: &Path, dsv: &str, facts: &Mvp6Facts) -> Res
     }
 
     let mut sessions = Vec::new();
-    for batch in table_batches(lake_root, &manifest, "sessions")? {
+    for batch in crate::read_dataset_table(lake_root, &manifest, "sessions")? {
         sessions.extend(sessions_from_record_batch(&batch)?);
     }
     let calendar = sessions
@@ -96,7 +95,7 @@ pub fn load_v4_projection(lake_root: &Path, dsv: &str, facts: &Mvp6Facts) -> Res
     }
 
     let mut reference_prices = BTreeMap::<(String, NaiveDate), Price>::new();
-    for batch in table_batches(lake_root, &manifest, "bar_sources")? {
+    for batch in crate::read_dataset_table(lake_root, &manifest, "bar_sources")? {
         for row in bar_sources_from_record_batch(&batch)? {
             if let Some(reference) = row.reference_price {
                 reference_prices.insert(
@@ -109,7 +108,7 @@ pub fn load_v4_projection(lake_root: &Path, dsv: &str, facts: &Mvp6Facts) -> Res
 
     let mut bars = Vec::new();
     let mut traded = BTreeSet::new();
-    for batch in table_batches(lake_root, &manifest, "bars")? {
+    for batch in crate::read_dataset_table(lake_root, &manifest, "bars")? {
         for bar in bars_from_record_batch(&batch, &sessions)? {
             let code = bar.instrument_id().symbol().to_owned();
             if !windows.contains_key(&code) {
@@ -129,7 +128,7 @@ pub fn load_v4_projection(lake_root: &Path, dsv: &str, facts: &Mvp6Facts) -> Res
     bars.sort_by(|left, right| (&left.code, left.date).cmp(&(&right.code, right.date)));
 
     let mut keyed = BTreeSet::new();
-    for batch in table_batches(lake_root, &manifest, "tdx_code_table")? {
+    for batch in crate::read_dataset_table(lake_root, &manifest, "tdx_code_table")? {
         for table in tdx_code_table_from_record_batch(&batch)? {
             if !calendar.contains(&table.session_date) {
                 return Err(format!(
@@ -299,48 +298,6 @@ fn published_local_dsv(root: &Path) -> Result<String> {
         .as_str()
         .map(str::to_owned)
         .ok_or_else(|| "local coverage report has no published DSV".into())
-}
-
-fn table_batches(
-    lake_root: &Path,
-    manifest: &Manifest,
-    table_name: &str,
-) -> Result<Vec<RecordBatch>> {
-    let table = manifest
-        .core
-        .tables
-        .iter()
-        .find(|table| table.table == table_name)
-        .ok_or_else(|| format!("v4 manifest is missing the {table_name} table"))?;
-    if table.schema_version != 1 {
-        return Err(format!(
-            "unsupported {table_name} schema version {}",
-            table.schema_version
-        )
-        .into());
-    }
-    let hex = manifest
-        .dsv
-        .strip_prefix("dsv:sha256:")
-        .ok_or("invalid v4 manifest DSV")?;
-    let path = lake_root
-        .join("normalized")
-        .join(table_name)
-        .join(hex)
-        .join("part-00000.parquet");
-    let batches = read_parquet(&path, table_name, "1")?;
-    for batch in &batches {
-        if batch
-            .schema()
-            .metadata()
-            .get("prajna.dsv")
-            .map(String::as_str)
-            != Some(manifest.dsv.as_str())
-        {
-            return Err(format!("{table_name} Parquet DSV does not match the manifest").into());
-        }
-    }
-    Ok(batches)
 }
 
 fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
