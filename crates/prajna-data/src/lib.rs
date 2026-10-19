@@ -3,6 +3,7 @@
 pub mod cninfo;
 mod frozen;
 mod manifest;
+mod mvp6_actions;
 mod mvp6_coverage;
 mod normalized;
 mod normalizer;
@@ -20,6 +21,10 @@ pub use publish::{PublishError, RebuildError, publish_dataset, rebuild_dataset};
 pub use manifest::{
     Manifest, ManifestCore, ManifestError, ManifestFile, ManifestInput, ManifestProvenance,
     ManifestTable, NormalizerIdentity, read_manifest, write_manifest,
+};
+pub use mvp6_actions::{
+    CORPORATE_ACTION_NORMALIZER_VERSION, CorporateActionPublish, default_mvp6_root,
+    publish_corporate_actions,
 };
 pub use mvp6_coverage::lock_mvp6_coverage_report;
 pub use normalized::{

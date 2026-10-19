@@ -89,3 +89,24 @@ cargo run -p prajna-data --bin prajna-cninfo-fixed --locked --offline -- \
 `identity.csv` 与 `citations.csv` 也是 #221 离线组装 Catalog 的输入：公告日期从同一冻结 Raw 取得（PDF 的 `finalpage/YYYY-MM-DD/` 路径或 JSON 的 `announcementTime`），不取本地 `observed_at`；身份与 TDX 代码表的差异按证据等级写入本机组装报告，无法判定的代码排除并记录。组装规则见 [`pit-universe-contract.md`](pit-universe-contract.md)。
 
 合成边界测试位于 `cargo test -p prajna-data --test cninfo_mvp6 --locked --offline`；它使用 mock HTTP、合成文本/PDF 引用、合成事实和手写 Parquet/manifest 的合成 v4 数据集，不连接真实来源。测试覆盖 Raw 不存在、公告 ID 不绑定、重复引用、页号越界、excerpt 不在引用页、excerpt 不支持记录值、空/未知字段引用、空验证者、验证时间早于采集、代码复用生命周期限定、v4 投影读取和 `crosscheck.json` 落盘。该测试不证明真实 v4 数据、真实公告、真实 PDF 排版或真实交叉核对结果。
+
+## MVP-6 corporate action Dataset v6（#223）
+
+`szse-etf-frozen@6` 是新增的只读消费端，不改变 v4/v5 的配置或输出身份。它把同一批 v4 行情 Raw（日历、TDX、可选的腾讯补位）与 `facts-session.json`（`contract=mvp-6-cninfo-facts-v1`）一起发布；`facts-session.dsv` 必须等于本次消费的已发布 v4 DSV，Normalizer 的 `config_sha256` 也绑定该 DSV，因此公告事实不能配到另一版行情。
+
+- `catalog_lifecycles` 决定本期范围：只有落在公告上市日（含）到终止日（含）之间的 TDX 有价 Bar 进入 Dataset。某只有事实身份的 ETF 若在公告存续期外仍有有价 Bar，整只 ETF 从本次发布排除并写 `excluded_etfs`，其余 ETF 继续（P27-19 第 2 条）。
+- `corporate_actions` 必须是 `cninfo_corporateActions_structured_v2`。`kind` 的 `dividend`、`split`/`conversion`、`liquidation` 分别映射为 `dividend`、`share_conversion`、`liquidation`；日期为 ISO-8601，可选字段保持 null。公告只有日期时，`announced_at` 取公告日收盘、`available_at` 取公告日之后第一个 Session 收盘（P6）。动作行的 `source_raw_sha256` 是 facts-session Raw，`normalization_version` 为 `szse-corporate-action@2`。
+- P21 以 TDX 除权参考价对照生命周期内上一有成交 close：参考价至少变动一个 0.001 刻度即视为跳变。除息/折算日有公告且有跳变时，还用公告的每份现金或折算比例计算期望参考价（`previous_close - cash_per_share` 或 `previous_close / split_ratio`），差异超过一个 0.001 刻度记 `announced_action_amount_mismatch`。有公告无跳变、无公告有跳变、金额/比例与跳变幅度不符、登记日与除息日前一 Session 不符、公告必填字段缺失及 `UNKNOWN` 参考价均记受影响 Session 为 `UNKNOWN`，写入 `p21_mismatches`/`unknown_sessions`，但**不阻断发布**（P27-19 第 3 条）。复合动作或金额缺失时只检查跳变存在性。总回报运行必须把 `p21.unknown_sessions` 映射为 `UNKNOWN` 并执行 UNKNOWN 底线；本 Dataset 只提供逐格报告，不代替运行门禁。生命周期首个有价 Session 没有可比前收，不算来源缺口。`checked_no_event` 只表示该 Session 未观察到跳变且没有公告动作，不证明不存在公司行动（ADR 0023）。
+- 新浪 qfq/hfq 是可选二级对拍：`acceptance/sina/collection.json` 中完成且 Raw 存在的配对才进入输入。完全没有任何新浪输入时为 `not_present`（不是“无事件”，也不是来源缺口）；已有部分输入但某只缺 qfq/hfq 配对时记 `sina_adjust_factor.source_gaps`；采集报告存在但所有结果都是 gap/未尝试、因而没有 Raw 进入 Dataset 时，Dataset 仍是 `not_present`，本机覆盖报告把 `sina_optional_crosscheck` 升级为 `source_gap` 并保留 `selection_gaps`，不把失败采集当作“未采集”。qfq/hfq 不一致、与公告金额/比例或 TDX 跳变不一致只列入 `mismatches`，不阻断。代码复用的因子序列按 Catalog 生命周期分别推导，累计值重置不当作减少错误。
+- 本机命令只读取本机冻结输入，只写本机 Raw 与 acceptance，不做网络请求：
+
+  ```sh
+  cargo run -p prajna-data --bin prajna-mvp6-publish-actions --locked --offline -- \
+    "$HOME/PrajnaData/mvp-6" "<published-v4-dsv>" \
+    "$HOME/PrajnaData/mvp-6/acceptance/cninfo-fixed/<run>/facts-session.json"
+  ```
+
+  结果写入 `normalized/` 和 manifest；`acceptance/mvp6-coverage.json` 增加 `corporate_action_dataset`、`p21`、`p21_mismatches`、`excluded_etfs`、`corporate_actions_with_missing_fields`、`tdx_out_of_scope_priced_bars`、`sina_optional_crosscheck` 与 `sina_input_selection`，不覆盖 v4 的 `dsv`，也不把 `mvp6_complete` 置真。非法新浪来源记录记为可报告的 source gap，不中止 Dataset。stdout/stderr 不输出真实代码、DSV、hash 或覆盖数。
+
+合成端到端测试位于 `cargo test -p prajna-data --test mvp6_corporate_actions --locked --offline`：3 只以上 ETF × 10 Session 覆盖分红、折算、公告字段缺失、无法解释的参考价跳变、代码复用、新浪缺失/不一致、存续期外 Bar 排除，并验证两次构建的 DSV/Manifest core 相同。仅合成数据验证；未执行真实公告与行情发布，不构成 P21 或 MVP-6 验收通过。
+
