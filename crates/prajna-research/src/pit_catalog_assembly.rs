@@ -22,7 +22,7 @@
 use crate::pit_universe::{
     AttributeFact, CatalogError, CatalogInput, CodeRange, CodeTableSnapshot, Coverage, Evidence,
     FundCategory, HistoricalCatalog, Lifecycle, LifecycleFact, MVP6_FIXED_ETF_CANDIDATES,
-    Publication, ScanObservation, ScanStatus,
+    Publication, ScanObservation, ScanStatus, in_code_scope, raw_hash,
 };
 use chrono::{DateTime, FixedOffset, NaiveDate};
 use prajna_data::cninfo::{Citation, EvidenceLevel, Mvp6Facts};
@@ -129,28 +129,38 @@ impl IdentitySeed {
         }
     }
 
-    fn lifecycle(&self, identity_start: NaiveDate, termination: Option<NaiveDate>) -> Lifecycle {
-        Lifecycle {
+    fn lifecycle(
+        &self,
+        identity_start: NaiveDate,
+        termination: Option<NaiveDate>,
+    ) -> Result<Lifecycle> {
+        let termination = match termination {
+            Some(date) => Some(LifecycleFact {
+                effective_date: date,
+                evidence: self.termination_evidence.clone().ok_or_else(|| {
+                    error(format!(
+                        "termination_date for {} has no verified Raw citation",
+                        self.code
+                    ))
+                })?,
+            }),
+            None => None,
+        };
+        Ok(Lifecycle {
             native_symbol: self.code.clone(),
             contract_raw_sha256: self.attribute_evidence.raw_sha256.clone(),
             listing: LifecycleFact {
                 effective_date: self.listing,
                 evidence: self.listing_evidence.clone(),
             },
-            termination: termination.map(|date| LifecycleFact {
-                effective_date: date,
-                evidence: self
-                    .termination_evidence
-                    .clone()
-                    .expect("termination date has termination evidence"),
-            }),
+            termination,
             attributes: vec![self.attribute()],
             identity_start: Some(identity_start),
             identity_end_exclusive: None,
             code_table_first_seen: None,
             code_table_last_seen: None,
             code_table_exit_date: None,
-        }
+        })
     }
 }
 
@@ -171,6 +181,13 @@ struct PlannedLifecycle {
     name_change: bool,
 }
 
+struct Plan {
+    lifecycles: Vec<PlannedLifecycle>,
+    excluded: BTreeMap<String, String>,
+    differences: Vec<IdentityDifference>,
+    notes: Vec<String>,
+}
+
 /// Builds a fixed-list MVP-6 Catalog from local frozen inputs.
 ///
 /// `root` is the local data root (`~/PrajnaData/mvp-6`), which contains both the
@@ -183,15 +200,39 @@ pub fn assemble_mvp6_catalog(
     citations: &[Citation],
 ) -> Result<CatalogAssembly> {
     let raw = RawStore::open(root).map_err(|e| error(e.to_string()))?;
+    let identity_rows = facts.identities.len();
+    let unresolved_org = facts
+        .identities
+        .iter()
+        .filter(|fact| fact.org_id.trim().is_empty())
+        .map(|fact| fact.code.clone())
+        .collect::<BTreeSet<_>>();
+    let mut filtered = facts.clone();
+    if !unresolved_org.is_empty() {
+        filtered
+            .identities
+            .retain(|fact| !unresolved_org.contains(&fact.code));
+    }
+    // Validate only rows that can become lifecycles; an unresolved orgId is a
+    // P27-19 exclusion, not a table-wide failure.
+    validate_citations(&filtered, citations)?;
     let v4 = load_v4(root, dsv)?;
-    let seeds = parse_identities(&v4, facts, citations, &raw)?;
-    let (planned, excluded_codes, differences, notes) = plan(&v4, &seeds)?;
-    if planned.is_empty() {
+    let seeds = parse_identities(&v4, &filtered, citations, &raw)?;
+    let mut plan = plan(&v4, &seeds)?;
+    for code in unresolved_org {
+        plan.notes
+            .retain(|note| !note.starts_with(&format!("{code}: ")));
+        plan.notes.push(format!(
+            "{code}: excluded from the Catalog (org_id_unresolved)"
+        ));
+        plan.excluded.insert(code, "org_id_unresolved".to_owned());
+    }
+    if plan.lifecycles.is_empty() {
         return Err(error(
             "no identity row can be assembled into a Catalog lifecycle",
         ));
     }
-    let input = build_input(&v4, &planned, citations)?;
+    let input = build_input(&v4, &plan, citations)?;
     let catalog =
         HistoricalCatalog::build(input.clone(), &raw).map_err(|e| error(e.to_string()))?;
     let report = CatalogAssemblyReport {
@@ -199,16 +240,17 @@ pub fn assemble_mvp6_catalog(
         dsv: v4.dsv.clone(),
         catalog_version: catalog.version().map_err(|e| error(e.to_string()))?,
         rule_version: ASSEMBLY_RULE_VERSION.into(),
-        identity_rows: facts.identities.len(),
+        identity_rows,
         lifecycles: input.lifecycles.len(),
-        included_codes: planned
+        included_codes: plan
+            .lifecycles
             .iter()
             .map(|lifecycle| lifecycle.seed.code.clone())
             .collect(),
-        excluded_codes,
-        differences,
+        excluded_codes: plan.excluded,
+        differences: plan.differences,
         catalog_coverage_gaps: catalog.coverage_gaps().clone(),
-        notes,
+        notes: plan.notes,
     };
     Ok(CatalogAssembly {
         input,
@@ -323,6 +365,45 @@ fn load_v4(root: &Path, dsv: &str) -> Result<V4Data> {
     })
 }
 
+/// Rejects duplicate `(fact_source, field)` citations and requires every
+/// identity row's own `source_page` to be bound to one of its field citations.
+/// `read_citations_csv` already enforces uniqueness; this also protects
+/// programmatic callers.
+fn validate_citations(facts: &Mvp6Facts, citations: &[Citation]) -> Result<()> {
+    let mut seen = BTreeSet::new();
+    for citation in citations {
+        if !seen.insert((citation.fact_source(), citation.field())) {
+            return Err(error(format!(
+                "duplicate Raw citation for {} field {}",
+                citation.fact_source(),
+                citation.field()
+            )));
+        }
+    }
+    for fact in &facts.identities {
+        let page = fact
+            .source_page
+            .parse::<u32>()
+            .map_err(|_| error(format!("invalid source_page for {}", fact.code)))?;
+        if !citations.iter().any(|citation| {
+            citation.fact_source() == fact.source_announcement_id
+                && citation.announcement_id() == fact.source_announcement_id
+                && citation.page() == page
+        }) {
+            return Err(error(format!(
+                "source_page {page} of {} is not bound to a cited field",
+                fact.source_announcement_id
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Identity dates are legal dates, not necessarily covered Sessions: a
+/// pre-window listing predates the v4 calendar. #229's calendar bound is
+/// therefore not applied here; the v2 code-table boundaries still come from the
+/// covered Sessions, and `Evidence::available_at` resolves the publication date
+/// against the declared calendar.
 fn parse_identities(
     v4: &V4Data,
     facts: &Mvp6Facts,
@@ -331,7 +412,7 @@ fn parse_identities(
 ) -> Result<Vec<IdentitySeed>> {
     let mut seeds = Vec::new();
     for fact in &facts.identities {
-        if !code_in_ranges(&fact.code, &v4.code_ranges) {
+        if !in_code_scope(&fact.code, &v4.code_ranges) {
             return Err(error(format!(
                 "identity code {} is outside the v4 configured code ranges",
                 fact.code
@@ -350,6 +431,9 @@ fn parse_identities(
                 &fact.code,
             )?)
         };
+        // #203 rejects a termination on or before the listing date; #229's
+        // facts validator only rejects strictly earlier dates. This assembly
+        // applies the stricter #203 rule here so the failure is explicit.
         if termination.is_some_and(|end| end <= listing) {
             return Err(error(format!(
                 "termination_date must follow listing_date for {}",
@@ -358,14 +442,14 @@ fn parse_identities(
         }
         let evidence_level = parse_evidence_level(&fact.evidence_level, &fact.code)?;
         let code_citation = citation(citations, &fact.source_announcement_id, "code")?;
-        if !normalized(code_citation.excerpt()).contains(&normalized(&fact.code)) {
+        if !without_whitespace(code_citation.excerpt()).contains(&without_whitespace(&fact.code)) {
             return Err(error(format!(
                 "code {} is not supported by its cited excerpt",
                 fact.code
             )));
         }
         let org_citation = citation(citations, &fact.source_announcement_id, "org_id")?;
-        if !normalized(org_citation.excerpt()).contains(&normalized(&fact.org_id)) {
+        if !without_whitespace(org_citation.excerpt()).contains(&without_whitespace(&fact.org_id)) {
             return Err(error(format!(
                 "org_id for {} is not supported by its cited excerpt",
                 fact.code
@@ -395,7 +479,8 @@ fn parse_identities(
         };
         let attribute = citation(citations, &fact.source_announcement_id, "legal_name")?;
         let attribute_evidence = evidence(raw, attribute, "identity.csv legal_name")?;
-        if !normalized(attribute.excerpt()).contains(&normalized(&fact.legal_name)) {
+        if !without_whitespace(attribute.excerpt()).contains(&without_whitespace(&fact.legal_name))
+        {
             return Err(error(format!(
                 "legal_name {} is not supported by its cited excerpt",
                 fact.legal_name
@@ -403,7 +488,9 @@ fn parse_identities(
         }
         if !fact.tracked_index.trim().is_empty() {
             let index = citation(citations, &fact.source_announcement_id, "tracked_index")?;
-            if !normalized(index.excerpt()).contains(&normalized(&fact.tracked_index)) {
+            if !without_whitespace(index.excerpt())
+                .contains(&without_whitespace(&fact.tracked_index))
+            {
                 return Err(error(format!(
                     "tracked_index {} is not supported by its cited excerpt",
                     fact.tracked_index
@@ -442,16 +529,7 @@ fn parse_identities(
 /// a code-table absence gap; a continuous presence can only split on an
 /// evidenced legal-name change. Anything else is excluded and reported rather
 /// than joining two identities.
-#[allow(clippy::type_complexity)]
-fn plan(
-    v4: &V4Data,
-    seeds: &[IdentitySeed],
-) -> Result<(
-    Vec<PlannedLifecycle>,
-    BTreeMap<String, String>,
-    Vec<IdentityDifference>,
-    Vec<String>,
-)> {
+fn plan(v4: &V4Data, seeds: &[IdentitySeed]) -> Result<Plan> {
     let mut by_code = BTreeMap::<String, Vec<&IdentitySeed>>::new();
     for seed in seeds {
         by_code.entry(seed.code.clone()).or_default().push(seed);
@@ -460,12 +538,23 @@ fn plan(
     let mut excluded = BTreeMap::new();
     let mut differences = Vec::new();
     let mut notes = Vec::new();
+    let all_codes = v4
+        .code_tables
+        .iter()
+        .flat_map(|table| table.native_symbols.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    let out_of_scope = all_codes
+        .iter()
+        .filter(|code| !by_code.contains_key(*code))
+        .count();
+    if out_of_scope > 0 {
+        notes.push(format!(
+            "{out_of_scope} TDX code(s) outside the assembled identity set were not assembled"
+        ));
+    }
     for code in MVP6_FIXED_ETF_CANDIDATES {
         if !by_code.contains_key(code) {
             excluded.insert(code.to_owned(), "identity_missing".to_owned());
-            notes.push(format!(
-                "{code}: no identity row; excluded from the fixed list"
-            ));
         }
     }
     for (code, rows) in &by_code {
@@ -494,10 +583,27 @@ fn plan(
         let runs = presence_runs(v4, code);
         if runs.is_empty() {
             excluded.insert(code.clone(), "code_table_absent".to_owned());
+            for row in &rows {
+                differences.push(IdentityDifference {
+                    code: code.clone(),
+                    kind: "code_table_absent".into(),
+                    expected_date: Some(row.listing),
+                    observed_date: None,
+                    evidence_level: Some(row.evidence_level),
+                    resolution: "excluded".into(),
+                });
+            }
             notes.push(format!(
                 "{code}: identity row exists but the v4 code table never contains the code"
             ));
             continue;
+        }
+        for row in &rows {
+            if row.termination.is_some_and(|end| end > v4.last_session) {
+                notes.push(format!(
+                    "{code}: termination_date is after the covered window; omitted from the Catalog lifecycle"
+                ));
+            }
         }
         match align_runs(code, &rows, &runs, v4, &mut differences) {
             Ok(aligned) => {
@@ -514,22 +620,17 @@ fn plan(
         }
     }
 
-    // Remaining fixed-list codes without an identity row but present in the
-    // published code table are reported under the same exclusion.
-    for code in MVP6_FIXED_ETF_CANDIDATES {
-        if !excluded.contains_key(code)
-            && !planned.iter().any(|lifecycle| lifecycle.seed.code == code)
-            && !presence_runs(v4, code).is_empty()
-        {
-            excluded.insert(code.to_owned(), "identity_missing".to_owned());
-        }
-    }
     for (code, reason) in &excluded {
         if !planned.iter().any(|lifecycle| lifecycle.seed.code == *code) {
             notes.push(format!("{code}: excluded from the Catalog ({reason})"));
         }
     }
-    Ok((planned, excluded, differences, notes))
+    Ok(Plan {
+        lifecycles: planned,
+        excluded,
+        differences,
+        notes,
+    })
 }
 
 #[allow(clippy::type_complexity)]
@@ -541,7 +642,6 @@ fn align_runs(
     differences: &mut Vec<IdentityDifference>,
 ) -> std::result::Result<(Vec<PlannedLifecycle>, Option<String>, Vec<String>), String> {
     let mut assigned = Vec::<(usize, NaiveDate, bool, usize)>::new();
-    let notes = Vec::new();
     for (index, row) in rows.iter().enumerate() {
         let run_index = if index == 0 {
             let containing = runs
@@ -677,7 +777,7 @@ fn align_runs(
                 return Ok((
                     Vec::new(),
                     Some("secondary_listing_disagrees_with_code_table".into()),
-                    notes,
+                    Vec::new(),
                 ));
             }
         }
@@ -722,7 +822,7 @@ fn align_runs(
                     return Ok((
                         Vec::new(),
                         Some("secondary_termination_disagrees_with_code_table".into()),
-                        notes,
+                        Vec::new(),
                     ));
                 }
             }
@@ -742,11 +842,11 @@ fn align_runs(
         return Ok((
             Vec::new(),
             Some(format!("priced_bar_outside_lifecycle:{date}")),
-            notes,
+            Vec::new(),
         ));
     }
 
-    Ok((lifecycles, None, notes))
+    Ok((lifecycles, None, Vec::new()))
 }
 
 fn outside_lifecycle_bar(
@@ -757,7 +857,8 @@ fn outside_lifecycle_bar(
     let dates = v4.bar_dates.get(code)?;
     dates.iter().copied().find(|date| {
         !lifecycles.iter().any(|lifecycle| {
-            *date >= lifecycle.seed.listing
+            *date >= lifecycle.seed.listing.max(lifecycle.identity_start)
+                && lifecycle.end_exclusive.is_none_or(|end| *date < end)
                 && lifecycle
                     .seed
                     .termination
@@ -766,11 +867,8 @@ fn outside_lifecycle_bar(
     })
 }
 
-fn build_input(
-    v4: &V4Data,
-    planned: &[PlannedLifecycle],
-    citations: &[Citation],
-) -> Result<CatalogInput> {
+fn build_input(v4: &V4Data, plan: &Plan, citations: &[Citation]) -> Result<CatalogInput> {
+    let planned = &plan.lifecycles;
     let included = planned
         .iter()
         .map(|lifecycle| lifecycle.seed.code.clone())
@@ -778,11 +876,17 @@ fn build_input(
     let lifecycles = planned
         .iter()
         .map(|lifecycle| {
+            // A termination after the covered window cannot be resolved against
+            // the frozen calendar and does not affect any in-window decision.
+            let termination = lifecycle
+                .seed
+                .termination
+                .filter(|date| *date <= v4.last_session);
             lifecycle
                 .seed
-                .lifecycle(lifecycle.identity_start, lifecycle.seed.termination)
+                .lifecycle(lifecycle.identity_start, termination)
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>>>()?;
 
     let mut scans = Vec::new();
     for lifecycle in planned {
@@ -893,7 +997,11 @@ fn build_input(
             scan_method: ASSEMBLY_SCAN_METHOD.into(),
             announcement_method: ASSEMBLY_ANNOUNCEMENT_METHOD.into(),
             announcement_raw_sha256,
-            gaps: BTreeSet::new(),
+            gaps: plan
+                .excluded
+                .iter()
+                .map(|(code, reason)| format!("mvp6_excluded:{code}:{reason}"))
+                .collect(),
             resolutions: vec![],
         },
         lifecycles,
@@ -1000,7 +1108,7 @@ fn publication_date(raw: &RawStore, citation: &Citation) -> Result<NaiveDate> {
         .map_err(|e| error(e.to_string()))?
     {
         if let Some(url) = record.request.get("url").and_then(Value::as_str)
-            && let Some(date) = adjunct_date(url)
+            && let Some(date) = cninfo_adjunct_date(url)
         {
             dates.insert(date);
         }
@@ -1021,7 +1129,7 @@ fn publication_date(raw: &RawStore, citation: &Citation) -> Result<NaiveDate> {
     }
 }
 
-fn adjunct_date(url: &str) -> Option<NaiveDate> {
+fn cninfo_adjunct_date(url: &str) -> Option<NaiveDate> {
     let (_, rest) = url.split_once("finalpage/")?;
     NaiveDate::parse_from_str(rest.get(..10)?, "%Y-%m-%d").ok()
 }
@@ -1142,7 +1250,7 @@ fn fund_category(value: &str) -> FundCategory {
 fn date_supported(excerpt: &str, date: NaiveDate) -> bool {
     use chrono::Datelike;
     let (year, month, day) = (date.year(), date.month(), date.day());
-    let excerpt = normalized(excerpt);
+    let excerpt = without_whitespace(excerpt);
     [
         date.to_string(),
         format!("{year}/{month:02}/{day:02}"),
@@ -1151,31 +1259,12 @@ fn date_supported(excerpt: &str, date: NaiveDate) -> bool {
         format!("{year}年{month:02}月{day:02}日"),
     ]
     .iter()
-    .any(|form| excerpt.contains(&normalized(form)))
+    .any(|form| excerpt.contains(&without_whitespace(form)))
 }
 
-fn normalized(value: &str) -> String {
+fn without_whitespace(value: &str) -> String {
     value
         .chars()
         .filter(|character| !character.is_whitespace())
         .collect()
-}
-
-fn code_in_ranges(code: &str, ranges: &[CodeRange]) -> bool {
-    code.len() == 6
-        && code.bytes().all(|byte| byte.is_ascii_digit())
-        && code.parse::<u32>().is_ok_and(|value| {
-            ranges
-                .iter()
-                .any(|range| range.start <= value && value <= range.end)
-        })
-}
-
-fn raw_hash(value: &str) -> bool {
-    value.strip_prefix("sha256:").is_some_and(|hex| {
-        hex.len() == 64
-            && hex
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    })
 }

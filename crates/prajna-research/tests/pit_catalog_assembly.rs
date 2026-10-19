@@ -13,10 +13,7 @@ use prajna_data::{
     write_parquet,
 };
 use prajna_domain::{Bar, BarData, InstrumentId, Price, Quantity, Session, TimestampNs, VenueId};
-use prajna_research::pit_catalog_assembly::{
-    ASSEMBLY_ANNOUNCEMENT_METHOD, ASSEMBLY_RULE_VERSION, ASSEMBLY_SCAN_METHOD,
-    assemble_mvp6_catalog,
-};
+use prajna_research::pit_catalog_assembly::assemble_mvp6_catalog;
 use prajna_research::pit_universe::{
     AttributeFact, CatalogInput, CodeRange, CodeTableSnapshot, Coverage, Evidence,
     FixedUniverseSpec, FundCategory, Lifecycle, LifecycleFact, Publication, ScanObservation,
@@ -517,7 +514,12 @@ fn missing_identity_row_is_excluded_and_reported() {
     );
     assert!(!assembly.report.included_codes.contains("159522"));
     assert_eq!(assembly.report.lifecycles, 4);
-    assert!(assembly.catalog.coverage_gaps().is_empty());
+    assert!(
+        assembly
+            .catalog
+            .coverage_gaps()
+            .contains("mvp6_excluded:159522:identity_missing")
+    );
     let fixed = mvp6_fixed();
     let result = assembly.catalog.fixed_universe(d(2), &fixed).unwrap();
     assert_eq!(result.members.len(), 4);
@@ -526,6 +528,10 @@ fn missing_identity_row_is_excluded_and_reported() {
             .members
             .iter()
             .any(|member| member.symbol().starts_with("159522"))
+    );
+    assert_eq!(
+        result.run_spec.fixed_list_exclusions.as_ref().unwrap()["159522"],
+        "identity_missing"
     );
 }
 
@@ -597,8 +603,27 @@ fn listing_and_termination_disagreements_are_graded_by_evidence() {
     );
     assert!(!assembly.report.included_codes.contains("159952"));
     assert!(assembly.catalog.resolve_row("159952", d(5)).is_err());
-    assert!(assembly.catalog.resolve_row("159919", d(2)).is_err());
+    // The official listing date (S2) is retained even though the first TDX
+    // appearance is S3; the fixed-list selector honors the announcement.
+    let listing_lifecycle = assembly
+        .input
+        .lifecycles
+        .iter()
+        .find(|lifecycle| lifecycle.native_symbol == "159919")
+        .unwrap();
+    assert_eq!(listing_lifecycle.listing.effective_date, d(2));
+    assert_eq!(listing_lifecycle.identity_start, Some(d(3)));
     assert!(assembly.catalog.resolve_row("159919", d(3)).is_ok());
+    let fixed = mvp6_fixed();
+    assert!(
+        assembly
+            .catalog
+            .fixed_universe(d(2), &fixed)
+            .unwrap()
+            .members
+            .iter()
+            .any(|member| member.symbol().starts_with("159919"))
+    );
     assert!(assembly.catalog.resolve_row("159612", d(6)).is_err());
     assert!(assembly.catalog.resolve_row("159612", d(5)).is_ok());
 }
@@ -654,15 +679,12 @@ fn missing_or_invalid_inputs_fail_closed() {
     let hash = world.citations[0].raw_sha256().to_owned();
     let hex = hash.strip_prefix("sha256:").unwrap();
     fs::remove_file(world.root.join("raw/sha256").join(&hex[..2]).join(hex)).unwrap();
+    let error = assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations)
+        .unwrap_err()
+        .to_string();
     assert!(
-        assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations)
-            .unwrap_err()
-            .to_string()
-            .contains("unavailable")
-            || assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations)
-                .unwrap_err()
-                .to_string()
-                .contains("I/O")
+        error.contains("unavailable") || error.contains("I/O"),
+        "{error}"
     );
 
     let empty = Mvp6Facts {
@@ -766,7 +788,193 @@ fn identity_without_code_table_presence_is_excluded() {
             .map(String::as_str),
         Some("code_table_absent")
     );
+    assert!(
+        assembly
+            .catalog
+            .coverage_gaps()
+            .contains("mvp6_excluded:159952:code_table_absent")
+    );
+    assert!(assembly.report.differences.iter().any(|difference| {
+        difference.code == "159952"
+            && difference.kind == "code_table_absent"
+            && difference.resolution == "excluded"
+    }));
     assert!(assembly.report.included_codes.contains("159919"));
+}
+
+#[test]
+fn termination_after_the_covered_window_is_omitted() {
+    let world = world(
+        &[row("159919", "合成ETF", 1, Some(5), 1, "", "official")],
+        &[(1, &["159919"]), (2, &["159919"]), (3, &["159919"])],
+        &[("159919", &[1, 2, 3])],
+    );
+    let assembly =
+        assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations).unwrap();
+    assert!(assembly.input.lifecycles[0].termination.is_none());
+    assert!(
+        assembly
+            .report
+            .notes
+            .iter()
+            .any(|note| note.contains("termination_date is after the covered window"))
+    );
+}
+
+#[test]
+fn priced_bar_after_code_table_exit_is_excluded() {
+    let world = world(
+        &[
+            row("159919", "合成ETF", 1, Some(8), 1, "", "official"),
+            row("159612", "合成红利ETF", 1, None, 1, "", "official"),
+        ],
+        &[
+            (1, &["159919", "159612"]),
+            (2, &["159919", "159612"]),
+            (3, &["159919", "159612"]),
+            (4, &["159612"]),
+            (5, &["159612"]),
+        ],
+        &[("159919", &[1, 2, 3, 5]), ("159612", &[1, 2, 3, 4, 5])],
+    );
+    let assembly =
+        assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations).unwrap();
+    assert!(
+        assembly
+            .report
+            .excluded_codes
+            .get("159919")
+            .is_some_and(|reason| reason.starts_with("priced_bar_outside_lifecycle"))
+    );
+    assert!(!assembly.report.included_codes.contains("159919"));
+    assert_eq!(
+        assembly.report.included_codes,
+        BTreeSet::from(["159612".to_owned()])
+    );
+}
+
+#[test]
+fn missing_or_ambiguous_announcement_date_fails_closed() {
+    let world = world(
+        &[row("159919", "合成ETF", 1, None, 1, "", "official")],
+        &[(1, &["159919"]), (2, &["159919"])],
+        &[("159919", &[1, 2])],
+    );
+    let raw = RawStore::open(&world.root).unwrap();
+    let source = "src-159919-0";
+    let document = format!("公告编号：{source}\n基金代码：159919\n上市日期：2023-01-01");
+    let hash = raw
+        .put(
+            document.as_bytes(),
+            SourceRecordInput {
+                content_type: "application/octet-stream".into(),
+                source_kind: SourceKind::Fixture,
+                source_id: "cninfo".into(),
+                request: json!({"url": "https://example.test/no-announcement-date"}),
+                observed_at: "synthetic".into(),
+                ingested_by: "synthetic".into(),
+            },
+        )
+        .unwrap();
+    let replacement = cite(&raw, &hash, source, "listing_date", "上市日期：2023-01-01");
+    let citations = world
+        .citations
+        .iter()
+        .filter(|citation| {
+            !(citation.fact_source() == source && citation.field() == "listing_date")
+        })
+        .cloned()
+        .chain(std::iter::once(replacement))
+        .collect::<Vec<_>>();
+    let error = assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &citations)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("cannot evidence the announcement date"),
+        "{error}"
+    );
+
+    let hash = world.citations[0].raw_sha256().to_owned();
+    let bytes = raw.get(&hash).unwrap();
+    raw.put(
+        &bytes,
+        SourceRecordInput {
+            content_type: "application/octet-stream".into(),
+            source_kind: SourceKind::Fixture,
+            source_id: "cninfo".into(),
+            request: json!({
+                "url": "https://static.cninfo.com.cn/finalpage/2023-01-02/src-159919-0.PDF"
+            }),
+            observed_at: "synthetic".into(),
+            ingested_by: "synthetic".into(),
+        },
+    )
+    .unwrap();
+    let error = assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("ambiguous announcement dates"), "{error}");
+}
+
+#[test]
+fn pre_window_listing_is_available_at_the_first_covered_session() {
+    let world = world(
+        &[row("159919", "合成ETF", 1, None, 1, "", "official")],
+        &[(2, &["159919"]), (3, &["159919"])],
+        &[("159919", &[2, 3])],
+    );
+    let assembly =
+        assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations).unwrap();
+    assert_eq!(assembly.input.lifecycles[0].listing.effective_date, d(1));
+    assert_eq!(assembly.input.lifecycles[0].identity_start, Some(d(2)));
+    let fixed =
+        FixedUniverseSpec::new("synthetic-fixed@1", BTreeSet::from(["159919".to_owned()])).unwrap();
+    assert_eq!(
+        assembly
+            .catalog
+            .fixed_universe(d(2), &fixed)
+            .unwrap()
+            .members
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn unresolved_org_id_is_excluded_instead_of_failing_the_run() {
+    let world = world(
+        &[
+            row("159919", "合成ETF", 1, None, 1, "", "official"),
+            row("159952", "合成科创ETF", 1, None, 1, "", "official"),
+        ],
+        &[(1, &["159919", "159952"]), (2, &["159919", "159952"])],
+        &[("159919", &[1, 2]), ("159952", &[1, 2])],
+    );
+    let mut facts = world.facts.clone();
+    facts
+        .identities
+        .iter_mut()
+        .find(|fact| fact.code == "159952")
+        .unwrap()
+        .org_id
+        .clear();
+    let assembly =
+        assemble_mvp6_catalog(&world.root, &world.dsv, &facts, &world.citations).unwrap();
+    assert_eq!(
+        assembly
+            .report
+            .excluded_codes
+            .get("159952")
+            .map(String::as_str),
+        Some("org_id_unresolved")
+    );
+    assert!(assembly.report.included_codes.contains("159919"));
+    assert!(
+        assembly
+            .catalog
+            .coverage_gaps()
+            .contains("mvp6_excluded:159952:org_id_unresolved")
+    );
 }
 
 #[test]
@@ -792,7 +1000,7 @@ fn assembled_input_matches_an_equivalent_handwritten_input() {
     }];
     let expected = CatalogInput {
         schema_version: 2,
-        rule_version: ASSEMBLY_RULE_VERSION.into(),
+        rule_version: "mvp6-catalog-assembly@1".into(),
         calendar_start: announcement.min(d(1)),
         calendar_end: d(3),
         calendar_raw_sha256: world.manifest_inputs.clone(),
@@ -800,10 +1008,13 @@ fn assembled_input_matches_an_equivalent_handwritten_input() {
         coverage: Coverage {
             start: d(1),
             end: d(3),
-            scan_method: ASSEMBLY_SCAN_METHOD.into(),
-            announcement_method: ASSEMBLY_ANNOUNCEMENT_METHOD.into(),
+            scan_method: "mvp6-tdx-v4@1: filtered to identity-table codes; first/last traded Session per evidenced lifecycle".into(),
+            announcement_method: "mvp6-cninfo-fixed-list@1: per-field frozen Raw citations; no pagination completeness claim".into(),
             announcement_raw_sha256: BTreeSet::from([hash.clone()]),
-            gaps: BTreeSet::new(),
+            gaps: ["159560", "159522", "159612", "159952"]
+                .into_iter()
+                .map(|code| format!("mvp6_excluded:{code}:identity_missing"))
+                .collect(),
             resolutions: Vec::new(),
         },
         lifecycles: vec![Lifecycle {

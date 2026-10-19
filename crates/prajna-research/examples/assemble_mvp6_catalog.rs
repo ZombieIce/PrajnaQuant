@@ -20,10 +20,17 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let output = Path::new(&args[4]);
 
     let raw = RawStore::open(root)?;
+    // The Catalog only consumes identity rows. The action/event tables are
+    // optional here; fall back to the public header-only templates so a
+    // Catalog-only local run does not need unrelated fact files.
+    let actions = fs::read_to_string(facts_dir.join("actions.csv"))
+        .unwrap_or_else(|_| include_str!("../../../configs/mvp-6/actions.csv").into());
+    let events = fs::read_to_string(facts_dir.join("events.csv"))
+        .unwrap_or_else(|_| include_str!("../../../configs/mvp-6/events.csv").into());
     let facts = Mvp6Facts::from_csv(
         &fs::read_to_string(facts_dir.join("identity.csv"))?,
-        &fs::read_to_string(facts_dir.join("actions.csv"))?,
-        &fs::read_to_string(facts_dir.join("events.csv"))?,
+        &actions,
+        &events,
     )?;
     let mut converter = Poppler;
     let citations = read_citations_csv(

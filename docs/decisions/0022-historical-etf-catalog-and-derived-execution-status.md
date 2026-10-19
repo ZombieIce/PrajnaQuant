@@ -21,7 +21,7 @@
 
 ## MVP-6 固定名单 Catalog 组装（#221）
 
-`pit_catalog_assembly` 只读本机已发布的 `szse-etf-frozen@4`、公开 `configs/mvp-6/identity.csv` 与本机 `facts/citations.csv`，离线生成 Catalog schema v2 输入并构建 Catalog。该组装是固定名单 Catalog：仅身份表中的代码进入 Catalog，日 TDX 代码表在 v2 边界推导前收窄到这些代码；名单代码缺身份行时记录排除，不虚构生命周期。代码复用须有代码表缺席间隔；连续存在只能由有证据的法定全称变更切分。公告日期来自冻结 Raw 的 `finalpage/YYYY-MM-DD/` 路径或匹配的 `announcementTime`，不使用本地 `observed_at` 或生效日；无法取得或存在歧义时失败。上市/终止与代码表差异按证据等级记录：官方证据优先并披露，二级不一致或生命周期外有价 Bar 则排除该 ETF。该组装不改变 #203 的 v1/v2 Catalog 身份或语义；仅合成测试验证，真实身份表与 v4 结果未验证。
+`pit_catalog_assembly` 只读本机已发布的 `szse-etf-frozen@4`、公开 `configs/mvp-6/identity.csv` 与本机 `facts/citations.csv`，离线生成 Catalog schema v2 输入并构建 Catalog。该组装是固定名单 Catalog：仅身份表中的代码进入 Catalog，日 TDX 代码表在 v2 边界推导前收窄到这些代码；名单代码缺身份行时记录排除，不虚构生命周期。代码复用须有代码表缺席间隔；连续存在只能由有证据的法定全称变更切分。公告日期来自冻结 Raw 的 `finalpage/YYYY-MM-DD/` 路径或匹配的 `announcementTime`，不使用本地 `observed_at` 或生效日；无法取得或存在歧义时失败。上市/终止与代码表差异按证据等级记录：官方证据优先并披露，二级不一致或生命周期外有价 Bar 则排除该 ETF（含代码表退出至终止之间的区间）；空 orgId 按 P27-19 排除该 ETF。每个排除代码写入 `mvp6_excluded:<code>:<reason>` 覆盖缺口，`fixed_universe` 将其转为逐代码排除并写入 `fixed_list_exclusions`，其他缺口继续整次失败。官方上市日早于 TDX 首次出现时保留为 `listing`，物理 `identity_start` 仍是 TDX 边界；晚于无法解释的 TDX 出现则排除。非终止的续接身份行作为有证据的全称变更边界，由 v2 构建器重新核验。该组装不改变 #203 的 v1/v2 Catalog 身份或语义；仅合成测试验证，真实身份表与 v4 结果未验证。
 
 ## 背景与证据边界
 

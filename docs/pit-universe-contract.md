@@ -222,7 +222,21 @@ nor the code-table presence is rejected. A row whose code-table presence starts
 before an in-window listing, whose lifecycle spans an un-evidenced prior run, or
 that has no code-table presence is excluded and reported rather than joined to
 another identity. Pre-window listings are supported; a pre-window sequence of
-multiple identity rows is not representable and is rejected.
+multiple identity rows is not representable and is rejected. A non-terminated
+successor row is accepted as an evidenced name-change boundary even though
+#229's overlapping-lifecycle validator does not model that shape; #203's v2
+builder re-derives the boundary and fails closed if the code table and name
+facts do not support it.
+
+An official listing date earlier than the first TDX code-table appearance stays
+in `Lifecycle.listing`; the physical `identity_start` remains the TDX
+appearance, so `resolve_row` has no price row before it. The fixed-list selector
+uses the listing date for membership (P27-19), so that Session can be a member
+with no price row and is reported as UNKNOWN by the coverage layer. An official
+listing later than an unexplained TDX presence cannot be represented without
+inventing a pre-listing identity, so the code is excluded.
+An identity row with an empty `org_id` is excluded as `org_id_unresolved`
+(P27-19) instead of failing the run.
 
 Each lifecycle's listing, termination and attribute evidence resolves to the
 frozen Raw cited for the field. The lifecycle's `contract_raw_sha256` is the
@@ -241,14 +255,20 @@ The report records listing and termination differences from the TDX code table
 `code_table_exit_before_termination`) with the identity's evidence level.
 Official evidence wins and the difference is disclosed; a secondary identity
 that disagrees is excluded. A priced Bar outside every evidenced lifecycle
-excludes the code under P27-19. `catalog_coverage_gaps` reports the v2 builder's
-remaining gaps; an excluded code's undecidable period is represented by the
-report's `excluded_codes` reason instead of a run-wide Catalog gap.
+excludes the code under P27-19 (including the interval between a code-table exit
+and a later termination). Every excluded code adds a code-scoped
+`mvp6_excluded:<code>:<reason>` coverage gap. `fixed_universe` turns that gap
+into a per-code exclusion and records the reason in
+`run_spec.fixed_list_exclusions`; other gaps remain run-wide failures. The local
+assembly report also lists the reason in `excluded_codes`, and the report must be
+read alongside the Run Spec so the exclusion is auditable.
 
-Synthetic tests cover pre-listing, post-termination, code reuse, legal-name
-change with P6 availability, missing identity rows, TDX disagreements, secondary
-evidence exclusion, priced bars outside a lifecycle, missing/invalid v4 input,
-invalid Raw references and equivalence with a handwritten `CatalogInput`. No
+Synthetic tests cover pre-window and in-window listing, post-termination, code
+reuse, legal-name change with P6 availability, missing identity rows, unresolved
+orgIds, TDX disagreements, secondary evidence exclusion, code-table absence
+differences, priced bars outside a lifecycle (including after a code-table
+exit), missing/ambiguous announcement dates, missing/invalid v4 input, invalid
+Raw references and equivalence with a handwritten `CatalogInput`. No
 real v4 Dataset, identity table or citation manifest is validated here.
 
 Synthetic tests cover v1 compatibility and v2 code ranges/snapshots, code-table

@@ -30,7 +30,7 @@ fn hash<T: Serialize>(prefix: &str, value: &T) -> Result<String> {
     let bytes = restricted_jcs(&value).map_err(|e| error(e.to_string()))?;
     Ok(format!("{prefix}:sha256:{:x}", Sha256::digest(bytes)))
 }
-fn raw_hash(value: &str) -> bool {
+pub(crate) fn raw_hash(value: &str) -> bool {
     value.strip_prefix("sha256:").is_some_and(|hex| {
         hex.len() == 64
             && hex
@@ -127,7 +127,7 @@ fn valid_szse_code(code: &str) -> bool {
     code.len() == 6 && code.bytes().all(|b| b.is_ascii_digit())
 }
 
-fn in_code_scope(code: &str, ranges: &[CodeRange]) -> bool {
+pub(crate) fn in_code_scope(code: &str, ranges: &[CodeRange]) -> bool {
     code.len() == 6
         && code.bytes().all(|b| b.is_ascii_digit())
         && code.parse::<u32>().is_ok_and(|value| {
@@ -1181,6 +1181,21 @@ impl HistoricalCatalog {
                 // into a run-wide coverage failure.
                 continue;
             }
+            // The fixed-list assembler records undecidable identities as
+            // code-scoped gaps. They exclude that code from this retrospective
+            // static list instead of failing every other instrument.
+            if let Some(detail) = gap.strip_prefix("mvp6_excluded:")
+                && let Some((code, reason)) = detail.split_once(':')
+                && scoped(code)
+            {
+                if fixed_codes.contains(code) {
+                    lifecycle_conflicts
+                        .entry(code.to_owned())
+                        .or_default()
+                        .insert(reason.to_owned());
+                }
+                continue;
+            }
             blocking_gaps.insert(gap.clone());
         }
         if !blocking_gaps.is_empty() {
@@ -1220,7 +1235,10 @@ impl HistoricalCatalog {
                 Some(reason.as_str())
             } else if !effective_codes.contains(&life.native_symbol) {
                 Some("outside_fixed_list")
-            } else if session_date < life.listing.effective_date.max(life.identity_start()) {
+            } else if session_date < life.listing.effective_date {
+                // P27-19: the official listing date wins for fixed-list
+                // membership. A missing price row before the first TDX
+                // appearance is an UNKNOWN Session, not a silent deletion.
                 Some("before_listing")
             } else if life.listing.evidence.available_at(&self.input)? > now {
                 Some("listing_not_known")
