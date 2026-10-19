@@ -137,9 +137,7 @@ pub fn crosscheck_v4(facts: &Mvp6Facts, bars: &[V4DailyBar]) -> CrosscheckReport
         }
     }
     for event in &facts.events {
-        // Daily keyed no-trade can only confirm a full-day halt; a morning or
-        // open-ended partial halt still trades later that session.
-        if event.kind != "suspension" || event.session_part != "full_day" {
+        if event.kind != "suspension" {
             continue;
         }
         let Ok(expected) = NaiveDate::parse_from_str(&event.effective_date, "%Y-%m-%d") else {
@@ -152,6 +150,11 @@ pub fn crosscheck_v4(facts: &Mvp6Facts, bars: &[V4DailyBar]) -> CrosscheckReport
                 Some(expected),
                 None,
             ));
+            continue;
+        }
+        // Daily keyed no-trade can only confirm a full-day halt; a morning or
+        // open-ended partial halt still trades later that session.
+        if event.session_part != "full_day" {
             continue;
         }
         if let Some(bar) = bars

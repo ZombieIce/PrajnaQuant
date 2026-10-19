@@ -20,14 +20,47 @@ use std::{
     sync::OnceLock,
 };
 
+/// The declared observation window and the frozen sessions inside it.
+///
+/// Publication dates may fall anywhere inside the declared window, including
+/// days that are not sessions; trade-related dates must be frozen sessions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FactCalendar {
+    pub sessions: BTreeSet<NaiveDate>,
+    pub window_start: NaiveDate,
+    pub window_end: NaiveDate,
+}
+
+impl FactCalendar {
+    pub fn new(
+        sessions: BTreeSet<NaiveDate>,
+        window_start: NaiveDate,
+        window_end: NaiveDate,
+    ) -> Result<Self> {
+        if sessions.is_empty() {
+            return Err("frozen calendar is empty".into());
+        }
+        if window_start > window_end {
+            return Err("fact window start is after its end".into());
+        }
+        Ok(Self {
+            sessions,
+            window_start,
+            window_end,
+        })
+    }
+}
+
 /// Validate public fact tables against the frozen open-session calendar and
 /// the verified field citations, then build versioned consumer inputs.
 pub fn validate_and_convert(
     facts: &Mvp6Facts,
     citations: &[Citation],
-    calendar: &BTreeSet<NaiveDate>,
+    calendar: &FactCalendar,
 ) -> Result<Mvp6Session> {
-    calendar_bounds(calendar)?;
+    if calendar.sessions.is_empty() {
+        return Err("frozen calendar is empty".into());
+    }
     let mut index = BTreeMap::<(String, String), &Citation>::new();
     for citation in citations {
         if index
@@ -115,7 +148,7 @@ pub fn validate_and_convert(
         let pay = parse_optional_date(&row.pay_date, "pay_date")?;
         for (name, date) in [("record_date", record), ("ex_date", ex), ("pay_date", pay)] {
             if let Some(date) = date {
-                validate_date(date, calendar, name)?;
+                validate_date(date, &calendar.sessions, name)?;
             }
         }
         validate_decimal(&row.cash_per_share, "cash_per_share", false)?;
@@ -164,7 +197,7 @@ pub fn validate_and_convert(
         let announcement = parse_date(&row.announcement_date, "announcement_date")?;
         let effective = parse_date(&row.effective_date, "effective_date")?;
         validate_publication_date(announcement, calendar, "announcement_date")?;
-        validate_date(effective, calendar, "effective_date")?;
+        validate_date(effective, &calendar.sessions, "effective_date")?;
         row_evidence(
             &index,
             &row.source_announcement_id,
@@ -470,31 +503,19 @@ fn parse_optional_date(value: &str, field: &str) -> Result<Option<NaiveDate>> {
     }
 }
 
-fn calendar_bounds(calendar: &BTreeSet<NaiveDate>) -> Result<(NaiveDate, NaiveDate)> {
-    let (Some(&first), Some(&last)) = (calendar.first(), calendar.last()) else {
-        return Err("frozen calendar is empty".into());
-    };
-    Ok((first, last))
-}
-
 /// Publication dates are calendar dates, not exchange sessions: funds publish
-/// notices on weekends and holidays. The date must still fall inside the frozen
-/// observation window; trade-related dates use [`validate_date`].
-fn validate_publication_date(
-    date: NaiveDate,
-    calendar: &BTreeSet<NaiveDate>,
-    field: &str,
-) -> Result<()> {
-    let (first, last) = calendar_bounds(calendar)?;
-    if date >= first && date <= last {
+/// notices on weekends and holidays. The date must still fall inside the
+/// declared observation window, not merely between the first and last session.
+fn validate_publication_date(date: NaiveDate, calendar: &FactCalendar, field: &str) -> Result<()> {
+    if date >= calendar.window_start && date <= calendar.window_end {
         Ok(())
     } else {
-        Err(format!("{field} outside frozen window: {date}").into())
+        Err(format!("{field} outside declared window: {date}").into())
     }
 }
 
-fn validate_date(date: NaiveDate, calendar: &BTreeSet<NaiveDate>, field: &str) -> Result<()> {
-    if calendar.contains(&date) {
+fn validate_date(date: NaiveDate, sessions: &BTreeSet<NaiveDate>, field: &str) -> Result<()> {
+    if sessions.contains(&date) {
         Ok(())
     } else {
         Err(format!("{field} outside frozen calendar: {date}").into())
@@ -507,13 +528,11 @@ fn validate_date(date: NaiveDate, calendar: &BTreeSet<NaiveDate>, field: &str) -
 /// confirm boundaries that fall inside the window. Trade-related action and
 /// event dates stay strictly inside the frozen sessions; publication dates are
 /// checked by [`validate_publication_date`].
-fn validate_lifecycle_date(
-    date: NaiveDate,
-    calendar: &BTreeSet<NaiveDate>,
-    field: &str,
-) -> Result<()> {
-    let (first, last) = calendar_bounds(calendar)?;
-    if calendar.contains(&date) || date < first || date > last {
+fn validate_lifecycle_date(date: NaiveDate, calendar: &FactCalendar, field: &str) -> Result<()> {
+    if calendar.sessions.contains(&date)
+        || date < calendar.window_start
+        || date > calendar.window_end
+    {
         Ok(())
     } else {
         Err(format!("{field} outside frozen calendar: {date}").into())
@@ -563,12 +582,22 @@ mod tests {
         assert!(field_supported("split_ratio", "2", "每份基金份额拆分为2份").is_err());
     }
 
-    #[test]
-    fn lifecycle_boundaries_may_predate_the_frozen_window_but_not_gap_inside_it() {
-        let calendar = ["2026-01-05", "2026-01-07"]
+    fn window() -> FactCalendar {
+        let sessions = ["2026-01-05", "2026-01-07"]
             .into_iter()
             .map(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").unwrap())
             .collect::<BTreeSet<_>>();
+        FactCalendar::new(
+            sessions,
+            NaiveDate::from_ymd_opt(2026, 1, 5).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 1, 7).unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn lifecycle_boundaries_may_predate_the_declared_window_but_not_gap_inside_it() {
+        let calendar = window();
         assert!(
             validate_lifecycle_date(
                 NaiveDate::from_ymd_opt(2012, 5, 28).unwrap(),
@@ -596,18 +625,40 @@ mod tests {
     }
 
     #[test]
-    fn publication_dates_need_the_window_but_not_a_session() {
-        let calendar = ["2026-01-05", "2026-01-07"]
-            .into_iter()
-            .map(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").unwrap())
-            .collect::<BTreeSet<_>>();
-        let saturday = NaiveDate::from_ymd_opt(2026, 1, 6).unwrap();
-        assert!(validate_publication_date(saturday, &calendar, "announcement_date").is_ok());
-        assert!(validate_date(saturday, &calendar, "ex_date").is_err());
+    fn publication_dates_use_the_declared_window_not_the_session_span() {
+        let calendar = window();
+        let non_session = NaiveDate::from_ymd_opt(2026, 1, 6).unwrap();
+        assert!(validate_publication_date(non_session, &calendar, "announcement_date").is_ok());
+        assert!(validate_date(non_session, &calendar.sessions, "ex_date").is_err());
         assert!(
             validate_publication_date(
                 NaiveDate::from_ymd_opt(2026, 1, 8).unwrap(),
                 &calendar,
+                "announcement_date"
+            )
+            .is_err()
+        );
+
+        // A window may open before the first frozen session (the MVP-6 window
+        // starts on 2022-10-01 but the first session is 2022-10-10).
+        let early = FactCalendar::new(
+            calendar.sessions.clone(),
+            NaiveDate::from_ymd_opt(2026, 1, 4).unwrap(),
+            calendar.window_end,
+        )
+        .unwrap();
+        assert!(
+            validate_publication_date(
+                NaiveDate::from_ymd_opt(2026, 1, 4).unwrap(),
+                &early,
+                "announcement_date"
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_publication_date(
+                NaiveDate::from_ymd_opt(2026, 1, 3).unwrap(),
+                &early,
                 "announcement_date"
             )
             .is_err()
