@@ -170,139 +170,208 @@ impl<T: Transport> Collector<T> {
             unresolved: Vec::new(),
         };
         for candidate in candidates {
-            if !scoped_code(&candidate.code) || candidate.active_start > candidate.active_end {
-                result
-                    .unresolved
-                    .push(format!("{}:invalid_candidate", candidate.code));
-                continue;
-            }
-            let resolution = match self.resolve_fixed_org_ids(candidate) {
-                Ok(value) if !value.is_empty() => OrgIdResolution {
-                    code: candidate.code.clone(),
-                    org_ids: value,
-                    status: "resolved".into(),
-                },
-                Ok(_) => OrgIdResolution {
-                    code: candidate.code.clone(),
-                    org_ids: Vec::new(),
-                    status: "org_id_unresolved".into(),
-                },
-                Err(_) => OrgIdResolution {
-                    code: candidate.code.clone(),
-                    org_ids: Vec::new(),
-                    status: "org_id_unresolved".into(),
-                },
-            };
-            if resolution.org_ids.is_empty() {
-                result
-                    .unresolved
-                    .push(format!("{}:org_id_unresolved", candidate.code));
-                result.resolutions.push(resolution);
-                continue;
-            }
-            for org_id in &resolution.org_ids {
-                let mut by_id = BTreeMap::<String, Announcement>::new();
-                let mut pagination_incomplete = false;
-                for (start, end) in year_segments(candidate.active_start, candidate.active_end) {
-                    let window = format!("{}~{}", start, end);
-                    match self.pages_for(&window, &format!("{},{}", candidate.code, org_id), "") {
-                        Ok((items, _)) => {
-                            for item in items {
-                                if item.code != candidate.code
-                                    || item.org_id.as_deref() != Some(org_id)
-                                {
-                                    pagination_incomplete = true;
-                                    continue;
-                                }
-                                by_id.insert(item.id.clone(), item);
-                            }
-                        }
-                        Err(_) => pagination_incomplete = true,
-                    }
-                }
-                if pagination_incomplete {
-                    result
-                        .unresolved
-                        .push(format!("{}:{org_id}:pagination_incomplete", candidate.code));
-                }
-                let mut items = by_id.into_values().collect::<Vec<_>>();
-                items.sort_by(|a, b| (a.announced_ms, &a.id).cmp(&(b.announced_ms, &b.id)));
-                for item in &mut items {
-                    item.categories = classify_mvp6(&item.title);
-                }
-                let mut listing_notice_complete = false;
-                for item in &items {
-                    if item.categories.iter().any(|c| c == "listing_notice") {
-                        if let Some(path) = item.attachment.as_deref().filter(|p| valid_pdf_path(p))
-                        {
-                            match self.fetch(Request {
-                                url: format!("{PDF}{path}"),
-                                form: BTreeMap::new(),
-                            }) {
-                                Ok((bytes, hash)) if bytes.starts_with(b"%PDF-") => {
-                                    let complete = match converter.text(&bytes) {
-                                        Ok(text) => listing_notice_covers_metadata(&text),
-                                        Err(_) => {
-                                            result
-                                                .unresolved
-                                                .push(format!("{}:pdf_unavailable", item.id));
-                                            false
-                                        }
-                                    };
-                                    listing_notice_complete |= complete;
-                                    result
-                                        .pdf_raw_sha256_by_announcement
-                                        .entry(item.id.clone())
-                                        .or_default()
-                                        .push(hash);
-                                }
-                                _ => result
-                                    .unresolved
-                                    .push(format!("{}:pdf_unavailable", item.id)),
-                            }
-                        } else {
-                            result
-                                .unresolved
-                                .push(format!("{}:pdf_unavailable", item.id));
-                        }
-                    } else if should_download_pdf(&item.categories, false, false)
-                        && !item
-                            .categories
-                            .iter()
-                            .any(|c| c == "fund_contract" || c == "prospectus")
-                    {
-                        self.download_mvp6_pdf(item, &mut result);
-                    }
-                }
-                for item in &items {
-                    let explicitly_requested = item
-                        .categories
-                        .iter()
-                        .any(|c| explicit_pdf_categories.contains(c));
-                    if !item
-                        .categories
-                        .iter()
-                        .any(|c| c == "fund_contract" || c == "prospectus")
-                        || !should_download_pdf(
-                            &item.categories,
-                            listing_notice_complete,
-                            explicitly_requested,
-                        )
-                        || result.pdf_raw_sha256_by_announcement.contains_key(&item.id)
-                    {
-                        continue;
-                    }
-                    self.download_mvp6_pdf(item, &mut result);
-                }
-                result
-                    .announcements
-                    .insert((candidate.code.clone(), org_id.clone()), items);
-            }
-            result.resolutions.push(resolution);
+            self.collect_fixed_candidate(
+                candidate,
+                explicit_pdf_categories,
+                converter,
+                &mut result,
+            );
         }
         result.unresolved.sort();
         result.unresolved.dedup();
         result
+    }
+
+    fn collect_fixed_candidate(
+        &mut self,
+        candidate: &FundCandidate,
+        explicit_pdf_categories: &BTreeSet<String>,
+        converter: &mut impl PdfText,
+        result: &mut FixedListResult,
+    ) {
+        if !scoped_code(&candidate.code) || candidate.active_start > candidate.active_end {
+            result
+                .unresolved
+                .push(format!("{}:invalid_candidate", candidate.code));
+            return;
+        }
+
+        let org_ids = self.resolve_fixed_org_ids(candidate).unwrap_or_default();
+        let resolution = OrgIdResolution {
+            code: candidate.code.clone(),
+            status: if org_ids.is_empty() {
+                "org_id_unresolved"
+            } else {
+                "resolved"
+            }
+            .into(),
+            org_ids,
+        };
+        if resolution.org_ids.is_empty() {
+            result
+                .unresolved
+                .push(format!("{}:org_id_unresolved", candidate.code));
+        } else {
+            for org_id in &resolution.org_ids {
+                self.collect_fixed_org(
+                    candidate,
+                    org_id,
+                    explicit_pdf_categories,
+                    converter,
+                    result,
+                );
+            }
+        }
+        result.resolutions.push(resolution);
+    }
+
+    fn collect_fixed_org(
+        &mut self,
+        candidate: &FundCandidate,
+        org_id: &str,
+        explicit_pdf_categories: &BTreeSet<String>,
+        converter: &mut impl PdfText,
+        result: &mut FixedListResult,
+    ) {
+        let items = self.fixed_org_announcements(candidate, org_id, result);
+        let listing_notice_complete = self.collect_listing_notice_pdfs(&items, converter, result);
+        self.download_primary_mvp6_pdfs(&items, result);
+        self.download_supplementary_mvp6_pdfs(
+            &items,
+            listing_notice_complete,
+            explicit_pdf_categories,
+            result,
+        );
+        result
+            .announcements
+            .insert((candidate.code.clone(), org_id.to_owned()), items);
+    }
+
+    fn fixed_org_announcements(
+        &mut self,
+        candidate: &FundCandidate,
+        org_id: &str,
+        result: &mut FixedListResult,
+    ) -> Vec<Announcement> {
+        let mut by_id = BTreeMap::<String, Announcement>::new();
+        let mut pagination_incomplete = false;
+        for (start, end) in year_segments(candidate.active_start, candidate.active_end) {
+            let window = format!("{start}~{end}");
+            match self.pages_for(&window, &format!("{},{}", candidate.code, org_id), "") {
+                Ok((items, _)) => {
+                    for item in items {
+                        if item.code != candidate.code || item.org_id.as_deref() != Some(org_id) {
+                            pagination_incomplete = true;
+                            continue;
+                        }
+                        by_id.insert(item.id.clone(), item);
+                    }
+                }
+                Err(_) => pagination_incomplete = true,
+            }
+        }
+        if pagination_incomplete {
+            result
+                .unresolved
+                .push(format!("{}:{org_id}:pagination_incomplete", candidate.code));
+        }
+
+        let mut items = by_id.into_values().collect::<Vec<_>>();
+        items.sort_by(|a, b| (a.announced_ms, &a.id).cmp(&(b.announced_ms, &b.id)));
+        for item in &mut items {
+            item.categories = classify_mvp6(&item.title);
+        }
+        items
+    }
+
+    fn collect_listing_notice_pdfs(
+        &mut self,
+        items: &[Announcement],
+        converter: &mut impl PdfText,
+        result: &mut FixedListResult,
+    ) -> bool {
+        let mut listing_notice_complete = false;
+        for item in items
+            .iter()
+            .filter(|item| item.categories.iter().any(|c| c == "listing_notice"))
+        {
+            let Some(path) = item
+                .attachment
+                .as_deref()
+                .filter(|path| valid_pdf_path(path))
+            else {
+                result
+                    .unresolved
+                    .push(format!("{}:pdf_unavailable", item.id));
+                continue;
+            };
+            match self.fetch(Request {
+                url: format!("{PDF}{path}"),
+                form: BTreeMap::new(),
+            }) {
+                Ok((bytes, hash)) if bytes.starts_with(b"%PDF-") => {
+                    match converter.text(&bytes) {
+                        Ok(text) => {
+                            listing_notice_complete |= listing_notice_covers_metadata(&text);
+                        }
+                        Err(_) => result
+                            .unresolved
+                            .push(format!("{}:pdf_unavailable", item.id)),
+                    }
+                    result
+                        .pdf_raw_sha256_by_announcement
+                        .entry(item.id.clone())
+                        .or_default()
+                        .push(hash);
+                }
+                _ => result
+                    .unresolved
+                    .push(format!("{}:pdf_unavailable", item.id)),
+            }
+        }
+        listing_notice_complete
+    }
+
+    fn download_primary_mvp6_pdfs(&mut self, items: &[Announcement], result: &mut FixedListResult) {
+        for item in items.iter().filter(|item| {
+            should_download_pdf(&item.categories, false, false)
+                && !item
+                    .categories
+                    .iter()
+                    .any(|c| c == "fund_contract" || c == "prospectus")
+                && !item.categories.iter().any(|c| c == "listing_notice")
+        }) {
+            self.download_mvp6_pdf(item, result);
+        }
+    }
+
+    fn download_supplementary_mvp6_pdfs(
+        &mut self,
+        items: &[Announcement],
+        listing_notice_complete: bool,
+        explicit_pdf_categories: &BTreeSet<String>,
+        result: &mut FixedListResult,
+    ) {
+        for item in items {
+            let explicitly_requested = item
+                .categories
+                .iter()
+                .any(|category| explicit_pdf_categories.contains(category));
+            let is_supplementary = item
+                .categories
+                .iter()
+                .any(|category| category == "fund_contract" || category == "prospectus");
+            let should_download = is_supplementary
+                && should_download_pdf(
+                    &item.categories,
+                    listing_notice_complete,
+                    explicitly_requested,
+                )
+                && !result.pdf_raw_sha256_by_announcement.contains_key(&item.id);
+            if should_download {
+                self.download_mvp6_pdf(item, result);
+            }
+        }
     }
 
     fn download_mvp6_pdf(&mut self, item: &Announcement, result: &mut FixedListResult) {
