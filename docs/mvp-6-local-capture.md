@@ -127,6 +127,70 @@ entries state that the TDX observation is `missing`. Do not include a keyed TDX
 no-trade observation in that plan. The tool requires the confirmed direct
 domestic network path and keeps its JSONL request log and response bytes local.
 
+## Validate public facts and cross-check v4
+
+Put the three public fact tables and the citation manifest under the local data
+root; none of these files belong in the repository. The candidate CSV is passed
+as the command argument and stays wherever the operator keeps it.
+
+```text
+~/PrajnaData/mvp-6/facts/identity.csv
+~/PrajnaData/mvp-6/facts/actions.csv
+~/PrajnaData/mvp-6/facts/events.csv
+~/PrajnaData/mvp-6/facts/citations.csv
+```
+
+`citations.csv` has one row per fact field:
+`fact_source,field,announcement_id,page,raw_sha256,excerpt,verified_by,verified_at`.
+`fact_source` is the fact row's `source_announcement_id`; `announcement_id`
+is the frozen document that states the field and may differ from it, for
+example when `code`/`org_id` come from the frozen index response and the
+listing date from the listing-notice PDF. `excerpt` is verbatim text from the
+cited page; whitespace is ignored when matching. A citation is accepted only
+when:
+
+- the Raw object exists with that hash and its bytes or request provenance
+  reference `announcement_id`; collected MVP-6 PDFs record that binding in
+  their frozen provenance;
+- the page exists in the frozen document (PDF pages come from the local text
+  converter; a non-PDF Raw is page 1) and the excerpt occurs on that page;
+- `verified_by` names the operator and `verified_at` is an RFC 3339 time that
+  does not precede the Raw capture time;
+- the recorded field value is recoverable from the excerpt: dates in ISO or
+  Chinese form, decimals as an equal number, other text literally. `kind` must
+  be an announcement category that the excerpt classifies into (`split` and
+  `conversion` share the 拆分/折算 category). `fund_category` and
+  `session_part` are not literal source text: their excerpt must still be on
+  the page, and the named verifier attests the mapping.
+
+Every populated fact field needs its own citation. A duplicate field, an
+unknown field, a citation for a field the row leaves empty, or a row whose
+`source_page` is not bound to one of its citations fails validation. PDF
+citations require `pdftotext`, the same converter the collector uses. Build
+hashes from the `source_raw_sha256` or `pdf_raw_sha256_by_announcement` values
+in the local cninfo `collection.json`.
+
+```sh
+cargo run -p prajna-data --bin prajna-cninfo-fixed --locked --offline -- \
+  /absolute/local/path/fixed-candidates.csv \
+  "<operator-confirmed direct domestic egress description>" \
+  "fund_contract,prospectus"
+```
+
+When `facts/` exists, the command reads the published v4 DSV from
+`acceptance/mvp6-coverage.json`, loads the `sessions`, `bars`, `bar_sources` and
+`tdx_code_table` tables, validates the fact tables, and writes
+`facts-session.json` plus the local-only `crosscheck.json` next to
+`collection.json`. A code-table observation inside any fact lifecycle with no
+Bar is treated as a keyed no-trade observation; dates outside all lifecycles
+for that code are not invented. The cross-check compares listing and termination
+with traded Bars, action ex-dates with `bar_sources.reference_price` against the
+previous traded close at the 0.001 tick, and suspension facts with keyed
+no-trade observations. Each comparison is scoped to the identity lifecycle that
+owns the date: a reused fund code's earlier Bars never move the next lifecycle's
+listing/termination boundary and never supply its prior-close baseline. The
+cross-check never edits the facts or the v4 Dataset.
+
 The coverage report must keep P21 comparisons and unknown rule sessions marked
 unresolved until the corresponding source facts and rule evidence have been
 checked. Publishing the v4 market DSV alone is not full MVP-6 acceptance.
