@@ -27,6 +27,7 @@ use prajna_domain::{
     Bar, BarData, Currency, InstrumentId, InstrumentKind, InstrumentSpec, InstrumentSpecData,
     Notional, Price, Quantity, Session, TimestampNs, VenueId,
 };
+use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use zip::ZipArchive;
@@ -34,8 +35,9 @@ use zip::ZipArchive;
 use crate::{
     AnnouncementRow, CorporateActionKind, CorporateActionRow, NormalizationIssue,
     NormalizationOutput, NormalizedTables, SourceCrosscheckRow, SourceKind, SourceRecord,
-    announcements_to_record_batch, bars_to_record_batch, corporate_actions_to_record_batch,
-    instruments_to_record_batch, sessions_to_record_batch,
+    announcements_to_record_batch, bars_to_record_batch,
+    cninfo::Mvp6Session,
+    corporate_actions_to_record_batch, instruments_to_record_batch, sessions_to_record_batch,
     sina_adjust_factor::{AdjustmentEvent, LifecycleRange, parse_adjustment_series_for_lifecycles},
     source_crosscheck_to_record_batch,
 };
@@ -65,6 +67,8 @@ pub struct SzseEtfFrozen {
     version: &'static str,
     code_ranges: Vec<(u32, u32)>,
     lifecycles: Vec<LifecycleRange>,
+    /// V6 binds the exact published v4 market Dataset Version it consumes.
+    market_dsv: Option<String>,
 }
 
 impl SzseEtfFrozen {
@@ -73,6 +77,7 @@ impl SzseEtfFrozen {
             version: "1",
             code_ranges: vec![(159000, 159999)],
             lifecycles: Vec::new(),
+            market_dsv: None,
         }
     }
     pub(super) fn v2() -> Self {
@@ -80,6 +85,7 @@ impl SzseEtfFrozen {
             version: "2",
             code_ranges: vec![(159000, 159999)],
             lifecycles: Vec::new(),
+            market_dsv: None,
         }
     }
     /// Configure inclusive Shenzhen ETF code ranges. The canonical ranges enter
@@ -98,6 +104,7 @@ impl SzseEtfFrozen {
             version: "3",
             code_ranges,
             lifecycles: Vec::new(),
+            market_dsv: None,
         })
     }
 
@@ -136,6 +143,23 @@ impl SzseEtfFrozen {
         Ok(normalizer)
     }
 
+    /// V6 consumes the validated `cninfo_corporateActions_structured_v2` facts
+    /// session (#229) instead of announcement-index corporate actions. Sina is
+    /// an optional cross-check: missing pair data is a reported gap, never
+    /// `no event`, and inconsistencies are listed instead of failing the
+    /// publish. P21 outcomes are evaluated into coverage; mismatches mark
+    /// affected cells `UNKNOWN` and never abort the Dataset.
+    pub fn v6(market_dsv: impl Into<String>) -> Result<Self, String> {
+        let market_dsv = market_dsv.into();
+        if !valid_dsv(&market_dsv) {
+            return Err("v6 requires the exact published v4 DSV identity".into());
+        }
+        let mut normalizer = Self::v4(vec![(158000, 159999)])?;
+        normalizer.version = "6";
+        normalizer.market_dsv = Some(market_dsv);
+        Ok(normalizer)
+    }
+
     fn lifecycle(&self, symbol: &str, date: NaiveDate) -> Option<&LifecycleRange> {
         self.lifecycles
             .iter()
@@ -161,6 +185,55 @@ impl Normalizer for SzseEtfFrozen {
     }
 
     fn config_sha256(&self) -> String {
+        if self.version == "6" {
+            let mut config: Value = serde_json::from_str(CONFIG_V2).expect("static config");
+            // V6 does not consume the older announcement index; remove its
+            // contract keys so the config does not imply otherwise.
+            if let Value::Object(fields) = &mut config {
+                for key in [
+                    "announcement_available_at",
+                    "announcement_category",
+                    "announcement_date",
+                    "action_unknown_fields",
+                ] {
+                    fields.remove(key);
+                }
+            }
+            config["actions"] = json!("cninfo_corporateActions_structured_v2");
+            config["inputs"] = json!("vendor_originals_plus_validated_cninfo_facts");
+            config["corporate_action_facts"] = json!("mvp-6-cninfo-facts-v1");
+            config["corporate_action_availability"] =
+                json!("next_session_close_after_announcement_date");
+            config["market_dsv"] = json!(self.market_dsv);
+            config["lifecycle_source"] = json!("cninfo_facts_catalog_lifecycles");
+            config["code_scope"] = json!(self.code_ranges);
+            config["bars"] = json!("tdx_primary_tencent_missing_cell_only@1");
+            config["reference_price"] = json!("tdx_f64@4_exchange_ex_rights_reference");
+            config["source_table"] = json!("bar_sources@1");
+            config["crosscheck"] = json!("diagnostic_only");
+            config["fallback_amount"] = json!("null_missing_session_not_zero");
+            config["tdx_no_trade"] = json!("tdx_key_blocks_fallback_including_zero_volume");
+            config["p21"] = json!({
+                "version": "p21-corporate-action-integrity@1",
+                "action_source": "cninfo_corporateActions_structured_v2",
+                "reference_jump": "tdx_ex_rights_reference_vs_previous_traded_close_one_tick",
+                "mismatch": "unknown_not_error",
+                "missing_reference": "unknown_not_error",
+                "incomplete_action": "unknown_not_error",
+                "checked_no_event": "no_reference_jump_and_no_announced_action_at_session_only",
+            });
+            config["sina_adjust_factor"] = json!({
+                "mode": "optional_crosscheck",
+                "mismatch": "report_not_fail",
+                "missing": "not_present_or_source_gap_not_no_event",
+                "event_derivation": "u_adjacent_difference_s_adjacent_ratio@1",
+                "lifecycle_split": "before_event_derivation",
+            });
+            return format!(
+                "sha256:{:x}",
+                Sha256::digest(crate::restricted_jcs(&config).expect("static config"))
+            );
+        }
         if matches!(self.version, "3" | "4" | "5") {
             let mut config: Value = serde_json::from_str(CONFIG_V2).expect("static config");
             config["code_scope"] = json!(self.code_ranges);
@@ -261,6 +334,54 @@ struct ActionSource<'a> {
     allow_sina_values: bool,
 }
 
+/// `facts-session.json` written by the #229 local acceptance step. The `dsv`
+/// binds these facts to one exact v4 market Dataset; a mismatch rejects the
+/// publish instead of silently pairing facts with a different market input.
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct FactsSessionDocument {
+    contract: String,
+    dsv: String,
+    session: Mvp6Session,
+}
+
+impl FactsSessionDocument {
+    /// Shared by the publisher and the Normalizer so both enforce the same
+    /// contract, DSV binding and v2 envelope before any table is built.
+    pub(crate) fn parse(bytes: &[u8], expected_dsv: &str) -> Result<Self, (&'static str, String)> {
+        let document: Self = serde_json::from_slice(bytes).map_err(|error| {
+            (
+                "invalid_corporate_action_facts",
+                format!("facts session does not match the v1 contract: {error}"),
+            )
+        })?;
+        if document.contract != "mvp-6-cninfo-facts-v1" {
+            return Err((
+                "invalid_corporate_action_facts",
+                "facts session contract must be mvp-6-cninfo-facts-v1".into(),
+            ));
+        }
+        if document.dsv != expected_dsv {
+            return Err((
+                "corporate_action_market_dsv_mismatch",
+                "facts session is bound to a different v4 market DSV".into(),
+            ));
+        }
+        let envelope = &document.session.corporate_actions;
+        if envelope.schema != "cninfo_corporateActions_structured_v2" || envelope.version != 2 {
+            return Err((
+                "invalid_corporate_action_facts",
+                "corporate_actions must use the structured v2 envelope".into(),
+            ));
+        }
+        Ok(document)
+    }
+
+    pub(crate) fn session(&self) -> &Mvp6Session {
+        &self.session
+    }
+}
+
 /// A decoded fact and the smallest Raw hash that states it.
 struct Sourced<V> {
     value: V,
@@ -278,7 +399,13 @@ struct Acc {
     announcements: BTreeMap<String, Sourced<Announcement>>,
     tdx_code_tables: BTreeMap<NaiveDate, Sourced<BTreeSet<String>>>,
     corporate_actions: Vec<ActionDraft>,
+    facts_session: Option<Sourced<FactsSessionDocument>>,
     sina_factors: BTreeMap<(String, String), Sourced<Vec<AdjustmentEvent>>>,
+    /// V6 keeps Sina bytes until Catalog lifecycles are known, then derives
+    /// events per lifecycle so a reused code's reset is not a decrease.
+    sina_raw: BTreeMap<(String, String), Sourced<Vec<u8>>>,
+    /// V6-only non-fatal Sina source gaps, kept out of the fatal issue list.
+    sina_errors: Vec<Value>,
     excluded: BTreeMap<&'static str, u64>,
 }
 
@@ -331,8 +458,8 @@ fn normalize(
     raw_inputs: &[RawInput],
     config: &SzseEtfFrozen,
 ) -> Result<NormalizationOutput, Vec<NormalizationIssue>> {
-    let include_actions = config.version != "1";
-    let v3 = matches!(config.version, "3" | "4" | "5");
+    let v6 = config.version == "6";
+    let v3 = matches!(config.version, "3" | "4" | "5" | "6");
     let venue = VenueId::new("SZSE").expect("static venue is valid");
     let mut acc = Acc::default();
     let mut duplicates = 0_u64;
@@ -358,16 +485,27 @@ fn normalize(
             .filter(|record| record.source_id == "sina_adjust_factor")
             .collect();
         if !sina_records.is_empty() {
-            if config.version != "5" {
+            if matches!(config.version, "5" | "6") {
+                for record in sina_records {
+                    if v6 {
+                        decode_sina_adjustment_v6(raw, record, &path, &mut acc, &mut duplicates);
+                    } else {
+                        decode_sina_adjustment(
+                            raw,
+                            record,
+                            &path,
+                            &mut acc,
+                            &mut duplicates,
+                            config,
+                        );
+                    }
+                }
+            } else {
                 acc.push(
                     "unsupported_sina_adjust_factor",
                     &path,
-                    "Sina adjustment factors require szse-etf-frozen v5",
+                    "Sina adjustment factors require szse-etf-frozen v5 or v6",
                 );
-                continue;
-            }
-            for record in sina_records {
-                decode_sina_adjustment(raw, record, &path, &mut acc, &mut duplicates, config);
             }
             continue;
         }
@@ -383,8 +521,26 @@ fn normalize(
             );
             continue;
         };
-        if object.contains_key("announcements") {
-            decode_cninfo(&object, raw, &path, &mut acc, &mut duplicates, config);
+        if object.get("contract").and_then(Value::as_str) == Some("mvp-6-cninfo-facts-v1") {
+            if v6 {
+                decode_facts_session(raw, &path, &mut acc, &mut duplicates, config);
+            } else {
+                acc.push(
+                    "unsupported_corporate_action_facts",
+                    &path,
+                    "corporate action facts require szse-etf-frozen v6",
+                );
+            }
+        } else if object.contains_key("announcements") {
+            if v6 {
+                // V6 takes corporate actions from the validated facts session,
+                // not from the older announcement index. Keeping the index out
+                // also avoids unrelated availability failures for a source the
+                // Dataset does not consume.
+                acc.count("announcement_index_not_consumed_in_v6");
+            } else {
+                decode_cninfo(&object, raw, &path, &mut acc, &mut duplicates, config);
+            }
         } else if object.get("data").is_some_and(Value::is_array) {
             decode_calendar(&object, raw, &path, &mut acc, &mut duplicates);
         } else if object.contains_key("code") && object.get("data").is_some_and(Value::is_object) {
@@ -406,7 +562,10 @@ fn normalize(
         secondary,
         announcements,
         corporate_actions: action_drafts,
-        sina_factors,
+        facts_session,
+        mut sina_factors,
+        mut sina_raw,
+        sina_errors: mut sina_issue_sink,
         tdx_code_tables,
         excluded,
     } = acc;
@@ -434,6 +593,60 @@ fn normalize(
             )),
         }
     }
+    // V6 derives every lifecycle and corporate action from the validated
+    // #229 facts session. Absence of the facts is a missing source, not
+    // evidence that no action occurred.
+    let mut v6_lifecycles = Vec::new();
+    let mut v6_actions = Vec::new();
+    let mut sina_errors = std::mem::take(&mut sina_issue_sink);
+    if v6 {
+        match facts_session {
+            None => issues.push(issue(
+                "missing_corporate_action_facts",
+                "$",
+                "v6 requires the mvp-6-cninfo-facts-v1 Raw object",
+            )),
+            Some(facts) => match lifecycles_from_facts(&facts.value.session) {
+                Ok(lifecycles) => {
+                    v6_actions = actions_from_facts(
+                        &facts.value.session,
+                        &calendar,
+                        &facts.raw,
+                        venue.clone(),
+                        &mut issues,
+                    );
+                    v6_lifecycles = lifecycles;
+                    // Derive Sina events per Catalog lifecycle so a reused
+                    // code's cumulative factor reset is not read as a decrease.
+                    for ((symbol, kind), source) in std::mem::take(&mut sina_raw) {
+                        let scoped: Vec<LifecycleRange> = v6_lifecycles
+                            .iter()
+                            .filter(|life| life.native_symbol == symbol)
+                            .cloned()
+                            .collect();
+                        match parse_adjustment_series_for_lifecycles(&source.value, &scoped) {
+                            Ok(events) => {
+                                sina_factors.insert(
+                                    (symbol, kind),
+                                    Sourced {
+                                        value: events,
+                                        raw: source.raw,
+                                    },
+                                );
+                            }
+                            Err(problem) => sina_errors.push(json!({
+                                "native_symbol": symbol,
+                                "adjustment_kind": kind,
+                                "reason": "sina_lifecycle_parse_failed",
+                                "detail": problem.to_string(),
+                            })),
+                        }
+                    }
+                }
+                Err(problems) => issues.extend(problems),
+            },
+        }
+    }
     // P6: a date-only announcement is knowable after the announced day's close,
     // so it is usable from the close of the first session strictly after it.
     // Every day up to that session must be covered, or an earlier unknown
@@ -445,11 +658,7 @@ fn normalize(
             category,
             date,
         } = fact.value;
-        let next = (1..)
-            .map(|offset| date + Duration::days(offset))
-            .map(|day| (day, calendar.get(&day).map(|known| known.value)))
-            .find(|(_, open)| *open != Some(false))
-            .and_then(|(day, open)| open.map(|_| day));
+        let next = next_session_after(&calendar, date);
         let Some(available_at) = next
             .and_then(|day| make_session(venue.clone(), day))
             .map(|session| session.ts_close())
@@ -507,6 +716,7 @@ fn normalize(
             normalization_version: "szse-corporate-action@1".into(),
         });
     }
+    corporate_actions.extend(v6_actions);
     let sina_event_count = if config.version == "5" {
         reconcile_sina_adjustments(
             &mut corporate_actions,
@@ -566,6 +776,52 @@ fn normalize(
         .ok_or_else(|| vec![issue("invalid_session", "$", "session cannot be built")])?;
     let session_dates: BTreeSet<NaiveDate> = sessions.iter().map(Session::session_date).collect();
     let session_by_date: BTreeMap<_, _> = sessions.iter().map(|s| (s.session_date(), s)).collect();
+
+    // V6 publishes only lifecycle-scoped fixed-list Bars. A priced TDX Bar
+    // outside the announcement-defined life of its ETF is an identity
+    // inconsistency: exclude that ETF and report it instead of failing the
+    // whole Dataset (P27-19 item 2).
+    let mut v6_out_of_scope_priced_bars = 0_u64;
+    let (primary, corporate_actions, excluded_etfs, p21, v6_sina) = if v6 {
+        let FilteredV6 {
+            primary,
+            actions: corporate_actions,
+            excluded_etfs,
+            excluded_symbols,
+            out_of_scope_priced_bars,
+        } = filter_v6_lifecycles(primary, corporate_actions, &v6_lifecycles);
+        v6_out_of_scope_priced_bars = out_of_scope_priced_bars;
+        // An excluded ETF is reported once as excluded; it has no P21 row that
+        // could be mistaken for an evaluated or clean result.
+        let p21_lifecycles: Vec<LifecycleRange> = v6_lifecycles
+            .iter()
+            .filter(|life| !excluded_symbols.contains(&life.native_symbol))
+            .cloned()
+            .collect();
+        let p21 = evaluate_p21(
+            &p21_lifecycles,
+            &primary,
+            &corporate_actions,
+            &session_dates,
+        );
+        let sina = crosscheck_sina_v6(
+            &sina_factors,
+            &p21_lifecycles,
+            &corporate_actions,
+            &primary,
+            &sina_errors,
+            &excluded_symbols,
+        );
+        (
+            primary,
+            corporate_actions,
+            excluded_etfs,
+            Some(p21),
+            Some(sina),
+        )
+    } else {
+        (primary, corporate_actions, Vec::new(), None, None)
+    };
 
     let symbols: BTreeSet<&String> = primary.keys().map(|(symbol, _)| symbol).collect();
     let currency = Currency::new("CNY").expect("static currency is valid");
@@ -676,7 +932,11 @@ fn normalize(
     let incomplete_action_fields: Vec<_> = corporate_actions
         .iter()
         .filter_map(|action| {
-            let missing = missing_action_fields(action);
+            let missing = if v6 {
+                missing_action_fields_facts(action)
+            } else {
+                missing_action_fields(action)
+            };
             (!missing.is_empty()).then(|| {
                 json!({
                     "announcement_id": action.announcement_id,
@@ -712,7 +972,7 @@ fn normalize(
         execution_status: None,
         source_crosscheck: Some(source_crosscheck_to_record_batch(&crosscheck).map_err(convert)?),
         announcements: Some(announcements_to_record_batch(&announcement_rows).map_err(convert)?),
-        corporate_actions: include_actions
+        corporate_actions: (config.version != "1")
             .then(|| corporate_actions_to_record_batch(&corporate_actions).map_err(convert))
             .transpose()?,
         tdx_code_table: (matches!(config.version, "4" | "5"))
@@ -765,12 +1025,1212 @@ fn normalize(
             ),
         });
     }
+    if let (Some(p21), Some(sina)) = (p21, v6_sina) {
+        coverage["corporate_action_version"] = json!("cninfo_corporateActions_structured_v2");
+        coverage["corporate_actions_with_missing_fields"] = json!(incomplete_action_fields);
+        coverage["excluded_etfs"] = json!(excluded_etfs);
+        coverage["tdx_out_of_scope_priced_bars"] = json!(v6_out_of_scope_priced_bars);
+        coverage["p21_mismatches"] = p21["mismatches"].clone();
+        coverage["p21"] = p21;
+        coverage["sina_adjust_factor"] = sina;
+    }
     Ok(NormalizationOutput {
         tables,
         coverage,
         synthetic_assumptions: Vec::new(),
         ignored_input_fields: Vec::new(),
     })
+}
+
+fn valid_dsv(value: &str) -> bool {
+    value.strip_prefix("dsv:sha256:").is_some_and(|hex| {
+        hex.len() == 64
+            && hex
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    })
+}
+
+/// Decodes the validated #229 facts session. The document is a public-fact
+/// projection, not an announcement index: it carries the exact v4 DSV it was
+/// checked against and the converted v2 corporate actions.
+fn decode_facts_session(
+    raw: &RawInput,
+    path: &str,
+    acc: &mut Acc,
+    duplicates: &mut u64,
+    config: &SzseEtfFrozen,
+) {
+    *acc.kind_counts
+        .entry("cninfo_corporate_action_facts")
+        .or_default() += 1;
+    let expected_dsv = config.market_dsv.as_deref().unwrap_or_default();
+    let document = match FactsSessionDocument::parse(&raw.bytes, expected_dsv) {
+        Ok(document) => document,
+        Err((code, message)) => {
+            acc.push(code, path, message);
+            return;
+        }
+    };
+    match &mut acc.facts_session {
+        Some(previous) if previous.value == document => {
+            *duplicates += 1;
+            if raw.raw_sha256 < previous.raw {
+                previous.raw = raw.raw_sha256.clone();
+            }
+        }
+        Some(_) => acc.push(
+            "source_revision_conflict",
+            path,
+            "the Raw set holds differing corporate action facts sessions",
+        ),
+        None => {
+            acc.facts_session = Some(Sourced {
+                value: document,
+                raw: raw.raw_sha256.clone(),
+            })
+        }
+    }
+}
+
+/// Converts the public Catalog identities into the lifecycle ranges used by
+/// every downstream fixed-list comparison. The termination date is inclusive,
+/// so the exclusive end is the next calendar day.
+fn lifecycles_from_facts(
+    session: &Mvp6Session,
+) -> Result<Vec<LifecycleRange>, Vec<NormalizationIssue>> {
+    let mut issues = Vec::new();
+    let mut lifecycles = Vec::new();
+    for identity in &session.catalog_lifecycles {
+        let path = identity.code.clone();
+        if identity.code.len() != 6
+            || !identity.code.bytes().all(|byte| byte.is_ascii_digit())
+            || !(identity.code.starts_with("158") || identity.code.starts_with("159"))
+        {
+            issues.push(issue(
+                "invalid_catalog_lifecycle",
+                path,
+                "catalog code must be a six-digit 158xxx/159xxx SZSE ETF",
+            ));
+            continue;
+        }
+        let end_exclusive = match identity.termination_date {
+            Some(date) if date < identity.listing_date => {
+                issues.push(issue(
+                    "invalid_catalog_lifecycle",
+                    path,
+                    "termination_date precedes listing_date",
+                ));
+                continue;
+            }
+            Some(date) => match date.succ_opt() {
+                Some(next) => Some(next),
+                None => {
+                    issues.push(issue(
+                        "invalid_catalog_lifecycle",
+                        path,
+                        "termination_date cannot be incremented",
+                    ));
+                    continue;
+                }
+            },
+            None => None,
+        };
+        lifecycles.push(LifecycleRange {
+            native_symbol: identity.code.clone(),
+            start: identity.listing_date,
+            end_exclusive,
+        });
+    }
+    lifecycles.sort_by_key(|life| (life.native_symbol.clone(), life.start));
+    if lifecycles.is_empty() {
+        issues.push(issue(
+            "empty_catalog_lifecycles",
+            "$",
+            "facts session contains no usable Catalog lifecycles",
+        ));
+    }
+    if lifecycles.windows(2).any(|pair| {
+        pair[0].native_symbol == pair[1].native_symbol
+            && pair[0].end_exclusive.is_none_or(|end| end > pair[1].start)
+    }) {
+        issues.push(issue(
+            "overlapping_catalog_lifecycles",
+            "$",
+            "catalog lifecycles for one code overlap or an open-ended lifecycle is followed by another",
+        ));
+    }
+    if issues.is_empty() {
+        Ok(lifecycles)
+    } else {
+        Err(issues)
+    }
+}
+
+/// Converts v2 corporate action facts into the normalized action table. Missing
+/// optional values stay null; P21 reports them rather than inventing amounts or
+/// dropping the whole Dataset.
+fn actions_from_facts(
+    session: &Mvp6Session,
+    calendar: &BTreeMap<NaiveDate, Sourced<bool>>,
+    raw_sha256: &str,
+    venue: VenueId,
+    issues: &mut Vec<NormalizationIssue>,
+) -> Vec<CorporateActionRow> {
+    let mut rows = Vec::new();
+    for (index, action) in session.corporate_actions.actions.iter().enumerate() {
+        let path = format!("{}#{}", action.source_announcement_id, action.source_page);
+        if action.code.len() != 6
+            || !action.code.bytes().all(|byte| byte.is_ascii_digit())
+            || !(action.code.starts_with("158") || action.code.starts_with("159"))
+        {
+            issues.push(issue(
+                "invalid_corporate_action_code",
+                &path,
+                "action code must be a six-digit 158xxx/159xxx SZSE ETF",
+            ));
+            continue;
+        }
+        let instrument_id = match InstrumentId::new(action.code.clone(), venue.clone()) {
+            Ok(id) => id,
+            Err(error) => {
+                issues.push(issue(
+                    "invalid_corporate_action_code",
+                    &path,
+                    error.to_string(),
+                ));
+                continue;
+            }
+        };
+        let kind = match action.kind.as_str() {
+            "dividend" => CorporateActionKind::Dividend,
+            "split" | "conversion" | "share_conversion" => CorporateActionKind::ShareConversion,
+            "liquidation" => CorporateActionKind::Liquidation,
+            other => {
+                issues.push(issue(
+                    "invalid_corporate_action_kind",
+                    &path,
+                    format!("action kind {other} has no total-return mapping"),
+                ));
+                continue;
+            }
+        };
+        let announced_at = match session_close(calendar, &venue, action.announcement_date) {
+            Some(close) => close,
+            None => {
+                issues.push(issue(
+                    "corporate_action_announcement_not_session",
+                    &path,
+                    "announcement_date is not a frozen open Session",
+                ));
+                continue;
+            }
+        };
+        let available_at = match next_session_after(calendar, action.announcement_date)
+            .and_then(|date| make_session(venue.clone(), date))
+        {
+            Some(session) => session.ts_close(),
+            None => {
+                issues.push(issue(
+                    "corporate_action_next_session_unknown",
+                    &path,
+                    "frozen calendar does not establish the first Session after the announcement",
+                ));
+                continue;
+            }
+        };
+        let cash_per_share = decimal(
+            &action.cash_per_share,
+            "cash_per_share",
+            false,
+            &path,
+            issues,
+        );
+        let share_ratio = decimal(&action.split_ratio, "split_ratio", true, &path, issues);
+        let liquidation_cash_per_share = decimal(
+            &action.liquidation_per_share,
+            "liquidation_per_share",
+            false,
+            &path,
+            issues,
+        );
+        rows.push(CorporateActionRow {
+            announcement_id: action.source_announcement_id.clone(),
+            action_index: index as u32,
+            instrument_id,
+            kind,
+            announced_date: action.announcement_date,
+            announced_at,
+            available_at,
+            record_date: action.record_date,
+            ex_date: action.ex_date,
+            pay_date: action.pay_date,
+            effective_date: action.ex_date,
+            cash_per_share,
+            share_ratio,
+            liquidation_cash_per_share,
+            source_raw_sha256: raw_sha256.to_owned(),
+            normalization_version: "szse-corporate-action@2".into(),
+        });
+    }
+    rows.sort_by(|left, right| {
+        (&left.announcement_id, left.action_index)
+            .cmp(&(&right.announcement_id, right.action_index))
+    });
+    rows
+}
+
+fn decimal(
+    value: &Option<String>,
+    field: &str,
+    must_be_positive: bool,
+    path: &str,
+    issues: &mut Vec<NormalizationIssue>,
+) -> Option<String> {
+    let text = value.as_deref()?;
+    match Notional::parse(text) {
+        Ok(parsed)
+            if parsed >= Notional::ZERO && (!must_be_positive || parsed > Notional::ZERO) =>
+        {
+            Some(parsed.to_string())
+        }
+        _ => {
+            issues.push(issue(
+                "invalid_corporate_action_decimal",
+                path,
+                format!(
+                    "{field} must be a {} decimal",
+                    if must_be_positive {
+                        "positive"
+                    } else {
+                        "non-negative"
+                    }
+                ),
+            ));
+            None
+        }
+    }
+}
+
+fn session_close(
+    calendar: &BTreeMap<NaiveDate, Sourced<bool>>,
+    venue: &VenueId,
+    date: NaiveDate,
+) -> Option<TimestampNs> {
+    if calendar.get(&date).map(|fact| fact.value) != Some(true) {
+        return None;
+    }
+    make_session(venue.clone(), date).map(|session| session.ts_close())
+}
+
+fn next_session_after(
+    calendar: &BTreeMap<NaiveDate, Sourced<bool>>,
+    date: NaiveDate,
+) -> Option<NaiveDate> {
+    (1..)
+        .map(|offset| date + Duration::days(offset))
+        .map(|day| (day, calendar.get(&day).map(|known| known.value)))
+        .find(|(_, open)| *open != Some(false))
+        .and_then(|(day, open)| open.map(|_| day))
+}
+
+fn missing_action_fields_facts(action: &CorporateActionRow) -> Vec<&'static str> {
+    match action.kind {
+        CorporateActionKind::Dividend => {
+            let mut fields = Vec::new();
+            if action.ex_date.is_none() {
+                fields.push("ex_date");
+            }
+            if action.cash_per_share.is_none() {
+                fields.push("cash_per_share");
+            }
+            if action.pay_date.is_none() {
+                fields.push("pay_date");
+            }
+            fields
+        }
+        CorporateActionKind::ShareConversion => {
+            let mut fields = Vec::new();
+            if action.ex_date.is_none() {
+                fields.push("ex_date");
+            }
+            if action.share_ratio.is_none() {
+                fields.push("share_ratio");
+            }
+            fields
+        }
+        CorporateActionKind::Liquidation => {
+            let mut fields = Vec::new();
+            if action.ex_date.is_none() {
+                fields.push("ex_date");
+            }
+            if action.liquidation_cash_per_share.is_none() {
+                fields.push("liquidation_cash_per_share");
+            }
+            if action.pay_date.is_none() {
+                fields.push("pay_date");
+            }
+            fields
+        }
+    }
+}
+
+/// Result of lifecycle filtering: Bars, actions, excluded-ETF report, the
+/// excluded symbol set used to omit their P21 rows, and the priced Bars dropped
+/// because their code has no Catalog identity at all.
+struct FilteredV6 {
+    primary: BTreeMap<Key, Sourced<SelectedBar>>,
+    actions: Vec<CorporateActionRow>,
+    excluded_etfs: Vec<Value>,
+    excluded_symbols: BTreeSet<String>,
+    out_of_scope_priced_bars: u64,
+}
+
+/// V6 keeps only lifecycle-scoped Bars. A priced TDX Bar outside the
+/// announcement-defined life of its code is an identity inconsistency; the
+/// whole ETF is excluded and reported instead of failing the Dataset.
+fn filter_v6_lifecycles(
+    primary: BTreeMap<Key, Sourced<SelectedBar>>,
+    actions: Vec<CorporateActionRow>,
+    lifecycles: &[LifecycleRange],
+) -> FilteredV6 {
+    let symbols: BTreeSet<&str> = lifecycles
+        .iter()
+        .map(|life| life.native_symbol.as_str())
+        .collect();
+    let out_of_scope_priced_bars = primary
+        .keys()
+        .filter(|(symbol, _)| !symbols.contains(symbol.as_str()))
+        .count() as u64;
+    let mut excluded = BTreeSet::new();
+    for (symbol, date) in primary.keys() {
+        if symbols.contains(symbol.as_str())
+            && !lifecycles
+                .iter()
+                .any(|life| life.native_symbol == *symbol && life.contains(*date))
+        {
+            excluded.insert(symbol.clone());
+        }
+    }
+    let excluded_report = excluded
+        .iter()
+        .map(|symbol| {
+            json!({
+                "native_symbol": symbol,
+                "reason": "priced_tdx_bar_outside_catalog_lifecycle",
+            })
+        })
+        .collect();
+    let primary = primary
+        .into_iter()
+        .filter(|((symbol, date), _)| {
+            symbols.contains(symbol.as_str())
+                && !excluded.contains(symbol)
+                && lifecycles
+                    .iter()
+                    .any(|life| life.native_symbol == *symbol && life.contains(*date))
+        })
+        .collect();
+    // An action for a code without a Catalog lifecycle is kept in the facts
+    // table and reported by P21 as outside every lifecycle; it is never
+    // silently treated as a clean or applicable action.
+    let actions = actions
+        .into_iter()
+        .filter(|action| !excluded.contains(action.instrument_id.symbol()))
+        .collect();
+    FilteredV6 {
+        primary,
+        actions,
+        excluded_etfs: excluded_report,
+        excluded_symbols: excluded,
+        out_of_scope_priced_bars,
+    }
+}
+
+/// One 0.001 price tick at the domain's scale-18 representation.
+const ONE_TICK_MANTISSA: u128 = 1_000_000_000_000_000;
+
+/// Expected ex-rights reference from the previous traded close and the
+/// announced fact. Liquidation has no price formula and is left unchecked.
+fn expected_reference(previous: Price, action: &CorporateActionRow) -> Option<Price> {
+    match action.kind {
+        CorporateActionKind::Dividend => {
+            let cash = Notional::parse(action.cash_per_share.as_deref()?).ok()?;
+            Price::from_mantissa(previous.mantissa().checked_sub(cash.mantissa())?).ok()
+        }
+        CorporateActionKind::ShareConversion => {
+            let ratio = Price::parse(action.share_ratio.as_deref()?).ok()?;
+            previous.checked_div_decimal(ratio).ok()
+        }
+        CorporateActionKind::Liquidation => None,
+    }
+}
+
+/// P21 compares the TDX exchange ex-rights reference with the previous traded
+/// close. A one-tick change is a jump. Announced facts are authoritative for
+/// classifying the jump; a mismatch becomes an `UNKNOWN` cell and a listed
+/// finding, never a publish error.
+fn evaluate_p21(
+    lifecycles: &[LifecycleRange],
+    primary: &BTreeMap<Key, Sourced<SelectedBar>>,
+    actions: &[CorporateActionRow],
+    session_dates: &BTreeSet<NaiveDate>,
+) -> Value {
+    let mut etfs = Vec::new();
+    let mut mismatches: Vec<Value> = Vec::new();
+    let mut unknown_global: BTreeMap<(String, String, String), Value> = BTreeMap::new();
+    let mut source_gap_any = lifecycles.is_empty();
+    let mut unknown_any = false;
+
+    for life in lifecycles {
+        let bars: Vec<(NaiveDate, &SelectedBar)> = primary
+            .iter()
+            .filter(|((symbol, date), _)| symbol == &life.native_symbol && life.contains(*date))
+            .map(|((_, date), fact)| (*date, &fact.value))
+            .collect();
+        let lifecycle_actions: Vec<&CorporateActionRow> = actions
+            .iter()
+            .filter(|action| {
+                action.instrument_id.symbol() == life.native_symbol
+                    && action_event_date(action).is_some_and(|date| life.contains(date))
+            })
+            .collect();
+        let mut action_by_date: BTreeMap<NaiveDate, Vec<&CorporateActionRow>> = BTreeMap::new();
+        for action in &lifecycle_actions {
+            if let Some(date) = action_event_date(action) {
+                action_by_date.entry(date).or_default().push(action);
+            }
+        }
+        let mut outcomes: Vec<Value> = lifecycle_actions
+            .iter()
+            .map(|action| {
+                json!({
+                    "announcement_id": action.announcement_id,
+                    "kind": action.kind,
+                    "event_date": action_event_date(action),
+                    "missing_fields": missing_action_fields_facts(action),
+                    "observed": "unverified",
+                })
+            })
+            .collect();
+        let outcome_index: BTreeMap<(String, u32), usize> = lifecycle_actions
+            .iter()
+            .enumerate()
+            .map(|(index, action)| ((action.announcement_id.clone(), action.action_index), index))
+            .collect();
+
+        let mut previous_close: Option<Price> = None;
+        let mut checked = 0_u64;
+        let mut checked_no_event = 0_u64;
+        let mut explained = 0_u64;
+        let mut first_without_prior_close = 0_u64;
+        let mut unchecked: Vec<Value> = Vec::new();
+        let mut source_gaps: BTreeSet<String> = BTreeSet::new();
+        let mut unknown: BTreeMap<(String, String), Value> = BTreeMap::new();
+
+        let set_outcome = |outcomes: &mut [Value], action: &CorporateActionRow, state: &str| {
+            if let Some(&index) =
+                outcome_index.get(&(action.announcement_id.clone(), action.action_index))
+            {
+                outcomes[index]["observed"] = json!(state);
+            }
+        };
+
+        for (date, bar) in &bars {
+            let actions_at = action_by_date.get(date);
+            match (previous_close, bar.reference_price) {
+                (Some(previous), Some(reference)) => {
+                    checked += 1;
+                    let jump = reference != previous;
+                    if jump {
+                        if let Some(list) = actions_at {
+                            if list.len() == 1
+                                && let Some(expected) = expected_reference(previous, list[0])
+                            {
+                                // A jump exists and the announced amount/ratio
+                                // predicts this reference. One tick of
+                                // rounding is allowed; a larger difference is
+                                // an announced-action inconsistency, not an
+                                // explained jump.
+                                if expected.mantissa().abs_diff(reference.mantissa())
+                                    <= ONE_TICK_MANTISSA
+                                {
+                                    explained += 1;
+                                    set_outcome(&mut outcomes, list[0], "explained");
+                                } else {
+                                    unknown_any = true;
+                                    let action = list[0];
+                                    set_outcome(
+                                        &mut outcomes,
+                                        action,
+                                        "announced_action_amount_mismatch",
+                                    );
+                                    unknown.insert(
+                                        (
+                                            date.to_string(),
+                                            "announced_action_amount_mismatch".into(),
+                                        ),
+                                        json!({
+                                            "session_date": date,
+                                            "reason": "announced_action_amount_mismatch",
+                                            "announcement_id": action.announcement_id,
+                                        }),
+                                    );
+                                    mismatches.push(json!({
+                                        "code": life.native_symbol,
+                                        "kind": "announced_action_amount_vs_reference_jump",
+                                        "session_date": date,
+                                        "announcement_id": action.announcement_id,
+                                    }));
+                                }
+                            } else {
+                                // Compound actions or missing amounts have no
+                                // single expected reference; the jump still
+                                // explains the action's existence.
+                                explained += list.len() as u64;
+                                for action in list {
+                                    set_outcome(&mut outcomes, action, "explained");
+                                }
+                            }
+                        } else {
+                            unknown_any = true;
+                            unknown.insert(
+                                (date.to_string(), "unexplained_reference_jump".into()),
+                                json!({
+                                    "session_date": date,
+                                    "reason": "unexplained_reference_jump",
+                                }),
+                            );
+                            mismatches.push(json!({
+                                "code": life.native_symbol,
+                                "kind": "unexplained_reference_jump",
+                                "session_date": date,
+                            }));
+                        }
+                    } else if let Some(list) = actions_at {
+                        unknown_any = true;
+                        for action in list {
+                            set_outcome(&mut outcomes, action, "announced_without_reference_jump");
+                            unknown.insert(
+                                (date.to_string(), "announced_without_reference_jump".into()),
+                                json!({
+                                    "session_date": date,
+                                    "reason": "announced_without_reference_jump",
+                                    "announcement_id": action.announcement_id,
+                                }),
+                            );
+                        }
+                        mismatches.push(json!({
+                            "code": life.native_symbol,
+                            "kind": "announced_without_reference_jump",
+                            "session_date": date,
+                        }));
+                    } else {
+                        checked_no_event += 1;
+                    }
+                }
+                (None, _) => {
+                    // The first priced Session of a lifecycle has no prior
+                    // traded close. That is outside P21's domain, not an
+                    // evidence gap, unless an action claims that Session.
+                    first_without_prior_close += 1;
+                    if let Some(list) = actions_at {
+                        source_gap_any = true;
+                        source_gaps.insert("action_without_prior_close".into());
+                        for action in list {
+                            set_outcome(&mut outcomes, action, "action_without_prior_close");
+                        }
+                        unchecked.push(json!({
+                            "session_date": date,
+                            "reason": "action_without_prior_close",
+                        }));
+                        unknown.insert(
+                            (date.to_string(), "action_without_prior_close".into()),
+                            json!({
+                                "session_date": date,
+                                "reason": "action_without_prior_close",
+                            }),
+                        );
+                        mismatches.push(json!({
+                            "code": life.native_symbol,
+                            "kind": "action_without_prior_close",
+                            "session_date": date,
+                        }));
+                    }
+                }
+                (Some(_), None) => {
+                    source_gap_any = true;
+                    source_gaps.insert("missing_tdx_reference".into());
+                    unchecked.push(json!({
+                        "session_date": date,
+                        "reason": "missing_tdx_reference",
+                    }));
+                    if let Some(list) = actions_at {
+                        for action in list {
+                            set_outcome(&mut outcomes, action, "missing_tdx_reference");
+                        }
+                    }
+                    unknown.insert(
+                        (date.to_string(), "missing_tdx_reference".into()),
+                        json!({
+                            "session_date": date,
+                            "reason": "missing_tdx_reference",
+                        }),
+                    );
+                }
+            }
+            previous_close = Some(bar.ohlcv.close);
+        }
+
+        let bar_dates: BTreeSet<NaiveDate> = bars.iter().map(|(date, _)| *date).collect();
+        for (index, action) in lifecycle_actions.iter().enumerate() {
+            let date = action_event_date(action);
+            let missing = missing_action_fields_facts(action);
+            if !missing.is_empty() {
+                source_gap_any = true;
+                source_gaps.insert("incomplete_corporate_action".into());
+                mismatches.push(json!({
+                    "code": life.native_symbol,
+                    "kind": "incomplete_corporate_action",
+                    "announcement_id": action.announcement_id,
+                    "missing_fields": missing,
+                }));
+                if let Some(date) = date {
+                    unknown_any = true;
+                    unknown.insert(
+                        (date.to_string(), "incomplete_corporate_action".into()),
+                        json!({
+                            "session_date": date,
+                            "reason": "incomplete_corporate_action",
+                            "announcement_id": action.announcement_id,
+                        }),
+                    );
+                }
+            }
+            let Some(date) = date else {
+                continue;
+            };
+            if !bar_dates.contains(&date) {
+                if session_dates.contains(&date) {
+                    source_gap_any = true;
+                    source_gaps.insert("action_date_missing_bar".into());
+                    mismatches.push(json!({
+                        "code": life.native_symbol,
+                        "kind": "action_date_missing_bar",
+                        "session_date": date,
+                        "announcement_id": action.announcement_id,
+                    }));
+                    unknown.insert(
+                        (date.to_string(), "action_date_missing_bar".into()),
+                        json!({
+                            "session_date": date,
+                            "reason": "action_date_missing_bar",
+                            "announcement_id": action.announcement_id,
+                        }),
+                    );
+                    if outcomes[index]["observed"] == json!("unverified") {
+                        outcomes[index]["observed"] = json!("action_date_missing_bar");
+                    }
+                } else {
+                    source_gap_any = true;
+                    source_gaps.insert("action_date_not_a_session".into());
+                    mismatches.push(json!({
+                        "code": life.native_symbol,
+                        "kind": "action_date_not_a_session",
+                        "session_date": date,
+                        "announcement_id": action.announcement_id,
+                    }));
+                    if outcomes[index]["observed"] == json!("unverified") {
+                        outcomes[index]["observed"] = json!("action_date_not_a_session");
+                    }
+                }
+            }
+            if let (Some(record_date), Some(_)) = (action.record_date, action.ex_date) {
+                let expected = previous_session_before(session_dates, date);
+                if expected != Some(record_date) {
+                    unknown_any = true;
+                    mismatches.push(json!({
+                        "code": life.native_symbol,
+                        "kind": "record_date_vs_previous_session",
+                        "session_date": date,
+                        "announcement_id": action.announcement_id,
+                    }));
+                    unknown.insert(
+                        (date.to_string(), "record_date_vs_previous_session".into()),
+                        json!({
+                            "session_date": date,
+                            "reason": "record_date_vs_previous_session",
+                            "announcement_id": action.announcement_id,
+                        }),
+                    );
+                }
+            }
+            if outcomes[index]["observed"] == json!("unverified") {
+                outcomes[index]["observed"] = json!("unverified_no_reference_check");
+                source_gap_any = true;
+                source_gaps.insert("action_not_checked".into());
+            }
+        }
+
+        let p21_status = if bars.is_empty() {
+            source_gap_any = true;
+            source_gaps.insert("no_priced_bars_in_lifecycle".into());
+            "source_gap"
+        } else if !unchecked.is_empty() || !source_gaps.is_empty() {
+            "source_gap"
+        } else if !unknown.is_empty() {
+            unknown_any = true;
+            "evaluated_with_unknown"
+        } else {
+            "evaluated"
+        };
+        let mut unknown_sessions: Vec<Value> = unknown.values().cloned().collect();
+        unknown_sessions.extend(unchecked.iter().cloned());
+        unknown_sessions.sort_by(|left, right| {
+            (left["session_date"].as_str(), left["reason"].as_str())
+                .cmp(&(right["session_date"].as_str(), right["reason"].as_str()))
+        });
+        unknown_sessions.dedup_by(|left, right| {
+            left["session_date"] == right["session_date"] && left["reason"] == right["reason"]
+        });
+        for cell in &unknown_sessions {
+            let key = (
+                life.native_symbol.clone(),
+                cell["session_date"].to_string(),
+                cell["reason"].as_str().unwrap_or_default().to_owned(),
+            );
+            unknown_global.entry(key).or_insert_with(|| {
+                json!({
+                    "instrument_id": format!("{}.SZSE", life.native_symbol),
+                    "session_date": cell["session_date"],
+                    "reason": cell["reason"],
+                })
+            });
+        }
+        etfs.push(json!({
+            "native_symbol": life.native_symbol,
+            "lifecycle_start": life.start,
+            "lifecycle_end_exclusive": life.end_exclusive,
+            "identity_evidence": "cninfo_facts_catalog_lifecycle",
+            "status": p21_status,
+            "sessions_checked": checked,
+            "checked_no_event": checked_no_event,
+            "sessions_without_prior_close": first_without_prior_close,
+            "explained_reference_jumps": explained,
+            "source_gap_reasons": source_gaps,
+            "unchecked_sessions": unchecked,
+            "unknown_sessions": unknown_sessions,
+            "actions": outcomes,
+        }));
+    }
+
+    for action in actions {
+        let date = action_event_date(action);
+        let assigned = date.is_some_and(|date| {
+            lifecycles.iter().any(|life| {
+                life.native_symbol == action.instrument_id.symbol() && life.contains(date)
+            })
+        });
+        if date.is_none() {
+            source_gap_any = true;
+            mismatches.push(json!({
+                "code": action.instrument_id.symbol(),
+                "kind": "action_without_event_date",
+                "announcement_id": action.announcement_id,
+            }));
+        } else if !assigned {
+            source_gap_any = true;
+            mismatches.push(json!({
+                "code": action.instrument_id.symbol(),
+                "kind": "action_outside_catalog_lifecycle",
+                "session_date": date,
+                "announcement_id": action.announcement_id,
+            }));
+            if let Some(date) = date {
+                unknown_global
+                    .entry((
+                        action.instrument_id.symbol().to_owned(),
+                        date.to_string(),
+                        "action_outside_catalog_lifecycle".into(),
+                    ))
+                    .or_insert_with(|| {
+                        json!({
+                            "instrument_id": format!("{}.SZSE", action.instrument_id.symbol()),
+                            "session_date": date,
+                            "reason": "action_outside_catalog_lifecycle",
+                        })
+                    });
+            }
+        }
+    }
+    mismatches.sort_by(|left, right| {
+        (
+            left["code"].as_str().unwrap_or_default(),
+            left["kind"].as_str().unwrap_or_default(),
+            left["session_date"].as_str().unwrap_or_default(),
+            left["announcement_id"].as_str().unwrap_or_default(),
+        )
+            .cmp(&(
+                right["code"].as_str().unwrap_or_default(),
+                right["kind"].as_str().unwrap_or_default(),
+                right["session_date"].as_str().unwrap_or_default(),
+                right["announcement_id"].as_str().unwrap_or_default(),
+            ))
+    });
+    let mut unknown_sessions: Vec<Value> = unknown_global.into_values().collect();
+    unknown_sessions.sort_by(|left, right| {
+        (
+            left["instrument_id"].as_str(),
+            left["session_date"].as_str(),
+            left["reason"].as_str(),
+        )
+            .cmp(&(
+                right["instrument_id"].as_str(),
+                right["session_date"].as_str(),
+                right["reason"].as_str(),
+            ))
+    });
+    let status = if source_gap_any {
+        "source_gap"
+    } else if unknown_any || !unknown_sessions.is_empty() {
+        "evaluated_with_unknown"
+    } else {
+        "evaluated"
+    };
+    json!({
+        "version": "p21-corporate-action-integrity@1",
+        "status": status,
+        "action_source": "cninfo_corporateActions_structured_v2",
+        "reference_rule": "tdx_ex_rights_reference_vs_previous_traded_close_one_tick@1",
+        "checked_no_event_definition": "No TDX reference jump and no announced action at that Session; this does not prove the absence of a corporate action.",
+        "etfs": etfs,
+        "unknown_sessions": unknown_sessions,
+        "mismatches": mismatches,
+    })
+}
+
+fn previous_session_before(
+    session_dates: &BTreeSet<NaiveDate>,
+    date: NaiveDate,
+) -> Option<NaiveDate> {
+    session_dates.range(..date).next_back().copied()
+}
+
+/// Sina is an optional secondary cross-check for P21. Missing qfq/hfq data is
+/// reported as a source gap, never as `no event`; disagreements are listed and
+/// never abort the publish.
+fn crosscheck_sina_v6(
+    factors: &BTreeMap<(String, String), Sourced<Vec<AdjustmentEvent>>>,
+    lifecycles: &[LifecycleRange],
+    actions: &[CorporateActionRow],
+    primary: &BTreeMap<Key, Sourced<SelectedBar>>,
+    decode_errors: &[Value],
+    excluded_symbols: &BTreeSet<String>,
+) -> Value {
+    let mut etfs = Vec::new();
+    let mut mismatches: Vec<Value> = Vec::new();
+    let mut source_gaps: Vec<Value> = decode_errors.to_vec();
+    let mut pairs = 0_u64;
+    let sina_available = !factors.is_empty() || !decode_errors.is_empty();
+    for life in lifecycles {
+        let qfq = factors.get(&(life.native_symbol.clone(), "qfq".into()));
+        let hfq = factors.get(&(life.native_symbol.clone(), "hfq".into()));
+        if qfq.is_none() && hfq.is_none() && !sina_available {
+            // Sina is optional: no input at all is simply not present, not a
+            // source gap. A missing pair among otherwise present input is a gap.
+            etfs.push(json!({
+                "native_symbol": life.native_symbol,
+                "status": "not_present",
+                "events": 0,
+                "mismatches": [],
+            }));
+            continue;
+        }
+        let (Some(qfq), Some(hfq)) = (qfq, hfq) else {
+            source_gaps.push(json!({
+                "native_symbol": life.native_symbol,
+                "reason": "qfq_hfq_pair_missing",
+            }));
+            etfs.push(json!({
+                "native_symbol": life.native_symbol,
+                "status": "source_gap",
+                "events": 0,
+                "mismatches": [],
+            }));
+            continue;
+        };
+        pairs += 1;
+        if qfq.value != hfq.value {
+            mismatches.push(json!({
+                "code": life.native_symbol,
+                "kind": "qfq_hfq_event_mismatch",
+            }));
+        }
+        let mut events: Vec<&AdjustmentEvent> = qfq
+            .value
+            .iter()
+            .filter(|event| life.contains(event.effective_date))
+            .collect();
+        events.sort_by_key(|event| event.effective_date);
+        let jump_dates = reference_jump_dates(life, primary);
+        let first_traded = primary
+            .iter()
+            .filter(|((symbol, date), _)| symbol == &life.native_symbol && life.contains(*date))
+            .map(|((_, date), _)| *date)
+            .min();
+        let lifecycle_actions: Vec<&CorporateActionRow> = actions
+            .iter()
+            .filter(|action| {
+                action.instrument_id.symbol() == life.native_symbol
+                    && action_event_date(action).is_some_and(|date| life.contains(date))
+            })
+            .collect();
+        let mut event_dates = BTreeSet::new();
+        let mut lifecycle_mismatches = Vec::new();
+        for event in &events {
+            event_dates.insert(event.effective_date);
+            let action = lifecycle_actions
+                .iter()
+                .find(|action| action_event_date(action) == Some(event.effective_date));
+            if action.is_none() {
+                lifecycle_mismatches.push(json!({
+                    "kind": "sina_event_without_announced_action",
+                    "session_date": event.effective_date,
+                }));
+            }
+            if Some(event.effective_date) != first_traded
+                && !jump_dates.contains(&event.effective_date)
+            {
+                lifecycle_mismatches.push(json!({
+                    "kind": "sina_event_without_reference_jump",
+                    "session_date": event.effective_date,
+                }));
+            }
+            if let Some(action) = action {
+                if let (Some(sina_value), Some(official)) =
+                    (&event.cash_per_share, &action.cash_per_share)
+                    && sina_value != official
+                {
+                    lifecycle_mismatches.push(json!({
+                        "kind": "sina_cash_per_share_mismatch",
+                        "session_date": event.effective_date,
+                    }));
+                }
+                if let (Some(sina_value), Some(official)) =
+                    (&event.share_ratio, &action.share_ratio)
+                    && sina_value != official
+                {
+                    lifecycle_mismatches.push(json!({
+                        "kind": "sina_share_ratio_mismatch",
+                        "session_date": event.effective_date,
+                    }));
+                }
+            }
+        }
+        for action in &lifecycle_actions {
+            if let Some(date) = action_event_date(action)
+                && !event_dates.contains(&date)
+            {
+                lifecycle_mismatches.push(json!({
+                    "kind": "announced_action_without_sina_event",
+                    "session_date": date,
+                    "announcement_id": action.announcement_id,
+                }));
+            }
+        }
+        lifecycle_mismatches.sort_by(|left, right| {
+            (left["session_date"].as_str(), left["kind"].as_str())
+                .cmp(&(right["session_date"].as_str(), right["kind"].as_str()))
+        });
+        for mismatch in &lifecycle_mismatches {
+            let mut row = mismatch.clone();
+            row["code"] = json!(life.native_symbol);
+            mismatches.push(row);
+        }
+        etfs.push(json!({
+            "native_symbol": life.native_symbol,
+            "status": if lifecycle_mismatches.is_empty() { "present" } else { "inconsistent" },
+            "events": events.len(),
+            "mismatches": lifecycle_mismatches,
+        }));
+    }
+    let mut outside_events = BTreeSet::new();
+    for ((symbol, _kind), source) in factors {
+        let symbol_lifecycles: Vec<&LifecycleRange> = lifecycles
+            .iter()
+            .filter(|life| &life.native_symbol == symbol)
+            .collect();
+        if symbol_lifecycles.is_empty() {
+            continue;
+        }
+        for event in &source.value {
+            if !symbol_lifecycles
+                .iter()
+                .any(|life| life.contains(event.effective_date))
+            {
+                outside_events.insert((symbol.clone(), event.effective_date));
+            }
+        }
+    }
+    for (symbol, date) in outside_events {
+        mismatches.push(json!({
+            "code": symbol,
+            "kind": "sina_event_outside_catalog_lifecycle",
+            "session_date": date,
+        }));
+    }
+    for (symbol, kind) in factors.keys() {
+        if !lifecycles.iter().any(|life| &life.native_symbol == symbol) {
+            source_gaps.push(json!({
+                "native_symbol": symbol,
+                "reason": if excluded_symbols.contains(symbol) {
+                    "sina_symbol_of_excluded_etf"
+                } else {
+                    "sina_symbol_outside_catalog_lifecycles"
+                },
+                "adjustment_kind": kind,
+            }));
+        }
+    }
+    mismatches.sort_by(|left, right| {
+        (
+            left["code"].as_str().unwrap_or_default(),
+            left["kind"].as_str().unwrap_or_default(),
+            left["session_date"].as_str().unwrap_or_default(),
+        )
+            .cmp(&(
+                right["code"].as_str().unwrap_or_default(),
+                right["kind"].as_str().unwrap_or_default(),
+                right["session_date"].as_str().unwrap_or_default(),
+            ))
+    });
+    let status = if !sina_available {
+        "not_present"
+    } else if !mismatches.is_empty() {
+        "inconsistent"
+    } else if !source_gaps.is_empty() {
+        "source_gap"
+    } else {
+        "present"
+    };
+    json!({
+        "version": "sina-optional-p21-crosscheck@1",
+        "status": status,
+        "pairs": pairs,
+        "mismatches": mismatches,
+        "source_gaps": source_gaps,
+        "etfs": etfs,
+        "definition": "Sina qfq/hfq event dates and values are compared with announced facts and TDX reference jumps; a missing pair is a source gap, not evidence of no event.",
+    })
+}
+
+fn reference_jump_dates(
+    life: &LifecycleRange,
+    primary: &BTreeMap<Key, Sourced<SelectedBar>>,
+) -> BTreeSet<NaiveDate> {
+    let mut jumps = BTreeSet::new();
+    let mut previous_close: Option<Price> = None;
+    for ((symbol, date), fact) in primary {
+        if symbol != &life.native_symbol || !life.contains(*date) {
+            continue;
+        }
+        if let (Some(previous), Some(reference)) = (previous_close, fact.value.reference_price) {
+            if reference != previous {
+                jumps.insert(*date);
+            }
+        }
+        previous_close = Some(fact.value.ohlcv.close);
+    }
+    jumps
+}
+
+/// Validates a Sina source record against its Raw object and authorized
+/// endpoint. V5 additionally checks configured lifecycle scope; V6 derives
+/// scope from the validated facts session.
+fn sina_source_identity<'a>(
+    raw: &RawInput,
+    source: &'a SourceRecord,
+) -> Result<(&'a str, &'a str), String> {
+    let url = source
+        .request
+        .get("url")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Sina source record is missing its request URL".to_owned())?;
+    let endpoint = url
+        .strip_prefix("https://finance.sina.com.cn/realstock/company/")
+        .ok_or_else(|| "Sina source URL is outside the authorized endpoint".to_owned())?;
+    let (symbol, kind_file) = endpoint
+        .split_once('/')
+        .ok_or_else(|| "Sina source URL is missing its symbol or adjustment kind".to_owned())?;
+    let kind = kind_file
+        .strip_suffix(".js")
+        .ok_or_else(|| "Sina source URL must end in .js".to_owned())?;
+    let valid_symbol = symbol.len() == 8
+        && symbol.is_ascii()
+        && symbol.starts_with("sz")
+        && symbol[2..].bytes().all(|byte| byte.is_ascii_digit())
+        && matches!(&symbol[2..5], "158" | "159");
+    if !matches!(kind, "qfq" | "hfq")
+        || source
+            .request
+            .get("adjustment_kind")
+            .and_then(Value::as_str)
+            != Some(kind)
+        || source.request.get("symbol").and_then(Value::as_str) != Some(symbol)
+        || source.request.get("http_status").and_then(Value::as_u64) != Some(200)
+        || source.request.get("byte_len").and_then(Value::as_u64) != Some(raw.bytes.len() as u64)
+        || source.request.get("network_path").and_then(Value::as_str) != Some("direct_no_proxy")
+        || source.source_kind != SourceKind::VendorApi
+        || !valid_symbol
+        || source.raw_sha256 != raw.raw_sha256
+    {
+        return Err(
+            "Sina source record identity does not match its Raw object or configured scope"
+                .to_owned(),
+        );
+    }
+    Ok((symbol, kind))
+}
+
+fn decode_sina_adjustment_v6(
+    raw: &RawInput,
+    source: &SourceRecord,
+    path: &str,
+    acc: &mut Acc,
+    duplicates: &mut u64,
+) {
+    let (symbol, kind) = match sina_source_identity(raw, source) {
+        Ok(value) => value,
+        Err(message) => {
+            let symbol = source
+                .request
+                .get("symbol")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            acc.sina_errors.push(json!({
+                "native_symbol": symbol,
+                "reason": "invalid_sina_adjustment_source",
+                "detail": message,
+            }));
+            return;
+        }
+    };
+    *acc.kind_counts
+        .entry(if kind == "qfq" {
+            "sina_adjust_factor_qfq"
+        } else {
+            "sina_adjust_factor_hfq"
+        })
+        .or_default() += 1;
+    insert_fact(
+        &mut acc.sina_raw,
+        (symbol[2..].to_owned(), kind.to_owned()),
+        raw.bytes.clone(),
+        &raw.raw_sha256,
+        path,
+        &mut acc.issues,
+        duplicates,
+    );
 }
 
 fn decode_calendar(
@@ -851,7 +2311,7 @@ fn decode_tdx(
 ) {
     *acc.kind_counts.entry("tdx_daily").or_default() += 1;
     let invalid = |acc: &mut Acc, message: String| acc.push("invalid_tdx_package", path, message);
-    let v3 = matches!(config.version, "3" | "4" | "5");
+    let v3 = matches!(config.version, "3" | "4" | "5" | "6");
     let mut archive = match ZipArchive::new(Cursor::new(raw.bytes.as_slice())) {
         Ok(archive) => archive,
         Err(error) => return invalid(acc, format!("cannot open ZIP: {error}")),
@@ -960,6 +2420,12 @@ fn decode_tdx(
         let reference_price = if v3 {
             match f64_price(read(4)).filter(|p| *p > Price::ZERO) {
                 Some(price) => Some(price),
+                None if config.version == "6" => {
+                    // P21 must distinguish a missing reference (source gap)
+                    // from a checked, unchanged reference. The Bar itself is
+                    // still a valid traded observation.
+                    None
+                }
                 None => {
                     acc.push(
                         "invalid_reference_price",
@@ -1456,60 +2922,18 @@ fn decode_sina_adjustment(
     duplicates: &mut u64,
     config: &SzseEtfFrozen,
 ) {
-    let Some(url) = source.request.get("url").and_then(Value::as_str) else {
-        acc.push(
-            "invalid_sina_adjustment_source",
-            path,
-            "Sina source record is missing its request URL",
-        );
-        return;
+    let (symbol, kind) = match sina_source_identity(raw, source) {
+        Ok(value) => value,
+        Err(message) => {
+            acc.push("invalid_sina_adjustment_source", path, message);
+            return;
+        }
     };
-    let Some(endpoint) = url.strip_prefix("https://finance.sina.com.cn/realstock/company/") else {
-        acc.push(
-            "invalid_sina_adjustment_source",
-            path,
-            "Sina source URL is outside the authorized endpoint",
-        );
-        return;
-    };
-    let Some((symbol, kind_file)) = endpoint.split_once('/') else {
-        acc.push(
-            "invalid_sina_adjustment_source",
-            path,
-            "Sina source URL is missing its symbol or adjustment kind",
-        );
-        return;
-    };
-    let Some(kind) = kind_file.strip_suffix(".js") else {
-        acc.push(
-            "invalid_sina_adjustment_source",
-            path,
-            "Sina source URL must end in .js",
-        );
-        return;
-    };
-    let valid_symbol = symbol.len() == 8
-        && symbol.is_ascii()
-        && symbol.starts_with("sz")
-        && symbol[2..].bytes().all(|byte| byte.is_ascii_digit());
-    if !matches!(kind, "qfq" | "hfq")
-        || source
-            .request
-            .get("adjustment_kind")
-            .and_then(Value::as_str)
-            != Some(kind)
-        || source.request.get("symbol").and_then(Value::as_str) != Some(symbol)
-        || source.request.get("http_status").and_then(Value::as_u64) != Some(200)
-        || source.request.get("byte_len").and_then(Value::as_u64) != Some(raw.bytes.len() as u64)
-        || source.request.get("network_path").and_then(Value::as_str) != Some("direct_no_proxy")
-        || source.source_kind != SourceKind::VendorApi
-        || !valid_symbol
-        || !config.scoped(&symbol[2..])
+    if !config.scoped(&symbol[2..])
         || !config
             .lifecycles
             .iter()
             .any(|life| life.native_symbol == symbol[2..])
-        || source.raw_sha256 != raw.raw_sha256
     {
         acc.push(
             "invalid_sina_adjustment_source",
@@ -1557,7 +2981,7 @@ fn decode_cninfo(
     duplicates: &mut u64,
     config: &SzseEtfFrozen,
 ) {
-    let include_actions = config.version != "1";
+    let include_actions = config.version != "1" && config.version != "6";
     *acc.kind_counts.entry("cninfo_announcements").or_default() += 1;
     let items = match &object["announcements"] {
         Value::Null => return,

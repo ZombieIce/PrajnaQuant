@@ -54,9 +54,10 @@ status, byte length, and SHA-256. A failed import keeps every previously
 inventoried request record and appends only new ones, so earlier Raw objects
 stay listed. Failed response objects are retained for
 audit and are excluded from DSV inputs.
-Freeze, Sina, and cninfo serialize coverage-report updates through the local
-`mvp6-coverage.lock`; freeze reloads the latest report while holding that lock
-before preserving collector coverage and writing its import results.
+Freeze, Sina, cninfo and the corporate-action publisher serialize
+coverage-report updates through the local `mvp6-coverage.lock`; freeze reloads
+the latest report while holding that lock before preserving collector coverage
+and writing its import results.
 
 The command intentionally fails closed when a requested SZSE session has no
 validated TDX package, a month is incomplete, response bytes do not match the
@@ -206,3 +207,43 @@ cross-check never edits the facts or the v4 Dataset.
 The coverage report must keep P21 comparisons and unknown rule sessions marked
 unresolved until the corresponding source facts and rule evidence have been
 checked. Publishing the v4 market DSV alone is not full MVP-6 acceptance.
+
+## Publish the corporate-action Dataset and evaluate P21 (#223)
+
+After the v4 market DSV is published and the #229 acceptance step has written
+`facts-session.json`, publish `szse-etf-frozen@6` from those frozen inputs. The
+command performs no network access and writes the P21 result only to the local
+acceptance report:
+
+```sh
+cargo run -p prajna-data --bin prajna-mvp6-publish-actions --locked --offline -- \
+  "$HOME/PrajnaData/mvp-6" "<published-v4-dsv>" \
+  "$HOME/PrajnaData/mvp-6/acceptance/cninfo-fixed/<run>/facts-session.json"
+```
+
+The facts session must be bound to that exact v4 DSV; a mismatch is rejected.
+The command adds the facts Raw and, when `acceptance/sina/collection.json`
+contains completed pairs, the Sina qfq/hfq Raw. No Sina input at all is
+`not_present`, never "no event"; a missing qfq/hfq pair among partial input is a
+reported source gap; a collection attempt whose outcomes are all gaps becomes a
+local `source_gap` even though no Raw entered the Dataset; inconsistent Sina
+values are listed but never change the authoritative announced facts.
+Reused-code factor series are split per Catalog lifecycle before events are
+derived.
+
+The local `mvp6-coverage.json` then carries `corporate_action_dataset`, `p21`,
+`p21_mismatches`, `excluded_etfs`, `corporate_actions_with_missing_fields`,
+`tdx_out_of_scope_priced_bars`, `sina_optional_crosscheck` and
+`sina_input_selection`. `source_status.p21_evaluated`
+becomes `true`; `source_status.p21_crosscheck` and `p21.status` carry the quality
+(`evaluated`, `evaluated_with_unknown` or `source_gap`). `p21.etfs[]` separates
+`checked_no_event` (no TDX reference jump and no announced action at that
+Session; not proof of no action) from `source_gap` and lists every affected
+`UNKNOWN` Session, including a dividend/split amount that does not match the
+reference jump. A priced TDX Bar outside an ETF's announcement-defined
+lifecycle excludes that ETF only. P21 mismatches and missing fields do not
+abort the publish. The report never claims `mvp6_complete`.
+
+Synthetic end-to-end coverage is in
+`cargo test -p prajna-data --test mvp6_corporate_actions --locked --offline`.
+
