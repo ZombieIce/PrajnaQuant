@@ -12,12 +12,16 @@ use prajna_research::{
         write_local_coverage_report,
     },
     pit_strategy::{self, PitS2Params, RiskNotice, RiskSignals},
-    pit_universe::{CatalogInput, HistoricalCatalog},
+    pit_universe::{CatalogInput, FixedUniverseSpec, HistoricalCatalog},
 };
 use std::collections::BTreeSet;
 
 fn default_dividend_tax_rate() -> Notional {
     Notional::ZERO
+}
+
+fn default_fixed_universe() -> Option<FixedUniverseSpec> {
+    Some(FixedUniverseSpec::mvp6())
 }
 
 fn bind_corporate_action_engine_version(spec: &mut Value) -> Result<(), ExperimentError> {
@@ -57,6 +61,11 @@ pub struct PitInput {
     dividend_tax_rate: Notional,
     #[serde(default)]
     eligibility: EligibilityParams,
+    #[serde(
+        default = "default_fixed_universe",
+        skip_serializing_if = "Option::is_none"
+    )]
+    fixed_universe: Option<FixedUniverseSpec>,
     #[serde(default)]
     risk_notices: Vec<RiskNotice>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -70,6 +79,7 @@ pub struct PitContext {
     pub tri: TotalReturnIndex,
     pub risk: RiskSignals,
     pub eligibility: EligibilityParams,
+    pub fixed_universe: Option<FixedUniverseSpec>,
     pub identity: Value,
     pub has_corporate_action_table: bool,
     pub dividend_tax_rate: Notional,
@@ -148,12 +158,17 @@ impl PitContext {
         if has_actions {
             identity["dividend_tax_rate"] = serde_json::json!(input.dividend_tax_rate);
         }
+        if let Some(fixed) = &input.fixed_universe {
+            identity["fixed_universe"] =
+                serde_json::to_value(fixed).map_err(|e| invalid(e.to_string()))?;
+        }
         Ok(Self {
             catalog,
             market,
             tri,
             risk,
             eligibility: input.eligibility.clone(),
+            fixed_universe: input.fixed_universe.clone(),
             identity,
             has_corporate_action_table: has_actions,
             dividend_tax_rate: input.dividend_tax_rate,
@@ -192,13 +207,16 @@ impl PitContext {
         let mut runs = BTreeMap::new();
         for value in combinations {
             let params: PitS2Params = serde_json::from_value(value.clone())?;
-            let plan = pit_strategy::plan(
+            let plan = pit_strategy::plan_with_fixed_universe(
                 &self.catalog,
                 &self.market,
                 &self.tri,
                 &self.risk,
-                self.eligibility.clone(),
                 &params,
+                pit_strategy::PitUniverseSelection {
+                    eligibility: self.eligibility.clone(),
+                    fixed_universe: self.fixed_universe.as_ref(),
+                },
                 &panel.sessions,
             )
             .map_err(|e| invalid(e.to_string()))?;

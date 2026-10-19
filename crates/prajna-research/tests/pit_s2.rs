@@ -1,6 +1,7 @@
 #[path = "common/pit.rs"]
 mod fixture;
 use prajna_account::VirtualPortfolioId;
+use prajna_data::RawStore;
 use prajna_domain::{Notional, Quantity};
 use prajna_research::{
     etf_eligible::EligibilityParams,
@@ -198,6 +199,67 @@ fn three_etf_ten_session_hand_golden_and_daily_parity() {
             .into_iter()
             .map(|(_, a)| a)
             .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn fixed_list_universe_intersects_catalog_lifecycle_and_versions_the_list() {
+    use prajna_research::pit_universe::FixedUniverseSpec;
+
+    let lake = fixture::lake();
+    let f = fixture::fixture_options(lake.path(), 1.0, true);
+    let raw = RawStore::open(lake.path()).unwrap();
+    let mut catalog_input = f.catalog.input().clone();
+    catalog_input.broad_indices = None;
+    let catalog =
+        prajna_research::pit_universe::HistoricalCatalog::build(catalog_input, &raw).unwrap();
+    assert!(catalog.universe(fixture::date(3)).is_err());
+    let listed = FixedUniverseSpec::new(
+        "mvp-6-fixed-etfs@1",
+        ["159001", "159003", "159009"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+    )
+    .unwrap();
+
+    let before_listing = catalog.fixed_universe(fixture::date(3), &listed).unwrap();
+    assert_eq!(before_listing.members, vec![f.ids[0].clone()]);
+    assert_eq!(before_listing.excluded[&f.ids[2]], "before_listing");
+    let first_eligible_day = catalog.fixed_universe(fixture::date(4), &listed).unwrap();
+    assert_eq!(
+        first_eligible_day.members,
+        vec![f.ids[0].clone(), f.ids[2].clone()]
+    );
+    assert!(first_eligible_day.excluded.contains_key(&f.ids[1]));
+    let after_termination = catalog.fixed_universe(fixture::date(8), &listed).unwrap();
+    assert!(!after_termination.members.contains(&f.ids[0]));
+    assert_eq!(after_termination.excluded[&f.ids[0]], "terminated");
+    assert_eq!(
+        before_listing.run_spec.history_claim.as_deref(),
+        Some("retrospective_static")
+    );
+    assert_eq!(
+        before_listing.run_spec.warnings.as_ref().unwrap(),
+        &std::collections::BTreeSet::from(["survivorship_bias".into()])
+    );
+
+    let revised = FixedUniverseSpec::new(
+        "mvp-6-fixed-etfs@1",
+        ["159001", "159003"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+    )
+    .unwrap();
+    let revised_universe = catalog.fixed_universe(fixture::date(3), &revised).unwrap();
+    assert_ne!(
+        before_listing.universe_version,
+        revised_universe.universe_version
+    );
+    assert_eq!(
+        before_listing.run_spec.fixed_list_version.as_deref(),
+        Some("mvp-6-fixed-etfs@1")
     );
 }
 
