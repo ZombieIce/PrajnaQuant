@@ -7,9 +7,14 @@ use prajna_research::{
     etf_eligible::EligibilityParams,
     etf_market::{DerivedMarket, MarketEvidence},
     etf_momentum::{CorporateActionRules, EmptyActionCoverage, TotalReturnIndex},
+    mvp6_coverage::{
+        UnknownCoverageReport, UnknownCoverageThresholds, evaluate_derived_market,
+        write_local_coverage_report,
+    },
     pit_strategy::{self, PitS2Params, RiskNotice, RiskSignals},
     pit_universe::{CatalogInput, FixedUniverseSpec, HistoricalCatalog},
 };
+use std::collections::BTreeSet;
 
 fn default_dividend_tax_rate() -> Notional {
     Notional::ZERO
@@ -78,6 +83,7 @@ pub struct PitContext {
     pub identity: Value,
     pub has_corporate_action_table: bool,
     pub dividend_tax_rate: Notional,
+    pub unknown_coverage: UnknownCoverageReport,
 }
 
 impl PitContext {
@@ -109,6 +115,27 @@ impl PitContext {
             )
         }
         .map_err(|e| invalid(e.to_string()))?;
+        let unexplained_actions = tri
+            .integrity()
+            .iter()
+            .flat_map(|integrity| {
+                integrity
+                    .unexplained_price_jumps
+                    .iter()
+                    .chain(integrity.unapplied_action_dates.iter())
+                    .map(|date| (integrity.instrument_id.clone(), *date))
+            })
+            .collect::<BTreeSet<_>>();
+        let unknown_coverage = evaluate_derived_market(
+            &catalog,
+            &market,
+            tri.version().to_owned(),
+            &unexplained_actions,
+            UnknownCoverageThresholds::default(),
+        )
+        .map_err(invalid)?;
+        write_local_coverage_report(root, &unknown_coverage)
+            .map_err(|error| invalid(format!("write local UNKNOWN coverage report: {error}")))?;
         let risk = match &input.cninfo_index {
             Some(index) => {
                 RiskSignals::build_from_cninfo(&catalog, input.risk_notices.clone(), index, &raw)
@@ -126,6 +153,7 @@ impl PitContext {
             "risk_exit_rule": "persistent-next-explicitly-sellable-open@1",
             "evidence_mode": "offline-opening-evidence",
             "return_mode": if has_actions { "corporate_action_total_return_6b" } else { "price_engineering_6a_empty_actions" },
+            "unknown_coverage": unknown_coverage.summary_json(),
         });
         if has_actions {
             identity["dividend_tax_rate"] = serde_json::json!(input.dividend_tax_rate);
@@ -144,6 +172,7 @@ impl PitContext {
             identity,
             has_corporate_action_table: has_actions,
             dividend_tax_rate: input.dividend_tax_rate,
+            unknown_coverage,
         })
     }
 
@@ -216,6 +245,7 @@ impl PitContext {
             bind_corporate_action_engine_version(&mut spec)?;
             spec["engine"]["pit_semantic_version"] =
                 serde_json::json!(pit_strategy::SEMANTIC_VERSION);
+            spec["unknown_coverage"] = self.unknown_coverage.summary_json();
             let id = identity(
                 "run",
                 &restricted_jcs(&spec).map_err(|e| invalid(e.to_string()))?,
