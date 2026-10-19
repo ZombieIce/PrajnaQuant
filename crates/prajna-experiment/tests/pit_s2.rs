@@ -131,6 +131,17 @@ fn pit_experiment_identity_engine_results_and_persistence() {
             f.tri.version()
         );
         assert_eq!(
+            runs[0].run_spec["unknown_coverage"]["thresholds"],
+            json!({
+                "total_unknown_percent": 5,
+                "per_instrument_unknown_percent": 20,
+            })
+        );
+        assert!(matches!(
+            runs[0].run_spec["unknown_coverage"]["engineering_acceptance"].as_str(),
+            Some("passed" | "failed")
+        ));
+        assert_eq!(
             runs[0].run_spec["pit"]["risk_signals"]["signals"]
                 .as_array()
                 .unwrap()
@@ -150,6 +161,11 @@ fn pit_experiment_identity_engine_results_and_persistence() {
             RunStatus::Completed,
             "{:?}",
             report.runs[0].error
+        );
+        assert!(
+            lake.path()
+                .join("acceptance/mvp6-unknown-coverage.json")
+                .is_file()
         );
         if engine == "fast_event" {
             let result = report.runs[0].fast_event_result.as_ref().unwrap();
@@ -255,6 +271,44 @@ fn pit_experiment_identity_engine_results_and_persistence() {
             .is_err()
         );
     }
+}
+
+#[test]
+fn unknown_floor_failure_is_recorded_without_failing_the_run() {
+    let lake = fixture::lake();
+    let f = fixture::fixture(lake.path());
+    let mut input = definition(&f, "vector");
+    input["pit"]["market"]["openings"][0]["limit_rule"] = Value::Null;
+    input["pit"]["market"]["openings"][1]["limit_rule"] = Value::Null;
+
+    let experiment = Experiment::parse(&input.to_string(), lake.path()).unwrap();
+    let runs = experiment.expand(lake.path()).unwrap();
+    let coverage = &runs[0].run_spec["unknown_coverage"];
+    assert_eq!(coverage["denominator_cells"], 27);
+    assert_eq!(coverage["unknown_cells"], 3);
+    assert_eq!(coverage["unknown_percent"], "11.11%");
+    assert_eq!(coverage["engineering_acceptance"], "failed");
+    assert_eq!(coverage["thresholds"]["total_unknown_percent"], 5);
+    assert_eq!(coverage["thresholds"]["per_instrument_unknown_percent"], 20);
+
+    let report = experiment.execute(lake.path(), 1).unwrap();
+    assert_eq!(report.runs[0].status, RunStatus::Completed);
+    assert_eq!(
+        report.runs[0].run_spec["unknown_coverage"]["engineering_acceptance"],
+        "failed"
+    );
+    let local_report: Value = serde_json::from_slice(
+        &std::fs::read(lake.path().join("acceptance/mvp6-unknown-coverage.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(local_report["unknowns"].as_array().unwrap().len(), 3);
+    assert!(
+        local_report["unknowns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|cell| cell["reason"]["kind"].is_string())
+    );
 }
 
 #[test]
