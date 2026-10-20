@@ -1261,6 +1261,21 @@ impl HistoricalCatalog {
                 }
                 continue;
             }
+            // An officially evidenced identity may have no TDX code-table
+            // presence. Its official lifetime is still a fixed-list member and
+            // is measured as UNKNOWN; the Catalog gap is disclosed, not a
+            // run-wide failure.
+            if let Some(detail) = gap.strip_prefix("lifecycle_without_code_table_identity:")
+                && let Some((code, _start)) = detail.split_once(':')
+                && scoped(code)
+                && self
+                    .input
+                    .lifecycles
+                    .iter()
+                    .any(|life| life.native_symbol == code && life.code_table_first_seen.is_none())
+            {
+                continue;
+            }
             blocking_gaps.insert(gap.clone());
         }
         if !blocking_gaps.is_empty() {

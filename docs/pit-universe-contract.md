@@ -278,20 +278,25 @@ future-information claim.
 
 The report records listing and termination differences from the TDX code table
 (`listing_date_vs_code_table_first`, `termination_vs_code_table_presence`,
-`code_table_exit_before_termination`, `code_table_presence_outside_lifecycle`)
-with the identity's evidence level; the kind and resolution are typed report
-enums. A bare TDX presence strictly before the first identity or strictly after
-the last one is reported as `code_table_presence_outside_lifecycle` and does not
-exclude the code when it has no priced Bar; a priced Bar there still excludes it
-under P27-19. Official evidence wins and the
-difference is disclosed; a secondary identity that disagrees is excluded. A
-priced Bar outside every evidenced lifecycle excludes the code under P27-19
-(including the interval between a code-table exit and a later termination).
-The UNKNOWN coverage denominator uses the legal lifetime: the official listing
-date (not `identity_start`) starts it, and it ends at the official termination
-or the next same-code identity boundary, so Sessions missing from the TDX code
-table still count as UNKNOWN and are not dropped. Every excluded code adds a
-code-scoped
+`code_table_exit_before_termination`, `code_table_presence_outside_lifecycle`,
+`priced_bar_outside_tdx_presence`) with the identity's evidence level; the kind
+and resolution are typed report enums. A bare TDX presence strictly before the
+first identity or strictly after the last one is reported as
+`code_table_presence_outside_lifecycle` and does not exclude the code when it has
+no priced Bar. Official evidence wins and the difference is disclosed; a
+secondary identity that disagrees is excluded. A priced Bar **outside the
+official lifespan** excludes the code under P27-19. A priced Bar inside the
+official lifespan but beyond a TDX presence run is a source disagreement
+reported as `priced_bar_outside_tdx_presence` with an unresolved resolution; the
+code stays in the fixed list and that Session is UNKNOWN. An identity with
+official dates but no TDX code-table presence at all stays in the official
+lifetime: it is reported as `code_table_absent` (unresolved), the Catalog
+discloses `lifecycle_without_code_table_identity`, and the fixed list keeps the
+code with UNKNOWN coverage. The UNKNOWN coverage denominator uses the legal
+lifetime: the official listing date (not `identity_start`) starts it, and it
+ends at the official termination or the next same-code identity boundary, so
+Sessions missing from the TDX code table still count as UNKNOWN and are not
+dropped. Every code-scoped exclusion adds a
 `mvp6_excluded:<code>:<reason>` coverage gap. `fixed_universe` turns that gap
 into a per-code exclusion and records the reason in
 `run_spec.fixed_list_exclusions`; other gaps remain run-wide failures. The local
@@ -302,11 +307,13 @@ Synthetic tests cover pre-window and in-window listing, post-termination, code
 reuse, an explicitly declared legal-name change with P6 availability and its
 rejection when unmarked, contract evidence, shared attribute pages, missing
 identity rows, unresolved orgIds, TDX disagreements, secondary evidence
-exclusion, code-table absence differences, priced bars outside a lifecycle
-(including after a code-table exit), TDX presence before the official listing
-without a priced Bar, missing/ambiguous announcement dates, missing/invalid v4
-input, invalid Raw references, official-lifetime UNKNOWN coverage and
-equivalence with a handwritten `CatalogInput`. No real v4 Dataset, identity
+exclusion, code-table absence, no-TDX-presence identities that stay in the
+official lifetime, priced Bars outside the official lifespan, priced Bars
+inside the official lifespan but beyond TDX presence, bare reuse
+post-termination runs, TDX presence before the official listing without a
+priced Bar, missing/ambiguous announcement dates, missing/invalid v4 input,
+invalid Raw references, official-lifetime UNKNOWN coverage and equivalence
+with a handwritten `CatalogInput`. No real v4 Dataset, identity
 table or citation manifest is validated here.
 
 Synthetic tests cover v1 compatibility and v2 code ranges/snapshots, code-table

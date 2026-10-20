@@ -74,6 +74,7 @@ pub enum IdentityDifferenceKind {
     TerminationVsCodeTablePresence,
     CodeTableExitBeforeTermination,
     PricedBarOutsideLifecycle,
+    PricedBarOutsideTdxPresence,
     CodeTablePresenceOutsideLifecycle,
 }
 
@@ -209,6 +210,10 @@ struct PlannedLifecycle {
     end_exclusive: Option<NaiveDate>,
     run: PresenceRun,
     name_change: bool,
+    /// False for an officially evidenced identity with no TDX code-table
+    /// presence: its physical price lifecycle is empty, but its official
+    /// lifetime remains a fixed-list member for UNKNOWN coverage.
+    has_presence: bool,
 }
 
 struct Plan {
@@ -657,7 +662,11 @@ fn plan(v4: &V4Data, seeds: &[IdentitySeed]) -> Result<Plan> {
         }
         let runs = presence_runs(v4, code);
         if runs.is_empty() {
-            excluded.insert(code.clone(), "code_table_absent".to_owned());
+            // The identity is officially evidenced but TDX never lists the
+            // code. This is missing market evidence, not evidence that the ETF
+            // is outside the official lifetime: keep it as a fixed-list member
+            // with an empty physical price lifecycle, report the gap, and let
+            // the coverage layer count the lifetime as UNKNOWN (P27-3/P27-6).
             for row in &rows {
                 differences.push(IdentityDifference {
                     code: code.clone(),
@@ -665,11 +674,23 @@ fn plan(v4: &V4Data, seeds: &[IdentitySeed]) -> Result<Plan> {
                     expected_date: Some(row.listing),
                     observed_date: None,
                     evidence_level: Some(row.evidence_level),
-                    resolution: IdentityDifferenceResolution::Excluded,
+                    resolution: IdentityDifferenceResolution::Unresolved,
+                });
+                planned.push(PlannedLifecycle {
+                    seed: (*row).clone(),
+                    identity_start: row.listing,
+                    end_exclusive: None,
+                    run: PresenceRun {
+                        first: row.listing,
+                        last: row.listing,
+                        exit: row.termination,
+                    },
+                    name_change: false,
+                    has_presence: false,
                 });
             }
             notes.push(format!(
-                "{code}: identity row exists but the v4 code table never contains the code"
+                "{code}: identity row exists but the v4 code table never contains the code; the official lifetime remains as UNKNOWN"
             ));
             continue;
         }
@@ -744,14 +765,10 @@ fn align_runs(
                         ));
                     }
                     // The successor may appear in the code table before its
-                    // official listing. That is a disclosed listing-date
-                    // difference, not an exclusion: only a priced Bar outside
-                    // the official lifetime excludes it (P27-19).
-                    if row.termination.is_some_and(|end| end <= runs[next].first) {
-                        return Err(format!(
-                            "{code}: reused-code lifecycle does not align with the code-table absence"
-                        ));
-                    }
+                    // official listing, or only after its official termination.
+                    // Both are disclosed differences, not exclusions: only a
+                    // priced Bar outside the official lifetime excludes the
+                    // code (P27-19).
                     next
                 }
                 (false, Some(_)) if row.listing > runs[previous_index].last => {
@@ -850,10 +867,14 @@ fn align_runs(
             end_exclusive,
             run,
             name_change: *name_change,
+            has_presence: true,
         });
     }
 
     for (index, lifecycle) in lifecycles.iter().enumerate() {
+        if !lifecycle.has_presence {
+            continue;
+        }
         let seed = &lifecycle.seed;
         // Listing vs the first code-table Session of the lifecycle's run. A
         // pre-window listing cannot be compared to a window that starts later.
@@ -929,8 +950,11 @@ fn align_runs(
         }
     }
 
-    // P27-19: a priced Bar outside every evidenced lifecycle excludes the code.
-    if let Some(date) = outside_lifecycle_bar(code, &lifecycles, v4) {
+    // P27-19 excludes a priced Bar outside the official lifetime. A Bar that
+    // is inside the official lifetime but beyond the TDX presence run is a
+    // source disagreement: report it and keep the ETF (its Session is UNKNOWN
+    // in the coverage grid).
+    if let Some(date) = outside_official_lifespan(code, &lifecycles, v4) {
         differences.push(IdentityDifference {
             code: code.to_owned(),
             kind: IdentityDifferenceKind::PricedBarOutsideLifecycle,
@@ -944,6 +968,16 @@ fn align_runs(
             Some(format!("priced_bar_outside_lifecycle:{date}")),
             Vec::new(),
         ));
+    }
+    for date in priced_bars_outside_tdx_presence(code, &lifecycles, v4) {
+        differences.push(IdentityDifference {
+            code: code.to_owned(),
+            kind: IdentityDifferenceKind::PricedBarOutsideTdxPresence,
+            expected_date: None,
+            observed_date: Some(date),
+            evidence_level: None,
+            resolution: IdentityDifferenceResolution::Unresolved,
+        });
     }
 
     for run in ignored_runs {
@@ -960,22 +994,72 @@ fn align_runs(
     Ok((lifecycles, None, Vec::new()))
 }
 
-fn outside_lifecycle_bar(
+fn planned_official_end(
+    lifecycle: &PlannedLifecycle,
+    lifecycles: &[PlannedLifecycle],
+) -> Option<NaiveDate> {
+    let successor_listing = lifecycles
+        .iter()
+        .filter(|other| {
+            other.seed.code == lifecycle.seed.code
+                && other.identity_start > lifecycle.identity_start
+        })
+        .map(|other| other.seed.listing)
+        .min();
+    match (lifecycle.seed.termination, successor_listing) {
+        (Some(termination), Some(successor)) => Some(termination.min(successor)),
+        (Some(termination), None) => Some(termination),
+        (None, Some(successor)) => Some(successor),
+        (None, None) => None,
+    }
+}
+
+fn date_in_official_lifetime(date: NaiveDate, lifecycles: &[PlannedLifecycle]) -> bool {
+    lifecycles.iter().any(|lifecycle| {
+        date >= lifecycle.seed.listing
+            && planned_official_end(lifecycle, lifecycles).is_none_or(|end| date < end)
+    })
+}
+
+fn outside_official_lifespan(
     code: &str,
     lifecycles: &[PlannedLifecycle],
     v4: &V4Data,
 ) -> Option<NaiveDate> {
     let dates = v4.bar_dates.get(code)?;
-    dates.iter().copied().find(|date| {
-        !lifecycles.iter().any(|lifecycle| {
-            *date >= lifecycle.seed.listing.max(lifecycle.identity_start)
-                && lifecycle.end_exclusive.is_none_or(|end| *date < end)
-                && lifecycle
-                    .seed
-                    .termination
-                    .is_none_or(|termination| *date < termination)
-        })
+    dates
+        .iter()
+        .copied()
+        .find(|date| !date_in_official_lifetime(*date, lifecycles))
+}
+
+fn date_in_tdx_presence(date: NaiveDate, lifecycles: &[PlannedLifecycle]) -> bool {
+    lifecycles.iter().any(|lifecycle| {
+        date >= lifecycle.seed.listing
+            && date >= lifecycle.identity_start
+            && lifecycle.end_exclusive.is_none_or(|end| date < end)
+            && lifecycle
+                .seed
+                .termination
+                .is_none_or(|termination| date < termination)
     })
+}
+
+fn priced_bars_outside_tdx_presence(
+    code: &str,
+    lifecycles: &[PlannedLifecycle],
+    v4: &V4Data,
+) -> Vec<NaiveDate> {
+    let Some(dates) = v4.bar_dates.get(code) else {
+        return Vec::new();
+    };
+    dates
+        .iter()
+        .copied()
+        .filter(|date| {
+            date_in_official_lifetime(*date, lifecycles) && !date_in_tdx_presence(*date, lifecycles)
+        })
+        .collect()
 }
 
 fn build_input(v4: &V4Data, plan: &Plan, citations: &[Citation]) -> Result<CatalogInput> {
@@ -1001,6 +1085,9 @@ fn build_input(v4: &V4Data, plan: &Plan, citations: &[Citation]) -> Result<Catal
 
     let mut scans = Vec::new();
     for lifecycle in planned {
+        if !lifecycle.has_presence {
+            continue;
+        }
         let start = lifecycle.identity_start;
         let end = lifecycle.end_exclusive;
         let dates = v4

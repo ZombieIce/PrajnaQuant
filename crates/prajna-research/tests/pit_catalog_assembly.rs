@@ -796,37 +796,57 @@ fn priced_bar_after_termination_excludes_the_code() {
 }
 
 #[test]
-fn identity_without_code_table_presence_is_excluded() {
+fn identity_without_code_table_presence_stays_in_the_official_lifetime() {
     let world = world(
         &[
             row("159919", "合成ETF", 1, None, 1, "", "official"),
-            row("159952", "合成科创ETF", 1, None, 1, "", "official"),
+            row("159952", "合成科创ETF", 1, Some(5), 1, "", "official"),
         ],
         &[(1, &["159919"]), (2, &["159919"])],
         &[("159919", &[1, 2])],
     );
     let assembly =
         assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations).unwrap();
-    assert_eq!(
-        assembly
-            .report
-            .excluded_codes
-            .get("159952")
-            .map(String::as_str),
-        Some("code_table_absent")
-    );
+    // The absence of TDX rows is missing market evidence, not evidence that
+    // the officially evidenced ETF is outside the fixed list.
+    assert!(!assembly.report.excluded_codes.contains_key("159952"));
+    assert!(assembly.report.included_codes.contains("159952"));
+    assert!(assembly.report.differences.iter().any(|difference| {
+        difference.code == "159952"
+            && difference.kind == IdentityDifferenceKind::CodeTableAbsent
+            && difference.resolution == IdentityDifferenceResolution::Unresolved
+    }));
     assert!(
         assembly
             .catalog
             .coverage_gaps()
-            .contains("mvp6_excluded:159952:code_table_absent")
+            .iter()
+            .any(|gap| gap.starts_with("lifecycle_without_code_table_identity:159952:"))
     );
-    assert!(assembly.report.differences.iter().any(|difference| {
-        difference.code == "159952"
-            && difference.kind == IdentityDifferenceKind::CodeTableAbsent
-            && difference.resolution == IdentityDifferenceResolution::Excluded
-    }));
-    assert!(assembly.report.included_codes.contains("159919"));
+    let lifecycle = assembly
+        .catalog
+        .input()
+        .lifecycles
+        .iter()
+        .find(|lifecycle| lifecycle.native_symbol == "159952")
+        .unwrap();
+    assert_eq!(lifecycle.identity_start, Some(d(1)));
+    assert_eq!(lifecycle.code_table_first_seen, None);
+    let fixed = mvp6_fixed();
+    let day2 = assembly.catalog.fixed_universe(d(2), &fixed).unwrap();
+    assert!(
+        day2.members
+            .iter()
+            .any(|member| member.symbol().starts_with("159952"))
+    );
+    assert_eq!(
+        day2.run_spec
+            .fixed_list_exclusions
+            .as_ref()
+            .unwrap()
+            .get("159952"),
+        None
+    );
 }
 
 #[test]
@@ -980,6 +1000,65 @@ fn fixed_list_keeps_a_code_through_a_gap_before_a_later_successor() {
 }
 
 #[test]
+fn reused_code_bare_post_termination_run_without_a_priced_bar_is_reported_not_excluded() {
+    // Old 159560 ends S4. The successor is officially listed S5 and terminates
+    // S6, but TDX only shows it in a later S7-S8 run with no priced Bars. The
+    // later run must not exclude the code; it is a disclosed termination
+    // disagreement and the official lifetime S5-S6 remains in the universe.
+    let world = world(
+        &[
+            row("159560", "合成中证500ETF-A", 1, Some(4), 1, "", "official"),
+            row("159560", "合成中证500ETF-B", 5, Some(6), 4, "", "official"),
+        ],
+        &[
+            (1, &["159560"]),
+            (2, &["159560"]),
+            (3, &["159560"]),
+            (4, &[]),
+            (5, &[]),
+            (6, &[]),
+            (7, &["159560"]),
+            (8, &["159560"]),
+        ],
+        &[("159560", &[1, 2, 3])],
+    );
+    let assembly =
+        assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations).unwrap();
+    assert!(assembly.report.included_codes.contains("159560"));
+    assert!(!assembly.report.excluded_codes.contains_key("159560"));
+    let difference = assembly
+        .report
+        .differences
+        .iter()
+        .find(|difference| {
+            difference.code == "159560"
+                && difference.kind == IdentityDifferenceKind::TerminationVsCodeTablePresence
+        })
+        .expect("post-termination TDX presence is reported");
+    assert_eq!(difference.expected_date, Some(d(6)));
+    assert_eq!(difference.observed_date, Some(d(8)));
+    assert_eq!(
+        difference.resolution,
+        IdentityDifferenceResolution::AcceptedIdentity
+    );
+    let fixed = mvp6_fixed();
+    let listed = assembly.catalog.fixed_universe(d(5), &fixed).unwrap();
+    assert!(
+        listed
+            .members
+            .iter()
+            .any(|member| member.symbol().starts_with("159560"))
+    );
+    let terminated = assembly.catalog.fixed_universe(d(7), &fixed).unwrap();
+    assert!(
+        !terminated
+            .members
+            .iter()
+            .any(|member| member.symbol().starts_with("159560"))
+    );
+}
+
+#[test]
 fn reused_code_successor_may_appear_in_tdx_before_its_official_listing() {
     // Old 159560 identity ends S4. The reused code reappears in the TDX table at
     // S5, but the successor's official listing is S6 and its first priced Bar is
@@ -1029,7 +1108,11 @@ fn reused_code_successor_may_appear_in_tdx_before_its_official_listing() {
 }
 
 #[test]
-fn priced_bar_after_code_table_exit_is_excluded() {
+fn priced_bar_after_code_table_exit_is_reported_not_excluded() {
+    // 159919 is officially alive S1-S8, but TDX stops observing it after S3 and
+    // still prices S5. The S5 Bar is inside the official lifespan, so it is a
+    // source disagreement (UNKNOWN interval), not a legal termination: the code
+    // stays in the fixed universe and the Bar is reported.
     let world = world(
         &[
             row("159919", "合成ETF", 1, Some(8), 1, "", "official"),
@@ -1046,17 +1129,32 @@ fn priced_bar_after_code_table_exit_is_excluded() {
     );
     let assembly =
         assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations).unwrap();
-    assert!(
-        assembly
-            .report
-            .excluded_codes
-            .get("159919")
-            .is_some_and(|reason| reason.starts_with("priced_bar_outside_lifecycle"))
-    );
-    assert!(!assembly.report.included_codes.contains("159919"));
+    assert!(!assembly.report.excluded_codes.contains_key("159919"));
+    assert!(assembly.report.included_codes.contains("159919"));
+    let difference = assembly
+        .report
+        .differences
+        .iter()
+        .find(|difference| {
+            difference.code == "159919"
+                && difference.kind == IdentityDifferenceKind::PricedBarOutsideTdxPresence
+        })
+        .expect("in-official Bar beyond TDX presence is reported");
+    assert_eq!(difference.observed_date, Some(d(5)));
     assert_eq!(
-        assembly.report.included_codes,
-        BTreeSet::from(["159612".to_owned()])
+        difference.resolution,
+        IdentityDifferenceResolution::Unresolved
+    );
+    // The Bar is inside the official lifetime but the physical TDX identity
+    // ended at S4, so no price row resolves at S5; the fixed universe still
+    // includes the code (and the coverage grid reports S5 as UNKNOWN).
+    assert!(assembly.catalog.resolve_row("159919", d(5)).is_err());
+    let fixed = mvp6_fixed();
+    let day5 = assembly.catalog.fixed_universe(d(5), &fixed).unwrap();
+    assert!(
+        day5.members
+            .iter()
+            .any(|member| member.symbol().starts_with("159919"))
     );
 }
 
