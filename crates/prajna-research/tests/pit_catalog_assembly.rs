@@ -1376,6 +1376,31 @@ fn delayed_legal_name_change_is_not_attributed_before_it_is_knowable() {
             prajna_research::mvp6_coverage::UnknownReason::MissingBarWithoutHaltNotice
         );
     }
+    // A termination during the delay is still an official boundary. A
+    // priced row on that Session must error rather than enter the P6 exception.
+    let mut terminated_input = assembly.catalog.input().clone();
+    let successor = terminated_input
+        .lifecycles
+        .iter_mut()
+        .find(|life| life.instrument_id().unwrap() == new)
+        .unwrap();
+    successor.termination = Some(LifecycleFact {
+        effective_date: d(3),
+        evidence: successor.listing.evidence.clone(),
+    });
+    let terminated =
+        prajna_research::pit_universe::HistoricalCatalog::build(terminated_input, &raw).unwrap();
+    let mut evidence = market.evidence().clone();
+    evidence.end = d(3);
+    let error = prajna_research::etf_market::DerivedMarket::from_dataset(
+        &world.root,
+        &dsv,
+        &terminated,
+        evidence,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("unattributed row"), "{error}");
     // Bars in the gap are reported as source disagreements, not attributed to
     // either InstrumentId.
     assert!(assembly.report.differences.iter().any(|difference| {

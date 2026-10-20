@@ -258,7 +258,9 @@ predecessor/successor Bars remain. The v4 DerivedMarket loader skips gap Bars,
 BarSources and crosschecks together. The official-lifetime coverage grid then
 emits one `MissingBarWithoutHaltNotice` UNKNOWN per gap Session under the
 predecessor, without assigning a price or a fixed-list member. Ordinary
-unattributed rows still fail closed. Rename listing-date and legal-name
+unattributed rows still fail closed. Quarantine never overrides an official
+termination: each path retains its existing termination-day convention.
+Rename listing-date and legal-name
 citations must reference the same frozen announcement document (pages may
 differ), so an earlier unrelated date citation cannot advance availability.
 

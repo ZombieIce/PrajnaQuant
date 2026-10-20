@@ -1430,6 +1430,10 @@ fn identity_availability_gaps(
         .iter()
         .filter_map(|identity| {
             let available = identity.available_from?;
+            let end = identity
+                .termination_date
+                .and_then(|date| date.succ_opt())
+                .map_or(available, |termination| available.min(termination));
             (identity.change_kind == LEGAL_NAME_CHANGE
                 && available > identity.listing_date
                 && ranges.iter().any(|previous| {
@@ -1440,7 +1444,7 @@ fn identity_availability_gaps(
             .then(|| LifecycleRange {
                 native_symbol: identity.code.clone(),
                 start: identity.listing_date,
-                end_exclusive: Some(available),
+                end_exclusive: Some(end),
             })
         })
         .collect()
@@ -3493,6 +3497,51 @@ mod lifecycle_tests {
         assert_eq!(ranges[0].start, "2026-01-05".parse().unwrap());
         assert_eq!(ranges[0].end_exclusive, Some("2026-01-06".parse().unwrap()));
         assert_eq!(ranges[1].start, "2026-01-08".parse().unwrap());
+    }
+
+    #[test]
+    fn rename_gap_does_not_exempt_post_termination_prices() {
+        let facts = session(vec![
+            lifecycle("159001", "2026-01-05", None, ""),
+            lifecycle_at(
+                "159001",
+                "2026-01-06",
+                Some("2026-01-06"),
+                LEGAL_NAME_CHANGE,
+                Some("2026-01-08"),
+            ),
+        ]);
+        let ranges = lifecycles_from_facts(&facts).unwrap();
+        let gaps = identity_availability_gaps(&facts, &ranges);
+        // v6's existing termination convention includes the termination day.
+        assert!(gaps[0].contains("2026-01-06".parse().unwrap()));
+        assert!(!gaps[0].contains("2026-01-07".parse().unwrap()));
+        let prices = ["2026-01-05", "2026-01-07"]
+            .into_iter()
+            .map(|date| {
+                (
+                    ("159001".into(), date.parse().unwrap()),
+                    Sourced {
+                        value: SelectedBar {
+                            ohlcv: Ohlcv {
+                                open: Price::parse("1").unwrap(),
+                                high: Price::parse("1").unwrap(),
+                                low: Price::parse("1").unwrap(),
+                                close: Price::parse("1").unwrap(),
+                                shares: Quantity::parse("100").unwrap(),
+                            },
+                            amount: None,
+                            reference_price: None,
+                            source: "tdx",
+                        },
+                        raw: "synthetic".into(),
+                    },
+                )
+            })
+            .collect();
+        let filtered = filter_v6_lifecycles(prices, Vec::new(), &ranges, &gaps);
+        assert!(filtered.excluded_symbols.contains("159001"));
+        assert!(filtered.primary.is_empty());
     }
 
     #[test]

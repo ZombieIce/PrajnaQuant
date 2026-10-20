@@ -1128,6 +1128,11 @@ impl HistoricalCatalog {
     pub(crate) fn is_identity_availability_gap(&self, symbol: &str, date: NaiveDate) -> bool {
         self.input.lifecycles.iter().any(|next| {
             next.native_symbol == symbol
+                && next
+                    .termination
+                    .as_ref()
+                    .is_none_or(|end| date < end.effective_date)
+                && next.identity_end_exclusive.is_none_or(|end| date < end)
                 && next.identity_available_from.is_some_and(|available| {
                     date >= next.listing.effective_date && date < available
                 })
