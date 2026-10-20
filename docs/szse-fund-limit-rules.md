@@ -74,9 +74,10 @@ The unresolved instrument-level assignments are explicit for each regime:
 | 2026-07-06–2026-10-01 | The same instrument-level assignments under the 2026 rules |
 | Any date in scope | Any category not enumerated in the applicable SZSE rule row, or any interval for which the official rule cannot be established |
 
-Callers must supply an explicit lifecycle-specific category assignment with
-its half-open effective interval, official document number, evidence level,
-and local frozen membership evidence. Primary assignments require a SZSE text
+Callers must supply an explicit category assignment with its half-open
+effective interval, official document number, evidence level, and local frozen
+membership evidence; the resolver binds it to the Catalog lifecycle by native
+symbol and session validity. Primary assignments require a SZSE text
 or list that directly names the fund. Secondary assignments require the fund
 contract/prospectus tracking-index statement together with the SZSE index-class
 rule. The public rule table stores regulation citations without Raw hashes; the
@@ -120,6 +121,20 @@ in the local acceptance bundle. The public parser validates category existence,
 source tier, interval coverage, and rejects overlapping assignments. Synthetic
 tests exercise the parser and overlap rejection; local acceptance replay is
 recorded separately in `mvp-6-local-capture.md`.
+
+Public assignments remain keyed by the six-digit SZSE code; the Catalog lifecycle
+`InstrumentId` (`<code>-<identity_start>-<contract-hash-prefix>.SZSE`) is not
+written back into the public assignment. A session binds only when the code
+matches and the date is inside `Lifecycle::validity`. A legal-name successor
+stays in the same fund chain, so one assignment binds inside each identity's own
+validity window. If one assignment's interval intersects lifecycles of two
+*different* funds that reused the same code, the intersecting cells stay
+`CategoryUnknown`; the resolver never picks one fund arbitrarily. The resolved
+`official_rule.category_evidence` records the public assignment identity and,
+separately, the resolved `lifecycle` binding (instrument ID and validity window);
+`supports` validates both. This changes resolved rule, derived-market and coverage
+version identities without changing the public v2 configuration or its assignment
+identities.
 
 The v2 wire format is selected only by `MarketEvidence.semantic_version`:
 omitting it (or null) keeps the v1 contract, where `LimitRule.evidence` and

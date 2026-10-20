@@ -269,6 +269,19 @@ impl AttributeFact {
         })
     }
 }
+/// Sessions attributed to one lifecycle identity. `until` is exclusive. This is
+/// the authoritative binding window for physical rows and PIT rule assignments;
+/// a public rule assignment keyed by `native_symbol` may only bind inside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LifecycleValidity {
+    pub from: NaiveDate,
+    pub until: Option<NaiveDate>,
+}
+impl LifecycleValidity {
+    pub fn contains(&self, date: NaiveDate) -> bool {
+        date >= self.from && self.until.is_none_or(|end| date < end)
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Lifecycle {
@@ -317,17 +330,24 @@ impl Lifecycle {
         InstrumentId::new(symbol, VenueId::new("SZSE").expect("static venue"))
             .map_err(|e| error(e.to_string()))
     }
-    fn contains(&self, date: NaiveDate) -> bool {
-        let start = self.listing.effective_date.max(self.identity_start()).max(
+    /// Sessions in which this identity is valid. The start is the latest of the
+    /// official listing, the price identity start and the renamed identity's
+    /// availability; the end is the earliest of the next identity boundary and
+    /// the official termination. Rule assignments must use the same window.
+    pub fn validity(&self) -> LifecycleValidity {
+        let from = self.listing.effective_date.max(self.identity_start()).max(
             self.identity_available_from
                 .unwrap_or(self.listing.effective_date),
         );
-        date >= start
-            && self.identity_end_exclusive.is_none_or(|end| date < end)
-            && self
-                .termination
-                .as_ref()
-                .is_none_or(|end| date < end.effective_date)
+        let until = self
+            .identity_end_exclusive
+            .into_iter()
+            .chain(self.termination.as_ref().map(|end| end.effective_date))
+            .min();
+        LifecycleValidity { from, until }
+    }
+    fn contains(&self, date: NaiveDate) -> bool {
+        self.validity().contains(date)
     }
 }
 

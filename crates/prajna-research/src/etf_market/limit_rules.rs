@@ -1,7 +1,7 @@
 use super::{
     FirstSessionReference, FundCategoryEvidence, LimitRule, LimitRuleEvidence, OfficialLimitRule,
 };
-use crate::pit_universe::{CatalogError, CatalogInput, Evidence, Publication};
+use crate::pit_universe::{CatalogError, CatalogInput, Evidence, Lifecycle, Publication};
 use chrono::NaiveDate;
 use prajna_domain::{InstrumentId, Price, Session, TimestampNs};
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,142 @@ type Result<T> = std::result::Result<T, CatalogError>;
 
 const OFFICIAL_V1: &str = include_str!("../../../../configs/mvp-6/limit_rules_v1.json");
 const OFFICIAL_V2: &str = include_str!("../../../../configs/mvp-6/limit_rules_v2.json");
+
+/// The Catalog lifecycle identity that a public category assignment binds to.
+/// Public assignments keep their six-digit `native_symbol` key; this binding is
+/// recorded separately in the rule evidence and must equal the Catalog lifecycle
+/// under which the session is evaluated.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LifecycleBinding {
+    pub instrument_id: InstrumentId,
+    pub native_symbol: String,
+    /// First Session attributed to the lifecycle (`Lifecycle::validity`).
+    pub effective_from: NaiveDate,
+    /// Exclusive end of the lifecycle; `None` means open-ended.
+    pub effective_until: Option<NaiveDate>,
+}
+impl LifecycleBinding {
+    pub fn from_lifecycle(life: &Lifecycle) -> Result<Self> {
+        let validity = life.validity();
+        Ok(Self {
+            instrument_id: life.instrument_id()?,
+            native_symbol: life.native_symbol.clone(),
+            effective_from: validity.from,
+            effective_until: validity.until,
+        })
+    }
+    pub fn contains(&self, session_date: NaiveDate) -> bool {
+        session_date >= self.effective_from
+            && self.effective_until.is_none_or(|end| session_date < end)
+    }
+}
+
+/// A rule-binding target plus every lifecycle sharing its native symbol.
+/// Assignments are keyed by code, so a binding must also reject a category whose
+/// interval spans a reused code's different fund. Successors that continue the
+/// same fund (for example a legal-name change) stay in one fund chain and bind
+/// inside each lifecycle's own validity window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleBinding {
+    target: LifecycleBinding,
+    /// `(lifecycle, first identity of its fund chain)` for the native symbol.
+    chain: Vec<(LifecycleBinding, NaiveDate)>,
+}
+impl RuleBinding {
+    pub fn from_lifecycles(
+        lifecycles: &[Lifecycle],
+        instrument_id: &InstrumentId,
+    ) -> Result<Option<Self>> {
+        let Some(target) = lifecycles
+            .iter()
+            .find(|life| life.instrument_id().as_ref() == Ok(instrument_id))
+        else {
+            return Ok(None);
+        };
+        let native_symbol = target.native_symbol.clone();
+        let mut group = lifecycles
+            .iter()
+            .filter(|life| life.native_symbol == native_symbol)
+            .collect::<Vec<_>>();
+        group.sort_by_key(|life| life.identity_start.unwrap_or(life.listing.effective_date));
+        let mut chain = Vec::with_capacity(group.len());
+        let mut chain_start = None;
+        // A terminated predecessor means the next lifecycle reuses the code for
+        // a different fund; an unterminated predecessor is a fund continuation
+        // such as a legal-name change. The first lifecycle always starts a chain.
+        let mut predecessor_terminated = true;
+        for life in group {
+            let binding = LifecycleBinding::from_lifecycle(life)?;
+            if predecessor_terminated {
+                chain_start = Some(binding.effective_from);
+            }
+            chain.push((
+                binding,
+                chain_start.expect("the first lifecycle starts a fund chain"),
+            ));
+            predecessor_terminated = life.termination.is_some();
+        }
+        let target = chain
+            .iter()
+            .find(|(binding, _)| binding.instrument_id == *instrument_id)
+            .map(|(binding, _)| binding.clone())
+            .expect("target is part of its native-symbol group");
+        Ok(Some(Self { target, chain }))
+    }
+
+    pub fn target(&self) -> &LifecycleBinding {
+        &self.target
+    }
+
+    fn target_chain_start(&self) -> NaiveDate {
+        self.chain
+            .iter()
+            .find(|(binding, _)| *binding == self.target)
+            .map(|(_, start)| *start)
+            .expect("target is part of the binding chain")
+    }
+
+    /// An assignment may not bind when its interval also covers a lifecycle of
+    /// a different fund that reused the same code. The affected cells stay
+    /// `CategoryUnknown`; the resolver never picks one fund arbitrarily.
+    fn spans_another_fund(&self, assignment: &FundCategoryAssignment) -> bool {
+        let target_chain = self.target_chain_start();
+        self.chain.iter().any(|(binding, chain_start)| {
+            *chain_start != target_chain
+                && binding.native_symbol == assignment.instrument_id.symbol()
+                && intervals_overlap(
+                    assignment.effective_from,
+                    assignment.effective_until,
+                    binding.effective_from,
+                    binding.effective_until,
+                )
+        })
+    }
+}
+
+/// Resolve the unique assignment for the binding's native symbol and session.
+/// Both the rule resolver and the coverage classifier use this function so a
+/// market cell and the coverage report cannot disagree about category binding.
+fn bound_assignment<'a>(
+    binding: &RuleBinding,
+    session_date: NaiveDate,
+    assignments: &'a [FundCategoryAssignment],
+) -> Option<&'a FundCategoryAssignment> {
+    if !binding.target.contains(session_date) {
+        return None;
+    }
+    let target = &binding.target;
+    let assignment = unique_match(assignments.iter().filter(|assignment| {
+        assignment.instrument_id.symbol() == target.native_symbol
+            && assignment.instrument_id.venue() == target.instrument_id.venue()
+            && assignment.effective_from <= session_date
+            && assignment
+                .effective_until
+                .is_none_or(|end| session_date < end)
+    }))?;
+    (!binding.spans_another_fund(assignment)).then_some(assignment)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -179,15 +315,18 @@ impl FundLimitRuleTable {
 
     pub fn rule_for(
         &self,
-        instrument_id: &InstrumentId,
+        binding: &RuleBinding,
         session_date: NaiveDate,
     ) -> Result<Option<LimitRule>> {
-        self.rule_for_with_assignments(instrument_id, session_date, &self.category_assignments)
+        self.rule_for_with_assignments(binding, session_date, &self.category_assignments)
     }
 
+    /// Resolve the assignment for the binding's native symbol and then the
+    /// matching rule record. Return `None` for missing, ambiguous, out-of-lifecycle
+    /// or out-of-interval categories; such cells stay `UNKNOWN`.
     pub fn rule_for_with_assignments(
         &self,
-        instrument_id: &InstrumentId,
+        binding: &RuleBinding,
         session_date: NaiveDate,
         assignments: &[FundCategoryAssignment],
     ) -> Result<Option<LimitRule>> {
@@ -195,13 +334,7 @@ impl FundLimitRuleTable {
             return Ok(None);
         }
 
-        let Some(assignment) = unique_match(assignments.iter().filter(|assignment| {
-            assignment.instrument_id == *instrument_id
-                && assignment.effective_from <= session_date
-                && assignment
-                    .effective_until
-                    .is_none_or(|end| session_date < end)
-        })) else {
+        let Some(assignment) = bound_assignment(binding, session_date, assignments) else {
             return Ok(None);
         };
         assignment.evidence.validate()?;
@@ -263,15 +396,30 @@ impl FundLimitRuleTable {
                     evidence: LimitRuleEvidence::Citation(assignment.evidence.clone()),
                     supporting_sources: assignment.supporting_sources.clone(),
                     evidence_level: assignment.evidence_level,
+                    lifecycle: binding.target.clone(),
                 }),
             }),
         }))
     }
 
+    /// The only category-assignment lookup used by coverage classification. It
+    /// applies the same lifecycle and reused-code rules as rule resolution.
+    pub fn category_assignment_for(
+        &self,
+        binding: &RuleBinding,
+        session_date: NaiveDate,
+    ) -> Option<&FundCategoryAssignment> {
+        bound_assignment(binding, session_date, &self.category_assignments)
+    }
+
+    /// Validate the rule's evidence against an authoritative binding. Both the
+    /// assignment identity (computed from the public six-digit assignment) and
+    /// the lifecycle binding must hold; neither is derived by rewriting the
+    /// public assignment's `instrument_id`.
     pub fn supports(
         &self,
         rule: &LimitRule,
-        instrument_id: &InstrumentId,
+        binding: &RuleBinding,
         session_date: NaiveDate,
     ) -> bool {
         if session_date < self.coverage_start || session_date >= self.coverage_end_exclusive {
@@ -303,7 +451,9 @@ impl FundLimitRuleTable {
             return false;
         }
         if category_evidence.document_number.trim().is_empty()
-            || category_evidence.instrument_id != *instrument_id
+            || category_evidence.lifecycle != binding.target
+            || category_evidence.instrument_id.symbol() != binding.target.native_symbol
+            || category_evidence.instrument_id.venue() != binding.target.instrument_id.venue()
             || category_evidence.fund_category != official_rule.fund_category
             || rule.evidence != category_evidence.evidence
             || !rule.supporting_evidence.is_empty()
@@ -314,13 +464,7 @@ impl FundLimitRuleTable {
                 .supporting_sources
                 .iter()
                 .any(|source| source.validate().is_err())
-            || category_evidence.effective_from > session_date
-            || category_evidence
-                .effective_until
-                .is_some_and(|end| session_date >= end)
-            || category_evidence
-                .effective_until
-                .is_some_and(|end| end <= category_evidence.effective_from)
+            || bound_assignment(binding, session_date, std::slice::from_ref(&assignment)).is_none()
         {
             return false;
         }
@@ -355,12 +499,12 @@ impl FundLimitRuleTable {
     pub fn evidence_available_at(
         &self,
         rule: &LimitRule,
-        instrument_id: &InstrumentId,
+        binding: &RuleBinding,
         evidence: &Evidence,
         session_date: NaiveDate,
         calendar: &CatalogInput,
     ) -> Result<TimestampNs> {
-        if !self.supports(rule, instrument_id, session_date) {
+        if !self.supports(rule, binding, session_date) {
             return Err(CatalogError(
                 "cannot resolve availability for an unsupported limit rule".into(),
             ));
@@ -375,13 +519,13 @@ impl FundLimitRuleTable {
     pub fn category_evidence_available_at(
         &self,
         rule: &LimitRule,
-        instrument_id: &InstrumentId,
+        binding: &RuleBinding,
         evidence: &CategorySourceEvidence,
         session_date: NaiveDate,
         _session_open: TimestampNs,
         calendar: &CatalogInput,
     ) -> Result<Option<TimestampNs>> {
-        if !self.supports(rule, instrument_id, session_date) {
+        if !self.supports(rule, binding, session_date) {
             return Err(CatalogError(
                 "cannot resolve availability for an unsupported limit rule".into(),
             ));
@@ -415,13 +559,13 @@ impl FundLimitRuleTable {
     pub fn rule_evidence_available_at(
         &self,
         rule: &LimitRule,
-        instrument_id: &InstrumentId,
+        binding: &RuleBinding,
         evidence: &RuleSourceEvidence,
         session_date: NaiveDate,
         session_open: TimestampNs,
         calendar: &CatalogInput,
     ) -> Result<TimestampNs> {
-        if !self.supports(rule, instrument_id, session_date) {
+        if !self.supports(rule, binding, session_date) {
             return Err(CatalogError(
                 "cannot resolve availability for an unsupported limit rule".into(),
             ));
@@ -682,6 +826,92 @@ mod tests {
         }
     }
 
+    fn lifecycle_evidence() -> Evidence {
+        Evidence {
+            raw_sha256: format!("sha256:{}", "a".repeat(64)),
+            announcement_id: "SYNTHETIC-LIFECYCLE".into(),
+            locator: "synthetic lifecycle fact".into(),
+            publication: Publication::Exact {
+                timestamp: "2022-01-01T08:00:00+08:00".parse::<TimestampNs>().unwrap(),
+            },
+        }
+    }
+
+    fn lifecycle(
+        code: &str,
+        listing: &str,
+        identity_start: Option<&str>,
+        identity_end: Option<&str>,
+        termination: Option<&str>,
+        identity_available_from: Option<&str>,
+    ) -> Lifecycle {
+        Lifecycle {
+            native_symbol: code.into(),
+            contract_raw_sha256: format!("sha256:{}", "b".repeat(64)),
+            listing: crate::pit_universe::LifecycleFact {
+                effective_date: date(listing),
+                evidence: lifecycle_evidence(),
+            },
+            termination: termination.map(|value| crate::pit_universe::LifecycleFact {
+                effective_date: date(value),
+                evidence: lifecycle_evidence(),
+            }),
+            attributes: Vec::new(),
+            identity_start: identity_start.map(date),
+            identity_end_exclusive: identity_end.map(date),
+            identity_available_from: identity_available_from.map(date),
+            code_table_first_seen: None,
+            code_table_last_seen: None,
+            code_table_exit_date: None,
+        }
+    }
+
+    fn binding_for(lifecycles: &[Lifecycle], instrument_id: &InstrumentId) -> RuleBinding {
+        RuleBinding::from_lifecycles(lifecycles, instrument_id)
+            .unwrap()
+            .unwrap()
+    }
+
+    fn binding(lifecycles: &[Lifecycle], code: &str) -> RuleBinding {
+        let id = lifecycles
+            .iter()
+            .find(|life| life.native_symbol == code)
+            .unwrap()
+            .instrument_id()
+            .unwrap();
+        binding_for(lifecycles, &id)
+    }
+
+    fn synthetic_calendar() -> CatalogInput {
+        let hash = format!("sha256:{}", "a".repeat(64));
+        CatalogInput {
+            schema_version: 1,
+            rule_version: "synthetic@1".into(),
+            calendar_start: date("2022-10-01"),
+            calendar_end: date("2026-10-01"),
+            calendar_raw_sha256: BTreeSet::from([hash]),
+            sessions: Vec::new(),
+            coverage: crate::pit_universe::Coverage {
+                start: date("2022-10-01"),
+                end: date("2026-09-30"),
+                scan_method: "synthetic".into(),
+                announcement_method: "synthetic".into(),
+                announcement_raw_sha256: BTreeSet::new(),
+                gaps: BTreeSet::new(),
+                resolutions: Vec::new(),
+            },
+            lifecycles: Vec::new(),
+            scans: Vec::new(),
+            broad_indices: None,
+            code_ranges: None,
+            code_tables: Vec::new(),
+        }
+    }
+
+    fn public_code(code: &str) -> InstrumentId {
+        format!("{code}.SZSE").parse().unwrap()
+    }
+
     #[test]
     fn unique_match_requires_exactly_one_item() {
         assert_eq!(unique_match(std::iter::empty::<u8>()), None);
@@ -694,6 +924,8 @@ mod tests {
     fn missing_or_overlapping_rule_records_are_unresolved_and_unsupported() {
         let table = FundLimitRuleTable::official_v1().unwrap();
         let instrument_id = "159001.SZSE".parse().unwrap();
+        let lifecycles = [lifecycle("159001", "2022-10-01", None, None, None, None)];
+        let binding = binding(&lifecycles, "159001");
         let session_date = date("2023-04-10");
         let assignments = [category_assignment(
             &instrument_id,
@@ -703,10 +935,10 @@ mod tests {
             "SYNTHETIC-LIST-A",
         )];
         let rule = table
-            .rule_for_with_assignments(&instrument_id, session_date, &assignments)
+            .rule_for_with_assignments(&binding, session_date, &assignments)
             .unwrap()
             .unwrap();
-        assert!(table.supports(&rule, &instrument_id, session_date));
+        assert!(table.supports(&rule, &binding, session_date));
 
         let mut overlapping = table.clone();
         overlapping.records.extend(table.records.iter().cloned());
@@ -715,11 +947,11 @@ mod tests {
         for unresolved in [missing, overlapping] {
             assert!(
                 unresolved
-                    .rule_for_with_assignments(&instrument_id, session_date, &assignments)
+                    .rule_for_with_assignments(&binding, session_date, &assignments)
                     .unwrap()
                     .is_none()
             );
-            assert!(!unresolved.supports(&rule, &instrument_id, session_date));
+            assert!(!unresolved.supports(&rule, &binding, session_date));
         }
     }
 
@@ -727,6 +959,8 @@ mod tests {
     fn official_table_switches_rules_and_uses_pit_category_assignments() {
         let table = FundLimitRuleTable::official_v1().unwrap();
         let instrument_id = "159001.SZSE".parse().unwrap();
+        let lifecycles = [lifecycle("159001", "2022-10-01", None, None, None, None)];
+        let binding = binding(&lifecycles, "159001");
         let assignments = vec![
             category_assignment(
                 &instrument_id,
@@ -762,11 +996,11 @@ mod tests {
             });
 
         let before = table
-            .rule_for_with_assignments(&instrument_id, date("2023-04-09"), &assignments)
+            .rule_for_with_assignments(&binding, date("2023-04-09"), &assignments)
             .unwrap()
             .unwrap();
         let after = table
-            .rule_for_with_assignments(&instrument_id, date("2023-04-10"), &assignments)
+            .rule_for_with_assignments(&binding, date("2023-04-10"), &assignments)
             .unwrap()
             .unwrap();
 
@@ -805,7 +1039,7 @@ mod tests {
             .as_mut()
             .unwrap()
             .effective_from = date("2022-10-01");
-        assert!(!table.supports(&altered_interval, &instrument_id, date("2023-04-10")));
+        assert!(!table.supports(&altered_interval, &binding, date("2023-04-10")));
         let mut reassigned = after.clone();
         reassigned
             .official_rule
@@ -815,7 +1049,7 @@ mod tests {
             .as_mut()
             .unwrap()
             .instrument_id = "159002.SZSE".parse().unwrap();
-        assert!(!table.supports(&reassigned, &instrument_id, date("2023-04-10")));
+        assert!(!table.supports(&reassigned, &binding, date("2023-04-10")));
         assert_eq!(
             after.official_rule.as_ref().unwrap().fund_category,
             "szse-20pct-index-etf-lof"
@@ -826,6 +1060,8 @@ mod tests {
     fn default_rule_switches_first_session_reference_definition_on_2023_effective_date() {
         let table = FundLimitRuleTable::official_v1().unwrap();
         let instrument_id = "159001.SZSE".parse().unwrap();
+        let lifecycles = [lifecycle("159001", "2022-10-01", None, None, None, None)];
+        let binding = binding(&lifecycles, "159001");
         let assignments = [category_assignment(
             &instrument_id,
             "szse-fund-default-10pct",
@@ -835,11 +1071,11 @@ mod tests {
         )];
 
         let before = table
-            .rule_for_with_assignments(&instrument_id, date("2023-04-09"), &assignments)
+            .rule_for_with_assignments(&binding, date("2023-04-09"), &assignments)
             .unwrap()
             .unwrap();
         let after = table
-            .rule_for_with_assignments(&instrument_id, date("2023-04-10"), &assignments)
+            .rule_for_with_assignments(&binding, date("2023-04-10"), &assignments)
             .unwrap()
             .unwrap();
 
@@ -876,11 +1112,14 @@ mod tests {
         assert!(!String::from_utf8_lossy(bytes).contains("raw_sha256"));
 
         let assignment = table.category_assignments[0].clone();
+        let code = assignment.instrument_id.symbol().to_owned();
+        let lifecycles = [lifecycle(&code, "2012-05-28", None, None, None, None)];
+        let binding = binding(&lifecycles, &code);
         let rule = table
-            .rule_for(&assignment.instrument_id, assignment.effective_from)
+            .rule_for(&binding, assignment.effective_from)
             .unwrap()
             .unwrap();
-        assert!(table.supports(&rule, &assignment.instrument_id, assignment.effective_from));
+        assert!(table.supports(&rule, &binding, assignment.effective_from));
         assert!(
             rule.official_rule
                 .as_ref()
@@ -904,9 +1143,11 @@ mod tests {
     fn missing_or_unknown_category_never_defaults_to_a_limit() {
         let table = FundLimitRuleTable::official_v1().unwrap();
         let instrument_id = "159001.SZSE".parse().unwrap();
+        let lifecycles = [lifecycle("159001", "2022-10-01", None, None, None, None)];
+        let binding = binding(&lifecycles, "159001");
         assert!(
             table
-                .rule_for(&instrument_id, date("2023-04-10"))
+                .rule_for(&binding, date("2023-04-10"))
                 .unwrap()
                 .is_none()
         );
@@ -920,7 +1161,7 @@ mod tests {
         );
         assert!(
             table
-                .rule_for_with_assignments(&instrument_id, date("2023-04-10"), &[unknown])
+                .rule_for_with_assignments(&binding, date("2023-04-10"), &[unknown])
                 .unwrap()
                 .is_none()
         );
@@ -930,6 +1171,8 @@ mod tests {
     fn overlapping_point_in_time_category_assignments_are_unresolved() {
         let table = FundLimitRuleTable::official_v1().unwrap();
         let instrument_id = "159001.SZSE".parse().unwrap();
+        let lifecycles = [lifecycle("159001", "2022-10-01", None, None, None, None)];
+        let binding = binding(&lifecycles, "159001");
         let first = category_assignment(
             &instrument_id,
             "szse-fund-default-10pct",
@@ -946,7 +1189,7 @@ mod tests {
         );
         assert!(
             table
-                .rule_for_with_assignments(&instrument_id, date("2023-04-10"), &[first, second])
+                .rule_for_with_assignments(&binding, date("2023-04-10"), &[first, second])
                 .unwrap()
                 .is_none()
         );
@@ -956,6 +1199,8 @@ mod tests {
     fn default_rule_periods_split_at_both_trading_rule_effective_dates() {
         let table = FundLimitRuleTable::official_v1().unwrap();
         let instrument_id = "159001.SZSE".parse().unwrap();
+        let lifecycles = [lifecycle("159001", "2022-10-01", None, None, None, None)];
+        let binding = binding(&lifecycles, "159001");
         let assignment = category_assignment(
             &instrument_id,
             "szse-fund-default-10pct",
@@ -966,7 +1211,7 @@ mod tests {
         let resolve = |session_date| {
             table
                 .rule_for_with_assignments(
-                    &instrument_id,
+                    &binding,
                     date(session_date),
                     std::slice::from_ref(&assignment),
                 )
@@ -992,10 +1237,218 @@ mod tests {
         );
         assert!(
             table
-                .rule_for_with_assignments(&instrument_id, date("2026-10-01"), &[assignment])
+                .rule_for_with_assignments(&binding, date("2026-10-01"), &[assignment])
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn public_code_assignment_binds_through_the_lifecycle_and_stays_consistent() {
+        let table = FundLimitRuleTable::official_v1().unwrap();
+        let instrument_id = public_code("159001");
+        let lifecycles = [lifecycle(
+            "159001",
+            "2022-12-01",
+            None,
+            None,
+            Some("2023-06-01"),
+            None,
+        )];
+        let binding = binding(&lifecycles, "159001");
+        let assignments = [category_assignment(
+            &instrument_id,
+            "szse-fund-default-10pct",
+            "2022-10-01",
+            None,
+            "SYNTHETIC-LIST-A",
+        )];
+        let resolve = |day: &str| {
+            table
+                .rule_for_with_assignments(&binding, date(day), &assignments)
+                .unwrap()
+        };
+
+        // The listing Session is covered; the termination date is exclusive.
+        let first = resolve("2022-12-01").unwrap();
+        assert!(table.supports(&first, &binding, date("2022-12-01")));
+        assert!(resolve("2023-06-01").is_none());
+        assert!(!table.supports(&first, &binding, date("2023-06-01")));
+
+        // The rule switch inside the lifecycle changes the record identity even
+        // when the default category rate stays at 10%.
+        let before = resolve("2023-04-09").unwrap();
+        let after = resolve("2023-04-10").unwrap();
+        assert_eq!(before.rate_bps, 1000);
+        assert_eq!(after.rate_bps, 1000);
+        assert_eq!(before.effective_until, Some(date("2023-04-10")));
+        assert_ne!(before.version, after.version);
+
+        // All availability gates require the same supported binding.
+        let calendar = synthetic_calendar();
+        let session_open: TimestampNs = "2023-04-10T09:30:00+08:00".parse().unwrap();
+        let category_evidence = after
+            .official_rule
+            .as_ref()
+            .unwrap()
+            .category_evidence
+            .as_ref()
+            .unwrap();
+        assert_eq!(category_evidence.lifecycle, *binding.target());
+        assert_eq!(category_evidence.instrument_id, instrument_id);
+        assert!(
+            table
+                .evidence_available_at(
+                    &after,
+                    &binding,
+                    &lifecycle_evidence(),
+                    date("2023-04-10"),
+                    &calendar,
+                )
+                .is_ok()
+        );
+        assert!(
+            table
+                .category_evidence_available_at(
+                    &after,
+                    &binding,
+                    after.evidence.as_citation().unwrap(),
+                    date("2023-04-10"),
+                    session_open,
+                    &calendar,
+                )
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            table
+                .rule_evidence_available_at(
+                    &before,
+                    &binding,
+                    &before.rule_evidence[0],
+                    date("2023-04-09"),
+                    session_open,
+                    &calendar,
+                )
+                .is_ok()
+        );
+        for (rule, evidence) in [(&before, "2023-06-01"), (&after, "2023-06-01")] {
+            assert!(
+                table
+                    .evidence_available_at(
+                        rule,
+                        &binding,
+                        &lifecycle_evidence(),
+                        date(evidence),
+                        &calendar,
+                    )
+                    .is_err()
+            );
+        }
+
+        // Tampering with either the assignment identity or the lifecycle binding
+        // makes the evidence unsupported.
+        let mut altered_assignment = after.clone();
+        altered_assignment
+            .official_rule
+            .as_mut()
+            .unwrap()
+            .category_evidence
+            .as_mut()
+            .unwrap()
+            .instrument_id = public_code("159002");
+        assert!(!table.supports(&altered_assignment, &binding, date("2023-04-10")));
+        let mut altered_binding = after.clone();
+        altered_binding
+            .official_rule
+            .as_mut()
+            .unwrap()
+            .category_evidence
+            .as_mut()
+            .unwrap()
+            .lifecycle
+            .effective_from = date("2022-10-01");
+        assert!(!table.supports(&altered_binding, &binding, date("2023-04-10")));
+    }
+
+    #[test]
+    fn category_binding_does_not_cross_a_reused_code() {
+        let table = FundLimitRuleTable::official_v1().unwrap();
+        let instrument_id = public_code("159001");
+        let old = lifecycle("159001", "2022-01-01", None, None, Some("2022-12-01"), None);
+        let new = lifecycle("159001", "2023-01-01", None, None, None, None);
+        let group = [old.clone(), new.clone()];
+        let old_binding = binding_for(&group, &old.instrument_id().unwrap());
+        let new_binding = binding_for(&group, &new.instrument_id().unwrap());
+        // One assignment interval covers both funds, so it cannot be attributed
+        // to either lifecycle. The result is UNKNOWN, not an error.
+        let wide = [category_assignment(
+            &instrument_id,
+            "szse-fund-default-10pct",
+            "2022-10-01",
+            None,
+            "SYNTHETIC-WIDE-LIST",
+        )];
+        for (binding, day) in [(&old_binding, "2022-11-01"), (&new_binding, "2023-01-02")] {
+            assert!(
+                table
+                    .rule_for_with_assignments(binding, date(day), &wide)
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(table.category_assignment_for(binding, date(day)).is_none());
+        }
+
+        // A fresh assignment for the reused code's new fund binds in its own
+        // lifecycle and is not inherited from the predecessor.
+        let new_only = [category_assignment(
+            &instrument_id,
+            "szse-fund-default-10pct",
+            "2023-01-01",
+            None,
+            "SYNTHETIC-NEW-FUND-LIST",
+        )];
+        let rule = table
+            .rule_for_with_assignments(&new_binding, date("2023-01-02"), &new_only)
+            .unwrap()
+            .unwrap();
+        assert!(table.supports(&rule, &new_binding, date("2023-01-02")));
+        assert!(!table.supports(&rule, &old_binding, date("2023-01-02")));
+    }
+
+    #[test]
+    fn category_binding_follows_a_legal_name_change_successor() {
+        let table = FundLimitRuleTable::official_v1().unwrap();
+        let instrument_id = public_code("159001");
+        let old = lifecycle("159001", "2022-01-01", None, Some("2023-01-01"), None, None);
+        let new = lifecycle("159001", "2023-01-01", None, None, None, None);
+        let group = [old.clone(), new.clone()];
+        let old_binding = binding_for(&group, &old.instrument_id().unwrap());
+        let new_binding = binding_for(&group, &new.instrument_id().unwrap());
+        let assignments = [category_assignment(
+            &instrument_id,
+            "szse-fund-default-10pct",
+            "2022-10-01",
+            None,
+            "SYNTHETIC-RENAME-LIST",
+        )];
+        for (binding, day) in [(&old_binding, "2022-12-30"), (&new_binding, "2023-01-02")] {
+            let rule = table
+                .rule_for_with_assignments(binding, date(day), &assignments)
+                .unwrap()
+                .unwrap();
+            assert!(table.supports(&rule, binding, date(day)));
+            assert_eq!(
+                rule.official_rule
+                    .as_ref()
+                    .unwrap()
+                    .category_evidence
+                    .as_ref()
+                    .unwrap()
+                    .lifecycle,
+                *binding.target()
+            );
+        }
     }
 
     #[test]
