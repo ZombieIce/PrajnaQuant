@@ -20,14 +20,45 @@ use std::{
     sync::OnceLock,
 };
 
+/// The declared observation window and the frozen sessions inside it.
+///
+/// Publication dates may fall anywhere inside the declared window, including
+/// days that are not sessions; trade-related dates must be frozen sessions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FactCalendar {
+    pub sessions: BTreeSet<NaiveDate>,
+    pub window_start: NaiveDate,
+    pub window_end: NaiveDate,
+}
+
+impl FactCalendar {
+    pub fn new(
+        sessions: BTreeSet<NaiveDate>,
+        window_start: NaiveDate,
+        window_end: NaiveDate,
+    ) -> Result<Self> {
+        if sessions.is_empty() {
+            return Err("frozen calendar is empty".into());
+        }
+        if window_start > window_end {
+            return Err("fact window start is after its end".into());
+        }
+        Ok(Self {
+            sessions,
+            window_start,
+            window_end,
+        })
+    }
+}
+
 /// Validate public fact tables against the frozen open-session calendar and
 /// the verified field citations, then build versioned consumer inputs.
 pub fn validate_and_convert(
     facts: &Mvp6Facts,
     citations: &[Citation],
-    calendar: &BTreeSet<NaiveDate>,
+    calendar: &FactCalendar,
 ) -> Result<Mvp6Session> {
-    if calendar.is_empty() {
+    if calendar.sessions.is_empty() {
         return Err("frozen calendar is empty".into());
     }
     let mut index = BTreeMap::<(String, String), &Citation>::new();
@@ -63,9 +94,9 @@ pub fn validate_and_convert(
         if termination.is_some_and(|date| date < listing) {
             return Err(format!("termination_date precedes listing_date for {}", row.code).into());
         }
-        validate_date(listing, calendar, "listing_date")?;
+        validate_lifecycle_date(listing, calendar, "listing_date")?;
         if let Some(date) = termination {
-            validate_date(date, calendar, "termination_date")?;
+            validate_lifecycle_date(date, calendar, "termination_date")?;
         }
         row_evidence(
             &index,
@@ -111,13 +142,13 @@ pub fn validate_and_convert(
         code(&row.code)?;
         required(&row.kind, "kind")?;
         let announcement = parse_date(&row.announcement_date, "announcement_date")?;
-        validate_date(announcement, calendar, "announcement_date")?;
+        validate_publication_date(announcement, calendar, "announcement_date")?;
         let record = parse_optional_date(&row.record_date, "record_date")?;
         let ex = parse_optional_date(&row.ex_date, "ex_date")?;
         let pay = parse_optional_date(&row.pay_date, "pay_date")?;
         for (name, date) in [("record_date", record), ("ex_date", ex), ("pay_date", pay)] {
             if let Some(date) = date {
-                validate_date(date, calendar, name)?;
+                validate_date(date, &calendar.sessions, name)?;
             }
         }
         validate_decimal(&row.cash_per_share, "cash_per_share", false)?;
@@ -165,8 +196,8 @@ pub fn validate_and_convert(
         }
         let announcement = parse_date(&row.announcement_date, "announcement_date")?;
         let effective = parse_date(&row.effective_date, "effective_date")?;
-        validate_date(announcement, calendar, "announcement_date")?;
-        validate_date(effective, calendar, "effective_date")?;
+        validate_publication_date(announcement, calendar, "announcement_date")?;
+        validate_date(effective, &calendar.sessions, "effective_date")?;
         row_evidence(
             &index,
             &row.source_announcement_id,
@@ -264,6 +295,10 @@ fn field_supported(field: &str, value: &str, excerpt: &str) -> Result<()> {
         date_forms(date)
             .iter()
             .any(|form| excerpt.contains(form.as_str()))
+    } else if field == "cash_per_share" {
+        cash_per_share_supported(value, &excerpt)
+    } else if field == "split_ratio" {
+        split_ratio_supported(value, &excerpt)
     } else if is_decimal_field(field) {
         let expected =
             Price::parse(value).map_err(|_| format!("invalid decimal for {field}: {value}"))?;
@@ -292,6 +327,29 @@ fn is_coded_field(field: &str) -> bool {
     matches!(field, "fund_category" | "session_part")
 }
 
+/// A split ratio is the number of new shares per old share. Bind its direction
+/// to the `old:new` pair on the page so a `2:1` reverse split cannot satisfy a
+/// recorded `2`. Ratios without an explicit pair are not accepted.
+fn split_ratio_supported(value: &str, excerpt: &str) -> bool {
+    let Ok(expected) = Price::parse(value) else {
+        return false;
+    };
+    static RATIO: OnceLock<Regex> = OnceLock::new();
+    let pattern = RATIO.get_or_init(|| {
+        Regex::new(r"(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)").expect("static ratio regex")
+    });
+    pattern.captures_iter(excerpt).any(|captures| {
+        let left = captures
+            .get(1)
+            .and_then(|value| Price::parse(value.as_str()).ok());
+        let right = captures
+            .get(2)
+            .and_then(|value| Price::parse(value.as_str()).ok());
+        matches!((left, right), (Some(left), Some(right))
+            if left.checked_mul_decimal(expected).ok() == Some(right))
+    })
+}
+
 fn is_date_field(field: &str) -> bool {
     matches!(
         field,
@@ -306,13 +364,38 @@ fn is_date_field(field: &str) -> bool {
 }
 
 fn is_decimal_field(field: &str) -> bool {
-    matches!(
-        field,
-        "cash_per_share" | "split_ratio" | "liquidation_per_share"
-    )
+    matches!(field, "split_ratio" | "liquidation_per_share")
 }
 
-fn date_forms(date: NaiveDate) -> [String; 5] {
+/// cninfo distribution notices state the cash amount per ten fund shares
+/// (`元/10份基金份额`), while the fact table records the amount per share.
+/// Accept the cited number only when the excerpt binds it to that explicit
+/// per-ten-shares unit and it equals exactly ten times the recorded value. No
+/// other unit conversion is inferred.
+fn cash_per_share_supported(value: &str, excerpt: &str) -> bool {
+    let Ok(expected) = Price::parse(value) else {
+        return false;
+    };
+    if decimal_tokens(excerpt).any(|token| Price::parse(token).ok() == Some(expected)) {
+        return true;
+    }
+    static PER_TEN_SHARES: OnceLock<Regex> = OnceLock::new();
+    let pattern = PER_TEN_SHARES.get_or_init(|| {
+        Regex::new(r"元/10份[^0-9]{0,8}(\d+(?:\.\d+)?)").expect("static per-ten regex")
+    });
+    let Some(captured) = pattern
+        .captures(excerpt)
+        .and_then(|captures| captures.get(1))
+    else {
+        return false;
+    };
+    let Ok(per_ten_shares) = expected.checked_mul(10) else {
+        return false;
+    };
+    Price::parse(captured.as_str()).ok() == Some(per_ten_shares)
+}
+
+fn date_forms(date: NaiveDate) -> [String; 6] {
     let (year, month, day) = (date.year(), date.month(), date.day());
     [
         format!("{year}-{month:02}-{day:02}"),
@@ -320,7 +403,50 @@ fn date_forms(date: NaiveDate) -> [String; 5] {
         format!("{year}.{month:02}.{day:02}"),
         format!("{year}年{month}月{day}日"),
         format!("{year}年{month:02}月{day:02}日"),
+        // Official notices also sign and date themselves with Chinese numerals
+        // (`二〇二六年一月五日`).
+        format!(
+            "{}年{}月{}日",
+            chinese_year(year),
+            chinese_number(month),
+            chinese_number(day)
+        ),
     ]
+}
+
+fn chinese_year(year: i32) -> String {
+    year.to_string()
+        .chars()
+        .map(|digit| match digit {
+            '0' => '〇',
+            '1' => '一',
+            '2' => '二',
+            '3' => '三',
+            '4' => '四',
+            '5' => '五',
+            '6' => '六',
+            '7' => '七',
+            '8' => '八',
+            '9' => '九',
+            other => other,
+        })
+        .collect()
+}
+
+/// Renders 1..=31 as a Chinese numeral. Values outside a calendar month or day
+/// fall back to ASCII, which never matches a numeral-signed source date.
+fn chinese_number(value: u32) -> String {
+    const DIGITS: [&str; 10] = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
+    match value {
+        0..=9 => DIGITS[value as usize].to_owned(),
+        10 => "十".to_owned(),
+        11..=19 => format!("十{}", DIGITS[(value - 10) as usize]),
+        20 => "二十".to_owned(),
+        21..=29 => format!("二十{}", DIGITS[(value - 20) as usize]),
+        30 => "三十".to_owned(),
+        31 => "三十一".to_owned(),
+        other => other.to_string(),
+    }
 }
 
 fn decimal_tokens(text: &str) -> impl Iterator<Item = &str> {
@@ -377,8 +503,36 @@ fn parse_optional_date(value: &str, field: &str) -> Result<Option<NaiveDate>> {
     }
 }
 
-fn validate_date(date: NaiveDate, calendar: &BTreeSet<NaiveDate>, field: &str) -> Result<()> {
-    if calendar.contains(&date) {
+/// Publication dates are calendar dates, not exchange sessions: funds publish
+/// notices on weekends and holidays. The date must still fall inside the
+/// declared observation window, not merely between the first and last session.
+fn validate_publication_date(date: NaiveDate, calendar: &FactCalendar, field: &str) -> Result<()> {
+    if date >= calendar.window_start && date <= calendar.window_end {
+        Ok(())
+    } else {
+        Err(format!("{field} outside declared window: {date}").into())
+    }
+}
+
+fn validate_date(date: NaiveDate, sessions: &BTreeSet<NaiveDate>, field: &str) -> Result<()> {
+    if sessions.contains(&date) {
+        Ok(())
+    } else {
+        Err(format!("{field} outside frozen calendar: {date}").into())
+    }
+}
+
+/// Lifecycle boundaries can predate the frozen market-data window: the MVP-6
+/// fixed list includes funds listed years before 2022. Their evidence is the
+/// cited official listing/termination notice, so the frozen sessions can only
+/// confirm boundaries that fall inside the window. Trade-related action and
+/// event dates stay strictly inside the frozen sessions; publication dates are
+/// checked by [`validate_publication_date`].
+fn validate_lifecycle_date(date: NaiveDate, calendar: &FactCalendar, field: &str) -> Result<()> {
+    if calendar.sessions.contains(&date)
+        || date < calendar.window_start
+        || date > calendar.window_end
+    {
         Ok(())
     } else {
         Err(format!("{field} outside frozen calendar: {date}").into())
@@ -387,4 +541,150 @@ fn validate_date(date: NaiveDate, calendar: &BTreeSet<NaiveDate>, field: &str) -
 
 fn empty_to_none(value: &str) -> Option<String> {
     (!value.trim().is_empty()).then(|| value.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn per_ten_share_amount_is_accepted_only_with_the_explicit_unit() {
+        assert!(
+            field_supported(
+                "cash_per_share",
+                "0.0453",
+                "本次分红方案（单位：元/10 份基金份额）0.4530"
+            )
+            .is_ok()
+        );
+        assert!(
+            field_supported(
+                "cash_per_share",
+                "0.0453",
+                "本次分红方案（单位：元/10份基0.4530金份额）"
+            )
+            .is_ok()
+        );
+        assert!(field_supported("cash_per_share", "0.0453", "每份派发0.0453元").is_ok());
+        assert!(field_supported("cash_per_share", "0.0453", "分红金额0.4530元").is_err());
+        // The number must follow the explicit per-ten unit, not merely share a page.
+        assert!(field_supported("cash_per_share", "1", "（单位：元/10份基金份额）").is_err());
+        assert!(field_supported("cash_per_share", "0.0453", "0.4530元/10份").is_err());
+        assert!(field_supported("cash_per_share", "0.0453", "0.4530元收益").is_err());
+    }
+
+    #[test]
+    fn split_ratio_binds_direction_to_the_old_new_pair() {
+        assert!(field_supported("split_ratio", "2", "本次拆分比例为1:2").is_ok());
+        assert!(field_supported("split_ratio", "1.5", "本次拆分比例为2:3").is_ok());
+        assert!(field_supported("split_ratio", "1.5", "本次拆分比例为3:2").is_err());
+        assert!(field_supported("split_ratio", "2", "本次拆分比例为2:1").is_err());
+        assert!(field_supported("split_ratio", "2", "每份基金份额拆分为2份").is_err());
+    }
+
+    fn window() -> FactCalendar {
+        let sessions = ["2026-01-05", "2026-01-07"]
+            .into_iter()
+            .map(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").unwrap())
+            .collect::<BTreeSet<_>>();
+        FactCalendar::new(
+            sessions,
+            NaiveDate::from_ymd_opt(2026, 1, 5).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 1, 7).unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn lifecycle_boundaries_may_predate_the_declared_window_but_not_gap_inside_it() {
+        let calendar = window();
+        assert!(
+            validate_lifecycle_date(
+                NaiveDate::from_ymd_opt(2012, 5, 28).unwrap(),
+                &calendar,
+                "listing_date"
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_lifecycle_date(
+                NaiveDate::from_ymd_opt(2026, 1, 6).unwrap(),
+                &calendar,
+                "listing_date"
+            )
+            .is_err()
+        );
+        assert!(
+            validate_lifecycle_date(
+                NaiveDate::from_ymd_opt(2026, 1, 7).unwrap(),
+                &calendar,
+                "listing_date"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn publication_dates_use_the_declared_window_not_the_session_span() {
+        let calendar = window();
+        let non_session = NaiveDate::from_ymd_opt(2026, 1, 6).unwrap();
+        assert!(validate_publication_date(non_session, &calendar, "announcement_date").is_ok());
+        assert!(validate_date(non_session, &calendar.sessions, "ex_date").is_err());
+        assert!(
+            validate_publication_date(
+                NaiveDate::from_ymd_opt(2026, 1, 8).unwrap(),
+                &calendar,
+                "announcement_date"
+            )
+            .is_err()
+        );
+
+        // A window may open before the first frozen session (the MVP-6 window
+        // starts on 2022-10-01 but the first session is 2022-10-10).
+        let early = FactCalendar::new(
+            calendar.sessions.clone(),
+            NaiveDate::from_ymd_opt(2026, 1, 4).unwrap(),
+            calendar.window_end,
+        )
+        .unwrap();
+        assert!(
+            validate_publication_date(
+                NaiveDate::from_ymd_opt(2026, 1, 4).unwrap(),
+                &early,
+                "announcement_date"
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_publication_date(
+                NaiveDate::from_ymd_opt(2026, 1, 3).unwrap(),
+                &early,
+                "announcement_date"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn dates_accept_chinese_numerals_from_official_signatures() {
+        let date = NaiveDate::from_ymd_opt(2026, 1, 5).unwrap();
+        assert!(date_forms(date).contains(&"二〇二六年一月五日".to_owned()));
+        assert!(
+            field_supported(
+                "announcement_date",
+                "2026-01-05",
+                "公告日：二〇二六年一月五日"
+            )
+            .is_ok()
+        );
+        assert!(
+            field_supported(
+                "announcement_date",
+                "2026-01-05",
+                "本基金将于2026年1月5日开市起停牌"
+            )
+            .is_ok()
+        );
+        assert!(field_supported("announcement_date", "2026-01-05", "二〇二六年一月六日").is_err());
+    }
 }

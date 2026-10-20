@@ -170,17 +170,20 @@ impl Citation {
             )
             .into());
         }
-        for record in store.sources(&self.raw_sha256)? {
-            let Ok(observed) = DateTime::parse_from_rfc3339(&record.observed_at) else {
-                continue;
-            };
-            if verified_at < observed {
-                return Err(format!(
-                    "citation for {} was verified before the Raw object was captured",
-                    self.announcement_id
-                )
-                .into());
-            }
+        // A later re-capture of identical bytes does not move the freeze time;
+        // the citation only has to postdate the first observed capture of the
+        // object it cites.
+        let earliest_capture = store
+            .sources(&self.raw_sha256)?
+            .iter()
+            .filter_map(|record| DateTime::parse_from_rfc3339(&record.observed_at).ok())
+            .min();
+        if earliest_capture.is_some_and(|observed| verified_at < observed) {
+            return Err(format!(
+                "citation for {} was verified before the Raw object was captured",
+                self.announcement_id
+            )
+            .into());
         }
 
         let page_text = self.page_text(&bytes, converter)?;

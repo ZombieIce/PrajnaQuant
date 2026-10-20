@@ -377,47 +377,117 @@ fn raw_persistence_failure_stops_all_further_requests() {
 }
 
 #[test]
-fn pagination_follows_declared_pages_even_when_unique_total_already_matches() {
+fn pagination_uses_unique_totals_over_unreliable_page_counts() {
     let row = announcement("a", "158001", json!("manager"), &title());
     let mut first: Value = serde_json::from_slice(&page(1, vec![row.clone()])).unwrap();
     first["hasMore"] = json!(true);
     first["totalpages"] = json!(2);
-    let mut second = first.clone();
-    second["hasMore"] = json!(false);
     let mut pages = PageSet::default();
     pages.push(1, &serde_json::to_vec(&first).unwrap()).unwrap();
-    assert!(pages.needs_more());
+    assert!(!pages.needs_more());
+    assert_eq!(pages.finish().unwrap().0.len(), 1);
+
+    // Legacy mode still follows declared pages even after reaching the total.
+    let mut legacy = PageSet::strict();
+    legacy
+        .push(1, &serde_json::to_vec(&first).unwrap())
+        .unwrap();
+    assert!(legacy.needs_more());
+    assert!(legacy.finish().is_err());
+
+    // cninfo reports `totalpages: 1` while a second page exists. The stable
+    // total and the unique announcement IDs decide completeness, so the
+    // understated page count must not fail the segment.
+    let second_row = announcement("b", "158001", json!("manager"), &title());
+    let mut understated = first.clone();
+    understated["totalAnnouncement"] = json!(2);
+    understated["hasMore"] = json!(true);
+    understated["totalpages"] = json!(1);
+    let mut last = understated.clone();
+    last["announcements"] = json!([second_row]);
+    last["hasMore"] = json!(false);
+    let mut pages = PageSet::default();
     pages
-        .push(2, &serde_json::to_vec(&second).unwrap())
+        .push(1, &serde_json::to_vec(&understated).unwrap())
+        .unwrap();
+    assert!(pages.needs_more());
+    pages.push(2, &serde_json::to_vec(&last).unwrap()).unwrap();
+    assert!(!pages.needs_more());
+    assert_eq!(pages.finish().unwrap().0.len(), 2);
+
+    // An early "no more" declaration is accepted only because the unique rows
+    // already match the stable total; a short page still fails in `finish`.
+    let mut local_only = first.clone();
+    local_only["hasMore"] = json!(false);
+    local_only["totalpages"] = json!(2);
+    let mut pages = PageSet::default();
+    pages
+        .push(1, &serde_json::to_vec(&local_only).unwrap())
         .unwrap();
     assert!(!pages.needs_more());
     assert_eq!(pages.finish().unwrap().0.len(), 1);
+
+    // The legacy collector keeps the strict page-count contract, including
+    // the single-page `totalpages: 0` rejection that the MVP-6 path relaxed.
+    let mut single: Value = serde_json::from_slice(&page(1, vec![row.clone()])).unwrap();
+    single["totalpages"] = json!(0);
+    single["hasMore"] = json!(false);
+    assert!(
+        PageSet::strict()
+            .push(1, &serde_json::to_vec(&single).unwrap())
+            .is_err()
+    );
+    PageSet::default()
+        .push(1, &serde_json::to_vec(&single).unwrap())
+        .unwrap();
+    let mut conflict: Value = serde_json::from_slice(&page(2, vec![row])).unwrap();
+    conflict["totalpages"] = json!(1);
+    conflict["hasMore"] = json!(true);
+    assert!(
+        PageSet::strict()
+            .push(1, &serde_json::to_vec(&conflict).unwrap())
+            .is_err()
+    );
+    PageSet::default()
+        .push(1, &serde_json::to_vec(&conflict).unwrap())
+        .unwrap();
+
+    // Empty pages cannot invalidate an already complete relaxed segment.
     let mut empty = first.clone();
     empty["announcements"] = json!([]);
+    empty["hasMore"] = json!(true);
     empty["totalpages"] = json!(3);
     first["totalpages"] = json!(3);
     let mut premature = PageSet::default();
     premature
         .push(1, &serde_json::to_vec(&first).unwrap())
         .unwrap();
+    assert!(!premature.needs_more());
+    premature
+        .push(2, &serde_json::to_vec(&empty).unwrap())
+        .unwrap();
+    assert_eq!(premature.finish().unwrap().0.len(), 1);
+
+    // An actually short segment still fails, including empty zero-progress pages.
+    first["totalAnnouncement"] = json!(2);
+    empty["totalAnnouncement"] = json!(2);
+    let mut incomplete = PageSet::default();
+    incomplete
+        .push(1, &serde_json::to_vec(&first).unwrap())
+        .unwrap();
+    assert!(incomplete.needs_more());
     assert!(
-        premature
+        incomplete
             .push(2, &serde_json::to_vec(&empty).unwrap())
             .is_err()
     );
-    first["totalpages"] = json!(1);
-    assert!(
-        PageSet::default()
-            .push(1, &serde_json::to_vec(&first).unwrap())
-            .is_err()
-    );
-    first["hasMore"] = json!(false);
-    first["totalpages"] = json!(2);
-    assert!(
-        PageSet::default()
-            .push(1, &serde_json::to_vec(&first).unwrap())
-            .is_err()
-    );
+
+    // A zero-total query is complete even if both pagination hints claim more.
+    empty["totalAnnouncement"] = json!(0);
+    let mut zero = PageSet::default();
+    zero.push(1, &serde_json::to_vec(&empty).unwrap()).unwrap();
+    assert!(!zero.needs_more());
+    assert!(zero.finish().unwrap().0.is_empty());
 }
 
 #[test]

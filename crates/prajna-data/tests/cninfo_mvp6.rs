@@ -232,6 +232,78 @@ fn fixed_index_flags_incomplete_totals_and_downloads_new_pdf_categories_only() {
 }
 
 #[test]
+fn single_page_with_zero_total_pages_is_a_complete_segment() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut collector, requests) = make_collector(
+        vec![
+            top(json!([{"code":"159001","orgId":"synthetic-org"}])),
+            json_reply(json!({
+                "totalAnnouncement":2,
+                "totalpages":0,
+                "hasMore":false,
+                "announcements":[
+                    ann("one", "乙类日常公告"),
+                    ann("two", "甲类日常公告"),
+                ]
+            })),
+        ],
+        dir.path(),
+    );
+    let result = collector.collect_fixed_list(&[candidate()], &BTreeSet::new(), &mut NoopPdf);
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    assert_eq!(
+        result.announcements[&("159001".into(), "synthetic-org".into())].len(),
+        2
+    );
+    assert!(
+        !result
+            .unresolved
+            .iter()
+            .any(|s| s.contains("pagination_incomplete"))
+    );
+}
+
+#[test]
+fn complete_fixed_segment_stops_before_stale_has_more_can_fetch_an_empty_page() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut collector, requests) = make_collector(
+        vec![
+            top(json!([{"code":"159001","orgId":"synthetic-org"}])),
+            json_reply(json!({
+                "totalAnnouncement":2, "totalpages":3, "hasMore":true,
+                "announcements":[ann("one", "甲类日常公告")]
+            })),
+            json_reply(json!({
+                "totalAnnouncement":2, "totalpages":3, "hasMore":true,
+                "announcements":[ann("one", "甲类日常公告"), ann("two", "乙类日常公告")]
+            })),
+            json_reply(json!({
+                "totalAnnouncement":2, "totalpages":3, "hasMore":true, "announcements":[]
+            })),
+        ],
+        dir.path(),
+    );
+    let result = collector.collect_fixed_list(&[candidate()], &BTreeSet::new(), &mut NoopPdf);
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 3); // topSearch + the two pages that reach the total
+    assert_eq!(requests[2].form["pageNum"], "2");
+    let announcements = &result.announcements[&("159001".into(), "synthetic-org".into())];
+    assert_eq!(
+        announcements
+            .iter()
+            .map(|a| a.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["one", "two"]
+    );
+    assert!(
+        !result
+            .unresolved
+            .iter()
+            .any(|s| s.contains("pagination_incomplete"))
+    );
+}
+
+#[test]
 fn fixed_list_access_denial_stops_source_before_short_name_fallback() {
     let dir = tempfile::tempdir().unwrap();
     let denied = HttpReply {
@@ -439,11 +511,16 @@ fn citation_csv(citations: &[Citation]) -> String {
     }
     csv
 }
-fn calendar() -> BTreeSet<NaiveDate> {
-    ["2026-01-05", "2026-01-06", "2026-01-07"]
-        .into_iter()
-        .map(|s| s.parse().unwrap())
-        .collect()
+fn calendar() -> FactCalendar {
+    FactCalendar::new(
+        ["2026-01-05", "2026-01-06", "2026-01-07"]
+            .into_iter()
+            .map(|s| s.parse().unwrap())
+            .collect(),
+        "2026-01-05".parse().unwrap(),
+        "2026-01-07".parse().unwrap(),
+    )
+    .unwrap()
 }
 fn date(value: &str) -> NaiveDate {
     value.parse().unwrap()
@@ -746,6 +823,29 @@ fn citation_csv_binds_each_row_to_a_frozen_document_page_excerpt_and_verifier() 
             .to_string()
             .contains("verified before the Raw object was captured")
     );
+    // Re-capturing identical bytes later does not move the freeze time: the
+    // citation may still postdate the first observed capture.
+    let mut recaptured = source_record("observed");
+    recaptured.observed_at = "2026-01-06T00:00:00Z".into();
+    assert_eq!(
+        store.put("观测于 159001".as_bytes(), recaptured).unwrap(),
+        observed_hash
+    );
+    Citation::from_store(
+        &store,
+        &mut NoopPdf,
+        CitationInput {
+            fact_source: "identity".into(),
+            field: "code".into(),
+            announcement_id: "observed".into(),
+            page: 1,
+            raw_sha256: observed_hash.clone(),
+            excerpt: "159001".into(),
+            verified_by: "synthetic-reviewer".into(),
+            verified_at: "2026-01-05T12:00:00Z".into(),
+        },
+    )
+    .unwrap();
     let zero_page = Citation::from_store(
         &store,
         &mut NoopPdf,
@@ -863,6 +963,27 @@ fn crosscheck_detects_action_and_suspension_disagreements_inside_the_lifecycle()
     assert!(!kinds.contains("listing_vs_first_bar"));
     assert!(!kinds.contains("termination_vs_last_bar"));
 
+    // Partial-day halts are not observable as keyed no-trade in daily Bars.
+    let mut partial = facts();
+    partial.events[0].session_part = "morning".into();
+    let kinds = mismatch_kinds(&crosscheck_v4(
+        &partial,
+        &[
+            bar("2026-01-05", "1.0", "1.0"),
+            bar("2026-01-07", "1.0", "1.0"),
+        ],
+    ));
+    assert!(!kinds.contains("suspension_vs_keyed_no_trade"));
+
+    // A partial suspension outside every lifecycle is still a lifecycle finding,
+    // even though its keyed no-trade comparison does not apply.
+    let mut outside = facts();
+    outside.events[0].session_part = "morning".into();
+    outside.events[0].effective_date = "2026-01-04".into();
+    let kinds = mismatch_kinds(&crosscheck_v4(&outside, &[bar("2026-01-05", "1.0", "1.0")]));
+    assert!(kinds.contains("suspension_outside_lifecycle"));
+    assert!(!kinds.contains("suspension_vs_keyed_no_trade"));
+
     // A first traded Bar after the listing date is a listing mismatch.
     let mut f = facts();
     f.identities[0].termination_date = "2026-01-06".into();
@@ -976,19 +1097,37 @@ fn converted_session_matches_manually_built_inputs() {
 }
 
 #[test]
-fn csv_parser_enforces_headers_and_accepts_empty_templates_without_inventing_rows() {
-    let identity = include_str!("../../../configs/mvp-6/identity.csv");
-    let actions = include_str!("../../../configs/mvp-6/actions.csv");
-    let events = include_str!("../../../configs/mvp-6/events.csv");
-    let empty = Mvp6Facts::from_csv(identity, actions, events).unwrap();
+fn csv_parser_enforces_headers_and_accepts_header_only_templates() {
+    const IDENTITY: &str = "code,org_id,legal_name,listing_date,termination_date,fund_category,tracked_index,evidence_level,source_announcement_id,source_page\n";
+    const ACTIONS: &str = "code,kind,announcement_date,record_date,ex_date,pay_date,cash_per_share,split_ratio,liquidation_per_share,evidence_level,source_announcement_id,source_page\n";
+    const EVENTS: &str = "code,kind,announcement_date,effective_date,session_part,evidence_level,source_announcement_id,source_page\n";
+    let empty = Mvp6Facts::from_csv(IDENTITY, ACTIONS, EVENTS).unwrap();
     assert!(empty.identities.is_empty() && empty.actions.is_empty() && empty.events.is_empty());
     let invalid = "code,org_id\n159001,org\n";
     assert!(
-        Mvp6Facts::from_csv(invalid, actions, events)
+        Mvp6Facts::from_csv(invalid, ACTIONS, EVENTS)
             .unwrap_err()
             .to_string()
             .contains("header mismatch")
     );
+}
+
+#[test]
+fn committed_public_fact_tables_parse_and_cover_the_fixed_list() {
+    let facts = Mvp6Facts::from_csv(
+        include_str!("../../../configs/mvp-6/identity.csv"),
+        include_str!("../../../configs/mvp-6/actions.csv"),
+        include_str!("../../../configs/mvp-6/events.csv"),
+    )
+    .unwrap();
+    assert_eq!(facts.identities.len(), 5);
+    assert!(
+        facts
+            .identities
+            .iter()
+            .all(|row| !row.org_id.is_empty() && !row.listing_date.is_empty())
+    );
+    assert!(!facts.actions.is_empty() && !facts.events.is_empty());
 }
 
 #[test]
@@ -1356,8 +1495,16 @@ fn local_acceptance_loads_v4_projection_and_persists_the_crosscheck_report() {
         .collect::<Vec<_>>();
     let dsv = publish_synthetic_v4(root, &sessions, &bars, &code_tables);
     let acceptance_dir = root.join("acceptance/cninfo-fixed/synthetic");
-    let acceptance =
-        write_facts_acceptance(&acceptance_dir, root, &dsv, &facts(), &evidence).unwrap();
+    let acceptance = write_facts_acceptance(
+        &acceptance_dir,
+        root,
+        &dsv,
+        date("2026-01-05"),
+        date("2026-01-07"),
+        &facts(),
+        &evidence,
+    )
+    .unwrap();
 
     assert!(acceptance.facts_session_path.exists());
     assert_eq!(acceptance.report.mismatches.len(), 1);
@@ -1430,7 +1577,7 @@ fn local_fixed_list_workflow_writes_collection_facts_and_crosscheck_reports() {
     fs::create_dir_all(root.join("acceptance")).unwrap();
     fs::write(
         root.join("acceptance/mvp6-coverage.json"),
-        serde_json::to_vec(&json!({"dataset_published": true, "dsv": dsv})).unwrap(),
+        serde_json::to_vec(&json!({"dataset_published": true, "dsv": dsv, "window": {"start": "2026-01-05", "end": "2026-01-07"}})).unwrap(),
     )
     .unwrap();
 

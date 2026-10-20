@@ -1,1 +1,6 @@
 code,org_id,legal_name,listing_date,termination_date,fund_category,tracked_index,evidence_level,source_announcement_id,source_page
+159919,jjjl0000037,嘉实沪深300交易型开放式指数证券投资基金,2012-05-28,,equity-index-etf,沪深300指数,official,61033600,4
+159612,jjjl0000034,国泰标普500交易型开放式指数证券投资基金（QDII）,2022-05-20,,cross-border-index-etf,标普500指数,official,1213367870,4
+159952,jjjl0000065,广发创业板交易型开放式指数证券投资基金,2017-05-19,,equity-index-etf,创业板指,official,1203519788,3
+159560,jjjl0000063,景顺长城中证芯片产业交易型开放式指数证券投资基金,2023-11-20,,equity-index-etf,中证芯片产业指数,official,1218329741,3
+159522,jjjl0000063,景顺长城国证2000交易型开放式指数证券投资基金,2023-10-16,2024-08-28,equity-index-etf,国证2000指数,official,1218003302,3

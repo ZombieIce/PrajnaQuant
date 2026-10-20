@@ -152,6 +152,11 @@ pub fn crosscheck_v4(facts: &Mvp6Facts, bars: &[V4DailyBar]) -> CrosscheckReport
             ));
             continue;
         }
+        // Daily keyed no-trade can only confirm a full-day halt; a morning or
+        // open-ended partial halt still trades later that session.
+        if event.session_part != "full_day" {
+            continue;
+        }
         if let Some(bar) = bars
             .iter()
             .find(|bar| bar.code == event.code && bar.date == expected)
