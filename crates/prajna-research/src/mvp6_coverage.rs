@@ -318,17 +318,23 @@ pub fn evaluate_derived_market(
         .iter()
         .map(|life| coverage_lifecycle(life, &catalog.input().lifecycles))
         .collect::<Result<Vec<_>, String>>()?;
-    let mut bindings = BTreeMap::new();
-    for life in &catalog.input().lifecycles {
-        let id = life.instrument_id().map_err(|error| error.to_string())?;
-        let binding = super::etf_market::limit_rules::RuleBinding::from_lifecycles(
-            &catalog.input().lifecycles,
-            &id,
-        )
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("missing rule binding for {id}"))?;
-        bindings.insert(id, binding);
-    }
+    // A lifecycle without a binding keeps its own cells CategoryUnknown instead
+    // of aborting the rest of the coverage report (P27-20.4).
+    let bindings: BTreeMap<_, _> = catalog
+        .input()
+        .lifecycles
+        .iter()
+        .filter_map(|life| {
+            let id = life.instrument_id().ok()?;
+            let binding = super::etf_market::limit_rules::RuleBinding::from_lifecycles(
+                &catalog.input().lifecycles,
+                &id,
+            )
+            .ok()
+            .flatten()?;
+            Some((id, binding))
+        })
+        .collect();
     let openings: BTreeMap<_, _> = market
         .evidence()
         .openings
@@ -352,10 +358,25 @@ pub fn evaluate_derived_market(
                 .is_some_and(|rule| {
                     binding.is_some_and(|binding| table.supports(rule, binding, cell.session_date))
                 });
+            // Evidence whose recorded lifecycle does not match the Catalog
+            // binding cannot establish the category, even if the public table
+            // has a valid assignment for the authoritative lifecycle.
+            let category_binding_is_stale = opening
+                .and_then(|item| item.limit_rule.as_ref())
+                .and_then(|rule| rule.official_rule.as_ref())
+                .and_then(|rule| rule.category_evidence.as_ref())
+                .is_some_and(|category| {
+                    binding
+                        .is_none_or(|binding| category.lifecycle.as_ref() != Some(binding.target()))
+                });
             let rule_unknown = (!rule_is_supported).then(|| {
-                binding.map_or(RuleUnknownReason::CategoryUnknown, |binding| {
-                    classify_unknown_rule(&table, binding, cell.session_date)
-                })
+                if category_binding_is_stale {
+                    RuleUnknownReason::CategoryUnknown
+                } else {
+                    binding.map_or(RuleUnknownReason::CategoryUnknown, |binding| {
+                        classify_unknown_rule(&table, binding, cell.session_date)
+                    })
+                }
             });
             CoverageObservation {
                 instrument_id: cell.instrument_id.clone(),
@@ -929,8 +950,9 @@ mod tests {
                 .category_evidence
                 .as_ref()
                 .unwrap()
-                .lifecycle,
-            *binding.target()
+                .lifecycle
+                .as_ref(),
+            Some(binding.target())
         );
         assert!(table.supports(&before, &binding, date_for("2023-04-09")));
     }
@@ -946,7 +968,7 @@ mod tests {
         let table = FundLimitRuleTable::official_v2().unwrap();
         // 159919 keeps a valid public assignment across the covered window.
         let old = rule_lifecycle("159919", "2012-05-28", None, None, Some("2023-01-01"), None);
-        let renamed = rule_lifecycle("159919", "2023-01-01", None, None, None, None);
+        let renamed = rule_lifecycle("159919", "2023-01-01", None, None, None, Some("2023-01-01"));
         let rename_group = [old.clone(), renamed.clone()];
         let old_binding = rule_binding(&rename_group, "159919");
         // A legal-name successor stays in one fund chain, so the same public
@@ -998,6 +1020,92 @@ mod tests {
                 RuleUnknownReason::CategoryUnknown
             );
         }
+
+        // One assignment interval spanning the terminated fund and its reused
+        // successor is ambiguous even when a rule record exists for both dates.
+        let mut wide = table
+            .category_assignments
+            .iter()
+            .find(|assignment| assignment.instrument_id.symbol() == "159919")
+            .unwrap()
+            .clone();
+        wide.effective_from = date_for("2022-10-01");
+        wide.effective_until = None;
+        let mut ambiguous = table.clone();
+        ambiguous.category_assignments = vec![wide];
+        for (life, day) in [(&reused_old, "2023-04-20"), (&reused_new, "2023-07-04")] {
+            let binding = crate::etf_market::limit_rules::RuleBinding::from_lifecycles(
+                &reuse_group,
+                &life.instrument_id().unwrap(),
+            )
+            .unwrap()
+            .unwrap();
+            assert!(
+                ambiguous
+                    .category_assignment_for(&binding, date_for(day))
+                    .is_none()
+            );
+            assert_eq!(
+                classify_unknown_rule(&ambiguous, &binding, date_for(day)),
+                RuleUnknownReason::CategoryUnknown
+            );
+        }
+    }
+
+    #[test]
+    fn coverage_classification_agrees_with_rule_resolution_across_lifecycle_boundaries() {
+        use crate::etf_market::limit_rules::FundLimitRuleTable;
+
+        let table = FundLimitRuleTable::official_v2().unwrap();
+        let lifecycle =
+            rule_lifecycle("159919", "2023-01-01", None, Some("2023-05-01"), None, None);
+        let binding = rule_binding(std::slice::from_ref(&lifecycle), "159919");
+        let resolve = |day: &str| table.rule_for(&binding, date_for(day)).unwrap();
+        for (day, rule_exists) in [
+            // Before the listing: the public assignment interval covers the
+            // date, but the lifecycle does not, so the cell stays UNKNOWN.
+            ("2022-12-30", false),
+            // Listing Session, rule-switch Session and the day after: known.
+            ("2023-01-03", true),
+            ("2023-04-09", true),
+            ("2023-04-10", true),
+            // The termination date is exclusive.
+            ("2023-05-01", false),
+        ] {
+            let rule = resolve(day);
+            assert_eq!(rule.is_some(), rule_exists, "{day}");
+            if let Some(rule) = rule {
+                assert!(table.supports(&rule, &binding, date_for(day)));
+                assert!(
+                    table
+                        .category_assignment_for(&binding, date_for(day))
+                        .is_some()
+                );
+            } else {
+                assert!(
+                    table
+                        .category_assignment_for(&binding, date_for(day))
+                        .is_none()
+                );
+                assert_eq!(
+                    classify_unknown_rule(&table, &binding, date_for(day)),
+                    RuleUnknownReason::CategoryUnknown
+                );
+            }
+        }
+        // A whole-period category gap stays UNKNOWN without an error.
+        let mut no_categories = table;
+        no_categories.category_assignments.clear();
+        assert!(
+            no_categories
+                .rule_for(&binding, date_for("2023-01-03"))
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            classify_unknown_rule(&no_categories, &binding, date_for("2023-01-03")),
+            RuleUnknownReason::CategoryUnknown
+        );
     }
 
     #[test]

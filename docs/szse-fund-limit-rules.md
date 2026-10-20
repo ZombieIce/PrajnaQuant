@@ -126,15 +126,18 @@ Public assignments remain keyed by the six-digit SZSE code; the Catalog lifecycl
 `InstrumentId` (`<code>-<identity_start>-<contract-hash-prefix>.SZSE`) is not
 written back into the public assignment. A session binds only when the code
 matches and the date is inside `Lifecycle::validity`. A legal-name successor
-stays in the same fund chain, so one assignment binds inside each identity's own
+stays in the same fund chain (the Catalog marks it with
+`identity_available_from`), so one assignment binds inside each identity's own
 validity window. If one assignment's interval intersects lifecycles of two
 *different* funds that reused the same code, the intersecting cells stay
 `CategoryUnknown`; the resolver never picks one fund arbitrarily. The resolved
 `official_rule.category_evidence` records the public assignment identity and,
 separately, the resolved `lifecycle` binding (instrument ID and validity window);
-`supports` validates both. This changes resolved rule, derived-market and coverage
-version identities without changing the public v2 configuration or its assignment
-identities.
+`supports` validates both. v1 evidence omits `lifecycle` and keeps its existing
+identity; v2 resolution always writes it, so old v2 evidence must be regenerated.
+This changes the recorded rule evidence, derived-market and coverage identities
+without changing the public v2 configuration or its assignment identities;
+`LimitRule.version` remains the public rule-table record identity.
 
 The v2 wire format is selected only by `MarketEvidence.semantic_version`:
 omitting it (or null) keeps the v1 contract, where `LimitRule.evidence` and

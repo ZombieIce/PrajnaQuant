@@ -1193,6 +1193,37 @@ fn legacy_v1_market_evidence_wire_replays_and_rejects_v2_citations() {
 }
 
 #[test]
+fn v1_category_evidence_wire_omits_the_optional_lifecycle_binding() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (raw, input) = fixture(tmp.path());
+    let cat = HistoricalCatalog::build(input, &raw).unwrap();
+    let evidence = FundCategoryEvidence {
+        instrument_id: "159001.SZSE".parse().unwrap(),
+        fund_category: "szse-fund-default-10pct".into(),
+        assignment_identity: "fund-category-assignment@1:sha256:synthetic".into(),
+        lifecycle: None,
+        document_number: "SYNTHETIC-CATEGORY-LIST".into(),
+        effective_from: date(1),
+        effective_until: None,
+        evidence: LimitRuleEvidence::Raw(cat.input().lifecycles[0].listing.evidence.clone()),
+        supporting_sources: Vec::new(),
+        evidence_level: limit_rules::EvidenceLevel::Primary,
+    };
+    let wire = serde_json::to_value(&evidence).unwrap();
+    // v1 keeps its existing wire shape: the optional binding is omitted.
+    assert!(wire.get("lifecycle").is_none());
+    let decoded: FundCategoryEvidence = serde_json::from_value(wire.clone()).unwrap();
+    assert!(decoded.lifecycle.is_none());
+    let mut with_binding = wire;
+    with_binding["lifecycle"] = serde_json::to_value(
+        limit_rules::LifecycleBinding::from_lifecycle(&cat.input().lifecycles[0]).unwrap(),
+    )
+    .unwrap();
+    let decoded_with: FundCategoryEvidence = serde_json::from_value(with_binding).unwrap();
+    assert!(decoded_with.lifecycle.is_some());
+}
+
+#[test]
 fn v2_rule_with_v1_raw_evidence_is_rejected_at_the_version_boundary() {
     let tmp = tempfile::tempdir().unwrap();
     let (raw, input) = fixture(tmp.path());
@@ -1529,11 +1560,9 @@ fn v2_public_code_rule_binds_to_the_catalog_lifecycle_in_coverage() {
             .unwrap();
         // The public assignment keeps its six-digit key; the Catalog lifecycle
         // identity is recorded separately and still binds.
-        assert_eq!(
-            category.instrument_id.symbol(),
-            category.lifecycle.native_symbol
-        );
-        assert_ne!(category.instrument_id, category.lifecycle.instrument_id);
+        let lifecycle = category.lifecycle.as_ref().expect("v2 lifecycle binding");
+        assert_eq!(category.instrument_id.symbol(), lifecycle.native_symbol);
+        assert_ne!(category.instrument_id, lifecycle.instrument_id);
     }
     let coverage = crate::mvp6_coverage::evaluate_derived_market(
         &cat,
@@ -1842,6 +1871,7 @@ fn v2_consumes_v4_catalog_lifecycle_boundaries_without_cross_identity_cells() {
     }
     let mut next_life = input.lifecycles[0].clone();
     next_life.identity_start = Some(date(6));
+    next_life.identity_available_from = Some(date(6));
     next_life.listing.effective_date = date(6);
     next_life.attributes[0].effective_date = date(6);
     next_life.attributes[0].legal_name = Some("SYNTHETIC-INDEX B".into());

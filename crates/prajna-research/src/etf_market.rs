@@ -117,7 +117,10 @@ pub struct FundCategoryEvidence {
     pub fund_category: String,
     pub assignment_identity: String,
     /// Catalog lifecycle this assignment bound to for the affected session.
-    pub lifecycle: limit_rules::LifecycleBinding,
+    /// v2 rule resolution always records it; old v1 evidence may omit it, and
+    /// v2 `supports` rejects a rule without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle: Option<limit_rules::LifecycleBinding>,
     pub document_number: String,
     pub effective_from: NaiveDate,
     pub effective_until: Option<NaiveDate>,
@@ -425,15 +428,16 @@ impl DerivedMarket {
                 return Err(err("opening outside lifecycle/calendar"));
             }
             let rule_table = limit_rule_table.as_ref();
-            let rule_binding = rule_table
-                .map(|_| {
-                    limit_rules::RuleBinding::from_lifecycles(
-                        &catalog.input().lifecycles,
-                        &opening.instrument_id,
-                    )
-                })
-                .transpose()?
-                .flatten();
+            // A missing binding leaves the rule unsupported (UNKNOWN); the
+            // validated Catalog always has one for an opening lifecycle.
+            let rule_binding = rule_table.and_then(|_| {
+                limit_rules::RuleBinding::from_lifecycles(
+                    &catalog.input().lifecycles,
+                    &opening.instrument_id,
+                )
+                .ok()
+                .flatten()
+            });
             let supported_rule = opening.limit_rule.as_ref().filter(|rule| {
                 rule_table
                     .zip(rule_binding.as_ref())
@@ -996,9 +1000,12 @@ fn derive_v2(
         cell.reasons.insert("missing_opening_evidence".into());
         return Ok(cell);
     };
+    // A missing binding leaves the rule unsupported (UNKNOWN) instead of
+    // aborting the other cells; a validated Catalog always has one.
     let binding =
-        limit_rules::RuleBinding::from_lifecycles(&context.catalog.input().lifecycles, id)?
-            .ok_or_else(|| err(format!("missing rule lifecycle for {id}")))?;
+        limit_rules::RuleBinding::from_lifecycles(&context.catalog.input().lifecycles, id)
+            .ok()
+            .flatten();
     let mut times = Vec::new();
     for doc in o
         .announcement_coverage
@@ -1009,19 +1016,21 @@ fn derive_v2(
         times.push(doc.available_at(context.catalog.input())?);
     }
     let supported_rule = o.limit_rule.as_ref().filter(|rule| {
-        context
-            .limit_rule_table
-            .supports(rule, &binding, session.session_date())
+        binding.as_ref().is_some_and(|binding| {
+            context
+                .limit_rule_table
+                .supports(rule, binding, session.session_date())
+        })
     });
     let mut rule_known_before_open = supported_rule.is_some();
     let mut category_evidence_availability_unknown = false;
     if let Some(rule) = &o.limit_rule {
         for doc in rule.documents() {
             cell.sources.insert(doc.raw_sha256.clone());
-            if supported_rule.is_some() {
+            if let (true, Some(binding)) = (supported_rule.is_some(), binding.as_ref()) {
                 let at = context.limit_rule_table.evidence_available_at(
                     rule,
-                    &binding,
+                    binding,
                     doc,
                     session.session_date(),
                     context.catalog.input(),
@@ -1030,13 +1039,13 @@ fn derive_v2(
                 times.push(at);
             }
         }
-        if supported_rule.is_some() {
+        if let (true, Some(binding)) = (supported_rule.is_some(), binding.as_ref()) {
             for source in rule.category_sources() {
                 cell.sources
                     .insert(format!("category:{}", source.announcement_id));
                 match context.limit_rule_table.category_evidence_available_at(
                     rule,
-                    &binding,
+                    binding,
                     source,
                     session.session_date(),
                     session.ts_open(),
@@ -1057,7 +1066,7 @@ fn derive_v2(
             for source in &rule.rule_evidence {
                 let at = context.limit_rule_table.rule_evidence_available_at(
                     rule,
-                    &binding,
+                    binding,
                     source,
                     session.session_date(),
                     session.ts_open(),
@@ -1081,9 +1090,11 @@ fn derive_v2(
         .and_then(|s| s.reference_price);
     let rule = o.limit_rule.as_ref().filter(|r| {
         rule_known_before_open
-            && context
-                .limit_rule_table
-                .supports(r, &binding, session.session_date())
+            && binding.as_ref().is_some_and(|binding| {
+                context
+                    .limit_rule_table
+                    .supports(r, binding, session.session_date())
+            })
             && (listing != session.session_date() || r.applies_on_first_session)
     });
     let limits = rule.zip(reference).and_then(|(r, p)| {

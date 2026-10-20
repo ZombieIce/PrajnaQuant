@@ -1,7 +1,9 @@
 use super::{
     FirstSessionReference, FundCategoryEvidence, LimitRule, LimitRuleEvidence, OfficialLimitRule,
 };
-use crate::pit_universe::{CatalogError, CatalogInput, Evidence, Lifecycle, Publication};
+use crate::pit_universe::{
+    CatalogError, CatalogInput, Evidence, Lifecycle, LifecycleValidity, Publication,
+};
 use chrono::NaiveDate;
 use prajna_domain::{InstrumentId, Price, Session, TimestampNs};
 use serde::{Deserialize, Serialize};
@@ -36,10 +38,22 @@ impl LifecycleBinding {
             effective_until: validity.until,
         })
     }
-    pub fn contains(&self, session_date: NaiveDate) -> bool {
-        session_date >= self.effective_from
-            && self.effective_until.is_none_or(|end| session_date < end)
+    pub fn validity(&self) -> LifecycleValidity {
+        LifecycleValidity {
+            from: self.effective_from,
+            until: self.effective_until,
+        }
     }
+    pub fn contains(&self, session_date: NaiveDate) -> bool {
+        self.validity().contains(session_date)
+    }
+}
+
+/// One lifecycle identity plus the first identity of the fund it belongs to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ChainMember {
+    binding: LifecycleBinding,
+    fund_start: NaiveDate,
 }
 
 /// A rule-binding target plus every lifecycle sharing its native symbol.
@@ -50,8 +64,8 @@ impl LifecycleBinding {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuleBinding {
     target: LifecycleBinding,
-    /// `(lifecycle, first identity of its fund chain)` for the native symbol.
-    chain: Vec<(LifecycleBinding, NaiveDate)>,
+    /// Every lifecycle for the native symbol, tagged with its fund chain.
+    chain: Vec<ChainMember>,
 }
 impl RuleBinding {
     pub fn from_lifecycles(
@@ -71,26 +85,29 @@ impl RuleBinding {
             .collect::<Vec<_>>();
         group.sort_by_key(|life| life.identity_start.unwrap_or(life.listing.effective_date));
         let mut chain = Vec::with_capacity(group.len());
-        let mut chain_start = None;
-        // A terminated predecessor means the next lifecycle reuses the code for
-        // a different fund; an unterminated predecessor is a fund continuation
-        // such as a legal-name change. The first lifecycle always starts a chain.
+        let mut fund_start = None;
         let mut predecessor_terminated = true;
-        for life in group {
+        for (index, life) in group.into_iter().enumerate() {
             let binding = LifecycleBinding::from_lifecycle(life)?;
-            if predecessor_terminated {
-                chain_start = Some(binding.effective_from);
+            // `identity_available_from` is the Catalog's explicit legal-name-change
+            // marker; it can only continue a fund whose predecessor was not
+            // terminated. Everything else (a new listing after termination, or an
+            // unmarked successor) starts a different fund that reused the code.
+            let continues_fund =
+                index > 0 && !predecessor_terminated && life.identity_available_from.is_some();
+            if !continues_fund {
+                fund_start = Some(binding.effective_from);
             }
-            chain.push((
+            chain.push(ChainMember {
                 binding,
-                chain_start.expect("the first lifecycle starts a fund chain"),
-            ));
+                fund_start: fund_start.expect("the first lifecycle starts a fund chain"),
+            });
             predecessor_terminated = life.termination.is_some();
         }
         let target = chain
             .iter()
-            .find(|(binding, _)| binding.instrument_id == *instrument_id)
-            .map(|(binding, _)| binding.clone())
+            .find(|member| member.binding.instrument_id == *instrument_id)
+            .map(|member| member.binding.clone())
             .expect("target is part of its native-symbol group");
         Ok(Some(Self { target, chain }))
     }
@@ -102,8 +119,8 @@ impl RuleBinding {
     fn target_chain_start(&self) -> NaiveDate {
         self.chain
             .iter()
-            .find(|(binding, _)| *binding == self.target)
-            .map(|(_, start)| *start)
+            .find(|member| member.binding == self.target)
+            .map(|member| member.fund_start)
             .expect("target is part of the binding chain")
     }
 
@@ -112,14 +129,14 @@ impl RuleBinding {
     /// `CategoryUnknown`; the resolver never picks one fund arbitrarily.
     fn spans_another_fund(&self, assignment: &FundCategoryAssignment) -> bool {
         let target_chain = self.target_chain_start();
-        self.chain.iter().any(|(binding, chain_start)| {
-            *chain_start != target_chain
-                && binding.native_symbol == assignment.instrument_id.symbol()
+        self.chain.iter().any(|member| {
+            member.fund_start != target_chain
+                && member.binding.native_symbol == assignment.instrument_id.symbol()
                 && intervals_overlap(
                     assignment.effective_from,
                     assignment.effective_until,
-                    binding.effective_from,
-                    binding.effective_until,
+                    member.binding.effective_from,
+                    member.binding.effective_until,
                 )
         })
     }
@@ -396,7 +413,7 @@ impl FundLimitRuleTable {
                     evidence: LimitRuleEvidence::Citation(assignment.evidence.clone()),
                     supporting_sources: assignment.supporting_sources.clone(),
                     evidence_level: assignment.evidence_level,
-                    lifecycle: binding.target.clone(),
+                    lifecycle: Some(binding.target.clone()),
                 }),
             }),
         }))
@@ -451,7 +468,7 @@ impl FundLimitRuleTable {
             return false;
         }
         if category_evidence.document_number.trim().is_empty()
-            || category_evidence.lifecycle != binding.target
+            || category_evidence.lifecycle.as_ref() != Some(&binding.target)
             || category_evidence.instrument_id.symbol() != binding.target.native_symbol
             || category_evidence.instrument_id.venue() != binding.target.instrument_id.venue()
             || category_evidence.fund_category != official_rule.fund_category
@@ -1294,7 +1311,7 @@ mod tests {
             .category_evidence
             .as_ref()
             .unwrap();
-        assert_eq!(category_evidence.lifecycle, *binding.target());
+        assert_eq!(category_evidence.lifecycle.as_ref(), Some(binding.target()));
         assert_eq!(category_evidence.instrument_id, instrument_id);
         assert!(
             table
@@ -1367,6 +1384,8 @@ mod tests {
             .as_mut()
             .unwrap()
             .lifecycle
+            .as_mut()
+            .unwrap()
             .effective_from = date("2022-10-01");
         assert!(!table.supports(&altered_binding, &binding, date("2023-04-10")));
     }
@@ -1417,11 +1436,39 @@ mod tests {
     }
 
     #[test]
+    fn unmarked_successor_starts_a_new_fund_even_without_a_termination_fact() {
+        let table = FundLimitRuleTable::official_v1().unwrap();
+        let instrument_id = public_code("159001");
+        // Reuse encoded only by the predecessor's identity end: there is no
+        // termination fact and the successor carries no legal-name marker.
+        let old = lifecycle("159001", "2022-01-01", None, Some("2022-12-01"), None, None);
+        let new = lifecycle("159001", "2023-01-01", None, None, None, None);
+        let group = [old.clone(), new.clone()];
+        let assignments = [category_assignment(
+            &instrument_id,
+            "szse-fund-default-10pct",
+            "2022-10-01",
+            None,
+            "SYNTHETIC-UNMARKED-REUSE",
+        )];
+        for (life, day) in [(&old, "2022-11-01"), (&new, "2023-01-02")] {
+            let binding = binding_for(&group, &life.instrument_id().unwrap());
+            assert!(
+                table
+                    .rule_for_with_assignments(&binding, date(day), &assignments)
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(table.category_assignment_for(&binding, date(day)).is_none());
+        }
+    }
+
+    #[test]
     fn category_binding_follows_a_legal_name_change_successor() {
         let table = FundLimitRuleTable::official_v1().unwrap();
         let instrument_id = public_code("159001");
         let old = lifecycle("159001", "2022-01-01", None, Some("2023-01-01"), None, None);
-        let new = lifecycle("159001", "2023-01-01", None, None, None, None);
+        let new = lifecycle("159001", "2023-01-01", None, None, None, Some("2023-01-01"));
         let group = [old.clone(), new.clone()];
         let old_binding = binding_for(&group, &old.instrument_id().unwrap());
         let new_binding = binding_for(&group, &new.instrument_id().unwrap());
@@ -1445,8 +1492,9 @@ mod tests {
                     .category_evidence
                     .as_ref()
                     .unwrap()
-                    .lifecycle,
-                *binding.target()
+                    .lifecycle
+                    .as_ref(),
+                Some(binding.target())
             );
         }
     }

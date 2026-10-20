@@ -1121,18 +1121,11 @@ impl HistoricalCatalog {
             .lifecycles
             .iter()
             .map(|life| {
-                let end_exclusive = life
-                    .identity_end_exclusive
-                    .into_iter()
-                    .chain(life.termination.iter().map(|end| end.effective_date))
-                    .min();
+                let validity = life.validity();
                 prajna_data::LifecycleRange {
                     native_symbol: life.native_symbol.clone(),
-                    start: life.listing.effective_date.max(life.identity_start()).max(
-                        life.identity_available_from
-                            .unwrap_or(life.listing.effective_date),
-                    ),
-                    end_exclusive,
+                    start: validity.from,
+                    end_exclusive: validity.until,
                 }
             })
             .collect()
