@@ -309,7 +309,7 @@ pub fn evaluate_derived_market(
     unexplained_actions: &BTreeSet<(InstrumentId, NaiveDate)>,
     thresholds: UnknownCoverageThresholds,
 ) -> Result<UnknownCoverageReport, String> {
-    let table = super::etf_market::limit_rules::FundLimitRuleTable::official_v1()
+    let table = super::etf_market::limit_rules::FundLimitRuleTable::official_v2()
         .map_err(|error| error.to_string())?;
     let catalog_version = catalog.version().map_err(|error| error.to_string())?;
     let lifecycles = catalog
@@ -801,8 +801,11 @@ mod tests {
     #[test]
     fn bundled_rule_table_changes_category_rule_on_its_effective_session() {
         use crate::{
-            etf_market::limit_rules::{EvidenceLevel, FundCategoryAssignment, FundLimitRuleTable},
-            pit_universe::{Evidence, Publication},
+            etf_market::limit_rules::{
+                CategoryEvidenceType, CategorySourceEvidence, EvidenceLevel,
+                FundCategoryAssignment, FundLimitRuleTable,
+            },
+            pit_universe::Publication,
         };
 
         let table = FundLimitRuleTable::official_v1().unwrap();
@@ -816,14 +819,15 @@ mod tests {
                 effective_until: until
                     .map(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").unwrap()),
                 document_number: document.clone(),
-                evidence: Evidence {
-                    raw_sha256: format!("sha256:{}", "0".repeat(64)),
+                evidence: CategorySourceEvidence {
+                    source_type: CategoryEvidenceType::OfficialList,
                     announcement_id: document,
                     locator: "synthetic rule switch".into(),
                     publication: Publication::DateOnly {
                         date: NaiveDate::parse_from_str("2023-01-01", "%Y-%m-%d").unwrap(),
                     },
                 },
+                supporting_sources: Vec::new(),
                 evidence_level: EvidenceLevel::Primary,
             }
         };

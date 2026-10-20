@@ -1,12 +1,16 @@
-use super::{FirstSessionReference, FundCategoryEvidence, LimitRule, OfficialLimitRule};
+use super::{
+    FirstSessionReference, FundCategoryEvidence, LimitRule, LimitRuleEvidence, OfficialLimitRule,
+};
 use crate::pit_universe::{CatalogError, CatalogInput, Evidence, Publication};
 use chrono::NaiveDate;
 use prajna_domain::{InstrumentId, Price, Session, TimestampNs};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 type Result<T> = std::result::Result<T, CatalogError>;
 
 const OFFICIAL_V1: &str = include_str!("../../../../configs/mvp-6/limit_rules_v1.json");
+const OFFICIAL_V2: &str = include_str!("../../../../configs/mvp-6/limit_rules_v2.json");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -16,13 +20,31 @@ pub struct FundCategoryAssignment {
     pub effective_from: NaiveDate,
     pub effective_until: Option<NaiveDate>,
     pub document_number: String,
-    pub evidence: Evidence,
+    pub evidence: CategorySourceEvidence,
+    #[serde(default)]
+    pub supporting_sources: Vec<CategorySourceEvidence>,
     pub evidence_level: EvidenceLevel,
 }
 
 impl FundCategoryAssignment {
     pub fn identity(&self) -> std::result::Result<String, CatalogError> {
         super::identity("fund-category-assignment@1", self)
+    }
+
+    fn evidence_tier_is_valid(&self) -> bool {
+        match self.evidence_level {
+            EvidenceLevel::Primary => {
+                self.evidence.source_type == CategoryEvidenceType::OfficialList
+                    && self.supporting_sources.is_empty()
+            }
+            EvidenceLevel::Secondary => {
+                self.evidence.source_type == CategoryEvidenceType::FundContract
+                    && self
+                        .supporting_sources
+                        .iter()
+                        .any(|source| source.source_type == CategoryEvidenceType::SzseCategoryRule)
+            }
+        }
     }
 }
 
@@ -58,6 +80,35 @@ pub struct SupportingRuleEvidence {
 pub enum EvidenceLevel {
     Primary,
     Secondary,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CategoryEvidenceType {
+    OfficialList,
+    FundContract,
+    SzseCategoryRule,
+}
+
+/// Public source citation for a fund category. The source Raw and its hash
+/// remain local; this citation identifies only the public document and its
+/// locating information.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CategorySourceEvidence {
+    pub source_type: CategoryEvidenceType,
+    pub announcement_id: String,
+    pub locator: String,
+    pub publication: Publication,
+}
+
+impl CategorySourceEvidence {
+    fn validate(&self) -> Result<()> {
+        if self.announcement_id.trim().is_empty() || self.locator.trim().is_empty() {
+            return Err(CatalogError("invalid fund category source citation".into()));
+        }
+        Ok(())
+    }
 }
 
 /// Public citation for an official rule. Raw bytes and their hashes remain local.
@@ -109,9 +160,20 @@ pub struct UnresolvedMembership {
 
 impl FundLimitRuleTable {
     pub fn official_v1() -> Result<Self> {
-        let table: Self = serde_json::from_str(OFFICIAL_V1)
-            .map_err(|error| CatalogError(format!("invalid bundled limit-rule table: {error}")))?;
-        table.validate()?;
+        let table = Self::parse_public_json(OFFICIAL_V1.as_bytes())?;
+        Ok(table)
+    }
+
+    pub fn official_v2() -> Result<Self> {
+        Self::parse_public_json(OFFICIAL_V2.as_bytes())
+    }
+
+    /// Parses and validates a public limit-rule JSON document. Public rule
+    /// assignments carry document citations, never local Raw hashes.
+    pub fn parse_public_json(bytes: &[u8]) -> Result<Self> {
+        let table: Self = serde_json::from_slice(bytes)
+            .map_err(|error| CatalogError(format!("invalid public limit-rule table: {error}")))?;
+        table.validate_public()?;
         Ok(table)
     }
 
@@ -143,6 +205,14 @@ impl FundLimitRuleTable {
             return Ok(None);
         };
         assignment.evidence.validate()?;
+        if !assignment.evidence_tier_is_valid() {
+            return Err(CatalogError(
+                "category assignment evidence tier is incomplete".into(),
+            ));
+        }
+        for source in &assignment.supporting_sources {
+            source.validate()?;
+        }
         if assignment.document_number.trim().is_empty()
             || assignment.document_number != assignment.evidence.announcement_id
             || assignment.fund_category.trim().is_empty()
@@ -170,7 +240,7 @@ impl FundLimitRuleTable {
             rounding: record.rounding.clone(),
             applies_on_first_session: record.applies_on_first_session,
             first_session_reference: Some(record.first_session_reference),
-            evidence: assignment.evidence.clone(),
+            evidence: LimitRuleEvidence::Citation(assignment.evidence.clone()),
             supporting_evidence: Vec::new(),
             rule_evidence: std::iter::once(record.evidence.clone())
                 .chain(
@@ -190,7 +260,8 @@ impl FundLimitRuleTable {
                     document_number: assignment.document_number.clone(),
                     effective_from: assignment.effective_from,
                     effective_until: assignment.effective_until,
-                    evidence: assignment.evidence.clone(),
+                    evidence: LimitRuleEvidence::Citation(assignment.evidence.clone()),
+                    supporting_sources: assignment.supporting_sources.clone(),
                     evidence_level: assignment.evidence_level,
                 }),
             }),
@@ -212,13 +283,17 @@ impl FundLimitRuleTable {
         let Some(category_evidence) = official_rule.category_evidence.as_ref() else {
             return false;
         };
+        let Some(category_source) = category_evidence.evidence.as_citation() else {
+            return false;
+        };
         let assignment = FundCategoryAssignment {
             instrument_id: category_evidence.instrument_id.clone(),
             fund_category: category_evidence.fund_category.clone(),
             effective_from: category_evidence.effective_from,
             effective_until: category_evidence.effective_until,
             document_number: category_evidence.document_number.clone(),
-            evidence: category_evidence.evidence.clone(),
+            evidence: category_source.clone(),
+            supporting_sources: category_evidence.supporting_sources.clone(),
             evidence_level: category_evidence.evidence_level,
         };
         if !assignment
@@ -232,8 +307,13 @@ impl FundLimitRuleTable {
             || category_evidence.fund_category != official_rule.fund_category
             || rule.evidence != category_evidence.evidence
             || !rule.supporting_evidence.is_empty()
-            || category_evidence.document_number != category_evidence.evidence.announcement_id
-            || category_evidence.evidence.validate().is_err()
+            || category_evidence.document_number != category_source.announcement_id
+            || category_source.validate().is_err()
+            || !assignment.evidence_tier_is_valid()
+            || category_evidence
+                .supporting_sources
+                .iter()
+                .any(|source| source.validate().is_err())
             || category_evidence.effective_from > session_date
             || category_evidence
                 .effective_until
@@ -286,6 +366,50 @@ impl FundLimitRuleTable {
             ));
         }
         evidence.available_at(calendar)
+    }
+
+    /// Returns `None` when the public citation cannot be placed on the frozen
+    /// calendar (for example a date-only contract publication before the
+    /// covered window). The caller keeps the affected cell UNKNOWN; it must
+    /// not fabricate an availability timestamp or abort other instruments.
+    pub fn category_evidence_available_at(
+        &self,
+        rule: &LimitRule,
+        instrument_id: &InstrumentId,
+        evidence: &CategorySourceEvidence,
+        session_date: NaiveDate,
+        _session_open: TimestampNs,
+        calendar: &CatalogInput,
+    ) -> Result<Option<TimestampNs>> {
+        if !self.supports(rule, instrument_id, session_date) {
+            return Err(CatalogError(
+                "cannot resolve availability for an unsupported limit rule".into(),
+            ));
+        }
+        let assignment_has_source = rule
+            .official_rule
+            .as_ref()
+            .and_then(|official| official.category_evidence.as_ref())
+            .is_some_and(|category| {
+                category.evidence.as_citation() == Some(evidence)
+                    || category.supporting_sources.contains(evidence)
+            });
+        if !assignment_has_source {
+            return Err(CatalogError("unsupported category source citation".into()));
+        }
+        Ok(match evidence.publication {
+            Publication::Exact { timestamp } => Some(timestamp),
+            Publication::DateOnly { date } => {
+                if date < calendar.calendar_start {
+                    return Ok(None);
+                }
+                calendar
+                    .sessions
+                    .iter()
+                    .find(|session| session.session_date() > date)
+                    .map(Session::ts_close)
+            }
+        })
     }
 
     pub fn rule_evidence_available_at(
@@ -350,7 +474,7 @@ impl FundLimitRuleTable {
         }
     }
 
-    fn validate(&self) -> Result<()> {
+    pub fn validate_public(&self) -> Result<()> {
         if self.version.trim().is_empty()
             || self.coverage_start >= self.coverage_end_exclusive
             || self.records.is_empty()
@@ -387,24 +511,105 @@ impl FundLimitRuleTable {
         }
 
         let expected_symbols = ["159919", "159560", "159522", "159612", "159952"];
-        if self.unresolved_memberships.len() != expected_symbols.len()
-            || expected_symbols.iter().any(|symbol| {
-                self.unresolved_memberships
-                    .iter()
-                    .filter(|row| {
-                        row.native_symbol == *symbol
-                            && row.effective_from == self.coverage_start
-                            && row.effective_until == self.coverage_end_exclusive
-                            && row.status == "unknown"
-                            && !row.reason.trim().is_empty()
+        match self.version.as_str() {
+            "szse-fund-limit-rules@1" => {
+                if !self.category_assignments.is_empty()
+                    || self.unresolved_memberships.len() != expected_symbols.len()
+                    || expected_symbols.iter().any(|symbol| {
+                        self.unresolved_memberships
+                            .iter()
+                            .filter(|row| {
+                                row.native_symbol == *symbol
+                                    && row.effective_from == self.coverage_start
+                                    && row.effective_until == self.coverage_end_exclusive
+                                    && row.status == "unknown"
+                                    && !row.reason.trim().is_empty()
+                            })
+                            .count()
+                            != 1
                     })
-                    .count()
-                    != 1
-            })
-        {
-            return Err(CatalogError(
-                "invalid fixed-ETF unresolved category coverage".into(),
-            ));
+                {
+                    return Err(CatalogError(
+                        "invalid fixed-ETF unresolved category coverage".into(),
+                    ));
+                }
+            }
+            "szse-fund-limit-rules@2" => {
+                let allowed: BTreeSet<_> = expected_symbols.into_iter().collect();
+                for assignment in &self.category_assignments {
+                    let symbol = assignment.instrument_id.symbol();
+                    if !allowed.contains(symbol)
+                        || assignment.effective_from < self.coverage_start
+                        || assignment.effective_until.is_some_and(|end| {
+                            end > self.coverage_end_exclusive || end <= assignment.effective_from
+                        })
+                        || !self
+                            .records
+                            .iter()
+                            .any(|record| record.fund_category == assignment.fund_category)
+                        || assignment.document_number.trim().is_empty()
+                        || assignment.document_number != assignment.evidence.announcement_id
+                    {
+                        return Err(CatalogError("invalid PIT fund-category assignment".into()));
+                    }
+                    assignment.evidence.validate()?;
+                    for source in &assignment.supporting_sources {
+                        source.validate()?;
+                    }
+                    if !assignment.evidence_tier_is_valid() {
+                        return Err(CatalogError("category evidence tier is incomplete".into()));
+                    }
+                }
+                for unresolved in &self.unresolved_memberships {
+                    if !allowed.contains(unresolved.native_symbol.as_str())
+                        || unresolved.effective_from < self.coverage_start
+                        || unresolved.effective_until > self.coverage_end_exclusive
+                        || unresolved.effective_until <= unresolved.effective_from
+                        || unresolved.status != "unknown"
+                        || unresolved.reason.trim().is_empty()
+                    {
+                        return Err(CatalogError(
+                            "invalid unresolved fund-category interval".into(),
+                        ));
+                    }
+                }
+                for symbol in expected_symbols {
+                    let mut intervals = self
+                        .category_assignments
+                        .iter()
+                        .filter(|assignment| assignment.instrument_id.symbol() == symbol)
+                        .map(|assignment| {
+                            (
+                                assignment.effective_from,
+                                assignment
+                                    .effective_until
+                                    .unwrap_or(self.coverage_end_exclusive),
+                            )
+                        })
+                        .chain(
+                            self.unresolved_memberships
+                                .iter()
+                                .filter(|row| row.native_symbol == symbol)
+                                .map(|row| (row.effective_from, row.effective_until)),
+                        )
+                        .collect::<Vec<_>>();
+                    intervals.sort_unstable();
+                    if intervals.first().map(|range| range.0) != Some(self.coverage_start)
+                        || intervals.last().map(|range| range.1)
+                            != Some(self.coverage_end_exclusive)
+                        || intervals.windows(2).any(|pair| pair[0].1 != pair[1].0)
+                    {
+                        return Err(CatalogError(format!(
+                            "fund-category intervals must partition the coverage for {symbol}"
+                        )));
+                    }
+                }
+            }
+            _ => {
+                return Err(CatalogError(
+                    "unsupported fund limit-rule table version".into(),
+                ));
+            }
         }
 
         for (index, record) in self.records.iter().enumerate() {
@@ -464,14 +669,15 @@ mod tests {
             effective_from: date(effective_from),
             effective_until: effective_until.map(date),
             document_number: document_number.into(),
-            evidence: Evidence {
-                raw_sha256: format!("sha256:{}", "c".repeat(64)),
+            evidence: CategorySourceEvidence {
+                source_type: CategoryEvidenceType::OfficialList,
                 announcement_id: document_number.into(),
                 locator: "synthetic category-list row".into(),
                 publication: Publication::Exact {
                     timestamp: "2023-04-09T08:00:00+08:00".parse::<TimestampNs>().unwrap(),
                 },
             },
+            supporting_sources: Vec::new(),
             evidence_level: EvidenceLevel::Primary,
         }
     }
@@ -541,8 +747,19 @@ mod tests {
         assignments[1].evidence_level = EvidenceLevel::Secondary;
         assignments[1].document_number = "SYNTHETIC-FUND-PROSPECTUS".into();
         assignments[1].evidence.announcement_id = "SYNTHETIC-FUND-PROSPECTUS".into();
+        assignments[1].evidence.source_type = CategoryEvidenceType::FundContract;
         assignments[1].evidence.locator =
             "synthetic prospectus §1: the fund tracks a ChiNext-only index".into();
+        assignments[1]
+            .supporting_sources
+            .push(CategorySourceEvidence {
+                source_type: CategoryEvidenceType::SzseCategoryRule,
+                announcement_id: "SYNTHETIC-SZSE-RULE".into(),
+                locator: "SZSE fund limit category rule §2".into(),
+                publication: Publication::DateOnly {
+                    date: date("2023-02-17"),
+                },
+            });
 
         let before = table
             .rule_for_with_assignments(&instrument_id, date("2023-04-09"), &assignments)
@@ -569,7 +786,7 @@ mod tests {
             EvidenceLevel::Primary
         );
         assert_eq!(
-            category_evidence.evidence.locator,
+            category_evidence.evidence.as_citation().unwrap().locator,
             "synthetic prospectus §1: the fund tracks a ChiNext-only index"
         );
         assert!(after.effective_until.is_some());
@@ -648,6 +865,39 @@ mod tests {
         assert!(table.category_assignments.is_empty());
         assert!(!OFFICIAL_V1.contains("raw_sha256"));
         assert_eq!(table.membership_scope, "coverage_window_not_lifecycle");
+    }
+
+    #[test]
+    fn public_v2_parser_resolves_evidenced_pit_categories_and_rejects_overlap() {
+        let bytes = include_bytes!("../../../../configs/mvp-6/limit_rules_v2.json");
+        let table = FundLimitRuleTable::parse_public_json(bytes).unwrap();
+        assert_eq!(table.version, "szse-fund-limit-rules@2");
+        assert!(!table.category_assignments.is_empty());
+        assert!(!String::from_utf8_lossy(bytes).contains("raw_sha256"));
+
+        let assignment = table.category_assignments[0].clone();
+        let rule = table
+            .rule_for(&assignment.instrument_id, assignment.effective_from)
+            .unwrap()
+            .unwrap();
+        assert!(table.supports(&rule, &assignment.instrument_id, assignment.effective_from));
+        assert!(
+            rule.official_rule
+                .as_ref()
+                .unwrap()
+                .category_evidence
+                .as_ref()
+                .unwrap()
+                .evidence
+                .as_citation()
+                .unwrap()
+                .locator
+                .contains("page")
+        );
+
+        let mut overlapping = table;
+        overlapping.category_assignments.push(assignment);
+        assert!(overlapping.validate_public().is_err());
     }
 
     #[test]
@@ -752,6 +1002,6 @@ mod tests {
     fn rule_document_number_must_match_its_evidence_identity() {
         let mut table = FundLimitRuleTable::official_v1().unwrap();
         table.records[0].document_number = "wrong-document".into();
-        assert!(table.validate().is_err());
+        assert!(table.validate_public().is_err());
     }
 }

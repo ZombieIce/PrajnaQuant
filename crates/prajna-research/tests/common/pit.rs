@@ -5,8 +5,8 @@ use prajna_domain::{InstrumentId, Session, TimestampNs};
 use prajna_research::{
     etf_eligible::EligibilityParams,
     etf_market::{
-        DerivedMarket, HaltEvidence, HaltScope, LimitRule, MarketEvidence, OpeningEvidence,
-        ReferencePrice,
+        DerivedMarket, HaltEvidence, HaltScope, LimitRule, LimitRuleEvidence, MarketEvidence,
+        OpeningEvidence, ReferencePrice,
     },
     etf_momentum::{EmptyActionCoverage, TotalReturnIndex},
     pit_strategy::{RiskKind, RiskNotice, RiskSignals},
@@ -29,9 +29,7 @@ pub fn time(day: u32, hour: u32) -> TimestampNs {
         .unwrap()
 }
 pub fn lake() -> tempfile::TempDir {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/pit-test-tmp");
-    std::fs::create_dir_all(&path).unwrap();
-    tempfile::tempdir_in(path).unwrap()
+    tempfile::tempdir().unwrap()
 }
 #[allow(dead_code)]
 pub struct Fixture {
@@ -327,7 +325,7 @@ fn fixture_with_prices(
                     rounding: "nearest_tick_half_up".into(),
                     applies_on_first_session: true,
                     first_session_reference: None,
-                    evidence: known.clone(),
+                    evidence: LimitRuleEvidence::Raw(known.clone()),
                     supporting_evidence: vec![],
                     rule_evidence: vec![],
                 }),

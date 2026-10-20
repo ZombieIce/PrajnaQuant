@@ -451,7 +451,7 @@ impl TotalReturnIndex {
             .join("corporate_actions")
             .join(dsv_hex)
             .join("part-00000.parquet");
-        let batches = read_parquet(path, "corporate_actions", "1")
+        let batches = read_parquet(path, "corporate_actions", &table.schema_version.to_string())
             .map_err(|e| FactorError::Evaluation(e.to_string()))?;
         let actual_hash = logical_hash(
             "corporate_actions",

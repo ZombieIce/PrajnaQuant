@@ -1,0 +1,625 @@
+{
+  "version": "szse-fund-limit-rules@2",
+  "coverage_start": "2022-10-01",
+  "coverage_end_exclusive": "2026-10-01",
+  "records": [
+    {
+      "id": "fund-default-10pct-2021",
+      "fund_category": "szse-fund-default-10pct",
+      "category_description": "Other officially classified funds not designated for a special 20% limit; requires a PIT category assignment source.",
+      "effective_from": "2021-04-06",
+      "effective_until": "2023-04-10",
+      "rate_bps": 1000,
+      "tick": "0.001",
+      "rounding": "nearest_tick_half_up",
+      "applies_on_first_session": true,
+      "first_session_reference": "previous_trading_day_net_asset_value",
+      "document_number": "深证上〔2021〕337号",
+      "evidence": {
+        "evidence_level": "primary",
+        "announcement_id": "深证上〔2021〕337号",
+        "locator": "https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020210331716400647184.pdf §§3.3.11, 3.3.15-3.3.16, 5.2.3(3)",
+        "publication": {
+          "precision": "date_only",
+          "date": "2021-03-31"
+        }
+      }
+    },
+    {
+      "id": "chinext-index-fund-20pct-2020",
+      "fund_category": "szse-chinext-index-etf-lof-class-b-20pct",
+      "category_description": "Index ETFs, LOFs or class-B structured-fund shares whose index constituents are exclusively ChiNext or other 20%-limit stocks.",
+      "effective_from": "2020-08-24",
+      "effective_until": "2023-04-10",
+      "rate_bps": 2000,
+      "tick": "0.001",
+      "rounding": "nearest_tick_half_up",
+      "applies_on_first_session": true,
+      "first_session_reference": "previous_trading_day_net_asset_value",
+      "document_number": "深证上〔2020〕515号",
+      "evidence": {
+        "evidence_level": "primary",
+        "announcement_id": "深证上〔2020〕515号",
+        "locator": "https://www.szse.cn/lawrules/rule/repeal/rules/P020231230545310237980.pdf §2.9",
+        "publication": {
+          "precision": "date_only",
+          "date": "2020-06-12"
+        }
+      },
+      "supporting_evidence": [
+        {
+          "effective_from": "2021-04-06",
+          "evidence": {
+            "evidence_level": "primary",
+            "announcement_id": "深证上〔2021〕337号",
+            "locator": "https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020210331716400647184.pdf §§3.3.11, 3.3.15-3.3.16, 5.2.3(3)",
+            "publication": {
+              "precision": "date_only",
+              "date": "2021-03-31"
+            }
+          },
+          "document_number": "深证上〔2021〕337号"
+        }
+      ]
+    },
+    {
+      "id": "chinext-80pct-lof-20pct-2020",
+      "fund_category": "szse-chinext-80pct-lof-20pct",
+      "category_description": "LOFs with at least 80% of non-cash assets invested in ChiNext or other 20%-limit stocks.",
+      "effective_from": "2020-08-24",
+      "effective_until": "2023-04-10",
+      "rate_bps": 2000,
+      "tick": "0.001",
+      "rounding": "nearest_tick_half_up",
+      "applies_on_first_session": true,
+      "first_session_reference": "previous_trading_day_net_asset_value",
+      "document_number": "深证上〔2020〕515号",
+      "evidence": {
+        "evidence_level": "primary",
+        "announcement_id": "深证上〔2020〕515号",
+        "locator": "https://www.szse.cn/lawrules/rule/repeal/rules/P020231230545310237980.pdf §2.9",
+        "publication": {
+          "precision": "date_only",
+          "date": "2020-06-12"
+        }
+      },
+      "supporting_evidence": [
+        {
+          "effective_from": "2021-04-06",
+          "evidence": {
+            "evidence_level": "primary",
+            "announcement_id": "深证上〔2021〕337号",
+            "locator": "https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020210331716400647184.pdf §§3.3.11, 3.3.15-3.3.16, 5.2.3(3)",
+            "publication": {
+              "precision": "date_only",
+              "date": "2021-03-31"
+            }
+          },
+          "document_number": "深证上〔2021〕337号"
+        }
+      ]
+    },
+    {
+      "id": "fund-default-10pct-2023",
+      "fund_category": "szse-fund-default-10pct",
+      "category_description": "Other officially classified funds not designated for a special 20% limit; requires a PIT category assignment source.",
+      "effective_from": "2023-04-10",
+      "effective_until": "2026-07-06",
+      "rate_bps": 1000,
+      "tick": "0.001",
+      "rounding": "nearest_tick_half_up",
+      "applies_on_first_session": true,
+      "first_session_reference": "most_recently_published_net_asset_value",
+      "document_number": "深证上〔2023〕98号",
+      "evidence": {
+        "evidence_level": "primary",
+        "announcement_id": "深证上〔2023〕98号",
+        "locator": "https://docs.static.szse.cn/www/lawrules/rule/repeal/rules/W020230217564423808793.pdf §§3.3.11, 3.3.13-3.3.15, 3.3.19, 5.2.3(3); notice https://www.szse.cn/lawrules/rule/repeal/rules/t20230217_598773.html",
+        "publication": {
+          "precision": "date_only",
+          "date": "2023-02-17"
+        }
+      }
+    },
+    {
+      "id": "chinext-index-fund-20pct-2023",
+      "fund_category": "szse-20pct-index-etf-lof",
+      "category_description": "Index ETFs and LOFs tracking indexes whose constituents are exclusively ChiNext or other 20%-limit securities.",
+      "effective_from": "2023-04-10",
+      "effective_until": "2026-07-06",
+      "rate_bps": 2000,
+      "tick": "0.001",
+      "rounding": "nearest_tick_half_up",
+      "applies_on_first_session": true,
+      "first_session_reference": "most_recently_published_net_asset_value",
+      "document_number": "深证上〔2023〕98号",
+      "evidence": {
+        "evidence_level": "primary",
+        "announcement_id": "深证上〔2023〕98号",
+        "locator": "https://docs.static.szse.cn/www/lawrules/rule/repeal/rules/W020230217564423808793.pdf §§3.3.13-3.3.15, 3.3.19, 5.2.3(3); effective date confirmed by https://www.szse.cn/aboutus/trends/news/t20230411_599874.html",
+        "publication": {
+          "precision": "date_only",
+          "date": "2023-02-17"
+        }
+      }
+    },
+    {
+      "id": "chinext-80pct-lof-20pct-2023",
+      "fund_category": "szse-20pct-80pct-lof",
+      "category_description": "LOFs with at least 80% of non-cash assets invested in ChiNext or other 20%-limit securities.",
+      "effective_from": "2023-04-10",
+      "effective_until": "2026-07-06",
+      "rate_bps": 2000,
+      "tick": "0.001",
+      "rounding": "nearest_tick_half_up",
+      "applies_on_first_session": true,
+      "first_session_reference": "most_recently_published_net_asset_value",
+      "document_number": "深证上〔2023〕98号",
+      "evidence": {
+        "evidence_level": "primary",
+        "announcement_id": "深证上〔2023〕98号",
+        "locator": "https://docs.static.szse.cn/www/lawrules/rule/repeal/rules/W020230217564423808793.pdf §§3.3.13-3.3.15, 3.3.19, 5.2.3(3); effective date confirmed by https://www.szse.cn/aboutus/trends/news/t20230411_599874.html",
+        "publication": {
+          "precision": "date_only",
+          "date": "2023-02-17"
+        }
+      }
+    },
+    {
+      "id": "fund-default-10pct-2026",
+      "fund_category": "szse-fund-default-10pct",
+      "category_description": "Other officially classified funds not designated for a special 20% limit; requires a PIT category assignment source.",
+      "effective_from": "2026-07-06",
+      "effective_until": null,
+      "rate_bps": 1000,
+      "tick": "0.001",
+      "rounding": "nearest_tick_half_up",
+      "applies_on_first_session": true,
+      "first_session_reference": "most_recently_published_net_asset_value",
+      "document_number": "深证上〔2026〕551号",
+      "evidence": {
+        "evidence_level": "primary",
+        "announcement_id": "深证上〔2026〕551号",
+        "locator": "https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020260424690713155663.pdf §§3.3.11, 3.3.13-3.3.15, 3.3.19, 5.2.3(3); notice https://www.szse.cn/lawrules/rule/trade/current/t20260424_620190.html",
+        "publication": {
+          "precision": "date_only",
+          "date": "2026-04-24"
+        }
+      }
+    },
+    {
+      "id": "chinext-index-fund-20pct-2026",
+      "fund_category": "szse-20pct-index-etf-lof",
+      "category_description": "Index ETFs and LOFs tracking indexes whose constituents are exclusively ChiNext or other 20%-limit securities.",
+      "effective_from": "2026-07-06",
+      "effective_until": null,
+      "rate_bps": 2000,
+      "tick": "0.001",
+      "rounding": "nearest_tick_half_up",
+      "applies_on_first_session": true,
+      "first_session_reference": "most_recently_published_net_asset_value",
+      "document_number": "深证上〔2026〕551号",
+      "evidence": {
+        "evidence_level": "primary",
+        "announcement_id": "深证上〔2026〕551号",
+        "locator": "https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020260424690713155663.pdf §§3.3.13-3.3.15, 3.3.19, 5.2.3(3); notice https://www.szse.cn/lawrules/rule/trade/current/t20260424_620190.html",
+        "publication": {
+          "precision": "date_only",
+          "date": "2026-04-24"
+        }
+      }
+    },
+    {
+      "id": "chinext-80pct-lof-20pct-2026",
+      "fund_category": "szse-20pct-80pct-lof",
+      "category_description": "LOFs with at least 80% of non-cash assets invested in ChiNext or other 20%-limit securities.",
+      "effective_from": "2026-07-06",
+      "effective_until": null,
+      "rate_bps": 2000,
+      "tick": "0.001",
+      "rounding": "nearest_tick_half_up",
+      "applies_on_first_session": true,
+      "first_session_reference": "most_recently_published_net_asset_value",
+      "document_number": "深证上〔2026〕551号",
+      "evidence": {
+        "evidence_level": "primary",
+        "announcement_id": "深证上〔2026〕551号",
+        "locator": "https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020260424690713155663.pdf §§3.3.13-3.3.15, 3.3.19, 5.2.3(3); notice https://www.szse.cn/lawrules/rule/trade/current/t20260424_620190.html",
+        "publication": {
+          "precision": "date_only",
+          "date": "2026-04-24"
+        }
+      }
+    }
+  ],
+  "category_assignments": [
+    {
+      "instrument_id": "159919.SZSE",
+      "fund_category": "szse-fund-default-10pct",
+      "effective_from": "2022-10-01",
+      "effective_until": "2023-04-10",
+      "document_number": "1214171043",
+      "evidence": {
+        "source_type": "fund_contract",
+        "announcement_id": "1214171043",
+        "locator": "page 7, definition of 标的指数: 沪深 300 指数",
+        "publication": {
+          "precision": "date_only",
+          "date": "2022-07-29"
+        }
+      },
+      "supporting_sources": [
+        {
+          "source_type": "szse_category_rule",
+          "announcement_id": "深证上〔2021〕337号",
+          "locator": "《深圳证券交易所交易规则（2021年3月修订）》§§3.3.11, 3.3.15–3.3.16, 5.2.3(3)",
+          "publication": {
+            "precision": "date_only",
+            "date": "2021-03-31"
+          }
+        }
+      ],
+      "evidence_level": "secondary"
+    },
+    {
+      "instrument_id": "159919.SZSE",
+      "fund_category": "szse-fund-default-10pct",
+      "effective_from": "2023-04-10",
+      "effective_until": "2026-07-06",
+      "document_number": "1214171043",
+      "evidence": {
+        "source_type": "fund_contract",
+        "announcement_id": "1214171043",
+        "locator": "page 7, definition of 标的指数: 沪深 300 指数",
+        "publication": {
+          "precision": "date_only",
+          "date": "2022-07-29"
+        }
+      },
+      "supporting_sources": [
+        {
+          "source_type": "szse_category_rule",
+          "announcement_id": "深证上〔2023〕98号",
+          "locator": "《深圳证券交易所交易规则（2023年修订）》§§3.3.11, 3.3.13–3.3.15, 3.3.19, 5.2.3(3)",
+          "publication": {
+            "precision": "date_only",
+            "date": "2023-02-17"
+          }
+        }
+      ],
+      "evidence_level": "secondary"
+    },
+    {
+      "instrument_id": "159919.SZSE",
+      "fund_category": "szse-fund-default-10pct",
+      "effective_from": "2026-07-06",
+      "effective_until": null,
+      "document_number": "1214171043",
+      "evidence": {
+        "source_type": "fund_contract",
+        "announcement_id": "1214171043",
+        "locator": "page 7, definition of 标的指数: 沪深 300 指数",
+        "publication": {
+          "precision": "date_only",
+          "date": "2022-07-29"
+        }
+      },
+      "supporting_sources": [
+        {
+          "source_type": "szse_category_rule",
+          "announcement_id": "深证上〔2026〕551号",
+          "locator": "《深圳证券交易所交易规则（2026年修订）》§§3.3.11, 3.3.13–3.3.15, 3.3.19, 5.2.3(3)",
+          "publication": {
+            "precision": "date_only",
+            "date": "2026-04-24"
+          }
+        }
+      ],
+      "evidence_level": "secondary"
+    },
+    {
+      "instrument_id": "159612.SZSE",
+      "fund_category": "szse-fund-default-10pct",
+      "effective_from": "2022-10-01",
+      "effective_until": "2023-04-10",
+      "document_number": "1212884210",
+      "evidence": {
+        "source_type": "fund_contract",
+        "announcement_id": "1212884210",
+        "locator": "page 11, 八、标的指数: 标普 500 指数",
+        "publication": {
+          "precision": "date_only",
+          "date": "2022-04-11"
+        }
+      },
+      "supporting_sources": [
+        {
+          "source_type": "szse_category_rule",
+          "announcement_id": "深证上〔2021〕337号",
+          "locator": "《深圳证券交易所交易规则（2021年3月修订）》§§3.3.11, 3.3.15–3.3.16, 5.2.3(3)",
+          "publication": {
+            "precision": "date_only",
+            "date": "2021-03-31"
+          }
+        }
+      ],
+      "evidence_level": "secondary"
+    },
+    {
+      "instrument_id": "159612.SZSE",
+      "fund_category": "szse-fund-default-10pct",
+      "effective_from": "2023-04-10",
+      "effective_until": "2026-07-06",
+      "document_number": "1212884210",
+      "evidence": {
+        "source_type": "fund_contract",
+        "announcement_id": "1212884210",
+        "locator": "page 11, 八、标的指数: 标普 500 指数",
+        "publication": {
+          "precision": "date_only",
+          "date": "2022-04-11"
+        }
+      },
+      "supporting_sources": [
+        {
+          "source_type": "szse_category_rule",
+          "announcement_id": "深证上〔2023〕98号",
+          "locator": "《深圳证券交易所交易规则（2023年修订）》§§3.3.11, 3.3.13–3.3.15, 3.3.19, 5.2.3(3)",
+          "publication": {
+            "precision": "date_only",
+            "date": "2023-02-17"
+          }
+        }
+      ],
+      "evidence_level": "secondary"
+    },
+    {
+      "instrument_id": "159612.SZSE",
+      "fund_category": "szse-fund-default-10pct",
+      "effective_from": "2026-07-06",
+      "effective_until": null,
+      "document_number": "1212884210",
+      "evidence": {
+        "source_type": "fund_contract",
+        "announcement_id": "1212884210",
+        "locator": "page 11, 八、标的指数: 标普 500 指数",
+        "publication": {
+          "precision": "date_only",
+          "date": "2022-04-11"
+        }
+      },
+      "supporting_sources": [
+        {
+          "source_type": "szse_category_rule",
+          "announcement_id": "深证上〔2026〕551号",
+          "locator": "《深圳证券交易所交易规则（2026年修订）》§§3.3.11, 3.3.13–3.3.15, 3.3.19, 5.2.3(3)",
+          "publication": {
+            "precision": "date_only",
+            "date": "2026-04-24"
+          }
+        }
+      ],
+      "evidence_level": "secondary"
+    },
+    {
+      "instrument_id": "159522.SZSE",
+      "fund_category": "szse-fund-default-10pct",
+      "effective_from": "2023-10-16",
+      "effective_until": "2024-08-29",
+      "document_number": "1217540657",
+      "evidence": {
+        "source_type": "fund_contract",
+        "announcement_id": "1217540657",
+        "locator": "page 11, 五、基金的标的指数: 国证 2000 指数",
+        "publication": {
+          "precision": "date_only",
+          "date": "2023-08-15"
+        }
+      },
+      "supporting_sources": [
+        {
+          "source_type": "szse_category_rule",
+          "announcement_id": "深证上〔2023〕98号",
+          "locator": "《深圳证券交易所交易规则（2023年修订）》§§3.3.11, 3.3.13–3.3.15, 3.3.19, 5.2.3(3)",
+          "publication": {
+            "precision": "date_only",
+            "date": "2023-02-17"
+          }
+        }
+      ],
+      "evidence_level": "secondary"
+    },
+    {
+      "instrument_id": "159560.SZSE",
+      "fund_category": "szse-fund-default-10pct",
+      "effective_from": "2023-11-20",
+      "effective_until": "2026-07-06",
+      "document_number": "1218046872",
+      "evidence": {
+        "source_type": "fund_contract",
+        "announcement_id": "1218046872",
+        "locator": "page 11, 五、基金的标的指数: 中证芯片产业指数",
+        "publication": {
+          "precision": "date_only",
+          "date": "2023-10-16"
+        }
+      },
+      "supporting_sources": [
+        {
+          "source_type": "szse_category_rule",
+          "announcement_id": "深证上〔2023〕98号",
+          "locator": "《深圳证券交易所交易规则（2023年修订）》§§3.3.11, 3.3.13–3.3.15, 3.3.19, 5.2.3(3)",
+          "publication": {
+            "precision": "date_only",
+            "date": "2023-02-17"
+          }
+        }
+      ],
+      "evidence_level": "secondary"
+    },
+    {
+      "instrument_id": "159560.SZSE",
+      "fund_category": "szse-fund-default-10pct",
+      "effective_from": "2026-07-06",
+      "effective_until": null,
+      "document_number": "1218046872",
+      "evidence": {
+        "source_type": "fund_contract",
+        "announcement_id": "1218046872",
+        "locator": "page 11, 五、基金的标的指数: 中证芯片产业指数",
+        "publication": {
+          "precision": "date_only",
+          "date": "2023-10-16"
+        }
+      },
+      "supporting_sources": [
+        {
+          "source_type": "szse_category_rule",
+          "announcement_id": "深证上〔2026〕551号",
+          "locator": "《深圳证券交易所交易规则（2026年修订）》§§3.3.11, 3.3.13–3.3.15, 3.3.19, 5.2.3(3)",
+          "publication": {
+            "precision": "date_only",
+            "date": "2026-04-24"
+          }
+        }
+      ],
+      "evidence_level": "secondary"
+    },
+    {
+      "instrument_id": "159952.SZSE",
+      "fund_category": "szse-chinext-index-etf-lof-class-b-20pct",
+      "effective_from": "2022-10-01",
+      "effective_until": "2023-04-10",
+      "document_number": "1203172785",
+      "evidence": {
+        "source_type": "fund_contract",
+        "announcement_id": "1203172785",
+        "locator": "page 11, 五、基金标的指数: 创业板指数",
+        "publication": {
+          "precision": "date_only",
+          "date": "2017-03-17"
+        }
+      },
+      "supporting_sources": [
+        {
+          "source_type": "szse_category_rule",
+          "announcement_id": "深证上〔2020〕515号",
+          "locator": "《深圳证券交易所创业板股票上市交易特别规定》§2.9, index funds tracking only 20%-limit constituents",
+          "publication": {
+            "precision": "date_only",
+            "date": "2020-06-12"
+          }
+        }
+      ],
+      "evidence_level": "secondary"
+    },
+    {
+      "instrument_id": "159952.SZSE",
+      "fund_category": "szse-20pct-index-etf-lof",
+      "effective_from": "2023-04-10",
+      "effective_until": "2023-11-29",
+      "document_number": "1203172785",
+      "evidence": {
+        "source_type": "fund_contract",
+        "announcement_id": "1203172785",
+        "locator": "page 11, 五、基金标的指数: 创业板指数",
+        "publication": {
+          "precision": "date_only",
+          "date": "2017-03-17"
+        }
+      },
+      "supporting_sources": [
+        {
+          "source_type": "szse_category_rule",
+          "announcement_id": "深证上〔2023〕98号",
+          "locator": "《深圳证券交易所交易规则（2023年修订）》§§3.3.11, 3.3.13–3.3.15, 3.3.19, 5.2.3(3)",
+          "publication": {
+            "precision": "date_only",
+            "date": "2023-02-17"
+          }
+        }
+      ],
+      "evidence_level": "secondary"
+    },
+    {
+      "instrument_id": "159952.SZSE",
+      "fund_category": "szse-20pct-index-etf-lof",
+      "effective_from": "2023-11-29",
+      "effective_until": "2026-07-06",
+      "document_number": "1218464175",
+      "evidence": {
+        "source_type": "fund_contract",
+        "announcement_id": "1218464175",
+        "locator": "page 11, 五、基金标的指数: 创业板指数",
+        "publication": {
+          "precision": "date_only",
+          "date": "2023-11-29"
+        }
+      },
+      "supporting_sources": [
+        {
+          "source_type": "szse_category_rule",
+          "announcement_id": "深证上〔2023〕98号",
+          "locator": "《深圳证券交易所交易规则（2023年修订）》§§3.3.11, 3.3.13–3.3.15, 3.3.19, 5.2.3(3)",
+          "publication": {
+            "precision": "date_only",
+            "date": "2023-02-17"
+          }
+        }
+      ],
+      "evidence_level": "secondary"
+    },
+    {
+      "instrument_id": "159952.SZSE",
+      "fund_category": "szse-20pct-index-etf-lof",
+      "effective_from": "2026-07-06",
+      "effective_until": null,
+      "document_number": "1218464175",
+      "evidence": {
+        "source_type": "fund_contract",
+        "announcement_id": "1218464175",
+        "locator": "page 11, 五、基金标的指数: 创业板指数",
+        "publication": {
+          "precision": "date_only",
+          "date": "2023-11-29"
+        }
+      },
+      "supporting_sources": [
+        {
+          "source_type": "szse_category_rule",
+          "announcement_id": "深证上〔2026〕551号",
+          "locator": "《深圳证券交易所交易规则（2026年修订）》§§3.3.11, 3.3.13–3.3.15, 3.3.19, 5.2.3(3)",
+          "publication": {
+            "precision": "date_only",
+            "date": "2026-04-24"
+          }
+        }
+      ],
+      "evidence_level": "secondary"
+    }
+  ],
+  "unresolved_memberships": [
+    {
+      "native_symbol": "159522",
+      "effective_from": "2022-10-01",
+      "effective_until": "2023-10-16",
+      "status": "unknown",
+      "reason": "Fund was not yet listed in this coverage interval."
+    },
+    {
+      "native_symbol": "159522",
+      "effective_from": "2024-08-29",
+      "effective_until": "2026-10-01",
+      "status": "unknown",
+      "reason": "The fund lifecycle ended; category is not carried forward to a reused ticker."
+    },
+    {
+      "native_symbol": "159560",
+      "effective_from": "2022-10-01",
+      "effective_until": "2023-11-20",
+      "status": "unknown",
+      "reason": "Fund was not yet listed in this coverage interval."
+    }
+  ],
+  "membership_scope": "coverage_window_not_lifecycle"
+}

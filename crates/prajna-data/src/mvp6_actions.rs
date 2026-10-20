@@ -18,7 +18,7 @@ use crate::{
     lock_mvp6_coverage_report, normalizer::FactsSessionDocument, publish_dataset, read_manifest,
 };
 
-pub const CORPORATE_ACTION_NORMALIZER_VERSION: &str = "6";
+pub const CORPORATE_ACTION_NORMALIZER_VERSION: &str = "7";
 pub const MARKET_NORMALIZER_VERSION: &str = "4";
 const FACTS_CONTRACT: &str = "mvp-6-cninfo-facts-v1";
 
@@ -33,7 +33,7 @@ pub struct CorporateActionPublish {
     pub report: Value,
 }
 
-/// Publishes `szse-etf-frozen@6` from the exact v4 market Raw inputs plus the
+/// Publishes `szse-etf-frozen@7` from the exact v4 market Raw inputs plus the
 /// validated corporate-action facts and any locally frozen Sina pairs.
 pub fn publish_corporate_actions(
     root: &Path,
@@ -93,7 +93,7 @@ pub fn publish_corporate_actions(
     inputs.sort();
     inputs.dedup();
 
-    let registry = NormalizerRegistry::with_corporate_actions_v6(market_dsv).map_err(invalid)?;
+    let registry = NormalizerRegistry::with_corporate_actions_v7(market_dsv).map_err(invalid)?;
     let manifest = publish_dataset(
         root,
         &store,

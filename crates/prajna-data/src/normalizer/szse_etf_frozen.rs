@@ -37,7 +37,8 @@ use crate::{
     NormalizationOutput, NormalizedTables, SourceCrosscheckRow, SourceKind, SourceRecord,
     announcements_to_record_batch, bars_to_record_batch,
     cninfo::{LEGAL_NAME_CHANGE, Mvp6Session},
-    corporate_actions_to_record_batch, instruments_to_record_batch, sessions_to_record_batch,
+    corporate_actions_to_record_batch, corporate_actions_to_record_batch_v2,
+    instruments_to_record_batch, sessions_to_record_batch,
     sina_adjust_factor::{AdjustmentEvent, LifecycleRange, parse_adjustment_series_for_lifecycles},
     source_crosscheck_to_record_batch,
 };
@@ -160,6 +161,20 @@ impl SzseEtfFrozen {
         Ok(normalizer)
     }
 
+    /// V7 keeps the v6 facts, lifecycle and market binding while allowing a
+    /// date-only announcement on a closed day. `announced_date` remains the
+    /// source fact; `announced_at` is null when no Session close exists.
+    pub fn v7(market_dsv: impl Into<String>) -> Result<Self, String> {
+        let market_dsv = market_dsv.into();
+        if !valid_dsv(&market_dsv) {
+            return Err("v7 requires the exact published v4 DSV identity".into());
+        }
+        let mut normalizer = Self::v4(vec![(158000, 159999)])?;
+        normalizer.version = "7";
+        normalizer.market_dsv = Some(market_dsv);
+        Ok(normalizer)
+    }
+
     fn lifecycle(&self, symbol: &str, date: NaiveDate) -> Option<&LifecycleRange> {
         self.lifecycles
             .iter()
@@ -185,7 +200,7 @@ impl Normalizer for SzseEtfFrozen {
     }
 
     fn config_sha256(&self) -> String {
-        if self.version == "6" {
+        if matches!(self.version, "6" | "7") {
             let mut config: Value = serde_json::from_str(CONFIG_V2).expect("static config");
             // V6 does not consume the older announcement index; remove its
             // contract keys so the config does not imply otherwise.
@@ -204,6 +219,13 @@ impl Normalizer for SzseEtfFrozen {
             config["corporate_action_facts"] = json!("mvp-6-cninfo-facts-v1");
             config["corporate_action_availability"] =
                 json!("next_session_close_after_announcement_date");
+            if self.version == "7" {
+                config["announced_at"] = json!("session_close_only_when_announcement_date_is_open");
+                config["closed_day_announcement"] =
+                    json!("preserve_date_and_leave_announced_at_null");
+                config["corporate_action_normalization"] = json!("szse-corporate-action@3");
+                config["corporate_action_schema_version"] = json!(2);
+            }
             config["market_dsv"] = json!(self.market_dsv);
             config["lifecycle_source"] = json!("cninfo_facts_catalog_lifecycles");
             config["code_scope"] = json!(self.code_ranges);
@@ -458,8 +480,8 @@ fn normalize(
     raw_inputs: &[RawInput],
     config: &SzseEtfFrozen,
 ) -> Result<NormalizationOutput, Vec<NormalizationIssue>> {
-    let v6 = config.version == "6";
-    let v3 = matches!(config.version, "3" | "4" | "5" | "6");
+    let v6 = matches!(config.version, "6" | "7");
+    let v3 = matches!(config.version, "3" | "4" | "5" | "6" | "7");
     let venue = VenueId::new("SZSE").expect("static venue is valid");
     let mut acc = Acc::default();
     let mut duplicates = 0_u64;
@@ -485,7 +507,7 @@ fn normalize(
             .filter(|record| record.source_id == "sina_adjust_factor")
             .collect();
         if !sina_records.is_empty() {
-            if matches!(config.version, "5" | "6") {
+            if matches!(config.version, "5" | "6" | "7") {
                 for record in sina_records {
                     if v6 {
                         decode_sina_adjustment_v6(raw, record, &path, &mut acc, &mut duplicates);
@@ -504,7 +526,7 @@ fn normalize(
                 acc.push(
                     "unsupported_sina_adjust_factor",
                     &path,
-                    "Sina adjustment factors require szse-etf-frozen v5 or v6",
+                    "Sina adjustment factors require szse-etf-frozen v5, v6 or v7",
                 );
             }
             continue;
@@ -528,7 +550,7 @@ fn normalize(
                 acc.push(
                     "unsupported_corporate_action_facts",
                     &path,
-                    "corporate action facts require szse-etf-frozen v6",
+                    "corporate action facts require szse-etf-frozen v6 or v7",
                 );
             }
         } else if object.contains_key("announcements") {
@@ -615,6 +637,7 @@ fn normalize(
                         &facts.raw,
                         venue.clone(),
                         &mut issues,
+                        config.version == "7",
                     );
                     v6_identity_gaps =
                         identity_availability_gaps(&facts.value.session, &lifecycles);
@@ -706,7 +729,7 @@ fn normalize(
                 .expect("validated symbol"),
             kind: draft.kind,
             announced_date: draft.announced_date,
-            announced_at: draft.announced_at,
+            announced_at: Some(draft.announced_at),
             available_at,
             record_date: draft.record_date,
             ex_date: draft.ex_date,
@@ -984,7 +1007,14 @@ fn normalize(
         source_crosscheck: Some(source_crosscheck_to_record_batch(&crosscheck).map_err(convert)?),
         announcements: Some(announcements_to_record_batch(&announcement_rows).map_err(convert)?),
         corporate_actions: (config.version != "1")
-            .then(|| corporate_actions_to_record_batch(&corporate_actions).map_err(convert))
+            .then(|| {
+                let batch = if config.version == "7" {
+                    corporate_actions_to_record_batch_v2(&corporate_actions)
+                } else {
+                    corporate_actions_to_record_batch(&corporate_actions)
+                };
+                batch.map_err(convert)
+            })
             .transpose()?,
         tdx_code_table: (matches!(config.version, "4" | "5"))
             .then(|| {
@@ -1220,6 +1250,7 @@ fn actions_from_facts(
     raw_sha256: &str,
     venue: VenueId,
     issues: &mut Vec<NormalizationIssue>,
+    preserve_date_only: bool,
 ) -> Vec<CorporateActionRow> {
     let mut rows = Vec::new();
     for (index, action) in session.corporate_actions.actions.iter().enumerate() {
@@ -1259,17 +1290,15 @@ fn actions_from_facts(
                 continue;
             }
         };
-        let announced_at = match session_close(calendar, &venue, action.announcement_date) {
-            Some(close) => close,
-            None => {
-                issues.push(issue(
-                    "corporate_action_announcement_not_session",
-                    &path,
-                    "announcement_date is not a frozen open Session",
-                ));
-                continue;
-            }
-        };
+        let announced_at = session_close(calendar, &venue, action.announcement_date);
+        if announced_at.is_none() && !preserve_date_only {
+            issues.push(issue(
+                "corporate_action_announcement_not_session",
+                &path,
+                "announcement_date is not a frozen open Session",
+            ));
+            continue;
+        }
         let available_at = match next_session_after(calendar, action.announcement_date)
             .and_then(|date| make_session(venue.clone(), date))
         {
@@ -1314,7 +1343,11 @@ fn actions_from_facts(
             share_ratio,
             liquidation_cash_per_share,
             source_raw_sha256: raw_sha256.to_owned(),
-            normalization_version: "szse-corporate-action@2".into(),
+            normalization_version: if preserve_date_only {
+                "szse-corporate-action@3".into()
+            } else {
+                "szse-corporate-action@2".into()
+            },
         });
     }
     rows.sort_by(|left, right| {
@@ -2400,7 +2433,7 @@ fn decode_tdx(
 ) {
     *acc.kind_counts.entry("tdx_daily").or_default() += 1;
     let invalid = |acc: &mut Acc, message: String| acc.push("invalid_tdx_package", path, message);
-    let v3 = matches!(config.version, "3" | "4" | "5" | "6");
+    let v3 = matches!(config.version, "3" | "4" | "5" | "6" | "7");
     let mut archive = match ZipArchive::new(Cursor::new(raw.bytes.as_slice())) {
         Ok(archive) => archive,
         Err(error) => return invalid(acc, format!("cannot open ZIP: {error}")),
@@ -2509,7 +2542,7 @@ fn decode_tdx(
         let reference_price = if v3 {
             match f64_price(read(4)).filter(|p| *p > Price::ZERO) {
                 Some(price) => Some(price),
-                None if config.version == "6" => {
+                None if matches!(config.version, "6" | "7") => {
                     // P21 must distinguish a missing reference (source gap)
                     // from a checked, unchanged reference. The Bar itself is
                     // still a valid traded observation.
@@ -3070,7 +3103,7 @@ fn decode_cninfo(
     duplicates: &mut u64,
     config: &SzseEtfFrozen,
 ) {
-    let include_actions = config.version != "1" && config.version != "6";
+    let include_actions = config.version != "1" && !matches!(config.version, "6" | "7");
     *acc.kind_counts.entry("cninfo_announcements").or_default() += 1;
     let items = match &object["announcements"] {
         Value::Null => return,

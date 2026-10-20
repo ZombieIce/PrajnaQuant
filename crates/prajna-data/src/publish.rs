@@ -200,7 +200,7 @@ pub fn publish_dataset(
         .normalize(&raw_inputs)
         .map_err(PublishError::Validation)?;
 
-    let tables = table_descriptors(&output.tables);
+    let tables = table_descriptors(&output.tables).map_err(PublishError::Hash)?;
     let manifest_tables = table_manifest_entries(&tables).map_err(PublishError::Hash)?;
     let core = ManifestCore {
         manifest_version: 1,
@@ -397,7 +397,7 @@ pub fn rebuild_dataset(
     let output = normalizer
         .normalize(&raw_inputs)
         .map_err(RebuildError::Validation)?;
-    let tables = table_descriptors(&output.tables);
+    let tables = table_descriptors(&output.tables).map_err(RebuildError::Hash)?;
     let manifest_tables = table_manifest_entries(&tables).map_err(RebuildError::Hash)?;
     let rebuilt = Manifest::new(
         ManifestCore {
@@ -425,7 +425,7 @@ struct TableToPublish<'a> {
     primary_key: &'static [&'static str],
 }
 
-fn table_descriptors(tables: &NormalizedTables) -> Vec<TableToPublish<'_>> {
+fn table_descriptors(tables: &NormalizedTables) -> Result<Vec<TableToPublish<'_>>, String> {
     let mut descriptors = vec![
         TableToPublish {
             name: "instruments",
@@ -497,13 +497,19 @@ fn table_descriptors(tables: &NormalizedTables) -> Vec<TableToPublish<'_>> {
     if let Some(batch) = &tables.corporate_actions {
         descriptors.push(TableToPublish {
             name: "corporate_actions",
-            schema_version: 1,
+            schema_version: batch
+                .schema()
+                .metadata()
+                .get("prajna.schema_version")
+                .ok_or_else(|| "corporate_actions schema version is missing".to_owned())?
+                .parse()
+                .map_err(|error| format!("invalid corporate_actions schema version: {error}"))?,
             schema: batch.schema(),
             batch,
             primary_key: &["announcement_id", "action_index"],
         });
     }
-    descriptors
+    Ok(descriptors)
 }
 
 fn table_manifest_entries(tables: &[TableToPublish<'_>]) -> Result<Vec<ManifestTable>, String> {
