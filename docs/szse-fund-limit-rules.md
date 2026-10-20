@@ -120,3 +120,15 @@ in the local acceptance bundle. The public parser validates category existence,
 source tier, interval coverage, and rejects overlapping assignments. Synthetic
 tests exercise the parser and overlap rejection; local acceptance replay is
 recorded separately in `mvp-6-local-capture.md`.
+
+The v2 wire format is selected only by `MarketEvidence.semantic_version`:
+omitting it (or null) keeps the v1 contract, where `LimitRule.evidence` and
+`official_rule.category_evidence.evidence` are Raw-backed `Evidence` values and
+their Raw bytes are validated. V2 requires public citations instead; a
+version/variant mismatch is rejected rather than silently dropping evidence. If
+a category citation's publication cannot be placed on the frozen calendar (for
+example, a date-only contract publication before the covered window), the
+affected cells stay `UNKNOWN` with `unknown_category_evidence_availability`;
+the build, other instruments, and the coverage report continue, and no
+availability timestamp is fabricated. Those cells are excluded from the trading
+Universe but remain in the UNKNOWN coverage denominator.

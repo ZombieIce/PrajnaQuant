@@ -1,4 +1,6 @@
-use super::{FirstSessionReference, FundCategoryEvidence, LimitRule, OfficialLimitRule};
+use super::{
+    FirstSessionReference, FundCategoryEvidence, LimitRule, LimitRuleEvidence, OfficialLimitRule,
+};
 use crate::pit_universe::{CatalogError, CatalogInput, Evidence, Publication};
 use chrono::NaiveDate;
 use prajna_domain::{InstrumentId, Price, Session, TimestampNs};
@@ -238,7 +240,7 @@ impl FundLimitRuleTable {
             rounding: record.rounding.clone(),
             applies_on_first_session: record.applies_on_first_session,
             first_session_reference: Some(record.first_session_reference),
-            evidence: assignment.evidence.clone(),
+            evidence: LimitRuleEvidence::Citation(assignment.evidence.clone()),
             supporting_evidence: Vec::new(),
             rule_evidence: std::iter::once(record.evidence.clone())
                 .chain(
@@ -258,7 +260,7 @@ impl FundLimitRuleTable {
                     document_number: assignment.document_number.clone(),
                     effective_from: assignment.effective_from,
                     effective_until: assignment.effective_until,
-                    evidence: assignment.evidence.clone(),
+                    evidence: LimitRuleEvidence::Citation(assignment.evidence.clone()),
                     supporting_sources: assignment.supporting_sources.clone(),
                     evidence_level: assignment.evidence_level,
                 }),
@@ -281,13 +283,16 @@ impl FundLimitRuleTable {
         let Some(category_evidence) = official_rule.category_evidence.as_ref() else {
             return false;
         };
+        let Some(category_source) = category_evidence.evidence.as_citation() else {
+            return false;
+        };
         let assignment = FundCategoryAssignment {
             instrument_id: category_evidence.instrument_id.clone(),
             fund_category: category_evidence.fund_category.clone(),
             effective_from: category_evidence.effective_from,
             effective_until: category_evidence.effective_until,
             document_number: category_evidence.document_number.clone(),
-            evidence: category_evidence.evidence.clone(),
+            evidence: category_source.clone(),
             supporting_sources: category_evidence.supporting_sources.clone(),
             evidence_level: category_evidence.evidence_level,
         };
@@ -302,8 +307,8 @@ impl FundLimitRuleTable {
             || category_evidence.fund_category != official_rule.fund_category
             || rule.evidence != category_evidence.evidence
             || !rule.supporting_evidence.is_empty()
-            || category_evidence.document_number != category_evidence.evidence.announcement_id
-            || category_evidence.evidence.validate().is_err()
+            || category_evidence.document_number != category_source.announcement_id
+            || category_source.validate().is_err()
             || !assignment.evidence_tier_is_valid()
             || category_evidence
                 .supporting_sources
@@ -363,6 +368,10 @@ impl FundLimitRuleTable {
         evidence.available_at(calendar)
     }
 
+    /// Returns `None` when the public citation cannot be placed on the frozen
+    /// calendar (for example a date-only contract publication before the
+    /// covered window). The caller keeps the affected cell UNKNOWN; it must
+    /// not fabricate an availability timestamp or abort other instruments.
     pub fn category_evidence_available_at(
         &self,
         rule: &LimitRule,
@@ -371,7 +380,7 @@ impl FundLimitRuleTable {
         session_date: NaiveDate,
         _session_open: TimestampNs,
         calendar: &CatalogInput,
-    ) -> Result<TimestampNs> {
+    ) -> Result<Option<TimestampNs>> {
         if !self.supports(rule, instrument_id, session_date) {
             return Err(CatalogError(
                 "cannot resolve availability for an unsupported limit rule".into(),
@@ -381,32 +390,26 @@ impl FundLimitRuleTable {
             .official_rule
             .as_ref()
             .and_then(|official| official.category_evidence.as_ref())
-            .is_some_and(|assignment| {
-                assignment.evidence == *evidence || assignment.supporting_sources.contains(evidence)
+            .is_some_and(|category| {
+                category.evidence.as_citation() == Some(evidence)
+                    || category.supporting_sources.contains(evidence)
             });
         if !assignment_has_source {
             return Err(CatalogError("unsupported category source citation".into()));
         }
-        match evidence.publication {
-            Publication::Exact { timestamp } => Ok(timestamp),
+        Ok(match evidence.publication {
+            Publication::Exact { timestamp } => Some(timestamp),
             Publication::DateOnly { date } => {
-                if date < calendar.calendar_start || date >= calendar.calendar_end {
-                    return Err(CatalogError(
-                        "date-only category publication outside covered calendar".into(),
-                    ));
+                if date < calendar.calendar_start {
+                    return Ok(None);
                 }
                 calendar
                     .sessions
                     .iter()
                     .find(|session| session.session_date() > date)
                     .map(Session::ts_close)
-                    .ok_or_else(|| {
-                        CatalogError(
-                            "next Session after category publication is not covered".into(),
-                        )
-                    })
             }
-        }
+        })
     }
 
     pub fn rule_evidence_available_at(
@@ -783,7 +786,7 @@ mod tests {
             EvidenceLevel::Primary
         );
         assert_eq!(
-            category_evidence.evidence.locator,
+            category_evidence.evidence.as_citation().unwrap().locator,
             "synthetic prospectus §1: the fund tracks a ChiNext-only index"
         );
         assert!(after.effective_until.is_some());
@@ -886,6 +889,8 @@ mod tests {
                 .as_ref()
                 .unwrap()
                 .evidence
+                .as_citation()
+                .unwrap()
                 .locator
                 .contains("page")
         );

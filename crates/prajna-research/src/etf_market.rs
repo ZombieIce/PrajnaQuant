@@ -52,6 +52,54 @@ pub enum ExecutionStatusVersion {
     #[serde(rename = "szse-derived-open@2")]
     V2,
 }
+/// Evidence carried by a limit rule. `szse-derived-open@1` keeps the Catalog
+/// `Evidence` wire contract (Raw hash plus announcement/locator/publication)
+/// and validates the Raw bytes on read. `szse-derived-open@2` uses a public
+/// document citation because the bundled rule table cannot contain Raw hashes.
+/// `DerivedMarket::build` enforces the variant selected by
+/// `MarketEvidence.semantic_version`, so v1 replay never silently drops its
+/// primary evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum LimitRuleEvidence {
+    /// `szse-derived-open@1`: Raw-backed Catalog evidence.
+    Raw(Evidence),
+    /// `szse-derived-open@2`: public document citation; Raw stays local.
+    Citation(limit_rules::CategorySourceEvidence),
+}
+impl LimitRuleEvidence {
+    fn as_raw(&self) -> Option<&Evidence> {
+        match self {
+            Self::Raw(evidence) => Some(evidence),
+            Self::Citation(_) => None,
+        }
+    }
+    fn as_citation(&self) -> Option<&limit_rules::CategorySourceEvidence> {
+        match self {
+            Self::Citation(evidence) => Some(evidence),
+            Self::Raw(_) => None,
+        }
+    }
+    #[cfg(test)]
+    fn as_citation_mut(&mut self) -> Option<&mut limit_rules::CategorySourceEvidence> {
+        match self {
+            Self::Citation(evidence) => Some(evidence),
+            Self::Raw(_) => None,
+        }
+    }
+    fn validate_for_version(&self, v2: bool, field: &str) -> Result<()> {
+        match (v2, self) {
+            (false, Self::Raw(evidence)) => evidence.validate(),
+            (true, Self::Citation(_)) => Ok(()),
+            (false, Self::Citation(_)) => Err(err(format!(
+                "{field} citation requires szse-derived-open@2"
+            ))),
+            (true, Self::Raw(_)) => Err(err(format!(
+                "{field} must use a public document citation under szse-derived-open@2"
+            ))),
+        }
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OfficialLimitRule {
@@ -70,7 +118,7 @@ pub struct FundCategoryEvidence {
     pub document_number: String,
     pub effective_from: NaiveDate,
     pub effective_until: Option<NaiveDate>,
-    pub evidence: limit_rules::CategorySourceEvidence,
+    pub evidence: LimitRuleEvidence,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub supporting_sources: Vec<limit_rules::CategorySourceEvidence>,
     pub evidence_level: limit_rules::EvidenceLevel,
@@ -95,7 +143,7 @@ pub struct LimitRule {
     pub applies_on_first_session: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_session_reference: Option<FirstSessionReference>,
-    pub evidence: limit_rules::CategorySourceEvidence,
+    pub evidence: LimitRuleEvidence,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub supporting_evidence: Vec<Evidence>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -105,7 +153,16 @@ pub struct LimitRule {
 }
 impl LimitRule {
     fn documents(&self) -> Vec<&Evidence> {
-        self.supporting_evidence.iter().collect()
+        let mut documents: Vec<&Evidence> = self.evidence.as_raw().into_iter().collect();
+        documents.extend(self.supporting_evidence.iter());
+        if let Some(category_evidence) = self
+            .official_rule
+            .as_ref()
+            .and_then(|rule| rule.category_evidence.as_ref())
+        {
+            documents.extend(category_evidence.evidence.as_raw());
+        }
+        documents
     }
 
     fn category_sources(&self) -> Vec<&limit_rules::CategorySourceEvidence> {
@@ -113,11 +170,32 @@ impl LimitRule {
             .as_ref()
             .and_then(|rule| rule.category_evidence.as_ref())
             .map(|category| {
-                std::iter::once(&category.evidence)
+                category
+                    .evidence
+                    .as_citation()
+                    .into_iter()
                     .chain(category.supporting_sources.iter())
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// v1 replay requires Raw-backed documents with integrity checks; v2
+    /// requires public document citations. Mismatched variants are rejected
+    /// instead of being treated as absent evidence.
+    fn validate_wire_evidence(&self, v2: bool) -> Result<()> {
+        self.evidence
+            .validate_for_version(v2, "limit-rule primary evidence")?;
+        if let Some(category_evidence) = self
+            .official_rule
+            .as_ref()
+            .and_then(|rule| rule.category_evidence.as_ref())
+        {
+            category_evidence
+                .evidence
+                .validate_for_version(v2, "fund-category evidence")?;
+        }
+        Ok(())
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -349,6 +427,9 @@ impl DerivedMarket {
                     table.supports(rule, &opening.instrument_id, opening.session_date)
                 })
             });
+            if let Some(rule) = &opening.limit_rule {
+                rule.validate_wire_evidence(v2)?;
+            }
             let session_open = sessions
                 .iter()
                 .find(|session| session.session_date() == opening.session_date)
@@ -377,7 +458,9 @@ impl DerivedMarket {
             }
             if let (Some(rule), Some(table)) = (supported_rule, rule_table) {
                 for source in rule.category_sources() {
-                    table.category_evidence_available_at(
+                    // Unknown availability stays a per-cell UNKNOWN; it must
+                    // not abort the other instruments or the coverage report.
+                    let _ = table.category_evidence_available_at(
                         rule,
                         &opening.instrument_id,
                         source,
@@ -909,41 +992,58 @@ fn derive_v2(
             .limit_rule_table
             .supports(rule, id, session.session_date())
     });
+    let mut rule_known_before_open = supported_rule.is_some();
+    let mut category_evidence_availability_unknown = false;
     if let Some(rule) = &o.limit_rule {
         for doc in rule.documents() {
             cell.sources.insert(doc.raw_sha256.clone());
             if supported_rule.is_some() {
-                times.push(context.limit_rule_table.evidence_available_at(
+                let at = context.limit_rule_table.evidence_available_at(
                     rule,
                     id,
                     doc,
                     session.session_date(),
                     context.catalog.input(),
-                )?);
+                )?;
+                rule_known_before_open &= at < session.ts_open();
+                times.push(at);
             }
         }
         if supported_rule.is_some() {
             for source in rule.category_sources() {
                 cell.sources
                     .insert(format!("category:{}", source.announcement_id));
-                times.push(context.limit_rule_table.category_evidence_available_at(
+                match context.limit_rule_table.category_evidence_available_at(
                     rule,
                     id,
                     source,
                     session.session_date(),
                     session.ts_open(),
                     context.catalog.input(),
-                )?);
+                )? {
+                    Some(at) => {
+                        rule_known_before_open &= at < session.ts_open();
+                        times.push(at);
+                    }
+                    // Availability cannot be proven inside the frozen calendar.
+                    // Keep the cell UNKNOWN; never fabricate a timestamp.
+                    None => {
+                        category_evidence_availability_unknown = true;
+                        rule_known_before_open = false;
+                    }
+                }
             }
             for source in &rule.rule_evidence {
-                times.push(context.limit_rule_table.rule_evidence_available_at(
+                let at = context.limit_rule_table.rule_evidence_available_at(
                     rule,
                     id,
                     source,
                     session.session_date(),
                     session.ts_open(),
                     context.catalog.input(),
-                )?);
+                )?;
+                rule_known_before_open &= at < session.ts_open();
+                times.push(at);
             }
         }
     }
@@ -959,52 +1059,12 @@ fn derive_v2(
         .filter(|s| s.source == "tdx")
         .and_then(|s| s.reference_price);
     let rule = o.limit_rule.as_ref().filter(|r| {
-        context
-            .limit_rule_table
-            .supports(r, id, session.session_date())
+        rule_known_before_open
+            && context
+                .limit_rule_table
+                .supports(r, id, session.session_date())
             && (listing != session.session_date() || r.applies_on_first_session)
     });
-    let rule = match rule {
-        Some(rule) => {
-            let available_before_open = rule
-                .documents()
-                .iter()
-                .map(|evidence| {
-                    context.limit_rule_table.evidence_available_at(
-                        rule,
-                        id,
-                        evidence,
-                        session.session_date(),
-                        context.catalog.input(),
-                    )
-                })
-                .chain(rule.rule_evidence.iter().map(|evidence| {
-                    context.limit_rule_table.rule_evidence_available_at(
-                        rule,
-                        id,
-                        evidence,
-                        session.session_date(),
-                        session.ts_open(),
-                        context.catalog.input(),
-                    )
-                }))
-                .chain(rule.category_sources().into_iter().map(|evidence| {
-                    context.limit_rule_table.category_evidence_available_at(
-                        rule,
-                        id,
-                        evidence,
-                        session.session_date(),
-                        session.ts_open(),
-                        context.catalog.input(),
-                    )
-                }))
-                .collect::<Result<Vec<_>>>()?
-                .iter()
-                .all(|available_at| *available_at < session.ts_open());
-            available_before_open.then_some(rule)
-        }
-        None => None,
-    };
     let limits = rule.zip(reference).and_then(|(r, p)| {
         Some((
             limit(p, r.tick, 10000 + r.rate_bps)?,
@@ -1059,6 +1119,14 @@ fn derive_v2(
     if limits.is_none() {
         cell.reasons
             .insert("unknown_price_limit_rule_or_reference".into());
+    }
+    if category_evidence_availability_unknown
+        && o.limit_rule
+            .as_ref()
+            .is_some_and(|rule| listing != session.session_date() || rule.applies_on_first_session)
+    {
+        cell.reasons
+            .insert("unknown_category_evidence_availability".into());
     }
     if cell.reasons.is_empty() {
         cell.state = TradeState::Tradable;

@@ -148,10 +148,7 @@ fn data(catalog: &HistoricalCatalog) -> (NormalizedTables, MarketEvidence) {
                     rounding: "nearest_tick_half_up".into(),
                     applies_on_first_session: true,
                     first_session_reference: None,
-                    evidence: category_source(
-                        &doc,
-                        limit_rules::CategoryEvidenceType::OfficialList,
-                    ),
+                    evidence: LimitRuleEvidence::Raw(doc.clone()),
                     supporting_evidence: vec![],
                     rule_evidence: vec![],
                     official_rule: None,
@@ -384,19 +381,22 @@ fn date_only_membership_evidence_before_truncated_calendar_is_not_backdated_to_o
         .unwrap()
         .unwrap();
 
-    // The publication date predates this truncated calendar, so availability is unknown.
+    // The publication date predates this truncated calendar, so availability is
+    // unknown. The caller must keep the cell UNKNOWN rather than fabricate a
+    // timestamp; this is a per-cell outcome, not a global error.
     input.calendar_start = date(1);
-    assert!(
+    assert_eq!(
         table
             .category_evidence_available_at(
                 &rule,
                 &instrument_id,
-                &rule.evidence,
+                rule.evidence.as_citation().unwrap(),
                 date(1),
                 time(1, 9),
                 &input,
             )
-            .is_err()
+            .unwrap(),
+        None
     );
 
     // With the publication date covered, the date-only fact becomes available at the
@@ -406,14 +406,14 @@ fn date_only_membership_evidence_before_truncated_calendar_is_not_backdated_to_o
         .category_evidence_available_at(
             &rule,
             &instrument_id,
-            &rule.evidence,
+            rule.evidence.as_citation().unwrap(),
             date(1),
             time(1, 9),
             &input,
         )
         .unwrap();
-    assert_eq!(available_at, time(1, 15));
-    assert!(available_at > time(1, 9));
+    assert_eq!(available_at, Some(time(1, 15)));
+    assert!(available_at.unwrap() > time(1, 9));
 }
 
 fn cat_sessions(catalog: &HistoricalCatalog) -> Vec<Session> {
@@ -1115,6 +1115,210 @@ fn rebuild_frozen_dataset_then_derive_replays_and_detects_raw_tampering() {
     .unwrap();
     assert!(DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, e).is_err());
 }
+
+#[test]
+fn legacy_v1_market_evidence_wire_replays_and_rejects_v2_citations() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (raw, input) = fixture(tmp.path());
+    let cat = HistoricalCatalog::build(input, &raw).unwrap();
+    let hashes = vendor_originals(&raw);
+    let manifest = prajna_data::publish_dataset(
+        tmp.path(),
+        &raw,
+        &NormalizerRegistry::with_builtins(),
+        "szse-etf-frozen",
+        "1",
+        &hashes,
+        "2026-10-15T00:00:00Z",
+    )
+    .unwrap();
+    let (_, evidence) = data(&cat);
+    let legacy = serde_json::to_value(&evidence).unwrap();
+
+    // The unchanged v1 wire shape: no semantic_version, Raw-backed rule
+    // evidence, and no v2 public citation fields.
+    assert!(legacy.get("semantic_version").is_none());
+    let rule = &legacy["openings"][0]["limit_rule"];
+    assert!(rule.get("official_rule").is_none());
+    assert!(rule["evidence"].get("raw_sha256").is_some());
+    assert!(rule["evidence"].get("source_type").is_none());
+    // A mixed Raw/citation object is neither valid wire form.
+    let mut mixed = rule["evidence"].clone();
+    mixed["source_type"] = serde_json::json!("official_list");
+    assert!(serde_json::from_value::<LimitRuleEvidence>(mixed).is_err());
+    let decoded_rule: LimitRule = serde_json::from_value(rule.clone()).unwrap();
+    assert!(matches!(decoded_rule.evidence, LimitRuleEvidence::Raw(_)));
+    assert_eq!(
+        decoded_rule.documents().len(),
+        1 + decoded_rule.supporting_evidence.len()
+    );
+
+    let decoded: MarketEvidence = serde_json::from_value(legacy.clone()).unwrap();
+    let market = DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, decoded).unwrap();
+    assert_eq!(market.cells().len(), 30);
+    assert!(
+        market
+            .cells()
+            .values()
+            .all(|cell| cell.state == TradeState::Tradable)
+    );
+    let replay: MarketEvidence = serde_json::from_value(legacy.clone()).unwrap();
+    let replayed = DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, replay).unwrap();
+    assert_eq!(market.version(), replayed.version());
+    // Pinned against the pre-#248 main checkout for the same synthetic input.
+    assert_eq!(
+        market.version(),
+        "derived-market:sha256:7b0257c982e509251c79fa94d134d17350fc7ce08621c0bc409f88960e339e6d"
+    );
+
+    // A v1 payload cannot smuggle a v2 citation past Raw validation.
+    let citation = serde_json::to_value(category_source(
+        evidence.openings[0].announcement_coverage.as_ref().unwrap(),
+        limit_rules::CategoryEvidenceType::OfficialList,
+    ))
+    .unwrap();
+    let mut wrong_version = legacy;
+    wrong_version["openings"][0]["limit_rule"]["evidence"] = citation;
+    let wrong: MarketEvidence = serde_json::from_value(wrong_version).unwrap();
+    assert!(
+        DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, wrong)
+            .unwrap_err()
+            .0
+            .contains("requires szse-derived-open@2")
+    );
+}
+
+#[test]
+fn v2_rule_with_v1_raw_evidence_is_rejected_at_the_version_boundary() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (raw, input) = fixture(tmp.path());
+    let cat = HistoricalCatalog::build(input, &raw).unwrap();
+    let hashes = vendor_originals(&raw);
+    let manifest = prajna_data::publish_dataset(
+        tmp.path(),
+        &raw,
+        &NormalizerRegistry::with_builtins(),
+        "szse-etf-frozen",
+        "3",
+        &hashes[..hashes.len() - 1],
+        "2026-10-15T00:00:00Z",
+    )
+    .unwrap();
+    let mut evidence = v2_evidence(&cat);
+    let raw_evidence = evidence.openings[0].announcement_coverage.clone().unwrap();
+    evidence.openings[0].limit_rule.as_mut().unwrap().evidence =
+        LimitRuleEvidence::Raw(raw_evidence);
+    assert!(
+        DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, evidence)
+            .unwrap_err()
+            .0
+            .contains("must use a public document citation")
+    );
+}
+
+#[test]
+fn unavailable_category_evidence_keeps_only_the_affected_cells_unknown() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (raw, input) = fixture(tmp.path());
+    let cat = HistoricalCatalog::build(input, &raw).unwrap();
+    let hashes = vendor_originals(&raw);
+    let manifest = prajna_data::publish_dataset(
+        tmp.path(),
+        &raw,
+        &NormalizerRegistry::with_builtins(),
+        "szse-etf-frozen",
+        "3",
+        &hashes[..hashes.len() - 1],
+        "2026-10-15T00:00:00Z",
+    )
+    .unwrap();
+    let base = v2_evidence(&cat);
+    let id = base.openings[0].instrument_id.clone();
+    let with_publication = |evidence: &mut MarketEvidence, publication: Publication| {
+        for opening in evidence
+            .openings
+            .iter_mut()
+            .filter(|opening| opening.instrument_id == id)
+        {
+            let rule = opening.limit_rule.as_mut().unwrap();
+            rule.evidence.as_citation_mut().unwrap().publication = publication.clone();
+            let category = rule
+                .official_rule
+                .as_mut()
+                .unwrap()
+                .category_evidence
+                .as_mut()
+                .unwrap();
+            category.evidence.as_citation_mut().unwrap().publication = publication.clone();
+            refresh_assignment_identity(category);
+        }
+    };
+
+    // The first later Session is outside the frozen calendar: availability is
+    // unprovable, so every affected cell stays UNKNOWN and the build succeeds.
+    let mut pre_window = base.clone();
+    with_publication(
+        &mut pre_window,
+        Publication::DateOnly {
+            date: NaiveDate::from_ymd_opt(2022, 4, 11).unwrap(),
+        },
+    );
+    let market =
+        DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, pre_window.clone()).unwrap();
+    for day in 1..=10 {
+        let cell = &market.cells()[&(id.clone(), date(day))];
+        assert_eq!(cell.state, TradeState::Unknown);
+        assert!(
+            cell.reasons
+                .contains("unknown_category_evidence_availability")
+        );
+        assert!(
+            cell.reasons
+                .contains("unknown_price_limit_rule_or_reference")
+        );
+        assert_eq!(cell.upper_limit, None);
+        assert_eq!(cell.lower_limit, None);
+        // Known market inputs still drive availability; nothing is backdated.
+        assert_eq!(cell.available_at, Some(time(day, 15)));
+        assert!(!cell.permits(true) && !cell.permits(false));
+    }
+    assert!(
+        market
+            .cells()
+            .iter()
+            .filter(|((instrument, _), _)| instrument != &id)
+            .all(|(_, cell)| cell.state == TradeState::Tradable)
+    );
+    let replay = DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, pre_window).unwrap();
+    assert_eq!(market.version(), replay.version());
+    assert!(matches!(
+        market
+            .rebalance_gate(date(1), std::slice::from_ref(&id), &[])
+            .unwrap(),
+        RebalanceGate::Deferred { .. }
+    ));
+
+    // A covered publication is still per-cell: only the Sessions whose open
+    // precedes the next close stay UNKNOWN.
+    let mut late = base;
+    with_publication(&mut late, Publication::DateOnly { date: date(1) });
+    let market = DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, late).unwrap();
+    for day in [1, 2] {
+        let cell = &market.cells()[&(id.clone(), date(day))];
+        assert_eq!(cell.state, TradeState::Unknown);
+        assert!(
+            cell.reasons
+                .contains("unknown_price_limit_rule_or_reference")
+        );
+    }
+    for day in 3..=10 {
+        assert_eq!(
+            market.cells()[&(id.clone(), date(day))].state,
+            TradeState::Tradable
+        );
+    }
+}
+
 fn v2_evidence(catalog: &HistoricalCatalog) -> MarketEvidence {
     let (_, evidence) = data(catalog);
     let mut value = serde_json::to_value(evidence).unwrap();
@@ -1176,7 +1380,7 @@ fn refresh_assignment_identity(category_evidence: &mut FundCategoryEvidence) {
         effective_from: category_evidence.effective_from,
         effective_until: category_evidence.effective_until,
         document_number: category_evidence.document_number.clone(),
-        evidence: category_evidence.evidence.clone(),
+        evidence: category_evidence.evidence.as_citation().unwrap().clone(),
         supporting_sources: category_evidence.supporting_sources.clone(),
         evidence_level: category_evidence.evidence_level,
     };
@@ -1371,7 +1575,14 @@ fn v2_frozen_openings_use_tdx_ex_rights_reference_and_fail_closed() {
             0 => opening.limit_rule.as_mut().unwrap().official_rule = None,
             1 => opening.limit_rule.as_mut().unwrap().effective_until = Some(date(1)),
             2 => {
-                opening.limit_rule.as_mut().unwrap().evidence.publication = Publication::Exact {
+                opening
+                    .limit_rule
+                    .as_mut()
+                    .unwrap()
+                    .evidence
+                    .as_citation_mut()
+                    .unwrap()
+                    .publication = Publication::Exact {
                     timestamp: time(2, 8),
                 }
             }
@@ -1390,7 +1601,11 @@ fn v2_frozen_openings_use_tdx_ex_rights_reference_and_fail_closed() {
                     .category_evidence
                     .as_mut()
                     .unwrap();
-                category_evidence.evidence.publication = Publication::Exact {
+                category_evidence
+                    .evidence
+                    .as_citation_mut()
+                    .unwrap()
+                    .publication = Publication::Exact {
                     timestamp: time(2, 8),
                 };
                 refresh_assignment_identity(category_evidence);

@@ -4,10 +4,9 @@ use prajna_data::{NormalizerRegistry, RawStore, SourceKind, SourceRecordInput, p
 use prajna_domain::{InstrumentId, Session, TimestampNs};
 use prajna_research::{
     etf_eligible::EligibilityParams,
-    etf_market::limit_rules::{CategoryEvidenceType, CategorySourceEvidence},
     etf_market::{
-        DerivedMarket, HaltEvidence, HaltScope, LimitRule, MarketEvidence, OpeningEvidence,
-        ReferencePrice,
+        DerivedMarket, HaltEvidence, HaltScope, LimitRule, LimitRuleEvidence, MarketEvidence,
+        OpeningEvidence, ReferencePrice,
     },
     etf_momentum::{EmptyActionCoverage, TotalReturnIndex},
     pit_strategy::{RiskKind, RiskNotice, RiskSignals},
@@ -326,12 +325,7 @@ fn fixture_with_prices(
                     rounding: "nearest_tick_half_up".into(),
                     applies_on_first_session: true,
                     first_session_reference: None,
-                    evidence: CategorySourceEvidence {
-                        source_type: CategoryEvidenceType::OfficialList,
-                        announcement_id: known.announcement_id.clone(),
-                        locator: known.locator.clone(),
-                        publication: known.publication.clone(),
-                    },
+                    evidence: LimitRuleEvidence::Raw(known.clone()),
                     supporting_evidence: vec![],
                     rule_evidence: vec![],
                 }),
