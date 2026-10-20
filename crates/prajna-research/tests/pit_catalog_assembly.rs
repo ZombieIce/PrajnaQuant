@@ -850,6 +850,55 @@ fn identity_without_code_table_presence_stays_in_the_official_lifetime() {
 }
 
 #[test]
+fn secondary_identity_without_code_table_presence_is_excluded() {
+    // P27-7 makes a consistent TDX code table part of secondary evidence.
+    // Without any TDX presence the secondary row is not corroborated and must
+    // not become a fixed-universe member.
+    let world = world(
+        &[
+            row("159919", "合成ETF", 1, None, 1, "", "official"),
+            row("159952", "合成科创ETF", 1, None, 1, "", "secondary"),
+        ],
+        &[(1, &["159919"]), (2, &["159919"])],
+        &[("159919", &[1, 2])],
+    );
+    let assembly =
+        assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations).unwrap();
+    assert_eq!(
+        assembly
+            .report
+            .excluded_codes
+            .get("159952")
+            .map(String::as_str),
+        Some("secondary_code_table_absent")
+    );
+    assert!(!assembly.report.included_codes.contains("159952"));
+    assert!(
+        assembly
+            .catalog
+            .coverage_gaps()
+            .contains("mvp6_excluded:159952:secondary_code_table_absent")
+    );
+    assert!(assembly.report.differences.iter().any(|difference| {
+        difference.code == "159952"
+            && difference.kind == IdentityDifferenceKind::CodeTableAbsent
+            && difference.resolution == IdentityDifferenceResolution::Excluded
+    }));
+    let fixed = mvp6_fixed();
+    let day2 = assembly.catalog.fixed_universe(d(2), &fixed).unwrap();
+    assert!(
+        !day2
+            .members
+            .iter()
+            .any(|member| member.symbol().starts_with("159952"))
+    );
+    assert_eq!(
+        day2.run_spec.fixed_list_exclusions.as_ref().unwrap()["159952"],
+        "secondary_code_table_absent"
+    );
+}
+
+#[test]
 fn termination_after_the_covered_window_is_omitted() {
     let world = world(
         &[row("159919", "合成ETF", 1, Some(5), 1, "", "official")],

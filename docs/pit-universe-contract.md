@@ -232,9 +232,12 @@ an evidenced legal-name change, and that successor row must declare
 #229's shared row validator accepts exactly that one non-terminated overlap;
 unmarked successors remain an overlapping-lifecycle error in both paths, and
 `szse-etf-frozen@4` ends the preceding normalized range at the declared change
-date. A row whose lifecycle spans an un-evidenced prior run, or that has no
-code-table presence, is excluded and reported rather than joined to another
-identity. Pre-window listings are supported; a pre-window sequence of multiple
+date. A row whose lifecycle spans an un-evidenced prior run is excluded and
+reported rather than joined to another identity. A **secondary-evidence** row
+with no code-table presence is excluded (`secondary_code_table_absent`) because
+P27-7 makes the code table part of its corroboration; an **official-evidence**
+no-presence identity is kept with UNKNOWN coverage (see below). Pre-window
+listings are supported; a pre-window sequence of multiple
 identity rows is not representable and is rejected. The v2 builder treats the
 earliest known legal name as the initial identity, so a first attribute whose
 effective date is later than the first code-table appearance does not invent a
@@ -292,7 +295,9 @@ code stays in the fixed list and that Session is UNKNOWN. An identity with
 official dates but no TDX code-table presence at all stays in the official
 lifetime: it is reported as `code_table_absent` (unresolved), the Catalog
 discloses `lifecycle_without_code_table_identity`, and the fixed list keeps the
-code with UNKNOWN coverage. The UNKNOWN coverage denominator uses the legal
+code with UNKNOWN coverage. A **secondary-evidence** identity with no TDX
+presence is excluded instead (`secondary_code_table_absent`), because the code
+table is part of its corroboration under P27-7. The UNKNOWN coverage denominator uses the legal
 lifetime: the official listing date (not `identity_start`) starts it, and it
 ends at the official termination or the next same-code identity boundary, so
 Sessions missing from the TDX code table still count as UNKNOWN and are not
@@ -307,7 +312,8 @@ Synthetic tests cover pre-window and in-window listing, post-termination, code
 reuse, an explicitly declared legal-name change with P6 availability and its
 rejection when unmarked, contract evidence, shared attribute pages, missing
 identity rows, unresolved orgIds, TDX disagreements, secondary evidence
-exclusion, code-table absence, no-TDX-presence identities that stay in the
+exclusion, code-table absence, secondary no-presence exclusion,
+official no-presence identities that stay in the
 official lifetime, priced Bars outside the official lifespan, priced Bars
 inside the official lifespan but beyond TDX presence, bare reuse
 post-termination runs, TDX presence before the official listing without a

@@ -662,11 +662,34 @@ fn plan(v4: &V4Data, seeds: &[IdentitySeed]) -> Result<Plan> {
         }
         let runs = presence_runs(v4, code);
         if runs.is_empty() {
-            // The identity is officially evidenced but TDX never lists the
-            // code. This is missing market evidence, not evidence that the ETF
-            // is outside the official lifetime: keep it as a fixed-list member
-            // with an empty physical price lifecycle, report the gap, and let
-            // the coverage layer count the lifetime as UNKNOWN (P27-3/P27-6).
+            // P27-7 makes a consistent TDX code table part of secondary
+            // evidence. Without it the secondary row is not corroborated and
+            // must not become a fixed-universe member.
+            if rows
+                .iter()
+                .any(|row| row.evidence_level == EvidenceLevel::Secondary)
+            {
+                for row in &rows {
+                    differences.push(IdentityDifference {
+                        code: code.clone(),
+                        kind: IdentityDifferenceKind::CodeTableAbsent,
+                        expected_date: Some(row.listing),
+                        observed_date: None,
+                        evidence_level: Some(row.evidence_level),
+                        resolution: IdentityDifferenceResolution::Excluded,
+                    });
+                }
+                excluded.insert(code.clone(), "secondary_code_table_absent".to_owned());
+                notes.push(format!(
+                    "{code}: secondary identity has no TDX code-table presence and is not corroborated"
+                ));
+                continue;
+            }
+            // An official identity stands on its own. This is missing market
+            // evidence, not evidence that the ETF is outside the official
+            // lifetime: keep it as a fixed-list member with an empty physical
+            // price lifecycle, report the gap, and let the coverage layer count
+            // the lifetime as UNKNOWN (P27-3/P27-6).
             for row in &rows {
                 differences.push(IdentityDifference {
                     code: code.clone(),
