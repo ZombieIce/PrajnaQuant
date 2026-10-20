@@ -134,6 +134,7 @@ fn fixture_with_prices(
         .collect(),
         identity_start: None,
         identity_end_exclusive: None,
+        identity_available_from: None,
         code_table_first_seen: None,
         code_table_last_seen: None,
         code_table_exit_date: None,

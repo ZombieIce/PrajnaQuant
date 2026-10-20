@@ -30,7 +30,7 @@ fn hash<T: Serialize>(prefix: &str, value: &T) -> Result<String> {
     let bytes = restricted_jcs(&value).map_err(|e| error(e.to_string()))?;
     Ok(format!("{prefix}:sha256:{:x}", Sha256::digest(bytes)))
 }
-fn raw_hash(value: &str) -> bool {
+pub(crate) fn raw_hash(value: &str) -> bool {
     value.strip_prefix("sha256:").is_some_and(|hex| {
         hex.len() == 64
             && hex
@@ -127,7 +127,7 @@ fn valid_szse_code(code: &str) -> bool {
     code.len() == 6 && code.bytes().all(|b| b.is_ascii_digit())
 }
 
-fn in_code_scope(code: &str, ranges: &[CodeRange]) -> bool {
+pub(crate) fn in_code_scope(code: &str, ranges: &[CodeRange]) -> bool {
     code.len() == 6
         && code.bytes().all(|b| b.is_ascii_digit())
         && code.parse::<u32>().is_ok_and(|value| {
@@ -283,6 +283,13 @@ pub struct Lifecycle {
     pub identity_start: Option<NaiveDate>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity_end_exclusive: Option<NaiveDate>,
+    /// First Session on which this identity may be used as a physical price
+    /// identity. A legal-name change keeps its effective `identity_start` for
+    /// the official boundary but sets this to the first close after the rename
+    /// announcement, so Bars before the change is knowable are not attributed to
+    /// the successor (P6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_available_from: Option<NaiveDate>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_table_first_seen: Option<NaiveDate>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -311,7 +318,11 @@ impl Lifecycle {
             .map_err(|e| error(e.to_string()))
     }
     fn contains(&self, date: NaiveDate) -> bool {
-        date >= self.listing.effective_date.max(self.identity_start())
+        let start = self.listing.effective_date.max(self.identity_start()).max(
+            self.identity_available_from
+                .unwrap_or(self.listing.effective_date),
+        );
+        date >= start
             && self.identity_end_exclusive.is_none_or(|end| date < end)
             && self
                 .termination
@@ -585,6 +596,43 @@ fn validate_v2_code_tables(input: &mut CatalogInput) -> Result<BTreeSet<String>>
                             .then(|| values.first().cloned().flatten())
                             .flatten()
                     });
+            // The earliest known name is the initial identity, not a change.
+            // This matters when an official listing (and its attribute) is
+            // later than the first TDX code-table appearance: it must not
+            // invent a second identity boundary.
+            let mut initial_name_date = if previous_name.is_none() {
+                names.iter().next().map(|(date, _)| *date)
+            } else {
+                None
+            };
+            if let Some(date) = initial_name_date {
+                previous_name = names.get(&date).and_then(|values| {
+                    (values.len() == 1)
+                        .then(|| values.first().cloned().flatten())
+                        .flatten()
+                });
+            }
+            // A reused code's successor run may also start before the new
+            // fund's official listing. The name at/before `first_seen` then
+            // belongs to the previous identity, so use the run's own first
+            // attribute as the initial name instead of inventing a change.
+            if run_start > 0
+                && let Some(attribute) = input
+                    .lifecycles
+                    .iter()
+                    .find(|life| {
+                        life.native_symbol == *symbol && life.identity_start() == first_seen
+                    })
+                    .and_then(|life| {
+                        life.attributes
+                            .iter()
+                            .min_by_key(|attribute| attribute.effective_date)
+                    })
+                && attribute.effective_date > first_seen
+            {
+                previous_name = attribute.legal_name.clone();
+                initial_name_date = Some(attribute.effective_date);
+            }
             if names
                 .get(&first_seen)
                 .is_some_and(|values| values.len() > 1)
@@ -597,6 +645,9 @@ fn validate_v2_code_tables(input: &mut CatalogInput) -> Result<BTreeSet<String>>
             )) {
                 if values.len() != 1 {
                     gaps.insert(format!("conflicting_legal_names:{symbol}:{effective_date}"));
+                    continue;
+                }
+                if Some(*effective_date) == initial_name_date {
                     continue;
                 }
                 let name = values.first().cloned().flatten();
@@ -824,6 +875,21 @@ impl HistoricalCatalog {
             if !ids.insert(life.instrument_id()?) {
                 return Err(error("duplicate lifecycle identity"));
             }
+            if let Some(available) = life.identity_available_from {
+                if available < life.identity_start() {
+                    return Err(error(format!(
+                        "identity_available_from precedes identity_start at lifecycle {i}"
+                    )));
+                }
+                if life
+                    .identity_end_exclusive
+                    .is_some_and(|end| available >= end)
+                {
+                    return Err(error(format!(
+                        "identity_available_from is outside lifecycle {i}"
+                    )));
+                }
+            }
             if life
                 .termination
                 .as_ref()
@@ -1042,7 +1108,10 @@ impl HistoricalCatalog {
                     .min();
                 prajna_data::LifecycleRange {
                     native_symbol: life.native_symbol.clone(),
-                    start: life.listing.effective_date.max(life.identity_start()),
+                    start: life.listing.effective_date.max(life.identity_start()).max(
+                        life.identity_available_from
+                            .unwrap_or(life.listing.effective_date),
+                    ),
                     end_exclusive,
                 }
             })
@@ -1053,6 +1122,26 @@ impl HistoricalCatalog {
     }
     pub fn coverage_gaps(&self) -> &BTreeSet<String> {
         &self.gaps
+    }
+    /// Explicit P6 rename gaps are quarantined, never assigned to either ID.
+    /// Ordinary unattributed or ambiguous rows still fail closed.
+    pub(crate) fn is_identity_availability_gap(&self, symbol: &str, date: NaiveDate) -> bool {
+        self.input.lifecycles.iter().any(|next| {
+            next.native_symbol == symbol
+                && next
+                    .termination
+                    .as_ref()
+                    .is_none_or(|end| date < end.effective_date)
+                && next.identity_end_exclusive.is_none_or(|end| date < end)
+                && next.identity_available_from.is_some_and(|available| {
+                    date >= next.listing.effective_date && date < available
+                })
+                && self.input.lifecycles.iter().any(|previous| {
+                    previous.native_symbol == symbol
+                        && previous.identity_start() < next.identity_start()
+                        && previous.identity_end_exclusive == Some(next.listing.effective_date)
+                })
+        })
     }
     /// Physical price-row mapping, separate from as-of strategy knowledge. Missing
     /// or ambiguous lifecycles are quarantined, never attached to nearest dates.
@@ -1081,7 +1170,10 @@ impl HistoricalCatalog {
             if life.native_symbol != native_symbol {
                 return false;
             }
-            let start = life.listing.effective_date.max(life.identity_start());
+            let start = life.listing.effective_date.max(life.identity_start()).max(
+                life.identity_available_from
+                    .unwrap_or(life.listing.effective_date),
+            );
             let next_identity_start = self
                 .input
                 .lifecycles
@@ -1181,6 +1273,36 @@ impl HistoricalCatalog {
                 // into a run-wide coverage failure.
                 continue;
             }
+            // The fixed-list assembler records undecidable identities as
+            // code-scoped gaps. They exclude that code from this retrospective
+            // static list instead of failing every other instrument.
+            if let Some(detail) = gap.strip_prefix("mvp6_excluded:")
+                && let Some((code, reason)) = detail.split_once(':')
+                && scoped(code)
+            {
+                if fixed_codes.contains(code) {
+                    lifecycle_conflicts
+                        .entry(code.to_owned())
+                        .or_default()
+                        .insert(reason.to_owned());
+                }
+                continue;
+            }
+            // An officially evidenced identity may have no TDX code-table
+            // presence. Its official lifetime is still a fixed-list member and
+            // is measured as UNKNOWN; the Catalog gap is disclosed, not a
+            // run-wide failure.
+            if let Some(detail) = gap.strip_prefix("lifecycle_without_code_table_identity:")
+                && let Some((code, _start)) = detail.split_once(':')
+                && scoped(code)
+                && self
+                    .input
+                    .lifecycles
+                    .iter()
+                    .any(|life| life.native_symbol == code && life.code_table_first_seen.is_none())
+            {
+                continue;
+            }
             blocking_gaps.insert(gap.clone());
         }
         if !blocking_gaps.is_empty() {
@@ -1216,18 +1338,33 @@ impl HistoricalCatalog {
         }
         for life in &self.input.lifecycles {
             let id = life.instrument_id()?;
+            // Fixed-list membership follows the official lifetime. A bare
+            // TDX exit before the official termination is a missing-market
+            // gap; only the next same-code identity's official listing (a name
+            // change or reuse) bounds the earlier identity.
+            let own_start = life.identity_start.unwrap_or(life.listing.effective_date);
+            let successor_listing = self
+                .input
+                .lifecycles
+                .iter()
+                .filter(|other| {
+                    other.native_symbol == life.native_symbol
+                        && other.identity_start.unwrap_or(other.listing.effective_date) > own_start
+                })
+                .map(|other| other.listing.effective_date)
+                .min();
             let reason = if let Some(reason) = effective_exclusions.get(&life.native_symbol) {
                 Some(reason.as_str())
             } else if !effective_codes.contains(&life.native_symbol) {
                 Some("outside_fixed_list")
-            } else if session_date < life.listing.effective_date.max(life.identity_start()) {
+            } else if session_date < life.listing.effective_date {
+                // P27-19: the official listing date wins for fixed-list
+                // membership. A missing price row before the first TDX
+                // appearance is an UNKNOWN Session, not a silent deletion.
                 Some("before_listing")
             } else if life.listing.evidence.available_at(&self.input)? > now {
                 Some("listing_not_known")
-            } else if life
-                .identity_end_exclusive
-                .is_some_and(|end| session_date >= end)
-            {
+            } else if successor_listing.is_some_and(|end| session_date >= end) {
                 Some("outside_catalog_lifecycle")
             } else if life.termination.as_ref().is_some_and(|termination| {
                 session_date >= termination.effective_date

@@ -36,7 +36,7 @@ use crate::{
     AnnouncementRow, CorporateActionKind, CorporateActionRow, NormalizationIssue,
     NormalizationOutput, NormalizedTables, SourceCrosscheckRow, SourceKind, SourceRecord,
     announcements_to_record_batch, bars_to_record_batch,
-    cninfo::Mvp6Session,
+    cninfo::{LEGAL_NAME_CHANGE, Mvp6Session},
     corporate_actions_to_record_batch, instruments_to_record_batch, sessions_to_record_batch,
     sina_adjust_factor::{AdjustmentEvent, LifecycleRange, parse_adjustment_series_for_lifecycles},
     source_crosscheck_to_record_batch,
@@ -597,6 +597,7 @@ fn normalize(
     // #229 facts session. Absence of the facts is a missing source, not
     // evidence that no action occurred.
     let mut v6_lifecycles = Vec::new();
+    let mut v6_identity_gaps = Vec::new();
     let mut v6_actions = Vec::new();
     let mut sina_errors = std::mem::take(&mut sina_issue_sink);
     if v6 {
@@ -615,6 +616,8 @@ fn normalize(
                         venue.clone(),
                         &mut issues,
                     );
+                    v6_identity_gaps =
+                        identity_availability_gaps(&facts.value.session, &lifecycles);
                     v6_lifecycles = lifecycles;
                     // Derive Sina events per Catalog lifecycle so a reused
                     // code's cumulative factor reset is not read as a decrease.
@@ -782,6 +785,7 @@ fn normalize(
     // inconsistency: exclude that ETF and report it instead of failing the
     // whole Dataset (P27-19 item 2).
     let mut v6_out_of_scope_priced_bars = 0_u64;
+    let mut v6_identity_gap_priced_bars = 0_u64;
     let (primary, corporate_actions, excluded_etfs, p21, v6_sina) = if v6 {
         let FilteredV6 {
             primary,
@@ -789,8 +793,15 @@ fn normalize(
             excluded_etfs,
             excluded_symbols,
             out_of_scope_priced_bars,
-        } = filter_v6_lifecycles(primary, corporate_actions, &v6_lifecycles);
+            identity_gap_priced_bars,
+        } = filter_v6_lifecycles(
+            primary,
+            corporate_actions,
+            &v6_lifecycles,
+            &v6_identity_gaps,
+        );
         v6_out_of_scope_priced_bars = out_of_scope_priced_bars;
+        v6_identity_gap_priced_bars = identity_gap_priced_bars;
         // An excluded ETF is reported once as excluded; it has no P21 row that
         // could be mistaken for an evaluated or clean result.
         let p21_lifecycles: Vec<LifecycleRange> = v6_lifecycles
@@ -1030,6 +1041,7 @@ fn normalize(
         coverage["corporate_actions_with_missing_fields"] = json!(incomplete_action_fields);
         coverage["excluded_etfs"] = json!(excluded_etfs);
         coverage["tdx_out_of_scope_priced_bars"] = json!(v6_out_of_scope_priced_bars);
+        coverage["tdx_identity_gap_priced_bars"] = json!(v6_identity_gap_priced_bars);
         coverage["p21_mismatches"] = p21["mismatches"].clone();
         coverage["p21"] = p21;
         coverage["sina_adjust_factor"] = sina;
@@ -1103,6 +1115,14 @@ fn lifecycles_from_facts(
     let mut lifecycles = Vec::new();
     for identity in &session.catalog_lifecycles {
         let path = identity.code.clone();
+        if !identity.change_kind.is_empty() && identity.change_kind != LEGAL_NAME_CHANGE {
+            issues.push(issue(
+                "invalid_catalog_lifecycle",
+                path.clone(),
+                "catalog change_kind must be empty or legal_name_change",
+            ));
+            continue;
+        }
         if identity.code.len() != 6
             || !identity.code.bytes().all(|byte| byte.is_ascii_digit())
             || !(identity.code.starts_with("158") || identity.code.starts_with("159"))
@@ -1136,13 +1156,34 @@ fn lifecycles_from_facts(
             },
             None => None,
         };
-        lifecycles.push(LifecycleRange {
-            native_symbol: identity.code.clone(),
-            start: identity.listing_date,
-            end_exclusive,
-        });
+        let effective_start = identity.listing_date;
+        let start = identity.available_from.unwrap_or(effective_start);
+        lifecycles.push((
+            LifecycleRange {
+                native_symbol: identity.code.clone(),
+                start,
+                end_exclusive,
+            },
+            identity.change_kind.clone(),
+            effective_start,
+        ));
     }
-    lifecycles.sort_by_key(|life| (life.native_symbol.clone(), life.start));
+    lifecycles.sort_by_key(|(life, _, _)| (life.native_symbol.clone(), life.start));
+    // A declared legal-name change starts a new identity when it is knowable.
+    // Its predecessor ends at the new name's effective Session, so a delayed
+    // publication leaves the accepted P6 gap rather than assigning Bars to the
+    // successor before the rename is known.
+    for index in 1..lifecycles.len() {
+        if lifecycles[index].0.native_symbol != lifecycles[index - 1].0.native_symbol {
+            continue;
+        }
+        if lifecycles[index].1 == LEGAL_NAME_CHANGE
+            && lifecycles[index].2 > lifecycles[index - 1].0.start
+            && lifecycles[index - 1].0.end_exclusive.is_none()
+        {
+            lifecycles[index - 1].0.end_exclusive = Some(lifecycles[index].2);
+        }
+    }
     if lifecycles.is_empty() {
         issues.push(issue(
             "empty_catalog_lifecycles",
@@ -1151,8 +1192,11 @@ fn lifecycles_from_facts(
         ));
     }
     if lifecycles.windows(2).any(|pair| {
-        pair[0].native_symbol == pair[1].native_symbol
-            && pair[0].end_exclusive.is_none_or(|end| end > pair[1].start)
+        pair[0].0.native_symbol == pair[1].0.native_symbol
+            && pair[0]
+                .0
+                .end_exclusive
+                .is_none_or(|end| end > pair[1].0.start)
     }) {
         issues.push(issue(
             "overlapping_catalog_lifecycles",
@@ -1161,7 +1205,7 @@ fn lifecycles_from_facts(
         ));
     }
     if issues.is_empty() {
-        Ok(lifecycles)
+        Ok(lifecycles.into_iter().map(|(life, _, _)| life).collect())
     } else {
         Err(issues)
     }
@@ -1375,6 +1419,37 @@ fn missing_action_fields_facts(action: &CorporateActionRow) -> Vec<&'static str>
     }
 }
 
+/// Only explicitly marked, validated successor gaps may quarantine individual
+/// Bars. A code-reuse absence or a post-termination Bar remains an inconsistency.
+fn identity_availability_gaps(
+    session: &Mvp6Session,
+    ranges: &[LifecycleRange],
+) -> Vec<LifecycleRange> {
+    session
+        .catalog_lifecycles
+        .iter()
+        .filter_map(|identity| {
+            let available = identity.available_from?;
+            let end = identity
+                .termination_date
+                .and_then(|date| date.succ_opt())
+                .map_or(available, |termination| available.min(termination));
+            (identity.change_kind == LEGAL_NAME_CHANGE
+                && available > identity.listing_date
+                && ranges.iter().any(|previous| {
+                    previous.native_symbol == identity.code
+                        && previous.start < identity.listing_date
+                        && previous.end_exclusive == Some(identity.listing_date)
+                }))
+            .then(|| LifecycleRange {
+                native_symbol: identity.code.clone(),
+                start: identity.listing_date,
+                end_exclusive: Some(end),
+            })
+        })
+        .collect()
+}
+
 /// Result of lifecycle filtering: Bars, actions, excluded-ETF report, the
 /// excluded symbol set used to omit their P21 rows, and the priced Bars dropped
 /// because their code has no Catalog identity at all.
@@ -1384,6 +1459,7 @@ struct FilteredV6 {
     excluded_etfs: Vec<Value>,
     excluded_symbols: BTreeSet<String>,
     out_of_scope_priced_bars: u64,
+    identity_gap_priced_bars: u64,
 }
 
 /// V6 keeps only lifecycle-scoped Bars. A priced TDX Bar outside the
@@ -1393,6 +1469,7 @@ fn filter_v6_lifecycles(
     primary: BTreeMap<Key, Sourced<SelectedBar>>,
     actions: Vec<CorporateActionRow>,
     lifecycles: &[LifecycleRange],
+    identity_gaps: &[LifecycleRange],
 ) -> FilteredV6 {
     let symbols: BTreeSet<&str> = lifecycles
         .iter()
@@ -1402,9 +1479,20 @@ fn filter_v6_lifecycles(
         .keys()
         .filter(|(symbol, _)| !symbols.contains(symbol.as_str()))
         .count() as u64;
+    let identity_gap_priced_bars = primary
+        .keys()
+        .filter(|(symbol, date)| {
+            identity_gaps
+                .iter()
+                .any(|gap| gap.native_symbol == *symbol && gap.contains(*date))
+        })
+        .count() as u64;
     let mut excluded = BTreeSet::new();
     for (symbol, date) in primary.keys() {
         if symbols.contains(symbol.as_str())
+            && !identity_gaps
+                .iter()
+                .any(|gap| gap.native_symbol == *symbol && gap.contains(*date))
             && !lifecycles
                 .iter()
                 .any(|life| life.native_symbol == *symbol && life.contains(*date))
@@ -1444,6 +1532,7 @@ fn filter_v6_lifecycles(
         excluded_etfs: excluded_report,
         excluded_symbols: excluded,
         out_of_scope_priced_bars,
+        identity_gap_priced_bars,
     }
 }
 
@@ -3321,4 +3410,151 @@ fn issue(
     message: impl Into<String>,
 ) -> NormalizationIssue {
     NormalizationIssue::new(code, path, message)
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use crate::cninfo::{CatalogLifecycle, EvidenceLevel, StructuredCorporateActionsV2};
+
+    fn lifecycle(
+        code: &str,
+        listing: &str,
+        termination: Option<&str>,
+        change_kind: &str,
+    ) -> CatalogLifecycle {
+        lifecycle_at(code, listing, termination, change_kind, None)
+    }
+
+    fn lifecycle_at(
+        code: &str,
+        listing: &str,
+        termination: Option<&str>,
+        change_kind: &str,
+        available_from: Option<&str>,
+    ) -> CatalogLifecycle {
+        CatalogLifecycle {
+            code: code.into(),
+            org_id: "org".into(),
+            legal_name: format!("name-{listing}"),
+            listing_date: listing.parse().unwrap(),
+            termination_date: termination.map(|date| date.parse().unwrap()),
+            fund_category: "index".into(),
+            tracked_index: String::new(),
+            evidence_level: EvidenceLevel::Official,
+            source_announcement_id: "announcement".into(),
+            source_page: 1,
+            change_kind: change_kind.into(),
+            available_from: available_from.map(|date| date.parse().unwrap()),
+        }
+    }
+
+    fn session(lifecycles: Vec<CatalogLifecycle>) -> Mvp6Session {
+        Mvp6Session {
+            catalog_lifecycles: lifecycles,
+            corporate_actions: StructuredCorporateActionsV2 {
+                schema: "cninfo_corporateActions_structured_v2".into(),
+                version: 2,
+                actions: Vec::new(),
+            },
+            risk_events: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn legal_name_change_ends_the_preceding_range_without_an_overlap_issue() {
+        let ranges = lifecycles_from_facts(&session(vec![
+            lifecycle("159001", "2026-01-05", None, ""),
+            lifecycle(
+                "159001",
+                "2026-01-06",
+                Some("2026-01-07"),
+                LEGAL_NAME_CHANGE,
+            ),
+        ]))
+        .unwrap();
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(ranges[0].start, "2026-01-05".parse().unwrap());
+        assert_eq!(ranges[0].end_exclusive, Some("2026-01-06".parse().unwrap()));
+        assert_eq!(ranges[1].start, "2026-01-06".parse().unwrap());
+        assert_eq!(ranges[1].end_exclusive, Some("2026-01-08".parse().unwrap()));
+    }
+
+    #[test]
+    fn delayed_legal_name_change_starts_the_successor_when_knowable() {
+        let ranges = lifecycles_from_facts(&session(vec![
+            lifecycle("159001", "2026-01-05", None, ""),
+            lifecycle_at(
+                "159001",
+                "2026-01-06",
+                None,
+                LEGAL_NAME_CHANGE,
+                Some("2026-01-08"),
+            ),
+        ]))
+        .unwrap();
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(ranges[0].start, "2026-01-05".parse().unwrap());
+        assert_eq!(ranges[0].end_exclusive, Some("2026-01-06".parse().unwrap()));
+        assert_eq!(ranges[1].start, "2026-01-08".parse().unwrap());
+    }
+
+    #[test]
+    fn rename_gap_does_not_exempt_post_termination_prices() {
+        let facts = session(vec![
+            lifecycle("159001", "2026-01-05", None, ""),
+            lifecycle_at(
+                "159001",
+                "2026-01-06",
+                Some("2026-01-06"),
+                LEGAL_NAME_CHANGE,
+                Some("2026-01-08"),
+            ),
+        ]);
+        let ranges = lifecycles_from_facts(&facts).unwrap();
+        let gaps = identity_availability_gaps(&facts, &ranges);
+        // v6's existing termination convention includes the termination day.
+        assert!(gaps[0].contains("2026-01-06".parse().unwrap()));
+        assert!(!gaps[0].contains("2026-01-07".parse().unwrap()));
+        let prices = ["2026-01-05", "2026-01-07"]
+            .into_iter()
+            .map(|date| {
+                (
+                    ("159001".into(), date.parse().unwrap()),
+                    Sourced {
+                        value: SelectedBar {
+                            ohlcv: Ohlcv {
+                                open: Price::parse("1").unwrap(),
+                                high: Price::parse("1").unwrap(),
+                                low: Price::parse("1").unwrap(),
+                                close: Price::parse("1").unwrap(),
+                                shares: Quantity::parse("100").unwrap(),
+                            },
+                            amount: None,
+                            reference_price: None,
+                            source: "tdx",
+                        },
+                        raw: "synthetic".into(),
+                    },
+                )
+            })
+            .collect();
+        let filtered = filter_v6_lifecycles(prices, Vec::new(), &ranges, &gaps);
+        assert!(filtered.excluded_symbols.contains("159001"));
+        assert!(filtered.primary.is_empty());
+    }
+
+    #[test]
+    fn unmarked_overlap_is_still_rejected() {
+        let error = lifecycles_from_facts(&session(vec![
+            lifecycle("159001", "2026-01-05", None, ""),
+            lifecycle("159001", "2026-01-06", None, ""),
+        ]))
+        .unwrap_err();
+        assert!(
+            error
+                .iter()
+                .any(|issue| issue.code == "overlapping_catalog_lifecycles")
+        );
+    }
 }

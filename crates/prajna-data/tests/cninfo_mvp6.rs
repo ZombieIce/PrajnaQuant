@@ -368,6 +368,7 @@ fn facts() -> Mvp6Facts {
             evidence_level: "official".into(),
             source_announcement_id: "identity".into(),
             source_page: "1".into(),
+            change_kind: String::new(),
         }],
         actions: vec![ActionFact {
             code: "159001".into(),
@@ -401,6 +402,18 @@ fn source_record(id: &str) -> SourceRecordInput {
         source_kind: SourceKind::Fixture,
         source_id: "cninfo".into(),
         request: json!({"url": format!("https://example.test/{id}")}),
+        observed_at: "synthetic".into(),
+        ingested_by: "cninfo-mvp6-test".into(),
+    }
+}
+fn source_record_at(id: &str, published: &str) -> SourceRecordInput {
+    SourceRecordInput {
+        content_type: "text/plain".into(),
+        source_kind: SourceKind::Fixture,
+        source_id: "cninfo".into(),
+        request: json!({
+            "url": format!("https://static.cninfo.com.cn/finalpage/{published}/{id}.PDF")
+        }),
         observed_at: "synthetic".into(),
         ingested_by: "cninfo-mvp6-test".into(),
     }
@@ -1063,6 +1076,8 @@ fn converted_session_matches_manually_built_inputs() {
             evidence_level: EvidenceLevel::Official,
             source_announcement_id: "identity".into(),
             source_page: 1,
+            change_kind: String::new(),
+            available_from: None,
         }],
         corporate_actions: StructuredCorporateActionsV2 {
             schema: "cninfo_corporateActions_structured_v2".into(),
@@ -1110,6 +1125,12 @@ fn csv_parser_enforces_headers_and_accepts_header_only_templates() {
             .to_string()
             .contains("header mismatch")
     );
+    // The pre-change_kind #229 header remains readable; the column defaults
+    // to an initial identity instead of forcing a local-file migration.
+    let legacy = "code,org_id,legal_name,listing_date,termination_date,fund_category,tracked_index,evidence_level,source_announcement_id,source_page\n159001,org,合成ETF,2026-01-05,,index,,official,identity,1\n";
+    let legacy_facts = Mvp6Facts::from_csv(legacy, ACTIONS, EVENTS).unwrap();
+    assert_eq!(legacy_facts.identities.len(), 1);
+    assert!(legacy_facts.identities[0].change_kind.is_empty());
 }
 
 #[test]
@@ -1557,8 +1578,8 @@ fn local_fixed_list_workflow_writes_collection_facts_and_crosscheck_reports() {
     fs::create_dir_all(&facts_dir).unwrap();
     fs::write(
         facts_dir.join("identity.csv"),
-        "code,org_id,legal_name,listing_date,termination_date,fund_category,tracked_index,evidence_level,source_announcement_id,source_page\n\
-         159001,org,合成ETF,2026-01-05,,index,,official,identity,1\n",
+        "code,org_id,legal_name,listing_date,termination_date,fund_category,tracked_index,evidence_level,source_announcement_id,source_page,change_kind\n\
+         159001,org,合成ETF,2026-01-05,,index,,official,identity,1,\n",
     )
     .unwrap();
     fs::write(
@@ -1625,5 +1646,130 @@ fn crosscheck_accepts_a_one_tick_action_jump() {
             .mismatches
             .iter()
             .any(|mismatch| mismatch.kind == "action_date_vs_reference_price_jump")
+    );
+}
+
+#[test]
+fn legal_name_change_is_shared_between_the_row_validator_and_the_lifecycle_ranges() {
+    let (_dir, store, evidence) = raw_fixture();
+    let mut f = facts();
+    let mut successor = f.identities[0].clone();
+    successor.legal_name = "合成ETF新".into();
+    successor.listing_date = "2026-01-06".into();
+    successor.source_announcement_id = "identity2".into();
+    successor.change_kind = LEGAL_NAME_CHANGE.into();
+    f.identities.push(successor);
+
+    let document = "公告编号：identity2\n基金代码：159001\n基金管理人登记代码：synthetic-org\n基金简称：合成ETF新\n上市日期：2026-01-06\n基金类型：指数基金";
+    let hash = store
+        .put(
+            document.as_bytes(),
+            source_record_at("identity2", "2026-01-06"),
+        )
+        .unwrap();
+    let mut citations = evidence;
+    for (field, excerpt) in [
+        ("code", "基金代码：159001"),
+        ("org_id", "基金管理人登记代码：synthetic-org"),
+        ("legal_name", "基金简称：合成ETF新"),
+        ("listing_date", "上市日期：2026-01-06"),
+        ("fund_category", "基金类型：指数基金"),
+    ] {
+        citations.push(verified_citation(
+            &store,
+            "identity2",
+            field,
+            "identity2",
+            &hash,
+            excerpt,
+        ));
+    }
+
+    let converted = validate_and_convert(&f, &citations, &calendar()).unwrap();
+    assert_eq!(converted.catalog_lifecycles.len(), 2);
+    assert_eq!(
+        converted.catalog_lifecycles[1].change_kind,
+        LEGAL_NAME_CHANGE
+    );
+    assert_eq!(
+        converted.catalog_lifecycles[1].available_from,
+        Some(date("2026-01-07"))
+    );
+
+    // The effective date alone may also occur in an earlier document. It
+    // cannot determine when the new legal name becomes knowable.
+    for published in ["2026-01-05", "2026-01-06"] {
+        let early_hash = store
+            .put(
+                format!("公告编号：early-listing\n上市日期：2026-01-06\n文档日期：{published}")
+                    .as_bytes(),
+                source_record_at("early-listing", published),
+            )
+            .unwrap();
+        let mut mixed = citations.clone();
+        *mixed
+            .iter_mut()
+            .find(|c| c.fact_source() == "identity2" && c.field() == "listing_date")
+            .unwrap() = verified_citation(
+            &store,
+            "identity2",
+            "listing_date",
+            "early-listing",
+            &early_hash,
+            "上市日期：2026-01-06",
+        );
+        assert!(
+            validate_and_convert(&f, &mixed, &calendar())
+                .unwrap_err()
+                .to_string()
+                .contains("same rename announcement")
+        );
+    }
+
+    let mut unmarked = f.clone();
+    unmarked.identities[1].change_kind.clear();
+    assert!(
+        validate_and_convert(&unmarked, &citations, &calendar())
+            .unwrap_err()
+            .to_string()
+            .contains("overlapping lifecycle")
+    );
+}
+
+#[test]
+fn contract_citation_is_consumed_by_the_shared_validator_and_must_state_the_legal_name() {
+    let (_dir, store, evidence) = raw_fixture();
+    let identity_raw = evidence
+        .iter()
+        .find(|citation| citation.fact_source() == "identity" && citation.field() == "code")
+        .unwrap()
+        .raw_sha256()
+        .to_owned();
+
+    let mut supported = evidence.clone();
+    supported.push(verified_citation(
+        &store,
+        "identity",
+        "contract",
+        "identity",
+        &identity_raw,
+        "基金简称：合成ETF",
+    ));
+    assert!(validate_and_convert(&facts(), &supported, &calendar()).is_ok());
+
+    let mut unsupported = evidence;
+    unsupported.push(verified_citation(
+        &store,
+        "identity",
+        "contract",
+        "identity",
+        &identity_raw,
+        "基金类型：指数基金",
+    ));
+    assert!(
+        validate_and_convert(&facts(), &unsupported, &calendar())
+            .unwrap_err()
+            .to_string()
+            .contains("not supported by its cited excerpt")
     );
 }

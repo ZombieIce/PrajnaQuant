@@ -22,8 +22,8 @@ pub use index::{
 };
 pub use mvp6::{
     ActionFact, CatalogLifecycle, CorporateActionV2, EventFact, EvidenceLevel, FixedListResult,
-    FundCandidate, IdentityFact, Mvp6Facts, Mvp6Session, OrgIdResolution, RiskEventV1,
-    StructuredCorporateActionsV2, should_download_pdf,
+    FundCandidate, IdentityFact, LEGAL_NAME_CHANGE, Mvp6Facts, Mvp6Session, OrgIdResolution,
+    RiskEventV1, StructuredCorporateActionsV2, should_download_pdf,
 };
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;

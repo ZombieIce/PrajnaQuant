@@ -183,6 +183,14 @@ citations require `pdftotext`, the same converter the collector uses. Build
 hashes from the `source_raw_sha256` or `pdf_raw_sha256_by_announcement` values
 in the local cninfo `collection.json`.
 
+`identity.csv` ends with `change_kind` (empty, or `legal_name_change`).
+The marker is required for a later, unterminated row of the same code whose
+legal full name changed; it is the only same-code overlap #229 accepts. An
+identity row also needs a `contract` citation (an attachment field, not an
+`identity.csv` column) whose excerpt states the legal name. The #221 assembly
+requires that citation and uses its Raw hash as `contract_raw_sha256`; it also
+requires the name/category/index citations to share one Raw page.
+
 ```sh
 cargo run -p prajna-data --bin prajna-cninfo-fixed --locked --offline -- \
   /absolute/local/path/fixed-candidates.csv \

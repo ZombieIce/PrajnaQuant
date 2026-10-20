@@ -910,3 +910,59 @@ const V5_CONFIG_SHA256: &str =
     "sha256:a7890a031af8475da07c3a1f42e1ee693f8dc1b4ff55f8acee74b268e7be42f9";
 const V6_CONFIG_SHA256: &str =
     "sha256:22c8ffebfcf05cbd09b9eaa06948e6bb3d2002bd1f9c6af45f4abf2c9dd95fab";
+
+#[test]
+fn v6_quarantines_only_delayed_rename_gap_bars_and_replays() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = fixture(dir.path(), "2026-01-05");
+    let mut facts = facts_session(&fixture.v4.dsv, "2026-01-05");
+    let mut successor = lifecycle("159612", "2026-01-06", None);
+    successor["legal_name"] = json!("Synthetic renamed ETF");
+    successor["change_kind"] = json!("legal_name_change");
+    successor["available_from"] = json!("2026-01-08");
+    facts["session"]["catalog_lifecycles"]
+        .as_array_mut()
+        .unwrap()
+        .push(successor);
+    fs::write(&fixture.facts_path, serde_json::to_vec(&facts).unwrap()).unwrap();
+    let published = publish(dir.path(), &fixture);
+    assert_eq!(
+        published.manifest.provenance.coverage["excluded_etfs"],
+        json!([])
+    );
+    assert_eq!(
+        published.manifest.provenance.coverage["tdx_identity_gap_priced_bars"],
+        2
+    );
+    let table = |name: &str| {
+        read_parquet(
+            dir.path()
+                .join("normalized")
+                .join(name)
+                .join(published.manifest.dsv.strip_prefix("dsv:sha256:").unwrap())
+                .join("part-00000.parquet"),
+            name,
+            "1",
+        )
+        .unwrap()
+        .remove(0)
+    };
+    let sessions = prajna_data::sessions_from_record_batch(&table("sessions")).unwrap();
+    let bars = prajna_data::bars_from_record_batch(&table("bars"), &sessions).unwrap();
+    let days: Vec<_> = bars
+        .iter()
+        .filter(|b| b.instrument_id().symbol() == "159612")
+        .map(|b| b.session_date().to_string())
+        .collect();
+    assert_eq!(days.len(), 8);
+    assert!(days.contains(&"2026-01-05".into()));
+    assert!(days.contains(&"2026-01-08".into()));
+    assert!(!days.contains(&"2026-01-06".into()));
+    assert!(!days.contains(&"2026-01-07".into()));
+    rebuild_dataset(
+        &fixture.store,
+        &NormalizerRegistry::with_corporate_actions_v6(fixture.v4.dsv.clone()).unwrap(),
+        &published.manifest,
+    )
+    .unwrap();
+}
