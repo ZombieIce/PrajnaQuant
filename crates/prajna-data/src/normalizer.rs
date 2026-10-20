@@ -138,6 +138,18 @@ impl NormalizerRegistry {
         Ok(registry)
     }
 
+    /// Registers the v7 corporate-action Dataset Normalizer. V7 preserves
+    /// date-only announcement dates when the announcement falls on a closed
+    /// Session while retaining v6's exact market Dataset binding.
+    pub fn with_corporate_actions_v7(market_dsv: impl Into<String>) -> Result<Self, String> {
+        let mut registry = Self::with_builtins();
+        let normalizer = SzseEtfFrozen::v7(market_dsv)?;
+        if !registry.register(normalizer) {
+            return Err("corporate action normalizer v7 is already registered".into());
+        }
+        Ok(registry)
+    }
+
     pub fn register(&mut self, normalizer: impl Normalizer + 'static) -> bool {
         let key = (normalizer.id().to_owned(), normalizer.version().to_owned());
         if self.normalizers.contains_key(&key) {

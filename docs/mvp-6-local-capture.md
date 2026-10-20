@@ -189,7 +189,10 @@ legal full name changed; it is the only same-code overlap #229 accepts. An
 identity row also needs a `contract` citation (an attachment field, not an
 `identity.csv` column) whose excerpt states the legal name. The #221 assembly
 requires that citation and uses its Raw hash as `contract_raw_sha256`; it also
-requires the name/category/index citations to share one Raw page.
+requires the name/category/index citations to share one Raw page. For #248,
+the five local contract citations were completed, and the three identity-field
+citations now point to a contract page that supports all three values. These
+citations and their Raw hashes remain in the local acceptance bundle.
 
 ```sh
 cargo run -p prajna-data --bin prajna-cninfo-fixed --locked --offline -- \
@@ -219,9 +222,16 @@ checked. Publishing the v4 market DSV alone is not full MVP-6 acceptance.
 ## Publish the corporate-action Dataset and evaluate P21 (#223)
 
 After the v4 market DSV is published and the #229 acceptance step has written
-`facts-session.json`, publish `szse-etf-frozen@6` from those frozen inputs. The
+`facts-session.json`, publish `szse-etf-frozen@7` from those frozen inputs. The
 command performs no network access and writes the P21 result only to the local
-acceptance report:
+acceptance report. V7 preserves `announcement_date` as a date: when it falls on
+a closed date, `announced_at` is null rather than a fabricated Session
+timestamp, and `available_at` remains the close of the first later open
+Session. An open-date announcement keeps its Session-close timestamp. A frozen
+calendar with no later Session is rejected. V4, v5, and v6 configuration
+identities remain unchanged. V6 keeps corporate-actions schema v1; only v7
+publishes schema v2, where `announced_at` is nullable. Dataset readers select
+the expected schema from each table's manifest version.
 
 ```sh
 cargo run -p prajna-data --bin prajna-mvp6-publish-actions --locked --offline -- \
@@ -254,4 +264,11 @@ abort the publish. The report never claims `mvp6_complete`.
 
 Synthetic end-to-end coverage is in
 `cargo test -p prajna-data --test mvp6_corporate_actions --locked --offline`.
+
+For #248 local-only acceptance, #221 Catalog assembly passed twice with the
+same identity, and the v7 corporate-action Dataset published twice with the
+same identity. Dataset publication succeeded, while the local P21 report
+remains `source_gap`; this deterministic replay does not establish real event
+completeness or full MVP-6 acceptance. Raw, PDFs, excerpts and hashes remain
+local.
 

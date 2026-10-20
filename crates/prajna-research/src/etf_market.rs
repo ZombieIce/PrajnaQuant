@@ -70,7 +70,9 @@ pub struct FundCategoryEvidence {
     pub document_number: String,
     pub effective_from: NaiveDate,
     pub effective_until: Option<NaiveDate>,
-    pub evidence: Evidence,
+    pub evidence: limit_rules::CategorySourceEvidence,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supporting_sources: Vec<limit_rules::CategorySourceEvidence>,
     pub evidence_level: limit_rules::EvidenceLevel,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,7 +95,7 @@ pub struct LimitRule {
     pub applies_on_first_session: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_session_reference: Option<FirstSessionReference>,
-    pub evidence: Evidence,
+    pub evidence: limit_rules::CategorySourceEvidence,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub supporting_evidence: Vec<Evidence>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -103,16 +105,19 @@ pub struct LimitRule {
 }
 impl LimitRule {
     fn documents(&self) -> Vec<&Evidence> {
-        let mut documents = vec![&self.evidence];
-        documents.extend(self.supporting_evidence.iter());
-        if let Some(category_evidence) = self
-            .official_rule
+        self.supporting_evidence.iter().collect()
+    }
+
+    fn category_sources(&self) -> Vec<&limit_rules::CategorySourceEvidence> {
+        self.official_rule
             .as_ref()
             .and_then(|rule| rule.category_evidence.as_ref())
-        {
-            documents.push(&category_evidence.evidence);
-        }
-        documents
+            .map(|category| {
+                std::iter::once(&category.evidence)
+                    .chain(category.supporting_sources.iter())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -317,7 +322,7 @@ impl DerivedMarket {
             prajna_data::sessions_from_record_batch(&tables.sessions).map_err(err)?;
         let v2 = evidence.semantic_version.is_some();
         let limit_rule_table = if v2 {
-            Some(limit_rules::FundLimitRuleTable::official_v1()?)
+            Some(limit_rules::FundLimitRuleTable::official_v2()?)
         } else {
             None
         };
@@ -371,6 +376,16 @@ impl DerivedMarket {
                 }
             }
             if let (Some(rule), Some(table)) = (supported_rule, rule_table) {
+                for source in rule.category_sources() {
+                    table.category_evidence_available_at(
+                        rule,
+                        &opening.instrument_id,
+                        source,
+                        opening.session_date,
+                        session_open,
+                        catalog.input(),
+                    )?;
+                }
                 for source in &rule.rule_evidence {
                     table.rule_evidence_available_at(
                         rule,
@@ -908,6 +923,18 @@ fn derive_v2(
             }
         }
         if supported_rule.is_some() {
+            for source in rule.category_sources() {
+                cell.sources
+                    .insert(format!("category:{}", source.announcement_id));
+                times.push(context.limit_rule_table.category_evidence_available_at(
+                    rule,
+                    id,
+                    source,
+                    session.session_date(),
+                    session.ts_open(),
+                    context.catalog.input(),
+                )?);
+            }
             for source in &rule.rule_evidence {
                 times.push(context.limit_rule_table.rule_evidence_available_at(
                     rule,
@@ -953,6 +980,16 @@ fn derive_v2(
                 })
                 .chain(rule.rule_evidence.iter().map(|evidence| {
                     context.limit_rule_table.rule_evidence_available_at(
+                        rule,
+                        id,
+                        evidence,
+                        session.session_date(),
+                        session.ts_open(),
+                        context.catalog.input(),
+                    )
+                }))
+                .chain(rule.category_sources().into_iter().map(|evidence| {
+                    context.limit_rule_table.category_evidence_available_at(
                         rule,
                         id,
                         evidence,

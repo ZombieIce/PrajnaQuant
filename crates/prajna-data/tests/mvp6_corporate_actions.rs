@@ -9,8 +9,8 @@ use std::{
 
 use prajna_data::{
     CorporateActionPublish, FrozenSourceMeta, Manifest, Normalizer, NormalizerRegistry, RawStore,
-    SourceKind, SourceRecordInput, SzseEtfFrozen, publish_corporate_actions, publish_dataset,
-    read_parquet, rebuild_dataset,
+    SourceKind, SourceRecordInput, SzseEtfFrozen, corporate_actions_from_record_batch,
+    publish_corporate_actions, publish_dataset, read_parquet, rebuild_dataset,
 };
 use serde_json::{Value, json};
 use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
@@ -32,12 +32,16 @@ fn meta(source: &str, content_type: &str) -> FrozenSourceMeta {
 }
 
 fn calendar() -> Vec<u8> {
+    calendar_with_open_days(&OPEN_DAYS)
+}
+
+fn calendar_with_open_days(open_days: &[u32]) -> Vec<u8> {
     let first = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
     let days: Vec<Value> = first
         .iter_days()
         .take_while(|day| chrono::Datelike::month(day) == 1)
         .map(|day| {
-            let open = OPEN_DAYS.contains(&chrono::Datelike::day(&day));
+            let open = open_days.contains(&chrono::Datelike::day(&day));
             json!({"jyrq": day.to_string(), "jybz": if open { "1" } else { "0" }, "zrxh": 1})
         })
         .collect();
@@ -198,16 +202,20 @@ struct Fixture {
 }
 
 fn fixture(root: &Path, listing_612: &str) -> Fixture {
+    fixture_with_open_days(root, listing_612, &OPEN_DAYS)
+}
+
+fn fixture_with_open_days(root: &Path, listing_612: &str, open_days: &[u32]) -> Fixture {
     let store = RawStore::open(root).unwrap();
     let mut hashes = vec![
         prajna_data::freeze_raw(
             &store,
-            &calendar(),
+            &calendar_with_open_days(open_days),
             meta("szse-calendar", "application/json"),
         )
         .unwrap(),
     ];
-    for (index, day) in OPEN_DAYS.iter().enumerate() {
+    for (index, day) in open_days.iter().enumerate() {
         let day_key = format!("2601{day:02}");
         hashes.push(
             prajna_data::freeze_raw(
@@ -253,6 +261,15 @@ fn fixture(root: &Path, listing_612: &str) -> Fixture {
     }
 }
 
+fn corporate_actions(root: &Path, dsv: &str) -> Vec<prajna_data::CorporateActionRow> {
+    let manifest = prajna_data::read_manifest(root, dsv).unwrap();
+    prajna_data::read_dataset_table(root, &manifest, "corporate_actions")
+        .unwrap()
+        .iter()
+        .flat_map(|batch| corporate_actions_from_record_batch(batch).unwrap())
+        .collect()
+}
+
 fn publish(root: &Path, fixture: &Fixture) -> CorporateActionPublish {
     publish_corporate_actions(
         root,
@@ -290,7 +307,16 @@ fn table_strings(root: &Path, dsv: &str, table: &str, column: usize) -> Vec<Stri
         .join(table)
         .join(hex)
         .join("part-00000.parquet");
-    read_parquet(&path, table, "1")
+    let manifest = prajna_data::read_manifest(root, dsv).unwrap();
+    let schema_version = manifest
+        .core
+        .tables
+        .iter()
+        .find(|entry| entry.table == table)
+        .unwrap()
+        .schema_version
+        .to_string();
+    read_parquet(&path, table, &schema_version)
         .unwrap()
         .iter()
         .flat_map(|batch| {
@@ -338,14 +364,14 @@ fn store_sina(store: &RawStore, symbol: &str, kind: &str, points: &[(&str, &str)
 }
 
 #[test]
-fn v6_p21_reports_every_outcome_and_rebuilds_identically() {
+fn v7_p21_reports_every_outcome_and_rebuilds_identically() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = fixture(dir.path(), "2026-01-05");
     let published = publish(dir.path(), &fixture);
     let coverage = &published.manifest.provenance.coverage;
     let p21 = &coverage["p21"];
 
-    assert_eq!(published.manifest.core.normalizer.version, "6");
+    assert_eq!(published.manifest.core.normalizer.version, "7");
     assert_ne!(published.manifest.dsv, fixture.v4.dsv);
     assert_eq!(coverage["corporate_actions"], 3);
     assert_eq!(coverage["sina_adjust_factor"]["status"], "not_present");
@@ -468,7 +494,7 @@ fn v6_p21_reports_every_outcome_and_rebuilds_identically() {
     assert_eq!(action_kinds, ["dividend", "share_conversion", "dividend"]);
 
     // Two independent builds of the same inputs produce the same identity.
-    let registry = NormalizerRegistry::with_corporate_actions_v6(fixture.v4.dsv.clone()).unwrap();
+    let registry = NormalizerRegistry::with_corporate_actions_v7(fixture.v4.dsv.clone()).unwrap();
     assert_eq!(
         rebuild_dataset(&fixture.store, &registry, &published.manifest).unwrap(),
         published.manifest.dsv
@@ -476,6 +502,110 @@ fn v6_p21_reports_every_outcome_and_rebuilds_identically() {
     let rebuilt = publish(dir.path(), &fixture);
     assert_eq!(rebuilt.manifest.dsv, published.manifest.dsv);
     assert_eq!(rebuilt.manifest.core, published.manifest.core);
+}
+
+#[test]
+fn v7_preserves_date_only_announcements_and_uses_the_first_later_session_close() {
+    let dir = tempfile::tempdir().unwrap();
+    // Jan 10–14 is a synthetic extended closure containing a weekend and a
+    // multi-day holiday. Jan 15 is the next open Session.
+    let fixture = fixture_with_open_days(dir.path(), "2026-01-05", &[5, 6, 7, 8, 9, 15, 16]);
+    let mut facts: Value = serde_json::from_slice(&fs::read(&fixture.facts_path).unwrap()).unwrap();
+    facts["session"]["corporate_actions"]["actions"][0]["announcement_date"] = json!("2026-01-10");
+    facts["session"]["corporate_actions"]["actions"][1]["announcement_date"] = json!("2026-01-12");
+    fs::write(&fixture.facts_path, serde_json::to_vec(&facts).unwrap()).unwrap();
+
+    let published = publish(dir.path(), &fixture);
+    assert_eq!(
+        published
+            .manifest
+            .core
+            .tables
+            .iter()
+            .find(|table| table.table == "corporate_actions")
+            .unwrap()
+            .schema_version,
+        2
+    );
+    let actions = corporate_actions(dir.path(), &published.manifest.dsv);
+    let date_only: Vec<_> = actions
+        .iter()
+        .filter(|row| row.announced_at.is_none())
+        .collect();
+    assert_eq!(date_only.len(), 2);
+    assert!(date_only.iter().all(|row| {
+        row.available_at
+            .to_string()
+            .starts_with("2026-01-15T07:00:00Z")
+    }));
+    assert!(
+        date_only
+            .iter()
+            .any(|row| row.announced_date.to_string() == "2026-01-10")
+    );
+    assert!(
+        date_only
+            .iter()
+            .any(|row| row.announced_date.to_string() == "2026-01-12")
+    );
+
+    let trading_day = actions
+        .iter()
+        .find(|row| row.announced_date.to_string() == "2026-01-05")
+        .unwrap();
+    assert!(trading_day.announced_at.is_some());
+    assert!(
+        trading_day
+            .announced_at
+            .unwrap()
+            .to_string()
+            .starts_with("2026-01-05T07:00:00Z")
+    );
+    assert!(
+        trading_day
+            .available_at
+            .to_string()
+            .starts_with("2026-01-06T07:00:00Z")
+    );
+}
+
+#[test]
+fn v7_rejects_an_announcement_when_the_frozen_calendar_has_no_later_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = fixture_with_open_days(dir.path(), "2026-01-05", &[5]);
+    let mut facts: Value = serde_json::from_slice(&fs::read(&fixture.facts_path).unwrap()).unwrap();
+    facts["session"]["corporate_actions"]["actions"][0]["announcement_date"] = json!("2026-01-10");
+    fs::write(&fixture.facts_path, serde_json::to_vec(&facts).unwrap()).unwrap();
+
+    assert!(
+        publish_corporate_actions(
+            dir.path(),
+            &fixture.v4.dsv,
+            &fixture.facts_path,
+            OBSERVED,
+            OBSERVED,
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn v7_normalizer_identity_is_new_and_legacy_v6_identity_is_stable() {
+    let market_dsv = "dsv:sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let v4 = SzseEtfFrozen::v4(vec![(158000, 159999)]).unwrap();
+    let v5 = SzseEtfFrozen::v5(vec![prajna_data::LifecycleRange {
+        native_symbol: "159919".into(),
+        start: "2026-01-05".parse().unwrap(),
+        end_exclusive: None,
+    }])
+    .unwrap();
+    let v6 = SzseEtfFrozen::v6(market_dsv).unwrap();
+    let v7 = SzseEtfFrozen::v7(market_dsv).unwrap();
+    assert_eq!(v6.version(), "6");
+    assert_eq!(v7.version(), "7");
+    assert_ne!(v7.config_sha256(), v4.config_sha256());
+    assert_ne!(v7.config_sha256(), v5.config_sha256());
+    assert_ne!(v7.config_sha256(), v6.config_sha256());
 }
 
 #[test]
@@ -769,6 +899,16 @@ fn v6_missing_tdx_reference_is_a_p21_source_gap_not_a_publish_error() {
         OBSERVED,
     )
     .unwrap();
+    assert_eq!(
+        manifest
+            .core
+            .tables
+            .iter()
+            .find(|table| table.table == "corporate_actions")
+            .unwrap()
+            .schema_version,
+        1
+    );
     let p21 = &manifest.provenance.coverage["p21"];
     assert_eq!(p21["status"], "source_gap");
     assert!(
@@ -961,7 +1101,7 @@ fn v6_quarantines_only_delayed_rename_gap_bars_and_replays() {
     assert!(!days.contains(&"2026-01-07".into()));
     rebuild_dataset(
         &fixture.store,
-        &NormalizerRegistry::with_corporate_actions_v6(fixture.v4.dsv.clone()).unwrap(),
+        &NormalizerRegistry::with_corporate_actions_v7(fixture.v4.dsv.clone()).unwrap(),
         &published.manifest,
     )
     .unwrap();

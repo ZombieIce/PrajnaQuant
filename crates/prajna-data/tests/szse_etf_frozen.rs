@@ -851,7 +851,7 @@ fn corporate_action_dataset_v2_normalizes_late_announcement_and_binds_facts() {
     assert_eq!(rows[0].cash_per_share.as_deref(), Some("0.0728"));
     assert_eq!(
         rows[0].announced_at,
-        "2026-01-05T16:00:00Z".parse().unwrap()
+        Some("2026-01-05T16:00:00Z".parse().unwrap())
     );
     assert_eq!(rows[1].kind, CorporateActionKind::ShareConversion);
     assert_eq!(rows[1].share_ratio.as_deref(), Some("2"));

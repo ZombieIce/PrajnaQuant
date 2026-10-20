@@ -100,3 +100,23 @@ CI uses only synthetic assignments and synthetic market inputs. Passing those
 tests verifies fail-closed resolution, date boundaries, price arithmetic, and
 both evidence levels using synthetic assignments; it does not establish real fund membership, source coverage,
 actual opening tradability, or investment performance.
+
+## Version 2 PIT assignments
+
+[`configs/mvp-6/limit_rules_v2.json`](../configs/mvp-6/limit_rules_v2.json)
+publishes `szse-fund-limit-rules@2`; v1 remains unchanged. V2 preserves the
+same rule periods and adds point-in-time `category_assignments` where the
+available source evidence supports a category. Assignments without a confirmed
+category stay in `unresolved_memberships`, including dates outside a fund's
+evidenced listing-to-termination interval.
+
+The assignments use secondary evidence: a fund-contract tracking-index
+statement together with the applicable SZSE index-category rule. Each row
+records its evidence tier, source announcement/document identifier, locator,
+publication date, and half-open PIT interval. No category is inferred from a
+code, short name, or default percentage. Public configuration contains no Raw
+hash, PDF, excerpt, or market-data value; those source bytes and excerpts remain
+in the local acceptance bundle. The public parser validates category existence,
+source tier, interval coverage, and rejects overlapping assignments. Synthetic
+tests exercise the parser and overlap rejection; local acceptance replay is
+recorded separately in `mvp-6-local-capture.md`.

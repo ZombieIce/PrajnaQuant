@@ -10,6 +10,18 @@
 
 MVP-6b 的合成实现要求 qfq 与 hfq 派生事件完全一致，并将每份现金/份额比例直接从新浪字段精确解析；TDX 除权参考变化、因子事件和 cninfo 对应公告须三方匹配。v5 的验证仅说明冻结合成原文可以经同一规范化路径重放，不构成真实行情、来源完整性或公告字段完整性的证据。
 
+## MVP-6 v7 date-only announcement handling (#248)
+
+V7 preserves a closed-day announcement as a date-only fact. Its
+`announced_at` stays null because no Session timestamp exists for that date;
+`available_at` remains the close of the first later open Session, and
+publication fails if the frozen calendar has no later Session. An open-day
+announcement retains the existing Session-close timestamp. This uses a new
+Normalizer configuration identity and leaves v4, v5, and v6 identities intact.
+V6 continues to publish corporate-actions schema v1. V7 publishes schema v2
+with nullable `announced_at`; readers resolve the expected table schema from
+the Dataset manifest, preserving the v6 schema contract.
+
 ## 决定
 
 ### 事件、时钟与身份（P19、P21）

@@ -115,9 +115,12 @@ fn field(name: &str, data_type: DataType, nullable: bool) -> Field {
 }
 
 fn schema(table: &str, fields: Vec<Field>) -> SchemaRef {
+    schema_with_version(table, SCHEMA_VERSION, fields)
+}
+fn schema_with_version(table: &str, version: &str, fields: Vec<Field>) -> SchemaRef {
     let metadata = HashMap::from([
         ("prajna.table".into(), table.into()),
-        ("prajna.schema_version".into(), SCHEMA_VERSION.into()),
+        ("prajna.schema_version".into(), version.into()),
     ]);
     Arc::new(Schema::new_with_metadata(fields, metadata))
 }
@@ -688,7 +691,10 @@ pub struct CorporateActionRow {
     pub instrument_id: InstrumentId,
     pub kind: CorporateActionKind,
     pub announced_date: NaiveDate,
-    pub announced_at: TimestampNs,
+    /// Exact announcement time when the announcement date is an open Session.
+    /// Date-only announcements on closed days keep `announced_date` and leave
+    /// this unset rather than fabricating a Session timestamp.
+    pub announced_at: Option<TimestampNs>,
     pub available_at: TimestampNs,
     pub record_date: Option<NaiveDate>,
     pub ex_date: Option<NaiveDate>,
@@ -731,15 +737,26 @@ pub fn announcements_schema() -> SchemaRef {
 }
 
 pub fn corporate_actions_schema() -> SchemaRef {
-    schema(
+    corporate_actions_schema_with("1", false)
+}
+
+/// Nullable-announcement-time corporate-action table used by the v7
+/// Normalizer. Schema v1 remains available for existing v4/v5/v6 outputs.
+pub fn corporate_actions_schema_v2() -> SchemaRef {
+    corporate_actions_schema_with("2", true)
+}
+
+fn corporate_actions_schema_with(version: &str, announced_at_nullable: bool) -> SchemaRef {
+    schema_with_version(
         "corporate_actions",
+        version,
         vec![
             utf8("announcement_id", false),
             utf8("action_index", false),
             utf8("instrument_id", false),
             utf8("kind", false),
             utf8("announced_date", false),
-            timestamp("announced_at", false),
+            timestamp("announced_at", announced_at_nullable),
             timestamp("available_at", false),
             utf8("record_date", true),
             utf8("ex_date", true),
@@ -756,6 +773,19 @@ pub fn corporate_actions_schema() -> SchemaRef {
 
 pub fn corporate_actions_to_record_batch(
     rows: &[CorporateActionRow],
+) -> Result<RecordBatch, DataError> {
+    corporate_actions_to_record_batch_with_schema(rows, corporate_actions_schema())
+}
+
+pub fn corporate_actions_to_record_batch_v2(
+    rows: &[CorporateActionRow],
+) -> Result<RecordBatch, DataError> {
+    corporate_actions_to_record_batch_with_schema(rows, corporate_actions_schema_v2())
+}
+
+fn corporate_actions_to_record_batch_with_schema(
+    rows: &[CorporateActionRow],
+    schema: SchemaRef,
 ) -> Result<RecordBatch, DataError> {
     let mut rows = rows.iter().collect::<Vec<_>>();
     rows.sort_by(|left, right| {
@@ -799,7 +829,7 @@ pub fn corporate_actions_to_record_batch(
         Arc::new(StringArray::from_iter_values(
             rows.iter().map(|row| row.announced_date.to_string()),
         )),
-        timestamps(rows.iter().map(|row| Some(row.announced_at)).collect()),
+        timestamps(rows.iter().map(|row| row.announced_at).collect()),
         timestamps(rows.iter().map(|row| Some(row.available_at)).collect()),
         dates(rows.iter().map(|row| row.record_date).collect()),
         dates(rows.iter().map(|row| row.ex_date).collect()),
@@ -823,7 +853,7 @@ pub fn corporate_actions_to_record_batch(
             rows.iter().map(|row| row.normalization_version.as_str()),
         )),
     ];
-    RecordBatch::try_new(corporate_actions_schema(), cols).map_err(Into::into)
+    RecordBatch::try_new(schema, cols).map_err(Into::into)
 }
 
 pub fn corporate_actions_from_record_batch(
@@ -880,8 +910,7 @@ pub fn corporate_actions_from_record_batch(
                 .map_err(|error| err(format!("invalid corporate action instrument: {error}")))?,
             kind,
             announced_date: date(4)?,
-            announced_at: optional_timestamp_at(batch, 5, row)?
-                .ok_or_else(|| err("missing corporate action announcement time"))?,
+            announced_at: optional_timestamp_at(batch, 5, row)?,
             available_at: optional_timestamp_at(batch, 6, row)?
                 .ok_or_else(|| err("missing corporate action availability"))?,
             record_date: optional_date(7)?,
@@ -1189,15 +1218,25 @@ fn expected_schema(table: &str) -> Result<SchemaRef, DataError> {
     }
 }
 
+fn expected_schema_for_version(table: &str, version: &str) -> Result<SchemaRef, DataError> {
+    match (table, version) {
+        ("corporate_actions", "2") => Ok(corporate_actions_schema_v2()),
+        ("corporate_actions", "1") => Ok(corporate_actions_schema()),
+        (_, "1") => expected_schema(table),
+        _ => Err(err(format!("unsupported {table} schema version {version}"))),
+    }
+}
+
 fn check_batch(batch: &RecordBatch, table: &str) -> Result<(), DataError> {
     let schema = batch.schema();
     let m = schema.metadata();
-    if m.get("prajna.table").map(String::as_str) != Some(table)
-        || m.get("prajna.schema_version").map(String::as_str) != Some(SCHEMA_VERSION)
-    {
+    if m.get("prajna.table").map(String::as_str) != Some(table) {
         return Err(err("Arrow schema table or schema_version mismatch"));
     }
-    let expected = expected_schema(table)?;
+    let version = m
+        .get("prajna.schema_version")
+        .ok_or_else(|| err("Arrow schema table or schema_version mismatch"))?;
+    let expected = expected_schema_for_version(table, version)?;
     if schema.fields() != expected.fields() {
         return Err(err("Arrow schema fields do not match the table schema"));
     }
@@ -1305,7 +1344,7 @@ pub fn read_parquet(
         return Err(err("Parquet table or schema_version mismatch"));
     }
     let schema = builder.schema().clone();
-    let expected = expected_schema(table)?;
+    let expected = expected_schema_for_version(table, schema_version)?;
     if schema.fields() != expected.fields() {
         return Err(err("Parquet fields do not match the table schema"));
     }
@@ -1335,7 +1374,9 @@ pub fn read_dataset_table(
         .iter()
         .find(|table| table.table == table_name)
         .ok_or_else(|| err(format!("manifest is missing the {table_name} table")))?;
-    if table.schema_version != 1 {
+    let supported = table.schema_version == 1
+        || (table_name == "corporate_actions" && table.schema_version == 2);
+    if !supported {
         return Err(err(format!(
             "unsupported {table_name} schema version {}",
             table.schema_version
@@ -1351,7 +1392,7 @@ pub fn read_dataset_table(
         .join(table_name)
         .join(hex)
         .join("part-00000.parquet");
-    let batches = read_parquet(&path, table_name, "1")?;
+    let batches = read_parquet(&path, table_name, &table.schema_version.to_string())?;
     for batch in &batches {
         if batch
             .schema()
@@ -1551,6 +1592,38 @@ mod tests {
                 compression_level: 3,
                 row_group_size: 65_536
             }
+        );
+    }
+
+    #[test]
+    fn corporate_action_schema_v2_is_nullable_without_changing_v1() {
+        let legacy = corporate_actions_schema();
+        let current = corporate_actions_schema_v2();
+        assert_eq!(
+            legacy
+                .metadata()
+                .get("prajna.schema_version")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            current
+                .metadata()
+                .get("prajna.schema_version")
+                .map(String::as_str),
+            Some("2")
+        );
+        assert!(
+            !legacy
+                .field_with_name("announced_at")
+                .unwrap()
+                .is_nullable()
+        );
+        assert!(
+            current
+                .field_with_name("announced_at")
+                .unwrap()
+                .is_nullable()
         );
     }
 

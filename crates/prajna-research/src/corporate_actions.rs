@@ -886,7 +886,9 @@ fn validate_action(action: &CorporateActionRow) -> Result<(), CorporateActionErr
     if action.announcement_id.trim().is_empty()
         || action.source_raw_sha256.trim().is_empty()
         || action.normalization_version.trim().is_empty()
-        || action.available_at < action.announced_at
+        || action
+            .announced_at
+            .is_some_and(|announced_at| action.available_at < announced_at)
     {
         return Err(invalid(
             "invalid corporate-action source identity or availability",
