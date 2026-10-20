@@ -159,6 +159,22 @@ impl Citation {
         self.publication_date
     }
 
+    /// A rename's effective date and new legal name must be evidenced by
+    /// the same frozen announcement. Separate pages of that document are valid.
+    pub fn legal_name_change_publication(&self, listing: &Self) -> Result<NaiveDate> {
+        if self.field != "legal_name"
+            || listing.field != "listing_date"
+            || self.fact_source != listing.fact_source
+            || self.announcement_id != listing.announcement_id
+            || self.raw_sha256 != listing.raw_sha256
+            || self.publication_date != listing.publication_date
+        {
+            return Err("legal_name_change listing_date and legal_name must cite the same rename announcement".into());
+        }
+        self.publication_date
+            .ok_or_else(|| "legal_name_change has no announcement publication date".into())
+    }
+
     fn verify(&self, store: &RawStore, converter: &mut impl PdfText) -> Result<()> {
         required(&self.fact_source, "fact_source")?;
         required(&self.announcement_id, "announcement_id")?;

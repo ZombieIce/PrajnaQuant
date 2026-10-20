@@ -1123,6 +1123,21 @@ impl HistoricalCatalog {
     pub fn coverage_gaps(&self) -> &BTreeSet<String> {
         &self.gaps
     }
+    /// Explicit P6 rename gaps are quarantined, never assigned to either ID.
+    /// Ordinary unattributed or ambiguous rows still fail closed.
+    pub(crate) fn is_identity_availability_gap(&self, symbol: &str, date: NaiveDate) -> bool {
+        self.input.lifecycles.iter().any(|next| {
+            next.native_symbol == symbol
+                && next.identity_available_from.is_some_and(|available| {
+                    date >= next.listing.effective_date && date < available
+                })
+                && self.input.lifecycles.iter().any(|previous| {
+                    previous.native_symbol == symbol
+                        && previous.identity_start() < next.identity_start()
+                        && previous.identity_end_exclusive == Some(next.listing.effective_date)
+                })
+        })
+    }
     /// Physical price-row mapping, separate from as-of strategy knowledge. Missing
     /// or ambiguous lifecycles are quarantined, never attached to nearest dates.
     pub fn resolve_row(&self, native_symbol: &str, date: NaiveDate) -> Result<InstrumentId> {

@@ -119,26 +119,16 @@ pub fn validate_and_convert(
             &mut used,
         )?;
         let available_from = if change_kind == LEGAL_NAME_CHANGE {
-            let citation = index
+            let name = index
+                .get(&(row.source_announcement_id.clone(), "legal_name".to_owned()))
+                .ok_or("legal_name_change has no legal_name citation")?;
+            let listing_citation = index
                 .get(&(
                     row.source_announcement_id.clone(),
                     "listing_date".to_owned(),
                 ))
-                .or_else(|| {
-                    index.get(&(row.source_announcement_id.clone(), "legal_name".to_owned()))
-                })
-                .ok_or_else(|| {
-                    format!(
-                        "legal_name_change row for {} has no listing/name citation",
-                        row.code
-                    )
-                })?;
-            let publication = citation.publication_date().ok_or_else(|| {
-                format!(
-                    "legal_name_change row for {} has no announcement publication date",
-                    row.code
-                )
-            })?;
+                .ok_or("legal_name_change has no listing_date citation")?;
+            let publication = name.legal_name_change_publication(listing_citation)?;
             let next = calendar
                 .sessions
                 .iter()

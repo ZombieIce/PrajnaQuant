@@ -1696,6 +1696,36 @@ fn legal_name_change_is_shared_between_the_row_validator_and_the_lifecycle_range
         Some(date("2026-01-07"))
     );
 
+    // The effective date alone may also occur in an earlier document. It
+    // cannot determine when the new legal name becomes knowable.
+    for published in ["2026-01-05", "2026-01-06"] {
+        let early_hash = store
+            .put(
+                format!("公告编号：early-listing\n上市日期：2026-01-06\n文档日期：{published}")
+                    .as_bytes(),
+                source_record_at("early-listing", published),
+            )
+            .unwrap();
+        let mut mixed = citations.clone();
+        *mixed
+            .iter_mut()
+            .find(|c| c.fact_source() == "identity2" && c.field() == "listing_date")
+            .unwrap() = verified_citation(
+            &store,
+            "identity2",
+            "listing_date",
+            "early-listing",
+            &early_hash,
+            "上市日期：2026-01-06",
+        );
+        assert!(
+            validate_and_convert(&f, &mixed, &calendar())
+                .unwrap_err()
+                .to_string()
+                .contains("same rename announcement")
+        );
+    }
+
     let mut unmarked = f.clone();
     unmarked.identities[1].change_kind.clear();
     assert!(

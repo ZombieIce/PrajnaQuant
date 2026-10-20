@@ -252,6 +252,16 @@ earliest known legal name as the initial identity, so a first attribute whose
 effective date is later than the first code-table appearance does not invent a
 second identity boundary.
 
+The accepted P6 rename gap is quarantined at row level: v6 drops only the
+unattributable gap Bars and records `tdx_identity_gap_priced_bars`; valid
+predecessor/successor Bars remain. The v4 DerivedMarket loader skips gap Bars,
+BarSources and crosschecks together. The official-lifetime coverage grid then
+emits one `MissingBarWithoutHaltNotice` UNKNOWN per gap Session under the
+predecessor, without assigning a price or a fixed-list member. Ordinary
+unattributed rows still fail closed. Rename listing-date and legal-name
+citations must reference the same frozen announcement document (pages may
+differ), so an earlier unrelated date citation cannot advance availability.
+
 An official listing date earlier than the first TDX code-table appearance stays
 in `Lifecycle.listing`; the physical `identity_start` remains the TDX
 appearance, so `resolve_row` has no price row before it. The fixed-list selector

@@ -1294,6 +1294,88 @@ fn delayed_legal_name_change_is_not_attributed_before_it_is_knowable() {
             .iter()
             .any(|member| member.symbol().starts_with("159919"))
     );
+    // Exercise the public market loader with replayable vendor-format Raw,
+    // including Bars, BarSources and crosschecks for the two gap Sessions.
+    let dsv = publish_replayable_v4(&world.root);
+    let raw = RawStore::open(&world.root).unwrap();
+    let (facts, citations) = facts_for(
+        &raw,
+        &[
+            row("159919", "合成ETF-A", 1, None, 0, "", "official"),
+            row("159919", "合成ETF-B", 2, None, 3, "", "official").legal_name_change(),
+            row("159560", "合成ETF-560", 1, None, 0, "", "official"),
+            row("159522", "合成ETF-522", 1, None, 0, "", "official"),
+            row("159612", "合成ETF-612", 1, None, 0, "", "official"),
+            row("159952", "合成ETF-952", 1, None, 0, "", "official"),
+        ],
+    );
+    let assembly = assemble_mvp6_catalog(&world.root, &dsv, &facts, &citations).unwrap();
+    assert!(
+        assembly.catalog.coverage_gaps().is_empty(),
+        "{:?}",
+        assembly.catalog.coverage_gaps()
+    );
+    let market = prajna_research::etf_market::DerivedMarket::from_dataset(
+        &world.root,
+        &dsv,
+        &assembly.catalog,
+        prajna_research::etf_market::MarketEvidence {
+            semantic_version: Some(prajna_research::etf_market::ExecutionStatusVersion::V2),
+            rule_version: "synthetic".into(),
+            start: d(1),
+            end: d(4),
+            coverage_gaps: BTreeSet::new(),
+            openings: Vec::new(),
+        },
+    )
+    .unwrap();
+    assert!(
+        market
+            .cells()
+            .get(&(old.clone(), d(1)))
+            .unwrap()
+            .close
+            .is_some()
+    );
+    assert!(
+        market
+            .cells()
+            .get(&(new.clone(), d(4)))
+            .unwrap()
+            .close
+            .is_some()
+    );
+    assert!(
+        !market
+            .cells()
+            .keys()
+            .any(|(id, date)| (id == &old || id == &new) && [d(2), d(3)].contains(date))
+    );
+    let coverage = prajna_research::mvp6_coverage::evaluate_derived_market(
+        &assembly.catalog,
+        &market,
+        "synthetic-actions",
+        &BTreeSet::new(),
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(coverage.denominator_cells, 20);
+    for day in [2, 3] {
+        let cells: Vec<_> = coverage
+            .unknowns
+            .iter()
+            .filter(|cell| {
+                (cell.instrument_id == old || cell.instrument_id == new)
+                    && cell.session_date == d(day)
+            })
+            .collect();
+        assert_eq!(cells.len(), 1);
+        assert_eq!(cells[0].instrument_id, old);
+        assert_eq!(
+            cells[0].reason,
+            prajna_research::mvp6_coverage::UnknownReason::MissingBarWithoutHaltNotice
+        );
+    }
     // Bars in the gap are reported as source disagreements, not attributed to
     // either InstrumentId.
     assert!(assembly.report.differences.iter().any(|difference| {
@@ -1903,5 +1985,126 @@ fn assembled_input_matches_an_equivalent_handwritten_input() {
     assert_eq!(
         manual.version().unwrap(),
         assembly.catalog.version().unwrap()
+    );
+}
+
+/// Minimal replayable v4 with a priced TDX row on all four synthetic Sessions.
+fn publish_replayable_v4(root: &Path) -> String {
+    use std::io::Write;
+    let raw = RawStore::open(root).unwrap();
+    let put = |bytes: Vec<u8>, source: &str| {
+        raw.put(
+            &bytes,
+            SourceRecordInput {
+                content_type: if bytes.starts_with(b"PK") {
+                    "application/zip"
+                } else {
+                    "application/json"
+                }
+                .into(),
+                source_kind: SourceKind::FileImport,
+                source_id: source.into(),
+                request: json!({}),
+                observed_at: "synthetic".into(),
+                ingested_by: "synthetic".into(),
+            },
+        )
+        .unwrap()
+    };
+    let calendar: Vec<_> = (1..=31)
+        .map(|day| {
+            json!({
+                "jyrq": d(day).to_string(), "jybz": if day <= 4 { "1" } else { "0" }, "zrxh": 1
+            })
+        })
+        .collect();
+    let mut hashes = vec![put(
+        serde_json::to_vec(&json!({"data": calendar})).unwrap(),
+        "szse-calendar",
+    )];
+    for day in 1..=4 {
+        let symbols = ["159522", "159560", "159612", "159919", "159952"];
+        let mut cod = vec![0_u8; 150 * symbols.len()];
+        let mut md1 = vec![0_u8; 512 * symbols.len()];
+        for (index, symbol) in symbols.iter().enumerate() {
+            cod[index * 150..index * 150 + 6].copy_from_slice(symbol.as_bytes());
+            cod[index * 150 + 32..index * 150 + 34].copy_from_slice(&(index as u16).to_le_bytes());
+            let block = &mut md1[index * 512..(index + 1) * 512];
+            for offset in [4, 12, 20, 28, 36] {
+                block[offset..offset + 8].copy_from_slice(&1.0_f64.to_le_bytes());
+            }
+            block[56..64].copy_from_slice(&100_u64.to_le_bytes());
+        }
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (suffix, bytes) in [("cod", cod), ("md1", md1)] {
+            zip.start_file(
+                format!("sz2301{day:02}.{suffix}"),
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+            zip.write_all(&bytes).unwrap();
+        }
+        hashes.push(put(zip.finish().unwrap().into_inner(), "tdx"));
+    }
+    prajna_data::publish_dataset(
+        root,
+        &raw,
+        &prajna_data::NormalizerRegistry::with_builtins(),
+        "szse-etf-frozen",
+        "4",
+        &hashes,
+        "synthetic",
+    )
+    .unwrap()
+    .dsv
+}
+
+#[test]
+fn rename_listing_and_name_must_cite_the_same_announcement() {
+    let mut world = world(
+        &[
+            row("159919", "合成ETF-A", 1, None, 0, "", "official"),
+            row("159919", "合成ETF-B", 2, None, 3, "", "official").legal_name_change(),
+        ],
+        &[
+            (1, &["159919"]),
+            (2, &["159919"]),
+            (3, &["159919"]),
+            (4, &["159919"]),
+        ],
+        &[("159919", &[1, 2, 3, 4])],
+    );
+    let raw = RawStore::open(&world.root).unwrap();
+    let (_, early) = facts_for(
+        &raw,
+        &[row("159919", "合成ETF-B", 2, None, 1, "", "official")],
+    );
+    let listing = early.iter().find(|c| c.field() == "listing_date").unwrap();
+    let source = world.facts.identities[1].source_announcement_id.clone();
+    let mixed = Citation::from_store(
+        &raw,
+        &mut NoopPdf,
+        CitationInput {
+            fact_source: source.clone(),
+            field: "listing_date".into(),
+            announcement_id: listing.announcement_id().into(),
+            raw_sha256: listing.raw_sha256().into(),
+            page: 1,
+            excerpt: listing.excerpt().into(),
+            verified_by: "synthetic-reviewer".into(),
+            verified_at: "2026-01-01T00:00:00Z".into(),
+        },
+    )
+    .unwrap();
+    *world
+        .citations
+        .iter_mut()
+        .find(|c| c.fact_source() == source && c.field() == "listing_date")
+        .unwrap() = mixed;
+    assert!(
+        assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations)
+            .unwrap_err()
+            .to_string()
+            .contains("same rename announcement")
     );
 }

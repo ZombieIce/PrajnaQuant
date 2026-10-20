@@ -397,6 +397,11 @@ impl DerivedMarket {
             if !dates.contains(&bar.session_date()) {
                 continue;
             }
+            if catalog
+                .is_identity_availability_gap(bar.instrument_id().symbol(), bar.session_date())
+            {
+                continue;
+            }
             // Unattributed code-reuse rows fail closed rather than joining nearest IDs.
             let id = catalog.resolve_row(bar.instrument_id().symbol(), bar.session_date())?;
             bars.insert((id, bar.session_date()), bar);
@@ -415,6 +420,12 @@ impl DerivedMarket {
                     continue;
                 }
                 raw.get(&source.source_raw_sha256).map_err(err)?;
+                if catalog.is_identity_availability_gap(
+                    source.instrument_id.symbol(),
+                    source.session_date,
+                ) {
+                    continue;
+                }
                 let id = catalog.resolve_row(source.instrument_id.symbol(), source.session_date)?;
                 if sources.insert((id, source.session_date), source).is_some() {
                     return Err(err("duplicate Bar source"));
@@ -654,6 +665,9 @@ fn crosschecks(
             continue;
         }
         let native: InstrumentId = ids.value(i).parse().map_err(err)?;
+        if catalog.is_identity_availability_gap(native.symbol(), date) {
+            continue;
+        }
         let id = catalog.resolve_row(native.symbol(), date)?;
         let sources = [primary, secondary]
             .into_iter()

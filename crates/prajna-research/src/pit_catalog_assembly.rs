@@ -513,6 +513,9 @@ fn parse_identities(
         }
         let listing_evidence = evidence(listing_citation)?;
         let available_from = if legal_name_change {
+            citation(citations, &fact.source_announcement_id, "legal_name")?
+                .legal_name_change_publication(listing_citation)
+                .map_err(|e| error(e.to_string()))?;
             Some(knowable_session(v4, &listing_evidence)?.max(listing))
         } else {
             None

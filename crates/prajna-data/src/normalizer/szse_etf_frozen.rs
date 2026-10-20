@@ -597,6 +597,7 @@ fn normalize(
     // #229 facts session. Absence of the facts is a missing source, not
     // evidence that no action occurred.
     let mut v6_lifecycles = Vec::new();
+    let mut v6_identity_gaps = Vec::new();
     let mut v6_actions = Vec::new();
     let mut sina_errors = std::mem::take(&mut sina_issue_sink);
     if v6 {
@@ -615,6 +616,8 @@ fn normalize(
                         venue.clone(),
                         &mut issues,
                     );
+                    v6_identity_gaps =
+                        identity_availability_gaps(&facts.value.session, &lifecycles);
                     v6_lifecycles = lifecycles;
                     // Derive Sina events per Catalog lifecycle so a reused
                     // code's cumulative factor reset is not read as a decrease.
@@ -782,6 +785,7 @@ fn normalize(
     // inconsistency: exclude that ETF and report it instead of failing the
     // whole Dataset (P27-19 item 2).
     let mut v6_out_of_scope_priced_bars = 0_u64;
+    let mut v6_identity_gap_priced_bars = 0_u64;
     let (primary, corporate_actions, excluded_etfs, p21, v6_sina) = if v6 {
         let FilteredV6 {
             primary,
@@ -789,8 +793,15 @@ fn normalize(
             excluded_etfs,
             excluded_symbols,
             out_of_scope_priced_bars,
-        } = filter_v6_lifecycles(primary, corporate_actions, &v6_lifecycles);
+            identity_gap_priced_bars,
+        } = filter_v6_lifecycles(
+            primary,
+            corporate_actions,
+            &v6_lifecycles,
+            &v6_identity_gaps,
+        );
         v6_out_of_scope_priced_bars = out_of_scope_priced_bars;
+        v6_identity_gap_priced_bars = identity_gap_priced_bars;
         // An excluded ETF is reported once as excluded; it has no P21 row that
         // could be mistaken for an evaluated or clean result.
         let p21_lifecycles: Vec<LifecycleRange> = v6_lifecycles
@@ -1030,6 +1041,7 @@ fn normalize(
         coverage["corporate_actions_with_missing_fields"] = json!(incomplete_action_fields);
         coverage["excluded_etfs"] = json!(excluded_etfs);
         coverage["tdx_out_of_scope_priced_bars"] = json!(v6_out_of_scope_priced_bars);
+        coverage["tdx_identity_gap_priced_bars"] = json!(v6_identity_gap_priced_bars);
         coverage["p21_mismatches"] = p21["mismatches"].clone();
         coverage["p21"] = p21;
         coverage["sina_adjust_factor"] = sina;
@@ -1407,6 +1419,33 @@ fn missing_action_fields_facts(action: &CorporateActionRow) -> Vec<&'static str>
     }
 }
 
+/// Only explicitly marked, validated successor gaps may quarantine individual
+/// Bars. A code-reuse absence or a post-termination Bar remains an inconsistency.
+fn identity_availability_gaps(
+    session: &Mvp6Session,
+    ranges: &[LifecycleRange],
+) -> Vec<LifecycleRange> {
+    session
+        .catalog_lifecycles
+        .iter()
+        .filter_map(|identity| {
+            let available = identity.available_from?;
+            (identity.change_kind == LEGAL_NAME_CHANGE
+                && available > identity.listing_date
+                && ranges.iter().any(|previous| {
+                    previous.native_symbol == identity.code
+                        && previous.start < identity.listing_date
+                        && previous.end_exclusive == Some(identity.listing_date)
+                }))
+            .then(|| LifecycleRange {
+                native_symbol: identity.code.clone(),
+                start: identity.listing_date,
+                end_exclusive: Some(available),
+            })
+        })
+        .collect()
+}
+
 /// Result of lifecycle filtering: Bars, actions, excluded-ETF report, the
 /// excluded symbol set used to omit their P21 rows, and the priced Bars dropped
 /// because their code has no Catalog identity at all.
@@ -1416,6 +1455,7 @@ struct FilteredV6 {
     excluded_etfs: Vec<Value>,
     excluded_symbols: BTreeSet<String>,
     out_of_scope_priced_bars: u64,
+    identity_gap_priced_bars: u64,
 }
 
 /// V6 keeps only lifecycle-scoped Bars. A priced TDX Bar outside the
@@ -1425,6 +1465,7 @@ fn filter_v6_lifecycles(
     primary: BTreeMap<Key, Sourced<SelectedBar>>,
     actions: Vec<CorporateActionRow>,
     lifecycles: &[LifecycleRange],
+    identity_gaps: &[LifecycleRange],
 ) -> FilteredV6 {
     let symbols: BTreeSet<&str> = lifecycles
         .iter()
@@ -1434,9 +1475,20 @@ fn filter_v6_lifecycles(
         .keys()
         .filter(|(symbol, _)| !symbols.contains(symbol.as_str()))
         .count() as u64;
+    let identity_gap_priced_bars = primary
+        .keys()
+        .filter(|(symbol, date)| {
+            identity_gaps
+                .iter()
+                .any(|gap| gap.native_symbol == *symbol && gap.contains(*date))
+        })
+        .count() as u64;
     let mut excluded = BTreeSet::new();
     for (symbol, date) in primary.keys() {
         if symbols.contains(symbol.as_str())
+            && !identity_gaps
+                .iter()
+                .any(|gap| gap.native_symbol == *symbol && gap.contains(*date))
             && !lifecycles
                 .iter()
                 .any(|life| life.native_symbol == *symbol && life.contains(*date))
@@ -1476,6 +1528,7 @@ fn filter_v6_lifecycles(
         excluded_etfs: excluded_report,
         excluded_symbols: excluded,
         out_of_scope_priced_bars,
+        identity_gap_priced_bars,
     }
 }
 
