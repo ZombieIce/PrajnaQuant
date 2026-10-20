@@ -4,8 +4,8 @@
 //! network access, real facts, or hashes are committed to the repository.
 
 use super::{
-    Citation, Collector, CrosscheckReport, FundCandidate, Mvp6Facts, PdfText, Result, Transport,
-    V4DailyBar, crosscheck_v4, read_citations_csv, validate_and_convert,
+    Citation, Collector, CrosscheckReport, FactCalendar, FundCandidate, Mvp6Facts, PdfText, Result,
+    Transport, V4DailyBar, crosscheck_v4, read_citations_csv, validate_and_convert,
 };
 use crate::{
     RawStore, bar_sources_from_record_batch, bars_from_record_batch, read_manifest,
@@ -181,11 +181,14 @@ pub fn write_facts_acceptance(
     directory: &Path,
     lake_root: &Path,
     dsv: &str,
+    window_start: NaiveDate,
+    window_end: NaiveDate,
     facts: &Mvp6Facts,
     citations: &[Citation],
 ) -> Result<FactsAcceptance> {
     let projection = load_v4_projection(lake_root, dsv, facts)?;
-    let session = validate_and_convert(facts, citations, &projection.calendar)?;
+    let calendar = FactCalendar::new(projection.calendar, window_start, window_end)?;
+    let session = validate_and_convert(facts, citations, &calendar)?;
     let report = crosscheck_v4(facts, &projection.bars);
     fs::create_dir_all(directory)?;
 
@@ -270,10 +273,13 @@ pub fn collect_and_accept<T: Transport>(
             store,
             converter,
         )?;
+        let (dsv, window_start, window_end) = published_local_dataset(root)?;
         Some(write_facts_acceptance(
             &directory,
             root,
-            &published_local_dsv(root)?,
+            &dsv,
+            window_start,
+            window_end,
             &facts,
             &citations,
         )?)
@@ -288,16 +294,25 @@ pub fn collect_and_accept<T: Transport>(
     })
 }
 
-fn published_local_dsv(root: &Path) -> Result<String> {
+fn published_local_dataset(root: &Path) -> Result<(String, NaiveDate, NaiveDate)> {
     let coverage: Value =
         serde_json::from_slice(&fs::read(root.join("acceptance/mvp6-coverage.json"))?)?;
     if coverage["dataset_published"] != true {
         return Err("local v4 dataset is not published".into());
     }
-    coverage["dsv"]
+    let dsv = coverage["dsv"]
         .as_str()
         .map(str::to_owned)
-        .ok_or_else(|| "local coverage report has no published DSV".into())
+        .ok_or_else(|| "local coverage report has no published DSV".to_owned())?;
+    let start = coverage["window"]["start"]
+        .as_str()
+        .ok_or("local coverage report has no window start")?
+        .parse::<NaiveDate>()?;
+    let end = coverage["window"]["end"]
+        .as_str()
+        .ok_or("local coverage report has no window end")?
+        .parse::<NaiveDate>()?;
+    Ok((dsv, start, end))
 }
 
 fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {

@@ -16,7 +16,7 @@ pub use citations::{Citation, CitationInput, read_citations_csv};
 pub use collect::{Collector, HttpReply, Request, Transport};
 pub use crosscheck::{CrosscheckMismatch, CrosscheckReport, V4DailyBar, crosscheck_v4};
 pub use extract::{EXTRACTOR_VERSION, PdfText, Poppler, extract_fields};
-pub use facts::validate_and_convert;
+pub use facts::{FactCalendar, validate_and_convert};
 pub use index::{
     Announcement, FundIndex, IndexDataset, NameFact, PageSet, RULES_VERSION, classify, scoped_code,
 };

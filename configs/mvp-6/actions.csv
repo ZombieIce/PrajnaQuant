@@ -1,1 +1,6 @@
 code,kind,announcement_date,record_date,ex_date,pay_date,cash_per_share,split_ratio,liquidation_per_share,evidence_level,source_announcement_id,source_page
+159919,dividend,2024-08-31,2024-09-13,2024-09-18,2024-09-19,0.0453,,,official,1221075235,1
+159919,dividend,2025-03-15,2025-03-28,2025-03-31,2025-04-01,0.0661,,,official,1222803928,1
+159919,dividend,2025-11-22,2025-12-05,2025-12-08,2025-12-09,0.0728,,,official,1224818553,1
+159560,split,2026-09-01,2026-09-04,2026-09-07,,,2,,official,1225536850,1
+159522,liquidation,2024-09-19,,,,,,,official,1221232567,1

@@ -277,7 +277,7 @@ impl<T: Transport> Collector<T> {
         let mut pagination_incomplete = false;
         for (start, end) in year_segments(candidate.active_start, candidate.active_end) {
             let window = format!("{start}~{end}");
-            match self.pages_for(&window, &format!("{},{}", candidate.code, org_id), "") {
+            match self.pages_for_mvp6(&window, &format!("{},{}", candidate.code, org_id), "") {
                 Ok((items, _)) => {
                     for item in items {
                         if item.code != candidate.code || item.org_id.as_deref() != Some(org_id) {
@@ -432,7 +432,7 @@ impl<T: Transport> Collector<T> {
         }
         for (start, end) in year_segments(candidate.active_start, candidate.active_end) {
             let window = format!("{start}~{end}");
-            let (items, _) = self.pages_for(&window, "", &candidate.short_name)?;
+            let (items, _) = self.pages_for_mvp6(&window, "", &candidate.short_name)?;
             for item in items.into_iter().filter(|a| a.code == candidate.code) {
                 if let Some(org) = item.org_id {
                     found.insert(org);
@@ -448,7 +448,31 @@ impl<T: Transport> Collector<T> {
         stock: &str,
         searchkey: &str,
     ) -> Result<(Vec<Announcement>, BTreeSet<String>)> {
-        let mut pages = PageSet::default();
+        self.pages_for_mode(window, stock, searchkey, true)
+    }
+
+    /// The MVP-6 fixed-list path opts out of the legacy page-count conflicts.
+    fn pages_for_mvp6(
+        &mut self,
+        window: &str,
+        stock: &str,
+        searchkey: &str,
+    ) -> Result<(Vec<Announcement>, BTreeSet<String>)> {
+        self.pages_for_mode(window, stock, searchkey, false)
+    }
+
+    fn pages_for_mode(
+        &mut self,
+        window: &str,
+        stock: &str,
+        searchkey: &str,
+        strict_page_counts: bool,
+    ) -> Result<(Vec<Announcement>, BTreeSet<String>)> {
+        let mut pages = if strict_page_counts {
+            PageSet::strict()
+        } else {
+            PageSet::default()
+        };
         for page in 1..=10000 {
             let form = BTreeMap::from([
                 ("pageNum".into(), page.to_string()),

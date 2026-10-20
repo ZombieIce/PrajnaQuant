@@ -131,8 +131,9 @@ domestic network path and keeps its JSONL request log and response bytes local.
 ## Validate public facts and cross-check v4
 
 Put the three public fact tables and the citation manifest under the local data
-root; none of these files belong in the repository. The candidate CSV is passed
-as the command argument and stays wherever the operator keeps it.
+root for validation. Only the three public fact tables may later be committed
+under `configs/mvp-6/`; `citations.csv` (it carries Raw hashes and excerpts),
+the candidate CSV, and every response or PDF stay local.
 
 ```text
 ~/PrajnaData/mvp-6/facts/identity.csv
@@ -156,13 +157,24 @@ when:
 - the page exists in the frozen document (PDF pages come from the local text
   converter; a non-PDF Raw is page 1) and the excerpt occurs on that page;
 - `verified_by` names the operator and `verified_at` is an RFC 3339 time that
-  does not precede the Raw capture time;
-- the recorded field value is recoverable from the excerpt: dates in ISO or
-  Chinese form, decimals as an equal number, other text literally. `kind` must
+  does not precede the first observed capture of that Raw; re-capturing
+  identical bytes later does not move the freeze time;
+- the recorded field value is recoverable from the excerpt: dates in ISO,
+  Arabic-Chinese or Chinese-numeral form (`二〇二六年一月五日`), decimals as an
+  equal number, other text literally. `cash_per_share` is per share even when
+  the notice states `元/10份基金份额`: the number must follow that explicit
+  unit on the page and equal ten times the recorded value, and no other unit
+  conversion is inferred. `kind` must
   be an announcement category that the excerpt classifies into (`split` and
   `conversion` share the 拆分/折算 category). `fund_category` and
   `session_part` are not literal source text: their excerpt must still be on
   the page, and the named verifier attests the mapping.
+
+`announcement_date` is a publication date and may be a weekend or holiday
+inside the window; `record_date`, `ex_date`, `pay_date` and `effective_date`
+must be frozen sessions. `listing_date` and `termination_date` may fall outside
+the market-data window because the fixed list includes funds listed years
+before it; a boundary inside the window that is not a session still fails.
 
 Every populated fact field needs its own citation. A duplicate field, an
 unknown field, a citation for a field the row leaves empty, or a row whose
