@@ -1144,27 +1144,32 @@ fn lifecycles_from_facts(
             },
             None => None,
         };
+        let effective_start = identity.listing_date;
+        let start = identity.available_from.unwrap_or(effective_start);
         lifecycles.push((
             LifecycleRange {
                 native_symbol: identity.code.clone(),
-                start: identity.listing_date,
+                start,
                 end_exclusive,
             },
             identity.change_kind.clone(),
+            effective_start,
         ));
     }
-    lifecycles.sort_by_key(|(life, _)| (life.native_symbol.clone(), life.start));
-    // A declared legal-name change starts a new identity without terminating
-    // the preceding one; it ends that predecessor at its own start date.
+    lifecycles.sort_by_key(|(life, _, _)| (life.native_symbol.clone(), life.start));
+    // A declared legal-name change starts a new identity when it is knowable.
+    // Its predecessor ends at the new name's effective Session, so a delayed
+    // publication leaves the accepted P6 gap rather than assigning Bars to the
+    // successor before the rename is known.
     for index in 1..lifecycles.len() {
         if lifecycles[index].0.native_symbol != lifecycles[index - 1].0.native_symbol {
             continue;
         }
         if lifecycles[index].1 == LEGAL_NAME_CHANGE
-            && lifecycles[index].0.start > lifecycles[index - 1].0.start
+            && lifecycles[index].2 > lifecycles[index - 1].0.start
             && lifecycles[index - 1].0.end_exclusive.is_none()
         {
-            lifecycles[index - 1].0.end_exclusive = Some(lifecycles[index].0.start);
+            lifecycles[index - 1].0.end_exclusive = Some(lifecycles[index].2);
         }
     }
     if lifecycles.is_empty() {
@@ -1188,7 +1193,7 @@ fn lifecycles_from_facts(
         ));
     }
     if issues.is_empty() {
-        Ok(lifecycles.into_iter().map(|(life, _)| life).collect())
+        Ok(lifecycles.into_iter().map(|(life, _, _)| life).collect())
     } else {
         Err(issues)
     }
@@ -3361,6 +3366,16 @@ mod lifecycle_tests {
         termination: Option<&str>,
         change_kind: &str,
     ) -> CatalogLifecycle {
+        lifecycle_at(code, listing, termination, change_kind, None)
+    }
+
+    fn lifecycle_at(
+        code: &str,
+        listing: &str,
+        termination: Option<&str>,
+        change_kind: &str,
+        available_from: Option<&str>,
+    ) -> CatalogLifecycle {
         CatalogLifecycle {
             code: code.into(),
             org_id: "org".into(),
@@ -3373,6 +3388,7 @@ mod lifecycle_tests {
             source_announcement_id: "announcement".into(),
             source_page: 1,
             change_kind: change_kind.into(),
+            available_from: available_from.map(|date| date.parse().unwrap()),
         }
     }
 
@@ -3405,6 +3421,25 @@ mod lifecycle_tests {
         assert_eq!(ranges[0].end_exclusive, Some("2026-01-06".parse().unwrap()));
         assert_eq!(ranges[1].start, "2026-01-06".parse().unwrap());
         assert_eq!(ranges[1].end_exclusive, Some("2026-01-08".parse().unwrap()));
+    }
+
+    #[test]
+    fn delayed_legal_name_change_starts_the_successor_when_knowable() {
+        let ranges = lifecycles_from_facts(&session(vec![
+            lifecycle("159001", "2026-01-05", None, ""),
+            lifecycle_at(
+                "159001",
+                "2026-01-06",
+                None,
+                LEGAL_NAME_CHANGE,
+                Some("2026-01-08"),
+            ),
+        ]))
+        .unwrap();
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(ranges[0].start, "2026-01-05".parse().unwrap());
+        assert_eq!(ranges[0].end_exclusive, Some("2026-01-06".parse().unwrap()));
+        assert_eq!(ranges[1].start, "2026-01-08".parse().unwrap());
     }
 
     #[test]

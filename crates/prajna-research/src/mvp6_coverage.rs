@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     etf_market::{DerivedMarket, TradeState},
-    pit_universe::{HistoricalCatalog, Lifecycle, official_end},
+    pit_universe::{HistoricalCatalog, Lifecycle},
 };
 
 pub const UNKNOWN_COVERAGE_VERSION: &str = "mvp6-unknown-coverage@1";
@@ -373,22 +373,49 @@ pub fn evaluate_derived_market(
     }))
 }
 
+/// A name-change successor's coverage begins when the new name is knowable
+/// (`identity_available_from`), not at its official effective date; a new
+/// listing or reused code still starts at its official listing so a pre-TDX
+/// official lifetime is not dropped.
+fn coverage_start(life: &Lifecycle) -> NaiveDate {
+    life.identity_available_from
+        .unwrap_or(life.listing.effective_date)
+}
+
 /// The coverage denominator is the ETF's legal lifetime, not the TDX code-table
 /// presence. An official listing before the first code-table appearance and a
 /// TDX exit before the official termination stay inside the lifetime, so their
-/// missing price cells are reported as UNKNOWN (P27-6/P27-19). The shared
-/// `official_end` helper also bounds the identity at the next same-code
-/// successor's official listing, so its sessions are never counted twice.
+/// missing price cells are reported as UNKNOWN (P27-6/P27-19). The predecessor
+/// is bounded by the next same-code successor's coverage start, so a delayed
+/// name change leaves one UNKNOWN cell in the gap and never double counts.
 fn coverage_lifecycle(
     life: &Lifecycle,
     lifecycles: &[Lifecycle],
 ) -> Result<CoverageLifecycle, String> {
     let instrument_id = life.instrument_id().map_err(|error| error.to_string())?;
+    let own_start = life.identity_start.unwrap_or(life.listing.effective_date);
+    let successor_start = lifecycles
+        .iter()
+        .filter(|other| {
+            other.native_symbol == life.native_symbol
+                && other.identity_start.unwrap_or(other.listing.effective_date) > own_start
+        })
+        .map(coverage_start)
+        .min();
+    let terminated_on = match (
+        life.termination.as_ref().map(|end| end.effective_date),
+        successor_start,
+    ) {
+        (Some(termination), Some(successor)) => Some(termination.min(successor)),
+        (Some(termination), None) => Some(termination),
+        (None, Some(successor)) => Some(successor),
+        (None, None) => None,
+    };
     Ok(CoverageLifecycle {
         instrument_id,
         native_symbol: life.native_symbol.clone(),
-        listed_on: life.listing.effective_date,
-        terminated_on: official_end(life, lifecycles),
+        listed_on: coverage_start(life),
+        terminated_on,
     })
 }
 
@@ -589,6 +616,24 @@ mod tests {
         termination: Option<u32>,
         identity_end_exclusive: Option<u32>,
     ) -> Lifecycle {
+        catalog_lifecycle_at(
+            code,
+            listing,
+            identity_start,
+            termination,
+            identity_end_exclusive,
+            None,
+        )
+    }
+
+    fn catalog_lifecycle_at(
+        code: &str,
+        listing: u32,
+        identity_start: Option<u32>,
+        termination: Option<u32>,
+        identity_end_exclusive: Option<u32>,
+        identity_available_from: Option<u32>,
+    ) -> Lifecycle {
         Lifecycle {
             native_symbol: code.into(),
             contract_raw_sha256: format!("sha256:{}", "a".repeat(64)),
@@ -603,6 +648,7 @@ mod tests {
             attributes: Vec::new(),
             identity_start: identity_start.map(date),
             identity_end_exclusive: identity_end_exclusive.map(date),
+            identity_available_from: identity_available_from.map(date),
             code_table_first_seen: None,
             code_table_last_seen: None,
             code_table_exit_date: None,
@@ -641,6 +687,32 @@ mod tests {
         // [S1, S5) is four Sessions even though TDX stopped observing at S3.
         assert_eq!(report.denominator_cells, 4);
         assert_eq!(report.unknown_cells, 4);
+    }
+
+    #[test]
+    fn coverage_counts_a_delayed_name_change_gap_once_under_the_predecessor() {
+        // Predecessor ends at the new name's effective S2; the rename is only
+        // knowable at S4, so S2/S3 are the accepted P6 gap. The successor's
+        // coverage starts S4, and the predecessor holds the gap cells once.
+        let old = catalog_lifecycle_at("159001", 1, Some(1), None, Some(2), None);
+        let new = catalog_lifecycle_at("159001", 2, Some(2), None, None, Some(4));
+        let mapped = [
+            coverage_lifecycle(&old, &[old.clone(), new.clone()]).unwrap(),
+            coverage_lifecycle(&new, &[old.clone(), new.clone()]).unwrap(),
+        ];
+        assert_eq!(mapped[0].terminated_on, Some(date(4)));
+        assert_eq!(mapped[1].listed_on, date(4));
+        let sessions = [date(1), date(2), date(3), date(4)];
+        let report = assess(&sessions, &mapped, &[]);
+        assert_eq!(report.denominator_cells, 4);
+        assert_eq!(
+            report
+                .instruments
+                .iter()
+                .map(|instrument| instrument.cells)
+                .collect::<Vec<_>>(),
+            vec![3, 1]
+        );
     }
 
     #[test]

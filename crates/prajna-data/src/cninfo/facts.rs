@@ -118,6 +118,42 @@ pub fn validate_and_convert(
             ],
             &mut used,
         )?;
+        let available_from = if change_kind == LEGAL_NAME_CHANGE {
+            let citation = index
+                .get(&(
+                    row.source_announcement_id.clone(),
+                    "listing_date".to_owned(),
+                ))
+                .or_else(|| {
+                    index.get(&(row.source_announcement_id.clone(), "legal_name".to_owned()))
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "legal_name_change row for {} has no listing/name citation",
+                        row.code
+                    )
+                })?;
+            let publication = citation.publication_date().ok_or_else(|| {
+                format!(
+                    "legal_name_change row for {} has no announcement publication date",
+                    row.code
+                )
+            })?;
+            let next = calendar
+                .sessions
+                .iter()
+                .find(|date| **date > publication)
+                .copied()
+                .ok_or_else(|| {
+                    format!(
+                        "legal_name_change row for {} has no following covered Session",
+                        row.code
+                    )
+                })?;
+            Some(next.max(listing))
+        } else {
+            None
+        };
         // The contract attachment is local evidence for the legal identity. It
         // has no identity.csv column, so #229 consumes it when present and
         // #221 requires it to populate `contract_raw_sha256`.
@@ -139,6 +175,7 @@ pub fn validate_and_convert(
             source_announcement_id: row.source_announcement_id.clone(),
             source_page: parse_page(&row.source_page)?,
             change_kind,
+            available_from,
         });
     }
     lifecycles.sort_by(|a, b| (&a.code, a.listing_date).cmp(&(&b.code, b.listing_date)));

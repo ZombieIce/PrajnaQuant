@@ -33,7 +33,7 @@ use crate::pit_universe::{
     FundCategory, HistoricalCatalog, Lifecycle, LifecycleFact, MVP6_FIXED_ETF_CANDIDATES,
     Publication, ScanObservation, ScanStatus, in_code_scope, raw_hash,
 };
-use chrono::{DateTime, FixedOffset, NaiveDate};
+use chrono::NaiveDate;
 use prajna_data::cninfo::{Citation, EvidenceLevel, LEGAL_NAME_CHANGE, Mvp6Facts};
 use prajna_data::{
     RawStore, TdxCodeTableRow, bars_from_record_batch, read_dataset_table, read_manifest,
@@ -41,7 +41,6 @@ use prajna_data::{
 };
 use prajna_domain::Session;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -143,6 +142,10 @@ struct IdentitySeed {
     category: FundCategory,
     evidence_level: EvidenceLevel,
     legal_name_change: bool,
+    /// First Session on which a legal-name change is knowable; `None` for an
+    /// initial listing or reused code. The official `listing` date remains the
+    /// effective name-change Session.
+    available_from: Option<NaiveDate>,
     contract_raw_sha256: String,
     listing_evidence: Evidence,
     termination_evidence: Option<Evidence>,
@@ -188,6 +191,7 @@ impl IdentitySeed {
             attributes: vec![self.attribute()],
             identity_start: Some(identity_start),
             identity_end_exclusive: None,
+            identity_available_from: self.available_from,
             code_table_first_seen: None,
             code_table_last_seen: None,
             code_table_exit_date: None,
@@ -507,7 +511,12 @@ fn parse_identities(
                 fact.code
             )));
         }
-        let listing_evidence = evidence(raw, listing_citation)?;
+        let listing_evidence = evidence(listing_citation)?;
+        let available_from = if legal_name_change {
+            Some(knowable_session(v4, &listing_evidence)?.max(listing))
+        } else {
+            None
+        };
         let termination_evidence = match termination {
             Some(date) => {
                 let citation =
@@ -518,7 +527,7 @@ fn parse_identities(
                         fact.code
                     )));
                 }
-                Some(evidence(raw, citation)?)
+                Some(evidence(citation)?)
             }
             None => None,
         };
@@ -530,7 +539,7 @@ fn parse_identities(
                 fact.legal_name
             )));
         }
-        let attribute_evidence = evidence(raw, attribute)?;
+        let attribute_evidence = evidence(attribute)?;
         // AttributeFact carries one Evidence for the whole
         // name/category/index tuple. Emitting the legal-name page for all three
         // is only faithful when the citations are demonstrably the same page.
@@ -541,7 +550,7 @@ fn parse_identities(
                 fact.fund_category, fact.code
             )));
         }
-        if evidence(raw, category)? != attribute_evidence {
+        if evidence(category)? != attribute_evidence {
             return Err(error(format!(
                 "legal_name and fund_category for {} are not evidenced by the same Raw page",
                 fact.code
@@ -557,7 +566,7 @@ fn parse_identities(
                     fact.tracked_index
                 )));
             }
-            if evidence(raw, index)? != attribute_evidence {
+            if evidence(index)? != attribute_evidence {
                 return Err(error(format!(
                     "legal_name and tracked_index for {} are not evidenced by the same Raw page",
                     fact.code
@@ -587,6 +596,7 @@ fn parse_identities(
             category: fund_category(&fact.fund_category),
             evidence_level,
             legal_name_change,
+            available_from,
             contract_raw_sha256,
             listing_evidence,
             termination_evidence,
@@ -1069,7 +1079,11 @@ fn outside_official_lifespan(
 fn date_in_tdx_presence(date: NaiveDate, lifecycles: &[PlannedLifecycle]) -> bool {
     lifecycles.iter().any(|lifecycle| {
         date >= lifecycle.seed.listing
-            && date >= lifecycle.identity_start
+            && date
+                >= lifecycle
+                    .seed
+                    .available_from
+                    .unwrap_or(lifecycle.identity_start)
             && lifecycle.end_exclusive.is_none_or(|end| date < end)
             && lifecycle
                 .seed
@@ -1122,19 +1136,26 @@ fn build_input(v4: &V4Data, plan: &Plan, citations: &[Citation]) -> Result<Catal
             continue;
         }
         let start = lifecycle.identity_start;
+        let scan_start = start.max(lifecycle.seed.available_from.unwrap_or(start));
         let end = lifecycle.end_exclusive;
         let dates = v4
             .bar_dates
             .get(&lifecycle.seed.code)
             .map(|dates| {
                 dates
-                    .range(start..)
+                    .range(scan_start..)
                     .copied()
                     .take_while(|date| end.is_none_or(|end| *date < end))
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        let raw_sha256 = scan_raw(v4, &lifecycle.seed.code, start, end, dates.first().copied())?;
+        let raw_sha256 = scan_raw(
+            v4,
+            &lifecycle.seed.code,
+            scan_start,
+            end,
+            dates.first().copied(),
+        )?;
         scans.push(ScanObservation {
             native_symbol: lifecycle.seed.code.clone(),
             status: if dates.is_empty() {
@@ -1318,108 +1339,35 @@ fn presence_runs(v4: &V4Data, code: &str) -> Vec<PresenceRun> {
     runs
 }
 
-fn evidence(raw: &RawStore, citation: &Citation) -> Result<Evidence> {
-    let date = publication_date(raw, citation)?;
+fn knowable_session(v4: &V4Data, evidence: &Evidence) -> Result<NaiveDate> {
+    let session = match &evidence.publication {
+        Publication::DateOnly { date } => v4
+            .sessions
+            .iter()
+            .find(|session| session.session_date() > *date),
+        Publication::Exact { timestamp } => v4
+            .sessions
+            .iter()
+            .find(|session| session.ts_close() >= *timestamp),
+    };
+    session
+        .map(|session| session.session_date())
+        .ok_or_else(|| error("legal-name change announcement has no available covered Session"))
+}
+
+fn evidence(citation: &Citation) -> Result<Evidence> {
+    let date = citation.publication_date().ok_or_else(|| {
+        error(format!(
+            "cannot evidence the announcement date for {} from its frozen Raw",
+            citation.announcement_id()
+        ))
+    })?;
     Ok(Evidence {
         raw_sha256: citation.raw_sha256().to_owned(),
         announcement_id: citation.announcement_id().to_owned(),
         locator: format!("{}:p{}", citation.announcement_id(), citation.page()),
         publication: Publication::DateOnly { date },
     })
-}
-
-/// Derives the historical announcement date from the frozen Raw, never from the
-/// local capture time (`observed_at`) or the fact's effective date.
-fn publication_date(raw: &RawStore, citation: &Citation) -> Result<NaiveDate> {
-    let bytes = raw
-        .get(citation.raw_sha256())
-        .map_err(|e| error(e.to_string()))?;
-    let mut dates = BTreeSet::new();
-    for record in raw
-        .sources(citation.raw_sha256())
-        .map_err(|e| error(e.to_string()))?
-    {
-        if let Some(url) = record.request.get("url").and_then(Value::as_str)
-            && let Some(date) = cninfo_adjunct_date(url)
-        {
-            dates.insert(date);
-        }
-    }
-    if let Some(date) = json_announcement_date(&bytes, citation.announcement_id())? {
-        dates.insert(date);
-    }
-    match dates.len() {
-        1 => Ok(*dates.first().expect("one date")),
-        0 => Err(error(format!(
-            "cannot evidence the announcement date for {} from its frozen Raw",
-            citation.announcement_id()
-        ))),
-        _ => Err(error(format!(
-            "ambiguous announcement dates for {} in its frozen Raw",
-            citation.announcement_id()
-        ))),
-    }
-}
-
-fn cninfo_adjunct_date(url: &str) -> Option<NaiveDate> {
-    let (_, rest) = url.split_once("finalpage/")?;
-    NaiveDate::parse_from_str(rest.get(..10)?, "%Y-%m-%d").ok()
-}
-
-fn json_announcement_date(bytes: &[u8], announcement_id: &str) -> Result<Option<NaiveDate>> {
-    if bytes.starts_with(b"%PDF-") {
-        return Ok(None);
-    }
-    let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
-        return Ok(None);
-    };
-    let mut dates = BTreeSet::new();
-    collect_announcement_dates(&value, announcement_id, &mut dates);
-    match dates.len() {
-        0 => Ok(None),
-        1 => Ok(dates.first().copied()),
-        _ => Err(error(format!(
-            "ambiguous announcementTime values for {announcement_id}"
-        ))),
-    }
-}
-
-fn collect_announcement_dates(
-    value: &Value,
-    announcement_id: &str,
-    dates: &mut BTreeSet<NaiveDate>,
-) {
-    match value {
-        Value::Object(object) => {
-            let numeric_id = announcement_id.parse::<i64>().ok();
-            if object.get("announcementId").is_some_and(|id| {
-                id.as_str() == Some(announcement_id)
-                    || numeric_id.is_some_and(|value| id.as_i64() == Some(value))
-            }) && let Some(millis) = object.get("announcementTime").and_then(Value::as_i64)
-                && let Some(date) = shanghai_date(millis)
-            {
-                dates.insert(date);
-            }
-            for value in object.values() {
-                collect_announcement_dates(value, announcement_id, dates);
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                collect_announcement_dates(item, announcement_id, dates);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn shanghai_date(millis: i64) -> Option<NaiveDate> {
-    let offset = FixedOffset::east_opt(8 * 3600)?;
-    Some(
-        DateTime::from_timestamp_millis(millis)?
-            .with_timezone(&offset)
-            .date_naive(),
-    )
 }
 
 fn citation<'a>(citations: &'a [Citation], source: &str, field: &str) -> Result<&'a Citation> {

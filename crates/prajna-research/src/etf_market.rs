@@ -461,6 +461,9 @@ impl DerivedMarket {
                 }
                 if v2
                     && (life.identity_start.is_some_and(|start| date < start)
+                        || life
+                            .identity_available_from
+                            .is_some_and(|start| date < start)
                         || life.identity_end_exclusive.is_some_and(|end| date >= end))
                 {
                     continue;

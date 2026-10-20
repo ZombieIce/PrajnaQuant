@@ -29,7 +29,7 @@ use std::{
 };
 
 fn d(day: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2023, 1, day).unwrap()
+    NaiveDate::from_ymd_opt(2023, 1, 1).unwrap() + chrono::Duration::days(i64::from(day) - 1)
 }
 
 fn session(day: u32) -> Session {
@@ -1228,6 +1228,85 @@ fn reused_code_successor_may_appear_in_tdx_before_its_official_listing() {
 }
 
 #[test]
+fn delayed_legal_name_change_is_not_attributed_before_it_is_knowable() {
+    // Predecessor effective S1; successor new name effective S2; the rename
+    // announcement is published S3 and is first knowable at S4 close. The
+    // successor's physical identity must not start before S4, and S2/S3 are the
+    // accepted one-cell-each P6 gap.
+    let world = world(
+        &[
+            row("159919", "合成ETF-A", 1, None, 0, "", "official"),
+            row("159919", "合成ETF-B", 2, None, 3, "", "official").legal_name_change(),
+        ],
+        &[
+            (1, &["159919"]),
+            (2, &["159919"]),
+            (3, &["159919"]),
+            (4, &["159919"]),
+        ],
+        &[("159919", &[1, 2, 3, 4])],
+    );
+    let assembly =
+        assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations).unwrap();
+    let old = assembly.catalog.resolve_row("159919", d(1)).unwrap();
+    assert!(assembly.catalog.resolve_row("159919", d(2)).is_err());
+    assert!(assembly.catalog.resolve_row("159919", d(3)).is_err());
+    let new = assembly.catalog.resolve_row("159919", d(4)).unwrap();
+    assert_ne!(old, new);
+    let successor = assembly
+        .catalog
+        .input()
+        .lifecycles
+        .iter()
+        .find(|lifecycle| lifecycle.identity_start == Some(d(2)))
+        .unwrap();
+    assert_eq!(successor.identity_available_from, Some(d(4)));
+    assert_eq!(successor.listing.effective_date, d(2));
+
+    // S2 and S3 have no fixed-list member; the reasons are the accepted P6 gap.
+    let fixed = mvp6_fixed();
+    let s1 = assembly.catalog.fixed_universe(d(1), &fixed).unwrap();
+    assert!(
+        s1.members
+            .iter()
+            .any(|member| member.symbol().starts_with("159919"))
+    );
+    for day in [2, 3] {
+        let gap = assembly.catalog.fixed_universe(d(day), &fixed).unwrap();
+        assert!(
+            !gap.members
+                .iter()
+                .any(|member| member.symbol().starts_with("159919")),
+            "no member at S{day}"
+        );
+        assert_eq!(
+            gap.excluded.get(&old).map(String::as_str),
+            Some("outside_catalog_lifecycle")
+        );
+        assert_eq!(
+            gap.excluded.get(&new).map(String::as_str),
+            Some("listing_not_known")
+        );
+    }
+    let s4 = assembly.catalog.fixed_universe(d(4), &fixed).unwrap();
+    assert!(
+        s4.members
+            .iter()
+            .any(|member| member.symbol().starts_with("159919"))
+    );
+    // Bars in the gap are reported as source disagreements, not attributed to
+    // either InstrumentId.
+    assert!(assembly.report.differences.iter().any(|difference| {
+        difference.kind == IdentityDifferenceKind::PricedBarOutsideTdxPresence
+            && difference.observed_date == Some(d(2))
+    }));
+    assert!(assembly.report.differences.iter().any(|difference| {
+        difference.kind == IdentityDifferenceKind::PricedBarOutsideTdxPresence
+            && difference.observed_date == Some(d(3))
+    }));
+}
+
+#[test]
 fn priced_bar_after_code_table_exit_is_reported_not_excluded() {
     // 159919 is officially alive S1-S8, but TDX stops observing it after S3 and
     // still prices S5. The S5 Bar is inside the official lifespan, so it is a
@@ -1335,9 +1414,23 @@ fn missing_or_ambiguous_announcement_date_fails_closed() {
         },
     )
     .unwrap();
-    let error = assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations)
-        .unwrap_err()
-        .to_string();
+    // The publication date is now verified when the citation is constructed.
+    let error = Citation::from_store(
+        &raw,
+        &mut NoopPdf,
+        CitationInput {
+            fact_source: source.into(),
+            field: "listing_date".into(),
+            announcement_id: source.into(),
+            page: 1,
+            raw_sha256: hash,
+            excerpt: "上市日期：2023-01-01".into(),
+            verified_by: "synthetic-reviewer".into(),
+            verified_at: "2026-01-01T00:00:00Z".into(),
+        },
+    )
+    .unwrap_err()
+    .to_string();
     assert!(error.contains("ambiguous announcement dates"), "{error}");
 }
 
@@ -1773,6 +1866,7 @@ fn assembled_input_matches_an_equivalent_handwritten_input() {
             }],
             identity_start: Some(d(1)),
             identity_end_exclusive: None,
+            identity_available_from: None,
             code_table_first_seen: None,
             code_table_last_seen: None,
             code_table_exit_date: None,

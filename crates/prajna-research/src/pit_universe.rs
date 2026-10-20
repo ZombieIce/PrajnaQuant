@@ -283,6 +283,13 @@ pub struct Lifecycle {
     pub identity_start: Option<NaiveDate>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity_end_exclusive: Option<NaiveDate>,
+    /// First Session on which this identity may be used as a physical price
+    /// identity. A legal-name change keeps its effective `identity_start` for
+    /// the official boundary but sets this to the first close after the rename
+    /// announcement, so Bars before the change is knowable are not attributed to
+    /// the successor (P6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_available_from: Option<NaiveDate>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_table_first_seen: Option<NaiveDate>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -311,37 +318,16 @@ impl Lifecycle {
             .map_err(|e| error(e.to_string()))
     }
     fn contains(&self, date: NaiveDate) -> bool {
-        date >= self.listing.effective_date.max(self.identity_start())
+        let start = self.listing.effective_date.max(self.identity_start()).max(
+            self.identity_available_from
+                .unwrap_or(self.listing.effective_date),
+        );
+        date >= start
             && self.identity_end_exclusive.is_none_or(|end| date < end)
             && self
                 .termination
                 .as_ref()
                 .is_none_or(|end| date < end.effective_date)
-    }
-}
-
-/// The official lifetime end used by fixed-list membership and UNKNOWN
-/// coverage: the official termination or the next same-code identity's official
-/// listing, whichever is earlier. The physical TDX `identity_end_exclusive` is
-/// not a legal end.
-pub(crate) fn official_end(life: &Lifecycle, lifecycles: &[Lifecycle]) -> Option<NaiveDate> {
-    let own_start = life.identity_start.unwrap_or(life.listing.effective_date);
-    let successor_listing = lifecycles
-        .iter()
-        .filter(|other| {
-            other.native_symbol == life.native_symbol
-                && other.identity_start.unwrap_or(other.listing.effective_date) > own_start
-        })
-        .map(|other| other.listing.effective_date)
-        .min();
-    match (
-        life.termination.as_ref().map(|end| end.effective_date),
-        successor_listing,
-    ) {
-        (Some(termination), Some(successor)) => Some(termination.min(successor)),
-        (Some(termination), None) => Some(termination),
-        (None, Some(successor)) => Some(successor),
-        (None, None) => None,
     }
 }
 
@@ -889,6 +875,21 @@ impl HistoricalCatalog {
             if !ids.insert(life.instrument_id()?) {
                 return Err(error("duplicate lifecycle identity"));
             }
+            if let Some(available) = life.identity_available_from {
+                if available < life.identity_start() {
+                    return Err(error(format!(
+                        "identity_available_from precedes identity_start at lifecycle {i}"
+                    )));
+                }
+                if life
+                    .identity_end_exclusive
+                    .is_some_and(|end| available >= end)
+                {
+                    return Err(error(format!(
+                        "identity_available_from is outside lifecycle {i}"
+                    )));
+                }
+            }
             if life
                 .termination
                 .as_ref()
@@ -1107,7 +1108,10 @@ impl HistoricalCatalog {
                     .min();
                 prajna_data::LifecycleRange {
                     native_symbol: life.native_symbol.clone(),
-                    start: life.listing.effective_date.max(life.identity_start()),
+                    start: life.listing.effective_date.max(life.identity_start()).max(
+                        life.identity_available_from
+                            .unwrap_or(life.listing.effective_date),
+                    ),
                     end_exclusive,
                 }
             })
@@ -1146,7 +1150,10 @@ impl HistoricalCatalog {
             if life.native_symbol != native_symbol {
                 return false;
             }
-            let start = life.listing.effective_date.max(life.identity_start());
+            let start = life.listing.effective_date.max(life.identity_start()).max(
+                life.identity_available_from
+                    .unwrap_or(life.listing.effective_date),
+            );
             let next_identity_start = self
                 .input
                 .lifecycles

@@ -14,9 +14,10 @@
 use super::mvp6::{required, strip_whitespace};
 use super::{PdfText, Result};
 use crate::RawStore;
-use chrono::DateTime;
+use chrono::{DateTime, FixedOffset, NaiveDate};
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet};
 
 const CITATION_HEADERS: &[&str] = &[
     "fact_source",
@@ -86,6 +87,11 @@ pub struct Citation {
     excerpt: String,
     verified_by: String,
     verified_at: String,
+    /// Historical announcement date parsed from the frozen Raw's cninfo
+    /// `finalpage/YYYY-MM-DD/` path or matching `announcementTime`. Local
+    /// capture time is never substituted; `None` means the Raw carries no
+    /// unambiguous date.
+    publication_date: Option<NaiveDate>,
 }
 
 impl Citation {
@@ -98,7 +104,7 @@ impl Citation {
         converter: &mut impl PdfText,
         input: CitationInput,
     ) -> Result<Self> {
-        let citation = Self {
+        let mut citation = Self {
             fact_source: input.fact_source,
             field: input.field,
             announcement_id: input.announcement_id,
@@ -107,8 +113,11 @@ impl Citation {
             excerpt: input.excerpt,
             verified_by: input.verified_by,
             verified_at: input.verified_at,
+            publication_date: None,
         };
         citation.verify(store, converter)?;
+        citation.publication_date =
+            publication_from_store(store, &citation.raw_sha256, &citation.announcement_id)?;
         Ok(citation)
     }
 
@@ -142,6 +151,12 @@ impl Citation {
 
     pub fn verified_at(&self) -> &str {
         &self.verified_at
+    }
+
+    /// Historical announcement date of the cited Raw, or `None` when the Raw
+    /// carries no unambiguous cninfo date.
+    pub fn publication_date(&self) -> Option<NaiveDate> {
+        self.publication_date
     }
 
     fn verify(&self, store: &RawStore, converter: &mut impl PdfText) -> Result<()> {
@@ -322,4 +337,81 @@ fn validate_verifier(value: &str) -> Result<()> {
         return Err(format!("verified_by must name the verifier: {value}").into());
     }
     Ok(())
+}
+
+/// Derives the announcement date from frozen Raw provenance, never from the
+/// local capture time or the fact's effective date. An ambiguous Raw fails
+/// closed instead of choosing a date.
+fn publication_from_store(
+    store: &RawStore,
+    raw_sha256: &str,
+    announcement_id: &str,
+) -> Result<Option<NaiveDate>> {
+    let bytes = store
+        .get(raw_sha256)
+        .map_err(|error| format!("cited Raw {raw_sha256} is unavailable: {error}"))?;
+    let mut dates = BTreeSet::new();
+    for record in store
+        .sources(raw_sha256)
+        .map_err(|error| error.to_string())?
+    {
+        if let Some(url) = record.request.get("url").and_then(Value::as_str)
+            && let Some(date) = cninfo_adjunct_date(url)
+        {
+            dates.insert(date);
+        }
+    }
+    if !bytes.starts_with(b"%PDF-")
+        && let Ok(value) = serde_json::from_slice::<Value>(&bytes)
+    {
+        collect_announcement_dates(&value, announcement_id, &mut dates);
+    }
+    match dates.len() {
+        0 => Ok(None),
+        1 => Ok(dates.first().copied()),
+        _ => Err(format!("ambiguous announcement dates for {announcement_id}").into()),
+    }
+}
+
+fn cninfo_adjunct_date(url: &str) -> Option<NaiveDate> {
+    let (_, rest) = url.split_once("finalpage/")?;
+    NaiveDate::parse_from_str(rest.get(..10)?, "%Y-%m-%d").ok()
+}
+
+fn collect_announcement_dates(
+    value: &Value,
+    announcement_id: &str,
+    dates: &mut BTreeSet<NaiveDate>,
+) {
+    match value {
+        Value::Object(object) => {
+            let numeric_id = announcement_id.parse::<i64>().ok();
+            if object.get("announcementId").is_some_and(|id| {
+                id.as_str() == Some(announcement_id)
+                    || numeric_id.is_some_and(|value| id.as_i64() == Some(value))
+            }) && let Some(millis) = object.get("announcementTime").and_then(Value::as_i64)
+                && let Some(date) = shanghai_date(millis)
+            {
+                dates.insert(date);
+            }
+            for value in object.values() {
+                collect_announcement_dates(value, announcement_id, dates);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_announcement_dates(item, announcement_id, dates);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn shanghai_date(millis: i64) -> Option<NaiveDate> {
+    let offset = FixedOffset::east_opt(8 * 3600)?;
+    Some(
+        DateTime::from_timestamp_millis(millis)?
+            .with_timezone(&offset)
+            .date_naive(),
+    )
 }

@@ -59,7 +59,15 @@ optional termination facts, and time-versioned category/index/name statements.
 Each statement has an effective date and `Evidence` (Raw SHA-256, announcement
 identity, page/section locator, historical publication). Evidence is extracted
 from the listing notice, official contract/prospectus or change announcement.
-The caller must not replace publication with local `observed_at`.
+The caller must not replace publication with local `observed_at`. A legal-name
+successor keeps its official `identity_start`/`listing` at the new name's
+effective Session, but sets `identity_available_from` to the first Session on
+which the rename is knowable under P6; `resolve_row`, derived-market cells,
+Normalizer ranges and UNKNOWN coverage start there. The predecessor is **not**
+extended to that point: the accepted `[effective, available_from)` gap is not a
+fixed-list member, is reported as `listing_not_known`/`outside_catalog_lifecycle`,
+and contributes exactly one UNKNOWN coverage cell per Session under the
+predecessor InstrumentId.
 
 For v1, internal ID remains
 `<code>-<listing YYYYMMDD>-<first 48 uppercase contract hash hex>.SZSE`.
@@ -313,7 +321,8 @@ read alongside the Run Spec so the exclusion is auditable.
 
 Synthetic tests cover pre-window and in-window listing, post-termination, code
 reuse, an explicitly declared legal-name change with P6 availability and its
-rejection when unmarked, contract evidence, shared attribute pages, missing
+rejection when unmarked, a publication-later-than-effective rename whose physical
+range starts only when knowable, contract evidence, shared attribute pages, missing
 identity rows, unresolved orgIds, TDX disagreements, secondary evidence
 exclusion, code-table absence, secondary no-presence exclusion,
 official no-presence identities that stay in the

@@ -406,6 +406,18 @@ fn source_record(id: &str) -> SourceRecordInput {
         ingested_by: "cninfo-mvp6-test".into(),
     }
 }
+fn source_record_at(id: &str, published: &str) -> SourceRecordInput {
+    SourceRecordInput {
+        content_type: "text/plain".into(),
+        source_kind: SourceKind::Fixture,
+        source_id: "cninfo".into(),
+        request: json!({
+            "url": format!("https://static.cninfo.com.cn/finalpage/{published}/{id}.PDF")
+        }),
+        observed_at: "synthetic".into(),
+        ingested_by: "cninfo-mvp6-test".into(),
+    }
+}
 const IDENTITY_DOC: &str = "基金代码：159001
 基金管理人登记代码：synthetic-org
 基金简称：合成ETF
@@ -1065,6 +1077,7 @@ fn converted_session_matches_manually_built_inputs() {
             source_announcement_id: "identity".into(),
             source_page: 1,
             change_kind: String::new(),
+            available_from: None,
         }],
         corporate_actions: StructuredCorporateActionsV2 {
             schema: "cninfo_corporateActions_structured_v2".into(),
@@ -1649,7 +1662,10 @@ fn legal_name_change_is_shared_between_the_row_validator_and_the_lifecycle_range
 
     let document = "公告编号：identity2\n基金代码：159001\n基金管理人登记代码：synthetic-org\n基金简称：合成ETF新\n上市日期：2026-01-06\n基金类型：指数基金";
     let hash = store
-        .put(document.as_bytes(), source_record("identity2"))
+        .put(
+            document.as_bytes(),
+            source_record_at("identity2", "2026-01-06"),
+        )
         .unwrap();
     let mut citations = evidence;
     for (field, excerpt) in [
@@ -1674,6 +1690,10 @@ fn legal_name_change_is_shared_between_the_row_validator_and_the_lifecycle_range
     assert_eq!(
         converted.catalog_lifecycles[1].change_kind,
         LEGAL_NAME_CHANGE
+    );
+    assert_eq!(
+        converted.catalog_lifecycles[1].available_from,
+        Some(date("2026-01-07"))
     );
 
     let mut unmarked = f.clone();

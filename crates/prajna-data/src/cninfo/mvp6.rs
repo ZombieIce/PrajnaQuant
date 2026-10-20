@@ -194,6 +194,11 @@ pub struct CatalogLifecycle {
     /// when set so existing facts-session JSON stays unchanged.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub change_kind: String,
+    /// First Session on which a legal-name change is knowable (P6). The
+    /// successor's `listing_date` remains the new name's effective Session;
+    /// the physical range starts here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available_from: Option<NaiveDate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
