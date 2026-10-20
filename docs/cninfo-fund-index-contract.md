@@ -24,7 +24,7 @@ cargo run -p prajna-data --bin prajna-cninfo --locked --offline -- \
 
 先分页查询 `hisAnnouncement/query` 的 `column=fund`、声明日期窗口，按公告 ID 去重，保留 158xxx/159xxx 的管理人 orgId。候选集与发现的深市 ETF 代码取并集；已终止/没有 orgId 的候选仍留在报告中，不使用 `topSearch`。每个 `(code, orgId)` 再以 `stock=code,orgId` 查询，核对证券及管理人身份。
 
-每个查询验证连续页号、稳定声明总数、唯一 ID 总数相等；同 ID 内容矛盾拒绝。重叠页可去重，但不能用请求行数代替唯一 ID 总数。提前结束、空页但未达总数、数量变化、非法响应和安全页数上限均标 unresolved。真实接口的 `totalpages` 不可靠：单页总数小于 `pageSize` 时返回 0，存在第二页时仍可能返回 1，也可能与 `hasMore` 不一致；因此完整性以稳定的 `totalAnnouncement` 与去重后的唯一 ID 数是否相等为准，`totalpages`/`hasMore` 只作为是否继续翻页的提示，不因页数声明不一致直接拒绝仍能凑齐总数的响应。这里只证明本次响应的一致性，不能证明公告全集或来源正确。不同 orgId 不自动解释为代码复用，也不合并生命周期。
+每个查询验证连续页号、稳定声明总数、唯一 ID 总数相等；同 ID 内容矛盾拒绝。重叠页可去重，但不能用请求行数代替唯一 ID 总数。提前结束、空页但未达总数、数量变化、非法响应和安全页数上限均标 unresolved。真实接口的 `totalpages` 不可靠：单页总数小于 `pageSize` 时返回 0，存在第二页时仍可能返回 1，也可能与 `hasMore` 不一致；MVP-6 固定名单路径因此以稳定的 `totalAnnouncement` 与去重后的唯一 ID 数是否相等为准，`totalpages`/`hasMore` 只作为是否继续翻页的提示，不因页数声明不一致直接拒绝仍能凑齐总数的响应。既有 `Collector::collect` 走 `PageSet::strict`，保留原来的声明页数冲突拒绝，不让本修订改变旧采集语义。这里只证明本次响应的一致性，不能证明公告全集或来源正确。不同 orgId 不自动解释为代码复用，也不合并生命周期。
 
 `FundIndex.unknown` 按基金/公告列出 orgId、全称、查询、附件或字段缺口；`IndexDataset.unknown` 保留发现阶段失败。下游必须检查数据集与基金缺口，再按字段和期间处理；`require_usable()` 仅检查索引覆盖缺口，不是交易可用性或完整总回报许可。
 

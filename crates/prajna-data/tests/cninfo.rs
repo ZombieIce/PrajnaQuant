@@ -425,6 +425,31 @@ fn pagination_uses_has_more_and_unique_totals_over_unreliable_page_counts() {
     assert!(!pages.needs_more());
     assert_eq!(pages.finish().unwrap().0.len(), 1);
 
+    // The legacy collector keeps the strict page-count contract, including
+    // the single-page `totalpages: 0` rejection that the MVP-6 path relaxed.
+    let mut single: Value = serde_json::from_slice(&page(1, vec![row.clone()])).unwrap();
+    single["totalpages"] = json!(0);
+    single["hasMore"] = json!(false);
+    assert!(
+        PageSet::strict()
+            .push(1, &serde_json::to_vec(&single).unwrap())
+            .is_err()
+    );
+    PageSet::default()
+        .push(1, &serde_json::to_vec(&single).unwrap())
+        .unwrap();
+    let mut conflict: Value = serde_json::from_slice(&page(2, vec![row])).unwrap();
+    conflict["totalpages"] = json!(1);
+    conflict["hasMore"] = json!(true);
+    assert!(
+        PageSet::strict()
+            .push(1, &serde_json::to_vec(&conflict).unwrap())
+            .is_err()
+    );
+    PageSet::default()
+        .push(1, &serde_json::to_vec(&conflict).unwrap())
+        .unwrap();
+
     // A page that claims more results while containing none still fails.
     let mut empty = first.clone();
     empty["announcements"] = json!([]);

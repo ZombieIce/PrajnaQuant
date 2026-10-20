@@ -66,6 +66,10 @@ pub struct Announcement {
 
 /// One query's complete page sequence. Changing totals, conflicting IDs and
 /// missing pages fail closed; overlaps are deduplicated by announcement ID.
+///
+/// The default (MVP-6 fixed-list) mode trusts the stable total and unique IDs
+/// over cninfo's unreliable `totalpages`/`hasMore`. The legacy `collect` path
+/// opts into [`PageSet::strict`] to preserve its published behavior.
 #[derive(Default)]
 pub struct PageSet {
     total: Option<usize>,
@@ -75,8 +79,17 @@ pub struct PageSet {
     empty_page: bool,
     items: BTreeMap<String, Announcement>,
     raw: BTreeSet<String>,
+    strict_page_counts: bool,
 }
 impl PageSet {
+    /// Keeps the pre-MVP-6 page-count contract used by `Collector::collect`.
+    pub fn strict() -> Self {
+        Self {
+            strict_page_counts: true,
+            ..Self::default()
+        }
+    }
+
     pub fn push(&mut self, page: usize, bytes: &[u8]) -> Result<()> {
         if page != self.next + 1 {
             return Err("non-contiguous pages".into());
@@ -103,6 +116,24 @@ impl PageSet {
             .get("hasMore")
             .map(|v| v.as_bool().ok_or("invalid hasMore"))
             .transpose()?;
+        if self.strict_page_counts {
+            if self
+                .declared_pages
+                .zip(declared_pages)
+                .is_some_and(|(a, b)| a != b)
+            {
+                return Err("changing page count".into());
+            }
+            if let Some(pages) = declared_pages.or(self.declared_pages) {
+                if (pages == 0 && total != 0)
+                    || (pages != 0 && page > pages)
+                    || (has_more == Some(true) && page >= pages)
+                    || (has_more == Some(false) && page < pages)
+                {
+                    return Err("conflicting pagination declarations".into());
+                }
+            }
+        }
         // cninfo's `totalpages` is not authoritative: it is 0 for a single page
         // whose total is below the page size, 1 even when a second page exists,
         // and may disagree with `hasMore`. Completeness is therefore decided by
