@@ -264,6 +264,46 @@ fn single_page_with_zero_total_pages_is_a_complete_segment() {
 }
 
 #[test]
+fn complete_fixed_segment_stops_before_stale_has_more_can_fetch_an_empty_page() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut collector, requests) = make_collector(
+        vec![
+            top(json!([{"code":"159001","orgId":"synthetic-org"}])),
+            json_reply(json!({
+                "totalAnnouncement":2, "totalpages":3, "hasMore":true,
+                "announcements":[ann("one", "甲类日常公告")]
+            })),
+            json_reply(json!({
+                "totalAnnouncement":2, "totalpages":3, "hasMore":true,
+                "announcements":[ann("one", "甲类日常公告"), ann("two", "乙类日常公告")]
+            })),
+            json_reply(json!({
+                "totalAnnouncement":2, "totalpages":3, "hasMore":true, "announcements":[]
+            })),
+        ],
+        dir.path(),
+    );
+    let result = collector.collect_fixed_list(&[candidate()], &BTreeSet::new(), &mut NoopPdf);
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 3); // topSearch + the two pages that reach the total
+    assert_eq!(requests[2].form["pageNum"], "2");
+    let announcements = &result.announcements[&("159001".into(), "synthetic-org".into())];
+    assert_eq!(
+        announcements
+            .iter()
+            .map(|a| a.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["one", "two"]
+    );
+    assert!(
+        !result
+            .unresolved
+            .iter()
+            .any(|s| s.contains("pagination_incomplete"))
+    );
+}
+
+#[test]
 fn fixed_list_access_denial_stops_source_before_short_name_fallback() {
     let dir = tempfile::tempdir().unwrap();
     let denied = HttpReply {

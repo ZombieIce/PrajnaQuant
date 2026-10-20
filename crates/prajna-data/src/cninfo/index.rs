@@ -134,15 +134,10 @@ impl PageSet {
                 }
             }
         }
-        // cninfo's `totalpages` is not authoritative: it is 0 for a single page
-        // whose total is below the page size, 1 even when a second page exists,
-        // and may disagree with `hasMore`. Completeness is therefore decided by
-        // the stable `totalAnnouncement` and the unique announcement IDs at
-        // `finish`; `hasMore` only drives whether another page is requested.
-        // Declared page counts are retained for the safety `needs_more` hint
-        // but never reject a response whose unique rows can still reach the
-        // declared total.
+        // An empty page cannot invalidate a complete MVP-6 segment. Legacy
+        // mode retains its declaration checks even after reaching the total.
         if items.is_empty()
+            && (self.strict_page_counts || self.items.len() < total)
             && (has_more == Some(true)
                 || declared_pages
                     .or(self.declared_pages)
@@ -195,6 +190,9 @@ impl PageSet {
         Ok(())
     }
     pub fn needs_more(&self) -> bool {
+        if !self.strict_page_counts && self.total.is_some_and(|n| self.items.len() >= n) {
+            return false;
+        }
         if self.has_more == Some(false) || self.empty_page {
             return false;
         }

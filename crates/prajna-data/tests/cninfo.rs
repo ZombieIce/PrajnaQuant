@@ -377,21 +377,23 @@ fn raw_persistence_failure_stops_all_further_requests() {
 }
 
 #[test]
-fn pagination_uses_has_more_and_unique_totals_over_unreliable_page_counts() {
+fn pagination_uses_unique_totals_over_unreliable_page_counts() {
     let row = announcement("a", "158001", json!("manager"), &title());
     let mut first: Value = serde_json::from_slice(&page(1, vec![row.clone()])).unwrap();
     first["hasMore"] = json!(true);
     first["totalpages"] = json!(2);
-    let mut second = first.clone();
-    second["hasMore"] = json!(false);
     let mut pages = PageSet::default();
     pages.push(1, &serde_json::to_vec(&first).unwrap()).unwrap();
-    assert!(pages.needs_more());
-    pages
-        .push(2, &serde_json::to_vec(&second).unwrap())
-        .unwrap();
     assert!(!pages.needs_more());
     assert_eq!(pages.finish().unwrap().0.len(), 1);
+
+    // Legacy mode still follows declared pages even after reaching the total.
+    let mut legacy = PageSet::strict();
+    legacy
+        .push(1, &serde_json::to_vec(&first).unwrap())
+        .unwrap();
+    assert!(legacy.needs_more());
+    assert!(legacy.finish().is_err());
 
     // cninfo reports `totalpages: 1` while a second page exists. The stable
     // total and the unique announcement IDs decide completeness, so the
@@ -450,7 +452,7 @@ fn pagination_uses_has_more_and_unique_totals_over_unreliable_page_counts() {
         .push(1, &serde_json::to_vec(&conflict).unwrap())
         .unwrap();
 
-    // A page that claims more results while containing none still fails.
+    // Empty pages cannot invalidate an already complete relaxed segment.
     let mut empty = first.clone();
     empty["announcements"] = json!([]);
     empty["hasMore"] = json!(true);
@@ -460,11 +462,32 @@ fn pagination_uses_has_more_and_unique_totals_over_unreliable_page_counts() {
     premature
         .push(1, &serde_json::to_vec(&first).unwrap())
         .unwrap();
+    assert!(!premature.needs_more());
+    premature
+        .push(2, &serde_json::to_vec(&empty).unwrap())
+        .unwrap();
+    assert_eq!(premature.finish().unwrap().0.len(), 1);
+
+    // An actually short segment still fails, including empty zero-progress pages.
+    first["totalAnnouncement"] = json!(2);
+    empty["totalAnnouncement"] = json!(2);
+    let mut incomplete = PageSet::default();
+    incomplete
+        .push(1, &serde_json::to_vec(&first).unwrap())
+        .unwrap();
+    assert!(incomplete.needs_more());
     assert!(
-        premature
+        incomplete
             .push(2, &serde_json::to_vec(&empty).unwrap())
             .is_err()
     );
+
+    // A zero-total query is complete even if both pagination hints claim more.
+    empty["totalAnnouncement"] = json!(0);
+    let mut zero = PageSet::default();
+    zero.push(1, &serde_json::to_vec(&empty).unwrap()).unwrap();
+    assert!(!zero.needs_more());
+    assert!(zero.finish().unwrap().0.is_empty());
 }
 
 #[test]
