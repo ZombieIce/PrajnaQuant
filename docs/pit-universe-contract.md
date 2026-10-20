@@ -233,10 +233,11 @@ an evidenced legal-name change, and that successor row must declare
 unmarked successors remain an overlapping-lifecycle error in both paths, and
 `szse-etf-frozen@4` ends the preceding normalized range at the declared change
 date. A row whose lifecycle spans an un-evidenced prior run is excluded and
-reported rather than joined to another identity. A **secondary-evidence** row
-with no code-table presence is excluded (`secondary_code_table_absent`) because
-P27-7 makes the code table part of its corroboration; an **official-evidence**
-no-presence identity is kept with UNKNOWN coverage (see below). Pre-window
+reported rather than joined to another identity. Without a code-table presence,
+an uncorroborated **secondary-evidence** lifecycle is excluded because P27-7
+makes the code table part of its corroboration; the **official-evidence**
+lifecycles for the same reused code are kept with UNKNOWN coverage, and a code
+with no official row is excluded as `secondary_code_table_absent`. Pre-window
 listings are supported; a pre-window sequence of multiple
 identity rows is not representable and is rejected. The v2 builder treats the
 earliest known legal name as the initial identity, so a first attribute whose
@@ -295,9 +296,11 @@ code stays in the fixed list and that Session is UNKNOWN. An identity with
 official dates but no TDX code-table presence at all stays in the official
 lifetime: it is reported as `code_table_absent` (unresolved), the Catalog
 discloses `lifecycle_without_code_table_identity`, and the fixed list keeps the
-code with UNKNOWN coverage. A **secondary-evidence** identity with no TDX
-presence is excluded instead (`secondary_code_table_absent`), because the code
-table is part of its corroboration under P27-7. The UNKNOWN coverage denominator uses the legal
+code with UNKNOWN coverage. An uncorroborated **secondary-evidence** lifecycle
+with no TDX presence is excluded instead, because the code table is part of its
+corroboration under P27-7; the official lifecycle for the same reused code stays
+in the fixed list, and a code with no official row is excluded as
+`secondary_code_table_absent`. The UNKNOWN coverage denominator uses the legal
 lifetime: the official listing date (not `identity_start`) starts it, and it
 ends at the official termination or the next same-code identity boundary, so
 Sessions missing from the TDX code table still count as UNKNOWN and are not

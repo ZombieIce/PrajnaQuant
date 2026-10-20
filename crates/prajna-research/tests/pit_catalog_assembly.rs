@@ -899,6 +899,77 @@ fn secondary_identity_without_code_table_presence_is_excluded() {
 }
 
 #[test]
+fn mixed_official_and_secondary_no_presence_keeps_the_official_lifecycle() {
+    // 159560 has an official predecessor (S1-S5) and a secondary successor
+    // (S6+) but no TDX presence at all. The secondary lifecycle is not
+    // corroborated and is excluded; the official predecessor must remain a
+    // fixed-list member through its own official lifetime.
+    let world = world(
+        &[
+            row("159919", "合成ETF", 1, None, 1, "", "official"),
+            row("159560", "合成中证500ETF-A", 1, Some(5), 1, "", "official"),
+            row("159560", "合成中证500ETF-B", 6, None, 5, "", "secondary"),
+        ],
+        &[
+            (1, &["159919"]),
+            (2, &["159919"]),
+            (3, &["159919"]),
+            (4, &["159919"]),
+            (5, &["159919"]),
+            (6, &["159919"]),
+        ],
+        &[("159919", &[1, 2, 3, 4, 5, 6])],
+    );
+    let assembly =
+        assemble_mvp6_catalog(&world.root, &world.dsv, &world.facts, &world.citations).unwrap();
+    assert!(assembly.report.included_codes.contains("159560"));
+    assert!(!assembly.report.excluded_codes.contains_key("159560"));
+    assert!(
+        !assembly
+            .catalog
+            .coverage_gaps()
+            .contains("mvp6_excluded:159560:secondary_code_table_absent")
+    );
+    assert!(assembly.report.differences.iter().any(|difference| {
+        difference.code == "159560"
+            && difference.evidence_level == Some(EvidenceLevel::Official)
+            && difference.kind == IdentityDifferenceKind::CodeTableAbsent
+            && difference.resolution == IdentityDifferenceResolution::Unresolved
+    }));
+    assert!(assembly.report.differences.iter().any(|difference| {
+        difference.code == "159560"
+            && difference.evidence_level == Some(EvidenceLevel::Secondary)
+            && difference.kind == IdentityDifferenceKind::CodeTableAbsent
+            && difference.resolution == IdentityDifferenceResolution::Excluded
+    }));
+    let fixed = mvp6_fixed();
+    let official = assembly.catalog.fixed_universe(d(3), &fixed).unwrap();
+    assert!(
+        official
+            .members
+            .iter()
+            .any(|member| member.symbol().starts_with("159560"))
+    );
+    assert!(
+        official
+            .run_spec
+            .fixed_list_exclusions
+            .as_ref()
+            .unwrap()
+            .get("159560")
+            .is_none()
+    );
+    let successor = assembly.catalog.fixed_universe(d(6), &fixed).unwrap();
+    assert!(
+        !successor
+            .members
+            .iter()
+            .any(|member| member.symbol().starts_with("159560")),
+        "the unsupported secondary successor lifecycle is not a member"
+    );
+}
+
+#[test]
 fn termination_after_the_covered_window_is_omitted() {
     let world = world(
         &[row("159919", "合成ETF", 1, Some(5), 1, "", "official")],

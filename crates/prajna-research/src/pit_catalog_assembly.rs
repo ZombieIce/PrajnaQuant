@@ -663,34 +663,38 @@ fn plan(v4: &V4Data, seeds: &[IdentitySeed]) -> Result<Plan> {
         let runs = presence_runs(v4, code);
         if runs.is_empty() {
             // P27-7 makes a consistent TDX code table part of secondary
-            // evidence. Without it the secondary row is not corroborated and
-            // must not become a fixed-universe member.
-            if rows
+            // evidence. Without it a secondary row is not corroborated and must
+            // not become a fixed-universe member. Official rows stand on their
+            // own, so a reused code keeps its official lifecycle while only the
+            // unsupported secondary row is excluded.
+            let official = rows
                 .iter()
-                .any(|row| row.evidence_level == EvidenceLevel::Secondary)
-            {
-                for row in &rows {
-                    differences.push(IdentityDifference {
-                        code: code.clone(),
-                        kind: IdentityDifferenceKind::CodeTableAbsent,
-                        expected_date: Some(row.listing),
-                        observed_date: None,
-                        evidence_level: Some(row.evidence_level),
-                        resolution: IdentityDifferenceResolution::Excluded,
-                    });
-                }
+                .copied()
+                .filter(|row| row.evidence_level == EvidenceLevel::Official)
+                .collect::<Vec<_>>();
+            let secondary = rows
+                .iter()
+                .copied()
+                .filter(|row| row.evidence_level == EvidenceLevel::Secondary)
+                .collect::<Vec<_>>();
+            for row in &secondary {
+                differences.push(IdentityDifference {
+                    code: code.clone(),
+                    kind: IdentityDifferenceKind::CodeTableAbsent,
+                    expected_date: Some(row.listing),
+                    observed_date: None,
+                    evidence_level: Some(row.evidence_level),
+                    resolution: IdentityDifferenceResolution::Excluded,
+                });
+            }
+            if official.is_empty() {
                 excluded.insert(code.clone(), "secondary_code_table_absent".to_owned());
                 notes.push(format!(
                     "{code}: secondary identity has no TDX code-table presence and is not corroborated"
                 ));
                 continue;
             }
-            // An official identity stands on its own. This is missing market
-            // evidence, not evidence that the ETF is outside the official
-            // lifetime: keep it as a fixed-list member with an empty physical
-            // price lifecycle, report the gap, and let the coverage layer count
-            // the lifetime as UNKNOWN (P27-3/P27-6).
-            for row in &rows {
+            for row in &official {
                 differences.push(IdentityDifference {
                     code: code.clone(),
                     kind: IdentityDifferenceKind::CodeTableAbsent,
@@ -712,9 +716,15 @@ fn plan(v4: &V4Data, seeds: &[IdentitySeed]) -> Result<Plan> {
                     has_presence: false,
                 });
             }
-            notes.push(format!(
-                "{code}: identity row exists but the v4 code table never contains the code; the official lifetime remains as UNKNOWN"
-            ));
+            if secondary.is_empty() {
+                notes.push(format!(
+                    "{code}: identity row exists but the v4 code table never contains the code; the official lifetime remains as UNKNOWN"
+                ));
+            } else {
+                notes.push(format!(
+                    "{code}: unsupported secondary lifecycle row(s) excluded; the official lifetime remains as UNKNOWN"
+                ));
+            }
             continue;
         }
         for row in &rows {
@@ -1457,6 +1467,8 @@ const EQUITY_CATEGORY_TOKENS: &[&str] = &[
     "股票型",
     "股票基金",
     "股票型基金",
+    "equity-index-etf",
+    "cross-border-index-etf",
 ];
 
 fn fund_category(value: &str) -> FundCategory {
