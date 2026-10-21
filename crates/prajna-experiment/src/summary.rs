@@ -322,6 +322,7 @@ pub(crate) fn summarize_fast(
         corporate_action_coverage: result.corporate_action_coverage.clone(),
         corporate_action_completeness: result.corporate_action_completeness.clone(),
         corporate_action_ledger: result.corporate_action_ledger.clone(),
+        terminal_settlements: result.terminal_settlements.clone(),
     };
     let mut summary = summarize(&projection, sessions_per_year);
     summary.pending_at_end = pending || !result.pending_risk_exits.is_empty();
@@ -376,6 +377,7 @@ mod tests {
             corporate_action_coverage: Vec::new(),
             corporate_action_completeness: CorporateActionCompleteness::default(),
             corporate_action_ledger: Vec::new(),
+            terminal_settlements: Vec::new(),
         }
     }
 

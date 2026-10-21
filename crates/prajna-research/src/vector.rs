@@ -19,10 +19,12 @@ use crate::{
     fast_event::{FastEventCosts, Marks, PriceField},
     parity_sizing::{ParityPlan, ParitySizingState, target_plan},
     strategy::{Decision, ExecutionEvent, ExecutionState, UnfilledEntry, execution_decimal},
+    terminal_settlement::{TerminalSettlementEntry, TerminalSettlementSchedule},
 };
 
 const RETURN_TOLERANCE: f64 = 1e-12;
 pub const CORPORATE_ACTION_SEMANTIC_VERSION: &str = "vector@2";
+pub const TERMINAL_SETTLEMENT_ENGINE_VERSION: &str = "vector@3";
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct VectorCosts {
@@ -60,6 +62,8 @@ pub struct VectorResult {
     pub corporate_action_completeness: CorporateActionCompleteness,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub corporate_action_ledger: Vec<CorporateActionLedgerEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terminal_settlements: Vec<TerminalSettlementEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -189,6 +193,7 @@ pub fn run_vector(
         None,
         None,
         None,
+        None,
     )
 }
 
@@ -223,6 +228,7 @@ pub fn run_vector_with_policy(
         Some(&mut generate),
         None,
         None,
+        None,
     )
 }
 
@@ -247,6 +253,7 @@ pub fn run_vector_pit(
         AvailabilityAssumption::None,
         None,
         Some((market, risk, initial_capital)),
+        None,
         None,
     )
 }
@@ -274,6 +281,35 @@ pub fn run_vector_pit_with_actions(
         None,
         Some((market, risk, initial_capital)),
         Some(actions),
+        None,
+    )
+}
+
+pub fn run_vector_pit_with_terminal_settlement(
+    panel: &Panel,
+    decisions: &[Decision],
+    market: &crate::etf_market::DerivedMarket,
+    risk: &crate::pit_strategy::RiskSignals,
+    costs: &VectorCosts,
+    initial_capital: Notional,
+    actions: Option<&CorporateActionSchedule>,
+) -> Result<VectorResult, VectorError> {
+    if initial_capital <= Notional::ZERO {
+        return Err(invalid_input("PIT initial_capital must be positive"));
+    }
+    crate::pit_strategy::validate_execution_panel(panel, market)
+        .map_err(|e| invalid_input(e.to_string()))?;
+    let schedule = TerminalSettlementSchedule::from_market(market, panel).map_err(invalid_input)?;
+    run_vector_inner(
+        panel,
+        decisions,
+        &[],
+        costs,
+        AvailabilityAssumption::None,
+        None,
+        Some((market, risk, initial_capital)),
+        actions,
+        Some(&schedule),
     )
 }
 
@@ -433,18 +469,25 @@ fn run_vector_inner(
         Notional,
     )>,
     actions: Option<&CorporateActionSchedule>,
+    terminal_settlement: Option<&TerminalSettlementSchedule>,
 ) -> Result<VectorResult, VectorError> {
     validate_costs(costs)?;
-    if actions.is_some() && pit.is_none() {
+    if (actions.is_some() || terminal_settlement.is_some()) && pit.is_none() {
         return Err(invalid_input(
-            "corporate actions require the PIT Vector Engine entry point",
+            "PIT ledger extensions require the PIT Vector Engine entry point",
         ));
     }
     let mut action_processor = actions
         .map(|actions| {
-            CorporateActionProcessor::new(actions, panel).map_err(|e| invalid_input(e.to_string()))
+            let processor = if terminal_settlement.is_some() {
+                CorporateActionProcessor::new_ignoring_liquidations(actions, panel)
+            } else {
+                CorporateActionProcessor::new(actions, panel)
+            };
+            processor.map_err(|e| invalid_input(e.to_string()))
         })
         .transpose()?;
+    let ledger_mode = action_processor.is_some() || terminal_settlement.is_some();
     let prices = read_prices(panel)?;
     let decision_indices = index_decisions(panel, decisions)?;
     let event_indices = index_events(panel, events)?;
@@ -486,12 +529,14 @@ fn run_vector_inner(
     let mut latest_target_weights = BTreeMap::new();
     let mut nav = 1.0;
     let mut result_sessions = Vec::with_capacity(panel.sessions.len());
+    let mut terminal_settlements = Vec::new();
     let mut result_executions = Vec::new();
     let mut risk_exits = Vec::new();
     let mut pit_state = pit.map(|_| ExecutionState::new(UnfilledEntry::Skip));
     let mut sizing_state = pit.map(|(_, _, capital)| ParitySizingState::new(capital));
     let sizing_costs = pit.map(|_| monetary_costs(costs)).transpose()?;
     let mut decimal_marks = Marks::default();
+    let mut terminal_close_prices = BTreeMap::new();
 
     for (session_index, session) in panel.sessions.iter().enumerate() {
         let mut risk_turnover = 0.0;
@@ -763,13 +808,24 @@ fn run_vector_inner(
         turnover = risk_turnover + turnover * (1.0 - risk_cost);
         cost = risk_cost + cost * (1.0 - risk_cost);
         let weights_after_execution = weights.clone();
-        let portfolio_components = if action_processor.is_some() {
+        let portfolio_components = if ledger_mode {
             Some(vector_components(
                 sizing_state
                     .as_ref()
                     .ok_or_else(|| invalid_input("missing PIT sizing state"))?,
                 &decimal_marks.prices,
             )?)
+        } else {
+            None
+        };
+        let terminal_open_equity = if terminal_settlement.is_some() {
+            Some(
+                sizing_state
+                    .as_ref()
+                    .ok_or_else(|| invalid_input("missing PIT sizing state"))?
+                    .equity(&decimal_marks.prices)
+                    .map_err(sizing_error)?,
+            )
         } else {
             None
         };
@@ -785,12 +841,57 @@ fn run_vector_inner(
             }
             processor.record(transitions);
         }
-        let portfolio_components_close = if action_processor.is_some() {
+        let mut close_marks = Marks::default();
+        let mut close_prices = decimal_marks.prices.clone();
+        if ledger_mode {
+            close_marks
+                .update(panel, session_index, PriceField::Close)
+                .map_err(sizing_error)?;
+            close_prices.extend(close_marks.prices.clone());
+            if terminal_settlement.is_some() {
+                terminal_close_prices.extend(close_marks.prices.clone());
+                close_prices.clone_from(&terminal_close_prices);
+            }
+        }
+        if let Some(schedule) = terminal_settlement {
+            let book = sizing_state
+                .as_mut()
+                .ok_or_else(|| invalid_input("missing PIT sizing state"))?;
+            let fresh_close = close_marks.fresh_ids_on(session.session_date);
+            let instruments = schedule
+                .instruments(session.session_date)
+                .cloned()
+                .unwrap_or_default();
+            for instrument in instruments {
+                if let Some(quantity) = book.positions.remove(&instrument) {
+                    if !fresh_close.contains(&instrument) {
+                        return Err(invalid_input(format!(
+                            "terminal settlement for {instrument} on {} requires a fresh raw close",
+                            session.session_date
+                        )));
+                    }
+                    let price = close_marks.prices[&instrument];
+                    let proceeds = crate::terminal_settlement::proceeds(quantity, price)
+                        .map_err(invalid_input)?;
+                    book.cash =
+                        crate::fast_event::add(book.cash, proceeds).map_err(sizing_error)?;
+                    terminal_settlements.push(TerminalSettlementEntry {
+                        session_date: session.session_date,
+                        portfolio_id: None,
+                        instrument_id: instrument,
+                        quantity,
+                        price,
+                        proceeds,
+                    });
+                }
+            }
+        }
+        let portfolio_components_close = if ledger_mode {
             Some(vector_components(
                 sizing_state
                     .as_ref()
                     .ok_or_else(|| invalid_input("missing PIT sizing state"))?,
-                &decimal_marks.prices,
+                &close_prices,
             )?)
         } else {
             None
@@ -799,35 +900,41 @@ fn run_vector_inner(
         let mut price_relatives = BTreeMap::new();
         let mut action_next_weights = None;
         if let Some(next_marks) = marks_by_session.get(session_index + 1) {
-            if let Some(processor) = &action_processor {
+            if ledger_mode {
                 let book = sizing_state
                     .as_ref()
                     .ok_or_else(|| invalid_input("missing PIT sizing state"))?;
-                let current_equity = book.equity(&decimal_marks.prices).map_err(sizing_error)?;
+                let current_equity = if let Some(equity) = terminal_open_equity {
+                    equity
+                } else {
+                    book.equity(&decimal_marks.prices).map_err(sizing_error)?
+                };
                 let next_index = session_index + 1;
                 let mut next_marks = Marks::default();
                 next_marks
                     .update(panel, next_index, PriceField::Open)
                     .map_err(sizing_error)?;
                 let mut next_book = book.clone();
-                let mut next_processor = processor.clone();
                 let next_date = panel.sessions[next_index].session_date;
-                let fresh_prices = next_marks.fresh_ids_on(next_date);
-                let transitions = next_processor
-                    .opening(
-                        next_date,
-                        None,
-                        &next_book.positions,
-                        &next_marks.prices,
-                        &fresh_prices,
-                        false,
-                    )
-                    .map_err(|e| invalid_input(e.to_string()))?;
-                for transition in &transitions {
-                    apply_transition_to_vector(transition, &mut next_book)
-                        .map_err(invalid_input)?;
+                if let Some(processor) = &action_processor {
+                    let mut next_processor = processor.clone();
+                    let fresh_prices = next_marks.fresh_ids_on(next_date);
+                    let transitions = next_processor
+                        .opening(
+                            next_date,
+                            None,
+                            &next_book.positions,
+                            &next_marks.prices,
+                            &fresh_prices,
+                            false,
+                        )
+                        .map_err(|e| invalid_input(e.to_string()))?;
+                    for transition in &transitions {
+                        apply_transition_to_vector(transition, &mut next_book)
+                            .map_err(invalid_input)?;
+                    }
+                    next_processor.record(transitions);
                 }
-                next_processor.record(transitions);
                 let next_equity = next_book.equity(&next_marks.prices).map_err(sizing_error)?;
                 let current = decimal_float(current_equity)?;
                 let next = decimal_float(next_equity)?;
@@ -1047,6 +1154,12 @@ fn run_vector_inner(
                 .into(),
         );
     }
+    if terminal_settlement.is_some() {
+        assumptions.push(
+            "Catalog terminal positions settle at the last in-lifecycle raw Bar close; actual liquidation cash and date are not used."
+                .into(),
+        );
+    }
     Ok(VectorResult {
         pit_initial_capital: pit.map(|(_, _, capital)| capital),
         sessions: result_sessions,
@@ -1064,6 +1177,7 @@ fn run_vector_inner(
         corporate_action_coverage,
         corporate_action_completeness,
         corporate_action_ledger,
+        terminal_settlements,
     })
 }
 

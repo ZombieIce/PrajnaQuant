@@ -42,6 +42,21 @@ const FAST_FULL: [&str; 6] = [
     "fee_settlements",
     "corporate_actions",
 ];
+const FAST_TERMINAL_STANDARD: [&str; 4] = [
+    "account_valuations",
+    "portfolio_valuations",
+    "corporate_actions",
+    "terminal_settlements",
+];
+const FAST_TERMINAL_FULL: [&str; 7] = [
+    "account_valuations",
+    "portfolio_valuations",
+    "orders",
+    "fills",
+    "fee_settlements",
+    "corporate_actions",
+    "terminal_settlements",
+];
 const ACCURATE_STANDARD: [&str; 2] = ["account_valuations", "portfolio_valuations"];
 const ACCURATE_FULL: [&str; 8] = [
     "account_valuations",
@@ -54,6 +69,12 @@ const ACCURATE_FULL: [&str; 8] = [
     "backend_comparisons",
 ];
 const STANDARD_TABLES: [&str; 3] = ["sessions", "executions", "corporate_actions"];
+const TERMINAL_STANDARD_TABLES: [&str; 4] = [
+    "sessions",
+    "executions",
+    "corporate_actions",
+    "terminal_settlements",
+];
 const FULL_TABLES: [&str; 7] = [
     "sessions",
     "executions",
@@ -62,6 +83,16 @@ const FULL_TABLES: [&str; 7] = [
     "weights_after_execution",
     "decisions",
     "pending_at_end",
+];
+const TERMINAL_FULL_TABLES: [&str; 8] = [
+    "sessions",
+    "executions",
+    "corporate_actions",
+    "target_weights",
+    "weights_after_execution",
+    "decisions",
+    "pending_at_end",
+    "terminal_settlements",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -74,15 +105,24 @@ pub enum ResultLevel {
 
 impl ResultLevel {
     fn tables_for(self, run: &RunExecution) -> &'static [&'static str] {
+        let terminal_settlement = run.run_spec.get("terminal_settlement").is_some();
         if run.is_event() {
             match self {
                 Self::Summary => &[],
                 Self::Standard if run.run_spec["engine"]["kind"] == "accurate_event" => {
                     &ACCURATE_STANDARD
                 }
+                Self::Standard if terminal_settlement => &FAST_TERMINAL_STANDARD,
                 Self::Standard => &FAST_STANDARD,
                 Self::Full if run.run_spec["engine"]["kind"] == "accurate_event" => &ACCURATE_FULL,
+                Self::Full if terminal_settlement => &FAST_TERMINAL_FULL,
                 Self::Full => &FAST_FULL,
+            }
+        } else if terminal_settlement {
+            match self {
+                Self::Summary => &[],
+                Self::Standard => &TERMINAL_STANDARD_TABLES,
+                Self::Full => &TERMINAL_FULL_TABLES,
             }
         } else {
             self.tables()
@@ -146,6 +186,7 @@ pub fn read_run_table(
     }
     if table != "summary"
         && !FULL_TABLES.contains(&table)
+        && table != "terminal_settlements"
         && !ACCURATE_FULL.contains(&table)
         && !NOT_PRODUCED_BY_ENGINE.contains(&table)
     {
@@ -1331,6 +1372,14 @@ fn result_rows(
                 rows.push((format!("event|{index:020}"), json_payload(&payload)?));
             }
         }
+        "terminal_settlements" => {
+            for (index, entry) in result.terminal_settlements.iter().enumerate() {
+                let mut payload =
+                    serde_json::to_value(entry).map_err(|error| err(error.to_string()))?;
+                payload["record_type"] = "terminal_settlement".into();
+                rows.push((format!("event|{index:020}"), json_payload(&payload)?));
+            }
+        }
         "sessions" => {
             for session in &result.sessions {
                 let mut payload = serde_json::json!({
@@ -2337,6 +2386,14 @@ fn fast_rows(
                 let mut payload =
                     serde_json::to_value(entry).map_err(|error| err(error.to_string()))?;
                 payload["record_type"] = "corporate_action".into();
+                rows.push((format!("event|{index:020}"), json_payload(&payload)?));
+            }
+        }
+        "terminal_settlements" => {
+            for (index, entry) in result.terminal_settlements.iter().enumerate() {
+                let mut payload =
+                    serde_json::to_value(entry).map_err(|error| err(error.to_string()))?;
+                payload["record_type"] = "terminal_settlement".into();
                 rows.push((format!("event|{index:020}"), json_payload(&payload)?));
             }
         }

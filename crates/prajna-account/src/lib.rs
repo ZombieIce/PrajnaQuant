@@ -365,6 +365,52 @@ impl TradingAccount {
         Ok(quantity)
     }
 
+    /// Convert a terminal position directly to available cash at its final raw close.
+    /// This is a lifecycle accounting event, not an Order, Fill, or receivable.
+    pub fn settle_terminal_position(
+        &mut self,
+        id: VirtualPortfolioId,
+        instrument: &InstrumentId,
+        price: prajna_domain::Price,
+    ) -> Result<(Quantity, Notional), LedgerError> {
+        if instrument.venue() != &self.venue {
+            return Err(LedgerError::WrongVenue);
+        }
+        if price <= prajna_domain::Price::ZERO {
+            return Err(LedgerError::NonPositivePrice);
+        }
+        let mut portfolio = self
+            .portfolios
+            .get(&id)
+            .ok_or(LedgerError::UnknownPortfolio(id))?
+            .clone();
+        let quantity = portfolio
+            .positions
+            .remove(instrument)
+            .ok_or(LedgerError::InsufficientPosition)?;
+        let proceeds = notional(price, quantity)?;
+        portfolio.cash = add(portfolio.cash, proceeds)?;
+        let mut positions = self.positions.clone();
+        update_position(
+            &mut positions,
+            instrument,
+            Quantity::from_mantissa(
+                quantity
+                    .mantissa()
+                    .checked_neg()
+                    .ok_or(FixedPointError::Overflow)?,
+            )?,
+        )?;
+        let cash = add(self.cash, proceeds)?;
+        let mut portfolios = self.portfolios.clone();
+        portfolios.insert(id, portfolio);
+        reconcile(cash, &positions, self.unallocated, &portfolios)?;
+        self.cash = cash;
+        self.positions = positions;
+        self.portfolios = portfolios;
+        Ok((quantity, proceeds))
+    }
+
     /// Atomically charge an F8 fee-only leg. Quantities, Orders and Fills do not change.
     /// A VP/instrument/open key may be settled once; retries cannot double-charge it.
     pub fn apply_fee_settlement(

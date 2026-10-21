@@ -18,10 +18,12 @@ use crate::{
     },
     executable,
     strategy::{Decision, ExecutionEvent, ExecutionState, UnfilledEntry},
+    terminal_settlement::{TerminalSettlementEntry, TerminalSettlementSchedule},
 };
 
 pub const SEMANTIC_VERSION: &str = "fast_event@1";
 pub const CORPORATE_ACTION_SEMANTIC_VERSION: &str = "fast_event@2";
+pub const TERMINAL_SETTLEMENT_ENGINE_VERSION: &str = "fast_event@3";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sizing {
@@ -184,6 +186,7 @@ pub struct FastEventResult {
     pub corporate_action_coverage: Vec<CorporateActionCoverage>,
     pub corporate_action_completeness: CorporateActionCompleteness,
     pub corporate_action_ledger: Vec<CorporateActionLedgerEntry>,
+    pub terminal_settlements: Vec<TerminalSettlementEntry>,
     pub assumptions: Vec<&'static str>,
     pub risk_exits: Vec<(VirtualPortfolioId, crate::pit_strategy::RiskExitAttempt)>,
     pub pending_risk_exits: Vec<(VirtualPortfolioId, InstrumentId)>,
@@ -326,7 +329,7 @@ pub fn run_fast_event(
     config: &FastEventConfig,
     portfolios: &[PortfolioRun],
 ) -> Result<FastEventResult, FastEventError> {
-    run_with_execution(panel, statuses, config, portfolios, None, None, None)
+    run_with_execution(panel, statuses, config, portfolios, None, None, None, None)
 }
 
 pub fn run_fast_event_pit(
@@ -351,6 +354,7 @@ pub fn run_fast_event_pit(
         portfolios,
         None,
         Some((market, risk)),
+        None,
         None,
     )
 }
@@ -379,6 +383,36 @@ pub fn run_fast_event_pit_with_actions(
         None,
         Some((market, risk)),
         Some(actions),
+        None,
+    )
+}
+
+pub fn run_fast_event_pit_with_terminal_settlement(
+    panel: &Panel,
+    market: &crate::etf_market::DerivedMarket,
+    risk: &crate::pit_strategy::RiskSignals,
+    config: &FastEventConfig,
+    portfolios: &[PortfolioRun],
+    actions: Option<&CorporateActionSchedule>,
+) -> Result<FastEventResult, FastEventError> {
+    crate::pit_strategy::validate_execution_panel(panel, market)
+        .map_err(|e| invalid(e.to_string()))?;
+    if portfolios
+        .iter()
+        .any(|p| p.rebalance != Rebalance::FullTarget)
+    {
+        return Err(invalid("PIT requires full_target"));
+    }
+    let schedule = TerminalSettlementSchedule::from_market(market, panel).map_err(invalid)?;
+    run_with_execution(
+        panel,
+        &BTreeMap::new(),
+        config,
+        portfolios,
+        None,
+        Some((market, risk)),
+        actions,
+        Some(&schedule),
     )
 }
 
@@ -420,9 +454,11 @@ pub fn run_lot_with_execution(
         Some(execution),
         None,
         None,
+        None,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_with_execution(
     panel: &Panel,
     statuses: &ExecutionStatusMap,
@@ -434,16 +470,22 @@ fn run_with_execution(
         &crate::pit_strategy::RiskSignals,
     )>,
     actions: Option<&CorporateActionSchedule>,
+    terminal_settlement: Option<&TerminalSettlementSchedule>,
 ) -> Result<FastEventResult, FastEventError> {
     validate(panel, config, portfolios)?;
-    if actions.is_some() && pit.is_none() {
+    if (actions.is_some() || terminal_settlement.is_some()) && pit.is_none() {
         return Err(invalid(
-            "corporate actions require the PIT Engine entry point",
+            "PIT ledger extensions require the PIT Engine entry point",
         ));
     }
     let mut action_processor = actions
         .map(|actions| {
-            CorporateActionProcessor::new(actions, panel).map_err(|e| invalid(e.to_string()))
+            let processor = if terminal_settlement.is_some() {
+                CorporateActionProcessor::new_ignoring_liquidations(actions, panel)
+            } else {
+                CorporateActionProcessor::new(actions, panel)
+            };
+            processor.map_err(|e| invalid(e.to_string()))
         })
         .transpose()?;
     let external_execution = execution.is_some();
@@ -464,6 +506,7 @@ fn run_with_execution(
     let mut attempts = Vec::new();
     let mut fills = Vec::new();
     let mut sizing_adjustments = Vec::new();
+    let mut terminal_settlements = Vec::new();
     let mut risk_exits = Vec::new();
     for (index, session) in panel.sessions.iter().enumerate() {
         open.update(panel, index, PriceField::Open)?;
@@ -824,6 +867,34 @@ fn run_with_execution(
                 action_processor.record(transitions);
             }
         }
+        if let Some(schedule) = terminal_settlement {
+            let fresh_close = close.fresh_ids_on(session.session_date);
+            for portfolio in portfolios {
+                let positions = account.portfolios()[&portfolio.id].positions().clone();
+                for instrument in positions.keys() {
+                    if !schedule.contains(session.session_date, instrument) {
+                        continue;
+                    }
+                    if !fresh_close.contains(instrument) {
+                        return Err(invalid(format!(
+                            "terminal settlement for {instrument} on {} requires a fresh raw close",
+                            session.session_date
+                        )));
+                    }
+                    let price = close.prices[instrument];
+                    let (quantity, proceeds) =
+                        account.settle_terminal_position(portfolio.id, instrument, price)?;
+                    terminal_settlements.push(TerminalSettlementEntry {
+                        session_date: session.session_date,
+                        portfolio_id: Some(portfolio.id),
+                        instrument_id: instrument.clone(),
+                        quantity,
+                        price,
+                        proceeds,
+                    });
+                }
+            }
+        }
         let close_value = account.value(&close.prices)?;
         if let Some(market) = execution.as_deref_mut() {
             market.close(session)?;
@@ -908,8 +979,36 @@ fn run_with_execution(
             Vec::new(),
         )
     };
+    let mut assumptions = if pit.is_some() {
+        vec![
+            "Single Venue, single currency, long-only, unlevered; full market fills.",
+            "Offline PIT Universe/Eligible/Derived Market evidence; not real-market PIT certification.",
+            "Directional opening price limits and persistent Risk Exit; regular blocked sells defer the whole target.",
+            if actions.is_some() {
+                "T+1, live queues and currency-unit rounding are not modeled."
+            } else {
+                "T+1, live queues, currency-unit rounding and corporate actions are not modeled."
+            },
+            "Valid raw bars mark HALTED/UNKNOWN; missing prices carry same-field last prices, never zero.",
+        ]
+    } else {
+        vec![
+            "Single Venue, single currency, long-only, unlevered; full market fills.",
+            "T+1, price limits, currency-unit rounding and corporate actions are not modeled.",
+            "Static synthetic Universe evidence does not establish PIT or dividend total return.",
+            "Valid raw bars mark even HALTED/UNKNOWN instruments; status gates execution only.",
+            "Missing prices carry the last valid price of the same field, never zero.",
+        ]
+    };
+    if terminal_settlement.is_some() {
+        assumptions.push(
+            "Catalog terminal positions settle at the last in-lifecycle raw Bar close; actual liquidation cash and date are not used.",
+        );
+    }
     Ok(FastEventResult {
-        semantic_version: if actions.is_some() {
+        semantic_version: if terminal_settlement.is_some() {
+            TERMINAL_SETTLEMENT_ENGINE_VERSION
+        } else if actions.is_some() {
             CORPORATE_ACTION_SEMANTIC_VERSION
         } else {
             SEMANTIC_VERSION
@@ -928,27 +1027,8 @@ fn run_with_execution(
         corporate_action_coverage,
         corporate_action_completeness,
         corporate_action_ledger,
-        assumptions: if pit.is_some() {
-            vec![
-                "Single Venue, single currency, long-only, unlevered; full market fills.",
-                "Offline PIT Universe/Eligible/Derived Market evidence; not real-market PIT certification.",
-                "Directional opening price limits and persistent Risk Exit; regular blocked sells defer the whole target.",
-                if actions.is_some() {
-                    "T+1, live queues and currency-unit rounding are not modeled."
-                } else {
-                    "T+1, live queues, currency-unit rounding and corporate actions are not modeled."
-                },
-                "Valid raw bars mark HALTED/UNKNOWN; missing prices carry same-field last prices, never zero.",
-            ]
-        } else {
-            vec![
-                "Single Venue, single currency, long-only, unlevered; full market fills.",
-                "T+1, price limits, currency-unit rounding and corporate actions are not modeled.",
-                "Static synthetic Universe evidence does not establish PIT or dividend total return.",
-                "Valid raw bars mark even HALTED/UNKNOWN instruments; status gates execution only.",
-                "Missing prices carry the last valid price of the same field, never zero.",
-            ]
-        },
+        terminal_settlements,
+        assumptions,
     })
 }
 
