@@ -376,8 +376,12 @@ fn date_only_membership_evidence_before_truncated_calendar_is_not_backdated_to_o
         supporting_sources: Vec::new(),
         evidence_level: limit_rules::EvidenceLevel::Primary,
     };
+    let lifecycle_id = input.lifecycles[0].instrument_id().unwrap();
+    let binding = limit_rules::RuleBinding::from_lifecycles(&input.lifecycles, &lifecycle_id)
+        .unwrap()
+        .unwrap();
     let rule = table
-        .rule_for_with_assignments(&instrument_id, date(1), &[assignment])
+        .rule_for_with_assignments(&binding, date(1), &[assignment])
         .unwrap()
         .unwrap();
 
@@ -389,7 +393,7 @@ fn date_only_membership_evidence_before_truncated_calendar_is_not_backdated_to_o
         table
             .category_evidence_available_at(
                 &rule,
-                &instrument_id,
+                &binding,
                 rule.evidence.as_citation().unwrap(),
                 date(1),
                 time(1, 9),
@@ -405,7 +409,7 @@ fn date_only_membership_evidence_before_truncated_calendar_is_not_backdated_to_o
     let available_at = table
         .category_evidence_available_at(
             &rule,
-            &instrument_id,
+            &binding,
             rule.evidence.as_citation().unwrap(),
             date(1),
             time(1, 9),
@@ -1189,6 +1193,37 @@ fn legacy_v1_market_evidence_wire_replays_and_rejects_v2_citations() {
 }
 
 #[test]
+fn v1_category_evidence_wire_omits_the_optional_lifecycle_binding() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (raw, input) = fixture(tmp.path());
+    let cat = HistoricalCatalog::build(input, &raw).unwrap();
+    let evidence = FundCategoryEvidence {
+        instrument_id: "159001.SZSE".parse().unwrap(),
+        fund_category: "szse-fund-default-10pct".into(),
+        assignment_identity: "fund-category-assignment@1:sha256:synthetic".into(),
+        lifecycle: None,
+        document_number: "SYNTHETIC-CATEGORY-LIST".into(),
+        effective_from: date(1),
+        effective_until: None,
+        evidence: LimitRuleEvidence::Raw(cat.input().lifecycles[0].listing.evidence.clone()),
+        supporting_sources: Vec::new(),
+        evidence_level: limit_rules::EvidenceLevel::Primary,
+    };
+    let wire = serde_json::to_value(&evidence).unwrap();
+    // v1 keeps its existing wire shape: the optional binding is omitted.
+    assert!(wire.get("lifecycle").is_none());
+    let decoded: FundCategoryEvidence = serde_json::from_value(wire.clone()).unwrap();
+    assert!(decoded.lifecycle.is_none());
+    let mut with_binding = wire;
+    with_binding["lifecycle"] = serde_json::to_value(
+        limit_rules::LifecycleBinding::from_lifecycle(&cat.input().lifecycles[0]).unwrap(),
+    )
+    .unwrap();
+    let decoded_with: FundCategoryEvidence = serde_json::from_value(with_binding).unwrap();
+    assert!(decoded_with.lifecycle.is_some());
+}
+
+#[test]
 fn v2_rule_with_v1_raw_evidence_is_rejected_at_the_version_boundary() {
     let tmp = tempfile::tempdir().unwrap();
     let (raw, input) = fixture(tmp.path());
@@ -1326,6 +1361,18 @@ fn v2_evidence(catalog: &HistoricalCatalog) -> MarketEvidence {
     for opening in value["openings"].as_array_mut().unwrap() {
         opening["source_independence"] = serde_json::Value::Null;
         opening["reference"] = serde_json::Value::Null;
+        let lifecycle_id: InstrumentId =
+            serde_json::from_value(opening["instrument_id"].clone()).unwrap();
+        let life = catalog
+            .input()
+            .lifecycles
+            .iter()
+            .find(|life| life.instrument_id().as_ref() == Ok(&lifecycle_id))
+            .expect("opening lifecycle");
+        // Public assignments are keyed by the six-digit SZSE code; the Catalog
+        // lifecycle ID is recorded as a separate binding.
+        let public_id: InstrumentId = format!("{}.SZSE", life.native_symbol).parse().unwrap();
+        let binding = limit_rules::LifecycleBinding::from_lifecycle(life).unwrap();
         let mut category_evidence = opening["announcement_coverage"].clone();
         category_evidence["announcement_id"] = serde_json::json!("SYNTHETIC-CATEGORY-LIST");
         category_evidence["locator"] = serde_json::json!("synthetic category-list row");
@@ -1335,7 +1382,7 @@ fn v2_evidence(catalog: &HistoricalCatalog) -> MarketEvidence {
         ))
         .unwrap();
         let category_assignment = limit_rules::FundCategoryAssignment {
-            instrument_id: serde_json::from_value(opening["instrument_id"].clone()).unwrap(),
+            instrument_id: public_id.clone(),
             fund_category: "szse-fund-default-10pct".into(),
             effective_from: NaiveDate::from_ymd_opt(2022, 10, 1).unwrap(),
             effective_until: None,
@@ -1359,7 +1406,8 @@ fn v2_evidence(catalog: &HistoricalCatalog) -> MarketEvidence {
             "fund_category": "szse-fund-default-10pct",
             "category_evidence": {
                 "document_number": "SYNTHETIC-CATEGORY-LIST",
-                "instrument_id": opening["instrument_id"].clone(),
+                "instrument_id": public_id,
+                "lifecycle": binding,
                 "fund_category": "szse-fund-default-10pct",
                 "assignment_identity": category_assignment.identity().unwrap(),
                 "effective_from": "2022-10-01",
@@ -1419,14 +1467,25 @@ fn official_pre_window_rule_sources_are_available_for_the_scoped_period() {
         }],
         evidence_level: limit_rules::EvidenceLevel::Secondary,
     };
+    let lifecycle_id = cat
+        .input()
+        .lifecycles
+        .iter()
+        .find(|life| life.native_symbol == "159001")
+        .unwrap()
+        .instrument_id()
+        .unwrap();
+    let binding = limit_rules::RuleBinding::from_lifecycles(&cat.input().lifecycles, &lifecycle_id)
+        .unwrap()
+        .unwrap();
     let rule = table
-        .rule_for_with_assignments(&instrument_id, date(1), &[assignment])
+        .rule_for_with_assignments(&binding, date(1), &[assignment])
         .unwrap()
         .unwrap();
     let available_at = table
         .rule_evidence_available_at(
             &rule,
-            &instrument_id,
+            &binding,
             &rule.rule_evidence[0],
             date(1),
             time(1, 9),
@@ -1468,6 +1527,94 @@ fn v2_tdx_only_dataset_is_tradable_without_dual_source_claims() {
     );
     let replay = DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, evidence).unwrap();
     assert_eq!(market.version(), replay.version());
+}
+
+#[test]
+fn v2_public_code_rule_binds_to_the_catalog_lifecycle_in_coverage() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (raw, input) = fixture(tmp.path());
+    let cat = HistoricalCatalog::build(input, &raw).unwrap();
+    let hashes = vendor_originals(&raw);
+    let manifest = prajna_data::publish_dataset(
+        tmp.path(),
+        &raw,
+        &NormalizerRegistry::with_builtins(),
+        "szse-etf-frozen",
+        "3",
+        &hashes[..hashes.len() - 1],
+        "2026-10-15T00:00:00Z",
+    )
+    .unwrap();
+    let evidence = v2_evidence(&cat);
+    let market = DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, evidence).unwrap();
+    for opening in &market.evidence().openings {
+        let category = opening
+            .limit_rule
+            .as_ref()
+            .unwrap()
+            .official_rule
+            .as_ref()
+            .unwrap()
+            .category_evidence
+            .as_ref()
+            .unwrap();
+        // The public assignment keeps its six-digit key; the Catalog lifecycle
+        // identity is recorded separately and still binds.
+        let lifecycle = category.lifecycle.as_ref().expect("v2 lifecycle binding");
+        assert_eq!(category.instrument_id.symbol(), lifecycle.native_symbol);
+        assert_ne!(category.instrument_id, lifecycle.instrument_id);
+    }
+    let coverage = crate::mvp6_coverage::evaluate_derived_market(
+        &cat,
+        &market,
+        "synthetic-actions",
+        &BTreeSet::new(),
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(coverage.denominator_cells, 30);
+    assert_eq!(coverage.unknown_cells, 0);
+    assert!(coverage.unknowns.iter().all(|cell| !matches!(
+        cell.reason,
+        crate::mvp6_coverage::UnknownReason::RuleUnknown {
+            reason: crate::mvp6_coverage::RuleUnknownReason::CategoryUnknown
+        }
+    )));
+
+    // P27-20.4: one instrument with no category evidence stays UNKNOWN and does
+    // not abort the other instruments or the coverage report.
+    let mut missing = v2_evidence(&cat);
+    for opening in &mut missing.openings {
+        if opening.instrument_id.symbol().starts_with("159001") {
+            opening.limit_rule = None;
+        }
+    }
+    let market = DerivedMarket::from_dataset(tmp.path(), &manifest.dsv, &cat, missing).unwrap();
+    let coverage = crate::mvp6_coverage::evaluate_derived_market(
+        &cat,
+        &market,
+        "synthetic-actions",
+        &BTreeSet::new(),
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(coverage.unknown_cells, 10);
+    assert!(coverage.unknowns.iter().all(|cell| {
+        cell.instrument_id.symbol().starts_with("159001")
+            && matches!(
+                cell.reason,
+                crate::mvp6_coverage::UnknownReason::RuleUnknown {
+                    reason: crate::mvp6_coverage::RuleUnknownReason::CategoryUnknown
+                }
+            )
+    }));
+    assert!(
+        coverage
+            .instruments
+            .iter()
+            .filter(|instrument| !instrument.native_symbol.starts_with("159001"))
+            .all(|instrument| instrument.unknown_cells == 0)
+    );
 }
 
 #[test]
@@ -1724,6 +1871,7 @@ fn v2_consumes_v4_catalog_lifecycle_boundaries_without_cross_identity_cells() {
     }
     let mut next_life = input.lifecycles[0].clone();
     next_life.identity_start = Some(date(6));
+    next_life.identity_available_from = Some(date(6));
     next_life.listing.effective_date = date(6);
     next_life.attributes[0].effective_date = date(6);
     next_life.attributes[0].legal_name = Some("SYNTHETIC-INDEX B".into());
