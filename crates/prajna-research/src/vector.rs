@@ -843,15 +843,13 @@ fn run_vector_inner(
         }
         let mut close_marks = Marks::default();
         let mut close_prices = decimal_marks.prices.clone();
-        if ledger_mode {
+        if terminal_settlement.is_some() {
             close_marks
                 .update(panel, session_index, PriceField::Close)
                 .map_err(sizing_error)?;
             close_prices.extend(close_marks.prices.clone());
-            if terminal_settlement.is_some() {
-                terminal_close_prices.extend(close_marks.prices.clone());
-                close_prices.clone_from(&terminal_close_prices);
-            }
+            terminal_close_prices.extend(close_marks.prices.clone());
+            close_prices.clone_from(&terminal_close_prices);
         }
         if let Some(schedule) = terminal_settlement {
             let book = sizing_state
