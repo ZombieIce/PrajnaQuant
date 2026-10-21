@@ -110,13 +110,15 @@ jobs:
       - run: cargo clippy -p prajna-research --all-targets --locked -- -D warnings
       - run: cargo test -p prajna-research --locked
       - run: cargo clippy -p prajna-experiment --all-targets --locked -- -D warnings
-      - run: cargo test -p prajna-experiment --locked
-      - name: A16 per-Run research timing regression (no Nautilus required)
-        run: cargo test -p prajna-experiment --features nautilus-integration --example measure_accurate --locked
-
       - uses: actions/setup-python@v5
+        id: setup-python
         with:
           python-version: "3.12"
+      - run: cargo test -p prajna-experiment --locked -- --include-ignored
+        env:
+          PRAJNA_TEST_PYTHON: ${{ steps.setup-python.outputs.python-path }}
+      - name: A16 per-Run research timing regression (no Nautilus required)
+        run: cargo test -p prajna-experiment --features nautilus-integration --example measure_accurate --locked
 
       - run: cargo clippy -p prajna-py --all-targets --locked -- -D warnings
       - run: cargo test -p prajna-py --locked

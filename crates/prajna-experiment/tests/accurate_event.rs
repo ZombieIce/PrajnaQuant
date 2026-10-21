@@ -1,4 +1,7 @@
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, OnceLock},
+};
 
 use prajna_adapter::{AdapterError, Backend, FakeBackend, RunPacket};
 use prajna_data::{NormalizerRegistry, RawStore, SourceKind, SourceRecordInput, publish_dataset};
@@ -45,6 +48,78 @@ fn fixture(root: &Path) -> (String, String) {
     .unwrap();
     universe.store(root).unwrap();
     (dataset.dsv, universe.id().unwrap())
+}
+
+fn python_version_error(path: &str, version: &str) -> Option<String> {
+    let version_parts = version
+        .split('.')
+        .take(2)
+        .map(str::parse::<u64>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok();
+    let supported = version_parts
+        .filter(|parts| parts.len() == 2)
+        .is_some_and(|parts| (parts[0], parts[1]) >= (3, 12));
+    (!supported).then(|| {
+        format!(
+            "accurate_event tests require Python >= 3.12; current interpreter `{path}` is {version}. Set PRAJNA_TEST_PYTHON to a Python 3.12+ executable."
+        )
+    })
+}
+
+fn test_python() -> &'static Path {
+    static PYTHON: OnceLock<PathBuf> = OnceLock::new();
+    PYTHON
+        .get_or_init(|| {
+            let python = std::env::var_os("PRAJNA_TEST_PYTHON")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("python3"));
+            let output = std::process::Command::new(&python)
+                .args([
+                    "-c",
+                    "import sys; print(f'{sys.executable}\\t{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')",
+                ])
+                .output()
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "could not start accurate_event test Python `{}`: {error}. Set PRAJNA_TEST_PYTHON to a Python 3.12+ executable.",
+                        python.display()
+                    )
+                });
+            if !output.status.success() {
+                panic!(
+                    "could not inspect accurate_event test Python `{}` ({}): {}. Set PRAJNA_TEST_PYTHON to a Python 3.12+ executable.",
+                    python.display(),
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+            }
+            let report = String::from_utf8(output.stdout)
+                .expect("Python interpreter path/version output must be UTF-8");
+            let (path, version) = report
+                .trim()
+                .split_once('\t')
+                .unwrap_or_else(|| panic!("unexpected test Python version response: {report:?}"));
+            if let Some(error) = python_version_error(path, version) {
+                panic!("{error}");
+            }
+            python
+        })
+        .as_path()
+}
+
+#[test]
+fn old_test_python_reports_path_version_and_configuration_hint() {
+    assert_eq!(
+        python_version_error("/opt/python3.12/bin/python", "3.12.0"),
+        None
+    );
+    assert_eq!(
+        python_version_error("/usr/bin/python3", "3.11.9"),
+        Some(
+            "accurate_event tests require Python >= 3.12; current interpreter `/usr/bin/python3` is 3.11.9. Set PRAJNA_TEST_PYTHON to a Python 3.12+ executable.".into()
+        )
+    );
 }
 
 fn definition(dsv: &str, universe: &str) -> Value {
@@ -294,7 +369,7 @@ fn scripted_worker(root: &Path) -> WorkerCommand {
         "Metadata-Version: 2.1\nName: nautilus_trader\nVersion: 2.0.0rc6\n",
     )
     .unwrap();
-    WorkerCommand::new("python3", root.join("worker.py"))
+    WorkerCommand::new(test_python(), root.join("worker.py"))
 }
 
 #[test]
@@ -511,9 +586,10 @@ fn accurate_cli_uses_the_same_run_replay_promotion_and_routing_commands() {
     assert!(String::from_utf8_lossy(&missing.stderr).contains("worker"));
     assert!(missing.stdout.is_empty());
     let worker_path = worker.worker.to_str().unwrap();
+    let python = test_python().to_string_lossy().into_owned();
     let options = [
         "--backend-python",
-        "python3",
+        python.as_str(),
         "--backend-worker",
         worker_path,
     ];
@@ -588,6 +664,7 @@ fn invalid_backend_identity_is_rejected_before_data_or_worker_execution() {
 }
 
 #[cfg(unix)]
+#[ignore = "requires permission to terminate a worker process group; lightweight CI runs with --include-ignored"]
 #[test]
 fn timed_out_worker_descendants_cannot_hold_pipes_or_outlive_the_run() {
     use std::time::Duration;
@@ -621,7 +698,7 @@ fn worker_python_keeps_its_virtual_environment_when_worker_directory_changes() {
     use std::process::Command;
     let temp = TempDir::new().unwrap();
     let venv = temp.path().join("venv");
-    let output = Command::new("python3")
+    let output = Command::new(test_python())
         .args(["-m", "venv", "--without-pip"])
         .arg(&venv)
         .output()
@@ -659,6 +736,7 @@ fn worker_python_keeps_its_virtual_environment_when_worker_directory_changes() {
 }
 
 #[cfg(unix)]
+#[ignore = "requires permission to terminate a worker process group; lightweight CI runs with --include-ignored"]
 #[test]
 fn exited_worker_leader_retains_ownership_until_descendant_pipe_cleanup() {
     use std::time::Duration;

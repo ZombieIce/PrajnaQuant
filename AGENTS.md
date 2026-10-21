@@ -49,7 +49,7 @@ POC-0 与新平台实现按当前任务的 spec/ADR 确定时间语义；修改�
 
 ## Testing Rules
 
-项目默认使用 Python 3.12；创建 venv 使用 `python3.12 -m venv .venv`，运行 Python 测试前确认所用解释器为 3.12。涉及 PyO3 时显式设置 `PYO3_PYTHON` 指向该解释器，避免选到系统 Python。
+项目默认使用 Python 3.12；创建 venv 使用 `python3.12 -m venv .venv`，运行 Python 测试前确认所用解释器为 3.12。涉及 PyO3 时显式设置 `PYO3_PYTHON` 指向该解释器，避免选到系统 Python。本机运行 `prajna-experiment` 测试前设置 `PRAJNA_TEST_PYTHON` 为 3.12 解释器；进程控制测试由 CI 覆盖，沙箱内跳过不算失败。
 
 实现票据时按改动范围验证：运行 `cargo fmt --all -- --check`，优先对受影响的 crate 使用 `cargo test -p <crate> --locked --offline` 和 `cargo clippy -p <crate> --all-targets --locked --offline -- -D warnings`，按需选择 feature。非必要不编译或测试整个 worktree/workspace；仅在票据明确要求、跨 crate 变更或定向验证无法覆盖风险时运行全 workspace 验证，并在交接中说明原因。Python 改动按范围运行相关测试（仓库原型测试为 `.venv/bin/python -m unittest discover -s tests -v`）；前端改动运行 `cd apps/web && npm run build`。纯文档改动检查 diff，无需编译。
 
