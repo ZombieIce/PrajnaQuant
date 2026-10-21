@@ -159,6 +159,46 @@ fn terminal_settlement_uses_last_catalog_bar_close_and_fast_vector_match() {
 }
 
 #[test]
+fn terminal_settlement_is_skipped_after_a_successful_early_risk_exit() {
+    let lake = fixture::lake();
+    let f = fixture::fixture_options(lake.path(), 1.0, true);
+    for engine in ["vector", "fast_event"] {
+        let mut input = terminal_settlement_definition(&f, engine);
+        input["pit"]["risk_notices"] = f.input["risk_notices"].clone();
+        for opening in input["pit"]["market"]["openings"].as_array_mut().unwrap() {
+            let is_first_instrument = opening["instrument_id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("159001-"));
+            if is_first_instrument && opening["session_date"] == fixture::date(6).to_string() {
+                opening["source_independence"] = opening["announcement_coverage"].clone();
+            }
+            if is_first_instrument && opening["session_date"] == fixture::date(7).to_string() {
+                opening["reference"]["adjusted_previous_close"] = json!("0.95");
+            }
+        }
+        input["pit"]["fixed_universe"] = json!({
+            "version":"synthetic-fixed-etfs@1",
+            "codes":["159001"]
+        });
+        if engine == "fast_event" {
+            input["fast_event"]["sizing"] = json!("vector_parity");
+        }
+        let experiment = Experiment::parse(&input.to_string(), lake.path()).unwrap();
+        let report = experiment.execute(lake.path(), 1).unwrap();
+        assert_eq!(report.runs[0].status, RunStatus::Completed);
+        if engine == "fast_event" {
+            let result = report.runs[0].fast_event_result.as_ref().unwrap();
+            assert!(result.risk_exits.iter().any(|(_, exit)| exit.executed));
+            assert!(result.terminal_settlements.is_empty());
+        } else {
+            let result = report.runs[0].result.as_ref().unwrap();
+            assert!(result.risk_exits.iter().any(|exit| exit.executed));
+            assert!(result.terminal_settlements.is_empty());
+        }
+    }
+}
+
+#[test]
 fn cninfo_risk_input_is_bound_to_run_and_exits_on_next_sellable_open() {
     use prajna_data::{
         RawStore, SourceKind, SourceRecordInput,
