@@ -92,6 +92,11 @@ fn terminal_settlement_uses_last_catalog_bar_close_and_fast_vector_match() {
     assert_eq!(vector_settlement.quantity, fast_settlement.quantity);
     assert_eq!(vector_settlement.price, fast_settlement.price);
     assert_eq!(vector_settlement.proceeds, fast_settlement.proceeds);
+    // The fixture's terminal-session open is 0.9 and close is 1.0.
+    // This hand-check proves the settlement uses close: 9,995 × 1.0 = 9,995.
+    assert_eq!(vector_settlement.quantity, "9995".parse().unwrap());
+    assert_eq!(vector_settlement.price, "1.0".parse().unwrap());
+    assert_eq!(vector_settlement.proceeds, "9995".parse().unwrap());
     assert_eq!(fast_settlement.portfolio_id, Some(VirtualPortfolioId(1)));
     assert_eq!(
         fast.sessions[6].close.portfolios[&VirtualPortfolioId(1)]
@@ -156,6 +161,80 @@ fn terminal_settlement_uses_last_catalog_bar_close_and_fast_vector_match() {
             1
         );
     }
+}
+
+#[test]
+fn terminal_settlement_uses_last_bar_before_a_multi_session_gap() {
+    let lake = fixture::lake();
+    let f = fixture::fixture_with_missing_bars_and_action_prices(
+        lake.path(),
+        1.0,
+        true,
+        std::collections::BTreeMap::from([((0, 5), (0.9, 1.0))]),
+        std::collections::BTreeSet::from([(0, 6), (0, 7)]),
+    );
+    let fixed = json!({
+        "version":"synthetic-fixed-etfs@1",
+        "codes":["159001"]
+    });
+
+    for engine in ["vector", "fast_event"] {
+        let mut input = terminal_settlement_definition(&f, engine);
+        input["pit"]["fixed_universe"] = fixed.clone();
+        if engine == "fast_event" {
+            input["fast_event"]["sizing"] = json!("vector_parity");
+        }
+        let experiment = Experiment::parse(&input.to_string(), lake.path()).unwrap();
+        let report = experiment.execute(lake.path(), 1).unwrap();
+        assert_eq!(report.runs[0].status, RunStatus::Completed);
+        let entry = if engine == "fast_event" {
+            &report.runs[0]
+                .fast_event_result
+                .as_ref()
+                .unwrap()
+                .terminal_settlements[0]
+        } else {
+            &report.runs[0].result.as_ref().unwrap().terminal_settlements[0]
+        };
+        assert_eq!(entry.session_date, fixture::date(5));
+        assert_eq!(entry.price, "1.0".parse().unwrap());
+    }
+}
+
+#[test]
+fn terminal_settlement_skips_terminations_before_the_run_window() {
+    use prajna_research::{pit_strategy, terminal_settlement::TerminalSettlementSchedule};
+
+    let lake = fixture::lake();
+    let f = fixture::fixture_options(lake.path(), 1.0, true);
+    let native =
+        prajna_research::load_panel(lake.path(), &f.dsv, &"SZSE".parse().unwrap()).unwrap();
+    let mut panel = pit_strategy::lifecycle_panel(&native, &f.catalog).unwrap();
+    panel
+        .sessions
+        .retain(|session| session.session_date >= fixture::date(9));
+
+    let schedule = TerminalSettlementSchedule::from_market(&f.market, &panel).unwrap();
+    assert!(schedule.is_empty());
+}
+
+#[test]
+fn terminal_settlement_without_an_in_window_bar_fails_during_run_expansion() {
+    let lake = fixture::lake();
+    let missing_bars = (1..=7).map(|day| (0, day)).collect();
+    let f = fixture::fixture_with_missing_bars(lake.path(), 1.0, true, missing_bars);
+    let mut input = terminal_settlement_definition(&f, "vector");
+    input["pit"]["fixed_universe"] = json!({
+        "version":"synthetic-fixed-etfs@1",
+        "codes":["159001"]
+    });
+    let experiment = Experiment::parse(&input.to_string(), lake.path()).unwrap();
+
+    let error = experiment.expand(lake.path()).unwrap_err().to_string();
+    assert!(
+        error.contains("no available in-window Bar close"),
+        "{error}"
+    );
 }
 
 #[test]

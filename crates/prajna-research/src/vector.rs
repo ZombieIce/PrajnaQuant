@@ -1154,7 +1154,7 @@ fn run_vector_inner(
     }
     if terminal_settlement.is_some() {
         assumptions.push(
-            "Catalog terminal positions settle at the last in-lifecycle raw Bar close; actual liquidation cash and date are not used."
+            "Normal execution at the final in-lifecycle Bar open remains allowed; remaining Catalog-terminal positions settle at that session's raw Bar close without using actual liquidation cash or date."
                 .into(),
         );
     }

@@ -51,7 +51,7 @@ pub fn fixture_at_price(root: &Path, price: f64) -> Fixture {
 }
 
 pub fn fixture_options(root: &Path, price: f64, terminated: bool) -> Fixture {
-    fixture_with_prices(root, price, terminated, &BTreeMap::new())
+    fixture_with_prices_and_gaps(root, price, terminated, &BTreeMap::new(), &BTreeSet::new())
 }
 
 #[allow(dead_code)]
@@ -59,14 +59,36 @@ pub fn fixture_with_action_prices(
     root: &Path,
     overrides: BTreeMap<(usize, u32), (f64, f64)>,
 ) -> Fixture {
-    fixture_with_prices(root, 1.0, false, &overrides)
+    fixture_with_prices_and_gaps(root, 1.0, false, &overrides, &BTreeSet::new())
 }
 
-fn fixture_with_prices(
+#[allow(dead_code)]
+pub fn fixture_with_missing_bars(
+    root: &Path,
+    price: f64,
+    terminated: bool,
+    missing_bars: BTreeSet<(usize, u32)>,
+) -> Fixture {
+    fixture_with_prices_and_gaps(root, price, terminated, &BTreeMap::new(), &missing_bars)
+}
+
+#[allow(dead_code)]
+pub fn fixture_with_missing_bars_and_action_prices(
+    root: &Path,
+    price: f64,
+    terminated: bool,
+    overrides: BTreeMap<(usize, u32), (f64, f64)>,
+    missing_bars: BTreeSet<(usize, u32)>,
+) -> Fixture {
+    fixture_with_prices_and_gaps(root, price, terminated, &overrides, &missing_bars)
+}
+
+fn fixture_with_prices_and_gaps(
     root: &Path,
     price: f64,
     terminated: bool,
     overrides: &BTreeMap<(usize, u32), (f64, f64)>,
+    missing_bars: &BTreeSet<(usize, u32)>,
 ) -> Fixture {
     let raw = RawStore::open(root).unwrap();
     let put = |bytes: &[u8]| {
@@ -230,7 +252,7 @@ fn fixture_with_prices(
         let mut cod = Vec::new();
         let mut md1 = Vec::new();
         for i in 0..codes {
-            if terminated && i == 0 && day >= 8 {
+            if (terminated && i == 0 && day >= 8) || missing_bars.contains(&(i, day)) {
                 continue;
             }
             let mut record = [0u8; 150];
@@ -264,7 +286,7 @@ fn fixture_with_prices(
     }
     for (i, _) in ids.iter().enumerate() {
         let rows = (if i == 2 { 4 } else { 1 }..=10)
-            .filter(|d| !terminated || i != 0 || *d < 8)
+            .filter(|d| (!terminated || i != 0 || *d < 8) && !missing_bars.contains(&(i, *d)))
             .map(|d| {
                 let (open, close) = bar_prices(i, d);
                 json!([

@@ -16,6 +16,9 @@ pub struct TerminalSettlementSchedule {
 
 impl TerminalSettlementSchedule {
     pub fn from_market(market: &DerivedMarket, panel: &Panel) -> Result<Self, String> {
+        let Some(first_session) = panel.sessions.first() else {
+            return Err("terminal settlement requires at least one session".into());
+        };
         let Some(last_session) = panel.sessions.last() else {
             return Err("terminal settlement requires at least one session".into());
         };
@@ -24,7 +27,11 @@ impl TerminalSettlementSchedule {
             let Some(termination_date) = market.termination_date(instrument) else {
                 continue;
             };
-            if termination_date > last_session.session_date {
+            if !termination_in_window(
+                termination_date,
+                first_session.session_date,
+                last_session.session_date,
+            ) {
                 continue;
             }
             let settlement_date = require_terminal_bar_date(
@@ -61,6 +68,14 @@ impl TerminalSettlementSchedule {
     }
 }
 
+fn termination_in_window(
+    termination_date: NaiveDate,
+    first_session: NaiveDate,
+    last_session: NaiveDate,
+) -> bool {
+    (first_session..=last_session).contains(&termination_date)
+}
+
 fn require_terminal_bar_date(
     instrument: &InstrumentId,
     termination_date: NaiveDate,
@@ -71,7 +86,7 @@ fn require_terminal_bar_date(
         .max()
         .ok_or_else(|| {
             format!(
-                "terminal settlement for {instrument} at {termination_date} has no Bar close in its lifecycle"
+                "terminal settlement for {instrument} at {termination_date} has no available in-window Bar close before termination"
             )
         })
 }
@@ -115,6 +130,24 @@ mod tests {
             std::iter::empty(),
         )
         .unwrap_err();
-        assert!(error.contains("has no Bar close in its lifecycle"));
+        assert!(error.contains("has no available in-window Bar close"));
+    }
+
+    #[test]
+    fn terminal_dates_before_or_after_the_run_window_are_not_scheduled() {
+        let first = NaiveDate::from_ymd_opt(2026, 1, 5).unwrap();
+        let last = NaiveDate::from_ymd_opt(2026, 1, 9).unwrap();
+        assert!(!termination_in_window(
+            NaiveDate::from_ymd_opt(2026, 1, 4).unwrap(),
+            first,
+            last,
+        ));
+        assert!(termination_in_window(first, first, last));
+        assert!(termination_in_window(last, first, last));
+        assert!(!termination_in_window(
+            NaiveDate::from_ymd_opt(2026, 1, 10).unwrap(),
+            first,
+            last,
+        ));
     }
 }
