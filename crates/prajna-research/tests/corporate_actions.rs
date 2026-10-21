@@ -14,11 +14,11 @@ use prajna_research::{
     },
     fast_event::{
         FastEventConfig, FastEventCosts, PortfolioRun, Rebalance, Sizing,
-        run_fast_event_pit_with_actions,
+        run_fast_event_pit_with_actions, run_fast_event_pit_with_terminal_settlement,
     },
     pit_strategy::{self, RiskSignals},
     strategy::{Decision, UnfilledEntry},
-    vector::{VectorCosts, run_vector_pit_with_actions},
+    vector::{VectorCosts, run_vector_pit_with_actions, run_vector_pit_with_terminal_settlement},
 };
 
 #[test]
@@ -153,6 +153,174 @@ fn dividend_entitlement_becomes_receivable_then_cash_without_early_reinvestment(
         0,
         "cash payment must not create an out-of-cycle rebalance"
     );
+}
+
+#[test]
+fn terminal_settlement_ignores_liquidation_action_facts() {
+    let lake = fixture::lake();
+    let f = fixture::fixture_options(lake.path(), 1.0, true);
+    let native =
+        prajna_research::load_panel(lake.path(), &f.dsv, &"SZSE".parse().unwrap()).unwrap();
+    let panel = pit_strategy::lifecycle_panel(&native, &f.catalog).unwrap();
+    let instrument = f.ids[0].clone();
+    let liquidation = CorporateActionRow {
+        announcement_id: "synthetic-liquidation".into(),
+        action_index: 0,
+        instrument_id: instrument.clone(),
+        kind: CorporateActionKind::Liquidation,
+        announced_date: fixture::date(1),
+        announced_at: Some(fixture::time(1, 8)),
+        available_at: fixture::time(1, 15),
+        record_date: None,
+        ex_date: None,
+        pay_date: Some(fixture::date(7)),
+        effective_date: Some(fixture::date(6)),
+        cash_per_share: None,
+        share_ratio: None,
+        liquidation_cash_per_share: Some("0.8".into()),
+        source_raw_sha256: "synthetic".into(),
+        normalization_version: "synthetic-actions@1".into(),
+    };
+    let actions = CorporateActionSchedule::new(
+        "synthetic-actions@1",
+        vec![liquidation],
+        f.ids
+            .iter()
+            .map(|id| CorporateActionCoverage {
+                instrument_id: id.clone(),
+                start: fixture::date(1),
+                end: fixture::date(10),
+                observed_actions: usize::from(id == &instrument),
+                unapplied_action_dates: vec![],
+                unexplained_price_jumps: vec![],
+                status: ActionCoverageStatus::Complete,
+            })
+            .collect(),
+    )
+    .unwrap();
+    let decisions = vec![Decision {
+        // A target formed at the penultimate close must still trade at the
+        // final in-lifecycle session's open; any remaining position settles
+        // at that session's Catalog-driven close.
+        decision_session: panel.sessions[5].clone(),
+        ranked: vec![],
+        targets: BTreeMap::from([(instrument, 1.0)]),
+    }];
+    let config = FastEventConfig {
+        currency: "CNY".parse().unwrap(),
+        venue: "SZSE".parse().unwrap(),
+        initial_cash: "10000".parse().unwrap(),
+        sizing: Sizing::VectorParity,
+        costs: FastEventCosts::ZERO,
+        lot_sizes: BTreeMap::new(),
+    };
+    let portfolios = [PortfolioRun {
+        id: VirtualPortfolioId(1),
+        capital: config.initial_cash,
+        decisions: decisions.clone(),
+        unfilled_entry: UnfilledEntry::Skip,
+        rebalance: Rebalance::FullTarget,
+    }];
+    let vector_costs = VectorCosts {
+        commission_rate: 0.0,
+        buy_slippage_bps: 0.0,
+        sell_slippage_bps: 0.0,
+        buy_tax_rate: 0.0,
+        sell_tax_rate: 0.0,
+    };
+
+    let fast = run_fast_event_pit_with_terminal_settlement(
+        &panel,
+        &f.market,
+        &RiskSignals::default(),
+        &config,
+        &portfolios,
+        Some(&actions),
+    )
+    .unwrap();
+    let vector = run_vector_pit_with_terminal_settlement(
+        &panel,
+        &decisions,
+        &f.market,
+        &RiskSignals::default(),
+        &vector_costs,
+        config.initial_cash,
+        Some(&actions),
+    )
+    .unwrap();
+
+    let ignored_kinds = [
+        CorporateActionLedgerKind::LiquidationReceivable,
+        CorporateActionLedgerKind::LiquidationPaid,
+        CorporateActionLedgerKind::LiquidationAmountUnknown,
+    ];
+    assert!(
+        fast.corporate_action_ledger
+            .iter()
+            .all(|entry| !ignored_kinds.contains(&entry.kind))
+    );
+    assert!(
+        vector
+            .corporate_action_ledger
+            .iter()
+            .all(|entry| !ignored_kinds.contains(&entry.kind))
+    );
+    assert!(fast.sessions.iter().all(|session| {
+        session.close.account.liquidation_receivable == Notional::ZERO
+            && session
+                .close
+                .portfolios
+                .values()
+                .all(|portfolio| portfolio.liquidation_receivable == Notional::ZERO)
+    }));
+    assert!(vector.sessions.iter().all(|session| {
+        session
+            .portfolio_components_close
+            .as_ref()
+            .is_some_and(|components| components.liquidation_receivable_weight == 0.0)
+    }));
+    assert_eq!(fast.terminal_settlements.len(), 1);
+    assert_eq!(vector.terminal_settlements.len(), 1);
+    assert_eq!(fast.terminal_settlements[0].session_date, fixture::date(7));
+    assert_eq!(
+        vector.terminal_settlements[0].session_date,
+        fixture::date(7)
+    );
+    assert_eq!(fast.terminal_settlements[0].price, "1.0".parse().unwrap());
+    assert_eq!(vector.terminal_settlements[0].price, "1.0".parse().unwrap());
+    let final_session = &fast.sessions[6];
+    assert!(fast.fills.iter().any(|fill| {
+        fill.fill.executed_at() == final_session.session.ts_open
+            && fill.fill.order().instrument_id() == &f.ids[0]
+            && fill.fill.order().quantity() > "0".parse().unwrap()
+    }));
+    assert!(
+        final_session.open_after.portfolios[&VirtualPortfolioId(1)]
+            .positions
+            .contains_key(&f.ids[0]),
+        "position bought at the final Bar open remains held until close settlement"
+    );
+    assert!(
+        !final_session.close.portfolios[&VirtualPortfolioId(1)]
+            .positions
+            .contains_key(&f.ids[0]),
+        "Catalog terminal settlement removes the position at the final Bar close"
+    );
+    assert!(fast.terminal_settlements[0].quantity > "0".parse().unwrap());
+    let final_open_execution = vector
+        .executions
+        .iter()
+        .find(|execution| execution.session_date == fixture::date(7).to_string())
+        .expect("final in-lifecycle Bar open has a Vector execution");
+    assert_eq!(
+        final_open_execution.kind,
+        prajna_research::vector::VectorExecutionKind::Executed
+    );
+    assert!(
+        vector.sessions[6].weights_after_execution[&f.ids[0]] > 0.0,
+        "Vector permits the final Bar open trade before close settlement"
+    );
+    assert!(vector.terminal_settlements[0].quantity > "0".parse().unwrap());
 }
 
 #[test]

@@ -23,6 +23,333 @@ fn definition(f: &fixture::Fixture, engine: &str) -> Value {
     value
 }
 
+fn terminal_settlement_definition(f: &fixture::Fixture, engine: &str) -> Value {
+    let mut value = definition(f, engine);
+    value["pit"]["risk_notices"] = json!([]);
+    value["pit"]["terminal_settlement"] = json!({"semantic_version":"mvp6-terminal-settlement@1"});
+    value
+}
+
+#[test]
+fn terminal_settlement_semantics_is_explicit_and_changes_run_identity() {
+    let lake = fixture::lake();
+    let f = fixture::fixture_options(lake.path(), 1.0, true);
+    let mut legacy_input = definition(&f, "vector");
+    legacy_input["pit"]["risk_notices"] = json!([]);
+    let legacy = Experiment::parse(&legacy_input.to_string(), lake.path()).unwrap();
+    let explicit = terminal_settlement_definition(&f, "vector");
+    let enabled = Experiment::parse(&explicit.to_string(), lake.path()).unwrap();
+    let legacy_run = legacy.expand(lake.path()).unwrap().remove(0);
+    let enabled_run = enabled.expand(lake.path()).unwrap().remove(0);
+    assert_ne!(legacy_run.run_id, enabled_run.run_id);
+    assert!(legacy_run.run_spec.get("terminal_settlement").is_none());
+    assert_eq!(
+        enabled_run.run_spec["terminal_settlement"]["semantic_version"],
+        "mvp6-terminal-settlement@1"
+    );
+    assert_eq!(
+        enabled_run.run_spec["engine"]["semantic_version"],
+        "vector@3"
+    );
+}
+
+#[test]
+fn terminal_settlement_uses_last_catalog_bar_close_and_fast_vector_match() {
+    use prajna_account::VirtualPortfolioId;
+
+    let lake = fixture::lake();
+    let f = fixture::fixture_options(lake.path(), 1.0, true);
+    let fixed = json!({
+        "version":"synthetic-fixed-etfs@1",
+        "codes":["159001"]
+    });
+    let mut vector_input = terminal_settlement_definition(&f, "vector");
+    let mut fast_input = terminal_settlement_definition(&f, "fast_event");
+    vector_input["pit"]["fixed_universe"] = fixed.clone();
+    fast_input["pit"]["fixed_universe"] = fixed;
+    fast_input["fast_event"]["sizing"] = json!("vector_parity");
+    let vector_experiment = Experiment::parse(&vector_input.to_string(), lake.path()).unwrap();
+    let fast_experiment = Experiment::parse(&fast_input.to_string(), lake.path()).unwrap();
+    let vector_run = vector_experiment.execute(lake.path(), 1).unwrap();
+    let fast_run = fast_experiment.execute(lake.path(), 1).unwrap();
+    assert_eq!(vector_run.runs[0].status, RunStatus::Completed);
+    assert_eq!(fast_run.runs[0].status, RunStatus::Completed);
+
+    let vector = vector_run.runs[0].result.as_ref().unwrap();
+    let fast = fast_run.runs[0].fast_event_result.as_ref().unwrap();
+    assert_eq!(fast.semantic_version, "fast_event@3");
+    assert_eq!(vector.terminal_settlements.len(), 1);
+    assert_eq!(fast.terminal_settlements.len(), 1);
+    let vector_settlement = &vector.terminal_settlements[0];
+    let fast_settlement = &fast.terminal_settlements[0];
+    assert_eq!(vector_settlement.session_date, fixture::date(7));
+    assert!(
+        vector_settlement
+            .instrument_id
+            .to_string()
+            .starts_with("159001-")
+    );
+    assert_eq!(vector_settlement.quantity, fast_settlement.quantity);
+    assert_eq!(vector_settlement.price, fast_settlement.price);
+    assert_eq!(vector_settlement.proceeds, fast_settlement.proceeds);
+    // The fixture's terminal-session open is 0.9 and close is 1.0.
+    // This hand-check proves the settlement uses close: 9,995 × 1.0 = 9,995.
+    assert_eq!(vector_settlement.quantity, "9995".parse().unwrap());
+    assert_eq!(vector_settlement.price, "1.0".parse().unwrap());
+    assert_eq!(vector_settlement.proceeds, "9995".parse().unwrap());
+    assert_eq!(fast_settlement.portfolio_id, Some(VirtualPortfolioId(1)));
+    assert_eq!(
+        fast.sessions[6].close.portfolios[&VirtualPortfolioId(1)]
+            .positions
+            .len(),
+        0
+    );
+    assert_eq!(
+        fast.sessions[6].close.portfolios[&VirtualPortfolioId(1)]
+            .cash
+            .mantissa()
+            - fast.sessions[6].open_after.portfolios[&VirtualPortfolioId(1)]
+                .cash
+                .mantissa(),
+        vector_settlement.proceeds.mantissa()
+    );
+    let close_components = vector.sessions[6]
+        .portfolio_components_close
+        .as_ref()
+        .unwrap();
+    assert!((close_components.available_cash_weight - 1.0).abs() < 1e-12);
+    assert_eq!(close_components.liquidation_receivable_weight, 0.0);
+
+    for (vector_session, fast_session) in vector.sessions.iter().zip(&fast.sessions) {
+        let fast_open_equity = fast_session
+            .open_after
+            .account
+            .equity
+            .to_string()
+            .parse::<f64>()
+            .unwrap()
+            / 10000.0;
+        assert!(
+            (fast_open_equity - vector_session.nav / (1.0 + vector_session.gross_return)).abs()
+                < 1e-12,
+            "daily parity failed on {}",
+            vector_session.session_date
+        );
+    }
+
+    for experiment in [&vector_experiment, &fast_experiment] {
+        let stored = experiment
+            .execute_and_store(
+                lake.path(),
+                env!("CARGO_MANIFEST_DIR"),
+                ResultLevel::Standard,
+                1,
+            )
+            .unwrap();
+        let run_id = &stored.manifest.runs[0].run_id;
+        let (_, batches) = read_run_table(
+            lake.path(),
+            &stored.manifest.experiment_id,
+            &stored.manifest.execution.id,
+            run_id,
+            ResultLevel::Standard,
+            "terminal_settlements",
+        )
+        .unwrap();
+        assert_eq!(
+            batches.iter().map(|batch| batch.num_rows()).sum::<usize>(),
+            1
+        );
+    }
+}
+
+#[test]
+fn terminal_settlement_uses_last_bar_before_a_multi_session_gap() {
+    let lake = fixture::lake();
+    let f = fixture::fixture_with_missing_bars_and_action_prices(
+        lake.path(),
+        1.0,
+        true,
+        std::collections::BTreeMap::from([((0, 5), (0.9, 1.0))]),
+        std::collections::BTreeSet::from([(0, 6), (0, 7)]),
+    );
+    let fixed = json!({
+        "version":"synthetic-fixed-etfs@1",
+        "codes":["159001"]
+    });
+
+    let mut reports = Vec::new();
+    for engine in ["vector", "fast_event"] {
+        let mut input = terminal_settlement_definition(&f, engine);
+        input["pit"]["fixed_universe"] = fixed.clone();
+        if engine == "fast_event" {
+            input["fast_event"]["sizing"] = json!("vector_parity");
+        }
+        let experiment = Experiment::parse(&input.to_string(), lake.path()).unwrap();
+        let report = experiment.execute(lake.path(), 1).unwrap();
+        assert_eq!(report.runs[0].status, RunStatus::Completed);
+        let entry = if engine == "fast_event" {
+            &report.runs[0]
+                .fast_event_result
+                .as_ref()
+                .unwrap()
+                .terminal_settlements[0]
+        } else {
+            &report.runs[0].result.as_ref().unwrap().terminal_settlements[0]
+        };
+        assert_eq!(entry.session_date, fixture::date(5));
+        assert_eq!(entry.price, "1.0".parse().unwrap());
+        reports.push(report);
+    }
+    let vector = reports[0].runs[0].result.as_ref().unwrap();
+    let fast = reports[1].runs[0].fast_event_result.as_ref().unwrap();
+    assert_eq!(
+        vector.terminal_settlements[0].quantity,
+        fast.terminal_settlements[0].quantity
+    );
+    assert_eq!(
+        vector.terminal_settlements[0].proceeds,
+        fast.terminal_settlements[0].proceeds
+    );
+    let settlement = &fast.terminal_settlements[0];
+    assert_eq!(
+        settlement.proceeds.mantissa(),
+        settlement.quantity.mantissa()
+    );
+    assert_eq!(
+        fast.sessions[4].close.account.cash.mantissa()
+            - fast.sessions[4].open_after.account.cash.mantissa(),
+        settlement.proceeds.mantissa()
+    );
+    assert!(fast.sessions[4].close.account.positions.is_empty());
+    assert_eq!(vector.sessions.len(), fast.sessions.len());
+    for (vector_session, fast_session) in vector.sessions.iter().zip(&fast.sessions) {
+        assert_eq!(
+            vector_session.session_date,
+            fast_session.session.session_date.to_string()
+        );
+        for valuation in [
+            &fast_session.open_after.account,
+            &fast_session.close.account,
+        ] {
+            let holdings: f64 = valuation
+                .positions
+                .values()
+                .map(|position| {
+                    position.price.to_string().parse::<f64>().unwrap()
+                        * position.quantity.to_string().parse::<f64>().unwrap()
+                })
+                .sum();
+            let accounted_equity = valuation.cash.to_string().parse::<f64>().unwrap()
+                + holdings
+                + valuation
+                    .dividend_receivable
+                    .to_string()
+                    .parse::<f64>()
+                    .unwrap()
+                + valuation
+                    .liquidation_receivable
+                    .to_string()
+                    .parse::<f64>()
+                    .unwrap();
+            assert!(
+                (valuation.equity.to_string().parse::<f64>().unwrap() - accounted_equity).abs()
+                    < 1e-9
+            );
+        }
+        let fast_open_nav = fast_session
+            .open_after
+            .account
+            .equity
+            .to_string()
+            .parse::<f64>()
+            .unwrap()
+            / 10000.0;
+        assert!(
+            (fast_open_nav - vector_session.nav / (1.0 + vector_session.gross_return)).abs()
+                < 1e-12,
+            "gap daily parity failed on {}",
+            vector_session.session_date
+        );
+    }
+}
+
+#[test]
+fn terminal_settlement_skips_terminations_before_the_run_window() {
+    use prajna_research::{pit_strategy, terminal_settlement::TerminalSettlementSchedule};
+
+    let lake = fixture::lake();
+    let f = fixture::fixture_options(lake.path(), 1.0, true);
+    let native =
+        prajna_research::load_panel(lake.path(), &f.dsv, &"SZSE".parse().unwrap()).unwrap();
+    let mut panel = pit_strategy::lifecycle_panel(&native, &f.catalog).unwrap();
+    panel
+        .sessions
+        .retain(|session| session.session_date >= fixture::date(9));
+
+    let schedule = TerminalSettlementSchedule::from_market(&f.market, &panel).unwrap();
+    assert!(schedule.is_empty());
+}
+
+#[test]
+fn terminal_settlement_without_an_in_window_bar_fails_during_run_expansion() {
+    let lake = fixture::lake();
+    let missing_bars = (1..=7).map(|day| (0, day)).collect();
+    let f = fixture::fixture_with_missing_bars(lake.path(), 1.0, true, missing_bars);
+    let mut input = terminal_settlement_definition(&f, "vector");
+    input["pit"]["fixed_universe"] = json!({
+        "version":"synthetic-fixed-etfs@1",
+        "codes":["159001"]
+    });
+    let experiment = Experiment::parse(&input.to_string(), lake.path()).unwrap();
+
+    let error = experiment.expand(lake.path()).unwrap_err().to_string();
+    assert!(
+        error.contains("no available in-window Bar close"),
+        "{error}"
+    );
+}
+
+#[test]
+fn terminal_settlement_is_skipped_after_a_successful_early_risk_exit() {
+    let lake = fixture::lake();
+    let f = fixture::fixture_options(lake.path(), 1.0, true);
+    for engine in ["vector", "fast_event"] {
+        let mut input = terminal_settlement_definition(&f, engine);
+        input["pit"]["risk_notices"] = f.input["risk_notices"].clone();
+        for opening in input["pit"]["market"]["openings"].as_array_mut().unwrap() {
+            let is_first_instrument = opening["instrument_id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("159001-"));
+            if is_first_instrument && opening["session_date"] == fixture::date(6).to_string() {
+                opening["source_independence"] = opening["announcement_coverage"].clone();
+            }
+            if is_first_instrument && opening["session_date"] == fixture::date(7).to_string() {
+                opening["reference"]["adjusted_previous_close"] = json!("0.95");
+            }
+        }
+        input["pit"]["fixed_universe"] = json!({
+            "version":"synthetic-fixed-etfs@1",
+            "codes":["159001"]
+        });
+        if engine == "fast_event" {
+            input["fast_event"]["sizing"] = json!("vector_parity");
+        }
+        let experiment = Experiment::parse(&input.to_string(), lake.path()).unwrap();
+        let report = experiment.execute(lake.path(), 1).unwrap();
+        assert_eq!(report.runs[0].status, RunStatus::Completed);
+        if engine == "fast_event" {
+            let result = report.runs[0].fast_event_result.as_ref().unwrap();
+            assert!(result.risk_exits.iter().any(|(_, exit)| exit.executed));
+            assert!(result.terminal_settlements.is_empty());
+        } else {
+            let result = report.runs[0].result.as_ref().unwrap();
+            assert!(result.risk_exits.iter().any(|exit| exit.executed));
+            assert!(result.terminal_settlements.is_empty());
+        }
+    }
+}
+
 #[test]
 fn cninfo_risk_input_is_bound_to_run_and_exits_on_next_sellable_open() {
     use prajna_data::{

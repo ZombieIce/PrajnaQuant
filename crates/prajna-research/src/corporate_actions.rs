@@ -366,6 +366,7 @@ struct Entitlement {
 #[derive(Debug, Clone)]
 pub(crate) struct CorporateActionProcessor<'a> {
     schedule: &'a CorporateActionSchedule,
+    ignore_liquidations: bool,
     entitlements: BTreeMap<(usize, Option<VirtualPortfolioId>), Entitlement>,
     liquidation_receivables: BTreeMap<(usize, Option<VirtualPortfolioId>), Notional>,
     ledger: Vec<CorporateActionLedgerEntry>,
@@ -376,6 +377,21 @@ impl<'a> CorporateActionProcessor<'a> {
     pub fn new(
         schedule: &'a CorporateActionSchedule,
         panel: &Panel,
+    ) -> Result<Self, CorporateActionError> {
+        Self::build(schedule, panel, false)
+    }
+
+    pub fn new_ignoring_liquidations(
+        schedule: &'a CorporateActionSchedule,
+        panel: &Panel,
+    ) -> Result<Self, CorporateActionError> {
+        Self::build(schedule, panel, true)
+    }
+
+    fn build(
+        schedule: &'a CorporateActionSchedule,
+        panel: &Panel,
+        ignore_liquidations: bool,
     ) -> Result<Self, CorporateActionError> {
         schedule.validate_for_panel(panel)?;
         let mut reasons = Vec::new();
@@ -406,6 +422,7 @@ impl<'a> CorporateActionProcessor<'a> {
         }
         Ok(Self {
             schedule,
+            ignore_liquidations,
             entitlements: BTreeMap::new(),
             liquidation_receivables: BTreeMap::new(),
             ledger: Vec::new(),
@@ -427,6 +444,9 @@ impl<'a> CorporateActionProcessor<'a> {
     ) -> Result<Vec<ActionTransition>, CorporateActionError> {
         let mut transitions = Vec::new();
         for (index, action) in self.schedule.actions.iter().enumerate() {
+            if self.ignore_liquidations && action.kind == CorporateActionKind::Liquidation {
+                continue;
+            }
             if opening_date(action) != Some(date) {
                 continue;
             }
@@ -600,6 +620,9 @@ impl<'a> CorporateActionProcessor<'a> {
     ) -> Result<Vec<ActionTransition>, CorporateActionError> {
         let mut transitions = Vec::new();
         for (index, action) in self.schedule.actions.iter().enumerate() {
+            if self.ignore_liquidations && action.kind == CorporateActionKind::Liquidation {
+                continue;
+            }
             if action.pay_date != Some(date) {
                 continue;
             }
@@ -702,7 +725,8 @@ impl<'a> CorporateActionProcessor<'a> {
             .actions
             .iter()
             .filter(|action| {
-                action.kind == CorporateActionKind::Liquidation
+                !self.ignore_liquidations
+                    && action.kind == CorporateActionKind::Liquidation
                     && action
                         .effective_date
                         .is_some_and(|effective| effective <= date)

@@ -797,25 +797,36 @@ pub(super) fn execute(
                 result.execution
             } else {
                 if let Some(pit) = &experiment.pit {
-                    match pit
+                    let actions = pit
                         .corporate_action_schedule(panel)
-                        .map_err(|e| e.to_string())?
-                    {
-                        Some(actions) => fast_event::run_fast_event_pit_with_actions(
+                        .map_err(|e| e.to_string())?;
+                    if pit.terminal_settlement_semantic_version.is_some() {
+                        fast_event::run_fast_event_pit_with_terminal_settlement(
                             panel,
                             &pit.market,
                             &pit.risk,
                             config,
                             &portfolios,
-                            &actions,
-                        ),
-                        None => fast_event::run_fast_event_pit(
-                            panel,
-                            &pit.market,
-                            &pit.risk,
-                            config,
-                            &portfolios,
-                        ),
+                            actions.as_ref(),
+                        )
+                    } else {
+                        match actions {
+                            Some(actions) => fast_event::run_fast_event_pit_with_actions(
+                                panel,
+                                &pit.market,
+                                &pit.risk,
+                                config,
+                                &portfolios,
+                                &actions,
+                            ),
+                            None => fast_event::run_fast_event_pit(
+                                panel,
+                                &pit.market,
+                                &pit.risk,
+                                config,
+                                &portfolios,
+                            ),
+                        }
                     }
                 } else {
                     fast_event::run_fast_event(panel, statuses, config, &portfolios)
@@ -863,27 +874,39 @@ pub(super) fn execute(
                         .engine
                         .vector_pit_capital
                         .ok_or("missing Vector PIT capital")?;
-                    match pit
+                    let actions = pit
                         .corporate_action_schedule(panel)
-                        .map_err(|e| e.to_string())?
-                    {
-                        Some(actions) => prajna_research::vector::run_vector_pit_with_actions(
+                        .map_err(|e| e.to_string())?;
+                    if pit.terminal_settlement_semantic_version.is_some() {
+                        prajna_research::vector::run_vector_pit_with_terminal_settlement(
                             panel,
                             &decisions,
                             &pit.market,
                             &pit.risk,
                             costs,
                             capital,
-                            &actions,
-                        ),
-                        None => prajna_research::vector::run_vector_pit(
-                            panel,
-                            &decisions,
-                            &pit.market,
-                            &pit.risk,
-                            costs,
-                            capital,
-                        ),
+                            actions.as_ref(),
+                        )
+                    } else {
+                        match actions {
+                            Some(actions) => prajna_research::vector::run_vector_pit_with_actions(
+                                panel,
+                                &decisions,
+                                &pit.market,
+                                &pit.risk,
+                                costs,
+                                capital,
+                                &actions,
+                            ),
+                            None => prajna_research::vector::run_vector_pit(
+                                panel,
+                                &decisions,
+                                &pit.market,
+                                &pit.risk,
+                                costs,
+                                capital,
+                            ),
+                        }
                     }
                 } else {
                     run_vector_with_policy(

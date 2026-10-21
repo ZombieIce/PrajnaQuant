@@ -42,9 +42,32 @@ fn bind_corporate_action_engine_version(spec: &mut Value) -> Result<(), Experime
         }
         _ => return Err(invalid(format!("unsupported PIT Engine {engine_kind}"))),
     };
-    spec["engine"]["semantic_version"] = serde_json::json!(semantic_version);
+    if spec.get("terminal_settlement").is_none() {
+        spec["engine"]["semantic_version"] = serde_json::json!(semantic_version);
+    }
     spec["corporate_action_schedule"]["semantic_version"] =
         serde_json::json!(prajna_research::corporate_actions::SEMANTIC_VERSION);
+    Ok(())
+}
+
+fn bind_terminal_settlement_engine_version(spec: &mut Value) -> Result<(), ExperimentError> {
+    if spec.get("terminal_settlement").is_none() {
+        return Ok(());
+    }
+    let engine_kind = spec["engine"]
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("terminal-settlement Run Spec has no Engine kind"))?;
+    let semantic_version = match engine_kind {
+        "fast_event" => prajna_research::fast_event::TERMINAL_SETTLEMENT_ENGINE_VERSION,
+        "vector" => prajna_research::vector::TERMINAL_SETTLEMENT_ENGINE_VERSION,
+        _ => {
+            return Err(invalid(format!(
+                "terminal settlement is unsupported by PIT Engine {engine_kind}"
+            )));
+        }
+    };
+    spec["engine"]["semantic_version"] = serde_json::json!(semantic_version);
     Ok(())
 }
 
@@ -70,6 +93,14 @@ pub struct PitInput {
     risk_notices: Vec<RiskNotice>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     cninfo_index: Option<prajna_data::cninfo::IndexDataset>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    terminal_settlement: Option<TerminalSettlementInput>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TerminalSettlementInput {
+    semantic_version: String,
 }
 
 #[derive(Debug)]
@@ -84,10 +115,19 @@ pub struct PitContext {
     pub has_corporate_action_table: bool,
     pub dividend_tax_rate: Notional,
     pub unknown_coverage: UnknownCoverageReport,
+    pub terminal_settlement_semantic_version: Option<String>,
 }
 
 impl PitContext {
     pub fn build(input: &PitInput, root: &Path, dsv: &str) -> Result<Self, ExperimentError> {
+        if let Some(config) = &input.terminal_settlement
+            && config.semantic_version != prajna_research::terminal_settlement::SEMANTIC_VERSION
+        {
+            return Err(invalid(format!(
+                "unsupported terminal settlement semantic_version {}",
+                config.semantic_version
+            )));
+        }
         let raw = RawStore::open(root).map_err(|e| invalid(e.to_string()))?;
         let catalog = HistoricalCatalog::build(input.catalog.clone(), &raw)
             .map_err(|e| invalid(e.to_string()))?;
@@ -173,6 +213,10 @@ impl PitContext {
             has_corporate_action_table: has_actions,
             dividend_tax_rate: input.dividend_tax_rate,
             unknown_coverage,
+            terminal_settlement_semantic_version: input
+                .terminal_settlement
+                .as_ref()
+                .map(|config| config.semantic_version.clone()),
         })
     }
 
@@ -221,6 +265,13 @@ impl PitContext {
             )
             .map_err(|e| invalid(e.to_string()))?;
             let corporate_actions = self.corporate_action_schedule(panel)?;
+            if self.terminal_settlement_semantic_version.is_some() {
+                prajna_research::terminal_settlement::TerminalSettlementSchedule::from_market(
+                    &self.market,
+                    panel,
+                )
+                .map_err(invalid)?;
+            }
             let mut spec = serde_json::json!({
                 "dsv": experiment.dsv, "universe": experiment.universe, "venue": experiment.venue,
                 "strategy": {"kind": experiment.strategy_kind, "parameters": params},
@@ -241,8 +292,17 @@ impl PitContext {
                     "return_basis": "total_return",
                 });
             }
+            if let Some(semantic_version) = &self.terminal_settlement_semantic_version {
+                spec["terminal_settlement"] = serde_json::json!({
+                    "semantic_version": semantic_version,
+                    "price_basis": "catalog_last_raw_bar_close",
+                    "accounting": "direct_cash_without_order_fill_or_costs",
+                    "liquidation_facts": "not_used",
+                });
+            }
             experiment.engine.normalize_spec(&mut spec);
             bind_corporate_action_engine_version(&mut spec)?;
+            bind_terminal_settlement_engine_version(&mut spec)?;
             spec["engine"]["pit_semantic_version"] =
                 serde_json::json!(pit_strategy::SEMANTIC_VERSION);
             spec["unknown_coverage"] = self.unknown_coverage.summary_json();
