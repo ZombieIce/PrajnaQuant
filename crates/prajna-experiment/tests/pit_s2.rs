@@ -2,6 +2,7 @@
 mod fixture;
 use prajna_experiment::{Experiment, ResultLevel, RunStatus, read_run_table};
 use serde_json::{Value, json};
+use std::process::Command;
 
 fn definition(f: &fixture::Fixture, engine: &str) -> Value {
     let mut value = json!({
@@ -35,6 +36,8 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
     };
     use prajna_experiment::{opening_evidence, pit::PitContext};
     use prajna_research::etf_market::{DerivedMarket, ExecutionStatusVersion, MarketEvidence};
+    let start = chrono::NaiveDate::from_ymd_opt(2023, 4, 5).unwrap();
+    let date = |day| fixture::date_at(start, day).to_string();
 
     struct SyntheticPdf;
     impl PdfText for SyntheticPdf {
@@ -44,10 +47,11 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
     }
 
     let lake = fixture::lake();
-    let f = fixture::fixture_with_symbols_missing_bars(
+    let f = fixture::fixture_with_symbols_missing_bars_starting_at(
         lake.path(),
-        ["159919", "159612", "159952"],
+        ["159919", "159612", "159522"],
         std::collections::BTreeSet::from([(1, 6), (2, 7), (1, 8)]),
+        start,
     );
     let raw = RawStore::open(lake.path()).unwrap();
     let v1 = read_manifest(lake.path(), &f.dsv).unwrap();
@@ -96,10 +100,10 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
             actions: vec![CorporateActionV2 {
                 code: "159919".into(),
                 kind: "dividend".into(),
-                announcement_date: fixture::date(1),
-                record_date: Some(fixture::date(2)),
-                ex_date: Some(fixture::date(3)),
-                pay_date: Some(fixture::date(4)),
+                announcement_date: fixture::date_at(start, 1),
+                record_date: Some(fixture::date_at(start, 2)),
+                ex_date: Some(fixture::date_at(start, 3)),
+                pay_date: Some(fixture::date_at(start, 4)),
                 cash_per_share: Some("0.001".into()),
                 split_ratio: None,
                 liquidation_per_share: None,
@@ -149,8 +153,8 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
         EventFact {
             code: "159919".into(),
             kind: "suspension".into(),
-            announcement_date: "2023-01-04".into(),
-            effective_date: "2023-01-05".into(),
+            announcement_date: date(4),
+            effective_date: date(5),
             session_part: "morning".into(),
             evidence_level: "official".into(),
             source_announcement_id: "SYNTH-HALT-OPENING".into(),
@@ -159,18 +163,18 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
         EventFact {
             code: "159612".into(),
             kind: "suspension".into(),
-            announcement_date: "2023-01-05".into(),
-            effective_date: "2023-01-06".into(),
+            announcement_date: date(5),
+            effective_date: date(6),
             session_part: "full_day".into(),
             evidence_level: "official".into(),
             source_announcement_id: "SYNTH-HALT-PREVIOUS".into(),
             source_page: "1".into(),
         },
         EventFact {
-            code: "159952".into(),
+            code: "159522".into(),
             kind: "suspension".into(),
-            announcement_date: "2023-01-07".into(),
-            effective_date: "2023-01-07".into(),
+            announcement_date: date(7),
+            effective_date: date(7),
             session_part: "full_day".into(),
             evidence_level: "official".into(),
             source_announcement_id: "SYNTH-HALT-SAME-DAY".into(),
@@ -179,8 +183,8 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
         EventFact {
             code: "159919".into(),
             kind: "suspension".into(),
-            announcement_date: "2023-01-07".into(),
-            effective_date: "2023-01-08".into(),
+            announcement_date: date(7),
+            effective_date: date(8),
             session_part: "full_day".into(),
             evidence_level: "official".into(),
             source_announcement_id: "SYNTH-HALT-CONFLICT".into(),
@@ -192,8 +196,8 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
         vec![EventFact {
             code: "159612".into(),
             kind: "suspension".into(),
-            announcement_date: "2023-01-08".into(),
-            effective_date: "2023-01-09".into(),
+            announcement_date: date(8),
+            effective_date: date(9),
             session_part: "open".into(),
             evidence_level: "official".into(),
             source_announcement_id: "SYNTH-HALT-OPEN-ALIAS".into(),
@@ -275,8 +279,8 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
         .unwrap()
         .instrument_id()
         .unwrap();
-    let regular = &context.market.cells()[&(halt_id.clone(), fixture::date(1))];
-    let opening_halt = &context.market.cells()[&(halt_id.clone(), fixture::date(5))];
+    let regular = &context.market.cells()[&(halt_id.clone(), fixture::date_at(start, 1))];
+    let opening_halt = &context.market.cells()[&(halt_id.clone(), fixture::date_at(start, 5))];
     assert_eq!(
         regular.state,
         prajna_research::etf_market::TradeState::Tradable
@@ -289,19 +293,49 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
     assert_eq!(opening_halt.execution_price, Some("1".parse().unwrap()));
     assert!(opening_halt.reasons.contains("official_opening_halt"));
     assert!(opening_halt.reasons.contains("execution_at_first_trade"));
-    assert_eq!(opening_halt.available_at, Some(fixture::time(5, 15)));
+    assert_eq!(
+        opening_halt.available_at,
+        Some(fixture::time_at(start, 5, 15))
+    );
+    let rule_before_switch = generated
+        .openings
+        .iter()
+        .find(|opening| {
+            opening.instrument_id == halt_id && opening.session_date == fixture::date_at(start, 5)
+        })
+        .unwrap()
+        .limit_rule
+        .as_ref()
+        .unwrap();
+    let rule_on_switch = generated
+        .openings
+        .iter()
+        .find(|opening| {
+            opening.instrument_id == halt_id && opening.session_date == fixture::date_at(start, 6)
+        })
+        .unwrap()
+        .limit_rule
+        .as_ref()
+        .unwrap();
+    assert_ne!(rule_before_switch.version, rule_on_switch.version);
+    assert_eq!(rule_on_switch.effective_from, fixture::date_at(start, 6));
+    let switch_cell = &context.market.cells()[&(halt_id.clone(), fixture::date_at(start, 6))];
+    assert_eq!(
+        switch_cell.limit_rule_version.as_deref(),
+        Some(rule_on_switch.version.as_str())
+    );
     let opening_evidence = generated
         .openings
         .iter()
         .find(|opening| {
             opening.instrument_id == opening_halt.instrument_id
-                && opening.session_date == fixture::date(5)
+                && opening.session_date == fixture::date_at(start, 5)
         })
         .unwrap();
     assert!(matches!(
         opening_evidence.halt.as_ref().unwrap().evidence.publication,
         prajna_research::pit_universe::Publication::DateOnly { date }
-            if date == fixture::date(4)
+            if date == fixture::date_at(start, 4)
     ));
     let halted_id = context
         .catalog
@@ -317,33 +351,57 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
         .input()
         .lifecycles
         .iter()
-        .find(|life| life.native_symbol == "159952")
+        .find(|life| life.native_symbol == "159522")
         .unwrap()
         .instrument_id()
         .unwrap();
-    let previous_day_halt = &context.market.cells()[&(halted_id.clone(), fixture::date(6))];
-    let same_day_halt = &context.market.cells()[&(same_day_id, fixture::date(7))];
-    let conflict = &context.market.cells()[&(halt_id.clone(), fixture::date(8))];
-    let missing_without_notice = &context.market.cells()[&(halted_id.clone(), fixture::date(8))];
+    let previous_day_halt =
+        &context.market.cells()[&(halted_id.clone(), fixture::date_at(start, 6))];
+    let same_day_halt = &context.market.cells()[&(same_day_id.clone(), fixture::date_at(start, 7))];
+    let conflict = &context.market.cells()[&(halt_id.clone(), fixture::date_at(start, 8))];
+    let missing_without_notice =
+        &context.market.cells()[&(halted_id.clone(), fixture::date_at(start, 8))];
     use prajna_research::etf_market::TradeState;
     assert_eq!(previous_day_halt.state, TradeState::Halted);
     assert_eq!(same_day_halt.state, TradeState::Unknown);
+    let unknown_category_id = context
+        .catalog
+        .input()
+        .lifecycles
+        .iter()
+        .find(|life| life.native_symbol == "159522")
+        .unwrap()
+        .instrument_id()
+        .unwrap();
+    let unknown_category_cell =
+        &context.market.cells()[&(unknown_category_id.clone(), fixture::date_at(start, 4))];
+    assert_eq!(unknown_category_cell.state, TradeState::Unknown);
+    assert!(context.unknown_coverage.unknowns.iter().any(|cell| {
+        cell.instrument_id == unknown_category_id
+            && cell.session_date == fixture::date_at(start, 4)
+            && matches!(
+                cell.reason,
+                prajna_research::mvp6_coverage::UnknownReason::RuleUnknown {
+                    reason: prajna_research::mvp6_coverage::RuleUnknownReason::CategoryUnknown
+                }
+            )
+    }));
     assert_eq!(conflict.state, TradeState::Unknown);
     assert!(conflict.reasons.contains("halt_trade_conflict"));
     assert_eq!(missing_without_notice.state, TradeState::Unknown);
-    let open_alias = &context.market.cells()[&(halted_id.clone(), fixture::date(9))];
+    let open_alias = &context.market.cells()[&(halted_id.clone(), fixture::date_at(start, 9))];
     assert_eq!(open_alias.state, TradeState::Tradable);
     assert!(open_alias.reasons.contains("official_opening_halt"));
     assert!(open_alias.reasons.contains("execution_at_first_trade"));
     assert!(
         previous_day_halt
             .available_at
-            .is_some_and(|at| at >= fixture::time(6, 15))
+            .is_some_and(|at| at >= fixture::time_at(start, 6, 15))
     );
     assert!(
         same_day_halt
             .available_at
-            .is_some_and(|at| at >= fixture::time(7, 15))
+            .is_some_and(|at| at >= fixture::time_at(start, 7, 15))
     );
 
     let report_path = lake.path().join("acceptance/mvp6-unknown-coverage.json");
@@ -351,6 +409,48 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
     let _second_context = PitContext::build(&pit_input, lake.path(), &v7.dsv).unwrap();
     let second_report = std::fs::read(&report_path).unwrap();
     assert_eq!(first_report, second_report);
+
+    let facts_dir = lake.path().join("cli-facts");
+    std::fs::create_dir_all(&facts_dir).unwrap();
+    std::fs::write(
+        facts_dir.join("events.csv"),
+        "code,kind,announcement_date,effective_date,session_part,evidence_level,source_announcement_id,source_page\n",
+    )
+    .unwrap();
+    std::fs::write(
+        facts_dir.join("citations.csv"),
+        "fact_source,field,announcement_id,page,raw_sha256,excerpt,verified_by,verified_at\n",
+    )
+    .unwrap();
+    let cli_input_path = lake.path().join("cli-input.json");
+    std::fs::write(&cli_input_path, serde_json::to_vec(&pit_input).unwrap()).unwrap();
+    let cli_output = Command::new(env!("CARGO_BIN_EXE_prajna-experiment"))
+        .arg("mvp6-opening-evidence")
+        .arg(&cli_input_path)
+        .arg("--lake")
+        .arg(lake.path())
+        .arg("--dsv")
+        .arg(&v7.dsv)
+        .arg("--facts-dir")
+        .arg(&facts_dir)
+        .output()
+        .unwrap();
+    assert!(
+        cli_output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&cli_output.stderr)
+    );
+    let cli_summary: serde_json::Value = serde_json::from_slice(&cli_output.stdout).unwrap();
+    assert_eq!(cli_summary["execution_status"], "szse-derived-open@3");
+    assert!(cli_summary["per_etf_unknown_coverage"].is_array());
+    assert!(cli_summary.get("unknown_cells").is_none());
+    let cli_expected =
+        opening_evidence::generate(lake.path(), &v7.dsv, &catalog, &[], &[]).unwrap();
+    assert_eq!(
+        std::fs::read(lake.path().join("acceptance/mvp6-opening-evidence-v3.json")).unwrap(),
+        opening_evidence::serialize(&cli_expected).unwrap()
+    );
+    assert!(report_path.is_file());
 
     let mut narrow_registry = NormalizerRegistry::new();
     assert!(

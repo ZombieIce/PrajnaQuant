@@ -23,8 +23,19 @@ use zip::{ZipWriter, write::SimpleFileOptions};
 pub fn date(day: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(2023, 1, day).unwrap()
 }
+#[allow(dead_code)]
+pub fn date_at(start: NaiveDate, day: u32) -> NaiveDate {
+    start + chrono::Duration::days(i64::from(day - 1))
+}
+#[allow(dead_code)]
 pub fn time(day: u32, hour: u32) -> TimestampNs {
     format!("2023-01-{day:02}T{hour:02}:00:00+08:00")
+        .parse()
+        .unwrap()
+}
+#[allow(dead_code)]
+pub fn time_at(start: NaiveDate, day: u32, hour: u32) -> TimestampNs {
+    format!("{}T{hour:02}:00:00+08:00", date_at(start, day))
         .parse()
         .unwrap()
 }
@@ -66,7 +77,24 @@ pub fn fixture_with_symbols_missing_bars(
     symbols: [&str; 3],
     missing_bars: BTreeSet<(usize, u32)>,
 ) -> Fixture {
-    fixture_with_prices_and_symbols(root, 1.0, false, &BTreeMap::new(), symbols, &missing_bars)
+    fixture_with_symbols_missing_bars_starting_at(root, symbols, missing_bars, date(1))
+}
+
+pub fn fixture_with_symbols_missing_bars_starting_at(
+    root: &Path,
+    symbols: [&str; 3],
+    missing_bars: BTreeSet<(usize, u32)>,
+    start: NaiveDate,
+) -> Fixture {
+    fixture_with_prices_and_symbols(
+        root,
+        1.0,
+        false,
+        &BTreeMap::new(),
+        symbols,
+        &missing_bars,
+        start,
+    )
 }
 
 #[allow(dead_code)]
@@ -90,6 +118,7 @@ fn fixture_with_prices(
         overrides,
         ["159001", "159002", "159003"],
         &BTreeSet::new(),
+        date(1),
     )
 }
 
@@ -106,6 +135,7 @@ fn fixture_with_symbols_and_options(
         &BTreeMap::new(),
         symbols,
         &BTreeSet::new(),
+        date(1),
     )
 }
 
@@ -116,6 +146,7 @@ fn fixture_with_prices_and_symbols(
     overrides: &BTreeMap<(usize, u32), (f64, f64)>,
     symbols: [&str; 3],
     missing_bars: &BTreeSet<(usize, u32)>,
+    start: NaiveDate,
 ) -> Fixture {
     let raw = RawStore::open(root).unwrap();
     let put = |bytes: &[u8]| {
@@ -149,33 +180,35 @@ fn fixture_with_prices_and_symbols(
         .map(|d| {
             Session::new(
                 "SZSE".parse().unwrap(),
-                date(d),
-                format!("2023-01-{d:02}T09:30:00+08:00").parse().unwrap(),
-                time(d, 15),
+                date_at(start, d),
+                format!("{}T09:30:00+08:00", date_at(start, d))
+                    .parse()
+                    .unwrap(),
+                time_at(start, d, 15),
             )
             .unwrap()
         })
         .collect();
-    let life = |code: &str, start, removal: Option<u32>| Lifecycle {
+    let life = |code: &str, first_day, removal: Option<u32>| Lifecycle {
         native_symbol: code.into(),
         contract_raw_sha256: doc.clone(),
         listing: LifecycleFact {
-            effective_date: date(start),
-            evidence: evidence("listing", time(1, 8)),
+            effective_date: date_at(start, first_day),
+            evidence: evidence("listing", time_at(start, 1, 8)),
         },
         termination: None,
         attributes: std::iter::once(AttributeFact {
-            effective_date: date(start),
+            effective_date: date_at(start, first_day),
             category: FundCategory::Equity,
             index_id: "CSI:300".into(),
-            evidence: evidence("contract", time(1, 8)),
+            evidence: evidence("contract", time_at(start, 1, 8)),
             legal_name: None,
         })
         .chain(removal.map(|d| AttributeFact {
-            effective_date: date(d),
+            effective_date: date_at(start, d),
             category: FundCategory::Other,
             index_id: "CSI:300".into(),
-            evidence: evidence("category-change", time(d, 8)),
+            evidence: evidence("category-change", time_at(start, d, 8)),
             legal_name: None,
         }))
         .collect(),
@@ -189,13 +222,13 @@ fn fixture_with_prices_and_symbols(
     let mut catalog_input = CatalogInput {
         schema_version: 1,
         rule_version: "synthetic-catalog@1".into(),
-        calendar_start: date(1),
-        calendar_end: date(10),
+        calendar_start: date_at(start, 1),
+        calendar_end: date_at(start, 10),
         calendar_raw_sha256: BTreeSet::from([doc.clone()]),
         sessions: sessions.clone(),
         coverage: Coverage {
-            start: date(1),
-            end: date(10),
+            start: date_at(start, 1),
+            end: date_at(start, 10),
             scan_method: "synthetic exhaustive range".into(),
             announcement_method: "synthetic exhaustive listings/contracts/terminations attachments"
                 .into(),
@@ -226,9 +259,9 @@ fn fixture_with_prices_and_symbols(
                             .iter()
                             .position(|symbol| symbol.parse::<u32>().ok() == Some(code))
                             .expect("seen code is one of the fixture symbols");
-                        date(if index == 2 { 4 } else { 1 })
+                        date_at(start, if index == 2 { 4 } else { 1 })
                     }),
-                    last_observed: seen.then(|| date(10)),
+                    last_observed: seen.then(|| date_at(start, 10)),
                     identity_start: None,
                 }
             })
@@ -236,7 +269,7 @@ fn fixture_with_prices_and_symbols(
         broad_indices: Some(BroadIndexList {
             version: "synthetic-domestic@1".into(),
             index_ids: BTreeSet::from(["CSI:300".into()]),
-            evidence: vec![evidence("scope", time(1, 8))],
+            evidence: vec![evidence("scope", time_at(start, 1, 8))],
             named_indices: vec![],
         }),
         code_ranges: None,
@@ -246,15 +279,15 @@ fn fixture_with_prices_and_symbols(
         let life = &mut catalog_input.lifecycles[0];
         life.attributes.truncate(1);
         life.termination = Some(LifecycleFact {
-            effective_date: date(8),
-            evidence: evidence("formal-termination", time(8, 8)),
+            effective_date: date_at(start, 8),
+            evidence: evidence("formal-termination", time_at(start, 8, 8)),
         });
         catalog_input
             .scans
             .iter_mut()
             .find(|s| s.native_symbol == "159001")
             .unwrap()
-            .last_observed = Some(date(7));
+            .last_observed = Some(date_at(start, 7));
     }
     let catalog = HistoricalCatalog::build(catalog_input.clone(), &raw).unwrap();
     let ids = catalog
@@ -263,10 +296,14 @@ fn fixture_with_prices_and_symbols(
         .iter()
         .map(|l| l.instrument_id().unwrap())
         .collect::<Vec<_>>();
-    let days = date(1)
+    let month_start = start.with_day(1).unwrap();
+    let days = month_start
         .iter_days()
-        .take_while(|d| d.month() == 1)
-        .map(|d| json!({"jyrq":d.to_string(),"jybz":if d.day() <= 10 {"1"} else {"0"}}))
+        .take_while(|d| d.month() == start.month())
+        .map(|d| {
+            let is_session = (1..=10).any(|day| date_at(start, day) == d);
+            json!({"jyrq":d.to_string(),"jybz":if is_session {"1"} else {"0"}})
+        })
         .collect::<Vec<_>>();
     let mut hashes = vec![put(&serde_json::to_vec(&json!({"data":days})).unwrap())];
     let open_price = |code: usize, day: u32| {
@@ -315,9 +352,16 @@ fn fixture_with_prices_and_symbols(
         }
         let mut zip = ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let opts = SimpleFileOptions::default().last_modified_time(zip::DateTime::default());
+        let tdx_date = date_at(start, day);
+        let day_key = format!(
+            "{:02}{:02}{:02}",
+            tdx_date.year() % 100,
+            tdx_date.month(),
+            tdx_date.day()
+        );
         for (name, data) in [
-            (format!("sz2301{day:02}.cod"), cod),
-            (format!("sz2301{day:02}.md1"), md1),
+            (format!("sz{day_key}.cod"), cod),
+            (format!("sz{day_key}.md1"), md1),
         ] {
             zip.start_file(name, opts).unwrap();
             zip.write_all(&data).unwrap();
@@ -330,7 +374,7 @@ fn fixture_with_prices_and_symbols(
             .map(|d| {
                 let (open, close) = bar_prices(i, d);
                 json!([
-                    date(d).to_string(),
+                    date_at(start, d).to_string(),
                     open.to_string(),
                     close.to_string(),
                     open.max(close).to_string(),
@@ -361,8 +405,12 @@ fn fixture_with_prices_and_symbols(
         .enumerate()
         .flat_map(|(i, id)| sessions.iter().map(move |s| (i, id, s)))
         .map(|(i, id, s)| {
-            let day = s.session_date().day();
-            let known = evidence("opening-coverage", time(1, 8));
+            let day = s
+                .session_date()
+                .signed_duration_since(date_at(start, 1))
+                .num_days() as u32
+                + 1;
+            let known = evidence("opening-coverage", time_at(start, 1, 8));
             let reference_price = overrides.get(&(i, day)).map_or(price, |(open, _)| *open);
             OpeningEvidence {
                 instrument_id: id.clone(),
@@ -375,12 +423,12 @@ fn fixture_with_prices_and_symbols(
                 },
                 halt: (i == 0 && day == 5).then(|| HaltEvidence {
                     scope: HaltScope::OpeningOnly,
-                    evidence: evidence("halt", time(4, 16)),
+                    evidence: evidence("halt", time_at(start, 4, 16)),
                 }),
                 limit_rule: Some(LimitRule {
                     official_rule: None,
                     version: "synthetic-10pct@1".into(),
-                    effective_from: date(1),
+                    effective_from: date_at(start, 1),
                     effective_until: None,
                     rate_bps: 1000,
                     tick: "0.001".parse().unwrap(),
@@ -402,8 +450,8 @@ fn fixture_with_prices_and_symbols(
     let market_input = MarketEvidence {
         semantic_version: None,
         rule_version: "synthetic-execution@1".into(),
-        start: date(1),
-        end: date(10),
+        start: date_at(start, 1),
+        end: date_at(start, 10),
         coverage_gaps: BTreeSet::new(),
         openings,
     };
@@ -411,16 +459,16 @@ fn fixture_with_prices_and_symbols(
     let empty_actions = EmptyActionCoverage {
         version: "synthetic-empty-actions@1".into(),
         instruments: ids.iter().cloned().collect(),
-        start: date(1),
-        end: date(10),
+        start: date_at(start, 1),
+        end: date_at(start, 10),
         source_hashes: BTreeSet::from([doc.clone()]),
-        available_at: Some(time(1, 8)),
+        available_at: Some(time_at(start, 1, 8)),
     };
     let tri = TotalReturnIndex::build(&market, None, Some(&empty_actions), &raw).unwrap();
     let notices = vec![RiskNotice {
         instrument_id: ids[0].clone(),
         kind: RiskKind::TerminationProposal,
-        evidence: evidence("termination-proposal", time(4, 15)),
+        evidence: evidence("termination-proposal", time_at(start, 4, 15)),
     }];
     let risk = RiskSignals::build(&catalog, notices.clone(), &raw).unwrap();
     let eligibility = EligibilityParams {

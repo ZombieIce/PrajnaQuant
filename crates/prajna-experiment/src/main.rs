@@ -9,7 +9,10 @@ use prajna_experiment::{
     diff_executions, opening_evidence,
     pit::{PitContext, PitInput},
 };
-use prajna_research::pit_universe::{CatalogInput, HistoricalCatalog};
+use prajna_research::{
+    mvp6_coverage::format_percent,
+    pit_universe::{CatalogInput, HistoricalCatalog},
+};
 use serde_json::json;
 
 const EXIT_CODES: &str = "Exit codes: 0 success; 1 I/O, provenance or execution failure; \
@@ -219,18 +222,11 @@ fn run(cli: Cli) -> Result<u8, (u8, String)> {
                 .instruments
                 .iter()
                 .map(|instrument| {
-                    let hundredths = if instrument.cells == 0 {
-                        0
-                    } else {
-                        (u128::from(instrument.unknown_cells) * 10_000
-                            + u128::from(instrument.cells) / 2)
-                            / u128::from(instrument.cells)
-                    };
                     json!({
                         "code": instrument.native_symbol,
                         "cells": instrument.cells,
                         "unknown_cells": instrument.unknown_cells,
-                        "unknown_percent": format!("{}.{:02}%", hundredths / 100, hundredths % 100),
+                        "unknown_percent": format_percent(instrument.unknown_cells, instrument.cells),
                     })
                 })
                 .collect::<Vec<_>>();

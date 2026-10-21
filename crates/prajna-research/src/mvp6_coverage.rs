@@ -146,7 +146,7 @@ impl UnknownCoverageReport {
             "denominator_cells": self.denominator_cells,
             "unknown_cells": self.unknown_cells,
             "unknown_ratio": ratio(self.unknown_cells, self.denominator_cells),
-            "unknown_percent": percent(self.unknown_cells, self.denominator_cells),
+            "unknown_percent": format_percent(self.unknown_cells, self.denominator_cells),
             "thresholds": self.thresholds,
             "engineering_acceptance": self.engineering_acceptance,
             "instruments": self.instruments.iter().map(|instrument| serde_json::json!({
@@ -154,7 +154,7 @@ impl UnknownCoverageReport {
                 "cells": instrument.cells,
                 "unknown_cells": instrument.unknown_cells,
                 "unknown_ratio": ratio(instrument.unknown_cells, instrument.cells),
-                "unknown_percent": percent(instrument.unknown_cells, instrument.cells),
+                "unknown_percent": format_percent(instrument.unknown_cells, instrument.cells),
             })).collect::<Vec<_>>(),
         })
     }
@@ -167,7 +167,8 @@ fn ratio(numerator: u64, denominator: u64) -> String {
     format!("{numerator}/{denominator}")
 }
 
-fn percent(numerator: u64, denominator: u64) -> String {
+/// Format an unknown-cell percentage with the same rounding used by coverage reports.
+pub fn format_percent(numerator: u64, denominator: u64) -> String {
     if denominator == 0 {
         return "0.00%".into();
     }
