@@ -11,7 +11,7 @@ use prajna_domain::InstrumentId;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    etf_market::{DerivedMarket, TradeState},
+    etf_market::{DerivedMarket, ExecutionStatusVersion, TradeState},
     pit_universe::{HistoricalCatalog, Lifecycle},
 };
 
@@ -384,7 +384,13 @@ pub fn evaluate_derived_market(
                 execution_state: cell.state,
                 has_bar: cell.close.is_some(),
                 has_opening_halt_notice: opening.is_some_and(|item| item.halt.is_some()),
-                has_reference_price: opening.is_some_and(|item| item.reference.is_some()),
+                has_reference_price: if market.evidence().semantic_version
+                    == Some(ExecutionStatusVersion::V3)
+                {
+                    cell.upper_limit.is_some() && cell.lower_limit.is_some()
+                } else {
+                    opening.is_some_and(|item| item.reference.is_some())
+                },
                 source_conflict: cell.reasons.contains("sources_conflicting")
                     || cell.reasons.contains("sources_missing_or_conflicting")
                     || cell.reasons.contains("halt_trade_conflict"),

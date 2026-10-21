@@ -24,6 +24,404 @@ fn definition(f: &fixture::Fixture, engine: &str) -> Value {
 }
 
 #[test]
+fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
+    use prajna_data::{
+        NormalizerRegistry, RawStore, SourceKind, SourceRecordInput,
+        cninfo::{
+            CatalogLifecycle, Citation, CitationInput, CorporateActionV2, EventFact, EvidenceLevel,
+            Mvp6Session, PdfText, RiskEventV1, StructuredCorporateActionsV2,
+        },
+        publish_dataset, read_manifest,
+    };
+    use prajna_experiment::{opening_evidence, pit::PitContext};
+    use prajna_research::etf_market::{DerivedMarket, ExecutionStatusVersion, MarketEvidence};
+
+    struct SyntheticPdf;
+    impl PdfText for SyntheticPdf {
+        fn text(&mut self, _pdf: &[u8]) -> prajna_data::cninfo::Result<String> {
+            Ok("synthetic suspension event".into())
+        }
+    }
+
+    let lake = fixture::lake();
+    let f = fixture::fixture_with_symbols_missing_bars(
+        lake.path(),
+        ["159919", "159612", "159952"],
+        std::collections::BTreeSet::from([(1, 6), (2, 7), (1, 8)]),
+    );
+    let raw = RawStore::open(lake.path()).unwrap();
+    let v1 = read_manifest(lake.path(), &f.dsv).unwrap();
+    let market_inputs = v1
+        .core
+        .inputs
+        .iter()
+        .map(|input| input.raw_sha256.clone())
+        .collect::<Vec<_>>();
+    let market = publish_dataset(
+        lake.path(),
+        &raw,
+        &NormalizerRegistry::with_builtins(),
+        "szse-etf-frozen",
+        "4",
+        &market_inputs,
+        "2026-10-20T00:00:00Z",
+    )
+    .unwrap();
+
+    let lifecycles = f
+        .catalog
+        .input()
+        .lifecycles
+        .iter()
+        .map(|life| CatalogLifecycle {
+            code: life.native_symbol.clone(),
+            org_id: format!("synthetic-{}", life.native_symbol),
+            legal_name: format!("Synthetic ETF {}", life.native_symbol),
+            listing_date: life.listing.effective_date,
+            termination_date: life.termination.as_ref().map(|fact| fact.effective_date),
+            fund_category: "equity".into(),
+            tracked_index: "CSI:300".into(),
+            evidence_level: EvidenceLevel::Official,
+            source_announcement_id: format!("synthetic-listing-{}", life.native_symbol),
+            source_page: 1,
+            change_kind: String::new(),
+            available_from: None,
+        })
+        .collect::<Vec<_>>();
+    let session = Mvp6Session {
+        catalog_lifecycles: lifecycles,
+        corporate_actions: StructuredCorporateActionsV2 {
+            schema: "cninfo_corporateActions_structured_v2".into(),
+            version: 2,
+            actions: vec![CorporateActionV2 {
+                code: "159919".into(),
+                kind: "dividend".into(),
+                announcement_date: fixture::date(1),
+                record_date: Some(fixture::date(2)),
+                ex_date: Some(fixture::date(3)),
+                pay_date: Some(fixture::date(4)),
+                cash_per_share: Some("0.001".into()),
+                split_ratio: None,
+                liquidation_per_share: None,
+                evidence_level: EvidenceLevel::Official,
+                source_announcement_id: "SYNTH-ACTION".into(),
+                source_page: 1,
+            }],
+        },
+        risk_events: Vec::<RiskEventV1>::new(),
+    };
+    let facts_bytes = serde_json::to_vec(&json!({
+        "contract": "mvp-6-cninfo-facts-v1",
+        "dsv": market.dsv.clone(),
+        "session": session.clone(),
+    }))
+    .unwrap();
+    let facts_hash = raw
+        .put(
+            &facts_bytes,
+            SourceRecordInput {
+                content_type: "application/json".into(),
+                source_kind: SourceKind::FileImport,
+                source_id: "synthetic-facts-session".into(),
+                request: json!({
+                    "contract": "mvp-6-cninfo-facts-v1",
+                    "market_dsv": market.dsv.clone(),
+                }),
+                observed_at: "2026-10-20T00:00:00Z".into(),
+                ingested_by: "synthetic-test".into(),
+            },
+        )
+        .unwrap();
+    let mut v7_inputs = market_inputs.clone();
+    v7_inputs.push(facts_hash);
+    let v7 = publish_dataset(
+        lake.path(),
+        &raw,
+        &NormalizerRegistry::with_corporate_actions_v7(market.dsv.clone()).unwrap(),
+        "szse-etf-frozen",
+        "7",
+        &v7_inputs,
+        "2026-10-20T00:00:00Z",
+    )
+    .unwrap();
+
+    let events = vec![
+        EventFact {
+            code: "159919".into(),
+            kind: "suspension".into(),
+            announcement_date: "2023-01-04".into(),
+            effective_date: "2023-01-05".into(),
+            session_part: "morning".into(),
+            evidence_level: "official".into(),
+            source_announcement_id: "SYNTH-HALT-OPENING".into(),
+            source_page: "1".into(),
+        },
+        EventFact {
+            code: "159612".into(),
+            kind: "suspension".into(),
+            announcement_date: "2023-01-05".into(),
+            effective_date: "2023-01-06".into(),
+            session_part: "full_day".into(),
+            evidence_level: "official".into(),
+            source_announcement_id: "SYNTH-HALT-PREVIOUS".into(),
+            source_page: "1".into(),
+        },
+        EventFact {
+            code: "159952".into(),
+            kind: "suspension".into(),
+            announcement_date: "2023-01-07".into(),
+            effective_date: "2023-01-07".into(),
+            session_part: "full_day".into(),
+            evidence_level: "official".into(),
+            source_announcement_id: "SYNTH-HALT-SAME-DAY".into(),
+            source_page: "1".into(),
+        },
+        EventFact {
+            code: "159919".into(),
+            kind: "suspension".into(),
+            announcement_date: "2023-01-07".into(),
+            effective_date: "2023-01-08".into(),
+            session_part: "full_day".into(),
+            evidence_level: "official".into(),
+            source_announcement_id: "SYNTH-HALT-CONFLICT".into(),
+            source_page: "1".into(),
+        },
+    ];
+    let events = [
+        events,
+        vec![EventFact {
+            code: "159612".into(),
+            kind: "suspension".into(),
+            announcement_date: "2023-01-08".into(),
+            effective_date: "2023-01-09".into(),
+            session_part: "open".into(),
+            evidence_level: "official".into(),
+            source_announcement_id: "SYNTH-HALT-OPEN-ALIAS".into(),
+            source_page: "1".into(),
+        }],
+    ]
+    .concat();
+    let mut citations = Vec::new();
+    for event in &events {
+        let pdf = format!(
+            "%PDF-1.4 synthetic document for {}",
+            event.source_announcement_id
+        );
+        let event_hash = raw
+            .put(
+                pdf.as_bytes(),
+                SourceRecordInput {
+                    content_type: "application/pdf".into(),
+                    source_kind: SourceKind::FileImport,
+                    source_id: format!("synthetic-pdf-{}", event.source_announcement_id),
+                    request: json!({
+                        "url": format!("https://example.invalid/finalpage/{}/synthetic.pdf", event.announcement_date)
+                    }),
+                    observed_at: "2026-10-20T00:00:00Z".into(),
+                    ingested_by: "synthetic-test".into(),
+                },
+            )
+            .unwrap();
+        let mut converter = SyntheticPdf;
+        for field in [
+            "announcement_date",
+            "effective_date",
+            "kind",
+            "session_part",
+        ] {
+            citations.push(
+                Citation::from_store(
+                    &raw,
+                    &mut converter,
+                    CitationInput {
+                        fact_source: event.source_announcement_id.clone(),
+                        field: field.into(),
+                        announcement_id: event.source_announcement_id.clone(),
+                        page: 1,
+                        raw_sha256: event_hash.clone(),
+                        excerpt: "synthetic suspension event".into(),
+                        verified_by: "synthetic-test".into(),
+                        verified_at: "2026-10-20T00:00:00Z".into(),
+                    },
+                )
+                .unwrap(),
+            );
+        }
+    }
+    let catalog = f.catalog.clone();
+    let generated =
+        opening_evidence::generate(lake.path(), &v7.dsv, &catalog, &events, &citations).unwrap();
+    let generated_again =
+        opening_evidence::generate(lake.path(), &v7.dsv, &catalog, &events, &citations).unwrap();
+    assert_eq!(
+        opening_evidence::serialize(&generated).unwrap(),
+        opening_evidence::serialize(&generated_again).unwrap()
+    );
+
+    let mut pit_input = f.input.clone();
+    pit_input["market"] = serde_json::to_value(&generated).unwrap();
+    pit_input["corporate_action_rules"] = json!({
+        "version": "synthetic-actions@1",
+        "unexplained_jump_threshold_bps": 100_000,
+    });
+    let pit_input = serde_json::from_value(pit_input).unwrap();
+    let context = PitContext::build(&pit_input, lake.path(), &v7.dsv).unwrap();
+    let halt_id = context
+        .catalog
+        .input()
+        .lifecycles
+        .iter()
+        .find(|life| life.native_symbol == "159919")
+        .unwrap()
+        .instrument_id()
+        .unwrap();
+    let regular = &context.market.cells()[&(halt_id.clone(), fixture::date(1))];
+    let opening_halt = &context.market.cells()[&(halt_id.clone(), fixture::date(5))];
+    assert_eq!(
+        regular.state,
+        prajna_research::etf_market::TradeState::Tradable
+    );
+    assert_eq!(regular.execution_price, Some("1".parse().unwrap()));
+    assert_eq!(
+        opening_halt.state,
+        prajna_research::etf_market::TradeState::Tradable
+    );
+    assert_eq!(opening_halt.execution_price, Some("1".parse().unwrap()));
+    assert!(opening_halt.reasons.contains("official_opening_halt"));
+    assert!(opening_halt.reasons.contains("execution_at_first_trade"));
+    assert_eq!(opening_halt.available_at, Some(fixture::time(5, 15)));
+    let opening_evidence = generated
+        .openings
+        .iter()
+        .find(|opening| {
+            opening.instrument_id == opening_halt.instrument_id
+                && opening.session_date == fixture::date(5)
+        })
+        .unwrap();
+    assert!(matches!(
+        opening_evidence.halt.as_ref().unwrap().evidence.publication,
+        prajna_research::pit_universe::Publication::DateOnly { date }
+            if date == fixture::date(4)
+    ));
+    let halted_id = context
+        .catalog
+        .input()
+        .lifecycles
+        .iter()
+        .find(|life| life.native_symbol == "159612")
+        .unwrap()
+        .instrument_id()
+        .unwrap();
+    let same_day_id = context
+        .catalog
+        .input()
+        .lifecycles
+        .iter()
+        .find(|life| life.native_symbol == "159952")
+        .unwrap()
+        .instrument_id()
+        .unwrap();
+    let previous_day_halt = &context.market.cells()[&(halted_id.clone(), fixture::date(6))];
+    let same_day_halt = &context.market.cells()[&(same_day_id, fixture::date(7))];
+    let conflict = &context.market.cells()[&(halt_id.clone(), fixture::date(8))];
+    let missing_without_notice = &context.market.cells()[&(halted_id.clone(), fixture::date(8))];
+    use prajna_research::etf_market::TradeState;
+    assert_eq!(previous_day_halt.state, TradeState::Halted);
+    assert_eq!(same_day_halt.state, TradeState::Unknown);
+    assert_eq!(conflict.state, TradeState::Unknown);
+    assert!(conflict.reasons.contains("halt_trade_conflict"));
+    assert_eq!(missing_without_notice.state, TradeState::Unknown);
+    let open_alias = &context.market.cells()[&(halted_id.clone(), fixture::date(9))];
+    assert_eq!(open_alias.state, TradeState::Tradable);
+    assert!(open_alias.reasons.contains("official_opening_halt"));
+    assert!(open_alias.reasons.contains("execution_at_first_trade"));
+    assert!(
+        previous_day_halt
+            .available_at
+            .is_some_and(|at| at >= fixture::time(6, 15))
+    );
+    assert!(
+        same_day_halt
+            .available_at
+            .is_some_and(|at| at >= fixture::time(7, 15))
+    );
+
+    let report_path = lake.path().join("acceptance/mvp6-unknown-coverage.json");
+    let first_report = std::fs::read(&report_path).unwrap();
+    let _second_context = PitContext::build(&pit_input, lake.path(), &v7.dsv).unwrap();
+    let second_report = std::fs::read(&report_path).unwrap();
+    assert_eq!(first_report, second_report);
+
+    let mut narrow_registry = NormalizerRegistry::new();
+    assert!(
+        narrow_registry.register(prajna_data::SzseEtfFrozen::v4(vec![(159000, 159999)]).unwrap())
+    );
+    let alternate_market = publish_dataset(
+        lake.path(),
+        &raw,
+        &narrow_registry,
+        "szse-etf-frozen",
+        "4",
+        &market_inputs,
+        "2026-10-20T00:00:00Z",
+    )
+    .unwrap();
+    let wrong_parent_facts = serde_json::to_vec(&json!({
+        "contract": "mvp-6-cninfo-facts-v1",
+        "dsv": alternate_market.dsv.clone(),
+        "session": session,
+    }))
+    .unwrap();
+    let wrong_facts_hash = raw
+        .put(
+            &wrong_parent_facts,
+            SourceRecordInput {
+                content_type: "application/json".into(),
+                source_kind: SourceKind::FileImport,
+                source_id: "synthetic-facts-session-wrong-parent".into(),
+                request: json!({
+                    "contract": "mvp-6-cninfo-facts-v1",
+                    "market_dsv": alternate_market.dsv.clone(),
+                }),
+                observed_at: "2026-10-20T00:00:00Z".into(),
+                ingested_by: "synthetic-test".into(),
+            },
+        )
+        .unwrap();
+    let mut wrong_v7_inputs = market_inputs;
+    wrong_v7_inputs.push(wrong_facts_hash);
+    let wrong_v7 = publish_dataset(
+        lake.path(),
+        &raw,
+        &NormalizerRegistry::with_corporate_actions_v7(alternate_market.dsv.clone()).unwrap(),
+        "szse-etf-frozen",
+        "7",
+        &wrong_v7_inputs,
+        "2026-10-20T00:00:00Z",
+    )
+    .unwrap();
+    let mismatch = DerivedMarket::from_dataset(
+        lake.path(),
+        &wrong_v7.dsv,
+        &catalog,
+        MarketEvidence {
+            semantic_version: Some(ExecutionStatusVersion::V3),
+            rule_version: "synthetic-mismatch@1".into(),
+            start: catalog.input().coverage.start,
+            end: catalog.input().coverage.end,
+            coverage_gaps: std::collections::BTreeSet::new(),
+            openings: Vec::new(),
+        },
+    )
+    .unwrap_err();
+    assert!(
+        mismatch
+            .to_string()
+            .contains("different v4 Normalizer config")
+    );
+}
+
+#[test]
 fn cninfo_risk_input_is_bound_to_run_and_exits_on_next_sellable_open() {
     use prajna_data::{
         RawStore, SourceKind, SourceRecordInput,

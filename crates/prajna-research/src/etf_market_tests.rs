@@ -1,9 +1,9 @@
 use super::*;
 use crate::pit_universe::*;
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use prajna_data::{
-    CorporateActionKind, CorporateActionRow, RawStore, SourceKind, SourceRecordInput,
-    bars_from_record_batch, bars_to_record_batch,
+    BarSourceRow, CorporateActionKind, CorporateActionRow, RawStore, SourceKind, SourceRecordInput,
+    bar_sources_to_record_batch, bars_from_record_batch, bars_to_record_batch,
 };
 use prajna_domain::{Session, TimestampNs};
 use std::collections::BTreeSet;
@@ -1421,6 +1421,136 @@ fn v2_evidence(catalog: &HistoricalCatalog) -> MarketEvidence {
     serde_json::from_value(value).unwrap()
 }
 
+#[test]
+fn v3_uses_first_trade_and_publication_date_without_announcement_coverage() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (raw, input) = fixture(tmp.path());
+    let catalog = HistoricalCatalog::build(input, &raw).unwrap();
+    let (mut tables, _) = data(&catalog);
+    let mut evidence = v2_evidence(&catalog);
+    evidence.semantic_version = Some(ExecutionStatusVersion::V3);
+    for opening in &mut evidence.openings {
+        opening.announcement_coverage = None;
+        opening.source_independence = None;
+        opening.reference = None;
+    }
+    let id = evidence.openings[0].instrument_id.clone();
+    let day2 = evidence
+        .openings
+        .iter_mut()
+        .find(|opening| opening.instrument_id == id && opening.session_date == date(2))
+        .unwrap();
+    day2.halt = Some(HaltEvidence {
+        scope: HaltScope::FullSession,
+        evidence: Evidence {
+            raw_sha256: catalog.input().lifecycles[0].contract_raw_sha256.clone(),
+            announcement_id: "synthetic-previous-day-halt".into(),
+            locator: "synthetic event row".into(),
+            publication: Publication::DateOnly { date: date(1) },
+        },
+    });
+    let day3 = evidence
+        .openings
+        .iter_mut()
+        .find(|opening| opening.instrument_id == id && opening.session_date == date(3))
+        .unwrap();
+    day3.halt = Some(HaltEvidence {
+        scope: HaltScope::FullSession,
+        evidence: Evidence {
+            raw_sha256: catalog.input().lifecycles[0].contract_raw_sha256.clone(),
+            announcement_id: "synthetic-same-day-halt".into(),
+            locator: "synthetic event row".into(),
+            publication: Publication::DateOnly { date: date(3) },
+        },
+    });
+    let day4 = evidence
+        .openings
+        .iter_mut()
+        .find(|opening| opening.instrument_id == id && opening.session_date == date(4))
+        .unwrap();
+    day4.halt = Some(HaltEvidence {
+        scope: HaltScope::FullSession,
+        evidence: Evidence {
+            raw_sha256: catalog.input().lifecycles[0].contract_raw_sha256.clone(),
+            announcement_id: "synthetic-conflicting-halt".into(),
+            locator: "synthetic event row".into(),
+            publication: Publication::DateOnly { date: date(3) },
+        },
+    });
+    let day5 = evidence
+        .openings
+        .iter_mut()
+        .find(|opening| opening.instrument_id == id && opening.session_date == date(5))
+        .unwrap();
+    day5.halt = Some(HaltEvidence {
+        scope: HaltScope::OpeningOnly,
+        evidence: Evidence {
+            raw_sha256: catalog.input().lifecycles[0].contract_raw_sha256.clone(),
+            announcement_id: "synthetic-opening-halt".into(),
+            locator: "synthetic event row".into(),
+            publication: Publication::DateOnly { date: date(4) },
+        },
+    });
+    day5.market_available_at = Some(time(5, 9));
+    let day7 = evidence
+        .openings
+        .iter_mut()
+        .find(|opening| opening.instrument_id == id && opening.session_date == date(7))
+        .unwrap();
+    day7.limit_rule = None;
+
+    let bars = bars_from_record_batch(&tables.bars, &catalog.input().sessions).unwrap();
+    let remaining_bars = bars
+        .into_iter()
+        .filter(|bar| {
+            !(bar.instrument_id().symbol() == "159001"
+                && [2, 3, 6].contains(&bar.session_date().day()))
+        })
+        .collect::<Vec<_>>();
+    let source_rows = remaining_bars
+        .iter()
+        .map(|bar| BarSourceRow {
+            instrument_id: bar.instrument_id().clone(),
+            session_date: bar.session_date(),
+            source: "tdx".into(),
+            source_raw_sha256: catalog.input().lifecycles[0].contract_raw_sha256.clone(),
+            reference_price: Some("1".parse().unwrap()),
+        })
+        .collect::<Vec<_>>();
+    tables.bars = bars_to_record_batch(&remaining_bars).unwrap();
+    tables.bar_sources = Some(bar_sources_to_record_batch(&source_rows).unwrap());
+
+    let market =
+        DerivedMarket::build("dsv:synthetic-v3", &catalog, evidence, &raw, &tables).unwrap();
+    let cells = market.cells();
+    let cell1 = &cells[&(id.clone(), date(1))];
+    let cell2 = &cells[&(id.clone(), date(2))];
+    let cell3 = &cells[&(id.clone(), date(3))];
+    let cell4 = &cells[&(id.clone(), date(4))];
+    let cell5 = &cells[&(id.clone(), date(5))];
+    let cell6 = &cells[&(id.clone(), date(6))];
+    let cell7 = &cells[&(id.clone(), date(7))];
+    assert_eq!(cell1.state, TradeState::Tradable);
+    assert_eq!(cell1.execution_price, Some("1".parse().unwrap()));
+    assert_eq!(cell2.state, TradeState::Halted);
+    assert_eq!(cell3.state, TradeState::Unknown);
+    assert_eq!(cell4.state, TradeState::Unknown);
+    assert!(cell4.reasons.contains("halt_trade_conflict"));
+    assert_eq!(cell5.state, TradeState::Tradable);
+    assert!(cell5.reasons.contains("official_opening_halt"));
+    assert!(cell5.reasons.contains("execution_at_first_trade"));
+    assert_eq!(cell5.available_at, Some(time(5, 15)));
+    assert_eq!(cell5.execution_price, Some("1".parse().unwrap()));
+    assert_eq!(cell6.state, TradeState::Unknown);
+    assert_eq!(cell7.state, TradeState::Unknown);
+    assert!(
+        market
+            .cells()
+            .values()
+            .all(|cell| !cell.reasons.contains("missing_announcement_coverage"))
+    );
+}
+
 fn refresh_assignment_identity(category_evidence: &mut FundCategoryEvidence) {
     let assignment = limit_rules::FundCategoryAssignment {
         instrument_id: category_evidence.instrument_id.clone(),
@@ -1987,5 +2117,92 @@ fn halted_state_preserves_latest_dependency_and_source_conflicts_remain_unknown(
     assert_eq!(
         values.column("status").unwrap().str().unwrap().get(2),
         Some("missing_input")
+    );
+}
+
+#[test]
+fn v7_market_rows_must_match_the_parent_v4_projection() {
+    use arrow_array::{Date32Array, Int64Array};
+    use arrow_schema::{DataType, Field, Schema};
+    use std::sync::Arc;
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("instrument_id", DataType::Utf8, false),
+        Field::new("session_date", DataType::Date32, false),
+        Field::new("value", DataType::Int64, false),
+    ]));
+    let batch = |ids: &[&str], dates: &[i32], values: &[i64]| {
+        RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(StringArray::from(ids.to_vec())),
+                Arc::new(Date32Array::from(dates.to_vec())),
+                Arc::new(Int64Array::from(values.to_vec())),
+            ],
+        )
+        .unwrap()
+    };
+    let parent = batch(
+        &["159001.SZSE", "159001.SZSE", "159002.SZSE"],
+        &[1, 2, 1],
+        &[10, 20, 30],
+    );
+    let subset = batch(&["159001.SZSE", "159002.SZSE"], &[2, 1], &[20, 30]);
+    let selected = matching_parent_rows(
+        std::slice::from_ref(&parent),
+        &subset,
+        &["instrument_id", "session_date"],
+    )
+    .unwrap();
+    assert_eq!(selected.iter().map(RecordBatch::num_rows).sum::<usize>(), 2);
+    assert_eq!(
+        logical_hash(
+            "market",
+            &schema,
+            std::slice::from_ref(&subset),
+            &["instrument_id", "session_date"]
+        )
+        .unwrap(),
+        logical_hash(
+            "market",
+            &schema,
+            &selected,
+            &["instrument_id", "session_date"]
+        )
+        .unwrap()
+    );
+
+    let changed = batch(&["159001.SZSE", "159002.SZSE"], &[2, 1], &[21, 30]);
+    let changed_parent = matching_parent_rows(
+        std::slice::from_ref(&parent),
+        &changed,
+        &["instrument_id", "session_date"],
+    )
+    .unwrap();
+    assert_ne!(
+        logical_hash(
+            "market",
+            &schema,
+            std::slice::from_ref(&changed),
+            &["instrument_id", "session_date"]
+        )
+        .unwrap(),
+        logical_hash(
+            "market",
+            &schema,
+            &changed_parent,
+            &["instrument_id", "session_date"]
+        )
+        .unwrap()
+    );
+
+    let missing = batch(&["159003.SZSE"], &[1], &[40]);
+    assert!(
+        matching_parent_rows(
+            std::slice::from_ref(&parent),
+            &missing,
+            &["instrument_id", "session_date"]
+        )
+        .is_err()
     );
 }

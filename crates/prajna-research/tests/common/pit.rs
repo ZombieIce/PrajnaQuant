@@ -43,15 +43,30 @@ pub struct Fixture {
 }
 
 pub fn fixture(root: &Path) -> Fixture {
-    fixture_at_price(root, 1.0)
+    fixture_with_symbols(root, ["159001", "159002", "159003"])
 }
 
+#[allow(dead_code)]
 pub fn fixture_at_price(root: &Path, price: f64) -> Fixture {
-    fixture_options(root, price, false)
+    fixture_with_symbols_and_options(root, price, false, ["159001", "159002", "159003"])
 }
 
+#[allow(dead_code)]
 pub fn fixture_options(root: &Path, price: f64, terminated: bool) -> Fixture {
-    fixture_with_prices(root, price, terminated, &BTreeMap::new())
+    fixture_with_symbols_and_options(root, price, terminated, ["159001", "159002", "159003"])
+}
+
+pub fn fixture_with_symbols(root: &Path, symbols: [&str; 3]) -> Fixture {
+    fixture_with_symbols_and_options(root, 1.0, false, symbols)
+}
+
+#[allow(dead_code)]
+pub fn fixture_with_symbols_missing_bars(
+    root: &Path,
+    symbols: [&str; 3],
+    missing_bars: BTreeSet<(usize, u32)>,
+) -> Fixture {
+    fixture_with_prices_and_symbols(root, 1.0, false, &BTreeMap::new(), symbols, &missing_bars)
 }
 
 #[allow(dead_code)]
@@ -67,6 +82,40 @@ fn fixture_with_prices(
     price: f64,
     terminated: bool,
     overrides: &BTreeMap<(usize, u32), (f64, f64)>,
+) -> Fixture {
+    fixture_with_prices_and_symbols(
+        root,
+        price,
+        terminated,
+        overrides,
+        ["159001", "159002", "159003"],
+        &BTreeSet::new(),
+    )
+}
+
+fn fixture_with_symbols_and_options(
+    root: &Path,
+    price: f64,
+    terminated: bool,
+    symbols: [&str; 3],
+) -> Fixture {
+    fixture_with_prices_and_symbols(
+        root,
+        price,
+        terminated,
+        &BTreeMap::new(),
+        symbols,
+        &BTreeSet::new(),
+    )
+}
+
+fn fixture_with_prices_and_symbols(
+    root: &Path,
+    price: f64,
+    terminated: bool,
+    overrides: &BTreeMap<(usize, u32), (f64, f64)>,
+    symbols: [&str; 3],
+    missing_bars: &BTreeSet<(usize, u32)>,
 ) -> Fixture {
     let raw = RawStore::open(root).unwrap();
     let put = |bytes: &[u8]| {
@@ -155,13 +204,15 @@ fn fixture_with_prices(
             resolutions: vec![],
         },
         lifecycles: vec![
-            life("159001", 1, Some(5)),
-            life("159002", 1, Some(7)),
-            life("159003", 4, None),
+            life(symbols[0], 1, Some(5)),
+            life(symbols[1], 1, Some(7)),
+            life(symbols[2], 4, None),
         ],
         scans: (159000..=159999)
             .map(|code| {
-                let seen = (159001..=159003).contains(&code);
+                let seen = symbols
+                    .iter()
+                    .any(|symbol| symbol.parse::<u32>().ok() == Some(code));
                 ScanObservation {
                     native_symbol: code.to_string(),
                     status: if seen {
@@ -170,7 +221,13 @@ fn fixture_with_prices(
                         ScanStatus::NoRows
                     },
                     raw_sha256: doc.clone(),
-                    first_observed: seen.then(|| date(if code == 159003 { 4 } else { 1 })),
+                    first_observed: seen.then(|| {
+                        let index = symbols
+                            .iter()
+                            .position(|symbol| symbol.parse::<u32>().ok() == Some(code))
+                            .expect("seen code is one of the fixture symbols");
+                        date(if index == 2 { 4 } else { 1 })
+                    }),
                     last_observed: seen.then(|| date(10)),
                     identity_start: None,
                 }
@@ -229,17 +286,22 @@ fn fixture_with_prices(
         let codes = if day < 4 { 2 } else { 3 };
         let mut cod = Vec::new();
         let mut md1 = Vec::new();
-        for i in 0..codes {
+        for (i, symbol) in symbols.iter().enumerate().take(codes) {
+            if missing_bars.contains(&(i, day)) {
+                continue;
+            }
             if terminated && i == 0 && day >= 8 {
                 continue;
             }
             let mut record = [0u8; 150];
-            record[..6].copy_from_slice(format!("15900{}", i + 1).as_bytes());
+            record[..6].copy_from_slice(symbol.as_bytes());
             record[32..34].copy_from_slice(&((cod.len() / 150) as u16).to_le_bytes());
             cod.extend_from_slice(&record);
             let mut block = [0u8; 512];
             let (open, close) = bar_prices(i, day);
+            let reference_price = overrides.get(&(i, day)).map_or(price, |(open, _)| *open);
             for (offset, v) in [
+                (4, reference_price),
                 (12, open),
                 (20, open.max(close)),
                 (28, open.min(close)),
@@ -264,7 +326,7 @@ fn fixture_with_prices(
     }
     for (i, _) in ids.iter().enumerate() {
         let rows = (if i == 2 { 4 } else { 1 }..=10)
-            .filter(|d| !terminated || i != 0 || *d < 8)
+            .filter(|d| (!terminated || i != 0 || *d < 8) && !missing_bars.contains(&(i, *d)))
             .map(|d| {
                 let (open, close) = bar_prices(i, d);
                 json!([
@@ -277,7 +339,7 @@ fn fixture_with_prices(
                 ])
             })
             .collect::<Vec<_>>();
-        let key = format!("sz15900{}", i + 1);
+        let key = format!("sz{}", symbols[i]);
         hashes.push(put(&serde_json::to_vec(
             &json!({"code":0,"data":{key:{"day":rows}}}),
         )

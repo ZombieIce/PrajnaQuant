@@ -10,9 +10,11 @@ use prajna_data::{
 use prajna_domain::{Bar, BarData, InstrumentId, Price, Quantity, Session, TimestampNs, VenueId};
 use serde_json::{Value, json};
 use std::{
+    cell::Cell,
     collections::{BTreeSet, VecDeque},
     fs,
     path::Path,
+    rc::Rc,
     sync::{Arc, Mutex},
     time::Instant,
 };
@@ -709,6 +711,30 @@ fn citation_csv_binds_each_row_to_a_frozen_document_page_excerpt_and_verifier() 
         .unwrap();
     assert_eq!(action.announcement_id(), "action");
 
+    let event_sources = BTreeSet::from(["event".to_owned()]);
+    let unrelated_raw_missing = csv.replacen(
+        evidence
+            .iter()
+            .find(|citation| citation.fact_source() == "identity")
+            .unwrap()
+            .raw_sha256(),
+        &format!("sha256:{}", "0".repeat(64)),
+        1,
+    );
+    let event_only = read_citations_csv_for_sources(
+        &unrelated_raw_missing,
+        &store,
+        &mut NoopPdf,
+        Some(&event_sources),
+    )
+    .unwrap();
+    assert!(!event_only.is_empty());
+    assert!(
+        event_only
+            .iter()
+            .all(|citation| citation.fact_source() == "event")
+    );
+
     assert!(
         read_citations_csv(
             "announcement_id,page,raw_sha256,evidenced_fields\n",
@@ -879,6 +905,55 @@ fn citation_csv_binds_each_row_to_a_frozen_document_page_excerpt_and_verifier() 
             .to_string()
             .contains("cited page must be positive")
     );
+}
+
+#[test]
+fn citation_csv_extracts_a_shared_pdf_only_once() {
+    struct CountingPdf(Rc<Cell<usize>>);
+    impl PdfText for CountingPdf {
+        fn text(&mut self, _: &[u8]) -> Result<String> {
+            self.0.set(self.0.get() + 1);
+            Ok("synthetic PDF text".into())
+        }
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = RawStore::open(dir.path()).unwrap();
+    let raw = store
+        .put(
+            b"%PDF-1.4 event-announcement",
+            source_record_at("event-announcement", "2026-01-05"),
+        )
+        .unwrap();
+    let citations = ["kind", "session_part"]
+        .into_iter()
+        .map(|field| {
+            Citation::from_store(
+                &store,
+                &mut NoopPdf,
+                CitationInput {
+                    fact_source: "event-announcement".into(),
+                    field: field.into(),
+                    announcement_id: "event-announcement".into(),
+                    page: 1,
+                    raw_sha256: raw.clone(),
+                    excerpt: "synthetic PDF text".into(),
+                    verified_by: "synthetic-reviewer".into(),
+                    verified_at: "2026-02-01T00:00:00Z".into(),
+                },
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let calls = Rc::new(Cell::new(0));
+    let loaded = read_citations_csv(
+        &citation_csv(&citations),
+        &store,
+        &mut CountingPdf(calls.clone()),
+    )
+    .unwrap();
+    assert_eq!(loaded.len(), 2);
+    assert_eq!(calls.get(), 1);
 }
 
 struct PagedPdf;

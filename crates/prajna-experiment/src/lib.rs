@@ -35,6 +35,7 @@ use sha2::{Digest, Sha256};
 
 mod accurate;
 mod engine;
+pub mod opening_evidence;
 pub mod pit;
 mod python;
 pub use python::{PreparedDecisions, PythonProvenance};

@@ -3,10 +3,13 @@
 use std::{fs, num::NonZeroUsize, path::PathBuf, process::ExitCode, sync::Arc, time::Instant};
 
 use clap::{Parser, Subcommand};
+use prajna_data::RawStore;
 use prajna_experiment::{
     ExecutionIdentity, Experiment, ExperimentError, ResultLevel, RunStatus, WorkerCommand,
-    diff_executions,
+    diff_executions, opening_evidence,
+    pit::{PitContext, PitInput},
 };
+use prajna_research::pit_universe::{CatalogInput, HistoricalCatalog};
 use serde_json::json;
 
 const EXIT_CODES: &str = "Exit codes: 0 success; 1 I/O, provenance or execution failure; \
@@ -52,6 +55,17 @@ enum Commands {
         exe_b: String,
         #[arg(long)]
         lake: PathBuf,
+    },
+    /// Generate local @3 opening evidence from frozen Dataset and cited facts,
+    /// then validate it through the canonical PitContext path.
+    Mvp6OpeningEvidence {
+        input: PathBuf,
+        #[arg(long)]
+        lake: PathBuf,
+        #[arg(long)]
+        dsv: String,
+        #[arg(long)]
+        facts_dir: PathBuf,
     },
 }
 
@@ -165,6 +179,70 @@ fn run(cli: Cli) -> Result<u8, (u8, String)> {
                 serde_json::to_string(&diff).map_err(|error| (1, error.to_string()))?
             );
             Ok(if changed { 4 } else { 0 })
+        }
+        Commands::Mvp6OpeningEvidence {
+            input,
+            lake,
+            dsv,
+            facts_dir,
+        } => {
+            let mut definition: serde_json::Value =
+                serde_json::from_slice(&fs::read(&input).map_err(|error| (1, error.to_string()))?)
+                    .map_err(|error| (2, error.to_string()))?;
+            let catalog_input: CatalogInput = serde_json::from_value(
+                definition
+                    .get("catalog")
+                    .cloned()
+                    .ok_or_else(|| (2, "input has no catalog".into()))?,
+            )
+            .map_err(|error| (2, error.to_string()))?;
+            let raw = RawStore::open(&lake).map_err(|error| (1, error.to_string()))?;
+            let catalog = HistoricalCatalog::build(catalog_input, &raw)
+                .map_err(|error| (2, error.to_string()))?;
+            let evidence =
+                opening_evidence::generate_from_local_files(&lake, &dsv, &catalog, &facts_dir)
+                    .map_err(|error| (1, error))?;
+            let evidence_bytes =
+                opening_evidence::serialize(&evidence).map_err(|error| (1, error))?;
+            let acceptance_dir = lake.join("acceptance");
+            fs::create_dir_all(&acceptance_dir).map_err(|error| (1, error.to_string()))?;
+            let evidence_path = acceptance_dir.join("mvp6-opening-evidence-v3.json");
+            fs::write(&evidence_path, &evidence_bytes).map_err(|error| (1, error.to_string()))?;
+            definition["market"] =
+                serde_json::to_value(evidence).map_err(|error| (1, error.to_string()))?;
+            let pit_input: PitInput =
+                serde_json::from_value(definition).map_err(|error| (2, error.to_string()))?;
+            let context = PitContext::build(&pit_input, &lake, &dsv)
+                .map_err(|error| (error_code(&error), error.to_string()))?;
+            let by_etf = context
+                .unknown_coverage
+                .instruments
+                .iter()
+                .map(|instrument| {
+                    let hundredths = if instrument.cells == 0 {
+                        0
+                    } else {
+                        (u128::from(instrument.unknown_cells) * 10_000
+                            + u128::from(instrument.cells) / 2)
+                            / u128::from(instrument.cells)
+                    };
+                    json!({
+                        "code": instrument.native_symbol,
+                        "cells": instrument.cells,
+                        "unknown_cells": instrument.unknown_cells,
+                        "unknown_percent": format!("{}.{:02}%", hundredths / 100, hundredths % 100),
+                    })
+                })
+                .collect::<Vec<_>>();
+            println!(
+                "{}",
+                json!({
+                    "execution_status": "szse-derived-open@3",
+                    "per_etf_unknown_coverage": by_etf,
+                    "evidence_output": "acceptance/mvp6-opening-evidence-v3.json",
+                })
+            );
+            Ok(0)
         }
     }
 }

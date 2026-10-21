@@ -12,7 +12,7 @@ pub use acceptance::{
     FactsAcceptance, FixedListAcceptance, V4Projection, collect_and_accept, load_v4_projection,
     write_facts_acceptance,
 };
-pub use citations::{Citation, CitationInput, read_citations_csv};
+pub use citations::{Citation, CitationInput, read_citations_csv, read_citations_csv_for_sources};
 pub use collect::{Collector, HttpReply, Request, Transport};
 pub use crosscheck::{CrosscheckMismatch, CrosscheckReport, V4DailyBar, crosscheck_v4};
 pub use extract::{EXTRACTOR_VERSION, PdfText, Poppler, extract_fields};
