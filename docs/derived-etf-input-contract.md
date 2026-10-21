@@ -72,6 +72,10 @@ python3 scripts/collect_tencent_fallback.py /local/missing-cells.json --network-
 
 `szse-etf-frozen@2` 仅当 cninfo 结构化索引行包含显式 `corporateActions` 事实时才产出事件表；分红缺日期/金额、折算缺日期/比例、清算缺生效日/结算金额、未知字段或未结构化的分红/折算/终止公告均 fail closed。保留来源 `announcementTime` 的精确 `announced_at`，另按冻结日历的下一交易日收盘计算保守 `available_at`。当前没有 PDF/附件解析器或公告全集/分页覆盖证明，v2 TRI 不应被解释为真实公告已完整。`TotalReturnIndex::build_from_dataset` 校验 action Parquet 的逻辑 hash/行数与 DSV，验证 Raw hash，再按事件日期顺序累计；分红使用 `(P[t] + d) / P[t-1]`，折算使用 `r × P[t] / P[t-1]`。公告可用时刻传播到事件点，因此晚到公告不能成为更早决策的可用因子值。同一 Instrument/事件日有多个事件时，因为当前输入未表达事件之间的权益份额基准与顺序，构建器 fail closed。规则版本和跳变阈值、事件行、数据集版本及生成点值进入 TRI 身份；Factor Cache 与 PIT Run 身份引用该版本。阈值以上且未被事件金额/比例解释的价格跳变在对应点缺失，并进入逐 Instrument 的 integrity 报告；报告的 `observed_raw_set_only` 不是完整性证明。
 
+### MVP-6 market-driven TRI semantics (#254)
+
+When `CorporateActionRules.version` is `mvp6-market-driven@1`, `liquidation` rows remain in the immutable corporate-action Dataset but are excluded from the Total Return Index and action ledger. The builder skips these rows before requiring an effective date or liquidation amount and lists each skipped row (announcement ID, action index, instrument, reason, and missing-field flags) in TRI diagnostics and identity. Dividend and share-conversion processing is unchanged. This semantic version does not model actual liquidation proceeds or dates; terminal positions are settled at the last in-lifecycle Bar under #255. Other rule versions retain the existing liquidation behavior and identity.
+
 `EtfMomentum::new(N)` 的独立身份为 `etf_tri_momentum@1`，高值优先，值为 `TRI[t]/TRI[t-N]-1`，需要 N+1 个交易所 Session。整个窗口内任一状态/指数输入 UNKNOWN 或缺失则 `missing_input`，不跨缺口找更早价格；HALTED 平持。依赖可用时刻未知为 `unknown_availability`；成功值可用时刻取全部依赖最晚值，且不早于观察 Session close。输出复用既有 Factor Values schema，非 ok 行 value/available_at 均 null。
 
 `EtfMomentum::cached` 复用 `FactorCache` 的校验、Parquet 和原子发布。独立 `FactorKey::for_etf_input` 绑定新因子版本/参数、DSV、Catalog、状态完整输入、TRI 输入、Universe 版本、实际成员、Values schema 和实现版本；旧 FactorKey 不变。缓存命中前也校验 TRI 与市场身份/成员，不能用另一市场的指数命中旧条目。
