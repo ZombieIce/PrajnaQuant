@@ -25,6 +25,11 @@ pub enum ReturnMode {
     ProviderTotalReturn,
 }
 
+/// Explicit action-rule version for the MVP-6 market-driven return semantics.
+/// Liquidation facts remain in the input Dataset and diagnostics, but do not
+/// alter the TRI or enter the action ledger.
+pub const MVP6_MARKET_DRIVEN_CORPORATE_ACTION_RULES_VERSION: &str = "mvp6-market-driven@1";
+
 /// A provider supplies already adjusted positive index levels plus the latest
 /// availability of every corporate-action/price input. Its identity must bind
 /// the complete immutable provider data and rules. This is an integration seam,
@@ -60,10 +65,14 @@ pub struct TotalReturnIndex {
     market_identity: String,
     actions: Vec<CorporateActionRow>,
     integrity: Vec<InstrumentActionIntegrity>,
+    skipped_liquidation_actions: Vec<SkippedLiquidationAction>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
+/// Versioned corporate-action interpretation used by the Total Return Index.
+/// `version` is also the explicit semantic selector for MVP-6's market-driven
+/// liquidation treatment.
 pub struct CorporateActionRules {
     pub version: String,
     pub unexplained_jump_threshold_bps: u32,
@@ -79,6 +88,16 @@ pub struct InstrumentActionIntegrity {
     pub unexplained_price_jumps: Vec<NaiveDate>,
     /// Raw-set presence does not prove complete official announcement coverage.
     pub coverage_status: ActionCoverageStatus,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SkippedLiquidationAction {
+    pub announcement_id: String,
+    pub action_index: u32,
+    pub instrument_id: InstrumentId,
+    pub reason: &'static str,
+    pub missing_effective_date: bool,
+    pub missing_liquidation_amount: bool,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize)]
@@ -211,6 +230,7 @@ impl TotalReturnIndex {
             market_identity: market.version().into(),
             actions: Vec::new(),
             integrity,
+            skipped_liquidation_actions: Vec::new(),
         })
     }
 
@@ -232,6 +252,38 @@ impl TotalReturnIndex {
                 "invalid corporate action Dataset Version or rules".into(),
             ));
         }
+        let input_actions = actions;
+        let (applicable_actions, skipped_liquidation_actions) =
+            actions_for_rules(actions, rules, raw)?;
+        Self::build_with_prepared_actions(
+            market,
+            applicable_actions.as_slice(),
+            input_actions,
+            rules,
+            dataset_version,
+            raw,
+            skipped_liquidation_actions,
+        )
+    }
+
+    fn build_with_prepared_actions(
+        market: &DerivedMarket,
+        actions: &[CorporateActionRow],
+        input_actions: &[CorporateActionRow],
+        rules: &CorporateActionRules,
+        dataset_version: &str,
+        raw: &RawStore,
+        skipped_liquidation_actions: Vec<SkippedLiquidationAction>,
+    ) -> Result<Self, FactorError> {
+        if dataset_version != market.dsv()
+            || rules.version.trim().is_empty()
+            || rules.unexplained_jump_threshold_bps == 0
+        {
+            return Err(FactorError::Evaluation(
+                "invalid corporate action Dataset Version or rules".into(),
+            ));
+        }
+        let ignore_liquidation = uses_market_driven_liquidation_rules(rules);
         let mut by_date = BTreeMap::new();
         for action in actions {
             raw.get(&action.source_raw_sha256)
@@ -405,12 +457,16 @@ impl TotalReturnIndex {
                 coverage_status: ActionCoverageStatus::ObservedRawSetOnly,
             });
         }
-        let identity = json!({
-            "semantic_version":"etf-total-return-index@2", "market":market.version(),
+        let mut identity = json!({
+            "semantic_version": if ignore_liquidation { "etf-total-return-index@3" } else { "etf-total-return-index@2" }, "market":market.version(),
             "dataset_version":dataset_version, "normalization_version":"szse-corporate-action@1",
-            "rules":rules, "actions":actions, "integrity":integrity,
+            "rules":rules, "actions":if ignore_liquidation { actions } else { input_actions }, "integrity":integrity,
             "points":points.iter().map(|((id,date),p)|json!({"instrument":id,"date":date,"level_bits":format!("{:016x}",p.level.to_bits()),"available_at":p.available_at})).collect::<Vec<_>>()
         });
+        if ignore_liquidation {
+            identity["input_actions"] = json!(input_actions);
+            identity["skipped_liquidation_actions"] = json!(skipped_liquidation_actions);
+        }
         let canonical = prajna_data::restricted_jcs(&identity)
             .map_err(|e| FactorError::Evaluation(e.to_string()))?;
         let version = format!("etf-tri-input:sha256:{:x}", Sha256::digest(canonical));
@@ -421,6 +477,7 @@ impl TotalReturnIndex {
             market_identity: market.version().into(),
             actions: actions.to_vec(),
             integrity,
+            skipped_liquidation_actions,
         })
     }
 
@@ -472,31 +529,47 @@ impl TotalReturnIndex {
                 "corporate_actions table does not match Dataset Version".into(),
             ));
         }
-        let actions = batches
+        let input_actions = batches
             .iter()
             .map(corporate_actions_from_record_batch)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| FactorError::Evaluation(e.to_string()))?
             .into_iter()
             .flatten()
-            .map(|mut action| {
-                let date = action.ex_date.or(action.effective_date).ok_or_else(|| {
-                    FactorError::Evaluation(
-                        "corporate action cannot be assigned to a lifecycle without an ex-date"
-                            .into(),
-                    )
-                })?;
-                let native_symbol = action.instrument_id.symbol().to_owned();
-                action.instrument_id = if action.kind == CorporateActionKind::Liquidation {
-                    market.resolve_settlement_action(&native_symbol, date)
-                } else {
-                    market.resolve_native_row(&native_symbol, date)
-                }
-                .map_err(|e| FactorError::Evaluation(e.to_string()))?;
-                Ok(action)
-            })
-            .collect::<Result<Vec<_>, FactorError>>()?;
-        Self::build_with_actions(market, &actions, rules, market.dsv(), raw)
+            .collect::<Vec<_>>();
+        let ignore_liquidation = uses_market_driven_liquidation_rules(rules);
+        let (applicable_actions, skipped_liquidation_actions) =
+            actions_for_rules(&input_actions, rules, raw)?;
+        let mut actions = Vec::with_capacity(applicable_actions.len());
+        for mut action in applicable_actions {
+            let date = action.ex_date.or(action.effective_date).ok_or_else(|| {
+                FactorError::Evaluation(
+                    "corporate action cannot be assigned to a lifecycle without an ex-date".into(),
+                )
+            })?;
+            let native_symbol = action.instrument_id.symbol().to_owned();
+            action.instrument_id = if action.kind == CorporateActionKind::Liquidation {
+                market.resolve_settlement_action(&native_symbol, date)
+            } else {
+                market.resolve_native_row(&native_symbol, date)
+            }
+            .map_err(|e| FactorError::Evaluation(e.to_string()))?;
+            actions.push(action);
+        }
+        let identity_actions = if ignore_liquidation {
+            input_actions.as_slice()
+        } else {
+            actions.as_slice()
+        };
+        Self::build_with_prepared_actions(
+            market,
+            &actions,
+            identity_actions,
+            rules,
+            market.dsv(),
+            raw,
+            skipped_liquidation_actions,
+        )
     }
 
     pub fn identity(&self) -> &Value {
@@ -518,6 +591,50 @@ impl TotalReturnIndex {
     pub fn actions(&self) -> &[CorporateActionRow] {
         &self.actions
     }
+
+    pub fn skipped_liquidation_actions(&self) -> &[SkippedLiquidationAction] {
+        &self.skipped_liquidation_actions
+    }
+}
+
+fn uses_market_driven_liquidation_rules(rules: &CorporateActionRules) -> bool {
+    rules.version == MVP6_MARKET_DRIVEN_CORPORATE_ACTION_RULES_VERSION
+}
+
+fn skipped_liquidation_action(action: &CorporateActionRow) -> SkippedLiquidationAction {
+    SkippedLiquidationAction {
+        announcement_id: action.announcement_id.clone(),
+        action_index: action.action_index,
+        instrument_id: action.instrument_id.clone(),
+        reason: "liquidation_ignored_by_mvp6_market_driven_semantics",
+        missing_effective_date: action.effective_date.is_none(),
+        missing_liquidation_amount: action.liquidation_cash_per_share.is_none(),
+    }
+}
+
+fn actions_for_rules(
+    actions: &[CorporateActionRow],
+    rules: &CorporateActionRules,
+    raw: &RawStore,
+) -> Result<(Vec<CorporateActionRow>, Vec<SkippedLiquidationAction>), FactorError> {
+    let ignore_liquidation = uses_market_driven_liquidation_rules(rules);
+    let mut applicable = Vec::with_capacity(actions.len());
+    let mut skipped = Vec::new();
+    for action in actions {
+        if ignore_liquidation && action.kind == CorporateActionKind::Liquidation {
+            raw.get(&action.source_raw_sha256)
+                .map_err(|e| FactorError::Evaluation(e.to_string()))?;
+            if action.normalization_version.trim().is_empty() {
+                return Err(FactorError::Evaluation(
+                    "corporate action normalization version is empty".into(),
+                ));
+            }
+            skipped.push(skipped_liquidation_action(action));
+        } else {
+            applicable.push(action.clone());
+        }
+    }
+    Ok((applicable, skipped))
 }
 
 fn parse_action_decimal(value: Option<&str>) -> Result<f64, FactorError> {

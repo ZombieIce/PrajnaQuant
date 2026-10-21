@@ -300,21 +300,6 @@ impl DerivedMarket {
         if manifest.core.normalizer.id != "szse-etf-frozen" {
             return Err(err("requires frozen SZSE ETF Dataset"));
         }
-        let registry = if manifest.core.normalizer.version == "5" {
-            NormalizerRegistry::with_sina_adjustment_v5(catalog.sina_factor_lifecycles())
-                .map_err(err)?
-        } else {
-            NormalizerRegistry::with_builtins()
-        };
-        let normalizer = registry
-            .get(
-                &manifest.core.normalizer.id,
-                &manifest.core.normalizer.version,
-            )
-            .ok_or_else(|| err("unknown normalizer"))?;
-        if normalizer.config_sha256() != manifest.core.normalizer.config_sha256 {
-            return Err(err("normalizer config mismatch"));
-        }
         let raw = RawStore::open(root).map_err(err)?;
         let inputs = manifest
             .core
@@ -328,6 +313,37 @@ impl DerivedMarket {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
+        let registry = if manifest.core.normalizer.version == "5" {
+            NormalizerRegistry::with_sina_adjustment_v5(catalog.sina_factor_lifecycles())
+                .map_err(err)?
+        } else if manifest.core.normalizer.version == "7" {
+            let market_dsvs = inputs
+                .iter()
+                .flat_map(|input| &input.source_records)
+                .filter(|source| source.source_id == "cninfo_corporate_action_facts")
+                .filter_map(|source| source.request["market_dsv"].as_str())
+                .collect::<std::collections::BTreeSet<_>>();
+            if market_dsvs.len() != 1 {
+                return Err(err(
+                    "corporate-action Dataset must identify exactly one market DSV",
+                ));
+            }
+            NormalizerRegistry::with_corporate_actions_v7(
+                (*market_dsvs.first().expect("one market DSV")).to_owned(),
+            )
+            .map_err(err)?
+        } else {
+            NormalizerRegistry::with_builtins()
+        };
+        let normalizer = registry
+            .get(
+                &manifest.core.normalizer.id,
+                &manifest.core.normalizer.version,
+            )
+            .ok_or_else(|| err("unknown normalizer"))?;
+        if normalizer.config_sha256() != manifest.core.normalizer.config_sha256 {
+            return Err(err("normalizer config mismatch"));
+        }
         let output = normalizer
             .normalize(&inputs)
             .map_err(|e| err(format!("normalization failed: {e:?}")))?;

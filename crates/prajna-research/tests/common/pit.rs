@@ -240,6 +240,8 @@ fn fixture_with_prices(
             let mut block = [0u8; 512];
             let (open, close) = bar_prices(i, day);
             for (offset, v) in [
+                // The legacy fixture ignores this field; v4 republish tests use it.
+                (4, price),
                 (12, open),
                 (20, open.max(close)),
                 (28, open.min(close)),
