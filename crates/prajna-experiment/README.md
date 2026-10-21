@@ -52,7 +52,7 @@ exe_b=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["exe"])'
 cd "$repo"
 ```
 
-新 Execution 保存于 `<lake>/experiments/<exp-hex>/executions/<exe-hex>/`。Summary 不创建 `runs/`。Vector Standard 添加 `sessions`、`executions`、`corporate_actions`；Full 再添加权重、排名及 pending 表。没有公司行动的运行仍保存空的 `corporate_actions` 表。每 Run 的 manifest 区分未保存与 Engine 不产生的表；不把缺表解释为零。
+新 Execution 保存于 `<lake>/experiments/<exp-hex>/executions/<exe-hex>/`。Summary 不创建 `runs/`。Vector Standard 添加 `sessions`、`executions`、`corporate_actions`；启用终止结算语义时另保存 `terminal_settlements`；Full 再添加权重、排名及 pending 表。没有公司行动的运行仍保存空的 `corporate_actions` 表。每 Run 的 manifest 区分未保存与 Engine 不产生的表；不把缺表解释为零。
 
 ## MVP-6 离线 PIT S2（#177）
 
@@ -70,6 +70,7 @@ DSV 可来自 `szse-etf-frozen@1`（6a）或 `@2`（含结构化公司行动表�
 | `empty_actions` | `@1` 必需的 #176 `EmptyActionCoverage`；`@2` 有 `corporate_actions` 表时忽略 |
 | `corporate_action_rules` | `@2` 必需；绑定 TRI 跳变阈值/语义版本，进入 PIT、Cache 与 Run 身份 |
 | `dividend_tax_rate` | 可选 scale-18 十进制字符串（如 `"0.03"`），默认 `"0"`；`@2` 进入 Corporate Action schedule 与 Run 身份 |
+| `terminal_settlement` | 可选；仅接受 `semantic_version: "mvp6-terminal-settlement@1"`。启用后，Catalog 终止时对仍持有标的按运行窗口内最后一个终止前 Bar 的原始 close 直接结转现金，不生成 Order/Fill 或结算费用；Run Spec 披露实际清算款/日期未使用，未启用时既有语义与身份不变 |
 | `eligibility` | 可省略；默认上市 61 Session、金额窗口 20、日均 1 千万元；`momentum_sessions` 由每 Run 的 `lookback` 覆盖 |
 | `risk_notices` | 可省略；`instrument_id` 为生命周期 ID，`kind` 与 `evidence` 引用冻结官方附件；Catalog 正式终止事实自动加入 |
 
@@ -236,7 +237,7 @@ lot 来源/解析值和最低佣金均进入 Run Spec；线程数及 ResultLevel
 | ResultLevel | Fast Event 保存内容 |
 | --- | --- |
 | Summary | E11 指标；每 Session open 后和 close 的账户/VP 恒等式仍在 Run 内精确验证；不创建 `runs/` |
-| Standard | Summary + `account_valuations`、`portfolio_valuations`：两点现金/持仓/权益、估值价、来源 Session/字段与账户未分配资本 |
+| Standard | Summary + `account_valuations`、`portfolio_valuations`：两点现金/持仓/权益、估值价、来源 Session/字段与账户未分配资本；启用终止结算时另有 `terminal_settlements`（Session、生命周期标的、数量、价格、结算金额） |
 | Full | Standard + `orders`（提交订单及 execution gate 阻塞/跳过/retry/pending 尝试）、`fills`（raw/实际成交额、比例佣金、最低佣金补足、税、滑点、现金变动及 F8 费用基数/方向）、`fee_settlements`（费用非零但数量不变的 F8 腿） |
 
 Fast Event 表用稳定 `row_id` + JSON `payload` 的 Parquet schema：所有账本数字为精确

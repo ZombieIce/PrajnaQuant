@@ -127,14 +127,36 @@ pub fn fixture_with_action_prices(
     root: &Path,
     overrides: BTreeMap<(usize, u32), (f64, f64)>,
 ) -> Fixture {
-    fixture_with_prices(root, 1.0, false, &overrides)
+    fixture_with_prices_and_gaps(root, 1.0, false, &overrides, &BTreeSet::new())
 }
 
-fn fixture_with_prices(
+#[allow(dead_code)]
+pub fn fixture_with_missing_bars(
+    root: &Path,
+    price: f64,
+    terminated: bool,
+    missing_bars: BTreeSet<(usize, u32)>,
+) -> Fixture {
+    fixture_with_prices_and_gaps(root, price, terminated, &BTreeMap::new(), &missing_bars)
+}
+
+#[allow(dead_code)]
+pub fn fixture_with_missing_bars_and_action_prices(
+    root: &Path,
+    price: f64,
+    terminated: bool,
+    overrides: BTreeMap<(usize, u32), (f64, f64)>,
+    missing_bars: BTreeSet<(usize, u32)>,
+) -> Fixture {
+    fixture_with_prices_and_gaps(root, price, terminated, &overrides, &missing_bars)
+}
+
+fn fixture_with_prices_and_gaps(
     root: &Path,
     price: f64,
     terminated: bool,
     overrides: &BTreeMap<(usize, u32), (f64, f64)>,
+    missing_bars: &BTreeSet<(usize, u32)>,
 ) -> Fixture {
     fixture_with_prices_and_symbols(
         root,
@@ -142,7 +164,7 @@ fn fixture_with_prices(
         terminated,
         overrides,
         ["159001", "159002", "159003"],
-        &BTreeSet::new(),
+        missing_bars,
         &BTreeSet::new(),
         &BTreeMap::new(),
         date(1),

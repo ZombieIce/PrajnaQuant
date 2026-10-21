@@ -31,3 +31,4 @@ pub mod etf_market;
 pub mod etf_momentum;
 pub mod mvp6_coverage;
 pub mod pit_strategy;
+pub mod terminal_settlement;
