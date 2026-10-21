@@ -222,7 +222,12 @@ fn terminal_settlement_uses_last_bar_before_a_multi_session_gap() {
         settlement.proceeds.mantissa()
     );
     assert!(fast.sessions[4].close.account.positions.is_empty());
+    assert_eq!(vector.sessions.len(), fast.sessions.len());
     for (vector_session, fast_session) in vector.sessions.iter().zip(&fast.sessions) {
+        assert_eq!(
+            vector_session.session_date,
+            fast_session.session.session_date.to_string()
+        );
         for valuation in [
             &fast_session.open_after.account,
             &fast_session.close.account,
