@@ -178,6 +178,7 @@ fn terminal_settlement_uses_last_bar_before_a_multi_session_gap() {
         "codes":["159001"]
     });
 
+    let mut reports = Vec::new();
     for engine in ["vector", "fast_event"] {
         let mut input = terminal_settlement_definition(&f, engine);
         input["pit"]["fixed_universe"] = fixed.clone();
@@ -198,6 +199,73 @@ fn terminal_settlement_uses_last_bar_before_a_multi_session_gap() {
         };
         assert_eq!(entry.session_date, fixture::date(5));
         assert_eq!(entry.price, "1.0".parse().unwrap());
+        reports.push(report);
+    }
+    let vector = reports[0].runs[0].result.as_ref().unwrap();
+    let fast = reports[1].runs[0].fast_event_result.as_ref().unwrap();
+    assert_eq!(
+        vector.terminal_settlements[0].quantity,
+        fast.terminal_settlements[0].quantity
+    );
+    assert_eq!(
+        vector.terminal_settlements[0].proceeds,
+        fast.terminal_settlements[0].proceeds
+    );
+    let settlement = &fast.terminal_settlements[0];
+    assert_eq!(
+        settlement.proceeds.mantissa(),
+        settlement.quantity.mantissa()
+    );
+    assert_eq!(
+        fast.sessions[4].close.account.cash.mantissa()
+            - fast.sessions[4].open_after.account.cash.mantissa(),
+        settlement.proceeds.mantissa()
+    );
+    assert!(fast.sessions[4].close.account.positions.is_empty());
+    for (vector_session, fast_session) in vector.sessions.iter().zip(&fast.sessions) {
+        for valuation in [
+            &fast_session.open_after.account,
+            &fast_session.close.account,
+        ] {
+            let holdings: f64 = valuation
+                .positions
+                .values()
+                .map(|position| {
+                    position.price.to_string().parse::<f64>().unwrap()
+                        * position.quantity.to_string().parse::<f64>().unwrap()
+                })
+                .sum();
+            let accounted_equity = valuation.cash.to_string().parse::<f64>().unwrap()
+                + holdings
+                + valuation
+                    .dividend_receivable
+                    .to_string()
+                    .parse::<f64>()
+                    .unwrap()
+                + valuation
+                    .liquidation_receivable
+                    .to_string()
+                    .parse::<f64>()
+                    .unwrap();
+            assert!(
+                (valuation.equity.to_string().parse::<f64>().unwrap() - accounted_equity).abs()
+                    < 1e-9
+            );
+        }
+        let fast_open_nav = fast_session
+            .open_after
+            .account
+            .equity
+            .to_string()
+            .parse::<f64>()
+            .unwrap()
+            / 10000.0;
+        assert!(
+            (fast_open_nav - vector_session.nav / (1.0 + vector_session.gross_return)).abs()
+                < 1e-12,
+            "gap daily parity failed on {}",
+            vector_session.session_date
+        );
     }
 }
 

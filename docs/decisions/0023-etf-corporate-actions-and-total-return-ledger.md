@@ -64,6 +64,8 @@ TRI 是理论总回报研究序列，链式累积隐含将分配权益继续计�
 
 Risk Exit 未成功的终止持仓不消失，也不按末日行情强制平仓。按正式清算公告，在确定权利/金额时将证券权益转为清算应收，付款时转现金；若公告同日明确支付可直接结算现金，但须有独立事件轨迹。金额未知时结果标为**不完整**，列出未决头寸/权利与估值限制，不宣称完整最终总回报，不将未知清算款设为零或无限沿用末价冒充终值。多次清算派付逐项冲减权利，不能重复确认收益。
 
+Within the research-only MVP-6 TRI semantics selected by `mvp6-market-driven@1`, `etf-total-return-index@3` deliberately excludes liquidation rows from the TRI and derived action ledger (#254). This does not change P20's account-settlement requirement: terminal positions are handled by #255, which also owns disclosure that settlement does not use actual liquidation proceeds or dates.
+
 `mvp6-terminal-settlement@1` 是显式选择的研究估值语义：当 Catalog 生命周期在运行窗口内终止时，最后一个有 Bar 的 Session 开盘仍允许正常执行；若收盘时仍持有该标的，则按原始收盘价将持仓直接转为现金。该账户事件保留 Session、数量、价格与 proceeds，不生成 Order/Fill，不加收结算佣金或滑点；它不读取公告清算金额/日期，也不宣称实际清算款或完整最终总回报。Run Spec 与结果须披露“未按实际清算款与清算日期结算”，并说明最后 Bar 开盘交易仍按正常规则执行，收盘时按 Catalog 终止结算剩余持仓。若运行窗口内终止前没有可用 Bar close，运行显式失败，不以零价结算。此语义仅对 `terminal_settlement` 显式启用，使用 Fast Event `fast_event@3` / Vector `vector@3`；未启用时既有行为和身份不变。启用该语义的 MVP-6 运行部分替代本节 P20 基于官方清算事实的终止清算路径；未启用时，P20 既有路径不变。该估值不代表官方清算权利，也不替代 P20 关于其他公司行动的账本要求。
 
 ### 公司行动完整性（P21）

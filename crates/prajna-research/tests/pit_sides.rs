@@ -2,10 +2,14 @@
 mod fixture;
 
 use prajna_account::VirtualPortfolioId;
+use prajna_data::{CorporateActionKind, CorporateActionRow};
 use prajna_domain::{InstrumentId, Quantity};
 use prajna_research::{
+    corporate_actions::CorporateActionSchedule,
     etf_market::{DerivedMarket, MarketEvidence},
-    etf_momentum::{CorporateActionRules, TotalReturnIndex},
+    etf_momentum::{
+        CorporateActionRules, MVP6_MARKET_DRIVEN_CORPORATE_ACTION_RULES_VERSION, TotalReturnIndex,
+    },
     fast_event::{
         FastEventConfig, FastEventCosts, FastEventResult, PortfolioRun, Rebalance, Sizing,
         run_fast_event_pit,
@@ -16,11 +20,12 @@ use prajna_research::{
 };
 use std::collections::BTreeMap;
 
-fn build_tri_with_actions(
+fn try_build_tri_with_actions(
     root: &std::path::Path,
     fixture: &fixture::Fixture,
     actions: serde_json::Value,
-) -> TotalReturnIndex {
+    rules_version: &str,
+) -> Result<TotalReturnIndex, prajna_research::factor::FactorError> {
     let raw = prajna_data::RawStore::open(root).unwrap();
     let mut hashes = prajna_data::read_manifest(root, &fixture.dsv)
         .unwrap()
@@ -73,10 +78,18 @@ fn build_tri_with_actions(
     let market =
         DerivedMarket::from_dataset(root, &manifest.dsv, &fixture.catalog, evidence).unwrap();
     let rules = CorporateActionRules {
-        version: "synthetic-tri-rules@1".into(),
+        version: rules_version.into(),
         unexplained_jump_threshold_bps: 1_000,
     };
-    TotalReturnIndex::build_from_dataset(&market, root, &rules, &raw).unwrap()
+    TotalReturnIndex::build_from_dataset(&market, root, &rules, &raw)
+}
+
+fn build_tri_with_actions(
+    root: &std::path::Path,
+    fixture: &fixture::Fixture,
+    actions: serde_json::Value,
+) -> TotalReturnIndex {
+    try_build_tri_with_actions(root, fixture, actions, "synthetic-tri-rules@1").unwrap()
 }
 
 #[test]
@@ -110,6 +123,11 @@ fn dataset_actions_map_to_lifecycle_and_settle_after_termination() {
     );
 
     assert_eq!(tri.actions().len(), 2);
+    assert_eq!(
+        tri.identity()["semantic_version"],
+        "etf-total-return-index@2"
+    );
+    assert!(tri.identity().get("skipped_liquidation_actions").is_none());
     let instrument = f.catalog.resolve_row("159001", fixture::date(4)).unwrap();
     assert!(
         tri.actions()
@@ -148,6 +166,426 @@ fn ex_date_only_share_conversion_is_usable_by_dataset_tri() {
     assert_eq!(tri.actions().len(), 1);
     assert_eq!(tri.actions()[0].effective_date, Some(fixture::date(4)));
     assert_eq!(tri.point(&f.ids[0], fixture::date(4)).unwrap().level, 1.0);
+}
+
+#[test]
+fn mvp6_market_driven_tri_skips_undated_liquidation_and_preserves_other_actions() {
+    let lake = fixture::lake();
+    let prices = (1..=10)
+        .map(|day| {
+            let close = if day < 5 { 1.0 } else { 0.5 };
+            ((0, day), (close, close))
+        })
+        .collect();
+    let f = fixture::fixture_with_action_prices(lake.path(), prices);
+    let raw = prajna_data::RawStore::open(lake.path()).unwrap();
+    let raw_hash = raw
+        .put(
+            b"synthetic corporate-action rows",
+            prajna_data::SourceRecordInput {
+                content_type: "application/json".into(),
+                source_kind: prajna_data::SourceKind::FileImport,
+                source_id: "synthetic-corporate-actions".into(),
+                request: serde_json::json!({}),
+                observed_at: "2026-10-15T00:00:00Z".into(),
+                ingested_by: "pit-sides-test".into(),
+            },
+        )
+        .unwrap();
+    let instrument = f.ids[0].clone();
+    let row = |action_index, kind, ex_date, cash, ratio, liquidation_cash| CorporateActionRow {
+        announcement_id: "SYN-ACTION-1".into(),
+        action_index,
+        instrument_id: instrument.clone(),
+        kind,
+        announced_date: fixture::date(1),
+        announced_at: None,
+        available_at: fixture::time(2, 15),
+        record_date: None,
+        ex_date,
+        pay_date: None,
+        effective_date: ex_date,
+        cash_per_share: cash,
+        share_ratio: ratio,
+        liquidation_cash_per_share: liquidation_cash,
+        source_raw_sha256: raw_hash.clone(),
+        normalization_version: "szse-corporate-action@3".into(),
+    };
+    let dividend = row(
+        0,
+        CorporateActionKind::Dividend,
+        Some(fixture::date(4)),
+        Some("0.05".into()),
+        None,
+        None,
+    );
+    let split = row(
+        1,
+        CorporateActionKind::ShareConversion,
+        Some(fixture::date(5)),
+        None,
+        Some("2".into()),
+        None,
+    );
+    let liquidation_without_date = row(
+        2,
+        CorporateActionKind::Liquidation,
+        None,
+        None,
+        None,
+        Some("0.85".into()),
+    );
+    let liquidation_without_amount = row(
+        3,
+        CorporateActionKind::Liquidation,
+        Some(fixture::date(6)),
+        None,
+        None,
+        None,
+    );
+    let actions = vec![
+        dividend.clone(),
+        split.clone(),
+        liquidation_without_date,
+        liquidation_without_amount,
+    ];
+    let new_rules = CorporateActionRules {
+        version: MVP6_MARKET_DRIVEN_CORPORATE_ACTION_RULES_VERSION.into(),
+        unexplained_jump_threshold_bps: 1_000,
+    };
+    let tri = TotalReturnIndex::build_with_actions(&f.market, &actions, &new_rules, &f.dsv, &raw)
+        .unwrap();
+    let control = TotalReturnIndex::build_with_actions(
+        &f.market,
+        &[dividend, split],
+        &CorporateActionRules {
+            version: "synthetic-tri-rules@1".into(),
+            unexplained_jump_threshold_bps: 1_000,
+        },
+        &f.dsv,
+        &raw,
+    )
+    .unwrap();
+
+    assert_eq!(tri.actions().len(), 2);
+    assert_eq!(
+        tri.identity()["semantic_version"],
+        "etf-total-return-index@3"
+    );
+    assert_eq!(
+        tri.identity()["skipped_liquidation_actions"][0]["reason"],
+        "liquidation_ignored_by_mvp6_market_driven_semantics"
+    );
+    assert!(tri.skipped_liquidation_actions()[0].missing_effective_date);
+    assert!(!tri.skipped_liquidation_actions()[0].missing_liquidation_amount);
+    assert!(!tri.skipped_liquidation_actions()[1].missing_effective_date);
+    assert!(tri.skipped_liquidation_actions()[1].missing_liquidation_amount);
+    assert_eq!(
+        tri.identity()["skipped_liquidation_actions"][0]["announcement_id"],
+        "SYN-ACTION-1"
+    );
+    assert_eq!(
+        tri.identity()["skipped_liquidation_actions"][0]["action_index"],
+        2
+    );
+    assert_eq!(tri.skipped_liquidation_actions().len(), 2);
+    assert_eq!(
+        tri.point(&instrument, fixture::date(4)).unwrap().level,
+        1.05
+    );
+    assert_eq!(
+        tri.point(&instrument, fixture::date(5)).unwrap().level,
+        1.05
+    );
+    assert_eq!(
+        control.identity()["semantic_version"],
+        "etf-total-return-index@2"
+    );
+    assert!(
+        control
+            .identity()
+            .get("skipped_liquidation_actions")
+            .is_none()
+    );
+
+    for day in 1..=10 {
+        let date = fixture::date(day);
+        assert_eq!(
+            tri.point(&instrument, date)
+                .map(|point| point.level.to_bits()),
+            control
+                .point(&instrument, date)
+                .map(|point| point.level.to_bits()),
+            "dividend/split TRI differs on {date}"
+        );
+    }
+
+    let legacy = TotalReturnIndex::build_with_actions(
+        &f.market,
+        &actions,
+        &CorporateActionRules {
+            version: "synthetic-tri-rules@1".into(),
+            unexplained_jump_threshold_bps: 1_000,
+        },
+        &f.dsv,
+        &raw,
+    );
+    assert!(
+        legacy.is_err(),
+        "legacy TRI must still reject an undated liquidation"
+    );
+}
+
+#[test]
+fn mvp6_dataset_tri_skips_liquidation_and_records_input_identity() {
+    let lake = fixture::lake();
+    let f = fixture::fixture_options(lake.path(), 1.0, true);
+    let control = &f.tri;
+    let tri = try_build_tri_with_actions(
+        lake.path(),
+        &f,
+        serde_json::json!([{
+            "type": "liquidation",
+            "effectiveDate": "2023-01-09",
+            "liquidationCashPerShare": "0.85"
+        }]),
+        MVP6_MARKET_DRIVEN_CORPORATE_ACTION_RULES_VERSION,
+    )
+    .unwrap();
+
+    assert!(tri.actions().is_empty());
+    assert_eq!(tri.skipped_liquidation_actions().len(), 1);
+    assert_eq!(
+        tri.identity()["semantic_version"],
+        "etf-total-return-index@3"
+    );
+    assert_eq!(tri.identity()["actions"].as_array().unwrap().len(), 0);
+    assert_eq!(tri.identity()["input_actions"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        tri.identity()["skipped_liquidation_actions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let instrument = f.catalog.resolve_row("159001", fixture::date(4)).unwrap();
+    for day in 1..=10 {
+        let date = fixture::date(day);
+        assert_eq!(
+            tri.point(&instrument, date)
+                .map(|point| point.level.to_bits()),
+            control
+                .point(&instrument, date)
+                .map(|point| point.level.to_bits()),
+            "dataset liquidation changed TRI on {date}"
+        );
+    }
+}
+
+fn publish_synthetic_v7_actions(
+    root: &std::path::Path,
+    market_dsv: &str,
+    actions: serde_json::Value,
+) -> String {
+    let lifecycle = serde_json::json!({
+        "code": "159001",
+        "org_id": "synthetic-org-159001",
+        "legal_name": "Synthetic ETF",
+        "listing_date": "2023-01-01",
+        "termination_date": null,
+        "fund_category": "index",
+        "tracked_index": "synthetic-index",
+        "evidence_level": "official",
+        "source_announcement_id": "synthetic-identity-159001",
+        "source_page": 1,
+    });
+    let facts = serde_json::json!({
+        "contract": "mvp-6-cninfo-facts-v1",
+        "dsv": market_dsv,
+        "session": {
+            "catalog_lifecycles": [lifecycle],
+            "corporate_actions": {
+                "schema": "cninfo_corporateActions_structured_v2",
+                "version": 2,
+                "actions": actions,
+            },
+            "risk_events": [],
+        },
+    });
+    std::fs::create_dir_all(root.join("acceptance")).unwrap();
+    std::fs::write(
+        root.join("acceptance/mvp6-coverage.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "dataset_published": true,
+            "dsv": market_dsv,
+            "mvp6_complete": false,
+            "source_status": {},
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let facts_path = root.join("synthetic-facts-session.json");
+    std::fs::write(&facts_path, serde_json::to_vec(&facts).unwrap()).unwrap();
+    prajna_data::publish_corporate_actions(
+        root,
+        market_dsv,
+        &facts_path,
+        "2026-10-15T00:00:00Z",
+        "2026-10-15T00:00:00Z",
+    )
+    .unwrap()
+    .manifest
+    .dsv
+}
+
+#[test]
+fn mvp6_v7_dataset_tri_skips_undated_liquidation_before_lifecycle_resolution() {
+    let lake = fixture::lake();
+    let f = fixture::fixture_with_action_prices(lake.path(), BTreeMap::new());
+    let raw = prajna_data::RawStore::open(lake.path()).unwrap();
+    let market_hashes = prajna_data::read_manifest(lake.path(), &f.dsv)
+        .unwrap()
+        .core
+        .inputs
+        .into_iter()
+        .map(|input| input.raw_sha256)
+        .collect::<Vec<_>>();
+    let market_manifest = prajna_data::publish_dataset(
+        lake.path(),
+        &raw,
+        &prajna_data::NormalizerRegistry::with_builtins(),
+        "szse-etf-frozen",
+        "4",
+        &market_hashes,
+        "2026-10-15T00:00:00Z",
+    )
+    .unwrap();
+    let action_dsv = publish_synthetic_v7_actions(
+        lake.path(),
+        &market_manifest.dsv,
+        serde_json::json!([
+            {
+                "code": "159001",
+                "kind": "dividend",
+                "announcement_date": "2023-01-02",
+                "record_date": "2023-01-03",
+                "ex_date": "2023-01-04",
+                "pay_date": "2023-01-08",
+                "cash_per_share": "0.05",
+                "split_ratio": null,
+                "liquidation_per_share": null,
+                "evidence_level": "official",
+                "source_announcement_id": "synthetic-dividend-1",
+                "source_page": 1,
+            },
+            {
+                "code": "159001",
+                "kind": "conversion",
+                "announcement_date": "2023-01-02",
+                "record_date": null,
+                "ex_date": "2023-01-05",
+                "pay_date": null,
+                "cash_per_share": null,
+                "split_ratio": "2",
+                "liquidation_per_share": null,
+                "evidence_level": "official",
+                "source_announcement_id": "synthetic-conversion-1",
+                "source_page": 1,
+            },
+            {
+                "code": "159001",
+                "kind": "liquidation",
+                "announcement_date": "2023-01-02",
+                "record_date": null,
+                "ex_date": null,
+                "pay_date": null,
+                "cash_per_share": null,
+                "split_ratio": null,
+                "liquidation_per_share": null,
+                "evidence_level": "official",
+                "source_announcement_id": "synthetic-liquidation-1",
+                "source_page": 1,
+            },
+        ]),
+    );
+    let evidence: MarketEvidence = serde_json::from_value(f.input["market"].clone()).unwrap();
+    let market =
+        DerivedMarket::from_dataset(lake.path(), &action_dsv, &f.catalog, evidence).unwrap();
+    let rules = CorporateActionRules {
+        version: MVP6_MARKET_DRIVEN_CORPORATE_ACTION_RULES_VERSION.into(),
+        unexplained_jump_threshold_bps: 1_000,
+    };
+    let tri = TotalReturnIndex::build_from_dataset(&market, lake.path(), &rules, &raw).unwrap();
+
+    assert_eq!(tri.actions().len(), 2);
+    assert_eq!(tri.skipped_liquidation_actions().len(), 1);
+    let skipped = &tri.skipped_liquidation_actions()[0];
+    assert_eq!(skipped.announcement_id, "synthetic-liquidation-1");
+    assert!(skipped.missing_effective_date);
+    assert!(skipped.missing_liquidation_amount);
+    assert_eq!(tri.identity()["dataset_version"], action_dsv);
+    assert_eq!(tri.identity()["input_actions"].as_array().unwrap().len(), 3);
+    assert_eq!(tri.identity()["actions"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        tri.identity()["skipped_liquidation_actions"][0]["action_index"],
+        2
+    );
+
+    let legacy_error = TotalReturnIndex::build_from_dataset(
+        &market,
+        lake.path(),
+        &CorporateActionRules {
+            version: "synthetic-legacy-rules@1".into(),
+            unexplained_jump_threshold_bps: 1_000,
+        },
+        &raw,
+    )
+    .unwrap_err();
+    assert!(
+        legacy_error
+            .to_string()
+            .contains("cannot be assigned to a lifecycle")
+    );
+
+    let control = TotalReturnIndex::build_with_actions(
+        &f.market,
+        tri.actions(),
+        &CorporateActionRules {
+            version: "synthetic-legacy-rules@1".into(),
+            unexplained_jump_threshold_bps: 1_000,
+        },
+        &f.dsv,
+        &raw,
+    )
+    .unwrap();
+    let id = f.catalog.resolve_row("159001", fixture::date(4)).unwrap();
+    for day in 1..=10 {
+        let date = fixture::date(day);
+        assert_eq!(
+            tri.point(&id, date).map(|point| point.level.to_bits()),
+            control.point(&id, date).map(|point| point.level.to_bits()),
+            "v7 Dataset dividend/conversion TRI differs on {date}"
+        );
+    }
+
+    let native =
+        prajna_research::load_panel(lake.path(), &f.dsv, &"SZSE".parse().unwrap()).unwrap();
+    let panel = pit_strategy::lifecycle_panel(&native, &f.catalog).unwrap();
+    let schedule = CorporateActionSchedule::from_total_return_index(
+        "synthetic-v7-actions@1",
+        &panel,
+        &tri,
+        "0".parse().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(schedule.actions().len(), 2);
+    assert!(
+        schedule
+            .actions()
+            .iter()
+            .all(|action| action.kind != CorporateActionKind::Liquidation)
+    );
 }
 
 fn case(
