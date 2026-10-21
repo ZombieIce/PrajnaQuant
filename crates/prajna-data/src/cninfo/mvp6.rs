@@ -89,14 +89,8 @@ impl Mvp6Facts {
         Ok(Self {
             identities: read_identity_csv(identity)?,
             actions: read_csv(actions, ACTION_HEADERS)?,
-            events: Self::events_from_csv(events)?,
+            events: read_csv(events, EVENT_HEADERS)?,
         })
-    }
-
-    /// Parse only opening-event facts when a consumer does not need identity
-    /// or corporate-action facts.
-    pub fn events_from_csv(events: &str) -> Result<Vec<EventFact>> {
-        read_csv(events, EVENT_HEADERS)
     }
 }
 

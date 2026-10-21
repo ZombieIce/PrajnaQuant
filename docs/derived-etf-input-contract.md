@@ -29,11 +29,13 @@ Eligible Set 沿用 P9 的 61/60/20 Session 和 1,000 万阈值，以及完整�
 
 `MarketEvidence.semantic_version = "szse-derived-open@3"` 是独立 opt-in。省略或 null 继续走原 @1；`szse-derived-open@2` 继续使用其原始逻辑和身份。@3 接受 `szse-etf-frozen@4` 与 `@7`。对 @7，Dataset 的 Raw provenance 必须唯一指向一个 `market_dsv`；该父 DSV 必须是规范配置的 `szse-etf-frozen@4` 并含 TDX 代码表。重放时先用 Manifest logical hash 校验父行情表，再以父 DSV 创建 @7 Normalizer；`instruments`、`sessions`、`bars`、`source_crosscheck` 与 `bar_sources` 中的每个 @7 行都必须与父表同主键行一致。@7 可是父行情表中的 ETF 子集，缺父行、字段不一致或 schema 不兼容都拒绝。该路径复用 `PitContext::build`、PIT 规则与公司行动 TRI，不建立第二套计算路径。
 
-本机 opening-evidence 生成器读取 Catalog、冻结 Dataset、公开 `limit_rules_v2.json`、`events.csv` 与该事件自己的本机 citation/Raw 引用。每个 Catalog 生命周期/Session 生成一格；类别与价格限制规则按 `RuleBinding` 解析，无法绑定或在开盘前不可知时留空并使格为 UNKNOWN。`suspension` 的 `morning` 或 `open` 映射为 `OpeningOnly`，`full_day` 映射为 `FullSession`；终止事件由 Catalog 生命周期表示，不转成停牌。未知事件类型、无效时段、越界事件、缺失/不一致引用均报错。公告发布时间使用引用 Raw 的发布日期 `DateOnly`，不从本地 `observed_at` 推断。生成器忽略 `announcement_coverage` 与 `source_independence`，输出 JSON 只写本机 acceptance 目录。
+本机 opening-evidence 生成器只读取 Catalog、冻结 Dataset 日历与公开 `limit_rules_v2.json`，经 `RuleBinding` 为每个 Catalog 生命周期/Session 解析限价规则。无法解析的规则留空。每格 `market_available_at` 固定为 Session 收盘。生成器不读取 `events.csv`、停牌事实或引用索引，输出 JSON 只写本机 acceptance 目录。
 
-- 当日 Bar 必须有正成交，TDX `bar_sources.reference_price` 必须为正数，按该日已生效且开盘前可知的规则计算限制价，并且日线 `open` 落在限价内，状态才是 `TRADABLE`。该 `open` 代表日线记录中的首笔成交价，也是 @3 的 `execution_price`；涨停/跌停方向门禁仍按 `open` 判定。缺 Bar、正成交、参考价、可用规则或可用时刻时不成交并保持 UNKNOWN。
-- 已公告的 `morning`/`open` 停牌事实与当日正成交可以协调：状态仍为 `TRADABLE`，附 `official_opening_halt` 与 `execution_at_first_trade` 原因。前一 Session 已发布、覆盖全天且无正成交的停牌为 `HALTED`；当日才发布的全天停牌且无 Bar 为 UNKNOWN；全天停牌事实与正成交冲突也为 UNKNOWN。没有 Bar 且没有停牌事实为 UNKNOWN。
-- `market_available_at` 固定为 Session 收盘；格子可用时刻为 `max(market_available_at, Session close)`，不读取 `observed_at`，也不早于 Session 收盘。停牌公告发布日期只决定开盘前是否已知，不替代行情可用时刻。
+- 生命周期内有正成交 Bar 即为 `TRADABLE`，日线 `open` 代表首笔成交价，也是 @3 的 `execution_price`。无正成交 Bar 为 `HALTED`、成交额为零，不计 `UNKNOWN`。
+- 规则已知且开盘前可用、TDX `bar_sources.reference_price` 为正数时，按规则计算涨跌停，方向门禁按 `open` 判定。规则未知时跳过涨跌停判定、保持可交易并带原因标记，不计 `UNKNOWN`。规则已知但参考价缺失时属于数据缺陷，状态为 `UNKNOWN`。
+- 若 Bar 任一 OHLC 价格超出计算的涨跌停区间或未对齐 tick，跳过涨跌停判定、保持可交易并带原因标记，不计 `UNKNOWN`。来源冲突或可用时刻未知等其它数据缺陷保持 `UNKNOWN`。
+- `market_available_at` 固定为 Session 收盘；有 Bar 格子的可用时刻不早于收盘，不读取本地 `observed_at`。无正成交 Bar 的 `HALTED` 状态在 Session 收盘可知。
+- P21 未解释跳变与未应用公司行动只写入 TRI 诊断，不传入 UNKNOWN 覆盖评估，也不计为 `UNKNOWN`。
 
 P27-22.5 的执行披露：①日线 `open` 是该日首笔成交价格，开盘停牌时首笔成交可能来自复牌时刻，当前输入没有分钟级成交时刻；②账户模型按同一 Session 结算，未建模先卖后买的盘中资金先后，因此可能允许现实中尚未到账的卖出款用于当日买入；③假设开盘前已提交的订单会参与复牌后的交易，尚未以深交所规则或排队数据验证。该离线状态不是官方开盘快照、排队成交证明或分钟撮合模型。
 

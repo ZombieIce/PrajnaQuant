@@ -1438,9 +1438,9 @@ fn publication_known_before_open(
     }
 }
 
-/// @3 derives opening feasibility from the first positive daily-bar trade,
-/// pre-open rule evidence and the normalized TDX reference. Market data remains
-/// close-available even though the opening price is the execution input.
+/// @3 treats a positive daily-bar trade as tradable and applies directional
+/// limits only when its rule and TDX reference are trustworthy. Market data
+/// remains close-available even though the opening price is the execution input.
 fn derive_v3(
     identity: (&InstrumentId, NaiveDate),
     session: &Session,
@@ -1471,14 +1471,27 @@ fn derive_v3(
         limit_rule_version: opening
             .and_then(|item| item.limit_rule.as_ref().map(|rule| rule.version.clone())),
     };
+    let positive_trade = bar.is_some_and(|bar| bar.volume() > Quantity::ZERO);
+    if !positive_trade {
+        cell.state = TradeState::Halted;
+        cell.amount = Some(Notional::ZERO);
+        cell.available_at = Some(session.ts_close());
+        cell.reasons.insert("no_positive_trade_bar".into());
+        return Ok(cell);
+    }
     let Some(opening) = opening else {
         cell.reasons.insert("missing_opening_evidence".into());
         return Ok(cell);
     };
-    // @3 intentionally ignores announcement_coverage and source_independence.
+    // @3 intentionally ignores announcement_coverage, source_independence,
+    // and halt facts. A missing positive-trade Bar is sufficient for HALTED.
     cell.available_at = opening
         .market_available_at
         .map(|available| available.max(session.ts_close()));
+    if cell.available_at.is_none() {
+        cell.reasons.insert("unknown_availability".into());
+        return Ok(cell);
+    }
 
     let binding =
         limit_rules::RuleBinding::from_lifecycles(&context.catalog.input().lifecycles, id)
@@ -1511,95 +1524,63 @@ fn derive_v3(
             .iter()
             .all(|evidence| publication_known_before_open(&evidence.publication, session));
     }
-    let positive_trade = bar.is_some_and(|bar| bar.volume() > Quantity::ZERO);
     let reference = source
         .filter(|row| row.source == "tdx")
         .and_then(|row| row.reference_price)
         .filter(|price| *price > Price::ZERO);
-    if !positive_trade {
-        cell.reasons.insert("missing_positive_trade".into());
-    }
     if !rule_known_before_open {
         cell.reasons
             .insert("unknown_preopen_price_limit_rule".into());
+        cell.state = TradeState::Tradable;
+        cell.can_buy = true;
+        cell.can_sell = true;
+        cell.execution_price = bar.map(Bar::open);
+        return Ok(cell);
     }
     if reference.is_none() {
         cell.reasons.insert("missing_tdx_reference_price".into());
-    }
-    if cell.available_at.is_none() {
-        cell.reasons.insert("unknown_availability".into());
+        return Ok(cell);
     }
 
-    let rule = supported_rule.filter(|_| rule_known_before_open);
-    let limits = rule.zip(reference).and_then(|(rule, reference)| {
-        Some((
-            limit(reference, rule.tick, 10000 + rule.rate_bps)?,
-            limit(reference, rule.tick, 10000 - rule.rate_bps)?,
-        ))
-    });
-    if let Some((upper, lower)) = limits {
-        cell.upper_limit = Some(upper);
-        cell.lower_limit = Some(lower);
-        if let Some(bar) = bar {
-            if bar.open() < lower || bar.open() > upper {
-                cell.reasons.insert("open_outside_pit_price_limits".into());
-            }
-            cell.can_buy = bar.open() < upper;
-            cell.can_sell = bar.open() > lower;
-        }
-    } else {
+    let rule = supported_rule.expect("known rule is supported");
+    let reference = reference.expect("reference presence was checked");
+    let Some(upper) = limit(reference, rule.tick, 10000 + rule.rate_bps) else {
         cell.reasons
-            .insert("unknown_price_limit_rule_or_reference".into());
-    }
-
-    if let Some(halt) = &opening.halt {
-        cell.reasons.insert("official_opening_halt".into());
-        let halt_known_before_open =
-            publication_known_before_open(&halt.evidence.publication, session);
-        if !halt_known_before_open {
-            cell.reasons.insert("halt_not_known_before_open".into());
-        }
-        match (halt.scope, halt_known_before_open, positive_trade) {
-            (HaltScope::FullSession, true, false) => {
-                cell.state = TradeState::Halted;
-                cell.amount = Some(Notional::ZERO);
-                return Ok(cell);
-            }
-            (HaltScope::FullSession, _, true) => {
-                cell.reasons.insert("halt_trade_conflict".into());
-                cell.can_buy = false;
-                cell.can_sell = false;
-                return Ok(cell);
-            }
-            (HaltScope::FullSession, false, false) | (HaltScope::OpeningOnly, _, false) => {
-                cell.can_buy = false;
-                cell.can_sell = false;
-                return Ok(cell);
-            }
-            (HaltScope::OpeningOnly, _, true) => {
-                cell.reasons.insert("execution_at_first_trade".into());
-            }
-        }
-    }
-
-    if positive_trade
-        && rule_known_before_open
-        && reference.is_some()
-        && limits.is_some()
-        && cell.available_at.is_some()
-        && !cell.reasons.contains("open_outside_pit_price_limits")
-    {
+            .insert("invalid_price_limit_calculation".into());
+        return Ok(cell);
+    };
+    let Some(lower) = limit(reference, rule.tick, 10000 - rule.rate_bps) else {
+        cell.reasons
+            .insert("invalid_price_limit_calculation".into());
+        return Ok(cell);
+    };
+    let bar = bar.expect("positive trade requires a Bar");
+    let prices_untrusted = [bar.open(), bar.high(), bar.low(), bar.close()]
+        .iter()
+        .any(|price| {
+            !price.is_aligned_to(rule.tick).unwrap_or(false) || *price > upper || *price < lower
+        });
+    if prices_untrusted {
+        cell.reasons
+            .insert("limit_check_skipped_untrusted_prices".into());
         cell.state = TradeState::Tradable;
-        cell.execution_price = bar.map(Bar::open);
-        if !cell.can_buy {
-            cell.reasons.insert("opening_upper_limit".into());
-        }
-        if !cell.can_sell {
-            cell.reasons.insert("opening_lower_limit".into());
-        }
-    } else {
-        cell.can_buy = false;
-        cell.can_sell = false;
+        cell.can_buy = true;
+        cell.can_sell = true;
+        cell.execution_price = Some(bar.open());
+        return Ok(cell);
+    }
+
+    cell.upper_limit = Some(upper);
+    cell.lower_limit = Some(lower);
+    cell.can_buy = bar.open() < upper;
+    cell.can_sell = bar.open() > lower;
+    cell.state = TradeState::Tradable;
+    cell.execution_price = Some(bar.open());
+    if !cell.can_buy {
+        cell.reasons.insert("opening_upper_limit".into());
+    }
+    if !cell.can_sell {
+        cell.reasons.insert("opening_lower_limit".into());
     }
     Ok(cell)
 }

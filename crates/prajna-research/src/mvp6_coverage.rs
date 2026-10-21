@@ -1,10 +1,6 @@
 //! Deterministic UNKNOWN coverage accounting for the MVP-6 fixed ETF window.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs, io,
-    path::Path,
-};
+use std::{collections::BTreeMap, fs, io, path::Path};
 
 use chrono::NaiveDate;
 use prajna_domain::InstrumentId;
@@ -45,7 +41,6 @@ pub enum UnknownReason {
     MissingReferencePrice,
     SourceConflict,
     RuleUnknown { reason: RuleUnknownReason },
-    UnexplainedCorporateAction,
     OtherExecutionEvidence,
 }
 
@@ -60,7 +55,6 @@ pub struct CoverageObservation {
     pub has_reference_price: bool,
     pub source_conflict: bool,
     pub rule_unknown: Option<RuleUnknownReason>,
-    pub unexplained_corporate_action: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -280,7 +274,7 @@ fn ratio_within(numerator: u64, denominator: u64, max_percent: u8) -> bool {
 }
 
 fn primary_unknown_reason(row: &CoverageObservation) -> Option<UnknownReason> {
-    if row.execution_state != TradeState::Unknown && !row.unexplained_corporate_action {
+    if row.execution_state != TradeState::Unknown {
         return None;
     }
     Some(if row.source_conflict {
@@ -293,21 +287,16 @@ fn primary_unknown_reason(row: &CoverageObservation) -> Option<UnknownReason> {
         }
     } else if !row.has_reference_price {
         UnknownReason::MissingReferencePrice
-    } else if row.unexplained_corporate_action {
-        UnknownReason::UnexplainedCorporateAction
     } else {
         UnknownReason::OtherExecutionEvidence
     })
 }
 
 /// Adapt the validated Catalog and DerivedMarket to the pure coverage evaluator.
-/// `unexplained_actions` is populated by the corporate-action integrity stage;
-/// it is empty when no unresolved price discontinuity was found.
 pub fn evaluate_derived_market(
     catalog: &HistoricalCatalog,
     market: &DerivedMarket,
     corporate_action_version: impl Into<String>,
-    unexplained_actions: &BTreeSet<(InstrumentId, NaiveDate)>,
     thresholds: UnknownCoverageThresholds,
 ) -> Result<UnknownCoverageReport, String> {
     let table = super::etf_market::limit_rules::FundLimitRuleTable::official_v2()
@@ -396,7 +385,6 @@ pub fn evaluate_derived_market(
                     || cell.reasons.contains("sources_missing_or_conflicting")
                     || cell.reasons.contains("halt_trade_conflict"),
                 rule_unknown,
-                unexplained_corporate_action: unexplained_actions.contains(&key),
             }
         })
         .collect::<Vec<_>>();
@@ -544,7 +532,6 @@ mod tests {
             has_reference_price: true,
             source_conflict: false,
             rule_unknown: None,
-            unexplained_corporate_action: false,
         }
     }
 
@@ -1122,7 +1109,6 @@ mod tests {
         row.execution_state = TradeState::Unknown;
         row.source_conflict = true;
         row.rule_unknown = Some(RuleUnknownReason::Repealed);
-        row.unexplained_corporate_action = true;
         let first = assess(&sessions, &[life("159001", 1, None)], &[row.clone()]);
         let second = assess(&sessions, &[life("159001", 1, None)], &[row]);
         assert_eq!(first.unknowns.len(), 1);
@@ -1141,6 +1127,16 @@ mod tests {
         assert!(public_summary.get("catalog_version").is_none());
         assert!(public_summary.get("derived_market_version").is_none());
         assert!(public_summary.get("corporate_action_version").is_none());
+    }
+
+    #[test]
+    fn diagnostics_on_a_tradable_cell_do_not_create_unknown_coverage() {
+        let sessions = [date(1)];
+        let mut row = known("159001", 1);
+        row.rule_unknown = Some(RuleUnknownReason::CategoryUnknown);
+        let report = assess(&sessions, &[life("159001", 1, None)], &[row]);
+        assert!(report.unknowns.is_empty());
+        assert_eq!(report.unknown_cells, 0);
     }
 
     #[test]

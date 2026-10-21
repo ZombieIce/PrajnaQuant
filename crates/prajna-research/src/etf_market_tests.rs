@@ -1422,7 +1422,7 @@ fn v2_evidence(catalog: &HistoricalCatalog) -> MarketEvidence {
 }
 
 #[test]
-fn v3_uses_first_trade_and_publication_date_without_announcement_coverage() {
+fn v3_uses_first_trade_and_skips_unknown_rules_without_announcement_coverage() {
     let tmp = tempfile::tempdir().unwrap();
     let (raw, input) = fixture(tmp.path());
     let catalog = HistoricalCatalog::build(input, &raw).unwrap();
@@ -1435,62 +1435,11 @@ fn v3_uses_first_trade_and_publication_date_without_announcement_coverage() {
         opening.reference = None;
     }
     let id = evidence.openings[0].instrument_id.clone();
-    let day2 = evidence
-        .openings
-        .iter_mut()
-        .find(|opening| opening.instrument_id == id && opening.session_date == date(2))
-        .unwrap();
-    day2.halt = Some(HaltEvidence {
-        scope: HaltScope::FullSession,
-        evidence: Evidence {
-            raw_sha256: catalog.input().lifecycles[0].contract_raw_sha256.clone(),
-            announcement_id: "synthetic-previous-day-halt".into(),
-            locator: "synthetic event row".into(),
-            publication: Publication::DateOnly { date: date(1) },
-        },
-    });
-    let day3 = evidence
-        .openings
-        .iter_mut()
-        .find(|opening| opening.instrument_id == id && opening.session_date == date(3))
-        .unwrap();
-    day3.halt = Some(HaltEvidence {
-        scope: HaltScope::FullSession,
-        evidence: Evidence {
-            raw_sha256: catalog.input().lifecycles[0].contract_raw_sha256.clone(),
-            announcement_id: "synthetic-same-day-halt".into(),
-            locator: "synthetic event row".into(),
-            publication: Publication::DateOnly { date: date(3) },
-        },
-    });
-    let day4 = evidence
-        .openings
-        .iter_mut()
-        .find(|opening| opening.instrument_id == id && opening.session_date == date(4))
-        .unwrap();
-    day4.halt = Some(HaltEvidence {
-        scope: HaltScope::FullSession,
-        evidence: Evidence {
-            raw_sha256: catalog.input().lifecycles[0].contract_raw_sha256.clone(),
-            announcement_id: "synthetic-conflicting-halt".into(),
-            locator: "synthetic event row".into(),
-            publication: Publication::DateOnly { date: date(3) },
-        },
-    });
     let day5 = evidence
         .openings
         .iter_mut()
         .find(|opening| opening.instrument_id == id && opening.session_date == date(5))
         .unwrap();
-    day5.halt = Some(HaltEvidence {
-        scope: HaltScope::OpeningOnly,
-        evidence: Evidence {
-            raw_sha256: catalog.input().lifecycles[0].contract_raw_sha256.clone(),
-            announcement_id: "synthetic-opening-halt".into(),
-            locator: "synthetic event row".into(),
-            publication: Publication::DateOnly { date: date(4) },
-        },
-    });
     day5.market_available_at = Some(time(5, 9));
     let day7 = evidence
         .openings
@@ -1506,6 +1455,30 @@ fn v3_uses_first_trade_and_publication_date_without_announcement_coverage() {
             !(bar.instrument_id().symbol() == "159001"
                 && [2, 3, 6].contains(&bar.session_date().day()))
         })
+        .map(|bar| {
+            if bar.instrument_id().symbol() != "159001" || bar.session_date() != date(8) {
+                return bar;
+            }
+            let price = Price::parse("1.0005").unwrap();
+            Bar::new(
+                BarData {
+                    instrument_id: bar.instrument_id().clone(),
+                    bar_spec: bar.bar_spec(),
+                    session_date: bar.session_date(),
+                    ts_open: bar.ts_open(),
+                    ts_close: bar.ts_close(),
+                    open: price,
+                    high: price,
+                    low: price,
+                    close: price,
+                    volume: bar.volume(),
+                    amount: bar.amount(),
+                    available_at: bar.available_at(),
+                },
+                Some(&catalog.input().sessions[7]),
+            )
+            .unwrap()
+        })
         .collect::<Vec<_>>();
     let source_rows = remaining_bars
         .iter()
@@ -1514,7 +1487,7 @@ fn v3_uses_first_trade_and_publication_date_without_announcement_coverage() {
             session_date: bar.session_date(),
             source: "tdx".into(),
             source_raw_sha256: catalog.input().lifecycles[0].contract_raw_sha256.clone(),
-            reference_price: Some("1".parse().unwrap()),
+            reference_price: (bar.session_date() != date(4)).then(|| "1".parse().unwrap()),
         })
         .collect::<Vec<_>>();
     tables.bars = bars_to_record_batch(&remaining_bars).unwrap();
@@ -1530,19 +1503,29 @@ fn v3_uses_first_trade_and_publication_date_without_announcement_coverage() {
     let cell5 = &cells[&(id.clone(), date(5))];
     let cell6 = &cells[&(id.clone(), date(6))];
     let cell7 = &cells[&(id.clone(), date(7))];
+    let cell8 = &cells[&(id.clone(), date(8))];
     assert_eq!(cell1.state, TradeState::Tradable);
     assert_eq!(cell1.execution_price, Some("1".parse().unwrap()));
     assert_eq!(cell2.state, TradeState::Halted);
-    assert_eq!(cell3.state, TradeState::Unknown);
+    assert_eq!(cell3.state, TradeState::Halted);
     assert_eq!(cell4.state, TradeState::Unknown);
-    assert!(cell4.reasons.contains("halt_trade_conflict"));
+    assert!(cell4.reasons.contains("missing_tdx_reference_price"));
     assert_eq!(cell5.state, TradeState::Tradable);
-    assert!(cell5.reasons.contains("official_opening_halt"));
-    assert!(cell5.reasons.contains("execution_at_first_trade"));
     assert_eq!(cell5.available_at, Some(time(5, 15)));
     assert_eq!(cell5.execution_price, Some("1".parse().unwrap()));
-    assert_eq!(cell6.state, TradeState::Unknown);
-    assert_eq!(cell7.state, TradeState::Unknown);
+    assert_eq!(cell6.state, TradeState::Halted);
+    assert_eq!(cell7.state, TradeState::Tradable);
+    assert!(cell7.reasons.contains("unknown_preopen_price_limit_rule"));
+    assert!(cell7.permits(true) && cell7.permits(false));
+    assert_eq!(cell8.state, TradeState::Tradable);
+    assert!(
+        cell8
+            .reasons
+            .contains("limit_check_skipped_untrusted_prices")
+    );
+    assert!(cell8.permits(true) && cell8.permits(false));
+    assert_eq!(cell8.execution_price, Some(Price::parse("1.0005").unwrap()));
+    assert!(cell8.upper_limit.is_none() && cell8.lower_limit.is_none());
     assert!(
         market
             .cells()
@@ -1698,7 +1681,6 @@ fn v2_public_code_rule_binds_to_the_catalog_lifecycle_in_coverage() {
         &cat,
         &market,
         "synthetic-actions",
-        &BTreeSet::new(),
         Default::default(),
     )
     .unwrap();
@@ -1724,7 +1706,6 @@ fn v2_public_code_rule_binds_to_the_catalog_lifecycle_in_coverage() {
         &cat,
         &market,
         "synthetic-actions",
-        &BTreeSet::new(),
         Default::default(),
     )
     .unwrap();

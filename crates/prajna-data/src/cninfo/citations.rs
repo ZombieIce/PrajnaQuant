@@ -299,17 +299,6 @@ pub fn read_citations_csv(
     store: &RawStore,
     converter: &mut impl PdfText,
 ) -> Result<Vec<Citation>> {
-    read_citations_csv_for_sources(text, store, converter, None)
-}
-
-/// Reads and verifies citations for selected fact-source IDs. Unrelated local
-/// citation rows are ignored without loading their Raw objects.
-pub fn read_citations_csv_for_sources(
-    text: &str,
-    store: &RawStore,
-    converter: &mut impl PdfText,
-    fact_sources: Option<&std::collections::BTreeSet<String>>,
-) -> Result<Vec<Citation>> {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct CitationRow {
@@ -340,9 +329,6 @@ pub fn read_citations_csv_for_sources(
     };
     for row in reader.deserialize::<CitationRow>() {
         let row = row?;
-        if fact_sources.is_some_and(|sources| !sources.contains(&row.fact_source)) {
-            continue;
-        }
         let page = row
             .page
             .parse::<u32>()

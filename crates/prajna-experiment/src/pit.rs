@@ -14,8 +14,6 @@ use prajna_research::{
     pit_strategy::{self, PitS2Params, RiskNotice, RiskSignals},
     pit_universe::{CatalogInput, FixedUniverseSpec, HistoricalCatalog},
 };
-use std::collections::BTreeSet;
-
 fn default_dividend_tax_rate() -> Notional {
     Notional::ZERO
 }
@@ -115,22 +113,10 @@ impl PitContext {
             )
         }
         .map_err(|e| invalid(e.to_string()))?;
-        let unexplained_actions = tri
-            .integrity()
-            .iter()
-            .flat_map(|integrity| {
-                integrity
-                    .unexplained_price_jumps
-                    .iter()
-                    .chain(integrity.unapplied_action_dates.iter())
-                    .map(|date| (integrity.instrument_id.clone(), *date))
-            })
-            .collect::<BTreeSet<_>>();
         let unknown_coverage = evaluate_derived_market(
             &catalog,
             &market,
             tri.version().to_owned(),
-            &unexplained_actions,
             UnknownCoverageThresholds::default(),
         )
         .map_err(invalid)?;

@@ -59,7 +59,7 @@ enum Commands {
         #[arg(long)]
         lake: PathBuf,
     },
-    /// Generate local @3 opening evidence from frozen Dataset and cited facts,
+    /// Generate local @3 opening evidence from a frozen Dataset and Catalog,
     /// then validate it through the canonical PitContext path.
     Mvp6OpeningEvidence {
         input: PathBuf,
@@ -67,8 +67,6 @@ enum Commands {
         lake: PathBuf,
         #[arg(long)]
         dsv: String,
-        #[arg(long)]
-        facts_dir: PathBuf,
     },
 }
 
@@ -183,12 +181,7 @@ fn run(cli: Cli) -> Result<u8, (u8, String)> {
             );
             Ok(if changed { 4 } else { 0 })
         }
-        Commands::Mvp6OpeningEvidence {
-            input,
-            lake,
-            dsv,
-            facts_dir,
-        } => {
+        Commands::Mvp6OpeningEvidence { input, lake, dsv } => {
             let mut definition: serde_json::Value =
                 serde_json::from_slice(&fs::read(&input).map_err(|error| (1, error.to_string()))?)
                     .map_err(|error| (2, error.to_string()))?;
@@ -203,8 +196,7 @@ fn run(cli: Cli) -> Result<u8, (u8, String)> {
             let catalog = HistoricalCatalog::build(catalog_input, &raw)
                 .map_err(|error| (2, error.to_string()))?;
             let evidence =
-                opening_evidence::generate_from_local_files(&lake, &dsv, &catalog, &facts_dir)
-                    .map_err(|error| (1, error))?;
+                opening_evidence::generate(&lake, &dsv, &catalog).map_err(|error| (1, error))?;
             let evidence_bytes =
                 opening_evidence::serialize(&evidence).map_err(|error| (1, error))?;
             let acceptance_dir = lake.join("acceptance");

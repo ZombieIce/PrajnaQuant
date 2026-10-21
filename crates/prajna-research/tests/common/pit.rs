@@ -93,6 +93,31 @@ pub fn fixture_with_symbols_missing_bars_starting_at(
         &BTreeMap::new(),
         symbols,
         &missing_bars,
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        start,
+    )
+}
+
+#[allow(dead_code)]
+pub fn fixture_with_market_inputs(
+    root: &Path,
+    symbols: [&str; 3],
+    missing_bars: BTreeSet<(usize, u32)>,
+    missing_tdx_bars: BTreeSet<(usize, u32)>,
+    overrides: BTreeMap<(usize, u32), (f64, f64)>,
+    reference_overrides: BTreeMap<(usize, u32), f64>,
+    start: NaiveDate,
+) -> Fixture {
+    fixture_with_prices_and_symbols(
+        root,
+        1.0,
+        false,
+        &overrides,
+        symbols,
+        &missing_bars,
+        &missing_tdx_bars,
+        &reference_overrides,
         start,
     )
 }
@@ -118,6 +143,8 @@ fn fixture_with_prices(
         overrides,
         ["159001", "159002", "159003"],
         &BTreeSet::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
         date(1),
     )
 }
@@ -135,10 +162,13 @@ fn fixture_with_symbols_and_options(
         &BTreeMap::new(),
         symbols,
         &BTreeSet::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
         date(1),
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fixture_with_prices_and_symbols(
     root: &Path,
     price: f64,
@@ -146,6 +176,8 @@ fn fixture_with_prices_and_symbols(
     overrides: &BTreeMap<(usize, u32), (f64, f64)>,
     symbols: [&str; 3],
     missing_bars: &BTreeSet<(usize, u32)>,
+    missing_tdx_bars: &BTreeSet<(usize, u32)>,
+    reference_overrides: &BTreeMap<(usize, u32), f64>,
     start: NaiveDate,
 ) -> Fixture {
     let raw = RawStore::open(root).unwrap();
@@ -324,7 +356,7 @@ fn fixture_with_prices_and_symbols(
         let mut cod = Vec::new();
         let mut md1 = Vec::new();
         for (i, symbol) in symbols.iter().enumerate().take(codes) {
-            if missing_bars.contains(&(i, day)) {
+            if missing_bars.contains(&(i, day)) || missing_tdx_bars.contains(&(i, day)) {
                 continue;
             }
             if terminated && i == 0 && day >= 8 {
@@ -336,7 +368,10 @@ fn fixture_with_prices_and_symbols(
             cod.extend_from_slice(&record);
             let mut block = [0u8; 512];
             let (open, close) = bar_prices(i, day);
-            let reference_price = overrides.get(&(i, day)).map_or(price, |(open, _)| *open);
+            let reference_price = reference_overrides
+                .get(&(i, day))
+                .copied()
+                .unwrap_or_else(|| overrides.get(&(i, day)).map_or(price, |(open, _)| *open));
             for (offset, v) in [
                 (4, reference_price),
                 (12, open),

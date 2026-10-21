@@ -1,24 +1,24 @@
 # ADR 0024：真实开盘证据与含公司行动 Dataset 的 PIT 路径
 
-- 状态：Accepted implementation contract，2026-10-21（[#171 P27-21/P27-22](https://github.com/ZombieIce/PrajnaQuant/issues/171)；实现票据 [#252](https://github.com/ZombieIce/PrajnaQuant/issues/252)）。仅为 MVP-6 新路径增加 `szse-derived-open@3`；@1/@2 和 `szse-etf-frozen@3/@4` 的既有身份与行为不变。
+- 状态：Accepted implementation contract，2026-10-21（[#171 P27-21～P27-24](https://github.com/ZombieIce/PrajnaQuant/issues/171)；实现票据 [#252](https://github.com/ZombieIce/PrajnaQuant/issues/252)）。仅为 MVP-6 新路径增加 `szse-derived-open@3`；@1/@2 和 `szse-etf-frozen@3/@4` 的既有身份与行为不变。
 
 ## 背景
 
-正式 `PitContext::build` 之前没有真实 Dataset 开盘证据生成器；@2 也只接受 `szse-etf-frozen@3/@4`，无法承载含公司行动表的 @7。#234 因而无法使用统一的 PIT 构建路径生成真实数据 UNKNOWN 覆盖报告。该 ADR 定义新的 opt-in 状态语义与 @7 绑定方式，不宣称公告集合完整、实盘可成交或真实总回报已验证。
+正式 `PitContext::build` 之前没有 Catalog/Dataset 开盘证据生成器；@2 也只接受 `szse-etf-frozen@3/@4`，无法承载含公司行动表的 @7。该 ADR 定义新的 opt-in 状态语义与 @7 绑定方式。#252 以合成数据验收；真实数据重跑由 #224 承担，不宣称公告集合完整、实盘可成交或真实总回报已验证。
 
 ## 决定
 
 ### `szse-derived-open@3`
 
 - `semantic_version` 显式为 `szse-derived-open@3` 才选择新语义。省略/null 的 @1 和显式 @2 行为及身份保持不变。
-- 有正成交日线 Bar、正数 TDX `bar_sources.reference_price`、开盘前已知且适用于该生命周期/日期的官方限价规则，并且 `Bar.open()` 位于规则限价范围内，才为 `TRADABLE`。`Bar.open()` 是当前数据粒度可用的执行价格，保存为 `MarketCell.execution_price`；开盘涨停/跌停方向门禁继续生效。
-- 开盘停牌的 `morning`/`open` 事实不推翻同日正成交：保持 `TRADABLE`，记录 `official_opening_halt` 和 `execution_at_first_trade`。已在开盘前公布的 `full_day` 停牌且没有正成交为 `HALTED`；同日公布且无正成交时无法证明开盘状态，保持 `UNKNOWN`。`full_day` 与正成交冲突时 `UNKNOWN`。没有 Bar 且没有停牌事实时 `UNKNOWN`。
-- 不要求 `announcement_coverage` 或 `source_independence`。规则未知、参考价缺失、无正成交、开盘越界、公告与成交冲突、可用时刻未知等均 fail closed。停牌金额为零只用于明确 HALTED 格。
-- 行情状态的可用时刻不早于该 Session 收盘；OpeningEvidence 的 `market_available_at` 设置为 Session 收盘，推导格使用其与收盘时间的较晚值。不使用本地 `observed_at`。事件发布时间取 citation 所验证 Raw 的公告日期；只有日期的引用保存为 `DateOnly`，同日公告不能算作开盘前已知。
+- 生命周期内有正成交日线 Bar 即为 `TRADABLE`，`Bar.open()` 作为当前数据粒度可用的执行价格，保存为 `MarketCell.execution_price`。生命周期内没有正成交 Bar 为 `HALTED`，成交额为零，不计入 `UNKNOWN`；不读取或核对停牌事实。
+- 限价规则与正数 TDX `bar_sources.reference_price` 均可信且在开盘前已知时，按 `open` 判定涨停/跌停方向门禁。规则未知时跳过限价判定、保持可交易并记录原因，不计 `UNKNOWN`。规则已知但参考价缺失属于数据缺陷，保持 `UNKNOWN`。
+- 若任一 Bar OHLC 价格超出计算的涨跌停区间或未对齐 tick，跳过限价判定、保持可交易并记录原因，不计 `UNKNOWN`。其它有 Bar 的数据缺陷（例如已知规则下缺参考价、来源冲突或可用时刻未知）保持 `UNKNOWN`。P21 未解释跳变与未应用公司行动只保留为 TRI 诊断，不传给 UNKNOWN 覆盖评估。
+- 不要求 `announcement_coverage` 或 `source_independence`。有 Bar 状态的可用时刻不早于 Session 收盘；OpeningEvidence 的 `market_available_at` 固定为 Session 收盘，推导格取不早于收盘的时刻。不使用本地 `observed_at`。
 
 ### 本机开盘证据生成器
 
-生成器从已构建 Catalog、冻结的行情 Dataset、公开 `configs/mvp-6/limit_rules_v2.json`、本机 `events.csv` 与对应事件的 citation/Raw 引用生成稳定排序的 MarketEvidence。限价规则使用 `RuleBinding` 绑定到具体生命周期；未能解析的规则留空。`suspension/morning` 与 `suspension/open` 映射到 `OpeningOnly`，`suspension/full_day` 映射到 `FullSession`。正式终止由 Catalog 生命周期处理；未知类型、无效时段、覆盖外事件或缺失/不一致引用报错。命令将输入 evidence 与 UNKNOWN 覆盖报告写到本机 acceptance 目录；不提交数据文件。
+生成器只读取已构建 Catalog、冻结 Dataset 日历和公开 `configs/mvp-6/limit_rules_v2.json`，通过 `RuleBinding` 为每个生命周期/Session 解析限价规则。无法解析时规则留空。每格的 `market_available_at` 固定为 Session 收盘；生成的 evidence 与覆盖报告只写到本机 acceptance 目录。生成器不读取 `events.csv`、停牌事实或引用索引。
 
 ### `szse-etf-frozen@7` 行情父数据绑定
 
@@ -32,4 +32,4 @@
 
 ## 验证边界
 
-合成端到端测试通过 @7 Dataset 和 `PitContext::build` 检查状态、执行价、收盘可用时刻、含公司行动路径和确定性。#224 真实 Dataset 复核结果仅留在本机；公开仓库和 PR 不含行情值、Raw、hash、覆盖派生数值或采集日志。该复核不证明真实来源完整性、官方队列成交或收益正确性。
+合成端到端测试通过 @7 Dataset 和 `PitContext::build` 检查状态、执行价、限价方向、规则未知、缺少参考价、不可置信价格、收盘可用时刻、P21 诊断隔离和确定性。真实 Dataset 复核属于 #224；公开仓库和 PR 不含行情值、Raw、hash、覆盖派生数值或采集日志。合成验证不证明真实来源完整性、官方队列成交或收益正确性。

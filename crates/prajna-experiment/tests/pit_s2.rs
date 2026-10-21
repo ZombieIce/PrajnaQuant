@@ -29,28 +29,27 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
     use prajna_data::{
         NormalizerRegistry, RawStore, SourceKind, SourceRecordInput,
         cninfo::{
-            CatalogLifecycle, Citation, CitationInput, CorporateActionV2, EventFact, EvidenceLevel,
-            Mvp6Session, PdfText, RiskEventV1, StructuredCorporateActionsV2,
+            CatalogLifecycle, CorporateActionV2, EvidenceLevel, Mvp6Session,
+            StructuredCorporateActionsV2,
         },
         publish_dataset, read_manifest,
     };
     use prajna_experiment::{opening_evidence, pit::PitContext};
     use prajna_research::etf_market::{DerivedMarket, ExecutionStatusVersion, MarketEvidence};
     let start = chrono::NaiveDate::from_ymd_opt(2023, 4, 5).unwrap();
-    let date = |day| fixture::date_at(start, day).to_string();
-
-    struct SyntheticPdf;
-    impl PdfText for SyntheticPdf {
-        fn text(&mut self, _pdf: &[u8]) -> prajna_data::cninfo::Result<String> {
-            Ok("synthetic suspension event".into())
-        }
-    }
 
     let lake = fixture::lake();
-    let f = fixture::fixture_with_symbols_missing_bars_starting_at(
+    let f = fixture::fixture_with_market_inputs(
         lake.path(),
         ["159919", "159612", "159522"],
-        std::collections::BTreeSet::from([(1, 6), (2, 7), (1, 8)]),
+        std::collections::BTreeSet::from([(0, 8), (1, 6), (2, 7), (1, 8)]),
+        std::collections::BTreeSet::from([(0, 4)]),
+        std::collections::BTreeMap::from([
+            ((0, 3), (1.1, 1.1)),
+            ((1, 3), (0.9, 0.9)),
+            ((0, 9), (1.0, 1.5)),
+        ]),
+        std::collections::BTreeMap::from([((0, 3), 1.0), ((1, 3), 1.0), ((0, 9), 1.0)]),
         start,
     );
     let raw = RawStore::open(lake.path()).unwrap();
@@ -112,7 +111,7 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
                 source_page: 1,
             }],
         },
-        risk_events: Vec::<RiskEventV1>::new(),
+        risk_events: Vec::new(),
     };
     let facts_bytes = serde_json::to_vec(&json!({
         "contract": "mvp-6-cninfo-facts-v1",
@@ -149,114 +148,9 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
     )
     .unwrap();
 
-    let events = vec![
-        EventFact {
-            code: "159919".into(),
-            kind: "suspension".into(),
-            announcement_date: date(4),
-            effective_date: date(5),
-            session_part: "morning".into(),
-            evidence_level: "official".into(),
-            source_announcement_id: "SYNTH-HALT-OPENING".into(),
-            source_page: "1".into(),
-        },
-        EventFact {
-            code: "159612".into(),
-            kind: "suspension".into(),
-            announcement_date: date(5),
-            effective_date: date(6),
-            session_part: "full_day".into(),
-            evidence_level: "official".into(),
-            source_announcement_id: "SYNTH-HALT-PREVIOUS".into(),
-            source_page: "1".into(),
-        },
-        EventFact {
-            code: "159522".into(),
-            kind: "suspension".into(),
-            announcement_date: date(7),
-            effective_date: date(7),
-            session_part: "full_day".into(),
-            evidence_level: "official".into(),
-            source_announcement_id: "SYNTH-HALT-SAME-DAY".into(),
-            source_page: "1".into(),
-        },
-        EventFact {
-            code: "159919".into(),
-            kind: "suspension".into(),
-            announcement_date: date(7),
-            effective_date: date(8),
-            session_part: "full_day".into(),
-            evidence_level: "official".into(),
-            source_announcement_id: "SYNTH-HALT-CONFLICT".into(),
-            source_page: "1".into(),
-        },
-    ];
-    let events = [
-        events,
-        vec![EventFact {
-            code: "159612".into(),
-            kind: "suspension".into(),
-            announcement_date: date(8),
-            effective_date: date(9),
-            session_part: "open".into(),
-            evidence_level: "official".into(),
-            source_announcement_id: "SYNTH-HALT-OPEN-ALIAS".into(),
-            source_page: "1".into(),
-        }],
-    ]
-    .concat();
-    let mut citations = Vec::new();
-    for event in &events {
-        let pdf = format!(
-            "%PDF-1.4 synthetic document for {}",
-            event.source_announcement_id
-        );
-        let event_hash = raw
-            .put(
-                pdf.as_bytes(),
-                SourceRecordInput {
-                    content_type: "application/pdf".into(),
-                    source_kind: SourceKind::FileImport,
-                    source_id: format!("synthetic-pdf-{}", event.source_announcement_id),
-                    request: json!({
-                        "url": format!("https://example.invalid/finalpage/{}/synthetic.pdf", event.announcement_date)
-                    }),
-                    observed_at: "2026-10-20T00:00:00Z".into(),
-                    ingested_by: "synthetic-test".into(),
-                },
-            )
-            .unwrap();
-        let mut converter = SyntheticPdf;
-        for field in [
-            "announcement_date",
-            "effective_date",
-            "kind",
-            "session_part",
-        ] {
-            citations.push(
-                Citation::from_store(
-                    &raw,
-                    &mut converter,
-                    CitationInput {
-                        fact_source: event.source_announcement_id.clone(),
-                        field: field.into(),
-                        announcement_id: event.source_announcement_id.clone(),
-                        page: 1,
-                        raw_sha256: event_hash.clone(),
-                        excerpt: "synthetic suspension event".into(),
-                        verified_by: "synthetic-test".into(),
-                        verified_at: "2026-10-20T00:00:00Z".into(),
-                    },
-                )
-                .unwrap(),
-            );
-        }
-    }
     let catalog = f.catalog.clone();
-    let generated =
-        opening_evidence::generate(lake.path(), &v7.dsv, &catalog, &events, &citations).unwrap();
-    let generated_again =
-        opening_evidence::generate(lake.path(), &v7.dsv, &catalog, &events, &citations).unwrap();
+    let generated = opening_evidence::generate(lake.path(), &v7.dsv, &catalog).unwrap();
+    let generated_again = opening_evidence::generate(lake.path(), &v7.dsv, &catalog).unwrap();
     assert_eq!(
         opening_evidence::serialize(&generated).unwrap(),
         opening_evidence::serialize(&generated_again).unwrap()
@@ -266,10 +160,11 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
     pit_input["market"] = serde_json::to_value(&generated).unwrap();
     pit_input["corporate_action_rules"] = json!({
         "version": "synthetic-actions@1",
-        "unexplained_jump_threshold_bps": 100_000,
+        "unexplained_jump_threshold_bps": 1,
     });
     let pit_input = serde_json::from_value(pit_input).unwrap();
     let context = PitContext::build(&pit_input, lake.path(), &v7.dsv).unwrap();
+    use prajna_research::etf_market::TradeState;
     let halt_id = context
         .catalog
         .input()
@@ -280,23 +175,28 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
         .instrument_id()
         .unwrap();
     let regular = &context.market.cells()[&(halt_id.clone(), fixture::date_at(start, 1))];
-    let opening_halt = &context.market.cells()[&(halt_id.clone(), fixture::date_at(start, 5))];
     assert_eq!(
         regular.state,
         prajna_research::etf_market::TradeState::Tradable
     );
     assert_eq!(regular.execution_price, Some("1".parse().unwrap()));
-    assert_eq!(
-        opening_halt.state,
-        prajna_research::etf_market::TradeState::Tradable
+    let missing_reference = &context.market.cells()[&(halt_id.clone(), fixture::date_at(start, 4))];
+    assert_eq!(missing_reference.state, TradeState::Unknown);
+    assert!(
+        missing_reference
+            .reasons
+            .contains("missing_tdx_reference_price")
     );
-    assert_eq!(opening_halt.execution_price, Some("1".parse().unwrap()));
-    assert!(opening_halt.reasons.contains("official_opening_halt"));
-    assert!(opening_halt.reasons.contains("execution_at_first_trade"));
-    assert_eq!(
-        opening_halt.available_at,
-        Some(fixture::time_at(start, 5, 15))
-    );
+    assert!(context.unknown_coverage.unknowns.iter().any(|cell| {
+        cell.instrument_id == halt_id
+            && cell.session_date == fixture::date_at(start, 4)
+            && cell.reason == prajna_research::mvp6_coverage::UnknownReason::MissingReferencePrice
+    }));
+    let upper_limit = &context.market.cells()[&(halt_id.clone(), fixture::date_at(start, 3))];
+    assert_eq!(upper_limit.state, TradeState::Tradable);
+    assert_eq!(upper_limit.execution_price, Some("1.1".parse().unwrap()));
+    assert!(!upper_limit.can_buy);
+    assert!(upper_limit.can_sell);
     let rule_before_switch = generated
         .openings
         .iter()
@@ -324,20 +224,7 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
         switch_cell.limit_rule_version.as_deref(),
         Some(rule_on_switch.version.as_str())
     );
-    let opening_evidence = generated
-        .openings
-        .iter()
-        .find(|opening| {
-            opening.instrument_id == opening_halt.instrument_id
-                && opening.session_date == fixture::date_at(start, 5)
-        })
-        .unwrap();
-    assert!(matches!(
-        opening_evidence.halt.as_ref().unwrap().evidence.publication,
-        prajna_research::pit_universe::Publication::DateOnly { date }
-            if date == fixture::date_at(start, 4)
-    ));
-    let halted_id = context
+    let lower_id = context
         .catalog
         .input()
         .lifecycles
@@ -346,24 +233,11 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
         .unwrap()
         .instrument_id()
         .unwrap();
-    let same_day_id = context
-        .catalog
-        .input()
-        .lifecycles
-        .iter()
-        .find(|life| life.native_symbol == "159522")
-        .unwrap()
-        .instrument_id()
-        .unwrap();
-    let previous_day_halt =
-        &context.market.cells()[&(halted_id.clone(), fixture::date_at(start, 6))];
-    let same_day_halt = &context.market.cells()[&(same_day_id.clone(), fixture::date_at(start, 7))];
-    let conflict = &context.market.cells()[&(halt_id.clone(), fixture::date_at(start, 8))];
-    let missing_without_notice =
-        &context.market.cells()[&(halted_id.clone(), fixture::date_at(start, 8))];
-    use prajna_research::etf_market::TradeState;
-    assert_eq!(previous_day_halt.state, TradeState::Halted);
-    assert_eq!(same_day_halt.state, TradeState::Unknown);
+    let lower_limit = &context.market.cells()[&(lower_id.clone(), fixture::date_at(start, 3))];
+    assert_eq!(lower_limit.state, TradeState::Tradable);
+    assert_eq!(lower_limit.execution_price, Some("0.9".parse().unwrap()));
+    assert!(lower_limit.can_buy);
+    assert!(!lower_limit.can_sell);
     let unknown_category_id = context
         .catalog
         .input()
@@ -375,34 +249,43 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
         .unwrap();
     let unknown_category_cell =
         &context.market.cells()[&(unknown_category_id.clone(), fixture::date_at(start, 4))];
-    assert_eq!(unknown_category_cell.state, TradeState::Unknown);
-    assert!(context.unknown_coverage.unknowns.iter().any(|cell| {
-        cell.instrument_id == unknown_category_id
-            && cell.session_date == fixture::date_at(start, 4)
-            && matches!(
-                cell.reason,
-                prajna_research::mvp6_coverage::UnknownReason::RuleUnknown {
-                    reason: prajna_research::mvp6_coverage::RuleUnknownReason::CategoryUnknown
-                }
-            )
+    assert_eq!(unknown_category_cell.state, TradeState::Tradable);
+    assert!(
+        unknown_category_cell
+            .reasons
+            .contains("unknown_preopen_price_limit_rule")
+    );
+    assert!(unknown_category_cell.can_buy && unknown_category_cell.can_sell);
+    assert!(unknown_category_cell.execution_price.is_some());
+    assert!(context.unknown_coverage.unknowns.iter().all(|cell| {
+        cell.instrument_id != unknown_category_id || cell.session_date != fixture::date_at(start, 4)
     }));
-    assert_eq!(conflict.state, TradeState::Unknown);
-    assert!(conflict.reasons.contains("halt_trade_conflict"));
-    assert_eq!(missing_without_notice.state, TradeState::Unknown);
-    let open_alias = &context.market.cells()[&(halted_id.clone(), fixture::date_at(start, 9))];
-    assert_eq!(open_alias.state, TradeState::Tradable);
-    assert!(open_alias.reasons.contains("official_opening_halt"));
-    assert!(open_alias.reasons.contains("execution_at_first_trade"));
+
+    let no_bar = &context.market.cells()[&(halt_id.clone(), fixture::date_at(start, 8))];
+    assert_eq!(no_bar.state, TradeState::Halted);
+    assert_eq!(no_bar.amount, Some(prajna_domain::Notional::ZERO));
+    assert!(context.unknown_coverage.unknowns.iter().all(|cell| {
+        cell.instrument_id != halt_id || cell.session_date != fixture::date_at(start, 8)
+    }));
+    let untrusted_prices = &context.market.cells()[&(halt_id.clone(), fixture::date_at(start, 9))];
+    assert_eq!(untrusted_prices.state, TradeState::Tradable);
     assert!(
-        previous_day_halt
-            .available_at
-            .is_some_and(|at| at >= fixture::time_at(start, 6, 15))
+        untrusted_prices
+            .reasons
+            .contains("limit_check_skipped_untrusted_prices")
     );
-    assert!(
-        same_day_halt
-            .available_at
-            .is_some_and(|at| at >= fixture::time_at(start, 7, 15))
-    );
+    assert!(untrusted_prices.can_buy && untrusted_prices.can_sell);
+    assert!(untrusted_prices.upper_limit.is_none() && untrusted_prices.lower_limit.is_none());
+    assert_eq!(untrusted_prices.execution_price, Some("1".parse().unwrap()));
+    assert!(context.tri.integrity().iter().any(|integrity| {
+        integrity.instrument_id == halt_id
+            && integrity
+                .unexplained_price_jumps
+                .contains(&fixture::date_at(start, 3))
+    }));
+    assert!(context.unknown_coverage.unknowns.iter().all(|cell| {
+        cell.instrument_id != halt_id || cell.session_date != fixture::date_at(start, 3)
+    }));
 
     let report_path = lake.path().join("acceptance/mvp6-unknown-coverage.json");
     let first_report = std::fs::read(&report_path).unwrap();
@@ -410,18 +293,6 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
     let second_report = std::fs::read(&report_path).unwrap();
     assert_eq!(first_report, second_report);
 
-    let facts_dir = lake.path().join("cli-facts");
-    std::fs::create_dir_all(&facts_dir).unwrap();
-    std::fs::write(
-        facts_dir.join("events.csv"),
-        "code,kind,announcement_date,effective_date,session_part,evidence_level,source_announcement_id,source_page\n",
-    )
-    .unwrap();
-    std::fs::write(
-        facts_dir.join("citations.csv"),
-        "fact_source,field,announcement_id,page,raw_sha256,excerpt,verified_by,verified_at\n",
-    )
-    .unwrap();
     let cli_input_path = lake.path().join("cli-input.json");
     std::fs::write(&cli_input_path, serde_json::to_vec(&pit_input).unwrap()).unwrap();
     let cli_output = Command::new(env!("CARGO_BIN_EXE_prajna-experiment"))
@@ -431,8 +302,6 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
         .arg(lake.path())
         .arg("--dsv")
         .arg(&v7.dsv)
-        .arg("--facts-dir")
-        .arg(&facts_dir)
         .output()
         .unwrap();
     assert!(
@@ -444,8 +313,7 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
     assert_eq!(cli_summary["execution_status"], "szse-derived-open@3");
     assert!(cli_summary["per_etf_unknown_coverage"].is_array());
     assert!(cli_summary.get("unknown_cells").is_none());
-    let cli_expected =
-        opening_evidence::generate(lake.path(), &v7.dsv, &catalog, &[], &[]).unwrap();
+    let cli_expected = opening_evidence::generate(lake.path(), &v7.dsv, &catalog).unwrap();
     assert_eq!(
         std::fs::read(lake.path().join("acceptance/mvp6-opening-evidence-v3.json")).unwrap(),
         opening_evidence::serialize(&cli_expected).unwrap()

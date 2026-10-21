@@ -711,30 +711,6 @@ fn citation_csv_binds_each_row_to_a_frozen_document_page_excerpt_and_verifier() 
         .unwrap();
     assert_eq!(action.announcement_id(), "action");
 
-    let event_sources = BTreeSet::from(["event".to_owned()]);
-    let unrelated_raw_missing = csv.replacen(
-        evidence
-            .iter()
-            .find(|citation| citation.fact_source() == "identity")
-            .unwrap()
-            .raw_sha256(),
-        &format!("sha256:{}", "0".repeat(64)),
-        1,
-    );
-    let event_only = read_citations_csv_for_sources(
-        &unrelated_raw_missing,
-        &store,
-        &mut NoopPdf,
-        Some(&event_sources),
-    )
-    .unwrap();
-    assert!(!event_only.is_empty());
-    assert!(
-        event_only
-            .iter()
-            .all(|citation| citation.fact_source() == "event")
-    );
-
     assert!(
         read_citations_csv(
             "announcement_id,page,raw_sha256,evidenced_fields\n",
