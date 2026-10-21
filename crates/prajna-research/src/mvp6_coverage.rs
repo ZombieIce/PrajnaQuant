@@ -11,7 +11,7 @@ use crate::{
     pit_universe::{HistoricalCatalog, Lifecycle},
 };
 
-pub const UNKNOWN_COVERAGE_VERSION: &str = "mvp6-unknown-coverage@1";
+pub const UNKNOWN_COVERAGE_VERSION: &str = "mvp6-unknown-coverage@2";
 pub const DEFAULT_TOTAL_UNKNOWN_PERCENT: u8 = 5;
 pub const DEFAULT_PER_INSTRUMENT_UNKNOWN_PERCENT: u8 = 20;
 
@@ -359,25 +359,38 @@ pub fn evaluate_derived_market(
                     binding
                         .is_none_or(|binding| category.lifecycle.as_ref() != Some(binding.target()))
                 });
-            let rule_unknown = (!rule_is_supported).then(|| {
-                if category_binding_is_stale {
-                    RuleUnknownReason::CategoryUnknown
-                } else {
-                    binding.map_or(RuleUnknownReason::CategoryUnknown, |binding| {
-                        classify_unknown_rule(&table, binding, cell.session_date)
+            let is_v3 = market.evidence().semantic_version == Some(ExecutionStatusVersion::V3);
+            let rule_unknown = if is_v3 {
+                cell.reasons
+                    .contains("unknown_preopen_price_limit_rule")
+                    .then(|| {
+                        if category_binding_is_stale {
+                            RuleUnknownReason::CategoryUnknown
+                        } else {
+                            binding.map_or(RuleUnknownReason::CategoryUnknown, |binding| {
+                                classify_unknown_rule(&table, binding, cell.session_date)
+                            })
+                        }
                     })
-                }
-            });
+            } else {
+                (!rule_is_supported).then(|| {
+                    if category_binding_is_stale {
+                        RuleUnknownReason::CategoryUnknown
+                    } else {
+                        binding.map_or(RuleUnknownReason::CategoryUnknown, |binding| {
+                            classify_unknown_rule(&table, binding, cell.session_date)
+                        })
+                    }
+                })
+            };
             CoverageObservation {
                 instrument_id: cell.instrument_id.clone(),
                 session_date: cell.session_date,
                 execution_state: cell.state,
                 has_bar: cell.close.is_some(),
                 has_opening_halt_notice: opening.is_some_and(|item| item.halt.is_some()),
-                has_reference_price: if market.evidence().semantic_version
-                    == Some(ExecutionStatusVersion::V3)
-                {
-                    cell.upper_limit.is_some() && cell.lower_limit.is_some()
+                has_reference_price: if is_v3 {
+                    !cell.reasons.contains("missing_tdx_reference_price")
                 } else {
                     opening.is_some_and(|item| item.reference.is_some())
                 },

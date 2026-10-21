@@ -1,6 +1,6 @@
 # ADR 0024：真实开盘证据与含公司行动 Dataset 的 PIT 路径
 
-- 状态：Accepted implementation contract，2026-10-21（[#171 P27-21～P27-24](https://github.com/ZombieIce/PrajnaQuant/issues/171)；实现票据 [#252](https://github.com/ZombieIce/PrajnaQuant/issues/252)）。仅为 MVP-6 新路径增加 `szse-derived-open@3`；@1/@2 和 `szse-etf-frozen@3/@4` 的既有身份与行为不变。
+- 状态：Accepted implementation contract，2026-10-21（[#171 P27-21～P27-24](https://github.com/ZombieIce/PrajnaQuant/issues/171)；实现票据 [#252](https://github.com/ZombieIce/PrajnaQuant/issues/252)）。仅为 MVP-6 新路径增加 `szse-derived-open@3`；@1/@2 的执行状态语义身份及 `szse-etf-frozen@3/@4` 身份不变。P27-24.3 调整共享 UNKNOWN 覆盖口径，覆盖报告升为 `mvp6-unknown-coverage@2`，因此相应 Run Summary 身份也会变化。
 
 ## 背景
 
@@ -10,10 +10,10 @@
 
 ### `szse-derived-open@3`
 
-- `semantic_version` 显式为 `szse-derived-open@3` 才选择新语义。省略/null 的 @1 和显式 @2 行为及身份保持不变。
-- 生命周期内有正成交日线 Bar 即为 `TRADABLE`，`Bar.open()` 作为当前数据粒度可用的执行价格，保存为 `MarketCell.execution_price`。生命周期内没有正成交 Bar 为 `HALTED`，成交额为零，不计入 `UNKNOWN`；不读取或核对停牌事实。
+- `semantic_version` 显式为 `szse-derived-open@3` 才选择新语义。省略/null 的 @1 和显式 @2 执行状态行为及身份保持不变；共享 UNKNOWN 覆盖语义单独由 `mvp6-unknown-coverage@2` 标识。
+- 生命周期内有正成交日线 Bar 即为 `TRADABLE`，`Bar.open()` 保存为 `MarketCell.execution_price` 供报告和诊断核对。Vector/Fast Event 的实际成交仍从执行 Session 的 Dataset `open` 取价；该字段不替代引擎成交输入，也不证明开盘时已知。生命周期内没有正成交 Bar 为 `HALTED`，成交额为零，不计入 `UNKNOWN`；不读取或核对停牌事实。
 - 限价规则与正数 TDX `bar_sources.reference_price` 均可信且在开盘前已知时，按 `open` 判定涨停/跌停方向门禁。规则未知时跳过限价判定、保持可交易并记录原因，不计 `UNKNOWN`。规则已知但参考价缺失属于数据缺陷，保持 `UNKNOWN`。
-- 若任一 Bar OHLC 价格超出计算的涨跌停区间或未对齐 tick，跳过限价判定、保持可交易并记录原因，不计 `UNKNOWN`。其它有 Bar 的数据缺陷（例如已知规则下缺参考价、来源冲突或可用时刻未知）保持 `UNKNOWN`。P21 未解释跳变与未应用公司行动只保留为 TRI 诊断，不传给 UNKNOWN 覆盖评估。
+- 任一 Bar OHLC 价格超出计算的涨跌停区间或未对齐 tick 时，保持可交易并记录价格异常，不计 `UNKNOWN`。方向门禁只依赖执行价 `open`：当 `open` 在限价区间内且对齐 tick 时，即使同 Bar 的 high/low/close 异常，仍按 `open` 的涨跌停方向限制成交；只有 `open` 本身越界或未对齐 tick 才跳过限价门禁。这样后续 OHLC 不会改变同一 Session 开盘许可。两个来源均存在但交叉校验不匹配属于来源冲突，保持 `UNKNOWN`。其它有 Bar 的数据缺陷（例如已知规则下缺参考价或可用时刻未知）也保持 `UNKNOWN`。P21 未解释跳变与未应用公司行动只保留为 TRI 诊断，不传给 UNKNOWN 覆盖评估。
 - 不要求 `announcement_coverage` 或 `source_independence`。有 Bar 状态的可用时刻不早于 Session 收盘；OpeningEvidence 的 `market_available_at` 固定为 Session 收盘，推导格取不早于收盘的时刻。不使用本地 `observed_at`。
 
 ### 本机开盘证据生成器
@@ -32,4 +32,4 @@
 
 ## 验证边界
 
-合成端到端测试通过 @7 Dataset 和 `PitContext::build` 检查状态、执行价、限价方向、规则未知、缺少参考价、不可置信价格、收盘可用时刻、P21 诊断隔离和确定性。真实 Dataset 复核属于 #224；公开仓库和 PR 不含行情值、Raw、hash、覆盖派生数值或采集日志。合成验证不证明真实来源完整性、官方队列成交或收益正确性。
+合成端到端与研究单测检查状态、诊断执行价、open 限价方向、异常 close 不放开涨停买入、来源冲突 UNKNOWN、缺参考价、限价计算失败、未知可用时刻、收盘可用时刻、P21 诊断隔离和确定性。UNKNOWN 分类改为 `mvp6-unknown-coverage@2`，报告观察从派生格子的原因标记读取。真实 Dataset 复核属于 #224；公开仓库和 PR 不含行情值、Raw、hash、覆盖派生数值或采集日志。合成验证不证明真实来源完整性、官方队列成交或收益正确性。

@@ -11,7 +11,7 @@
 - **P7/P8**：目标名录由 TDX 逐日代码表重建，缺席间隔与 cninfo 法定全称变化切分生命周期。目标宽基筛选使用 cninfo 法定全称与版本化国内宽基指数名/别名匹配，按公告可知时刻生效，不用场内简称；缺失/无法匹配期间排除并报告。具体实现由 #203 承担。
 - **P10**：TRADABLE 允许 TDX 或补位正成交 Bar，加已知开盘停牌排除和 P12 门禁；公告覆盖开盘为 HALTED，无 Bar 且无停牌公告为 UNKNOWN。#205 实现显式 `MarketEvidence.semantic_version = "szse-derived-open@2"`，省略仍保留旧版身份/双源逻辑；v2 只消费 v3/v4 的来源参考价，并记录官方规则文号/类别/生效区间，越界行情报错。补位参考价缺失仍 UNKNOWN，Eligible 固定窗口不跳过缺金额 Session；cninfo 分类风险信号按 P6 日历连接。仅合成验证，契约见 [派生输入](../derived-etf-input-contract.md)。
 
-2026-10-21，[#252 / ADR 0024](0024-real-data-opening-evidence.md) 为真实开盘输入增加 opt-in `szse-derived-open@3`，只部分取代下文 P10 的状态推导方式；@1/@2 身份与行为不变。@3 从含公司行动的 `szse-etf-frozen@7` 接受经绑定的 @4 行情投影，按正成交日线 Bar 的 `open` 作为首笔成交价，并将行情状态的可用时刻设在 Session 收盘。它不要求公告覆盖证明；其余量价、限价规则、停牌冲突与 UNKNOWN 边界见 [ADR 0024](0024-real-data-opening-evidence.md)。真实行情复核仅限本机，不能据此声称官方队列成交或真实收益已验收。
+2026-10-21，[#252 / ADR 0024](0024-real-data-opening-evidence.md) 为真实开盘输入增加 opt-in `szse-derived-open@3`，只部分取代下文 P10 的状态推导方式；@1/@2 执行状态语义身份与行为不变。@3 从含公司行动的 `szse-etf-frozen@7` 接受经绑定的 @4 行情投影，按正成交日线 Bar 的 `open` 作为首笔成交价，并将行情状态的可用时刻设在 Session 收盘。P27-24.3 调整所有状态版本共用的 UNKNOWN 覆盖口径，报告版本升为 `mvp6-unknown-coverage@2`，相应 Run Summary 身份随之变化。@3 不要求公告覆盖证明；其余量价、限价规则、来源冲突与 UNKNOWN 边界见 [ADR 0024](0024-real-data-opening-evidence.md)。真实行情复核仅限本机，不能据此声称官方队列成交或真实收益已验收。
 
 ## #217 SZSE 基金限价规则目录补充
 

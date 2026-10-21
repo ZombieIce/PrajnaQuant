@@ -269,13 +269,9 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
     }));
     let untrusted_prices = &context.market.cells()[&(halt_id.clone(), fixture::date_at(start, 9))];
     assert_eq!(untrusted_prices.state, TradeState::Tradable);
-    assert!(
-        untrusted_prices
-            .reasons
-            .contains("limit_check_skipped_untrusted_prices")
-    );
+    assert!(untrusted_prices.reasons.contains("untrusted_bar_prices"));
     assert!(untrusted_prices.can_buy && untrusted_prices.can_sell);
-    assert!(untrusted_prices.upper_limit.is_none() && untrusted_prices.lower_limit.is_none());
+    assert!(untrusted_prices.upper_limit.is_some() && untrusted_prices.lower_limit.is_some());
     assert_eq!(untrusted_prices.execution_price, Some("1".parse().unwrap()));
     assert!(context.tri.integrity().iter().any(|integrity| {
         integrity.instrument_id == halt_id

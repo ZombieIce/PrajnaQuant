@@ -652,6 +652,7 @@ impl DerivedMarket {
                         session,
                         bars.get(&key),
                         sources.get(&key),
+                        checks.get(&key),
                         openings.get(&key).copied(),
                         V3DerivationContext {
                             catalog,
@@ -1446,6 +1447,7 @@ fn derive_v3(
     session: &Session,
     bar: Option<&Bar>,
     source: Option<&BarSourceRow>,
+    crosscheck: Option<&Crosscheck>,
     opening: Option<&OpeningEvidence>,
     context: V3DerivationContext<'_>,
 ) -> Result<MarketCell> {
@@ -1466,6 +1468,11 @@ fn derive_v3(
         sources: source
             .iter()
             .map(|row| row.source_raw_sha256.clone())
+            .chain(
+                crosscheck
+                    .into_iter()
+                    .flat_map(|check| check.sources.iter().cloned()),
+            )
             .collect(),
         rule_version: context.version.into(),
         limit_rule_version: opening
@@ -1490,6 +1497,10 @@ fn derive_v3(
         .map(|available| available.max(session.ts_close()));
     if cell.available_at.is_none() {
         cell.reasons.insert("unknown_availability".into());
+        return Ok(cell);
+    }
+    if crosscheck.is_some_and(|check| check.has_primary && check.has_secondary && !check.matched) {
+        cell.reasons.insert("sources_conflicting".into());
         return Ok(cell);
     }
 
@@ -1560,7 +1571,13 @@ fn derive_v3(
         .any(|price| {
             !price.is_aligned_to(rule.tick).unwrap_or(false) || *price > upper || *price < lower
         });
+    let execution_open_untrusted = !bar.open().is_aligned_to(rule.tick).unwrap_or(false)
+        || bar.open() > upper
+        || bar.open() < lower;
     if prices_untrusted {
+        cell.reasons.insert("untrusted_bar_prices".into());
+    }
+    if execution_open_untrusted {
         cell.reasons
             .insert("limit_check_skipped_untrusted_prices".into());
         cell.state = TradeState::Tradable;

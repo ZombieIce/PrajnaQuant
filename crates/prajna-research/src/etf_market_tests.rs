@@ -1447,6 +1447,12 @@ fn v3_uses_first_trade_and_skips_unknown_rules_without_announcement_coverage() {
         .find(|opening| opening.instrument_id == id && opening.session_date == date(7))
         .unwrap();
     day7.limit_rule = None;
+    let day10 = evidence
+        .openings
+        .iter_mut()
+        .find(|opening| opening.instrument_id == id && opening.session_date == date(10))
+        .unwrap();
+    day10.market_available_at = None;
 
     let bars = bars_from_record_batch(&tables.bars, &catalog.input().sessions).unwrap();
     let remaining_bars = bars
@@ -1456,10 +1462,28 @@ fn v3_uses_first_trade_and_skips_unknown_rules_without_announcement_coverage() {
                 && [2, 3, 6].contains(&bar.session_date().day()))
         })
         .map(|bar| {
-            if bar.instrument_id().symbol() != "159001" || bar.session_date() != date(8) {
+            if bar.instrument_id().symbol() != "159001"
+                || ![date(1), date(8)].contains(&bar.session_date())
+            {
                 return bar;
             }
-            let price = Price::parse("1.0005").unwrap();
+            let session = catalog
+                .input()
+                .sessions
+                .iter()
+                .find(|session| session.session_date() == bar.session_date())
+                .unwrap();
+            let (open, high, low, close) = if bar.session_date() == date(1) {
+                (
+                    Price::parse("1.1").unwrap(),
+                    Price::parse("1.5").unwrap(),
+                    Price::parse("1.1").unwrap(),
+                    Price::parse("1.5").unwrap(),
+                )
+            } else {
+                let price = Price::parse("1.0005").unwrap();
+                (price, price, price, price)
+            };
             Bar::new(
                 BarData {
                     instrument_id: bar.instrument_id().clone(),
@@ -1467,15 +1491,15 @@ fn v3_uses_first_trade_and_skips_unknown_rules_without_announcement_coverage() {
                     session_date: bar.session_date(),
                     ts_open: bar.ts_open(),
                     ts_close: bar.ts_close(),
-                    open: price,
-                    high: price,
-                    low: price,
-                    close: price,
+                    open,
+                    high,
+                    low,
+                    close,
                     volume: bar.volume(),
                     amount: bar.amount(),
                     available_at: bar.available_at(),
                 },
-                Some(&catalog.input().sessions[7]),
+                Some(session),
             )
             .unwrap()
         })
@@ -1487,11 +1511,63 @@ fn v3_uses_first_trade_and_skips_unknown_rules_without_announcement_coverage() {
             session_date: bar.session_date(),
             source: "tdx".into(),
             source_raw_sha256: catalog.input().lifecycles[0].contract_raw_sha256.clone(),
-            reference_price: (bar.session_date() != date(4)).then(|| "1".parse().unwrap()),
+            reference_price: if bar.session_date() == date(4) {
+                None
+            } else if bar.session_date() == date(5) {
+                Some(Price::parse("20000000000000000000").unwrap())
+            } else {
+                Some("1".parse().unwrap())
+            },
         })
         .collect::<Vec<_>>();
     tables.bars = bars_to_record_batch(&remaining_bars).unwrap();
     tables.bar_sources = Some(bar_sources_to_record_batch(&source_rows).unwrap());
+
+    {
+        let checks = tables.source_crosscheck.as_ref().unwrap();
+        let ids = checks
+            .column_by_name("instrument_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow_array::StringArray>()
+            .unwrap();
+        let days = checks
+            .column_by_name("session_date")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow_array::Date32Array>()
+            .unwrap();
+        let target_day = date(9)
+            .signed_duration_since(NaiveDate::from_ymd_opt(1970, 1, 1).expect("epoch"))
+            .num_days() as i32;
+        let target_row = (0..checks.num_rows())
+            .find(|row| {
+                catalog
+                    .resolve_row(
+                        ids.value(*row).parse::<InstrumentId>().unwrap().symbol(),
+                        date(9),
+                    )
+                    .ok()
+                    .as_ref()
+                    == Some(&id)
+                    && days.value(*row) == target_day
+            })
+            .unwrap();
+        let status_column = checks.schema().index_of("status").unwrap();
+        let statuses = checks
+            .column(status_column)
+            .as_any()
+            .downcast_ref::<arrow_array::StringArray>()
+            .unwrap();
+        let mut updated_statuses = (0..checks.num_rows())
+            .map(|row| statuses.value(row).to_owned())
+            .collect::<Vec<_>>();
+        updated_statuses[target_row] = "mismatch".into();
+        let mut columns = checks.columns().to_vec();
+        columns[status_column] =
+            std::sync::Arc::new(arrow_array::StringArray::from(updated_statuses));
+        tables.source_crosscheck = Some(RecordBatch::try_new(checks.schema(), columns).unwrap());
+    }
 
     let market =
         DerivedMarket::build("dsv:synthetic-v3", &catalog, evidence, &raw, &tables).unwrap();
@@ -1504,15 +1580,22 @@ fn v3_uses_first_trade_and_skips_unknown_rules_without_announcement_coverage() {
     let cell6 = &cells[&(id.clone(), date(6))];
     let cell7 = &cells[&(id.clone(), date(7))];
     let cell8 = &cells[&(id.clone(), date(8))];
+    let cell9 = &cells[&(id.clone(), date(9))];
+    let cell10 = &cells[&(id.clone(), date(10))];
     assert_eq!(cell1.state, TradeState::Tradable);
-    assert_eq!(cell1.execution_price, Some("1".parse().unwrap()));
+    assert_eq!(cell1.execution_price, Some("1.1".parse().unwrap()));
+    assert!(cell1.reasons.contains("untrusted_bar_prices"));
+    assert!(!cell1.can_buy);
+    assert!(cell1.can_sell);
+    assert!(cell1.upper_limit.is_some() && cell1.lower_limit.is_some());
     assert_eq!(cell2.state, TradeState::Halted);
     assert_eq!(cell3.state, TradeState::Halted);
     assert_eq!(cell4.state, TradeState::Unknown);
     assert!(cell4.reasons.contains("missing_tdx_reference_price"));
-    assert_eq!(cell5.state, TradeState::Tradable);
+    assert_eq!(cell5.state, TradeState::Unknown);
     assert_eq!(cell5.available_at, Some(time(5, 15)));
-    assert_eq!(cell5.execution_price, Some("1".parse().unwrap()));
+    assert!(cell5.reasons.contains("invalid_price_limit_calculation"));
+    assert_eq!(cell5.execution_price, None);
     assert_eq!(cell6.state, TradeState::Halted);
     assert_eq!(cell7.state, TradeState::Tradable);
     assert!(cell7.reasons.contains("unknown_preopen_price_limit_rule"));
@@ -1526,12 +1609,42 @@ fn v3_uses_first_trade_and_skips_unknown_rules_without_announcement_coverage() {
     assert!(cell8.permits(true) && cell8.permits(false));
     assert_eq!(cell8.execution_price, Some(Price::parse("1.0005").unwrap()));
     assert!(cell8.upper_limit.is_none() && cell8.lower_limit.is_none());
+    assert_eq!(cell9.state, TradeState::Unknown);
+    assert!(cell9.reasons.contains("sources_conflicting"));
+    assert_eq!(cell10.state, TradeState::Unknown);
+    assert!(cell10.reasons.contains("unknown_availability"));
     assert!(
         market
             .cells()
             .values()
             .all(|cell| !cell.reasons.contains("missing_announcement_coverage"))
     );
+
+    let coverage = crate::mvp6_coverage::evaluate_derived_market(
+        &catalog,
+        &market,
+        "synthetic-actions@1",
+        crate::mvp6_coverage::UnknownCoverageThresholds::default(),
+    )
+    .unwrap();
+    assert_eq!(coverage.version, "mvp6-unknown-coverage@2");
+    assert!(coverage.unknowns.iter().any(|unknown| {
+        unknown.instrument_id == id
+            && unknown.session_date == date(4)
+            && unknown.reason == crate::mvp6_coverage::UnknownReason::MissingReferencePrice
+    }));
+    for day in [5, 10] {
+        assert!(coverage.unknowns.iter().any(|unknown| {
+            unknown.instrument_id == id
+                && unknown.session_date == date(day)
+                && unknown.reason == crate::mvp6_coverage::UnknownReason::OtherExecutionEvidence
+        }));
+    }
+    assert!(coverage.unknowns.iter().any(|unknown| {
+        unknown.instrument_id == id
+            && unknown.session_date == date(9)
+            && unknown.reason == crate::mvp6_coverage::UnknownReason::SourceConflict
+    }));
 }
 
 fn refresh_assignment_identity(category_evidence: &mut FundCategoryEvidence) {
