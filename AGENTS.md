@@ -45,6 +45,8 @@ POC-0 与新平台实现按当前任务的 spec/ADR 确定时间语义；修改�
 
 一张票据对应一个 GitHub Issue、一个从最新 `main` 拉出的分支 `<issue>-<slug>` 和一个 PR，PR 描述写 `Closes #<issue>`。Agent 可以在自己的分支上提交和推送，不得直接推 `main`、不得 force push 共享分支、不得自行合并。实现完成后，由未参与实现的 agent 对照 Issue/spec 和仓库规范在 PR 上独立 review；实现 agent 处理发现并把复核结果写成 PR 评论。仍有问题时如实记录，不宣称验收通过。合并由项目负责人执行。一个工作区同一时间只承载一个分支，并行任务使用独立的 `git worktree`。不得改写验收条目去迎合实现，也不得修改其他票据的状态或结论；确需调整时在对应 Issue 评论中提出。
 
+票据规模门槛：一张票只改一处接口。开工前估算改动量；预计改动（含测试）超过约 800 行或涉及多个接口时，先在 Issue 评论提出拆分方案，等负责人确认后再实现。口径未定的票标 `needs-triage`，等负责人定稿后再标 `ready-for-agent`；只认领 `ready-for-agent` 的票。
+
 ## Testing Rules
 
 项目默认使用 Python 3.12；创建 venv 使用 `python3.12 -m venv .venv`，运行 Python 测试前确认所用解释器为 3.12。涉及 PyO3 时显式设置 `PYO3_PYTHON` 指向该解释器，避免选到系统 Python。本机运行 `prajna-experiment` 测试前设置 `PRAJNA_TEST_PYTHON` 为 3.12 解释器；进程控制测试由 CI 覆盖，沙箱内跳过不算失败。
