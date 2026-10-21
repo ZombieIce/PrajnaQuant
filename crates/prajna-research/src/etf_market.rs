@@ -309,11 +309,25 @@ impl DerivedMarket {
             return Err(err("requires frozen SZSE ETF Dataset"));
         }
         let is_v3 = evidence.semantic_version == Some(ExecutionStatusVersion::V3);
+        let raw = RawStore::open(root).map_err(err)?;
+        let inputs = manifest
+            .core
+            .inputs
+            .iter()
+            .map(|input| {
+                Ok(RawInput {
+                    raw_sha256: input.raw_sha256.clone(),
+                    bytes: raw.get(&input.raw_sha256).map_err(err)?,
+                    source_records: raw.sources(&input.raw_sha256).map_err(err)?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
         let registry = if manifest.core.normalizer.version == "5" {
             NormalizerRegistry::with_sina_adjustment_v5(catalog.sina_factor_lifecycles())
                 .map_err(err)?
-        } else if is_v3 && manifest.core.normalizer.version == "7" {
-            let raw = RawStore::open(root).map_err(err)?;
+        } else if manifest.core.normalizer.version == "7" {
+            // @7 replay is also needed by TRI construction when execution semantics are absent.
+            // The v3 execution path validates the projected market tables below.
             let market_dsv = market_dsv_from_v7_inputs(&manifest, &raw)?;
             NormalizerRegistry::with_corporate_actions_v7(market_dsv).map_err(err)?
         } else {
@@ -328,19 +342,6 @@ impl DerivedMarket {
         if normalizer.config_sha256() != manifest.core.normalizer.config_sha256 {
             return Err(err("normalizer config mismatch"));
         }
-        let raw = RawStore::open(root).map_err(err)?;
-        let inputs = manifest
-            .core
-            .inputs
-            .iter()
-            .map(|input| {
-                Ok(RawInput {
-                    raw_sha256: input.raw_sha256.clone(),
-                    bytes: raw.get(&input.raw_sha256).map_err(err)?,
-                    source_records: raw.sources(&input.raw_sha256).map_err(err)?,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
         let output = normalizer
             .normalize(&inputs)
             .map_err(|e| err(format!("normalization failed: {e:?}")))?;
@@ -393,7 +394,6 @@ impl DerivedMarket {
             }
         }
         if is_v3 && manifest.core.normalizer.version == "7" {
-            let raw = RawStore::open(root).map_err(err)?;
             let market_dsv = market_dsv_from_v7_inputs(&manifest, &raw)?;
             validate_v7_market_tables(root, &market_dsv, &output.tables)?;
         }
@@ -811,11 +811,12 @@ fn market_dsv_from_v7_inputs(manifest: &prajna_data::Manifest, raw: &RawStore) -
     let mut market_dsvs = BTreeSet::new();
     for input in &manifest.core.inputs {
         for record in raw.sources(&input.raw_sha256).map_err(err)? {
-            if record
-                .request
-                .get("contract")
-                .and_then(serde_json::Value::as_str)
-                == Some("mvp-6-cninfo-facts-v1")
+            if record.source_id == "cninfo_corporate_action_facts"
+                && record
+                    .request
+                    .get("contract")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("mvp-6-cninfo-facts-v1")
             {
                 if let Some(dsv) = record
                     .request

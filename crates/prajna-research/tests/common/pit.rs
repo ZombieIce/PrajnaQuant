@@ -373,6 +373,7 @@ fn fixture_with_prices_and_symbols(
                 .copied()
                 .unwrap_or_else(|| overrides.get(&(i, day)).map_or(price, |(open, _)| *open));
             for (offset, v) in [
+                // Keep explicit limit-reference overrides and v4 republish fixtures observable.
                 (4, reference_price),
                 (12, open),
                 (20, open.max(close)),
