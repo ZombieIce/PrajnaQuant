@@ -811,13 +811,13 @@ fn market_dsv_from_v7_inputs(manifest: &prajna_data::Manifest, raw: &RawStore) -
     let mut market_dsvs = BTreeSet::new();
     for input in &manifest.core.inputs {
         for record in raw.sources(&input.raw_sha256).map_err(err)? {
-            if record.source_id == "cninfo_corporate_action_facts"
-                && record
+            let is_facts_provenance = record.source_id == "cninfo_corporate_action_facts"
+                || record
                     .request
                     .get("contract")
                     .and_then(serde_json::Value::as_str)
-                    == Some("mvp-6-cninfo-facts-v1")
-            {
+                    == Some("mvp-6-cninfo-facts-v1");
+            if is_facts_provenance {
                 if let Some(dsv) = record
                     .request
                     .get("market_dsv")
