@@ -39,6 +39,7 @@ COSTS = {
 }
 TERMINAL = {"semantic_version": "mvp6-terminal-settlement@1"}
 TOLERANCE = 1e-12
+WEIGHT_TOLERANCE = Decimal("1e-12")
 
 
 def dec(value: Any) -> Decimal:
@@ -206,18 +207,54 @@ def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
 
     accounting = data["accounting"]
     accounting_errors = []
+    weight_errors = []
+    weight_summaries = []
     for row in accounting["valuations"]:
         try:
-            equity = dec(row["cash"]) + dec(row["dividend_receivable"])
-            equity += dec(row.get("liquidation_receivable", "0"))
+            cash = dec(row["cash"])
+            dividend_receivable = dec(row["dividend_receivable"])
+            liquidation_receivable = dec(row.get("liquidation_receivable", "0"))
+            reported_equity = dec(row["equity"])
+            equity = cash + dividend_receivable + liquidation_receivable
+            position_weight_total = Decimal(0)
             for instrument, position in row["positions"].items():
                 quantity, price = dec(position["quantity"]), dec(position["price"])
                 market_value = dec(position["market_value"])
                 if quantity < 0 or quantity * price != market_value:
                     accounting_errors.append({"session_date": row["session_date"], "instrument_id": instrument})
+                if reported_equity > 0:
+                    weight = market_value / reported_equity
+                    position_weight_total += weight
+                    if weight < 0:
+                        weight_errors.append({
+                            "session_date": row["session_date"],
+                            "instrument_id": instrument,
+                            "kind": "negative_position_weight",
+                        })
                 equity += market_value
-            if equity != dec(row["equity"]):
+            if equity != reported_equity:
                 accounting_errors.append({"session_date": row["session_date"], "kind": "nav_identity"})
+            if reported_equity <= 0:
+                weight_errors.append({"session_date": row["session_date"], "kind": "nonpositive_equity"})
+            else:
+                cash_weight = cash / reported_equity
+                receivable_weight = (dividend_receivable + liquidation_receivable) / reported_equity
+                cash_and_position_weight = cash_weight + position_weight_total
+                total_weight = cash_and_position_weight + receivable_weight
+                if cash_weight < 0:
+                    weight_errors.append({"session_date": row["session_date"], "kind": "negative_cash_weight"})
+                if dividend_receivable < 0 or liquidation_receivable < 0:
+                    weight_errors.append({"session_date": row["session_date"], "kind": "negative_receivable_weight"})
+                if abs(total_weight - Decimal(1)) > WEIGHT_TOLERANCE:
+                    weight_errors.append({"session_date": row["session_date"], "kind": "weight_identity"})
+                weight_summaries.append({
+                    "session_date": row["session_date"],
+                    "cash_remainder": {"amount": str(cash), "weight": str(cash_weight)},
+                    "position_weight_total": str(position_weight_total),
+                    "cash_and_position_weight": str(cash_and_position_weight),
+                    "receivable_weight": str(receivable_weight),
+                    "total_weight": str(total_weight),
+                })
         except (KeyError, InvalidOperation, TypeError):
             accounting_errors.append({"session_date": row.get("session_date"), "kind": "invalid_valuation"})
 
@@ -246,6 +283,7 @@ def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
     accounting_ok = (
         bool(accounting["valuations"])
         and not accounting_errors
+        and not weight_errors
         and bool(accounting["fills"])
         and not fee_errors
         and accounting.get("fees_present") is True
@@ -261,6 +299,7 @@ def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
         "reproducibility": result(deterministic),
         "python_as_of_and_cli": result(python_cli_ok),
         "daily_accounting": result(accounting_ok, valuation_errors=accounting_errors,
+                                   weight_errors=weight_errors, weight_summaries=weight_summaries,
                                    fee_errors=len(fee_errors), blocked_trades=len(blocked_trades)),
         "unknown_floor": verify_unknown_coverage(data["unknown_coverage"]),
         "frozen_raw_immutable": result(data.get("raw_immutable") is True),
@@ -401,6 +440,10 @@ def prior_run_identity(acceptance: Path, current_output: Path) -> dict[str, Any]
             cli_result = json.loads(cli_log["stdout"])
         except (OSError, KeyError, json.JSONDecodeError):
             continue
+        # The identity baseline must be the legacy input where the universe
+        # was omitted. A newer explicit-universe attempt cannot replace it.
+        if "fixed_universe" in prior_input:
+            continue
         if cli_result.get("exp") and cli_result.get("exe"):
             return {
                 "experiment_id": cli_result["exp"],
@@ -418,8 +461,12 @@ def identity_change(
     return {
         "previous": previous,
         "current": current,
-        "experiment_changed": previous is not None and previous["experiment_id"] != current["experiment_id"],
-        "execution_changed": previous is not None and previous["execution_id"] != current["execution_id"],
+        "experiment_changed": (
+            previous["experiment_id"] != current["experiment_id"] if previous is not None else None
+        ),
+        "execution_changed": (
+            previous["execution_id"] != current["execution_id"] if previous is not None else None
+        ),
     }
 
 

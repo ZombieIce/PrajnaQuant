@@ -9,6 +9,8 @@ import unittest
 from scripts.mvp6_acceptance import (
     build_pit_input,
     fixed_universe_diagnostics,
+    identity_change,
+    prior_run_identity,
     raw_integrity_failure,
 )
 
@@ -82,6 +84,45 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
         self.assertTrue(all(item["passed"] for item in report["checks"].values()))
+        weights = report["checks"]["daily_accounting"]["weight_summaries"][0]
+        self.assertEqual(weights["cash_remainder"]["amount"], "970")
+        self.assertEqual(weights["position_weight_total"], "0.025")
+        self.assertEqual(weights["cash_and_position_weight"], "0.995")
+        self.assertEqual(weights["receivable_weight"], "0.005")
+        self.assertEqual(weights["total_weight"], "1.000")
+
+    def test_cli_rejects_negative_cash_weight_even_when_nav_identity_holds(self):
+        artifacts = run_artifacts()
+        valuation = artifacts["accounting"]["valuations"][0]
+        valuation["cash"] = "-10"
+        valuation["equity"] = "20"
+
+        result = self.invoke(artifacts)
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        accounting = json.loads(result.stdout)["checks"]["daily_accounting"]
+        self.assertFalse(accounting["passed"])
+        self.assertEqual(accounting["weight_errors"][0]["kind"], "negative_cash_weight")
+
+    def test_cli_rejects_negative_position_and_receivable_weights(self):
+        cases = (
+            ("negative_position_weight", lambda row: (
+                row["positions"]["159919.SZSE"].update(price="-5", market_value="-25"),
+                row.update(equity="950"),
+            )),
+            ("negative_receivable_weight", lambda row: (
+                row.update(dividend_receivable="-5", equity="990"),
+            )),
+        )
+        for expected_kind, mutate in cases:
+            with self.subTest(expected_kind=expected_kind):
+                artifacts = run_artifacts()
+                mutate(artifacts["accounting"]["valuations"][0])
+                result = self.invoke(artifacts)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                accounting = json.loads(result.stdout)["checks"]["daily_accounting"]
+                self.assertFalse(accounting["passed"])
+                self.assertIn(expected_kind, [error["kind"] for error in accounting["weight_errors"]])
 
     def test_cli_rejects_nav_mismatch_and_unknown_floor_overrun(self):
         artifacts = run_artifacts()
@@ -135,6 +176,40 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
             raw_integrity_failure({"raw-a": True, "raw-b": False}),
             "frozen Raw integrity failed: 1 object missing or mismatched",
         )
+
+    def test_identity_baseline_skips_newer_prior_run_with_explicit_universe(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            acceptance = Path(temp_dir)
+            legacy = acceptance / "issue-234-20261021-legacy"
+            explicit = acceptance / "issue-234-20261022-explicit"
+            current = acceptance / "issue-234-20261023-current"
+            for run_dir, run_id, pit_input in (
+                (legacy, "legacy-run", {"catalog": {"coverage": {}}}),
+                (explicit, "explicit-run", {"fixed_universe": {"codes": ["159919"]}}),
+            ):
+                run = run_dir / "independent-run-1"
+                run.mkdir(parents=True)
+                (run / "pit-input.json").write_text(json.dumps(pit_input))
+                (run / "main-summary-cli.json").write_text(json.dumps({
+                    "stdout": json.dumps({"exp": f"exp-{run_id}", "exe": f"exe-{run_id}"}),
+                }))
+
+            previous = prior_run_identity(acceptance, current)
+
+        self.assertEqual(previous["experiment_id"], "exp-legacy-run")
+        self.assertEqual(previous["execution_id"], "exe-legacy-run")
+        self.assertEqual(previous["fixed_universe"], "omitted; legacy default applied")
+
+    def test_identity_change_is_unknown_without_a_legacy_baseline(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            current_output = Path(temp_dir) / "current"
+            comparison = identity_change(
+                Path(temp_dir), current_output, {"exp": "new-exp", "exe": "new-exe"},
+            )
+
+        self.assertIsNone(comparison["previous"])
+        self.assertIsNone(comparison["experiment_changed"])
+        self.assertIsNone(comparison["execution_changed"])
 
     def test_cli_reports_early_failed_run_and_marks_dependent_checks_unverified(self):
         artifacts = {
