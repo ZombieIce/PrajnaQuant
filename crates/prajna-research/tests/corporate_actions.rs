@@ -127,7 +127,7 @@ fn dividend_entitlement_becomes_receivable_then_cash_without_early_reinvestment(
     );
     assert_eq!(fast.return_basis, ReturnBasis::TotalReturn);
     assert_eq!(vector.return_basis, ReturnBasis::TotalReturn);
-    assert_eq!(fast.semantic_version, "fast_event@2");
+    assert_eq!(fast.semantic_version, "fast_event@5");
     assert_eq!(
         fast.corporate_action_dividend_tax_rate,
         Some("0.1".parse().unwrap())
@@ -936,6 +936,10 @@ fn fractional_share_conversion_rounds_down_and_records_equity_difference() {
         &actions,
     )
     .unwrap();
+    assert_eq!(
+        result.semantic_version, "fast_event@2",
+        "lot keeps the pre-cash-budget corporate-action identity"
+    );
     let portfolio = &result.sessions[3].open_after.portfolios[&VirtualPortfolioId(1)];
     assert_eq!(portfolio.cash, Notional::ZERO);
     assert_eq!(portfolio.positions[&id].quantity, "151".parse().unwrap());

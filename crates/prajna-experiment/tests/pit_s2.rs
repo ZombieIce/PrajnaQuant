@@ -50,7 +50,70 @@ fn terminal_settlement_semantics_is_explicit_and_changes_run_identity() {
     );
     assert_eq!(
         enabled_run.run_spec["engine"]["semantic_version"],
-        "vector@3"
+        "vector@6"
+    );
+}
+
+#[test]
+fn shared_sizing_version_is_in_run_spec_and_result_and_reruns_are_stable() {
+    let lake = fixture::lake();
+    let f = fixture::fixture_options(lake.path(), 1.0, true);
+    let fixed = json!({
+        "version":"synthetic-fixed-etfs@1",
+        "codes":["159001","159002","159003"]
+    });
+
+    let mut vector_input = definition(&f, "vector");
+    vector_input["pit"]["fixed_universe"] = fixed.clone();
+    let vector_experiment = Experiment::parse(&vector_input.to_string(), lake.path()).unwrap();
+    let vector_run = &vector_experiment.expand(lake.path()).unwrap()[0];
+    assert_eq!(
+        vector_run.run_spec["engine"]["semantic_version"],
+        "vector@4"
+    );
+
+    let mut parity_input = definition(&f, "fast_event");
+    parity_input["fast_event"]["sizing"] = json!("vector_parity");
+    parity_input["pit"]["fixed_universe"] = fixed.clone();
+    let parity_experiment = Experiment::parse(&parity_input.to_string(), lake.path()).unwrap();
+    let first = parity_experiment.execute(lake.path(), 1).unwrap();
+    let second = parity_experiment.execute(lake.path(), 1).unwrap();
+    let run = &first.runs[0];
+    assert_eq!(run.status, RunStatus::Completed);
+    assert_eq!(run.run_spec["engine"]["semantic_version"], "fast_event@4");
+    let fast = run.fast_event_result.as_ref().unwrap();
+    assert_eq!(fast.semantic_version, "fast_event@4");
+    assert_eq!(run.run_id, second.runs[0].run_id);
+    assert_eq!(
+        serde_json::to_vec(&run.summary).unwrap(),
+        serde_json::to_vec(&second.runs[0].summary).unwrap()
+    );
+
+    let mut lot_input = definition(&f, "fast_event");
+    lot_input["pit"]["fixed_universe"] = fixed.clone();
+    let lot_experiment = Experiment::parse(&lot_input.to_string(), lake.path()).unwrap();
+    let lot_run = &lot_experiment.expand(lake.path()).unwrap()[0];
+    assert_eq!(
+        lot_run.run_spec["engine"]["semantic_version"],
+        "fast_event@1"
+    );
+
+    let mut terminal_lot = terminal_settlement_definition(&f, "fast_event");
+    terminal_lot["pit"]["fixed_universe"] = fixed;
+    let terminal_experiment = Experiment::parse(&terminal_lot.to_string(), lake.path()).unwrap();
+    let terminal_run = &terminal_experiment.expand(lake.path()).unwrap()[0];
+    assert_eq!(
+        terminal_run.run_spec["engine"]["semantic_version"],
+        "fast_event@3"
+    );
+    let terminal_report = terminal_experiment.execute(lake.path(), 1).unwrap();
+    assert_eq!(
+        terminal_report.runs[0]
+            .fast_event_result
+            .as_ref()
+            .unwrap()
+            .semantic_version,
+        "fast_event@3"
     );
 }
 
@@ -78,7 +141,7 @@ fn terminal_settlement_uses_last_catalog_bar_close_and_fast_vector_match() {
 
     let vector = vector_run.runs[0].result.as_ref().unwrap();
     let fast = fast_run.runs[0].fast_event_result.as_ref().unwrap();
-    assert_eq!(fast.semantic_version, "fast_event@3");
+    assert_eq!(fast.semantic_version, "fast_event@6");
     assert_eq!(vector.terminal_settlements.len(), 1);
     assert_eq!(fast.terminal_settlements.len(), 1);
     let vector_settlement = &vector.terminal_settlements[0];

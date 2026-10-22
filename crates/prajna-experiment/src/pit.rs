@@ -30,9 +30,13 @@ fn bind_corporate_action_engine_version(spec: &mut Value) -> Result<(), Experime
         .get("kind")
         .and_then(Value::as_str)
         .ok_or_else(|| invalid("corporate-action Run Spec has no Engine kind"))?;
+    let parity_path = uses_parity_sizing(spec, engine_kind);
     let semantic_version = match engine_kind {
+        "fast_event" if parity_path => {
+            prajna_research::fast_event::CORPORATE_ACTION_PARITY_CASH_SEMANTIC_VERSION
+        }
         "fast_event" => prajna_research::fast_event::CORPORATE_ACTION_SEMANTIC_VERSION,
-        "vector" => prajna_research::vector::CORPORATE_ACTION_SEMANTIC_VERSION,
+        "vector" => prajna_research::vector::CORPORATE_ACTION_PIT_SIZING_SEMANTIC_VERSION,
         "accurate_event" => {
             return Err(invalid(
                 "Accurate Event does not implement the corporate-action ledger",
@@ -56,9 +60,13 @@ fn bind_terminal_settlement_engine_version(spec: &mut Value) -> Result<(), Exper
         .get("kind")
         .and_then(Value::as_str)
         .ok_or_else(|| invalid("terminal-settlement Run Spec has no Engine kind"))?;
+    let parity_path = uses_parity_sizing(spec, engine_kind);
     let semantic_version = match engine_kind {
+        "fast_event" if parity_path => {
+            prajna_research::fast_event::TERMINAL_SETTLEMENT_PARITY_CASH_ENGINE_VERSION
+        }
         "fast_event" => prajna_research::fast_event::TERMINAL_SETTLEMENT_ENGINE_VERSION,
-        "vector" => prajna_research::vector::TERMINAL_SETTLEMENT_ENGINE_VERSION,
+        "vector" => prajna_research::vector::TERMINAL_SETTLEMENT_PIT_SIZING_ENGINE_VERSION,
         _ => {
             return Err(invalid(format!(
                 "terminal settlement is unsupported by PIT Engine {engine_kind}"
@@ -67,6 +75,13 @@ fn bind_terminal_settlement_engine_version(spec: &mut Value) -> Result<(), Exper
     };
     spec["engine"]["semantic_version"] = serde_json::json!(semantic_version);
     Ok(())
+}
+
+/// PIT Vector always consumes the shared F8 plan; PIT Fast Event only does so
+/// with vector_parity. Lot runs retain their previous semantic identity.
+fn uses_parity_sizing(spec: &Value, engine_kind: &str) -> bool {
+    engine_kind == "vector"
+        || spec.pointer("/fast_event/sizing").and_then(Value::as_str) == Some("vector_parity")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -267,7 +282,7 @@ impl PitContext {
                     !cell.permits(true) || !cell.permits(false)
                 }).collect::<Vec<_>>(),
                 "costs": experiment.costs.normalized(), "availability_assumption": "none",
-                "engine": {"kind":"vector", "semantic_version":"vector@1"}, "seed": null,
+                "engine": {"kind":"vector", "semantic_version": prajna_research::vector::PIT_SIZING_SEMANTIC_VERSION}, "seed": null,
             });
             if let Some(schedule) = &corporate_actions {
                 spec["corporate_action_schedule"] = serde_json::json!({
@@ -324,20 +339,30 @@ mod tests {
 
     #[test]
     fn action_schedule_versions_are_bound_to_pit_engine_identity() {
-        for (kind, expected) in [
+        for (kind, sizing, expected) in [
             (
                 "fast_event",
+                Some("vector_parity"),
+                prajna_research::fast_event::CORPORATE_ACTION_PARITY_CASH_SEMANTIC_VERSION,
+            ),
+            (
+                "fast_event",
+                Some("lot"),
                 prajna_research::fast_event::CORPORATE_ACTION_SEMANTIC_VERSION,
             ),
             (
                 "vector",
-                prajna_research::vector::CORPORATE_ACTION_SEMANTIC_VERSION,
+                None,
+                prajna_research::vector::CORPORATE_ACTION_PIT_SIZING_SEMANTIC_VERSION,
             ),
         ] {
             let mut spec = serde_json::json!({
                 "engine": {"kind": kind, "semantic_version": "legacy"},
                 "corporate_action_schedule": {"version": "fixture"},
             });
+            if let Some(sizing) = sizing {
+                spec["fast_event"] = serde_json::json!({"sizing": sizing});
+            }
             bind_corporate_action_engine_version(&mut spec).unwrap();
             assert_eq!(spec["engine"]["semantic_version"], expected);
             assert_eq!(

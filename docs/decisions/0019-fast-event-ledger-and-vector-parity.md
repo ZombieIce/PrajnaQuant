@@ -151,3 +151,26 @@ Vector 保持 open NAV，跨引擎数值比较仍须按前文对齐估值点。
 PIT Vector 必须显式携带 `vector_pit.initial_capital`，纳入 Experiment/Run 身份，并保留精确现金/数量
 作为后续 sizing 输入，不能从 f64 NAV/权重重建。该最小状态只用于 sizing，Vector 的收益摘要仍独立；
 Fast `TradingAccount` 的订单、成交、fee settlement 与双层账本仍是 canonical，旧 Vector 路径不变。
+
+### Full-target 显式量化修正（#263）
+
+`vector_parity + full_target` 的候选数量、佣金/税/滑点与 fee-only 费用仍按原 F8
+scale-18 half-even 算法计算，不因后续现金修正重算。共享计划在已成交卖出结算后，
+先按实际现金（不含分红/清算应收）预留所有尚未支付的买腿及 fee-only 费用，
+不重复预留已付卖腿费用；再按 InstrumentId 升序分配买腿本金预算。
+若某买腿按候选数量计算的 checked 实际定点成交额超过剩余本金预算，只把该腿数量
+降到不超过候选值、且按实际定点成交额可支付的最大 representable 数量，
+并以 checked 定点运算保存候选/实际数量、候选/实际成交额、预算、预留费用和现金余量。
+不得跨过当前数量改变方向，不得增加卖腿筹资、跳过、重试或重归一目标；
+调整后仍执行原有方向与可交易性门禁，保留 fee-only settlement 契约。
+
+仅当未量化的同一计划仍能由实际现金支付时，才允许上述削减，从而证明缺口来自
+scale-18 金额/数量量化；该比较使用 checked 定点数与 256-bit 整数乘积，不使用固定 epsilon。若应收账款、冻结/保留持仓或
+真实资金不足使未量化计划本身不可行，则明确失败，不把应收当现金，也不以 epsilon、
+clamp、资本补差或减费掩盖。PIT Vector 与 Fast 的非 retry `vector_parity`（含非 PIT）
+消费同一计划；lot、独立 retry 与旧权重式 Vector 保持原规则。
+
+受影响路径使用 Fast Event `fast_event@4`（公司行动 `@5`，终止结算 `@6`）和
+Vector PIT `vector@4`（公司行动 `@5`，终止结算 `@6`）；lot 仍为 `fast_event@1/@2/@3`，
+旧 Static Universe `vector@1` 不变。规范化 Run Spec 与结果版本一致；历史资产不覆盖，
+旧行为由旧提交复现，不提供双模式 API。

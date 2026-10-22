@@ -24,6 +24,10 @@ use crate::{
 pub const SEMANTIC_VERSION: &str = "fast_event@1";
 pub const CORPORATE_ACTION_SEMANTIC_VERSION: &str = "fast_event@2";
 pub const TERMINAL_SETTLEMENT_ENGINE_VERSION: &str = "fast_event@3";
+/// Full-target/vector-parity plans now correct only scale-18 quantization overspend.
+pub const PARITY_CASH_SEMANTIC_VERSION: &str = "fast_event@4";
+pub const CORPORATE_ACTION_PARITY_CASH_SEMANTIC_VERSION: &str = "fast_event@5";
+pub const TERMINAL_SETTLEMENT_PARITY_CASH_ENGINE_VERSION: &str = "fast_event@6";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sizing {
@@ -150,6 +154,17 @@ pub enum QuantityAdjustmentKind {
 pub enum SizingAdjustmentReason {
     LotRounding,
     InsufficientCash,
+    QuantizationCashBudget,
+}
+
+/// Checked fixed-point operands behind a full-target cash reduction.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+pub struct SizingCashEvidence {
+    pub principal_budget: Notional,
+    pub candidate_principal: Notional,
+    pub actual_principal: Notional,
+    pub reserved_fee: Notional,
+    pub cash_residue: Notional,
 }
 
 /// Diagnostic only: explains target lot rounding and cash-limited order reductions.
@@ -163,12 +178,15 @@ pub struct FastEventSizingAdjustment {
     pub reason: SizingAdjustmentReason,
     pub requested_quantity: Quantity,
     pub actual_quantity: Quantity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cash: Option<SizingCashEvidence>,
 }
 
 #[derive(Default)]
 struct PlannedExecution {
     fills: Vec<FastEventFill>,
     fee_settlements: Vec<ParityFeeSettlement>,
+    adjustments: Vec<FastEventSizingAdjustment>,
 }
 
 #[derive(Debug, Clone)]
@@ -641,6 +659,7 @@ fn run_with_execution(
                         session_fills.extend(sized.planned.fills);
                         session_fees.extend(sized.planned.fee_settlements);
                         sizing_adjustments.extend(sized.adjustments);
+                        sizing_adjustments.extend(sized.planned.adjustments);
                     }
                     attempts.push(FastEventAttempt {
                         portfolio_id: portfolio.id,
@@ -720,11 +739,13 @@ fn run_with_execution(
                                     })
                                     .collect(),
                                 fee_settlements: Vec::new(),
+                                adjustments: Vec::new(),
                             }
                         }
                     };
                     session_fills.extend(planned.fills);
                     session_fees.extend(planned.fee_settlements);
+                    sizing_adjustments.extend(planned.adjustments);
                     if matches!(portfolio.rebalance, Rebalance::EntryOnly(_)) {
                         entry_attempted.insert(portfolio_index);
                     }
@@ -1006,12 +1027,17 @@ fn run_with_execution(
         );
     }
     Ok(FastEventResult {
-        semantic_version: if terminal_settlement.is_some() {
-            TERMINAL_SETTLEMENT_ENGINE_VERSION
-        } else if actions.is_some() {
-            CORPORATE_ACTION_SEMANTIC_VERSION
-        } else {
-            SEMANTIC_VERSION
+        semantic_version: match (
+            config.sizing,
+            actions.is_some(),
+            terminal_settlement.is_some(),
+        ) {
+            (Sizing::VectorParity, _, true) => TERMINAL_SETTLEMENT_PARITY_CASH_ENGINE_VERSION,
+            (Sizing::VectorParity, true, false) => CORPORATE_ACTION_PARITY_CASH_SEMANTIC_VERSION,
+            (Sizing::VectorParity, false, false) => PARITY_CASH_SEMANTIC_VERSION,
+            (Sizing::Lot, _, true) => TERMINAL_SETTLEMENT_ENGINE_VERSION,
+            (Sizing::Lot, true, false) => CORPORATE_ACTION_SEMANTIC_VERSION,
+            (Sizing::Lot, false, false) => SEMANTIC_VERSION,
         },
         config: config.clone(),
         sessions,
@@ -1178,6 +1204,7 @@ fn pit_fills(
                     &mut adjustments,
                 )?,
                 fee_settlements: Vec::new(),
+                adjustments: Vec::new(),
             },
             Sizing::VectorParity if request.is_retry => PlannedExecution {
                 fills: parity_retry_fills_inner(
@@ -1193,6 +1220,7 @@ fn pit_fills(
                     },
                 )?,
                 fee_settlements: Vec::new(),
+                adjustments: Vec::new(),
             },
             Sizing::VectorParity => parity_fills_retaining(
                 account,
@@ -1634,6 +1662,7 @@ fn record_adjustment(
             reason,
             requested_quantity,
             actual_quantity,
+            cash: None,
         });
     }
 }
@@ -1746,12 +1775,19 @@ fn parity_fills_retaining(
         return Ok(PlannedExecution {
             fills: parity_retry_fills(account, id, targets, prices, session, costs)?,
             fee_settlements: Vec::new(),
+            adjustments: Vec::new(),
         });
     }
     let portfolio = &account.portfolios()[&id];
     let equity = account.value(prices)?.portfolios[&id].equity;
+    let receivables = add(
+        portfolio.dividend_receivable(),
+        portfolio.liquidation_receivable(),
+    )?;
     let plan = crate::parity_sizing::target_plan(
         equity,
+        portfolio.cash(),
+        receivables,
         portfolio.positions(),
         targets,
         prices,
@@ -1759,6 +1795,24 @@ fn parity_fills_retaining(
         retained,
     )?;
     let mut planned = PlannedExecution::default();
+    for adjustment in &plan.cash_adjustments {
+        planned.adjustments.push(FastEventSizingAdjustment {
+            portfolio_id: id,
+            instrument_id: adjustment.instrument.clone(),
+            attempted_at: session.ts_open,
+            quantity_kind: QuantityAdjustmentKind::BuyOrder,
+            reason: SizingAdjustmentReason::QuantizationCashBudget,
+            requested_quantity: adjustment.candidate_quantity,
+            actual_quantity: adjustment.actual_quantity,
+            cash: Some(SizingCashEvidence {
+                principal_budget: adjustment.principal_budget,
+                candidate_principal: adjustment.candidate_principal,
+                actual_principal: adjustment.actual_principal,
+                reserved_fee: adjustment.reserved_fee,
+                cash_residue: adjustment.cash_residue,
+            }),
+        });
+    }
     for leg in plan.legs {
         let delta = leg.delta()?;
         let crate::parity_sizing::ParityLeg {
@@ -1906,7 +1960,7 @@ fn parity_retry_fills_inner(
     Ok(fills)
 }
 
-fn affordable_quantity(
+pub(crate) fn affordable_quantity(
     maximum: Quantity,
     price: Price,
     available: Notional,

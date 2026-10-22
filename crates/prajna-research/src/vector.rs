@@ -25,6 +25,10 @@ use crate::{
 const RETURN_TOLERANCE: f64 = 1e-12;
 pub const CORPORATE_ACTION_SEMANTIC_VERSION: &str = "vector@2";
 pub const TERMINAL_SETTLEMENT_ENGINE_VERSION: &str = "vector@3";
+/// PIT Vector shares the corrected full-target cash-feasible sizing plan.
+pub const PIT_SIZING_SEMANTIC_VERSION: &str = "vector@4";
+pub const CORPORATE_ACTION_PIT_SIZING_SEMANTIC_VERSION: &str = "vector@5";
+pub const TERMINAL_SETTLEMENT_PIT_SIZING_ENGINE_VERSION: &str = "vector@6";
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct VectorCosts {
@@ -120,6 +124,22 @@ pub struct VectorPitSizing {
     pub fees: Notional,
     pub desired_quantities: BTreeMap<InstrumentId, Quantity>,
     pub required_sides: BTreeMap<InstrumentId, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cash_adjustments: Vec<VectorCashAdjustment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cash_residue: Option<Notional>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VectorCashAdjustment {
+    pub instrument_id: InstrumentId,
+    pub candidate_quantity: Quantity,
+    pub actual_quantity: Quantity,
+    pub candidate_principal: Notional,
+    pub actual_principal: Notional,
+    pub principal_budget: Notional,
+    pub reserved_fee: Notional,
+    pub cash_residue: Notional,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -336,6 +356,9 @@ fn pit_target_plan(
     costs: FastEventCosts,
 ) -> Result<SizedVectorTarget, VectorError> {
     let equity = current.equity(prices).map_err(sizing_error)?;
+    let receivables =
+        crate::fast_event::add(current.dividend_receivable, current.liquidation_receivable)
+            .map_err(sizing_error)?;
     let mut skipped_buys = targets
         .iter()
         .filter(|(id, w)| **w > 0.0 && !prices.contains_key(*id))
@@ -344,6 +367,8 @@ fn pit_target_plan(
     loop {
         let plan = target_plan(
             equity,
+            current.cash,
+            receivables,
             &current.positions,
             targets,
             prices,
@@ -440,6 +465,21 @@ fn sizing_diagnostic(plan: &ParityPlan) -> Result<VectorPitSizing, VectorError> 
             .map(|leg| (leg.instrument.clone(), leg.desired))
             .collect(),
         required_sides: sides,
+        cash_adjustments: plan
+            .cash_adjustments
+            .iter()
+            .map(|adjustment| VectorCashAdjustment {
+                instrument_id: adjustment.instrument.clone(),
+                candidate_quantity: adjustment.candidate_quantity,
+                actual_quantity: adjustment.actual_quantity,
+                candidate_principal: adjustment.candidate_principal,
+                actual_principal: adjustment.actual_principal,
+                principal_budget: adjustment.principal_budget,
+                reserved_fee: adjustment.reserved_fee,
+                cash_residue: adjustment.cash_residue,
+            })
+            .collect(),
+        cash_residue: (!plan.cash_adjustments.is_empty()).then_some(plan.cash_residue),
     })
 }
 
