@@ -299,6 +299,7 @@ pub(crate) fn summarize_fast(
         risk_exits: vec![],
         pending_risk_exits: vec![],
         pit_initial_capital: None,
+        semantic_version: None,
         assumptions: result
             .assumptions
             .iter()
@@ -340,6 +341,7 @@ mod tests {
     fn result(nav_and_returns: &[(f64, f64)]) -> VectorResult {
         VectorResult {
             pit_initial_capital: None,
+            semantic_version: None,
             sessions: nav_and_returns
                 .iter()
                 .enumerate()

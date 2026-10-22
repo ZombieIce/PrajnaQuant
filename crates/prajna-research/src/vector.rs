@@ -16,15 +16,13 @@ use crate::{
         CorporateActionProcessor, CorporateActionSchedule, ReturnBasis, apply_transition_to_vector,
     },
     factor::AvailabilityAssumption,
-    fast_event::{FastEventCosts, Marks, PriceField},
+    fast_event::{FastEventCosts, Marks, PriceField, SizingAdjustmentReason},
     parity_sizing::{ParityPlan, ParitySizingState, target_plan},
     strategy::{Decision, ExecutionEvent, ExecutionState, UnfilledEntry, execution_decimal},
     terminal_settlement::{TerminalSettlementEntry, TerminalSettlementSchedule},
 };
 
 const RETURN_TOLERANCE: f64 = 1e-12;
-pub const CORPORATE_ACTION_SEMANTIC_VERSION: &str = "vector@2";
-pub const TERMINAL_SETTLEMENT_ENGINE_VERSION: &str = "vector@3";
 /// PIT Vector shares the corrected full-target cash-feasible sizing plan.
 pub const PIT_SIZING_SEMANTIC_VERSION: &str = "vector@4";
 pub const CORPORATE_ACTION_PIT_SIZING_SEMANTIC_VERSION: &str = "vector@5";
@@ -54,6 +52,8 @@ pub struct VectorResult {
     pub pending_risk_exits: Vec<InstrumentId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pit_initial_capital: Option<Notional>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_version: Option<String>,
     #[serde(default, skip_serializing_if = "is_price_return")]
     pub return_basis: ReturnBasis,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -140,6 +140,7 @@ pub struct VectorCashAdjustment {
     pub principal_budget: Notional,
     pub reserved_fee: Notional,
     pub cash_residue: Notional,
+    pub reason: SizingAdjustmentReason,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -365,10 +366,8 @@ fn pit_target_plan(
         .map(|(id, _)| id.clone())
         .collect::<BTreeSet<_>>();
     loop {
-        let plan = target_plan(
+        let mut plan = target_plan(
             equity,
-            current.cash,
-            receivables,
             &current.positions,
             targets,
             prices,
@@ -410,6 +409,14 @@ fn pit_target_plan(
             continue;
         }
         let next = if blocked_sells.is_empty() {
+            if let Some(error) =
+                crate::parity_sizing::settle_plan_cash(&mut plan, current.cash, receivables)
+                    .map_err(sizing_error)?
+            {
+                return Err(sizing_error(
+                    crate::fast_event::FastEventError::InvalidInput(error.into()),
+                ));
+            }
             Some(current.preview(&plan).map_err(sizing_error)?)
         } else {
             None
@@ -477,6 +484,7 @@ fn sizing_diagnostic(plan: &ParityPlan) -> Result<VectorPitSizing, VectorError> 
                 principal_budget: adjustment.principal_budget,
                 reserved_fee: adjustment.reserved_fee,
                 cash_residue: adjustment.cash_residue,
+                reason: SizingAdjustmentReason::QuantizationCashBudget,
             })
             .collect(),
         cash_residue: (!plan.cash_adjustments.is_empty()).then_some(plan.cash_residue),
@@ -1200,6 +1208,16 @@ fn run_vector_inner(
     }
     Ok(VectorResult {
         pit_initial_capital: pit.map(|(_, _, capital)| capital),
+        semantic_version: pit.map(|_| {
+            if terminal_settlement.is_some() {
+                TERMINAL_SETTLEMENT_PIT_SIZING_ENGINE_VERSION
+            } else if actions.is_some() {
+                CORPORATE_ACTION_PIT_SIZING_SEMANTIC_VERSION
+            } else {
+                PIT_SIZING_SEMANTIC_VERSION
+            }
+            .to_owned()
+        }),
         sessions: result_sessions,
         decisions: result_decisions,
         executions: result_executions,

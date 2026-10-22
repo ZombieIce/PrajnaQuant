@@ -373,6 +373,37 @@ mod tests {
     }
 
     #[test]
+    fn terminal_settlement_versions_are_bound_to_parity_and_lot() {
+        for (kind, sizing, expected) in [
+            (
+                "fast_event",
+                Some("vector_parity"),
+                prajna_research::fast_event::TERMINAL_SETTLEMENT_PARITY_CASH_ENGINE_VERSION,
+            ),
+            (
+                "fast_event",
+                Some("lot"),
+                prajna_research::fast_event::TERMINAL_SETTLEMENT_ENGINE_VERSION,
+            ),
+            (
+                "vector",
+                None,
+                prajna_research::vector::TERMINAL_SETTLEMENT_PIT_SIZING_ENGINE_VERSION,
+            ),
+        ] {
+            let mut spec = serde_json::json!({
+                "engine": {"kind": kind, "semantic_version": "legacy"},
+                "terminal_settlement": {"semantic_version": "mvp6-terminal-settlement@1"},
+            });
+            if let Some(sizing) = sizing {
+                spec["fast_event"] = serde_json::json!({"sizing": sizing});
+            }
+            bind_terminal_settlement_engine_version(&mut spec).unwrap();
+            assert_eq!(spec["engine"]["semantic_version"], expected);
+        }
+    }
+
+    #[test]
     fn action_schedule_is_rejected_for_accurate_event() {
         let mut spec = serde_json::json!({
             "engine": {"kind": "accurate_event", "semantic_version": "accurate_event@1"},

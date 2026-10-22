@@ -149,7 +149,7 @@ pub enum QuantityAdjustmentKind {
     Target,
     BuyOrder,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SizingAdjustmentReason {
     LotRounding,
@@ -187,6 +187,7 @@ struct PlannedExecution {
     fills: Vec<FastEventFill>,
     fee_settlements: Vec<ParityFeeSettlement>,
     adjustments: Vec<FastEventSizingAdjustment>,
+    cash_error: Option<&'static str>,
 }
 
 #[derive(Debug, Clone)]
@@ -740,6 +741,7 @@ fn run_with_execution(
                                     .collect(),
                                 fee_settlements: Vec::new(),
                                 adjustments: Vec::new(),
+                                cash_error: None,
                             }
                         }
                     };
@@ -1205,6 +1207,7 @@ fn pit_fills(
                 )?,
                 fee_settlements: Vec::new(),
                 adjustments: Vec::new(),
+                cash_error: None,
             },
             Sizing::VectorParity if request.is_retry => PlannedExecution {
                 fills: parity_retry_fills_inner(
@@ -1221,6 +1224,7 @@ fn pit_fills(
                 )?,
                 fee_settlements: Vec::new(),
                 adjustments: Vec::new(),
+                cash_error: None,
             },
             Sizing::VectorParity => parity_fills_retaining(
                 account,
@@ -1231,6 +1235,7 @@ fn pit_fills(
                 config.costs,
                 false,
                 &skipped_buys,
+                true,
             )?,
         };
         let required = planned
@@ -1266,6 +1271,11 @@ fn pit_fills(
             })
             .map(|(id, _)| (*id).clone())
             .collect::<BTreeSet<_>>();
+        if blocked_sells.is_empty() {
+            if let Some(error) = planned.cash_error {
+                return Err(invalid(error));
+            }
+        }
         let applied = if blocked_sells.is_empty() {
             projected_weights(account, run.id, prices, &planned)?
         } else {
@@ -1757,6 +1767,7 @@ fn parity_fills(
         costs,
         retry,
         &BTreeSet::new(),
+        false,
     )
 }
 
@@ -1770,12 +1781,14 @@ fn parity_fills_retaining(
     costs: FastEventCosts,
     retry: bool,
     retained: &BTreeSet<InstrumentId>,
+    defer_cash_error: bool,
 ) -> Result<PlannedExecution, FastEventError> {
     if retry {
         return Ok(PlannedExecution {
             fills: parity_retry_fills(account, id, targets, prices, session, costs)?,
             fee_settlements: Vec::new(),
             adjustments: Vec::new(),
+            cash_error: None,
         });
     }
     let portfolio = &account.portfolios()[&id];
@@ -1784,17 +1797,25 @@ fn parity_fills_retaining(
         portfolio.dividend_receivable(),
         portfolio.liquidation_receivable(),
     )?;
-    let plan = crate::parity_sizing::target_plan(
+    let mut plan = crate::parity_sizing::target_plan(
         equity,
-        portfolio.cash(),
-        receivables,
         portfolio.positions(),
         targets,
         prices,
         costs,
         retained,
     )?;
-    let mut planned = PlannedExecution::default();
+    let cash_error =
+        crate::parity_sizing::settle_plan_cash(&mut plan, portfolio.cash(), receivables)?;
+    if let Some(error) = cash_error {
+        if !defer_cash_error {
+            return Err(invalid(error));
+        }
+    }
+    let mut planned = PlannedExecution {
+        cash_error,
+        ..Default::default()
+    };
     for adjustment in &plan.cash_adjustments {
         planned.adjustments.push(FastEventSizingAdjustment {
             portfolio_id: id,

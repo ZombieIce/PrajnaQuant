@@ -269,5 +269,20 @@ fn pit_vector_preview_and_fast_account_consume_the_same_corrected_quantities() {
         sizing.cash_residue,
         Some("0.000000000000000002".parse().unwrap())
     );
+    assert_eq!(
+        sizing.cash_adjustments[0].reason,
+        SizingAdjustmentReason::QuantizationCashBudget
+    );
     assert_eq!(sizing.fees, "0.3".parse::<Notional>().unwrap());
+    assert_eq!(vector.semantic_version.as_deref(), Some("vector@4"));
+    assert_eq!(
+        vector.sessions[1].nav / (1.0 + vector.sessions[1].gross_return) * 1000.0,
+        fast.sessions[1]
+            .open_after
+            .account
+            .equity
+            .to_string()
+            .parse::<f64>()
+            .unwrap()
+    );
 }

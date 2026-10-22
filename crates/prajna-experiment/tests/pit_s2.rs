@@ -142,6 +142,7 @@ fn terminal_settlement_uses_last_catalog_bar_close_and_fast_vector_match() {
     let vector = vector_run.runs[0].result.as_ref().unwrap();
     let fast = fast_run.runs[0].fast_event_result.as_ref().unwrap();
     assert_eq!(fast.semantic_version, "fast_event@6");
+    assert_eq!(vector.semantic_version.as_deref(), Some("vector@6"));
     assert_eq!(vector.terminal_settlements.len(), 1);
     assert_eq!(fast.terminal_settlements.len(), 1);
     let vector_settlement = &vector.terminal_settlements[0];

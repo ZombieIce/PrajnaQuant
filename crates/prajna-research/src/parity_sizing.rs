@@ -67,13 +67,13 @@ pub(crate) struct ParityPlan {
     pub cash_adjustments: Vec<ParityCashAdjustment>,
     /// Final cash after sells, all buy fees, buy principal and fee-only fees.
     pub cash_residue: Notional,
+    after: Notional,
+    target_weight_sum: Notional,
+    retained_value: Notional,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn target_plan(
     equity: Notional,
-    cash: Notional,
-    receivables: Notional,
     positions: &BTreeMap<InstrumentId, Quantity>,
     targets: &BTreeMap<InstrumentId, f64>,
     prices: &BTreeMap<InstrumentId, Price>,
@@ -87,6 +87,9 @@ pub(crate) fn target_plan(
         legs: Vec::new(),
         cash_adjustments: Vec::new(),
         cash_residue: Notional::ZERO,
+        after: Notional::ZERO,
+        target_weight_sum: Notional::ZERO,
+        retained_value: Notional::ZERO,
     };
     if equity == Notional::ZERO {
         return Ok(plan);
@@ -152,14 +155,9 @@ pub(crate) fn target_plan(
             slip,
         });
     }
-    settle_cash(
-        &mut plan,
-        cash,
-        after,
-        target_weight_sum,
-        receivables,
-        retained_value,
-    )?;
+    plan.after = after;
+    plan.target_weight_sum = target_weight_sum;
+    plan.retained_value = retained_value;
     Ok(plan)
 }
 
@@ -201,14 +199,14 @@ fn wide_mul(left: u128, right: u128) -> (u128, u128) {
     (high + (middle >> 64), (middle << 64) | (low & mask))
 }
 
-fn settle_cash(
+pub(crate) fn settle_plan_cash(
     plan: &mut ParityPlan,
     cash: Notional,
-    after: Notional,
-    target_weight_sum: Notional,
     receivables: Notional,
-    retained_value: Notional,
-) -> Result<(), FastEventError> {
+) -> Result<Option<&'static str>, FastEventError> {
+    let after = plan.after;
+    let target_weight_sum = plan.target_weight_sum;
+    let retained_value = plan.retained_value;
     let mut cash_after_sells = cash;
     for leg in &plan.legs {
         let delta = leg.delta()?;
@@ -221,9 +219,7 @@ fn settle_cash(
         )?;
         cash_after_sells = sub(cash_after_sells, leg.total_fees()?)?;
         if cash_after_sells < Notional::ZERO {
-            return Err(FastEventError::InvalidInput(
-                "full-target sell settlement exceeds available cash".into(),
-            ));
+            return Ok(Some("full-target sell settlement exceeds available cash"));
         }
     }
     let mut reserved_fees = Notional::ZERO;
@@ -237,9 +233,7 @@ fn settle_cash(
     }
     let mut budget = sub(cash_after_sells, reserved_fees)?;
     if budget < Notional::ZERO {
-        return Err(FastEventError::InvalidInput(
-            "unpaid full-target fees exceed cash after sells".into(),
-        ));
+        return Ok(Some("unpaid full-target fees exceed cash after sells"));
     }
     let mut constrained = false;
     for leg in &plan.legs {
@@ -256,11 +250,11 @@ fn settle_cash(
     }
     if !constrained {
         plan.cash_residue = budget;
-        return Ok(());
+        return Ok(None);
     }
     if !rounding_only_feasible(after, target_weight_sum, receivables, retained_value)? {
-        return Err(FastEventError::InvalidInput(
-            "full-target cash shortfall is not attributable to scale-18 rounding".into(),
+        return Ok(Some(
+            "full-target cash shortfall is not attributable to scale-18 rounding",
         ));
     }
     let mut remaining = sub(cash_after_sells, reserved_fees)?;
@@ -306,7 +300,7 @@ fn settle_cash(
     for adjustment in &mut plan.cash_adjustments {
         adjustment.cash_residue = plan.cash_residue;
     }
-    Ok(())
+    Ok(None)
 }
 
 /// Exact carried sizing inputs for Vector. Fast's TradingAccount remains the
@@ -450,10 +444,8 @@ mod tests {
         let a = instrument("A.SYNTH");
         let prices = BTreeMap::from([(a.clone(), price("1"))]);
         for (target, expected, residue) in [("1", "1000", "0"), ("0.5", "500", "500")] {
-            let plan = target_plan(
+            let mut plan = target_plan(
                 "1000".parse().unwrap(),
-                "1000".parse().unwrap(),
-                Notional::ZERO,
                 &BTreeMap::new(),
                 &BTreeMap::from([(a.clone(), target.parse().unwrap())]),
                 &prices,
@@ -461,6 +453,10 @@ mod tests {
                 &BTreeSet::new(),
             )
             .unwrap();
+            assert_eq!(
+                settle_plan_cash(&mut plan, "1000".parse().unwrap(), Notional::ZERO).unwrap(),
+                None
+            );
             assert!(plan.cash_adjustments.is_empty());
             assert_eq!(plan.legs[0].desired, quantity(expected));
             assert_eq!(plan.cash_residue, residue.parse().unwrap());
@@ -471,10 +467,8 @@ mod tests {
     fn tiny_representable_quantity_is_not_clamped_away() {
         let a = instrument("A.SYNTH");
         let prices = BTreeMap::from([(a.clone(), price("1"))]);
-        let plan = target_plan(
+        let mut plan = target_plan(
             "0.000000000000000002".parse().unwrap(),
-            "0.000000000000000002".parse().unwrap(),
-            Notional::ZERO,
             &BTreeMap::new(),
             &BTreeMap::from([(a, 0.5)]),
             &prices,
@@ -482,6 +476,15 @@ mod tests {
             &BTreeSet::new(),
         )
         .unwrap();
+        assert_eq!(
+            settle_plan_cash(
+                &mut plan,
+                "0.000000000000000002".parse().unwrap(),
+                Notional::ZERO
+            )
+            .unwrap(),
+            None
+        );
         assert_eq!(plan.legs[0].desired, quantity("0.000000000000000001"));
         assert_eq!(plan.cash_residue, "0.000000000000000001".parse().unwrap());
         assert!(plan.cash_adjustments.is_empty());
@@ -492,9 +495,7 @@ mod tests {
         let ids = [instrument("A.SYNTH")];
         let prices = BTreeMap::from([(ids[0].clone(), price("1"))]);
         let targets = BTreeMap::from([(ids[0].clone(), 1.0)]);
-        let error = target_plan(
-            "1000".parse().unwrap(),
-            Notional::ZERO,
+        let mut plan = target_plan(
             "1000".parse().unwrap(),
             &BTreeMap::new(),
             &targets,
@@ -502,12 +503,15 @@ mod tests {
             FastEventCosts::ZERO,
             &BTreeSet::new(),
         )
-        .unwrap_err()
-        .to_string();
+        .unwrap();
+        let error = settle_plan_cash(&mut plan, Notional::ZERO, "1000".parse().unwrap())
+            .unwrap()
+            .unwrap();
         assert!(
             error.contains("not attributable to scale-18 rounding"),
             "{error}"
         );
+        assert!(plan.cash_adjustments.is_empty());
     }
 
     #[test]
@@ -517,21 +521,29 @@ mod tests {
         let prices = BTreeMap::from([(a.clone(), price("1")), (b.clone(), price("1"))]);
         let positions = BTreeMap::from([(a.clone(), quantity("500"))]);
         let targets = BTreeMap::from([(a.clone(), 0.5), (b.clone(), 0.5)]);
-        let error = target_plan(
+        let mut plan = target_plan(
             "500".parse().unwrap(),
-            Notional::ZERO,
-            Notional::ZERO,
             &positions,
             &targets,
             &prices,
             FastEventCosts::ZERO,
             &BTreeSet::from([a]),
         )
-        .unwrap_err()
-        .to_string();
+        .unwrap();
+        let error = settle_plan_cash(&mut plan, Notional::ZERO, Notional::ZERO)
+            .unwrap()
+            .unwrap();
         assert!(
             error.contains("not attributable to scale-18 rounding"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn wide_mul_handles_high_words_and_equality() {
+        assert_eq!(wide_mul(1 << 64, 1 << 64), (1, 0));
+        assert_eq!(wide_mul(u128::MAX, 1), (0, u128::MAX));
+        assert_eq!(wide_mul(3, 5), (0, 15));
+        assert_eq!(wide_mul(1 << 64, 3), (0, 3 << 64));
     }
 }
