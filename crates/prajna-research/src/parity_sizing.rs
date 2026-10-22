@@ -67,9 +67,9 @@ pub(crate) struct ParityPlan {
     pub cash_adjustments: Vec<ParityCashAdjustment>,
     /// Final cash after sells, all buy fees, buy principal and fee-only fees.
     pub cash_residue: Notional,
-    after: Notional,
-    target_weight_sum: Notional,
-    retained_value: Notional,
+    pub(crate) after: Notional,
+    pub(crate) target_weight_sum: Notional,
+    pub(crate) retained_value: Notional,
 }
 
 pub(crate) fn target_plan(
