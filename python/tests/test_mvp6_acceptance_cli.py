@@ -51,8 +51,6 @@ def universe_diagnostics():
 def parity_days():
     rows = []
     for index, date in enumerate(DATES):
-        cost = "0.005" if index == 1 else "0"
-        trajectory = [{"kind": "executed", "blocked": [], "skipped_buys": []}] if index == 1 else []
         vector_components = {
             "available_cash_weight": 0.97, "dividend_receivable_weight": 0.005,
             "liquidation_receivable_weight": 0.0,
@@ -63,14 +61,14 @@ def parity_days():
         }
         rows.append({
             "session_date": date,
-            "vector_open_nav": "1000", "fast_open_nav": "1000",
-            "vector_close_nav": "1000", "fast_close_nav": "1000",
+            "vector_open_nav": "1", "fast_open_nav": "1",
+            "vector_close_nav": "1", "fast_close_nav": "1",
             "vector_open_components": vector_components,
             "fast_open_components": fast_components,
             "vector_close_components": vector_components,
             "fast_close_components": fast_components,
-            "vector_cost": cost, "fast_cost": cost,
-            "vector_trajectory": trajectory, "fast_trajectory": trajectory,
+            "vector_cost": "0", "fast_cost": "0",
+            "vector_trajectory": [], "fast_trajectory": [],
         })
     return rows
 
@@ -121,12 +119,15 @@ def run_artifacts():
                  "action_index": 1, "instrument_id": "159560.SZSE", "kind": "share_conversion",
                  "quantity_before": "100", "share_ratio": "2", "quantity_after": "200",
                  "theoretical_quantity": "200", "residual_quantity": "0",
-                 "corporate_action_rounding": "0"},
+                 "corporate_action_rounding": "0", "valuation_price": "6"},
             ],
             "terminal_settlement_version": "mvp6-terminal-settlement@1",
             "terminal_settlements": [],
         },
-        "parity": {"expected_sessions": DATES, "days": parity_days()},
+        "parity": {
+            "initial_cash": "1000", "expected_sessions": DATES, "days": parity_days(),
+            "fast_valuations": accounting_valuations(),
+        },
         "independent_runs": [independent, json.loads(json.dumps(independent))],
         "python_cli": {
             "cli": {"experiment_id": "experiment", "execution_id": "execution", "summary_logical_hash": "summary", "runs": {"run": {"status": "completed", "table_hashes": {"account_valuations": "account", "fills": "fills"}}}},
@@ -234,6 +235,27 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertFalse(json.loads(result.stdout)["checks"]["unknown_floor"]["passed"])
 
+    def test_unknown_coverage_cannot_raise_ticket_limits(self):
+        artifacts = run_artifacts()
+        coverage = artifacts["unknown_coverage"]
+        coverage["unknown_cells"] = 100
+        coverage["denominator_cells"] = 300
+        coverage["thresholds"] = {
+            "total_unknown_percent": 100,
+            "per_instrument_unknown_percent": 100,
+        }
+        coverage["instruments"] = [
+            {"symbol": code, "cells": 60, "unknown_cells": 20} for code in FIXED_CODES
+        ]
+
+        result = self.invoke(artifacts)
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        check = json.loads(result.stdout)["checks"]["unknown_floor"]
+        self.assertFalse(check["passed"])
+        self.assertIn("total_unknown_percent_over_limit", [e["kind"] for e in check["errors"]])
+        self.assertIn("per_instrument_unknown_percent_over_limit", [e["kind"] for e in check["errors"]])
+
     def test_main_run_requires_dividend_transitions_and_consistent_split_arithmetic(self):
         cases = (
             lambda actions: actions.__delitem__(1),
@@ -244,6 +266,10 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
             lambda actions: actions[3].update(quantity_after="199"),
             lambda actions: actions[3].update(residual_quantity="1"),
             lambda actions: actions[3].update(corporate_action_rounding=None),
+            lambda actions: actions[3].update(
+                quantity_before="101", share_ratio="1.5", theoretical_quantity="151.5", quantity_after="151",
+                residual_quantity="0.5", corporate_action_rounding="-999",
+            ),
         )
         for mutate in cases:
             with self.subTest(mutation=mutate):
@@ -257,10 +283,10 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
     def test_daily_parity_requires_full_sessions_nav_components_cost_and_trajectory(self):
         mutations = (
             lambda days: days.pop(),
-            lambda days: days[0].update(fast_close_nav="999"),
+            lambda days: days[0].update(fast_close_nav="0.999"),
             lambda days: days[0]["fast_open_components"].update(invested_weight=0.0),
-            lambda days: days[1].update(fast_cost="0"),
-            lambda days: days[1].update(fast_trajectory=[]),
+            lambda days: days[1].update(vector_cost="0.001"),
+            lambda days: days[1].update(vector_trajectory=[{"kind": "executed", "blocked": [], "skipped_buys": []}]),
         )
         for mutate in mutations:
             with self.subTest(mutation=mutate):
@@ -269,6 +295,77 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
                 result = self.invoke(artifacts)
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertFalse(json.loads(result.stdout)["checks"]["daily_parity"]["passed"])
+
+    def test_daily_parity_recomputes_the_fast_ledger_as_an_independent_oracle(self):
+        artifacts = run_artifacts()
+        position = artifacts["parity"]["fast_valuations"][0]["positions"]["159919.SZSE"]
+        position["price"] = "6"
+
+        result = self.invoke(artifacts)
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        check = json.loads(result.stdout)["checks"]["daily_parity"]
+        self.assertFalse(check["passed"])
+        self.assertIn("oracle", [error.get("kind") for error in check["errors"]])
+
+    def test_daily_parity_matches_the_documented_dividend_hand_calculation(self):
+        artifacts = run_artifacts()
+        def valuation(date, point, price, market_value, cash, receivable, equity):
+            return {
+                "session_date": date, "valuation_point": point, "cash": str(cash),
+                "dividend_receivable": str(receivable), "liquidation_receivable": "0",
+                "equity": str(equity), "unallocated_capital": "0", "accounting_verified": True,
+                "positions": {"159919.SZSE": {
+                    "quantity": "100", "price": str(price), "market_value": market_value,
+                }},
+            }
+
+        artifacts["parity"]["fast_valuations"] = [
+            valuation(DATES[0], "open_after", "10", "1000", "0", "0", "1000"),
+            valuation(DATES[0], "close", "10", "1000", "0", "0", "1000"),
+            valuation(DATES[1], "open_after", "9.9", "990", "0", "10", "1000"),
+            valuation(DATES[1], "close", "9.9", "990", "0", "10", "1000"),
+            valuation(DATES[2], "open_after", "9.9", "990", "10", "0", "1000"),
+            valuation(DATES[2], "close", "10.89", "1089", "10", "0", "1099"),
+        ]
+        navs = (("1", "1"), ("1", "1"), ("1", "1.099"))
+        components = (
+            ({"available_cash_weight": 0, "dividend_receivable_weight": 0, "liquidation_receivable_weight": 0},
+             {"cash_weight": 0, "invested_weight": 1, "dividend_receivable_weight": 0, "liquidation_receivable_weight": 0}),
+            ({"available_cash_weight": 0, "dividend_receivable_weight": 0.01, "liquidation_receivable_weight": 0},
+             {"cash_weight": 0, "invested_weight": 0.99, "dividend_receivable_weight": 0.01, "liquidation_receivable_weight": 0}),
+            ({"available_cash_weight": 0.01, "dividend_receivable_weight": 0, "liquidation_receivable_weight": 0},
+             {"cash_weight": 0.01, "invested_weight": 0.99, "dividend_receivable_weight": 0, "liquidation_receivable_weight": 0}),
+        )
+        for index, day in enumerate(artifacts["parity"]["days"]):
+            day["vector_open_nav"], day["fast_open_nav"] = navs[index][0], navs[index][0]
+            day["vector_close_nav"], day["fast_close_nav"] = navs[index][1], navs[index][1]
+            vector_components, fast_components = components[index]
+            day["vector_open_components"] = vector_components
+            day["vector_close_components"] = vector_components
+            day["fast_open_components"] = fast_components
+            day["fast_close_components"] = fast_components
+        final_day = artifacts["parity"]["days"][-1]
+        final_cash_weight = 10 / 1099
+        final_invested_weight = 1089 / 1099
+        final_day["vector_close_components"] = {
+            "available_cash_weight": final_cash_weight,
+            "dividend_receivable_weight": 0,
+            "liquidation_receivable_weight": 0,
+        }
+        final_day["fast_close_components"] = {
+            "cash_weight": final_cash_weight,
+            "invested_weight": final_invested_weight,
+            "dividend_receivable_weight": 0,
+            "liquidation_receivable_weight": 0,
+        }
+
+        result = self.invoke(artifacts)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        parity = json.loads(result.stdout)["checks"]["daily_parity"]
+        self.assertTrue(parity["passed"])
+        self.assertEqual(parity["oracle"]["valuation_points"], 6)
 
     def test_daily_accounting_requires_every_session_at_both_valuation_points(self):
         artifacts = run_artifacts()
@@ -361,6 +458,11 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
                     raw_integrity_failure(snapshot),
                     "frozen Raw integrity failed: empty or malformed inventory",
                 )
+            inventory.write_bytes(b"\xff\xfe\xfa")
+            self.assertEqual(
+                raw_integrity_failure(raw_hashes(root, inventory)),
+                "frozen Raw integrity failed: empty or malformed inventory",
+            )
 
     def test_raw_inventory_checks_content_at_the_sha256_address(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -467,6 +569,11 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
             "failure": {"criterion": "daily_parity", "error": "synthetic parity read failure"},
             "unknown_coverage": unknown_coverage(),
             "raw_immutable": False,
+            "non_blocking": {
+                "small_grid": {"status": "not_run", "reason": "Not required for the engineering ledger gate."},
+                "accurate_smoke": {"status": "not_run", "reason": "No Accurate Event worker was configured."},
+                "legacy_comparison": {"status": "not_run", "reason": "Legacy comparator is unavailable."},
+            },
         }
         result = self.invoke(artifacts)
 
@@ -477,8 +584,14 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
             "daily_accounting", "unknown_floor", "frozen_raw_immutable",
         })
         self.assertEqual(report["checks"]["daily_parity"]["status"], "failed")
-        self.assertEqual(report["checks"]["main_run"]["status"], "not_run")
+        self.assertEqual(report["checks"]["main_run"]["status"], "passed")
         self.assertEqual(report["checks"]["frozen_raw_immutable"]["status"], "failed")
+        self.assertEqual(report["non_blocking"], artifacts["non_blocking"])
+
+        artifacts["non_blocking"]["accurate_smoke"].pop("reason")
+        invalid_result = self.invoke(artifacts)
+        invalid_report = json.loads(invalid_result.stdout)
+        self.assertIn("accurate_smoke is not_run without a reason", invalid_report["non_blocking_errors"])
 
 
 if __name__ == "__main__":

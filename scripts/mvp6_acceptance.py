@@ -44,6 +44,10 @@ COSTS = {
 TERMINAL = {"semantic_version": "mvp6-terminal-settlement@1"}
 TOLERANCE = 1e-12
 WEIGHT_TOLERANCE = Decimal("1e-12")
+UNKNOWN_LIMITS = {
+    "total_unknown_percent": Decimal("5"),
+    "per_instrument_unknown_percent": Decimal("20"),
+}
 ACTIVE_POST_MAIN_RUN: dict[str, Any] | None = None
 
 
@@ -176,8 +180,14 @@ def verify_unknown_coverage(coverage: dict[str, Any]) -> dict[str, Any]:
     except (InvalidOperation, TypeError, ValueError):
         total_limit_dec = instrument_limit_dec = Decimal(-1)
         errors.append({"kind": "invalid_threshold"})
-    if total_limit_dec < 0 or instrument_limit_dec < 0:
+    if (total_limit_dec < 0 or instrument_limit_dec < 0
+            or total_limit_dec > UNKNOWN_LIMITS["total_unknown_percent"]
+            or instrument_limit_dec > UNKNOWN_LIMITS["per_instrument_unknown_percent"]):
         errors.append({"kind": "invalid_threshold"})
+    total_limit_dec = min(total_limit_dec, UNKNOWN_LIMITS["total_unknown_percent"])
+    instrument_limit_dec = min(
+        instrument_limit_dec, UNKNOWN_LIMITS["per_instrument_unknown_percent"],
+    )
     total_percent = (
         Decimal(100) * aggregate_unknown / aggregate_cells if valid_aggregate else None
     )
@@ -235,16 +245,30 @@ def verify_post_main_failure(data: dict[str, Any]) -> dict[str, Any]:
             "main_run", "daily_parity", "reproducibility", "python_as_of_and_cli", "daily_accounting",
         )
     }
+    checks["main_run"] = result(True, status="passed", reason="The main Run completed before the post-main phase failed.")
     failed_check = failure.get("criterion")
     if failed_check not in checks:
         failed_check = "daily_accounting"
     checks[failed_check] = result(False, error=failure.get("error", "post-main phase failed"))
     checks["unknown_floor"] = verify_unknown_coverage(data["unknown_coverage"])
     checks["frozen_raw_immutable"] = result(data.get("raw_immutable") is True)
+    non_blocking = data.get("non_blocking", {})
+    non_blocking_errors = []
+    expected_non_blocking = {"small_grid", "accurate_smoke", "legacy_comparison"}
+    if set(non_blocking) != expected_non_blocking:
+        non_blocking_errors.append("non-blocking outcomes are incomplete")
+    for name in expected_non_blocking:
+        item = non_blocking.get(name, {})
+        if item.get("status") not in {"passed", "failed", "not_run"}:
+            non_blocking_errors.append(f"{name} has an invalid status")
+        elif item["status"] == "not_run" and not str(item.get("reason", "")).strip():
+            non_blocking_errors.append(f"{name} is not_run without a reason")
     return {
         "schema": "mvp6-acceptance-verification@1",
         "passed": False,
         "checks": checks,
+        "non_blocking": non_blocking,
+        "non_blocking_errors": non_blocking_errors,
     }
 
 
@@ -379,7 +403,14 @@ def verify_split_ledger(actions: list[dict[str, Any]]) -> tuple[bool, list[dict[
                     or theoretical < 0 or theoretical.to_integral_value(rounding=ROUND_FLOOR) != after
                     or theoretical - after != residual or residual < 0):
                 errors.append({"kind": "split_quantity_reconciliation"})
-            if (residual == 0 and rounding != 0) or (residual > 0 and rounding > 0):
+            if residual == 0:
+                expected_rounding = Decimal(0)
+            else:
+                price = dec(row["valuation_price"])
+                if not price.is_finite() or price <= 0:
+                    raise InvalidOperation
+                expected_rounding = -(residual * price)
+            if rounding != expected_rounding:
                 errors.append({"kind": "split_rounding_reconciliation"})
         except (KeyError, InvalidOperation, TypeError):
             errors.append({"kind": "invalid_split_ledger"})
@@ -392,6 +423,26 @@ def _close(left: Any, right: Any) -> bool:
         return a.is_finite() and b.is_finite() and abs(a - b) <= Decimal(str(TOLERANCE))
     except (InvalidOperation, TypeError, ValueError):
         return False
+
+
+def ledger_oracle(
+    valuation: dict[str, Any],
+) -> tuple[Decimal, Decimal, Decimal, Decimal, Decimal]:
+    cash = dec(valuation["cash"])
+    dividend = dec(valuation["dividend_receivable"])
+    liquidation = dec(valuation.get("liquidation_receivable", "0"))
+    if cash < 0 or dividend < 0 or liquidation < 0:
+        raise ValueError("Fast Event cash and receivables must be nonnegative")
+    invested = Decimal(0)
+    for position in valuation["positions"].values():
+        quantity = dec(position["quantity"])
+        price = dec(position["price"])
+        market_value = dec(position["market_value"])
+        calculated_value = quantity * price
+        if quantity < 0 or price <= 0 or calculated_value != market_value:
+            raise ValueError("position quantity, raw valuation price, and market value do not reconcile")
+        invested += calculated_value
+    return cash + dividend + liquidation + invested, cash, invested, dividend, liquidation
 
 
 def normalized_trajectory(rows: list[dict[str, Any]]) -> list[tuple[str, tuple[str, ...], tuple[str, ...]]]:
@@ -408,18 +459,82 @@ def verify_parity(parity: dict[str, Any]) -> dict[str, Any]:
     expected = parity.get("expected_sessions", [])
     days = parity.get("days", [])
     errors = []
+    try:
+        initial_cash = dec(parity["initial_cash"])
+        if not initial_cash.is_finite() or initial_cash <= 0:
+            raise InvalidOperation
+    except (KeyError, InvalidOperation, TypeError, ValueError):
+        initial_cash = Decimal(0)
+        errors.append({"kind": "oracle", "reason": "invalid initial capital"})
     if not expected or len(set(expected)) != len(expected):
         errors.append({"kind": "invalid_expected_sessions"})
     by_date = {day.get("session_date"): day for day in days}
     if len(by_date) != len(days) or set(by_date) != set(expected):
         errors.append({"kind": "parity_session_coverage"})
+    valuation_rows = parity.get("fast_valuations", [])
+    valuation_map = {
+        (row.get("session_date"), row.get("valuation_point")): row
+        for row in valuation_rows
+    }
+    expected_points = {(date, point) for date in expected for point in ("open_after", "close")}
+    observed_points = [(row.get("session_date"), row.get("valuation_point"))
+                       for row in valuation_rows]
+    if len(observed_points) != len(set(observed_points)) or set(observed_points) != expected_points:
+        errors.append({"kind": "oracle", "reason": "Fast Event valuation coverage is incomplete"})
+    oracle_valuation_count = 0
     for date in expected:
         day = by_date.get(date)
         if day is None:
             continue
-        for metric in ("open_nav", "close_nav", "cost"):
-            if not _close(day.get(f"vector_{metric}"), day.get(f"fast_{metric}")):
-                errors.append({"kind": f"{metric}_mismatch", "session_date": date})
+        for point, vector_point, fast_point in (
+            ("open_after", "open", "open"), ("close", "close", "close"),
+        ):
+            valuation = valuation_map.get((date, point))
+            if valuation is None:
+                continue
+            try:
+                equity, cash, invested, dividend, liquidation = ledger_oracle(valuation)
+                oracle_valuation_count += 1
+                reported_equity = dec(valuation["equity"])
+                if (valuation.get("accounting_verified") is not True
+                        or dec(valuation.get("unallocated_capital", "0")) != 0
+                        or equity != reported_equity):
+                    raise ValueError("Fast Event NAV does not match independently recomputed account ledger")
+                if initial_cash > 0:
+                    oracle_nav = equity / initial_cash
+                    if not _close(day.get(f"vector_{vector_point}_nav"), oracle_nav):
+                        errors.append({"kind": f"{fast_point}_nav_mismatch", "session_date": date})
+                    if not _close(day.get(f"fast_{fast_point}_nav"), oracle_nav):
+                        errors.append({"kind": "oracle", "reason": "Fast Event NAV differs from the ledger oracle",
+                                       "session_date": date, "valuation_point": point})
+                vector = day.get(f"vector_{vector_point}_components") or {}
+                fast = day.get(f"fast_{fast_point}_components") or {}
+                if equity <= 0:
+                    raise ValueError("nonpositive Fast Event ledger equity")
+                oracle_components = {
+                    "cash_weight": cash / equity,
+                    "invested_weight": invested / equity,
+                    "dividend_receivable_weight": dividend / equity,
+                    "liquidation_receivable_weight": liquidation / equity,
+                }
+                if not _close(vector.get("available_cash_weight"), oracle_components["cash_weight"]):
+                    errors.append({"kind": f"{vector_point}_oracle_cash_mismatch", "session_date": date})
+                if not _close(vector.get("dividend_receivable_weight"), oracle_components["dividend_receivable_weight"]):
+                    errors.append({"kind": f"{vector_point}_oracle_receivable_mismatch", "session_date": date})
+                if not _close(vector.get("liquidation_receivable_weight"), oracle_components["liquidation_receivable_weight"]):
+                    errors.append({"kind": f"{vector_point}_oracle_liquidation_mismatch", "session_date": date})
+                if not _close(fast.get("cash_weight"), oracle_components["cash_weight"]):
+                    errors.append({"kind": f"{fast_point}_oracle_cash_mismatch", "session_date": date})
+                if not _close(fast.get("invested_weight"), oracle_components["invested_weight"]):
+                    errors.append({"kind": f"{fast_point}_oracle_invested_mismatch", "session_date": date})
+                if not _close(fast.get("dividend_receivable_weight"), oracle_components["dividend_receivable_weight"]):
+                    errors.append({"kind": f"{fast_point}_oracle_receivable_mismatch", "session_date": date})
+                if not _close(fast.get("liquidation_receivable_weight"), oracle_components["liquidation_receivable_weight"]):
+                    errors.append({"kind": f"{fast_point}_oracle_liquidation_mismatch", "session_date": date})
+            except (KeyError, InvalidOperation, TypeError, ValueError):
+                errors.append({"kind": "oracle", "session_date": date, "valuation_point": point})
+        if not _close(day.get("vector_cost"), day.get("fast_cost")):
+            errors.append({"kind": "cost_mismatch", "session_date": date})
         for point in ("open", "close"):
             vector = day.get(f"vector_{point}_components") or {}
             fast = day.get(f"fast_{point}_components") or {}
@@ -444,7 +559,15 @@ def verify_parity(parity: dict[str, Any]) -> dict[str, Any]:
                 errors.append({"kind": "status_defer_trajectory_mismatch", "session_date": date})
         except (KeyError, TypeError):
             errors.append({"kind": "missing_status_defer_trajectory", "session_date": date})
-    return result(not errors, sessions=len(days), errors=errors)
+    return result(
+        not errors,
+        sessions=len(days),
+        oracle={
+            "basis": "Decimal(cash + dividend receivable + liquidation receivable + sum(quantity * raw price))",
+            "valuation_points": oracle_valuation_count,
+        },
+        errors=errors,
+    )
 
 
 def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
@@ -877,11 +1000,26 @@ def write_post_main_failure_report(
     raw_after = raw_hashes(acceptance.parent, raw_inventory)
     raw_immutable = raw_snapshot_unchanged(raw_before, raw_after)
     failure = {"criterion": criterion, "error": error}
+    non_blocking = {
+        "small_grid": {
+            "status": "not_run",
+            "reason": "P16 non-blocking grid is not needed for the engineering ledger gate.",
+        },
+        "accurate_smoke": {
+            "status": "not_run",
+            "reason": "No Accurate Event worker was configured for this local acceptance.",
+        },
+        "legacy_comparison": {
+            "status": "not_run",
+            "reason": "The old-system comparator for the legacy window is not available in this workspace.",
+        },
+    }
     artifacts = {
         "schema": PHASE_FAILURE_SCHEMA,
         "failure": failure,
         "unknown_coverage": normalized_unknown,
         "raw_immutable": raw_immutable,
+        "non_blocking": non_blocking,
     }
     verification = verify_post_main_failure(artifacts)
     report = {
@@ -890,6 +1028,7 @@ def write_post_main_failure_report(
         "classification": "platform engineering acceptance; not strategy historical performance",
         "verification": verification,
         "failure": failure,
+        "non_blocking": non_blocking,
         "raw_immutability": {
             "passed": raw_immutable,
             "inventory_entries": raw_before.request_records,
@@ -928,7 +1067,7 @@ def raw_hashes(root: Path, inventory: Path) -> RawHashSnapshot:
     inventory_sha256 = hashlib.sha256(inventory_bytes).hexdigest()
     try:
         data = json.loads(inventory_bytes)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError):
         return RawHashSnapshot({}, 0, "inventory cannot be read", inventory_sha256)
     records = data.get("request_records") if isinstance(data, dict) else None
     if not isinstance(records, list) or not records:
@@ -1350,17 +1489,17 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         fast_fees_by_date[date] = fast_fees_by_date.get(date, Decimal(0)) + dec(fill["total_fees"])
 
     def fast_components(row: dict[str, Any]) -> dict[str, float]:
-        equity = dec(row["equity"])
-        positions_value = sum((dec(position["market_value"]) for position in row["positions"].values()), Decimal(0))
+        equity, cash, invested, dividend, liquidation = ledger_oracle(row)
         return {
-            "cash_weight": float(dec(row["cash"]) / equity),
-            "invested_weight": float(positions_value / equity),
-            "dividend_receivable_weight": float(dec(row["dividend_receivable"]) / equity),
-            "liquidation_receivable_weight": float(dec(row["liquidation_receivable"]) / equity),
+            "cash_weight": float(cash / equity),
+            "invested_weight": float(invested / equity),
+            "dividend_receivable_weight": float(dividend / equity),
+            "liquidation_receivable_weight": float(liquidation / equity),
         }
 
     parity_days = []
     previous_close_equity = dec(parity_fast_definition["fast_event"]["initial_cash"])
+    parity_initial_cash = dec(parity_fast_definition["fast_event"]["initial_cash"])
     vector_by_date = {row["session_date"]: row for row in vector_sessions}
     for date in expected_sessions:
         vector = vector_by_date[date]
@@ -1372,9 +1511,9 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         parity_days.append({
             "session_date": date,
             "vector_open_nav": float(vector["nav"]) / (1 + float(vector["gross_return"])),
-            "fast_open_nav": float(dec(fast_open_row["equity"]) / dec(parity_fast_definition["fast_event"]["initial_cash"])),
+            "fast_open_nav": float(ledger_oracle(fast_open_row)[0] / parity_initial_cash),
             "vector_close_nav": vector["nav"],
-            "fast_close_nav": float(dec(fast_close_row["equity"]) / dec(parity_fast_definition["fast_event"]["initial_cash"])),
+            "fast_close_nav": float(ledger_oracle(fast_close_row)[0] / parity_initial_cash),
             "vector_open_components": vector_components_open,
             "fast_open_components": fast_components(fast_open_row),
             "vector_close_components": vector_components_close,
@@ -1416,7 +1555,22 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     all_run_specs = [run["run_spec"] for run in main_full_manifest["runs"]]
     run_spec = all_run_specs[0]
     engine = run_spec["engine"]
-    action_rows = main_full_tables["corporate_actions"]
+    open_prices_by_date = {
+        row["session_date"]: {
+            instrument: position["price"]
+            for instrument, position in row["positions"].items()
+        }
+        for row in main_account_rows
+        if row.get("valuation_point") == "open_after"
+    }
+    action_rows = []
+    for action in main_full_tables["corporate_actions"]:
+        enriched = dict(action)
+        if action.get("kind") == "share_conversion":
+            enriched["valuation_price"] = open_prices_by_date.get(
+                action.get("session_date"), {},
+            ).get(action.get("instrument_id"))
+        action_rows.append(enriched)
     mark_run_phase("reproducibility")
     independent_reports = compare_independent_levels(main_manifests)
     mark_run_phase("python_as_of_and_cli")
@@ -1438,7 +1592,14 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
             "terminal_settlement_version": run_spec.get("terminal_settlement", {}).get("semantic_version"),
             "terminal_settlements": main_full_tables["terminal_settlements"],
         },
-        "parity": {"expected_sessions": expected_sessions, "days": parity_days},
+        "parity": {
+            "initial_cash": str(parity_initial_cash),
+            "expected_sessions": expected_sessions,
+            "days": parity_days,
+            "fast_valuations": [
+                row for row in fast_accounts if row.get("scope") == "account"
+            ],
+        },
         "independent_runs": independent_reports,
         "python_cli": {
             "cli": {
