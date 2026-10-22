@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import tempfile
+from decimal import Decimal
 from pathlib import Path
 import unittest
 
@@ -15,6 +16,9 @@ from scripts.mvp6_acceptance import (
     raw_integrity_failure,
     raw_hashes,
     raw_snapshot_unchanged,
+    reconstruct_vector_close_nav,
+    vector_open_nav,
+    write_post_main_failure_report,
 )
 
 
@@ -36,14 +40,14 @@ def unknown_coverage():
 
 def universe_diagnostics():
     codes_by_session = [{"session_index": index, "session_date": date,
-                         "included_codes": FIXED_CODES, "excluded_reasons": {}}
+                         "included_codes": list(FIXED_CODES), "excluded_reasons": {}}
                         for index, date in enumerate(DATES)]
     return {
         "configuration": {
-            "version": "mvp6-fixed-etf@3", "codes": FIXED_CODES, "minimum_code_count": 3,
+            "version": "mvp6-fixed-etf@3", "codes": list(FIXED_CODES), "minimum_code_count": 3,
         },
         "catalog_versions": ["catalog@1"], "rule_versions": ["rules@1"],
-        "included_codes": FIXED_CODES, "excluded_reasons": {}, "unresolved_codes": [],
+        "included_codes": list(FIXED_CODES), "excluded_reasons": {}, "unresolved_codes": [],
         "session_count": len(DATES), "sessions": codes_by_session,
     }
 
@@ -367,6 +371,37 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
         self.assertTrue(parity["passed"])
         self.assertEqual(parity["oracle"]["valuation_points"], 6)
 
+    def test_vector_close_nav_revalues_the_same_session_not_the_next_open(self):
+        session = {
+            "nav": "1.1", "gross_return": "0.1",
+            "portfolio_components": {
+                "available_cash_weight": "0", "dividend_receivable_weight": "0",
+                "liquidation_receivable_weight": "0",
+            },
+        }
+        instrument = "159919.SZSE"
+
+        self.assertEqual(vector_open_nav(session), Decimal(1))
+        close_nav = reconstruct_vector_close_nav(
+            session, {instrument: "1"}, {instrument: "10"}, {instrument: "10.5"},
+            "0", Decimal("1000"),
+        )
+        self.assertEqual(close_nav, Decimal("1.05"))
+        self.assertNotEqual(close_nav, Decimal(str(session["nav"])))
+
+        dividend_session = {
+            "nav": "1.0", "gross_return": "0",
+            "portfolio_components": {
+                "available_cash_weight": "0", "dividend_receivable_weight": "0.01",
+                "liquidation_receivable_weight": "0",
+            },
+        }
+        dividend_close = reconstruct_vector_close_nav(
+            dividend_session, {instrument: "0.99"}, {instrument: "9.9"}, {instrument: "10.89"},
+            "0", Decimal("1000"),
+        )
+        self.assertEqual(dividend_close, Decimal("1.099"))
+
     def test_daily_accounting_requires_every_session_at_both_valuation_points(self):
         artifacts = run_artifacts()
         artifacts["accounting"]["valuations"].pop()
@@ -489,6 +524,42 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
                 "frozen Raw integrity failed: 1 object missing or mismatched",
             )
 
+    def test_raw_inventory_separates_failed_attempt_provenance_from_frozen_objects(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            body = b"synthetic frozen raw body"
+            digest = hashlib.sha256(body).hexdigest()
+            raw = root / "raw" / "sha256" / digest[:2] / digest
+            raw.parent.mkdir(parents=True)
+            raw.write_bytes(body)
+            inventory = root / "inventory.json"
+            inventory.write_text(json.dumps({"request_records": [
+                {"url": "successful", "sha256": f"sha256:{digest}"},
+                {"url": "failed", "sha256": "", "error": "timeout; body hash unavailable"},
+            ]}))
+            snapshot = raw_hashes(root, inventory)
+
+            self.assertIsNone(raw_integrity_failure(snapshot))
+            self.assertEqual(snapshot.unavailable_records, 1)
+            self.assertEqual(len(snapshot.checked), 1)
+            self.assertTrue(all(snapshot.checked.values()))
+
+            inventory.write_text(json.dumps({"request_records": [
+                {"url": "failed-only", "sha256": "unknown", "error": "capture interrupted"},
+            ]}))
+            self.assertEqual(
+                raw_integrity_failure(raw_hashes(root, inventory)),
+                "frozen Raw integrity failed: empty or malformed inventory",
+            )
+
+            inventory.write_text(json.dumps({"request_records": [
+                {"url": "unexplained", "sha256": "unknown"},
+            ]}))
+            self.assertEqual(
+                raw_integrity_failure(raw_hashes(root, inventory)),
+                "frozen Raw integrity failed: empty or malformed inventory",
+            )
+
     def test_identity_baseline_skips_newer_prior_run_with_explicit_universe(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             acceptance = Path(temp_dir)
@@ -564,16 +635,22 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
         self.assertEqual(report["checks"]["frozen_raw_immutable"]["status"], "passed")
 
     def test_post_main_phase_failure_still_emits_all_blocking_checks(self):
+        standard = run_artifacts()
+        non_blocking = {
+            "small_grid": {"status": "not_run", "reason": "Not required for the engineering ledger gate."},
+            "accurate_smoke": {"status": "not_run", "reason": "No Accurate Event worker was configured."},
+            "legacy_comparison": {"status": "not_run", "reason": "Legacy comparator is unavailable."},
+        }
         artifacts = {
             "schema": "mvp6-post-main-failure@1",
             "failure": {"criterion": "daily_parity", "error": "synthetic parity read failure"},
+            "engine_completed": True,
+            "main_run": standard["main_run"],
+            "fixed_universe": standard["fixed_universe"],
+            "session_input_count": len(DATES),
             "unknown_coverage": unknown_coverage(),
             "raw_immutable": False,
-            "non_blocking": {
-                "small_grid": {"status": "not_run", "reason": "Not required for the engineering ledger gate."},
-                "accurate_smoke": {"status": "not_run", "reason": "No Accurate Event worker was configured."},
-                "legacy_comparison": {"status": "not_run", "reason": "Legacy comparator is unavailable."},
-            },
+            "non_blocking": non_blocking,
         }
         result = self.invoke(artifacts)
 
@@ -585,13 +662,91 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
         })
         self.assertEqual(report["checks"]["daily_parity"]["status"], "failed")
         self.assertEqual(report["checks"]["main_run"]["status"], "passed")
+        self.assertTrue(report["checks"]["main_run"]["engine_completed"])
         self.assertEqual(report["checks"]["frozen_raw_immutable"]["status"], "failed")
-        self.assertEqual(report["non_blocking"], artifacts["non_blocking"])
+        self.assertEqual(report["non_blocking"], non_blocking)
 
         artifacts["non_blocking"]["accurate_smoke"].pop("reason")
         invalid_result = self.invoke(artifacts)
         invalid_report = json.loads(invalid_result.stdout)
         self.assertIn("accurate_smoke is not_run without a reason", invalid_report["non_blocking_errors"])
+
+    def test_post_main_failure_never_passes_unverified_main_run(self):
+        artifacts = {
+            "schema": "mvp6-post-main-failure@1",
+            "failure": {"criterion": "daily_parity", "error": "synthetic parity read failure"},
+            "engine_completed": True,
+            "unknown_coverage": unknown_coverage(),
+            "raw_immutable": True,
+            "non_blocking": {
+                "small_grid": {"status": "not_run", "reason": "Not required."},
+                "accurate_smoke": {"status": "not_run", "reason": "No worker."},
+                "legacy_comparison": {"status": "not_run", "reason": "Unavailable."},
+            },
+        }
+        result = self.invoke(artifacts)
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        main = json.loads(result.stdout)["checks"]["main_run"]
+        self.assertFalse(main["passed"])
+        self.assertEqual(main["status"], "not_run")
+        self.assertTrue(main["engine_completed"])
+        self.assertIn("not verified", main["reason"])
+
+        standard = run_artifacts()
+        artifacts["main_run"] = json.loads(json.dumps(standard["main_run"]))
+        artifacts["fixed_universe"] = standard["fixed_universe"]
+        artifacts["session_input_count"] = len(DATES)
+        artifacts["main_run"]["actions"] = []
+        invalid_result = self.invoke(artifacts)
+        invalid_main = json.loads(invalid_result.stdout)["checks"]["main_run"]
+        self.assertFalse(invalid_main["passed"])
+        self.assertEqual(invalid_main["status"], "failed")
+
+        artifacts.pop("engine_completed")
+        artifacts["main_run"] = json.loads(json.dumps(standard["main_run"]))
+        missing_engine = self.invoke(artifacts)
+        missing_engine_main = json.loads(missing_engine.stdout)["checks"]["main_run"]
+        self.assertFalse(missing_engine_main["passed"])
+        self.assertEqual(missing_engine_main["status"], "not_run")
+
+    def test_post_main_report_retains_source_context_and_raw_inventory_location(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            acceptance = root / "acceptance"
+            output = acceptance / "issue-234-test"
+            output.mkdir(parents=True)
+            body = b"synthetic frozen raw body"
+            digest = hashlib.sha256(body).hexdigest()
+            raw = root / "raw" / "sha256" / digest[:2] / digest
+            raw.parent.mkdir(parents=True)
+            raw.write_bytes(body)
+            inventory = acceptance / "inventory.json"
+            inventory.write_text(json.dumps({"request_records": [
+                {"url": "successful", "sha256": digest},
+            ]}))
+            before = raw_hashes(root, inventory)
+
+            write_post_main_failure_report(
+                output=output, acceptance=acceptance, raw_inventory=inventory,
+                unknown=unknown_coverage(), criterion="daily_parity",
+                error="synthetic post-main failure", raw_before=before,
+                coverage={"source_status": {"tdx": "captured"}, "p21": {"status": "source_gap"}},
+                pit_base={"risk_notices": [{"announcement_id": "risk-1"}]},
+                engine_completed=True,
+            )
+            report = json.loads((output / "mvp6-acceptance-report.json").read_text())
+
+        source = report["source_evidence"]
+        self.assertEqual(source["decision_window"]["start"], "2023-01-01")
+        self.assertEqual(source["universe_claim"], "retrospective_static")
+        self.assertTrue(source["survivorship_bias"])
+        self.assertEqual(source["return_basis"], "unknown (post-main failure before Run Spec verification)")
+        self.assertEqual(source["p21_status"], "source_gap")
+        self.assertEqual(source["risk_notice_count"], 1)
+        self.assertEqual(report["local_artifacts"]["frozen_raw_inventory"], str(inventory))
+        self.assertTrue(report["raw_immutability"]["passed"])
+        self.assertEqual(report["verification"]["checks"]["main_run"]["status"], "not_run")
 
 
 if __name__ == "__main__":

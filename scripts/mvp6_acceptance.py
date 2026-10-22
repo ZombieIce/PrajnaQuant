@@ -42,6 +42,13 @@ COSTS = {
     "sell_tax_rate": 0.0,
 }
 TERMINAL = {"semantic_version": "mvp6-terminal-settlement@1"}
+EXECUTION_LIMITATIONS = [
+    "The Session close is the market-data availability time; next Session execution uses the first-trade/open price.",
+    "Same-Session sells and buys may not share the real intraday funding order.",
+    "Orders submitted before open are assumed to participate after an opening halt resumes; this is unverified.",
+    "Termination settlement uses the last in-lifecycle Bar close, not actual liquidation amount or date.",
+    "No-Bar Sessions are treated as halted and non-tradable, not UNKNOWN.",
+]
 TOLERANCE = 1e-12
 WEIGHT_TOLERANCE = Decimal("1e-12")
 UNKNOWN_LIMITS = {
@@ -100,6 +107,7 @@ class RawHashSnapshot:
     request_records: int
     inventory_error: str | None = None
     inventory_sha256: str | None = None
+    unavailable_records: int = 0
 
 
 def raw_snapshot_valid(snapshot: RawHashSnapshot | dict[str, bool]) -> bool:
@@ -239,17 +247,55 @@ def verify_early_failure(data: dict[str, Any]) -> dict[str, Any]:
 def verify_post_main_failure(data: dict[str, Any]) -> dict[str, Any]:
     failure = data["failure"]
     reason = "This criterion was not completed because post-main evidence assembly stopped."
+    engine_completed = data.get("engine_completed") is True
     checks = {
         name: result(False, status="not_run", reason=reason)
         for name in (
             "main_run", "daily_parity", "reproducibility", "python_as_of_and_cli", "daily_accounting",
         )
     }
-    checks["main_run"] = result(True, status="passed", reason="The main Run completed before the post-main phase failed.")
+    main_evidence = data.get("main_run")
+    if isinstance(main_evidence, dict):
+        main_check = verify_main_evidence(
+            main_evidence, data.get("fixed_universe", {}),
+            data.get("session_input_count", 0),
+        )
+        details = {
+            key: value for key, value in main_check.items() if key not in {"passed", "status"}
+        }
+        if not engine_completed:
+            checks["main_run"] = result(
+                False, status="not_run", engine_completed=False,
+                reason="The post-main report did not record that the main Run engine completed.",
+                **details,
+            )
+        elif main_check["passed"]:
+            checks["main_run"] = result(True, engine_completed=True, **details)
+        else:
+            checks["main_run"] = result(
+                False, status="failed", engine_completed=True,
+                reason="The main Run acceptance evidence failed verification.", **details,
+            )
+    else:
+        checks["main_run"] = result(
+            False, status="not_run", engine_completed=engine_completed,
+            reason=(
+                "The main Run engine completed, but its acceptance evidence was not verified before "
+                "the post-main phase stopped."
+                if engine_completed
+                else "The main Run did not record completion or verifiable acceptance evidence."
+            ),
+        )
     failed_check = failure.get("criterion")
     if failed_check not in checks:
         failed_check = "daily_accounting"
-    checks[failed_check] = result(False, error=failure.get("error", "post-main phase failed"))
+    if failed_check == "main_run":
+        checks["main_run"] = result(
+            False, status="failed", engine_completed=engine_completed,
+            error=failure.get("error", "post-main phase failed"),
+        )
+    else:
+        checks[failed_check] = result(False, error=failure.get("error", "post-main phase failed"))
     checks["unknown_floor"] = verify_unknown_coverage(data["unknown_coverage"])
     checks["frozen_raw_immutable"] = result(data.get("raw_immutable") is True)
     non_blocking = data.get("non_blocking", {})
@@ -445,6 +491,78 @@ def ledger_oracle(
     return cash + dividend + liquidation + invested, cash, invested, dividend, liquidation
 
 
+def vector_open_nav(session: dict[str, Any]) -> Decimal:
+    """Return the same-Session open-after NAV from a Vector session row.
+
+    Vector stores the next-open NAV in ``nav`` and the open-to-next-open return in
+    ``gross_return``; removing that forward return yields the post-cost open NAV.
+    """
+    try:
+        nav = dec(session["nav"])
+        gross = dec(session["gross_return"])
+    except (KeyError, InvalidOperation, TypeError) as error:
+        raise ValueError("Vector session has no valid NAV or gross return") from error
+    if not nav.is_finite() or nav <= 0 or not gross.is_finite() or gross <= -1:
+        raise ValueError("Vector session NAV or gross return is outside its valid range")
+    return nav / (1 + gross)
+
+
+def reconstruct_vector_close_nav(
+    session: dict[str, Any],
+    open_weights: dict[str, Any],
+    open_prices: dict[str, Any],
+    close_prices: dict[str, Any],
+    close_entitlement: Any,
+    initial_cash: Decimal,
+) -> Decimal:
+    """Reconstruct the same-Session close NAV from Vector's open-after evidence.
+
+    ``nav`` includes the next Session open mark, so it cannot be used as the close
+    NAV when the current close differs from the next open. Revalue the Vector
+    open-after weights at the current raw close, keep cash/receivable weights, and
+    add closing-date dividend entitlements. Prices are shared raw inputs; the
+    weights, NAV and action ledger remain Vector-owned observations.
+    """
+    if not initial_cash.is_finite() or initial_cash <= 0:
+        raise ValueError("initial cash must be finite and positive")
+    open_nav = vector_open_nav(session)
+    components = session.get("portfolio_components")
+    if not isinstance(components, dict):
+        raise ValueError("Vector session has no open portfolio components")
+    try:
+        non_invested = (
+            dec(components["available_cash_weight"])
+            + dec(components["dividend_receivable_weight"])
+            + dec(components["liquidation_receivable_weight"])
+        )
+    except (KeyError, InvalidOperation, TypeError) as error:
+        raise ValueError("Vector open components are incomplete") from error
+    if not non_invested.is_finite() or non_invested < 0:
+        raise ValueError("Vector open components are outside their valid range")
+    revaluation = non_invested
+    for instrument, raw_weight in open_weights.items():
+        try:
+            weight = dec(raw_weight)
+            open_price = dec(open_prices[instrument])
+            close_price = dec(close_prices[instrument])
+        except (KeyError, InvalidOperation, TypeError) as error:
+            raise ValueError(f"missing or invalid Vector valuation price for {instrument}") from error
+        if (not weight.is_finite() or weight < 0 or not open_price.is_finite()
+                or not close_price.is_finite() or open_price <= 0 or close_price <= 0):
+            raise ValueError(f"invalid Vector weight or valuation price for {instrument}")
+        revaluation += weight * close_price / open_price
+    try:
+        entitlement = dec(close_entitlement or "0")
+    except (InvalidOperation, TypeError) as error:
+        raise ValueError("invalid closing-date dividend entitlement") from error
+    if not entitlement.is_finite() or entitlement < 0:
+        raise ValueError("closing-date dividend entitlement is outside its valid range")
+    equity = open_nav * initial_cash * revaluation + entitlement
+    if not equity.is_finite() or equity <= 0:
+        raise ValueError("reconstructed Vector close equity is not finite and positive")
+    return equity / initial_cash
+
+
 def normalized_trajectory(rows: list[dict[str, Any]]) -> list[tuple[str, tuple[str, ...], tuple[str, ...]]]:
     kinds = {"entries_retried": "retryable_execution", "retryable_execution": "retryable_execution"}
     normalized = []
@@ -570,16 +688,10 @@ def verify_parity(parity: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
-    """Evaluate the six blocking criteria from a report or synthetic artifact set."""
-    if data.get("schema") == EARLY_FAILURE_SCHEMA:
-        return verify_early_failure(data)
-    if data.get("schema") == PHASE_FAILURE_SCHEMA:
-        return verify_post_main_failure(data)
-    if data.get("schema") != SCHEMA:
-        raise ValueError(f"schema must be {SCHEMA}")
-
-    main = data["main_run"]
+def verify_main_evidence(
+    main: dict[str, Any], fixed_universe: dict[str, Any], session_input_count: int,
+) -> dict[str, Any]:
+    """Evaluate the main Run criteria from supplied evidence only."""
     actions = main.get("actions", [])
     dividend, dividend_errors = verify_dividend_ledger(actions)
     split_traceable, split_errors = verify_split_ledger(actions)
@@ -599,13 +711,33 @@ def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
         main.get("terminal_settlement_version") == TERMINAL["semantic_version"]
         and not terminal_errors
     )
-    universe_check = verify_fixed_universe(
-        data.get("fixed_universe", {}), data.get("accounting", {}).get("session_input_count", 0),
-    )
+    universe_check = verify_fixed_universe(fixed_universe, session_input_count)
     main_ok = (
         main.get("sizing") == "lot" and main.get("rebalance") == "full_target"
         and main.get("return_basis") == "total_return" and dividend and split_traceable
         and terminal_traceable and universe_check["passed"]
+    )
+    return result(
+        main_ok, dividend_ledger=dividend, dividend_errors=dividend_errors,
+        split_ledger=split_traceable, split_errors=split_errors,
+        terminal_settlement=terminal_traceable, terminal_errors=terminal_errors,
+        fixed_universe=universe_check,
+    )
+
+
+def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate the six blocking criteria from a report or synthetic artifact set."""
+    if data.get("schema") == EARLY_FAILURE_SCHEMA:
+        return verify_early_failure(data)
+    if data.get("schema") == PHASE_FAILURE_SCHEMA:
+        return verify_post_main_failure(data)
+    if data.get("schema") != SCHEMA:
+        raise ValueError(f"schema must be {SCHEMA}")
+
+    main = data["main_run"]
+    main_check = verify_main_evidence(
+        main, data.get("fixed_universe", {}),
+        data.get("accounting", {}).get("session_input_count", 0),
     )
 
     parity_check = verify_parity(data.get("parity", {}))
@@ -728,14 +860,11 @@ def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
         bool(expected_sessions) and not accounting_errors and not weight_errors
         and bool(accounting.get("fills")) and not fee_errors
         and accounting.get("fees_present") is True and not blocked_trades
-        and split_traceable and terminal_traceable
+        and main_check["split_ledger"] and main_check["terminal_settlement"]
     )
 
     checks = {
-        "main_run": result(main_ok, dividend_ledger=dividend, dividend_errors=dividend_errors,
-                            split_ledger=split_traceable, split_errors=split_errors,
-                            terminal_settlement=terminal_traceable, terminal_errors=terminal_errors,
-                            fixed_universe=universe_check),
+        "main_run": main_check,
         "daily_parity": parity_check,
         "reproducibility": result(deterministic),
         "python_as_of_and_cli": result(python_cli_ok),
@@ -921,6 +1050,32 @@ def identity_change(
     }
 
 
+def source_evidence_context(
+    coverage: dict[str, Any] | None, pit_base: dict[str, Any] | None, *,
+    return_basis: str,
+) -> dict[str, Any]:
+    """Return the scope, source and risk context required on every report path."""
+    coverage = coverage or {}
+    pit_base = pit_base or {}
+    corporate_action_dataset = coverage.get("corporate_action_dataset") or {}
+    p21 = coverage.get("p21") or {}
+    return {
+        "decision_window": {"start": "2023-01-01", "end": "2026-09-30", "preheat": "60 Sessions"},
+        "return_basis": return_basis,
+        "universe_claim": "retrospective_static",
+        "survivorship_bias": True,
+        "source_status": coverage.get("source_status"),
+        "market_normalizer": corporate_action_dataset.get("normalizer"),
+        "p21_status": p21.get("status"),
+        "historical_capture_status": coverage.get("historical_capture_status"),
+        "terms_conclusion": coverage.get("terms_conclusion"),
+        "unknown_semantics": "P27-23.5 narrowed UNKNOWN to data defects; no-Bar and unknown rules are excluded.",
+        "execution_limitations": list(EXECUTION_LIMITATIONS),
+        "risk_notice_count": len(pit_base.get("risk_notices", [])),
+        "cninfo_index_supplied": "cninfo_index" in pit_base,
+    }
+
+
 def write_early_failure_report(
     *, output: Path, acceptance: Path, raw_inventory: Path, coverage: dict[str, Any],
     unknown: dict[str, Any], pit_base: dict[str, Any], failure: dict[str, Any],
@@ -947,25 +1102,19 @@ def write_early_failure_report(
         "raw_immutability": {
             "passed": raw_immutable,
             "inventory_entries": raw_before.request_records,
+            "frozen_objects": len(raw_before.checked),
             "verified_before_run": sum(raw_before.checked.values()),
             "verified_after_run": sum(raw_after.checked.values()),
             "failed_before_run": sum(not valid for valid in raw_before.checked.values()),
+            "unavailable_capture_records": raw_before.unavailable_records,
         },
         "non_blocking": {
             name: {"status": "not_run", "reason": "The main Run failed before acceptance could continue."}
             for name in ("small_grid", "accurate_smoke", "legacy_comparison")
         },
-        "source_evidence": {
-            "decision_window": {"start": "2023-01-01", "end": "2026-09-30", "preheat": "60 Sessions"},
-            "return_basis": "total_return (planned; no Run result was produced)",
-            "universe_claim": "retrospective_static",
-            "survivorship_bias": True,
-            "source_status": coverage.get("source_status"),
-            "p21_status": coverage.get("p21", {}).get("status"),
-            "unknown_semantics": "P27-23.5 narrowed UNKNOWN to data defects; no-Bar and unknown rules are excluded.",
-            "risk_notice_count": len(pit_base.get("risk_notices", [])),
-            "cninfo_index_supplied": "cninfo_index" in pit_base,
-        },
+        "source_evidence": source_evidence_context(
+            coverage, pit_base, return_basis="total_return (planned; no Run result was produced)",
+        ),
         "local_artifacts": {
             "directory": str(output),
             "rerun_command": "python scripts/mvp6_acceptance.py run --root ~/PrajnaData/mvp-6",
@@ -995,6 +1144,10 @@ def write_early_failure_report(
 def write_post_main_failure_report(
     *, output: Path, acceptance: Path, raw_inventory: Path, unknown: dict[str, Any],
     criterion: str, error: str, raw_before: RawHashSnapshot,
+    coverage: dict[str, Any] | None = None, pit_base: dict[str, Any] | None = None,
+    engine_completed: bool = False, main_evidence: dict[str, Any] | None = None,
+    fixed_universe: dict[str, Any] | None = None, session_input_count: int = 0,
+    return_basis: str | None = None,
 ) -> dict[str, Any]:
     normalized_unknown = normalize_unknown_coverage(unknown)
     raw_after = raw_hashes(acceptance.parent, raw_inventory)
@@ -1020,7 +1173,12 @@ def write_post_main_failure_report(
         "unknown_coverage": normalized_unknown,
         "raw_immutable": raw_immutable,
         "non_blocking": non_blocking,
+        "engine_completed": engine_completed,
     }
+    if main_evidence is not None:
+        artifacts["main_run"] = main_evidence
+        artifacts["fixed_universe"] = fixed_universe or {}
+        artifacts["session_input_count"] = session_input_count
     verification = verify_post_main_failure(artifacts)
     report = {
         "schema": "mvp6-local-engineering-report@1",
@@ -1028,17 +1186,27 @@ def write_post_main_failure_report(
         "classification": "platform engineering acceptance; not strategy historical performance",
         "verification": verification,
         "failure": failure,
+        "engine_completed": engine_completed,
+        "main_run": main_evidence,
+        "fixed_universe": fixed_universe,
         "non_blocking": non_blocking,
+        "source_evidence": source_evidence_context(
+            coverage, pit_base,
+            return_basis=return_basis or "unknown (post-main failure before Run Spec verification)",
+        ),
         "raw_immutability": {
             "passed": raw_immutable,
             "inventory_entries": raw_before.request_records,
+            "frozen_objects": len(raw_before.checked),
             "verified_before_run": sum(raw_before.checked.values()),
             "verified_after_run": sum(raw_after.checked.values()),
+            "unavailable_capture_records": raw_before.unavailable_records,
         },
         "unknown_coverage": normalized_unknown,
         "local_artifacts": {
             "directory": str(output),
             "rerun_command": "python scripts/mvp6_acceptance.py run --root ~/PrajnaData/mvp-6",
+            "frozen_raw_inventory": str(raw_inventory),
         },
     }
     write_json(output / "mvp6-acceptance-report.json", report)
@@ -1059,10 +1227,17 @@ def write_post_main_failure_report(
     }
 
 
+def capture_failure_recorded(record: dict[str, Any]) -> bool:
+    """Return whether an unhashed inventory record is explicit failed-attempt provenance."""
+    capture = record.get("capture_record")
+    errors = (record.get("error"), capture.get("error") if isinstance(capture, dict) else None)
+    return any(isinstance(error, str) and error.strip() for error in errors)
+
+
 def raw_hashes(root: Path, inventory: Path) -> RawHashSnapshot:
     try:
         inventory_bytes = inventory.read_bytes()
-    except (OSError, json.JSONDecodeError):
+    except OSError:
         return RawHashSnapshot({}, 0, "inventory cannot be read")
     inventory_sha256 = hashlib.sha256(inventory_bytes).hexdigest()
     try:
@@ -1074,14 +1249,21 @@ def raw_hashes(root: Path, inventory: Path) -> RawHashSnapshot:
         return RawHashSnapshot({}, 0, "inventory has no request records")
     hashes: set[str] = set()
     malformed = False
+    unavailable = 0
     for item in records:
         value = item.get("sha256") if isinstance(item, dict) else None
         if not isinstance(value, str):
-            malformed = True
+            if isinstance(item, dict) and capture_failure_recorded(item):
+                unavailable += 1
+            else:
+                malformed = True
             continue
         digest = value.removeprefix("sha256:")
         if not re.fullmatch(r"[0-9a-fA-F]{64}", digest):
-            malformed = True
+            if capture_failure_recorded(item):
+                unavailable += 1
+            else:
+                malformed = True
             continue
         hashes.add(digest.lower())
     checked: dict[str, bool] = {}
@@ -1098,6 +1280,7 @@ def raw_hashes(root: Path, inventory: Path) -> RawHashSnapshot:
         checked, len(records),
         "inventory contains a missing or invalid SHA-256" if malformed else None,
         inventory_sha256,
+        unavailable,
     )
 
 
@@ -1425,6 +1608,9 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     ACTIVE_POST_MAIN_RUN = {
         "output": output, "acceptance": acceptance, "raw_inventory": raw_inventory,
         "unknown": unknown, "raw_before": before, "criterion": "daily_parity",
+        "coverage": coverage, "pit_base": pit_base, "engine_completed": True,
+        "main_evidence": None, "fixed_universe": None, "session_input_count": 0,
+        "return_basis": None,
     }
     mark_run_phase("daily_parity")
     vector_definition = experiment_definition(dsv, catalog_version, pit_inputs[0], "vector")
@@ -1456,13 +1642,54 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     fast_accounts = read_table(lake_dirs[0], fast_manifest, fast_run["run_id"], "account_valuations")
     fast_fills = read_table(lake_dirs[0], fast_manifest, fast_run["run_id"], "fills")
     fast_attempts = read_table(lake_dirs[0], fast_manifest, fast_run["run_id"], "orders")
+    fast_terminal_settlements = read_table(
+        lake_dirs[0], fast_manifest, fast_run["run_id"], "terminal_settlements",
+    )
     vector_run = vector_manifest["runs"][0]
     vector_sessions = read_table(lake_dirs[0], vector_manifest, vector_run["run_id"], "sessions")
     vector_executions = read_table(lake_dirs[0], vector_manifest, vector_run["run_id"], "executions")
+    vector_weights = read_table(
+        lake_dirs[0], vector_manifest, vector_run["run_id"], "weights_after_execution",
+    )
+    vector_actions = read_table(
+        lake_dirs[0], vector_manifest, vector_run["run_id"], "corporate_actions",
+    )
 
     main_account_rows = [row for row in main_full_tables["account_valuations"]
                          if row.get("scope") == "account"]
     expected_sessions = sorted({row["session_date"] for row in main_account_rows})
+    main_prices_by_date: dict[str, dict[str, dict[str, Any]]] = {"open_after": {}, "close": {}}
+    for row in main_account_rows:
+        point = row.get("valuation_point")
+        if point in main_prices_by_date:
+            main_prices_by_date[point][row["session_date"]] = {
+                instrument: position["price"]
+                for instrument, position in row.get("positions", {}).items()
+            }
+    vector_weights_by_date: dict[str, dict[str, Any]] = {}
+    for row in vector_weights:
+        date, instrument = row.get("session_date"), row.get("instrument_id")
+        if isinstance(date, str) and isinstance(instrument, str):
+            vector_weights_by_date.setdefault(date, {})[instrument] = row.get("weight")
+    vector_entitlements_by_date: dict[str, Decimal] = {}
+    for action in vector_actions:
+        if action.get("kind") != "dividend_entitlement":
+            continue
+        date = action.get("session_date")
+        if not isinstance(date, str):
+            continue
+        try:
+            amount = dec(action["net_amount"])
+        except (KeyError, InvalidOperation, TypeError) as error:
+            raise ValueError("Vector dividend entitlement has no valid net amount") from error
+        if not amount.is_finite() or amount < 0:
+            raise ValueError("Vector dividend entitlement net amount is outside its valid range")
+        vector_entitlements_by_date[date] = vector_entitlements_by_date.get(date, Decimal(0)) + amount
+    terminal_close_prices = {
+        (row["session_date"], row["instrument_id"]): row["price"]
+        for row in fast_terminal_settlements
+        if row.get("session_date") and row.get("instrument_id")
+    }
     fast_account_by_point = {
         (row["session_date"], row["valuation_point"]): row
         for row in fast_accounts
@@ -1508,11 +1735,35 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         fast_cost = fast_fees_by_date.get(date, Decimal(0)) / previous_close_equity
         vector_components_open = vector.get("portfolio_components")
         vector_components_close = vector.get("portfolio_components_close")
+        open_prices = {
+            **main_prices_by_date["open_after"].get(date, {}),
+            **{
+                instrument: position["price"]
+                for instrument, position in fast_open_row.get("positions", {}).items()
+            },
+        }
+        close_prices = {
+            **main_prices_by_date["close"].get(date, {}),
+            **{
+                instrument: position["price"]
+                for instrument, position in fast_close_row.get("positions", {}).items()
+            },
+        }
+        for (terminal_date, instrument), price in terminal_close_prices.items():
+            if terminal_date == date:
+                close_prices[instrument] = price
+        try:
+            vector_close_nav = float(reconstruct_vector_close_nav(
+                vector, vector_weights_by_date.get(date, {}), open_prices, close_prices,
+                vector_entitlements_by_date.get(date, "0"), parity_initial_cash,
+            ))
+        except (InvalidOperation, TypeError, ValueError):
+            vector_close_nav = None
         parity_days.append({
             "session_date": date,
-            "vector_open_nav": float(vector["nav"]) / (1 + float(vector["gross_return"])),
+            "vector_open_nav": float(vector_open_nav(vector)),
             "fast_open_nav": float(ledger_oracle(fast_open_row)[0] / parity_initial_cash),
-            "vector_close_nav": vector["nav"],
+            "vector_close_nav": vector_close_nav,
             "fast_close_nav": float(ledger_oracle(fast_close_row)[0] / parity_initial_cash),
             "vector_open_components": vector_components_open,
             "fast_open_components": fast_components(fast_open_row),
@@ -1555,22 +1806,31 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     all_run_specs = [run["run_spec"] for run in main_full_manifest["runs"]]
     run_spec = all_run_specs[0]
     engine = run_spec["engine"]
-    open_prices_by_date = {
-        row["session_date"]: {
-            instrument: position["price"]
-            for instrument, position in row["positions"].items()
-        }
-        for row in main_account_rows
-        if row.get("valuation_point") == "open_after"
-    }
     action_rows = []
     for action in main_full_tables["corporate_actions"]:
         enriched = dict(action)
         if action.get("kind") == "share_conversion":
-            enriched["valuation_price"] = open_prices_by_date.get(
+            enriched["valuation_price"] = main_prices_by_date["open_after"].get(
                 action.get("session_date"), {},
             ).get(action.get("instrument_id"))
         action_rows.append(enriched)
+    fixed_universe = fixed_universe_diagnostics(run_spec)
+    session_input_count = len(run_spec.get("session_inputs", []))
+    return_basis = run_spec.get("corporate_action_schedule", {}).get("return_basis")
+    main_evidence = {
+        "sizing": engine.get("sizing"),
+        "rebalance": engine.get("rebalance"),
+        "return_basis": return_basis,
+        "actions": action_rows,
+        "terminal_settlement_version": run_spec.get("terminal_settlement", {}).get("semantic_version"),
+        "terminal_settlements": main_full_tables["terminal_settlements"],
+    }
+    ACTIVE_POST_MAIN_RUN.update({
+        "main_evidence": main_evidence,
+        "fixed_universe": fixed_universe,
+        "session_input_count": session_input_count,
+        "return_basis": return_basis,
+    })
     mark_run_phase("reproducibility")
     independent_reports = compare_independent_levels(main_manifests)
     mark_run_phase("python_as_of_and_cli")
@@ -1578,20 +1838,15 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         lake_dirs[0], dsv, pit_inputs[0], vector_manifest,
     )
     mark_run_phase("daily_accounting")
+    after = raw_hashes(root, raw_inventory)
+    raw_immutable = raw_snapshot_unchanged(before, after)
     evidence = {
         "schema": SCHEMA,
-        "fixed_universe": fixed_universe_diagnostics(run_spec),
+        "fixed_universe": fixed_universe,
         "identity_change": identity_change(
             acceptance, output, main_results[0]["cli"]["full"],
         ),
-        "main_run": {
-            "sizing": engine.get("sizing"),
-            "rebalance": engine.get("rebalance"),
-            "return_basis": run_spec.get("corporate_action_schedule", {}).get("return_basis"),
-            "actions": action_rows,
-            "terminal_settlement_version": run_spec.get("terminal_settlement", {}).get("semantic_version"),
-            "terminal_settlements": main_full_tables["terminal_settlements"],
-        },
+        "main_run": main_evidence,
         "parity": {
             "initial_cash": str(parity_initial_cash),
             "expected_sessions": expected_sessions,
@@ -1617,9 +1872,9 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
             "api_action": main_results[0]["api"]["full"]["action"],
             "as_of_view_matches": as_of_matches,
         },
-    "accounting": {
-        "expected_sessions": expected_sessions,
-        "session_input_count": len(run_spec.get("session_inputs", [])),
+        "accounting": {
+            "expected_sessions": expected_sessions,
+            "session_input_count": session_input_count,
             "valuations": valuations,
             "fills": [{
                 "session_date": row["fill"]["executed_at"][:10],
@@ -1633,34 +1888,16 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
             "fees_present": bool(main_full_tables["fills"]),
         },
         "unknown_coverage": run_spec["unknown_coverage"],
-        "raw_immutable": (
-            raw_snapshot_unchanged(before, (after := raw_hashes(root, raw_inventory)))
-        ),
+        "raw_immutable": raw_immutable,
         "non_blocking": {
             "small_grid": {"status": "not_run", "reason": "P16 non-blocking grid is not needed for the engineering ledger gate."},
             "accurate_smoke": {"status": "not_run", "reason": "No Accurate Event worker was configured for this local acceptance."},
             "legacy_comparison": {"status": "not_run", "reason": "The old-system comparator for the legacy window is not available in this workspace."},
         },
-        "source_evidence": {
-            "market_normalizer": coverage.get("corporate_action_dataset", {}).get("normalizer"),
-            "p21_status": coverage.get("p21", {}).get("status"),
-            "source_status": coverage.get("source_status"),
-            "historical_capture_status": coverage.get("historical_capture_status"),
-            "terms_conclusion": coverage.get("terms_conclusion"),
-            "decision_window": {"start": "2023-01-01", "end": "2026-09-30", "preheat": "60 Sessions"},
-            "universe_claim": "retrospective_static",
-            "survivorship_bias": True,
-            "unknown_semantics": "P27-23.5 narrowed UNKNOWN to data defects; no-Bar and unknown rules are excluded.",
-            "execution_limitations": [
-                "The Session close is the market-data availability time; next Session execution uses the first-trade/open price.",
-                "Same-Session sells and buys may not share the real intraday funding order.",
-                "Orders submitted before open are assumed to participate after an opening halt resumes; this is unverified.",
-                "Termination settlement uses the last in-lifecycle Bar close, not actual liquidation amount or date.",
-                "No-Bar Sessions are treated as halted and non-tradable, not UNKNOWN.",
-            ],
-            "risk_notice_count": len(pit_base.get("risk_notices", [])),
-            "cninfo_index_supplied": "cninfo_index" in pit_base,
-        },
+        "source_evidence": source_evidence_context(
+            coverage, pit_base,
+            return_basis=return_basis or "total_return (expected; not verified)",
+        ),
     }
     verification = verify_artifacts(evidence)
     report = {
@@ -1669,6 +1906,15 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         "classification": "platform engineering acceptance; not strategy historical performance",
         "benchmark": None,
         "verification": verification,
+        "source_evidence": evidence["source_evidence"],
+        "raw_immutability": {
+            "passed": raw_immutable,
+            "inventory_entries": before.request_records,
+            "frozen_objects": len(before.checked),
+            "verified_before_run": sum(before.checked.values()),
+            "verified_after_run": sum(after.checked.values()),
+            "unavailable_capture_records": before.unavailable_records,
+        },
         "local_artifacts": {
             "directory": str(output),
             "rerun_command": "python scripts/mvp6_acceptance.py run --root ~/PrajnaData/mvp-6",
@@ -1722,6 +1968,12 @@ def main() -> int:
                     output=context["output"], acceptance=context["acceptance"],
                     raw_inventory=context["raw_inventory"], unknown=context["unknown"],
                     criterion=context["criterion"], error=str(error), raw_before=context["raw_before"],
+                    coverage=context.get("coverage"), pit_base=context.get("pit_base"),
+                    engine_completed=context.get("engine_completed") is True,
+                    main_evidence=context.get("main_evidence"),
+                    fixed_universe=context.get("fixed_universe"),
+                    session_input_count=context.get("session_input_count") or 0,
+                    return_basis=context.get("return_basis"),
                 )
                 ACTIVE_POST_MAIN_RUN = None
                 print(json.dumps(summary, indent=2, sort_keys=True))
