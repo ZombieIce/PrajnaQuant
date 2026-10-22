@@ -1,4 +1,5 @@
 """The MVP-6 acceptance CLI validates synthetic artifacts without market data."""
+import hashlib
 import json
 import subprocess
 import sys
@@ -12,18 +13,95 @@ from scripts.mvp6_acceptance import (
     identity_change,
     prior_run_identity,
     raw_integrity_failure,
+    raw_hashes,
 )
 
 
 ROOT = Path(__file__).resolve().parents[2]
 CLI = ROOT / "scripts" / "mvp6_acceptance.py"
+FIXED_CODES = ["159919", "159560", "159522", "159612", "159952"]
+DATES = ["2026-01-05", "2026-01-06", "2026-01-07"]
+
+
+def unknown_coverage():
+    return {
+        "engineering_acceptance": "passed", "unknown_cells": 5, "denominator_cells": 300,
+        "thresholds": {"total_unknown_percent": 5, "per_instrument_unknown_percent": 20},
+        "instruments": [
+            {"symbol": code, "cells": 60, "unknown_cells": 1} for code in FIXED_CODES
+        ],
+    }
+
+
+def universe_diagnostics():
+    codes_by_session = [{"session_index": index, "session_date": date,
+                         "included_codes": FIXED_CODES, "excluded_reasons": {}}
+                        for index, date in enumerate(DATES)]
+    return {
+        "configuration": {
+            "version": "mvp6-fixed-etf@3", "codes": FIXED_CODES, "minimum_code_count": 3,
+        },
+        "catalog_versions": ["catalog@1"], "rule_versions": ["rules@1"],
+        "included_codes": FIXED_CODES, "excluded_reasons": {}, "unresolved_codes": [],
+        "session_count": len(DATES), "sessions": codes_by_session,
+    }
+
+
+def parity_days():
+    rows = []
+    for index, date in enumerate(DATES):
+        cost = "0.005" if index == 1 else "0"
+        trajectory = [{"kind": "executed", "blocked": [], "skipped_buys": []}] if index == 1 else []
+        vector_components = {
+            "available_cash_weight": 0.97, "dividend_receivable_weight": 0.005,
+            "liquidation_receivable_weight": 0.0,
+        }
+        fast_components = {
+            "cash_weight": 0.97, "invested_weight": 0.025,
+            "dividend_receivable_weight": 0.005, "liquidation_receivable_weight": 0.0,
+        }
+        rows.append({
+            "session_date": date,
+            "vector_open_nav": "1000", "fast_open_nav": "1000",
+            "vector_close_nav": "1000", "fast_close_nav": "1000",
+            "vector_open_components": vector_components,
+            "fast_open_components": fast_components,
+            "vector_close_components": vector_components,
+            "fast_close_components": fast_components,
+            "vector_cost": cost, "fast_cost": cost,
+            "vector_trajectory": trajectory, "fast_trajectory": trajectory,
+        })
+    return rows
+
+
+def accounting_valuations():
+    return [{
+        "session_date": date, "valuation_point": point, "cash": "970",
+        "dividend_receivable": "5", "liquidation_receivable": "0", "equity": "1000",
+        "unallocated_capital": "0", "accounting_verified": True,
+        "positions": {"159919.SZSE": {"quantity": "5", "price": "5", "market_value": "25"}},
+    } for date in DATES for point in ("open_after", "close")]
+
+
+def dividend_action(kind, date):
+    return {
+        "session_date": date, "portfolio_id": 1, "announcement_id": "dividend-1",
+        "action_index": 0, "instrument_id": "159919.SZSE", "kind": kind,
+        "quantity_before": "5", "quantity_after": "5", "gross_amount": "5",
+        "tax_amount": "0", "net_amount": "5",
+    }
 
 
 def run_artifacts():
     levels = {
-        "summary": {"run_ids": ["run"], "summary_logical_hash": "summary", "table_hashes": {}},
-        "standard": {"run_ids": ["run"], "summary_logical_hash": "summary", "table_hashes": {"account_valuations": "standard"}},
-        "full": {"run_ids": ["run"], "summary_logical_hash": "summary", "table_hashes": {"account_valuations": "full", "fills": "fills"}},
+        "summary": {"run_ids": ["run"], "summary_logical_hash": "summary", "table_hashes": {},
+                    "runs": [{"status": "completed"}]},
+        "standard": {"run_ids": ["run"], "summary_logical_hash": "summary",
+                     "table_hashes": {"account_valuations": "standard"},
+                     "runs": [{"status": "completed"}]},
+        "full": {"run_ids": ["run"], "summary_logical_hash": "summary",
+                 "table_hashes": {"account_valuations": "full", "fills": "fills"},
+                 "runs": [{"status": "completed"}]},
     }
     independent = {
         "experiment_id": "experiment", "execution_id": "execution", "summary_logical_hash": "summary",
@@ -31,16 +109,23 @@ def run_artifacts():
     }
     return {
         "schema": "mvp6-acceptance-artifacts@1",
+        "fixed_universe": universe_diagnostics(),
         "main_run": {
             "sizing": "lot", "rebalance": "full_target", "return_basis": "total_return",
             "actions": [
-                {"instrument_id": "159919.SZSE", "kind": "dividend_entitlement"},
-                {"instrument_id": "159560.SZSE", "kind": "share_conversion", "quantity_before": "100", "quantity_after": "200", "theoretical_quantity": "200", "residual_quantity": "0", "corporate_action_rounding": "0"},
+                dividend_action("dividend_entitlement", DATES[0]),
+                dividend_action("dividend_receivable", DATES[1]),
+                dividend_action("dividend_paid", DATES[2]),
+                {"session_date": DATES[1], "portfolio_id": 1, "announcement_id": "split-1",
+                 "action_index": 1, "instrument_id": "159560.SZSE", "kind": "share_conversion",
+                 "quantity_before": "100", "share_ratio": "2", "quantity_after": "200",
+                 "theoretical_quantity": "200", "residual_quantity": "0",
+                 "corporate_action_rounding": "0"},
             ],
             "terminal_settlement_version": "mvp6-terminal-settlement@1",
             "terminal_settlements": [],
         },
-        "parity": {"days": [{"session_date": "2026-01-05", "vector_open_nav": "1000", "fast_open_nav": "1000"}]},
+        "parity": {"expected_sessions": DATES, "days": parity_days()},
         "independent_runs": [independent, json.loads(json.dumps(independent))],
         "python_cli": {
             "cli": {"experiment_id": "experiment", "execution_id": "execution", "summary_logical_hash": "summary", "runs": {"run": {"status": "completed", "table_hashes": {"account_valuations": "account", "fills": "fills"}}}},
@@ -49,20 +134,18 @@ def run_artifacts():
             "as_of_view_matches": True,
         },
         "accounting": {
-            "valuations": [{
-                "session_date": "2026-01-05", "valuation_point": "close", "cash": "970",
-                "dividend_receivable": "5", "liquidation_receivable": "0", "equity": "1000",
-                "positions": {"159919.SZSE": {"quantity": "5", "price": "5", "market_value": "25"}},
-            }],
-            "fills": [{"total_fees": "5", "costs": {"commission": "3", "minimum_commission_top_up": "2", "tax": "0"}, "slippage": "0"}],
+            "expected_sessions": DATES,
+            "session_input_count": len(DATES),
+            "valuations": accounting_valuations(),
+            "fills": [{"session_date": DATES[1], "instrument_id": "159919.SZSE", "total_fees": "5",
+                       "costs": {"commission": "3", "minimum_commission_top_up": "2", "tax": "0"},
+                       "slippage": "0"}],
             "forbidden_cells": [{"instrument_id": "159612.SZSE", "session_date": "2026-01-05", "state": "halted"}],
             "trades": [{"instrument_id": "159919.SZSE", "session_date": "2026-01-05"}],
             "fees_present": True,
         },
         "unknown_coverage": {
-            "engineering_acceptance": "passed", "unknown_cells": 1, "denominator_cells": 100,
-            "thresholds": {"total_unknown_percent": 5, "per_instrument_unknown_percent": 20},
-            "instruments": [{"symbol": "159919", "cells": 20, "unknown_cells": 1}],
+            **unknown_coverage(),
         },
         "raw_immutable": True,
     }
@@ -127,12 +210,97 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
     def test_cli_rejects_nav_mismatch_and_unknown_floor_overrun(self):
         artifacts = run_artifacts()
         artifacts["accounting"]["valuations"][0]["equity"] = "1001"
-        artifacts["unknown_coverage"]["unknown_cells"] = 6
+        artifacts["unknown_coverage"]["unknown_cells"] = 16
         result = self.invoke(artifacts)
         self.assertEqual(result.returncode, 1, result.stderr)
         report = json.loads(result.stdout)
         self.assertFalse(report["checks"]["daily_accounting"]["passed"])
         self.assertFalse(report["checks"]["unknown_floor"]["passed"])
+
+    def test_unknown_coverage_requires_positive_reconciled_fixed_universe_denominators(self):
+        cases = (
+            lambda coverage: coverage.update(denominator_cells=0),
+            lambda coverage: coverage.update(instruments=[]),
+            lambda coverage: coverage["instruments"].pop(),
+            lambda coverage: coverage.update(unknown_cells=4),
+            lambda coverage: coverage["instruments"][0].update(cells=0),
+        )
+        for mutate in cases:
+            with self.subTest(mutation=mutate):
+                artifacts = run_artifacts()
+                mutate(artifacts["unknown_coverage"])
+                result = self.invoke(artifacts)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertFalse(json.loads(result.stdout)["checks"]["unknown_floor"]["passed"])
+
+    def test_main_run_requires_dividend_transitions_and_consistent_split_arithmetic(self):
+        cases = (
+            lambda actions: actions.__delitem__(1),
+            lambda actions: actions.__delitem__(2),
+            lambda actions: actions[0].update(kind="dividend_paid"),
+            lambda actions: actions[1].update(net_amount="4"),
+            lambda actions: actions[2].update(announcement_id="orphan-payment"),
+            lambda actions: actions[3].update(quantity_after="199"),
+            lambda actions: actions[3].update(residual_quantity="1"),
+            lambda actions: actions[3].update(corporate_action_rounding=None),
+        )
+        for mutate in cases:
+            with self.subTest(mutation=mutate):
+                artifacts = run_artifacts()
+                mutate(artifacts["main_run"]["actions"])
+                result = self.invoke(artifacts)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                checks = json.loads(result.stdout)["checks"]
+                self.assertFalse(checks["main_run"]["passed"])
+
+    def test_daily_parity_requires_full_sessions_nav_components_cost_and_trajectory(self):
+        mutations = (
+            lambda days: days.pop(),
+            lambda days: days[0].update(fast_close_nav="999"),
+            lambda days: days[0]["fast_open_components"].update(invested_weight=0.0),
+            lambda days: days[1].update(fast_cost="0"),
+            lambda days: days[1].update(fast_trajectory=[]),
+        )
+        for mutate in mutations:
+            with self.subTest(mutation=mutate):
+                artifacts = run_artifacts()
+                mutate(artifacts["parity"]["days"])
+                result = self.invoke(artifacts)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertFalse(json.loads(result.stdout)["checks"]["daily_parity"]["passed"])
+
+    def test_daily_accounting_requires_every_session_at_both_valuation_points(self):
+        artifacts = run_artifacts()
+        artifacts["accounting"]["valuations"].pop()
+        result = self.invoke(artifacts)
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        accounting = json.loads(result.stdout)["checks"]["daily_accounting"]
+        self.assertFalse(accounting["passed"])
+        self.assertIn("valuation_coverage", [error["kind"] for error in accounting["valuation_errors"]])
+
+    def test_fixed_universe_diagnostics_enforce_five_codes_and_minimum_per_session(self):
+        cases = (
+            lambda diagnostics: diagnostics["sessions"][0]["included_codes"].pop(),
+            lambda diagnostics: diagnostics["configuration"].update(codes=FIXED_CODES[:4]),
+            lambda diagnostics: diagnostics.update(catalog_versions=[]),
+        )
+        for mutate in cases:
+            with self.subTest(mutation=mutate):
+                artifacts = run_artifacts()
+                mutate(artifacts["fixed_universe"])
+                result = self.invoke(artifacts)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertFalse(json.loads(result.stdout)["checks"]["main_run"]["passed"])
+
+    def test_empty_full_run_cannot_pass_reproducibility_vacuously(self):
+        artifacts = run_artifacts()
+        artifacts["independent_runs"][0]["levels"]["full"]["runs"] = []
+        artifacts["independent_runs"][1]["levels"]["full"]["runs"] = []
+        result = self.invoke(artifacts)
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertFalse(json.loads(result.stdout)["checks"]["reproducibility"]["passed"])
 
     def test_runner_supplies_explicit_mvp6_fixed_universe(self):
         base = {"catalog": {"coverage": {"start": "2023-01-01", "end": "2026-09-30"}}}
@@ -176,6 +344,40 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
             raw_integrity_failure({"raw-a": True, "raw-b": False}),
             "frozen Raw integrity failed: 1 object missing or mismatched",
         )
+        self.assertEqual(
+            raw_integrity_failure({}),
+            "frozen Raw integrity failed: empty or malformed inventory",
+        )
+
+    def test_raw_inventory_rejects_empty_records_and_missing_sha256(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            inventory = root / "inventory.json"
+            for records in ([], [{"url": "local-only-no-hash"}]):
+                inventory.write_text(json.dumps({"request_records": records}))
+                snapshot = raw_hashes(root, inventory)
+                self.assertEqual(
+                    raw_integrity_failure(snapshot),
+                    "frozen Raw integrity failed: empty or malformed inventory",
+                )
+
+    def test_raw_inventory_checks_content_at_the_sha256_address(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            body = b"synthetic raw body"
+            digest = hashlib.sha256(body).hexdigest()
+            raw = root / "raw" / "sha256" / digest[:2] / digest
+            raw.parent.mkdir(parents=True)
+            raw.write_bytes(body)
+            inventory = root / "inventory.json"
+            inventory.write_text(json.dumps({"request_records": [{"sha256": f"sha256:{digest}"}]}))
+            self.assertIsNone(raw_integrity_failure(raw_hashes(root, inventory)))
+
+            raw.write_bytes(b"tampered synthetic raw body")
+            self.assertEqual(
+                raw_integrity_failure(raw_hashes(root, inventory)),
+                "frozen Raw integrity failed: 1 object missing or mismatched",
+            )
 
     def test_identity_baseline_skips_newer_prior_run_with_explicit_universe(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -227,11 +429,10 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
                 },
             },
             "unknown_coverage": {
-                "engineering_acceptance": "passed",
+                **unknown_coverage(),
                 "unknown_cells": 0,
-                "denominator_cells": 100,
-                "thresholds": {"total_unknown_percent": 5, "per_instrument_unknown_percent": 20},
-                "instruments": [{"symbol": "159919", "cells": 100, "unknown_cells": 0}],
+                "instruments": [{"symbol": code, "cells": 60, "unknown_cells": 0}
+                                for code in FIXED_CODES],
             },
             "raw_immutable": True,
         }
@@ -251,6 +452,25 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
             self.assertFalse(report["checks"][name]["passed"])
         self.assertEqual(report["checks"]["unknown_floor"]["status"], "passed")
         self.assertEqual(report["checks"]["frozen_raw_immutable"]["status"], "passed")
+
+    def test_post_main_phase_failure_still_emits_all_blocking_checks(self):
+        artifacts = {
+            "schema": "mvp6-post-main-failure@1",
+            "failure": {"criterion": "daily_parity", "error": "synthetic parity read failure"},
+            "unknown_coverage": unknown_coverage(),
+            "raw_immutable": False,
+        }
+        result = self.invoke(artifacts)
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(set(report["checks"]), {
+            "main_run", "daily_parity", "reproducibility", "python_as_of_and_cli",
+            "daily_accounting", "unknown_floor", "frozen_raw_immutable",
+        })
+        self.assertEqual(report["checks"]["daily_parity"]["status"], "failed")
+        self.assertEqual(report["checks"]["main_run"]["status"], "not_run")
+        self.assertEqual(report["checks"]["frozen_raw_immutable"]["status"], "failed")
 
 
 if __name__ == "__main__":

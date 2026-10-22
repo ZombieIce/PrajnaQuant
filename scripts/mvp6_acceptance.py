@@ -5,9 +5,12 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation, ROUND_FLOOR
+import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 from typing import Any
@@ -15,6 +18,7 @@ from typing import Any
 
 SCHEMA = "mvp6-acceptance-artifacts@1"
 EARLY_FAILURE_SCHEMA = "mvp6-early-failure@1"
+PHASE_FAILURE_SCHEMA = "mvp6-post-main-failure@1"
 FIXED_UNIVERSE = {
     "version": "mvp6-fixed-etf@3",
     "codes": ["159919", "159560", "159522", "159612", "159952"],
@@ -40,6 +44,7 @@ COSTS = {
 TERMINAL = {"semantic_version": "mvp6-terminal-settlement@1"}
 TOLERANCE = 1e-12
 WEIGHT_TOLERANCE = Decimal("1e-12")
+ACTIVE_POST_MAIN_RUN: dict[str, Any] | None = None
 
 
 def dec(value: Any) -> Decimal:
@@ -48,6 +53,11 @@ def dec(value: Any) -> Decimal:
 
 def result(passed: bool, **details: Any) -> dict[str, Any]:
     return {"passed": bool(passed), "status": "passed" if passed else "failed", **details}
+
+
+def mark_run_phase(criterion: str) -> None:
+    if ACTIVE_POST_MAIN_RUN is not None:
+        ACTIVE_POST_MAIN_RUN["criterion"] = criterion
 
 
 def build_pit_input(pit_base: dict[str, Any], frozen_opening: dict[str, Any]) -> dict[str, Any]:
@@ -61,45 +71,123 @@ def build_pit_input(pit_base: dict[str, Any], frozen_opening: dict[str, Any]) ->
 
 
 def normalize_unknown_coverage(coverage: dict[str, Any]) -> dict[str, Any]:
+    instruments: dict[str, dict[str, Any]] = {}
+    for item in coverage.get("instruments", []):
+        symbol = item.get("symbol", item.get("native_symbol"))
+        if symbol is None:
+            symbol = ""
+        totals = instruments.setdefault(symbol, {"symbol": symbol, "cells": 0, "unknown_cells": 0})
+        if type(item.get("cells")) is int:
+            totals["cells"] += item["cells"]
+        if type(item.get("unknown_cells")) is int:
+            totals["unknown_cells"] += item["unknown_cells"]
     return {
-        "engineering_acceptance": coverage["engineering_acceptance"],
-        "unknown_cells": coverage["unknown_cells"],
-        "denominator_cells": coverage["denominator_cells"],
-        "thresholds": coverage["thresholds"],
-        "instruments": [
-            {
-                "symbol": item.get("symbol", item.get("native_symbol")),
-                "cells": item["cells"],
-                "unknown_cells": item["unknown_cells"],
-            }
-            for item in coverage["instruments"]
-        ],
+        "engineering_acceptance": coverage.get("engineering_acceptance"),
+        "unknown_cells": coverage.get("unknown_cells"),
+        "denominator_cells": coverage.get("denominator_cells"),
+        "thresholds": coverage.get("thresholds", {}),
+        "instruments": list(instruments.values()),
     }
 
 
-def raw_integrity_failure(checked: dict[str, bool]) -> str | None:
-    invalid = sum(not valid for valid in checked.values())
+@dataclass
+class RawHashSnapshot:
+    checked: dict[str, bool]
+    request_records: int
+    inventory_error: str | None = None
+
+
+def raw_snapshot_valid(snapshot: RawHashSnapshot | dict[str, bool]) -> bool:
+    if isinstance(snapshot, RawHashSnapshot):
+        return (
+            snapshot.inventory_error is None
+            and snapshot.request_records > 0
+            and bool(snapshot.checked)
+            and all(snapshot.checked.values())
+        )
+    return bool(snapshot) and all(snapshot.values())
+
+
+def raw_integrity_failure(checked: RawHashSnapshot | dict[str, bool]) -> str | None:
+    if isinstance(checked, RawHashSnapshot):
+        if checked.inventory_error or checked.request_records <= 0 or not checked.checked:
+            return "frozen Raw integrity failed: empty or malformed inventory"
+        values = checked.checked
+    else:
+        if not checked:
+            return "frozen Raw integrity failed: empty or malformed inventory"
+        values = checked
+    invalid = sum(not valid for valid in values.values())
     return f"frozen Raw integrity failed: {invalid} object missing or mismatched" if invalid else None
 
 
 def verify_unknown_coverage(coverage: dict[str, Any]) -> dict[str, Any]:
-    total_percent = (
-        Decimal(100) * dec(coverage["unknown_cells"]) / dec(coverage["denominator_cells"])
-        if int(coverage["denominator_cells"]) else Decimal(0)
+    errors: list[dict[str, Any]] = []
+    aggregate_unknown = coverage.get("unknown_cells")
+    aggregate_cells = coverage.get("denominator_cells")
+    thresholds = coverage.get("thresholds", {})
+    total_limit = thresholds.get("total_unknown_percent")
+    instrument_limit = thresholds.get("per_instrument_unknown_percent")
+    counts: dict[str, list[int]] = {}
+    for item in coverage.get("instruments", []):
+        symbol = item.get("symbol")
+        cells, unknown = item.get("cells"), item.get("unknown_cells")
+        if not isinstance(symbol, str) or not symbol or type(cells) is not int or type(unknown) is not int:
+            errors.append({"kind": "invalid_instrument_coverage"})
+            continue
+        if cells <= 0 or unknown < 0 or unknown > cells:
+            errors.append({"kind": "invalid_instrument_denominator", "symbol": symbol})
+            continue
+        totals = counts.setdefault(symbol, [0, 0])
+        totals[0] += cells
+        totals[1] += unknown
+
+    valid_aggregate = (
+        type(aggregate_unknown) is int and type(aggregate_cells) is int
+        and aggregate_cells > 0 and aggregate_unknown >= 0 and aggregate_unknown <= aggregate_cells
     )
-    total_limit = dec(coverage["thresholds"]["total_unknown_percent"])
-    instrument_limits = []
-    for instrument in coverage["instruments"]:
-        cells = int(instrument["cells"])
-        unknown = int(instrument["unknown_cells"])
-        percent = Decimal(100) * unknown / cells if cells else Decimal(0)
-        instrument_limits.append({"symbol": instrument["symbol"], "percent": float(percent)})
+    if not valid_aggregate:
+        errors.append({"kind": "invalid_aggregate_denominator"})
+    if set(counts) != set(FIXED_UNIVERSE["codes"]):
+        errors.append({"kind": "fixed_universe_coverage_mismatch"})
+    per_instrument = []
+    for symbol in FIXED_UNIVERSE["codes"]:
+        cells, unknown = counts.get(symbol, [0, 0])
+        percent = Decimal(100) * unknown / cells if cells > 0 else None
+        per_instrument.append({
+            "symbol": symbol, "cells": cells, "unknown_cells": unknown,
+            "percent": float(percent) if percent is not None else None,
+        })
+    if valid_aggregate and (
+        sum(item[0] for item in counts.values()) != aggregate_cells
+        or sum(item[1] for item in counts.values()) != aggregate_unknown
+    ):
+        errors.append({"kind": "aggregate_instrument_reconciliation"})
+    try:
+        total_limit_dec = dec(total_limit)
+        instrument_limit_dec = dec(instrument_limit)
+        if not total_limit_dec.is_finite() or not instrument_limit_dec.is_finite():
+            raise InvalidOperation
+    except (InvalidOperation, TypeError, ValueError):
+        total_limit_dec = instrument_limit_dec = Decimal(-1)
+        errors.append({"kind": "invalid_threshold"})
+    if total_limit_dec < 0 or instrument_limit_dec < 0:
+        errors.append({"kind": "invalid_threshold"})
+    total_percent = (
+        Decimal(100) * aggregate_unknown / aggregate_cells if valid_aggregate else None
+    )
+    if total_percent is not None and total_percent > total_limit_dec:
+        errors.append({"kind": "total_unknown_percent_over_limit"})
+    if any(item["percent"] is None or Decimal(str(item["percent"])) > instrument_limit_dec
+           for item in per_instrument):
+        errors.append({"kind": "per_instrument_unknown_percent_over_limit"})
+    if coverage.get("engineering_acceptance") != "passed":
+        errors.append({"kind": "coverage_report_not_accepted"})
     return result(
-        coverage.get("engineering_acceptance") == "passed"
-        and total_percent <= total_limit
-        and all(item["percent"] <= float(coverage["thresholds"]["per_instrument_unknown_percent"])
-                for item in instrument_limits),
-        per_instrument=instrument_limits,
+        not errors,
+        total_percent=float(total_percent) if total_percent is not None else None,
+        per_instrument=per_instrument,
+        errors=errors,
     )
 
 
@@ -133,60 +221,275 @@ def verify_early_failure(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def verify_post_main_failure(data: dict[str, Any]) -> dict[str, Any]:
+    failure = data["failure"]
+    reason = "This criterion was not completed because post-main evidence assembly stopped."
+    checks = {
+        name: result(False, status="not_run", reason=reason)
+        for name in (
+            "main_run", "daily_parity", "reproducibility", "python_as_of_and_cli", "daily_accounting",
+        )
+    }
+    failed_check = failure.get("criterion")
+    if failed_check not in checks:
+        failed_check = "daily_accounting"
+    checks[failed_check] = result(False, error=failure.get("error", "post-main phase failed"))
+    checks["unknown_floor"] = verify_unknown_coverage(data["unknown_coverage"])
+    checks["frozen_raw_immutable"] = result(data.get("raw_immutable") is True)
+    return {
+        "schema": "mvp6-acceptance-verification@1",
+        "passed": False,
+        "checks": checks,
+    }
+
+
+def verify_fixed_universe(diagnostics: dict[str, Any], expected_session_count: int) -> dict[str, Any]:
+    errors = []
+    configuration = diagnostics.get("configuration", {})
+    configured_codes = configuration.get("codes", [])
+    if (configuration.get("version") != FIXED_UNIVERSE["version"]
+            or not isinstance(configured_codes, list)
+            or not all(isinstance(code, str) for code in configured_codes)
+            or len(configured_codes) != len(FIXED_UNIVERSE["codes"])
+            or set(configured_codes) != set(FIXED_UNIVERSE["codes"])
+            or configuration.get("minimum_code_count") != FIXED_UNIVERSE["minimum_code_count"]
+            or configuration.get("excluded_codes", {})):
+        errors.append({"kind": "fixed_universe_configuration_mismatch"})
+    if not diagnostics.get("catalog_versions") or not diagnostics.get("rule_versions"):
+        errors.append({"kind": "missing_catalog_or_rule_version"})
+    sessions = diagnostics.get("sessions", [])
+    if (not sessions or len(sessions) != diagnostics.get("session_count")
+            or len(sessions) != expected_session_count):
+        errors.append({"kind": "fixed_universe_session_coverage"})
+    included_union: set[str] = set()
+    excluded_union: dict[str, set[str]] = {}
+    for index, session in enumerate(sessions):
+        if session.get("session_index") != index:
+            errors.append({"kind": "fixed_universe_session_order", "session_index": index})
+        included = session.get("included_codes", [])
+        exclusions = session.get("excluded_reasons", {})
+        if (not isinstance(included, list) or not all(isinstance(code, str) for code in included)
+                or not isinstance(exclusions, dict)
+                or not all(isinstance(code, str) for code in exclusions)):
+            errors.append({"kind": "invalid_session_universe", "session_index": index})
+            continue
+        included_set = set(included)
+        if len(included_set) != len(included):
+            errors.append({"kind": "duplicate_session_universe_code", "session_index": index})
+        included_union.update(included_set)
+        if (not included_set.issubset(FIXED_UNIVERSE["codes"])
+                or not set(exclusions).issubset(FIXED_UNIVERSE["codes"])
+                or included_set.intersection(exclusions)):
+            errors.append({"kind": "invalid_session_universe_membership", "session_index": index})
+        if len(included_set) < FIXED_UNIVERSE["minimum_code_count"]:
+            errors.append({"kind": "minimum_code_count", "session_index": index})
+        for code, reason in exclusions.items():
+            if not isinstance(reason, str) or not reason.strip():
+                errors.append({"kind": "invalid_exclusion_reason", "session_index": index})
+            else:
+                excluded_union.setdefault(code, set()).add(reason)
+        for code in FIXED_UNIVERSE["codes"]:
+            reason = exclusions.get(code)
+            if code not in included_set and (not isinstance(reason, str) or not reason.strip()):
+                errors.append({"kind": "unaccounted_fixed_code", "session_index": index})
+                break
+    if set(diagnostics.get("included_codes", [])) != included_union:
+        errors.append({"kind": "included_code_summary_mismatch"})
+    normalized_exclusions = {
+        code: sorted(reasons) for code, reasons in sorted(excluded_union.items())
+    }
+    if diagnostics.get("excluded_reasons") != normalized_exclusions:
+        errors.append({"kind": "excluded_code_summary_mismatch"})
+    if diagnostics.get("unresolved_codes") != []:
+        errors.append({"kind": "unresolved_fixed_codes"})
+    return result(not errors, sessions=len(sessions), errors=errors)
+
+
+def verify_dividend_ledger(actions: list[dict[str, Any]]) -> tuple[bool, list[dict[str, Any]]]:
+    errors = []
+    groups: dict[tuple[Any, Any, Any], dict[str, list[dict[str, Any]]]] = {}
+    for event in actions:
+        if not event.get("instrument_id", "").startswith("159919"):
+            continue
+        kind = event.get("kind")
+        if kind not in {"dividend_entitlement", "dividend_receivable", "dividend_paid"}:
+            continue
+        if (event.get("portfolio_id") is None or not event.get("announcement_id")
+                or type(event.get("action_index")) is not int):
+            errors.append({"kind": "missing_dividend_identity"})
+        key = (event.get("portfolio_id"), event.get("announcement_id"), event.get("action_index"))
+        groups.setdefault(key, {}).setdefault(kind, []).append(event)
+    if not groups:
+        errors.append({"kind": "missing_dividend_ledger"})
+    if not any(transitions.get("dividend_paid") for transitions in groups.values()):
+        errors.append({"kind": "missing_dividend_payment"})
+    for key, transitions in groups.items():
+        entitlement = transitions.get("dividend_entitlement", [])
+        receivable = transitions.get("dividend_receivable", [])
+        paid = transitions.get("dividend_paid", [])
+        if len(entitlement) != 1 or len(receivable) != 1 or len(paid) > 1:
+            errors.append({"kind": "incomplete_dividend_transition_chain"})
+            continue
+        ordered = [entitlement[0], receivable[0], *paid]
+        if any(not isinstance(row.get("session_date"), str) for row in ordered):
+            errors.append({"kind": "invalid_dividend_session"})
+            continue
+        dates = [row["session_date"] for row in ordered]
+        if dates != sorted(dates) or dates[0] == dates[1] or (len(dates) == 3 and dates[1] == dates[2]):
+            errors.append({"kind": "dividend_transition_date_order"})
+        fields = ("quantity_before", "quantity_after", "gross_amount", "tax_amount", "net_amount")
+        reference = entitlement[0]
+        try:
+            gross, tax, net = (dec(reference[field]) for field in ("gross_amount", "tax_amount", "net_amount"))
+            if gross - tax != net or gross < 0 or tax < 0 or net < 0:
+                errors.append({"kind": "dividend_amount_identity"})
+            for row in ordered[1:]:
+                if any(dec(row[field]) != dec(reference[field]) for field in fields):
+                    errors.append({"kind": "dividend_transition_reconciliation"})
+                    break
+        except (KeyError, InvalidOperation, TypeError):
+            errors.append({"kind": "invalid_dividend_amounts"})
+    return not errors, errors
+
+
+def verify_split_ledger(actions: list[dict[str, Any]]) -> tuple[bool, list[dict[str, Any]]]:
+    rows = [event for event in actions if event.get("instrument_id", "").startswith("159560")
+            and event.get("kind") == "share_conversion"]
+    errors = []
+    if not rows:
+        return False, [{"kind": "missing_split_ledger"}]
+    for row in rows:
+        try:
+            if (row.get("portfolio_id") is None or not row.get("announcement_id")
+                    or type(row.get("action_index")) is not int):
+                errors.append({"kind": "missing_split_identity"})
+            before = dec(row["quantity_before"])
+            ratio = dec(row["share_ratio"])
+            after = dec(row["quantity_after"])
+            theoretical = dec(row["theoretical_quantity"])
+            residual = dec(row["residual_quantity"])
+            rounding = dec(row["corporate_action_rounding"])
+            calculated = before * ratio
+            if (before < 0 or ratio <= 0 or calculated != theoretical
+                    or theoretical < 0 or theoretical.to_integral_value(rounding=ROUND_FLOOR) != after
+                    or theoretical - after != residual or residual < 0):
+                errors.append({"kind": "split_quantity_reconciliation"})
+            if (residual == 0 and rounding != 0) or (residual > 0 and rounding > 0):
+                errors.append({"kind": "split_rounding_reconciliation"})
+        except (KeyError, InvalidOperation, TypeError):
+            errors.append({"kind": "invalid_split_ledger"})
+    return not errors, errors
+
+
+def _close(left: Any, right: Any) -> bool:
+    try:
+        a, b = dec(left), dec(right)
+        return a.is_finite() and b.is_finite() and abs(a - b) <= Decimal(str(TOLERANCE))
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+
+
+def normalized_trajectory(rows: list[dict[str, Any]]) -> list[tuple[str, tuple[str, ...], tuple[str, ...]]]:
+    kinds = {"entries_retried": "retryable_execution", "retryable_execution": "retryable_execution"}
+    normalized = []
+    for row in rows:
+        kind = kinds.get(row.get("kind"), row.get("kind"))
+        normalized.append((kind, tuple(sorted(row.get("blocked", []))),
+                           tuple(sorted(row.get("skipped_buys", [])))))
+    return sorted(normalized)
+
+
+def verify_parity(parity: dict[str, Any]) -> dict[str, Any]:
+    expected = parity.get("expected_sessions", [])
+    days = parity.get("days", [])
+    errors = []
+    if not expected or len(set(expected)) != len(expected):
+        errors.append({"kind": "invalid_expected_sessions"})
+    by_date = {day.get("session_date"): day for day in days}
+    if len(by_date) != len(days) or set(by_date) != set(expected):
+        errors.append({"kind": "parity_session_coverage"})
+    for date in expected:
+        day = by_date.get(date)
+        if day is None:
+            continue
+        for metric in ("open_nav", "close_nav", "cost"):
+            if not _close(day.get(f"vector_{metric}"), day.get(f"fast_{metric}")):
+                errors.append({"kind": f"{metric}_mismatch", "session_date": date})
+        for point in ("open", "close"):
+            vector = day.get(f"vector_{point}_components") or {}
+            fast = day.get(f"fast_{point}_components") or {}
+            try:
+                vector_cash = dec(vector["available_cash_weight"])
+                vector_dividend = dec(vector["dividend_receivable_weight"])
+                vector_liquidation = dec(vector["liquidation_receivable_weight"])
+                vector_invested = Decimal(1) - vector_cash - vector_dividend - vector_liquidation
+                components = (
+                    (vector_cash, dec(fast["cash_weight"])),
+                    (vector_invested, dec(fast["invested_weight"])),
+                    (vector_dividend, dec(fast["dividend_receivable_weight"])),
+                    (vector_liquidation, dec(fast["liquidation_receivable_weight"])),
+                )
+                if any(not left.is_finite() or not right.is_finite() or abs(left - right) > Decimal(str(TOLERANCE))
+                       for left, right in components):
+                    errors.append({"kind": f"{point}_component_mismatch", "session_date": date})
+            except (KeyError, InvalidOperation, TypeError):
+                errors.append({"kind": f"missing_{point}_components", "session_date": date})
+        try:
+            if normalized_trajectory(day["vector_trajectory"]) != normalized_trajectory(day["fast_trajectory"]):
+                errors.append({"kind": "status_defer_trajectory_mismatch", "session_date": date})
+        except (KeyError, TypeError):
+            errors.append({"kind": "missing_status_defer_trajectory", "session_date": date})
+    return result(not errors, sessions=len(days), errors=errors)
+
+
 def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
     """Evaluate the six blocking criteria from a report or synthetic artifact set."""
     if data.get("schema") == EARLY_FAILURE_SCHEMA:
         return verify_early_failure(data)
+    if data.get("schema") == PHASE_FAILURE_SCHEMA:
+        return verify_post_main_failure(data)
     if data.get("schema") != SCHEMA:
         raise ValueError(f"schema must be {SCHEMA}")
 
     main = data["main_run"]
-    actions = main["actions"]
-    dividend = any(
-        event.get("instrument_id", "").startswith("159919")
-        and event.get("kind") in {"dividend_entitlement", "dividend_receivable", "dividend_paid"}
-        for event in actions
-    )
-    split_rows = [
-        event for event in actions
-        if event.get("instrument_id", "").startswith("159560")
-        and event.get("kind") == "share_conversion"
-    ]
-    split_traceable = bool(split_rows) and all(
-        all(event.get(field) is not None for field in (
-            "quantity_before", "quantity_after", "theoretical_quantity",
-            "residual_quantity", "corporate_action_rounding",
-        )) for event in split_rows
-    )
+    actions = main.get("actions", [])
+    dividend, dividend_errors = verify_dividend_ledger(actions)
+    split_traceable, split_errors = verify_split_ledger(actions)
     terminal_rows = main.get("terminal_settlements", [])
+    terminal_errors = []
+    for row in terminal_rows:
+        try:
+            quantity = dec(row["quantity"])
+            price = dec(row["price"])
+            proceeds = dec(row["proceeds"])
+            if (not row.get("session_date") or not row.get("instrument_id")
+                    or quantity <= 0 or price <= 0 or proceeds != quantity * price):
+                terminal_errors.append({"kind": "invalid_terminal_settlement"})
+        except (KeyError, InvalidOperation, TypeError):
+            terminal_errors.append({"kind": "invalid_terminal_settlement"})
     terminal_traceable = (
         main.get("terminal_settlement_version") == TERMINAL["semantic_version"]
-        and all(all(row.get(field) is not None for field in (
-            "session_date", "instrument_id", "quantity", "price", "proceeds",
-        )) for row in terminal_rows)
+        and not terminal_errors
+    )
+    universe_check = verify_fixed_universe(
+        data.get("fixed_universe", {}), data.get("accounting", {}).get("session_input_count", 0),
     )
     main_ok = (
-        main.get("sizing") == "lot"
-        and main.get("rebalance") == "full_target"
-        and main.get("return_basis") == "total_return"
-        and dividend
-        and split_traceable
-        and terminal_traceable
+        main.get("sizing") == "lot" and main.get("rebalance") == "full_target"
+        and main.get("return_basis") == "total_return" and dividend and split_traceable
+        and terminal_traceable and universe_check["passed"]
     )
 
-    parity_days = data["parity"]["days"]
-    parity_errors = []
-    for day in parity_days:
-        error = abs(float(dec(day["vector_open_nav"])) - float(dec(day["fast_open_nav"])))
-        if error > TOLERANCE:
-            parity_errors.append({"session_date": day["session_date"], "absolute_error": error})
-    parity_ok = bool(parity_days) and not parity_errors
+    parity_check = verify_parity(data.get("parity", {}))
 
     independent = data["independent_runs"]
     deterministic = len(independent) == 2
     if deterministic:
         deterministic = (
-            independent[0]["experiment_id"] == independent[1]["experiment_id"]
+            bool(independent[0].get("experiment_id"))
+            and bool(independent[0].get("execution_id"))
+            and bool(independent[0].get("summary_logical_hash"))
+            and independent[0]["experiment_id"] == independent[1]["experiment_id"]
             and independent[0]["execution_id"] == independent[1]["execution_id"]
             and independent[0]["summary_logical_hash"] == independent[1]["summary_logical_hash"]
             and set(independent[0]["levels"]) == {"summary", "standard", "full"}
@@ -194,8 +497,10 @@ def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
         )
     if deterministic:
         deterministic = all(
-            run.get("status") == "completed"
-            for run in independent[0]["levels"]["full"].get("runs", [])
+            bool(independent[0]["levels"][level].get("runs"))
+            and all(run.get("status") == "completed"
+                    for run in independent[0]["levels"][level].get("runs", []))
+            for level in ("summary", "standard", "full")
         )
 
     python = data["python_cli"]
@@ -207,20 +512,32 @@ def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
 
     accounting = data["accounting"]
     accounting_errors = []
+    expected_sessions = accounting.get("expected_sessions", [])
+    session_input_count = accounting.get("session_input_count")
+    expected_points = {(date, point) for date in expected_sessions for point in ("open_after", "close")}
+    observed_points = [(row.get("session_date"), row.get("valuation_point"))
+                       for row in accounting.get("valuations", [])]
+    if (not expected_sessions or len(set(expected_sessions)) != len(expected_sessions)
+            or type(session_input_count) is not int or session_input_count != len(expected_sessions)
+            or len(observed_points) != len(set(observed_points))
+            or set(observed_points) != expected_points):
+        accounting_errors.append({"kind": "valuation_coverage"})
     weight_errors = []
     weight_summaries = []
-    for row in accounting["valuations"]:
+    for row in accounting.get("valuations", []):
         try:
             cash = dec(row["cash"])
             dividend_receivable = dec(row["dividend_receivable"])
             liquidation_receivable = dec(row.get("liquidation_receivable", "0"))
             reported_equity = dec(row["equity"])
+            if row.get("accounting_verified") is not True or dec(row.get("unallocated_capital", "0")) != 0:
+                accounting_errors.append({"session_date": row.get("session_date"), "kind": "unverified_account"})
             equity = cash + dividend_receivable + liquidation_receivable
             position_weight_total = Decimal(0)
             for instrument, position in row["positions"].items():
                 quantity, price = dec(position["quantity"]), dec(position["price"])
                 market_value = dec(position["market_value"])
-                if quantity < 0 or quantity * price != market_value:
+                if quantity < 0 or price <= 0 or quantity * price != market_value:
                     accounting_errors.append({"session_date": row["session_date"], "instrument_id": instrument})
                 if reported_equity > 0:
                     weight = market_value / reported_equity
@@ -248,7 +565,7 @@ def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
                 if abs(total_weight - Decimal(1)) > WEIGHT_TOLERANCE:
                     weight_errors.append({"session_date": row["session_date"], "kind": "weight_identity"})
                 weight_summaries.append({
-                    "session_date": row["session_date"],
+                    "session_date": row["session_date"], "valuation_point": row["valuation_point"],
                     "cash_remainder": {"amount": str(cash), "weight": str(cash_weight)},
                     "position_weight_total": str(position_weight_total),
                     "cash_and_position_weight": str(cash_and_position_weight),
@@ -259,48 +576,44 @@ def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
             accounting_errors.append({"session_date": row.get("session_date"), "kind": "invalid_valuation"})
 
     fee_errors = []
-    for fill in accounting["fills"]:
+    for fill in accounting.get("fills", []):
         try:
             costs = fill["costs"]
-            total = sum((dec(costs[key]) for key in (
-                "commission", "minimum_commission_top_up", "tax",
-            )), Decimal(0)) + dec(fill["slippage"])
-            if total != dec(fill["total_fees"]):
-                fee_errors.append(True)
+            values = [dec(costs[key]) for key in ("commission", "minimum_commission_top_up", "tax")]
+            slippage = dec(fill["slippage"])
+            total = sum(values, Decimal(0)) + slippage
+            if any(value < 0 for value in [*values, slippage]) or total != dec(fill["total_fees"]):
+                fee_errors.append({"kind": "fill_fee_reconciliation"})
         except (KeyError, InvalidOperation, TypeError):
-            fee_errors.append(True)
+            fee_errors.append({"kind": "invalid_fill_fee"})
 
     blocked = {
         (cell["instrument_id"], cell["session_date"])
-        for cell in accounting["forbidden_cells"]
-        if cell["state"] in {"unknown", "halted"}
+        for cell in accounting.get("forbidden_cells", [])
+        if cell.get("state") in {"unknown", "halted"}
     }
     blocked_trades = [
-        trade for trade in accounting["trades"]
-        if (trade["instrument_id"], trade["session_date"]) in blocked
+        trade for trade in accounting.get("trades", [])
+        if (trade.get("instrument_id"), trade.get("session_date")) in blocked
     ]
-    rounding_ok = split_traceable
     accounting_ok = (
-        bool(accounting["valuations"])
-        and not accounting_errors
-        and not weight_errors
-        and bool(accounting["fills"])
-        and not fee_errors
-        and accounting.get("fees_present") is True
-        and not blocked_trades
-        and rounding_ok
-        and terminal_traceable
+        bool(expected_sessions) and not accounting_errors and not weight_errors
+        and bool(accounting.get("fills")) and not fee_errors
+        and accounting.get("fees_present") is True and not blocked_trades
+        and split_traceable and terminal_traceable
     )
 
     checks = {
-        "main_run": result(main_ok, dividend_ledger=dividend, split_ledger=split_traceable,
-                            terminal_settlement=terminal_traceable),
-        "daily_parity": result(parity_ok, sessions=len(parity_days), errors=parity_errors),
+        "main_run": result(main_ok, dividend_ledger=dividend, dividend_errors=dividend_errors,
+                            split_ledger=split_traceable, split_errors=split_errors,
+                            terminal_settlement=terminal_traceable, terminal_errors=terminal_errors,
+                            fixed_universe=universe_check),
+        "daily_parity": parity_check,
         "reproducibility": result(deterministic),
         "python_as_of_and_cli": result(python_cli_ok),
         "daily_accounting": result(accounting_ok, valuation_errors=accounting_errors,
                                    weight_errors=weight_errors, weight_summaries=weight_summaries,
-                                   fee_errors=len(fee_errors), blocked_trades=len(blocked_trades)),
+                                   fee_errors=fee_errors, blocked_trades=len(blocked_trades)),
         "unknown_floor": verify_unknown_coverage(data["unknown_coverage"]),
         "frozen_raw_immutable": result(data.get("raw_immutable") is True),
     }
@@ -393,15 +706,23 @@ def fixed_universe_diagnostics(run_spec: dict[str, Any]) -> dict[str, Any]:
     excluded: dict[str, set[str]] = {}
     catalog_versions: set[str] = set()
     rule_versions: set[str] = set()
-    for session in run_spec.get("session_inputs", []):
+    session_reports = []
+    for index, session in enumerate(run_spec.get("session_inputs", [])):
         universe = session.get("eligible", {}).get("universe", {}).get("run_spec", {})
-        included.update(universe.get("fixed_list", []))
+        session_included = set(universe.get("fixed_list", []))
+        session_excluded = universe.get("fixed_list_exclusions", {}) or {}
+        included.update(session_included)
         if universe.get("catalog_version"):
             catalog_versions.add(universe["catalog_version"])
         if universe.get("rule_version"):
             rule_versions.add(universe["rule_version"])
-        for code, reason in universe.get("fixed_list_exclusions", {}).items():
+        for code, reason in session_excluded.items():
             excluded.setdefault(code, set()).add(reason)
+        session_reports.append({
+            "session_index": index,
+            "included_codes": sorted(session_included),
+            "excluded_reasons": dict(sorted(session_excluded.items())),
+        })
     candidates = set(fixed.get("codes", [])) | set(fixed.get("excluded_codes", {}))
     accounted = included | set(excluded)
     return {
@@ -411,6 +732,8 @@ def fixed_universe_diagnostics(run_spec: dict[str, Any]) -> dict[str, Any]:
         "included_codes": sorted(included),
         "excluded_reasons": {code: sorted(reasons) for code, reasons in sorted(excluded.items())},
         "unresolved_codes": sorted(candidates - accounted),
+        "session_count": len(session_reports),
+        "sessions": session_reports,
     }
 
 
@@ -477,7 +800,12 @@ def write_early_failure_report(
     normalized_unknown = normalize_unknown_coverage(unknown)
     raw_before = failure["raw_hashes_before"]
     raw_after = raw_hashes(acceptance.parent, raw_inventory)
-    raw_immutable = raw_before == raw_after and all(raw_before.values()) and all(raw_after.values())
+    raw_immutable = (
+        raw_before.checked == raw_after.checked
+        and raw_before.inventory_error == raw_after.inventory_error
+        and raw_snapshot_valid(raw_before)
+        and raw_snapshot_valid(raw_after)
+    )
     artifacts = {
         "schema": EARLY_FAILURE_SCHEMA,
         "failure": {key: failure.get(key) for key in (
@@ -495,10 +823,10 @@ def write_early_failure_report(
         "failure": artifacts["failure"],
         "raw_immutability": {
             "passed": raw_immutable,
-            "inventory_entries": len(raw_before),
-            "verified_before_run": sum(raw_before.values()),
-            "verified_after_run": sum(raw_after.values()),
-            "failed_before_run": sum(not valid for valid in raw_before.values()),
+            "inventory_entries": raw_before.request_records,
+            "verified_before_run": sum(raw_before.checked.values()),
+            "verified_after_run": sum(raw_after.checked.values()),
+            "failed_before_run": sum(not valid for valid in raw_before.checked.values()),
         },
         "non_blocking": {
             name: {"status": "not_run", "reason": "The main Run failed before acceptance could continue."}
@@ -531,7 +859,7 @@ def write_early_failure_report(
                 "code": item["symbol"],
                 "unknown_cells": item["unknown_cells"],
                 "cells": item["cells"],
-                "unknown_percent": 100 * item["unknown_cells"] / item["cells"] if item["cells"] else 0,
+                "unknown_percent": 100 * item["unknown_cells"] / item["cells"] if item["cells"] else None,
             }
             for item in normalized_unknown["instruments"]
         ],
@@ -541,18 +869,91 @@ def write_early_failure_report(
     return safe_summary
 
 
-def raw_hashes(root: Path, inventory: Path) -> dict[str, bool]:
-    data = json.loads(inventory.read_text())
-    hashes = sorted({item["sha256"] for item in data["request_records"] if item.get("sha256")})
+def write_post_main_failure_report(
+    *, output: Path, acceptance: Path, raw_inventory: Path, unknown: dict[str, Any],
+    criterion: str, error: str, raw_before: RawHashSnapshot,
+) -> dict[str, Any]:
+    normalized_unknown = normalize_unknown_coverage(unknown)
+    raw_after = raw_hashes(acceptance.parent, raw_inventory)
+    raw_immutable = raw_before == raw_after and raw_snapshot_valid(raw_before) and raw_snapshot_valid(raw_after)
+    failure = {"criterion": criterion, "error": error}
+    artifacts = {
+        "schema": PHASE_FAILURE_SCHEMA,
+        "failure": failure,
+        "unknown_coverage": normalized_unknown,
+        "raw_immutable": raw_immutable,
+    }
+    verification = verify_post_main_failure(artifacts)
+    report = {
+        "schema": "mvp6-local-engineering-report@1",
+        "issue": 234,
+        "classification": "platform engineering acceptance; not strategy historical performance",
+        "verification": verification,
+        "failure": failure,
+        "raw_immutability": {
+            "passed": raw_immutable,
+            "inventory_entries": raw_before.request_records,
+            "verified_before_run": sum(raw_before.checked.values()),
+            "verified_after_run": sum(raw_after.checked.values()),
+        },
+        "unknown_coverage": normalized_unknown,
+        "local_artifacts": {
+            "directory": str(output),
+            "rerun_command": "python scripts/mvp6_acceptance.py run --root ~/PrajnaData/mvp-6",
+        },
+    }
+    write_json(output / "mvp6-acceptance-report.json", report)
+    return {
+        "passed": False,
+        "checks": {name: check["status"] for name, check in verification["checks"].items()},
+        "per_etf_unknown_coverage": [
+            {
+                "code": item["symbol"], "unknown_cells": item["unknown_cells"],
+                "cells": item["cells"],
+                "unknown_percent": 100 * item["unknown_cells"] / item["cells"] if item["cells"] else None,
+            }
+            for item in normalized_unknown["instruments"]
+            if item["symbol"] in FIXED_UNIVERSE["codes"]
+        ],
+        "conclusion": "Platform engineering acceptance only; this is not strategy historical performance.",
+        "report": str(output / "mvp6-acceptance-report.json"),
+    }
+
+
+def raw_hashes(root: Path, inventory: Path) -> RawHashSnapshot:
+    try:
+        data = json.loads(inventory.read_text())
+    except (OSError, json.JSONDecodeError):
+        return RawHashSnapshot({}, 0, "inventory cannot be read")
+    records = data.get("request_records") if isinstance(data, dict) else None
+    if not isinstance(records, list) or not records:
+        return RawHashSnapshot({}, 0, "inventory has no request records")
+    hashes: set[str] = set()
+    malformed = False
+    for item in records:
+        value = item.get("sha256") if isinstance(item, dict) else None
+        if not isinstance(value, str):
+            malformed = True
+            continue
+        digest = value.removeprefix("sha256:")
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", digest):
+            malformed = True
+            continue
+        hashes.add(digest.lower())
     checked: dict[str, bool] = {}
-    for digest in hashes:
+    for digest in sorted(hashes):
         path = root / "raw" / "sha256" / digest[:2] / digest
         if not path.is_file():
             checked[digest] = False
             continue
-        import hashlib
-        checked[digest] = hashlib.sha256(path.read_bytes()).hexdigest() == digest
-    return checked
+        try:
+            checked[digest] = hashlib.sha256(path.read_bytes()).hexdigest() == digest
+        except OSError:
+            checked[digest] = False
+    return RawHashSnapshot(
+        checked, len(records),
+        "inventory contains a missing or invalid SHA-256" if malformed else None,
+    )
 
 
 def local_lake(source: Path, destination: Path) -> Path:
@@ -748,6 +1149,8 @@ def as_of_decisions_match(lake: Path, dsv: str, pit: dict[str, Any], vector_mani
 
 
 def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
+    global ACTIVE_POST_MAIN_RUN
+    ACTIVE_POST_MAIN_RUN = None
     root = Path(args.root).expanduser().resolve()
     expected_root = (Path.home() / "PrajnaData" / "mvp-6").resolve()
     if root != expected_root:
@@ -786,8 +1189,8 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     before = raw_hashes(root, raw_inventory)
     write_json(output / "frozen-input-evidence.json", {
         "data_read_only": True,
-        "raw_inventory_entries": len(before),
-        "all_inventory_hashes_verified_before": all(before.values()),
+        "raw_inventory_entries": before.request_records,
+        "all_inventory_hashes_verified_before": raw_snapshot_valid(before),
         "raw_integrity_failure": raw_integrity_failure(before),
         "fixed_universe": FIXED_UNIVERSE,
         "source_status": coverage.get("source_status"),
@@ -874,6 +1277,11 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         main_manifests.append(manifests)
         main_results.append({"cli": cli_results, "api": api_results})
 
+    ACTIVE_POST_MAIN_RUN = {
+        "output": output, "acceptance": acceptance, "raw_inventory": raw_inventory,
+        "unknown": unknown, "raw_before": before, "criterion": "daily_parity",
+    }
+    mark_run_phase("daily_parity")
     vector_definition = experiment_definition(dsv, catalog_version, pit_inputs[0], "vector")
     parity_fast_definition = experiment_definition(
         dsv, catalog_version, pit_inputs[0], "fast_event", sizing="vector_parity",
@@ -890,6 +1298,7 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     vector_manifest = vector_manifests["full"]
     fast_manifest = fast_manifests["full"]
 
+    mark_run_phase("daily_accounting")
     main_full_manifest = main_manifests[0]["full"]
     main_run = main_full_manifest["runs"][0]
     main_lake = lake_dirs[0]
@@ -898,22 +1307,80 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         for name in ("account_valuations", "fills", "fee_settlements", "corporate_actions", "terminal_settlements")
     }
     fast_run = fast_manifest["runs"][0]
+    mark_run_phase("daily_parity")
     fast_accounts = read_table(lake_dirs[0], fast_manifest, fast_run["run_id"], "account_valuations")
+    fast_fills = read_table(lake_dirs[0], fast_manifest, fast_run["run_id"], "fills")
+    fast_attempts = read_table(lake_dirs[0], fast_manifest, fast_run["run_id"], "orders")
     vector_run = vector_manifest["runs"][0]
     vector_sessions = read_table(lake_dirs[0], vector_manifest, vector_run["run_id"], "sessions")
-    vector_decisions = read_table(lake_dirs[0], vector_manifest, vector_run["run_id"], "decisions")
+    vector_executions = read_table(lake_dirs[0], vector_manifest, vector_run["run_id"], "executions")
 
-    fast_open = {
-        row["session_date"]: float(dec(row["equity"])) / 1_000_000
+    main_account_rows = [row for row in main_full_tables["account_valuations"]
+                         if row.get("scope") == "account"]
+    expected_sessions = sorted({row["session_date"] for row in main_account_rows})
+    fast_account_by_point = {
+        (row["session_date"], row["valuation_point"]): row
         for row in fast_accounts
-        if row.get("scope") == "account" and row.get("valuation_point") == "open_after"
+        if row.get("scope") == "account"
     }
-    parity_days = [{
-        "session_date": row["session_date"],
-        "vector_open_nav": float(row["nav"]) / (1 + float(row["gross_return"])),
-        "fast_open_nav": fast_open[row["session_date"]],
-    } for row in vector_sessions]
+    vector_executions_by_date: dict[str, list[dict[str, Any]]] = {}
+    for event in vector_executions:
+        if event.get("session_date"):
+            vector_executions_by_date.setdefault(event["session_date"], []).append({
+                "kind": event.get("kind"), "blocked": event.get("blocked", []),
+                "skipped_buys": event.get("skipped_buys", []),
+            })
+    fast_attempts_by_date: dict[str, list[dict[str, Any]]] = {}
+    for attempt in fast_attempts:
+        if attempt.get("record_type") == "attempt" and attempt.get("session_date"):
+            fast_attempts_by_date.setdefault(attempt["session_date"], []).append({
+                "kind": attempt.get("kind"), "blocked": attempt.get("blocked", []),
+                "skipped_buys": attempt.get("skipped_buys", []),
+            })
+    fast_fees_by_date: dict[str, Decimal] = {}
+    for row in fast_fills:
+        fill = row["fill"]
+        date = fill["executed_at"][:10]
+        fast_fees_by_date[date] = fast_fees_by_date.get(date, Decimal(0)) + dec(fill["total_fees"])
 
+    def fast_components(row: dict[str, Any]) -> dict[str, float]:
+        equity = dec(row["equity"])
+        positions_value = sum((dec(position["market_value"]) for position in row["positions"].values()), Decimal(0))
+        return {
+            "cash_weight": float(dec(row["cash"]) / equity),
+            "invested_weight": float(positions_value / equity),
+            "dividend_receivable_weight": float(dec(row["dividend_receivable"]) / equity),
+            "liquidation_receivable_weight": float(dec(row["liquidation_receivable"]) / equity),
+        }
+
+    parity_days = []
+    previous_close_equity = dec(parity_fast_definition["fast_event"]["initial_cash"])
+    vector_by_date = {row["session_date"]: row for row in vector_sessions}
+    for date in expected_sessions:
+        vector = vector_by_date[date]
+        fast_open_row = fast_account_by_point[(date, "open_after")]
+        fast_close_row = fast_account_by_point[(date, "close")]
+        fast_cost = fast_fees_by_date.get(date, Decimal(0)) / previous_close_equity
+        vector_components_open = vector.get("portfolio_components")
+        vector_components_close = vector.get("portfolio_components_close")
+        parity_days.append({
+            "session_date": date,
+            "vector_open_nav": float(vector["nav"]) / (1 + float(vector["gross_return"])),
+            "fast_open_nav": float(dec(fast_open_row["equity"]) / dec(parity_fast_definition["fast_event"]["initial_cash"])),
+            "vector_close_nav": vector["nav"],
+            "fast_close_nav": float(dec(fast_close_row["equity"]) / dec(parity_fast_definition["fast_event"]["initial_cash"])),
+            "vector_open_components": vector_components_open,
+            "fast_open_components": fast_components(fast_open_row),
+            "vector_close_components": vector_components_close,
+            "fast_close_components": fast_components(fast_close_row),
+            "vector_cost": vector["cost"],
+            "fast_cost": float(fast_cost),
+            "vector_trajectory": vector_executions_by_date.get(date, []),
+            "fast_trajectory": fast_attempts_by_date.get(date, []),
+        })
+        previous_close_equity = dec(fast_close_row["equity"])
+
+    mark_run_phase("daily_accounting")
     excluded = main_run["run_spec"].get("execution_exclusions", [])
     forbidden_cells = [cell for cell in excluded if cell.get("state") in {"unknown", "halted"}]
     trades = []
@@ -927,9 +1394,7 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         })
 
     valuations = []
-    for row in main_full_tables["account_valuations"]:
-        if row.get("scope") != "account":
-            continue
+    for row in main_account_rows:
         valuations.append({
             "session_date": row["session_date"],
             "valuation_point": row["valuation_point"],
@@ -937,6 +1402,8 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
             "dividend_receivable": row["dividend_receivable"],
             "liquidation_receivable": row["liquidation_receivable"],
             "equity": row["equity"],
+            "unallocated_capital": row["unallocated_capital"],
+            "accounting_verified": row["accounting_verified"],
             "positions": row["positions"],
         })
 
@@ -944,6 +1411,13 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     run_spec = all_run_specs[0]
     engine = run_spec["engine"]
     action_rows = main_full_tables["corporate_actions"]
+    mark_run_phase("reproducibility")
+    independent_reports = compare_independent_levels(main_manifests)
+    mark_run_phase("python_as_of_and_cli")
+    as_of_matches = as_of_decisions_match(
+        lake_dirs[0], dsv, pit_inputs[0], vector_manifest,
+    )
+    mark_run_phase("daily_accounting")
     evidence = {
         "schema": SCHEMA,
         "fixed_universe": fixed_universe_diagnostics(run_spec),
@@ -958,8 +1432,8 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
             "terminal_settlement_version": run_spec.get("terminal_settlement", {}).get("semantic_version"),
             "terminal_settlements": main_full_tables["terminal_settlements"],
         },
-        "parity": {"days": parity_days},
-        "independent_runs": compare_independent_levels(main_manifests),
+        "parity": {"expected_sessions": expected_sessions, "days": parity_days},
+        "independent_runs": independent_reports,
         "python_cli": {
             "cli": {
                 "experiment_id": main_results[0]["cli"]["full"]["exp"],
@@ -974,13 +1448,15 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
                 "runs": main_results[0]["api"]["full"]["runs"],
             },
             "api_action": main_results[0]["api"]["full"]["action"],
-            "as_of_view_matches": as_of_decisions_match(
-                lake_dirs[0], dsv, pit_inputs[0], vector_manifest,
-            ),
+            "as_of_view_matches": as_of_matches,
         },
-        "accounting": {
+    "accounting": {
+        "expected_sessions": expected_sessions,
+        "session_input_count": len(run_spec.get("session_inputs", [])),
             "valuations": valuations,
             "fills": [{
+                "session_date": row["fill"]["executed_at"][:10],
+                "instrument_id": row["fill"]["order"]["instrument_id"],
                 "total_fees": row["fill"]["total_fees"],
                 "costs": row["fill"]["costs"],
                 "slippage": row["fill"]["slippage"],
@@ -992,7 +1468,7 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         "unknown_coverage": run_spec["unknown_coverage"],
         "raw_immutable": (
             (after := raw_hashes(root, raw_inventory)) == before
-            and all(before.values()) and all(after.values())
+            and raw_snapshot_valid(before) and raw_snapshot_valid(after)
         ),
         "non_blocking": {
             "small_grid": {"status": "not_run", "reason": "P16 non-blocking grid is not needed for the engineering ledger gate."},
@@ -1041,8 +1517,10 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         "checks": {name: item["passed"] for name, item in verification["checks"].items()},
         "per_etf_unknown_coverage": [
             {"code": item["symbol"], "unknown_cells": item["unknown_cells"],
-             "cells": item["cells"], "unknown_percent": item["unknown_percent"]}
+             "cells": item["cells"],
+             "unknown_percent": 100 * item["unknown_cells"] / item["cells"] if item["cells"] else None}
             for item in public_unknown
+            if item.get("symbol") in FIXED_UNIVERSE["codes"]
         ],
         "conclusion": "Platform engineering acceptance only; this is not strategy historical performance.",
         "report": str(output / "mvp6-acceptance-report.json"),
@@ -1051,6 +1529,7 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
 
 
 def main() -> int:
+    global ACTIVE_POST_MAIN_RUN
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     verify = subparsers.add_parser("verify", help="verify a local or synthetic artifact JSON")
@@ -1070,6 +1549,20 @@ def main() -> int:
         print(json.dumps(summary, indent=2, sort_keys=True))
         return 0 if summary["passed"] else 1
     except Exception as error:
+        if ACTIVE_POST_MAIN_RUN is not None:
+            context = ACTIVE_POST_MAIN_RUN
+            try:
+                summary = write_post_main_failure_report(
+                    output=context["output"], acceptance=context["acceptance"],
+                    raw_inventory=context["raw_inventory"], unknown=context["unknown"],
+                    criterion=context["criterion"], error=str(error), raw_before=context["raw_before"],
+                )
+                ACTIVE_POST_MAIN_RUN = None
+                print(json.dumps(summary, indent=2, sort_keys=True))
+                return 1
+            except Exception as report_error:
+                print(f"MVP-6 acceptance failed while writing phase report: {report_error}", file=sys.stderr)
+                return 2
         print(f"MVP-6 acceptance failed: {error}", file=sys.stderr)
         return 2
 
