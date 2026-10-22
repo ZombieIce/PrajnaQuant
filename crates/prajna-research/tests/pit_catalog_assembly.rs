@@ -1355,7 +1355,6 @@ fn delayed_legal_name_change_is_not_attributed_before_it_is_knowable() {
         &assembly.catalog,
         &market,
         "synthetic-actions",
-        &BTreeSet::new(),
         Default::default(),
     )
     .unwrap();

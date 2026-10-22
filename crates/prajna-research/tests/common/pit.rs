@@ -23,8 +23,19 @@ use zip::{ZipWriter, write::SimpleFileOptions};
 pub fn date(day: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(2023, 1, day).unwrap()
 }
+#[allow(dead_code)]
+pub fn date_at(start: NaiveDate, day: u32) -> NaiveDate {
+    start + chrono::Duration::days(i64::from(day - 1))
+}
+#[allow(dead_code)]
 pub fn time(day: u32, hour: u32) -> TimestampNs {
     format!("2023-01-{day:02}T{hour:02}:00:00+08:00")
+        .parse()
+        .unwrap()
+}
+#[allow(dead_code)]
+pub fn time_at(start: NaiveDate, day: u32, hour: u32) -> TimestampNs {
+    format!("{}T{hour:02}:00:00+08:00", date_at(start, day))
         .parse()
         .unwrap()
 }
@@ -43,15 +54,72 @@ pub struct Fixture {
 }
 
 pub fn fixture(root: &Path) -> Fixture {
-    fixture_at_price(root, 1.0)
+    fixture_with_symbols(root, ["159001", "159002", "159003"])
 }
 
+#[allow(dead_code)]
 pub fn fixture_at_price(root: &Path, price: f64) -> Fixture {
-    fixture_options(root, price, false)
+    fixture_with_symbols_and_options(root, price, false, ["159001", "159002", "159003"])
 }
 
+#[allow(dead_code)]
 pub fn fixture_options(root: &Path, price: f64, terminated: bool) -> Fixture {
-    fixture_with_prices_and_gaps(root, price, terminated, &BTreeMap::new(), &BTreeSet::new())
+    fixture_with_symbols_and_options(root, price, terminated, ["159001", "159002", "159003"])
+}
+
+pub fn fixture_with_symbols(root: &Path, symbols: [&str; 3]) -> Fixture {
+    fixture_with_symbols_and_options(root, 1.0, false, symbols)
+}
+
+#[allow(dead_code)]
+pub fn fixture_with_symbols_missing_bars(
+    root: &Path,
+    symbols: [&str; 3],
+    missing_bars: BTreeSet<(usize, u32)>,
+) -> Fixture {
+    fixture_with_symbols_missing_bars_starting_at(root, symbols, missing_bars, date(1))
+}
+
+pub fn fixture_with_symbols_missing_bars_starting_at(
+    root: &Path,
+    symbols: [&str; 3],
+    missing_bars: BTreeSet<(usize, u32)>,
+    start: NaiveDate,
+) -> Fixture {
+    fixture_with_prices_and_symbols(
+        root,
+        1.0,
+        false,
+        &BTreeMap::new(),
+        symbols,
+        &missing_bars,
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        start,
+    )
+}
+
+#[allow(dead_code)]
+pub fn fixture_with_market_inputs(
+    root: &Path,
+    symbols: [&str; 3],
+    missing_bars: BTreeSet<(usize, u32)>,
+    missing_tdx_bars: BTreeSet<(usize, u32)>,
+    overrides: BTreeMap<(usize, u32), (f64, f64)>,
+    reference_overrides: BTreeMap<(usize, u32), f64>,
+    start: NaiveDate,
+) -> Fixture {
+    fixture_with_prices_and_symbols(
+        root,
+        1.0,
+        false,
+        &overrides,
+        symbols,
+        &missing_bars,
+        &missing_tdx_bars,
+        &reference_overrides,
+        start,
+    )
 }
 
 #[allow(dead_code)]
@@ -90,6 +158,50 @@ fn fixture_with_prices_and_gaps(
     overrides: &BTreeMap<(usize, u32), (f64, f64)>,
     missing_bars: &BTreeSet<(usize, u32)>,
 ) -> Fixture {
+    fixture_with_prices_and_symbols(
+        root,
+        price,
+        terminated,
+        overrides,
+        ["159001", "159002", "159003"],
+        missing_bars,
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        date(1),
+    )
+}
+
+fn fixture_with_symbols_and_options(
+    root: &Path,
+    price: f64,
+    terminated: bool,
+    symbols: [&str; 3],
+) -> Fixture {
+    fixture_with_prices_and_symbols(
+        root,
+        price,
+        terminated,
+        &BTreeMap::new(),
+        symbols,
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        date(1),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fixture_with_prices_and_symbols(
+    root: &Path,
+    price: f64,
+    terminated: bool,
+    overrides: &BTreeMap<(usize, u32), (f64, f64)>,
+    symbols: [&str; 3],
+    missing_bars: &BTreeSet<(usize, u32)>,
+    missing_tdx_bars: &BTreeSet<(usize, u32)>,
+    reference_overrides: &BTreeMap<(usize, u32), f64>,
+    start: NaiveDate,
+) -> Fixture {
     let raw = RawStore::open(root).unwrap();
     let put = |bytes: &[u8]| {
         raw.put(
@@ -122,33 +234,35 @@ fn fixture_with_prices_and_gaps(
         .map(|d| {
             Session::new(
                 "SZSE".parse().unwrap(),
-                date(d),
-                format!("2023-01-{d:02}T09:30:00+08:00").parse().unwrap(),
-                time(d, 15),
+                date_at(start, d),
+                format!("{}T09:30:00+08:00", date_at(start, d))
+                    .parse()
+                    .unwrap(),
+                time_at(start, d, 15),
             )
             .unwrap()
         })
         .collect();
-    let life = |code: &str, start, removal: Option<u32>| Lifecycle {
+    let life = |code: &str, first_day, removal: Option<u32>| Lifecycle {
         native_symbol: code.into(),
         contract_raw_sha256: doc.clone(),
         listing: LifecycleFact {
-            effective_date: date(start),
-            evidence: evidence("listing", time(1, 8)),
+            effective_date: date_at(start, first_day),
+            evidence: evidence("listing", time_at(start, 1, 8)),
         },
         termination: None,
         attributes: std::iter::once(AttributeFact {
-            effective_date: date(start),
+            effective_date: date_at(start, first_day),
             category: FundCategory::Equity,
             index_id: "CSI:300".into(),
-            evidence: evidence("contract", time(1, 8)),
+            evidence: evidence("contract", time_at(start, 1, 8)),
             legal_name: None,
         })
         .chain(removal.map(|d| AttributeFact {
-            effective_date: date(d),
+            effective_date: date_at(start, d),
             category: FundCategory::Other,
             index_id: "CSI:300".into(),
-            evidence: evidence("category-change", time(d, 8)),
+            evidence: evidence("category-change", time_at(start, d, 8)),
             legal_name: None,
         }))
         .collect(),
@@ -162,13 +276,13 @@ fn fixture_with_prices_and_gaps(
     let mut catalog_input = CatalogInput {
         schema_version: 1,
         rule_version: "synthetic-catalog@1".into(),
-        calendar_start: date(1),
-        calendar_end: date(10),
+        calendar_start: date_at(start, 1),
+        calendar_end: date_at(start, 10),
         calendar_raw_sha256: BTreeSet::from([doc.clone()]),
         sessions: sessions.clone(),
         coverage: Coverage {
-            start: date(1),
-            end: date(10),
+            start: date_at(start, 1),
+            end: date_at(start, 10),
             scan_method: "synthetic exhaustive range".into(),
             announcement_method: "synthetic exhaustive listings/contracts/terminations attachments"
                 .into(),
@@ -177,13 +291,15 @@ fn fixture_with_prices_and_gaps(
             resolutions: vec![],
         },
         lifecycles: vec![
-            life("159001", 1, Some(5)),
-            life("159002", 1, Some(7)),
-            life("159003", 4, None),
+            life(symbols[0], 1, Some(5)),
+            life(symbols[1], 1, Some(7)),
+            life(symbols[2], 4, None),
         ],
         scans: (159000..=159999)
             .map(|code| {
-                let seen = (159001..=159003).contains(&code);
+                let seen = symbols
+                    .iter()
+                    .any(|symbol| symbol.parse::<u32>().ok() == Some(code));
                 ScanObservation {
                     native_symbol: code.to_string(),
                     status: if seen {
@@ -192,8 +308,14 @@ fn fixture_with_prices_and_gaps(
                         ScanStatus::NoRows
                     },
                     raw_sha256: doc.clone(),
-                    first_observed: seen.then(|| date(if code == 159003 { 4 } else { 1 })),
-                    last_observed: seen.then(|| date(10)),
+                    first_observed: seen.then(|| {
+                        let index = symbols
+                            .iter()
+                            .position(|symbol| symbol.parse::<u32>().ok() == Some(code))
+                            .expect("seen code is one of the fixture symbols");
+                        date_at(start, if index == 2 { 4 } else { 1 })
+                    }),
+                    last_observed: seen.then(|| date_at(start, 10)),
                     identity_start: None,
                 }
             })
@@ -201,7 +323,7 @@ fn fixture_with_prices_and_gaps(
         broad_indices: Some(BroadIndexList {
             version: "synthetic-domestic@1".into(),
             index_ids: BTreeSet::from(["CSI:300".into()]),
-            evidence: vec![evidence("scope", time(1, 8))],
+            evidence: vec![evidence("scope", time_at(start, 1, 8))],
             named_indices: vec![],
         }),
         code_ranges: None,
@@ -211,15 +333,15 @@ fn fixture_with_prices_and_gaps(
         let life = &mut catalog_input.lifecycles[0];
         life.attributes.truncate(1);
         life.termination = Some(LifecycleFact {
-            effective_date: date(8),
-            evidence: evidence("formal-termination", time(8, 8)),
+            effective_date: date_at(start, 8),
+            evidence: evidence("formal-termination", time_at(start, 8, 8)),
         });
         catalog_input
             .scans
             .iter_mut()
             .find(|s| s.native_symbol == "159001")
             .unwrap()
-            .last_observed = Some(date(7));
+            .last_observed = Some(date_at(start, 7));
     }
     let catalog = HistoricalCatalog::build(catalog_input.clone(), &raw).unwrap();
     let ids = catalog
@@ -228,10 +350,14 @@ fn fixture_with_prices_and_gaps(
         .iter()
         .map(|l| l.instrument_id().unwrap())
         .collect::<Vec<_>>();
-    let days = date(1)
+    let month_start = start.with_day(1).unwrap();
+    let days = month_start
         .iter_days()
-        .take_while(|d| d.month() == 1)
-        .map(|d| json!({"jyrq":d.to_string(),"jybz":if d.day() <= 10 {"1"} else {"0"}}))
+        .take_while(|d| d.month() == start.month())
+        .map(|d| {
+            let is_session = (1..=10).any(|day| date_at(start, day) == d);
+            json!({"jyrq":d.to_string(),"jybz":if is_session {"1"} else {"0"}})
+        })
         .collect::<Vec<_>>();
     let mut hashes = vec![put(&serde_json::to_vec(&json!({"data":days})).unwrap())];
     let open_price = |code: usize, day: u32| {
@@ -251,19 +377,26 @@ fn fixture_with_prices_and_gaps(
         let codes = if day < 4 { 2 } else { 3 };
         let mut cod = Vec::new();
         let mut md1 = Vec::new();
-        for i in 0..codes {
-            if (terminated && i == 0 && day >= 8) || missing_bars.contains(&(i, day)) {
+        for (i, symbol) in symbols.iter().enumerate().take(codes) {
+            if missing_bars.contains(&(i, day)) || missing_tdx_bars.contains(&(i, day)) {
+                continue;
+            }
+            if terminated && i == 0 && day >= 8 {
                 continue;
             }
             let mut record = [0u8; 150];
-            record[..6].copy_from_slice(format!("15900{}", i + 1).as_bytes());
+            record[..6].copy_from_slice(symbol.as_bytes());
             record[32..34].copy_from_slice(&((cod.len() / 150) as u16).to_le_bytes());
             cod.extend_from_slice(&record);
             let mut block = [0u8; 512];
             let (open, close) = bar_prices(i, day);
+            let reference_price = reference_overrides
+                .get(&(i, day))
+                .copied()
+                .unwrap_or_else(|| overrides.get(&(i, day)).map_or(price, |(open, _)| *open));
             for (offset, v) in [
-                // The legacy fixture ignores this field; v4 republish tests use it.
-                (4, price),
+                // Keep explicit limit-reference overrides and v4 republish fixtures observable.
+                (4, reference_price),
                 (12, open),
                 (20, open.max(close)),
                 (28, open.min(close)),
@@ -277,9 +410,16 @@ fn fixture_with_prices_and_gaps(
         }
         let mut zip = ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let opts = SimpleFileOptions::default().last_modified_time(zip::DateTime::default());
+        let tdx_date = date_at(start, day);
+        let day_key = format!(
+            "{:02}{:02}{:02}",
+            tdx_date.year() % 100,
+            tdx_date.month(),
+            tdx_date.day()
+        );
         for (name, data) in [
-            (format!("sz2301{day:02}.cod"), cod),
-            (format!("sz2301{day:02}.md1"), md1),
+            (format!("sz{day_key}.cod"), cod),
+            (format!("sz{day_key}.md1"), md1),
         ] {
             zip.start_file(name, opts).unwrap();
             zip.write_all(&data).unwrap();
@@ -292,7 +432,7 @@ fn fixture_with_prices_and_gaps(
             .map(|d| {
                 let (open, close) = bar_prices(i, d);
                 json!([
-                    date(d).to_string(),
+                    date_at(start, d).to_string(),
                     open.to_string(),
                     close.to_string(),
                     open.max(close).to_string(),
@@ -301,7 +441,7 @@ fn fixture_with_prices_and_gaps(
                 ])
             })
             .collect::<Vec<_>>();
-        let key = format!("sz15900{}", i + 1);
+        let key = format!("sz{}", symbols[i]);
         hashes.push(put(&serde_json::to_vec(
             &json!({"code":0,"data":{key:{"day":rows}}}),
         )
@@ -323,8 +463,12 @@ fn fixture_with_prices_and_gaps(
         .enumerate()
         .flat_map(|(i, id)| sessions.iter().map(move |s| (i, id, s)))
         .map(|(i, id, s)| {
-            let day = s.session_date().day();
-            let known = evidence("opening-coverage", time(1, 8));
+            let day = s
+                .session_date()
+                .signed_duration_since(date_at(start, 1))
+                .num_days() as u32
+                + 1;
+            let known = evidence("opening-coverage", time_at(start, 1, 8));
             let reference_price = overrides.get(&(i, day)).map_or(price, |(open, _)| *open);
             OpeningEvidence {
                 instrument_id: id.clone(),
@@ -337,12 +481,12 @@ fn fixture_with_prices_and_gaps(
                 },
                 halt: (i == 0 && day == 5).then(|| HaltEvidence {
                     scope: HaltScope::OpeningOnly,
-                    evidence: evidence("halt", time(4, 16)),
+                    evidence: evidence("halt", time_at(start, 4, 16)),
                 }),
                 limit_rule: Some(LimitRule {
                     official_rule: None,
                     version: "synthetic-10pct@1".into(),
-                    effective_from: date(1),
+                    effective_from: date_at(start, 1),
                     effective_until: None,
                     rate_bps: 1000,
                     tick: "0.001".parse().unwrap(),
@@ -364,8 +508,8 @@ fn fixture_with_prices_and_gaps(
     let market_input = MarketEvidence {
         semantic_version: None,
         rule_version: "synthetic-execution@1".into(),
-        start: date(1),
-        end: date(10),
+        start: date_at(start, 1),
+        end: date_at(start, 10),
         coverage_gaps: BTreeSet::new(),
         openings,
     };
@@ -373,16 +517,16 @@ fn fixture_with_prices_and_gaps(
     let empty_actions = EmptyActionCoverage {
         version: "synthetic-empty-actions@1".into(),
         instruments: ids.iter().cloned().collect(),
-        start: date(1),
-        end: date(10),
+        start: date_at(start, 1),
+        end: date_at(start, 10),
         source_hashes: BTreeSet::from([doc.clone()]),
-        available_at: Some(time(1, 8)),
+        available_at: Some(time_at(start, 1, 8)),
     };
     let tri = TotalReturnIndex::build(&market, None, Some(&empty_actions), &raw).unwrap();
     let notices = vec![RiskNotice {
         instrument_id: ids[0].clone(),
         kind: RiskKind::TerminationProposal,
-        evidence: evidence("termination-proposal", time(4, 15)),
+        evidence: evidence("termination-proposal", time_at(start, 4, 15)),
     }];
     let risk = RiskSignals::build(&catalog, notices.clone(), &raw).unwrap();
     let eligibility = EligibilityParams {

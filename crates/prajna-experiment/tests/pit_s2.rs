@@ -2,6 +2,7 @@
 mod fixture;
 use prajna_experiment::{Experiment, ResultLevel, RunStatus, read_run_table};
 use serde_json::{Value, json};
+use std::process::Command;
 
 fn definition(f: &fixture::Fixture, engine: &str) -> Value {
     let mut value = json!({
@@ -348,6 +349,367 @@ fn terminal_settlement_is_skipped_after_a_successful_early_risk_exit() {
             assert!(result.terminal_settlements.is_empty());
         }
     }
+}
+
+#[test]
+fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
+    use prajna_data::{
+        NormalizerRegistry, RawStore, SourceKind, SourceRecordInput,
+        cninfo::{
+            CatalogLifecycle, CorporateActionV2, EvidenceLevel, Mvp6Session,
+            StructuredCorporateActionsV2,
+        },
+        publish_dataset, read_manifest,
+    };
+    use prajna_experiment::{opening_evidence, pit::PitContext};
+    use prajna_research::etf_market::{DerivedMarket, ExecutionStatusVersion, MarketEvidence};
+    let start = chrono::NaiveDate::from_ymd_opt(2023, 4, 5).unwrap();
+
+    let lake = fixture::lake();
+    let f = fixture::fixture_with_market_inputs(
+        lake.path(),
+        ["159919", "159612", "159522"],
+        std::collections::BTreeSet::from([(0, 8), (1, 6), (2, 7), (1, 8)]),
+        std::collections::BTreeSet::from([(0, 4)]),
+        std::collections::BTreeMap::from([
+            ((0, 3), (1.1, 1.1)),
+            ((1, 3), (0.9, 0.9)),
+            ((0, 9), (1.0, 1.5)),
+        ]),
+        std::collections::BTreeMap::from([((0, 3), 1.0), ((1, 3), 1.0), ((0, 9), 1.0)]),
+        start,
+    );
+    let raw = RawStore::open(lake.path()).unwrap();
+    let v1 = read_manifest(lake.path(), &f.dsv).unwrap();
+    let market_inputs = v1
+        .core
+        .inputs
+        .iter()
+        .map(|input| input.raw_sha256.clone())
+        .collect::<Vec<_>>();
+    let market = publish_dataset(
+        lake.path(),
+        &raw,
+        &NormalizerRegistry::with_builtins(),
+        "szse-etf-frozen",
+        "4",
+        &market_inputs,
+        "2026-10-20T00:00:00Z",
+    )
+    .unwrap();
+
+    let lifecycles = f
+        .catalog
+        .input()
+        .lifecycles
+        .iter()
+        .map(|life| CatalogLifecycle {
+            code: life.native_symbol.clone(),
+            org_id: format!("synthetic-{}", life.native_symbol),
+            legal_name: format!("Synthetic ETF {}", life.native_symbol),
+            listing_date: life.listing.effective_date,
+            termination_date: life.termination.as_ref().map(|fact| fact.effective_date),
+            fund_category: "equity".into(),
+            tracked_index: "CSI:300".into(),
+            evidence_level: EvidenceLevel::Official,
+            source_announcement_id: format!("synthetic-listing-{}", life.native_symbol),
+            source_page: 1,
+            change_kind: String::new(),
+            available_from: None,
+        })
+        .collect::<Vec<_>>();
+    let session = Mvp6Session {
+        catalog_lifecycles: lifecycles,
+        corporate_actions: StructuredCorporateActionsV2 {
+            schema: "cninfo_corporateActions_structured_v2".into(),
+            version: 2,
+            actions: vec![CorporateActionV2 {
+                code: "159919".into(),
+                kind: "dividend".into(),
+                announcement_date: fixture::date_at(start, 1),
+                record_date: Some(fixture::date_at(start, 2)),
+                ex_date: Some(fixture::date_at(start, 3)),
+                pay_date: Some(fixture::date_at(start, 4)),
+                cash_per_share: Some("0.001".into()),
+                split_ratio: None,
+                liquidation_per_share: None,
+                evidence_level: EvidenceLevel::Official,
+                source_announcement_id: "SYNTH-ACTION".into(),
+                source_page: 1,
+            }],
+        },
+        risk_events: Vec::new(),
+    };
+    let facts_bytes = serde_json::to_vec(&json!({
+        "contract": "mvp-6-cninfo-facts-v1",
+        "dsv": market.dsv.clone(),
+        "session": session.clone(),
+    }))
+    .unwrap();
+    let facts_hash = raw
+        .put(
+            &facts_bytes,
+            SourceRecordInput {
+                content_type: "application/json".into(),
+                source_kind: SourceKind::FileImport,
+                source_id: "synthetic-facts-session".into(),
+                request: json!({
+                    "contract": "mvp-6-cninfo-facts-v1",
+                    "market_dsv": market.dsv.clone(),
+                }),
+                observed_at: "2026-10-20T00:00:00Z".into(),
+                ingested_by: "synthetic-test".into(),
+            },
+        )
+        .unwrap();
+    let mut v7_inputs = market_inputs.clone();
+    v7_inputs.push(facts_hash);
+    let v7 = publish_dataset(
+        lake.path(),
+        &raw,
+        &NormalizerRegistry::with_corporate_actions_v7(market.dsv.clone()).unwrap(),
+        "szse-etf-frozen",
+        "7",
+        &v7_inputs,
+        "2026-10-20T00:00:00Z",
+    )
+    .unwrap();
+
+    let catalog = f.catalog.clone();
+    let generated = opening_evidence::generate(lake.path(), &v7.dsv, &catalog).unwrap();
+    let generated_again = opening_evidence::generate(lake.path(), &v7.dsv, &catalog).unwrap();
+    assert_eq!(
+        opening_evidence::serialize(&generated).unwrap(),
+        opening_evidence::serialize(&generated_again).unwrap()
+    );
+
+    let mut pit_input = f.input.clone();
+    pit_input["market"] = serde_json::to_value(&generated).unwrap();
+    pit_input["corporate_action_rules"] = json!({
+        "version": "synthetic-actions@1",
+        "unexplained_jump_threshold_bps": 1,
+    });
+    let pit_input = serde_json::from_value(pit_input).unwrap();
+    let context = PitContext::build(&pit_input, lake.path(), &v7.dsv).unwrap();
+    use prajna_research::etf_market::TradeState;
+    let halt_id = context
+        .catalog
+        .input()
+        .lifecycles
+        .iter()
+        .find(|life| life.native_symbol == "159919")
+        .unwrap()
+        .instrument_id()
+        .unwrap();
+    let regular = &context.market.cells()[&(halt_id.clone(), fixture::date_at(start, 1))];
+    assert_eq!(
+        regular.state,
+        prajna_research::etf_market::TradeState::Tradable
+    );
+    assert_eq!(regular.execution_price, Some("1".parse().unwrap()));
+    let missing_reference = &context.market.cells()[&(halt_id.clone(), fixture::date_at(start, 4))];
+    assert_eq!(missing_reference.state, TradeState::Unknown);
+    assert!(
+        missing_reference
+            .reasons
+            .contains("missing_tdx_reference_price")
+    );
+    assert!(context.unknown_coverage.unknowns.iter().any(|cell| {
+        cell.instrument_id == halt_id
+            && cell.session_date == fixture::date_at(start, 4)
+            && cell.reason == prajna_research::mvp6_coverage::UnknownReason::MissingReferencePrice
+    }));
+    let upper_limit = &context.market.cells()[&(halt_id.clone(), fixture::date_at(start, 3))];
+    assert_eq!(upper_limit.state, TradeState::Tradable);
+    assert_eq!(upper_limit.execution_price, Some("1.1".parse().unwrap()));
+    assert!(!upper_limit.can_buy);
+    assert!(upper_limit.can_sell);
+    let rule_before_switch = generated
+        .openings
+        .iter()
+        .find(|opening| {
+            opening.instrument_id == halt_id && opening.session_date == fixture::date_at(start, 5)
+        })
+        .unwrap()
+        .limit_rule
+        .as_ref()
+        .unwrap();
+    let rule_on_switch = generated
+        .openings
+        .iter()
+        .find(|opening| {
+            opening.instrument_id == halt_id && opening.session_date == fixture::date_at(start, 6)
+        })
+        .unwrap()
+        .limit_rule
+        .as_ref()
+        .unwrap();
+    assert_ne!(rule_before_switch.version, rule_on_switch.version);
+    assert_eq!(rule_on_switch.effective_from, fixture::date_at(start, 6));
+    let switch_cell = &context.market.cells()[&(halt_id.clone(), fixture::date_at(start, 6))];
+    assert_eq!(
+        switch_cell.limit_rule_version.as_deref(),
+        Some(rule_on_switch.version.as_str())
+    );
+    let lower_id = context
+        .catalog
+        .input()
+        .lifecycles
+        .iter()
+        .find(|life| life.native_symbol == "159612")
+        .unwrap()
+        .instrument_id()
+        .unwrap();
+    let lower_limit = &context.market.cells()[&(lower_id.clone(), fixture::date_at(start, 3))];
+    assert_eq!(lower_limit.state, TradeState::Tradable);
+    assert_eq!(lower_limit.execution_price, Some("0.9".parse().unwrap()));
+    assert!(lower_limit.can_buy);
+    assert!(!lower_limit.can_sell);
+    let unknown_category_id = context
+        .catalog
+        .input()
+        .lifecycles
+        .iter()
+        .find(|life| life.native_symbol == "159522")
+        .unwrap()
+        .instrument_id()
+        .unwrap();
+    let unknown_category_cell =
+        &context.market.cells()[&(unknown_category_id.clone(), fixture::date_at(start, 4))];
+    assert_eq!(unknown_category_cell.state, TradeState::Tradable);
+    assert!(
+        unknown_category_cell
+            .reasons
+            .contains("unknown_preopen_price_limit_rule")
+    );
+    assert!(unknown_category_cell.can_buy && unknown_category_cell.can_sell);
+    assert!(unknown_category_cell.execution_price.is_some());
+    assert!(context.unknown_coverage.unknowns.iter().all(|cell| {
+        cell.instrument_id != unknown_category_id || cell.session_date != fixture::date_at(start, 4)
+    }));
+
+    let no_bar = &context.market.cells()[&(halt_id.clone(), fixture::date_at(start, 8))];
+    assert_eq!(no_bar.state, TradeState::Halted);
+    assert_eq!(no_bar.amount, Some(prajna_domain::Notional::ZERO));
+    assert!(context.unknown_coverage.unknowns.iter().all(|cell| {
+        cell.instrument_id != halt_id || cell.session_date != fixture::date_at(start, 8)
+    }));
+    let untrusted_prices = &context.market.cells()[&(halt_id.clone(), fixture::date_at(start, 9))];
+    assert_eq!(untrusted_prices.state, TradeState::Tradable);
+    assert!(untrusted_prices.reasons.contains("untrusted_bar_prices"));
+    assert!(untrusted_prices.can_buy && untrusted_prices.can_sell);
+    assert!(untrusted_prices.upper_limit.is_some() && untrusted_prices.lower_limit.is_some());
+    assert_eq!(untrusted_prices.execution_price, Some("1".parse().unwrap()));
+    assert!(context.tri.integrity().iter().any(|integrity| {
+        integrity.instrument_id == halt_id
+            && integrity
+                .unexplained_price_jumps
+                .contains(&fixture::date_at(start, 3))
+    }));
+    assert!(context.unknown_coverage.unknowns.iter().all(|cell| {
+        cell.instrument_id != halt_id || cell.session_date != fixture::date_at(start, 3)
+    }));
+
+    let report_path = lake.path().join("acceptance/mvp6-unknown-coverage.json");
+    let first_report = std::fs::read(&report_path).unwrap();
+    let _second_context = PitContext::build(&pit_input, lake.path(), &v7.dsv).unwrap();
+    let second_report = std::fs::read(&report_path).unwrap();
+    assert_eq!(first_report, second_report);
+
+    let cli_input_path = lake.path().join("cli-input.json");
+    std::fs::write(&cli_input_path, serde_json::to_vec(&pit_input).unwrap()).unwrap();
+    let cli_output = Command::new(env!("CARGO_BIN_EXE_prajna-experiment"))
+        .arg("mvp6-opening-evidence")
+        .arg(&cli_input_path)
+        .arg("--lake")
+        .arg(lake.path())
+        .arg("--dsv")
+        .arg(&v7.dsv)
+        .output()
+        .unwrap();
+    assert!(
+        cli_output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&cli_output.stderr)
+    );
+    let cli_summary: serde_json::Value = serde_json::from_slice(&cli_output.stdout).unwrap();
+    assert_eq!(cli_summary["execution_status"], "szse-derived-open@3");
+    assert!(cli_summary["per_etf_unknown_coverage"].is_array());
+    assert!(cli_summary.get("unknown_cells").is_none());
+    let cli_expected = opening_evidence::generate(lake.path(), &v7.dsv, &catalog).unwrap();
+    assert_eq!(
+        std::fs::read(lake.path().join("acceptance/mvp6-opening-evidence-v3.json")).unwrap(),
+        opening_evidence::serialize(&cli_expected).unwrap()
+    );
+    assert!(report_path.is_file());
+
+    let mut narrow_registry = NormalizerRegistry::new();
+    assert!(
+        narrow_registry.register(prajna_data::SzseEtfFrozen::v4(vec![(159000, 159999)]).unwrap())
+    );
+    let alternate_market = publish_dataset(
+        lake.path(),
+        &raw,
+        &narrow_registry,
+        "szse-etf-frozen",
+        "4",
+        &market_inputs,
+        "2026-10-20T00:00:00Z",
+    )
+    .unwrap();
+    let wrong_parent_facts = serde_json::to_vec(&json!({
+        "contract": "mvp-6-cninfo-facts-v1",
+        "dsv": alternate_market.dsv.clone(),
+        "session": session,
+    }))
+    .unwrap();
+    let wrong_facts_hash = raw
+        .put(
+            &wrong_parent_facts,
+            SourceRecordInput {
+                content_type: "application/json".into(),
+                source_kind: SourceKind::FileImport,
+                source_id: "synthetic-facts-session-wrong-parent".into(),
+                request: json!({
+                    "contract": "mvp-6-cninfo-facts-v1",
+                    "market_dsv": alternate_market.dsv.clone(),
+                }),
+                observed_at: "2026-10-20T00:00:00Z".into(),
+                ingested_by: "synthetic-test".into(),
+            },
+        )
+        .unwrap();
+    let mut wrong_v7_inputs = market_inputs;
+    wrong_v7_inputs.push(wrong_facts_hash);
+    let wrong_v7 = publish_dataset(
+        lake.path(),
+        &raw,
+        &NormalizerRegistry::with_corporate_actions_v7(alternate_market.dsv.clone()).unwrap(),
+        "szse-etf-frozen",
+        "7",
+        &wrong_v7_inputs,
+        "2026-10-20T00:00:00Z",
+    )
+    .unwrap();
+    let mismatch = DerivedMarket::from_dataset(
+        lake.path(),
+        &wrong_v7.dsv,
+        &catalog,
+        MarketEvidence {
+            semantic_version: Some(ExecutionStatusVersion::V3),
+            rule_version: "synthetic-mismatch@1".into(),
+            start: catalog.input().coverage.start,
+            end: catalog.input().coverage.end,
+            coverage_gaps: std::collections::BTreeSet::new(),
+            openings: Vec::new(),
+        },
+    )
+    .unwrap_err();
+    assert!(
+        mismatch
+            .to_string()
+            .contains("different v4 Normalizer config")
+    );
 }
 
 #[test]

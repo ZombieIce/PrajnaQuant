@@ -25,6 +25,20 @@ v3 Bars 仍为原始价 D7 schema，另有 `bar_sources@1` Parquet：主键 `(in
 
 Eligible Set 沿用 P9 的 61/60/20 Session 和 1,000 万阈值，以及完整固定 Session 窗口；任一 UNKNOWN 或缺成交额使该窗口不可用。v2 市场身份进入 TRI、Factor Cache、Eligible Set 与 PIT Run 身份；不改旧动量或引擎账户/成本算法。
 
+## 执行状态 v3：首笔成交价与含公司行动 Dataset（#252）
+
+`MarketEvidence.semantic_version = "szse-derived-open@3"` 是独立 opt-in。省略或 null 继续走原 @1；`szse-derived-open@2` 继续使用其原始执行状态逻辑和身份。@3 接受 `szse-etf-frozen@4` 与 `@7`。对 @7，Dataset 的 Raw provenance 必须唯一指向一个 `market_dsv`；该父 DSV 必须是规范配置的 `szse-etf-frozen@4` 并含 TDX 代码表。重放时先用 Manifest logical hash 校验父行情表，再以父 DSV 创建 @7 Normalizer；`instruments`、`sessions`、`bars`、`source_crosscheck` 与 `bar_sources` 中的每个 @7 行都必须与父表同主键行一致。@7 可是父行情表中的 ETF 子集，缺父行、字段不一致或 schema 不兼容都拒绝。该路径复用 `PitContext::build`、PIT 规则与公司行动 TRI，不建立第二套计算路径。P27-24.3 的共享覆盖口径由 `mvp6-unknown-coverage@2` 标识，改变覆盖报告与对应 Run Summary 身份，但不改变旧版执行状态推导。
+
+本机 opening-evidence 生成器只读取 Catalog、冻结 Dataset 日历与公开 `limit_rules_v2.json`，经 `RuleBinding` 为每个 Catalog 生命周期/Session 解析限价规则。无法解析的规则留空。每格 `market_available_at` 固定为 Session 收盘。生成器不读取 `events.csv`、停牌事实或引用索引，输出 JSON 只写本机 acceptance 目录。
+
+- 生命周期内有正成交 Bar 即为 `TRADABLE`，日线 `open` 代表首笔成交价，并写入 @3 的 `MarketCell.execution_price` 供报告/诊断核对。实际 Vector/Fast Event 成交仍直接取执行 Session 的 Dataset `open`；`execution_price` 不替代引擎成交输入，也不表示开盘时已知。无正成交 Bar 为 `HALTED`、成交额为零，不计 `UNKNOWN`。
+- 规则已知且开盘前可用、TDX `bar_sources.reference_price` 为正数时，按规则计算涨跌停，方向门禁按 `open` 判定。规则未知时跳过涨跌停判定、保持可交易并带原因标记，不计 `UNKNOWN`。规则已知但参考价缺失时属于数据缺陷，状态为 `UNKNOWN`。
+- 若 Bar 任一 OHLC 价格超出计算的涨跌停区间或未对齐 tick，保持可交易并带 `untrusted_bar_prices` 诊断标记，不计 `UNKNOWN`。方向门禁只依赖 `open`：`open` 在计算区间内且对齐 tick 时，后续 high/low/close 异常不会放开开盘涨跌停方向；只有 `open` 本身越界或未对齐 tick 时跳过限价门禁并带 `limit_check_skipped_untrusted_prices`。两个来源都存在但 cross-check 不匹配、已知规则缺参考价或可用时刻未知等数据缺陷保持 `UNKNOWN`。
+- `market_available_at` 固定为 Session 收盘；有 Bar 格子的可用时刻不早于收盘，不读取本地 `observed_at`。无正成交 Bar 的 `HALTED` 状态在 Session 收盘可知。
+- P21 未解释跳变与未应用公司行动只写入 TRI 诊断，不传入 UNKNOWN 覆盖评估，也不计为 `UNKNOWN`。
+
+P27-22.5 的执行披露：①日线 `open` 是该日首笔成交价格，开盘停牌时首笔成交可能来自复牌时刻，当前输入没有分钟级成交时刻；②账户模型按同一 Session 结算，未建模先卖后买的盘中资金先后，因此可能允许现实中尚未到账的卖出款用于当日买入；③假设开盘前已提交的订单会参与复牌后的交易，尚未以深交所规则或排队数据验证。该离线状态不是官方开盘快照、排队成交证明或分钟撮合模型。
+
 ### cninfo Risk Exit 连接
 
 `RiskSignals::build_from_cninfo(catalog, notices, index, raw)` 消费 #202 的 `IndexDataset`；Experiment 的 `pit.cninfo_index` 可选字段连接到同一构建器，CLI/Python 宿主共用 Rust 结果。省略字段仍走原 `risk_notices` 路径。要求支持的分类版本、覆盖 Catalog 的公告窗口、无索引/基金 unknown、有效 Raw 引用，以及一致的代码/公告 ID/分类。未知分类版本、覆盖缺口、无法唯一归属生命周期均明确报错，不就近连接代码复用期间。

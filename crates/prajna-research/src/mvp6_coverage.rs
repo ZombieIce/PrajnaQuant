@@ -1,21 +1,17 @@
 //! Deterministic UNKNOWN coverage accounting for the MVP-6 fixed ETF window.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs, io,
-    path::Path,
-};
+use std::{collections::BTreeMap, fs, io, path::Path};
 
 use chrono::NaiveDate;
 use prajna_domain::InstrumentId;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    etf_market::{DerivedMarket, TradeState},
+    etf_market::{DerivedMarket, ExecutionStatusVersion, TradeState},
     pit_universe::{HistoricalCatalog, Lifecycle},
 };
 
-pub const UNKNOWN_COVERAGE_VERSION: &str = "mvp6-unknown-coverage@1";
+pub const UNKNOWN_COVERAGE_VERSION: &str = "mvp6-unknown-coverage@2";
 pub const DEFAULT_TOTAL_UNKNOWN_PERCENT: u8 = 5;
 pub const DEFAULT_PER_INSTRUMENT_UNKNOWN_PERCENT: u8 = 20;
 
@@ -45,7 +41,6 @@ pub enum UnknownReason {
     MissingReferencePrice,
     SourceConflict,
     RuleUnknown { reason: RuleUnknownReason },
-    UnexplainedCorporateAction,
     OtherExecutionEvidence,
 }
 
@@ -60,7 +55,6 @@ pub struct CoverageObservation {
     pub has_reference_price: bool,
     pub source_conflict: bool,
     pub rule_unknown: Option<RuleUnknownReason>,
-    pub unexplained_corporate_action: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -146,7 +140,7 @@ impl UnknownCoverageReport {
             "denominator_cells": self.denominator_cells,
             "unknown_cells": self.unknown_cells,
             "unknown_ratio": ratio(self.unknown_cells, self.denominator_cells),
-            "unknown_percent": percent(self.unknown_cells, self.denominator_cells),
+            "unknown_percent": format_percent(self.unknown_cells, self.denominator_cells),
             "thresholds": self.thresholds,
             "engineering_acceptance": self.engineering_acceptance,
             "instruments": self.instruments.iter().map(|instrument| serde_json::json!({
@@ -154,7 +148,7 @@ impl UnknownCoverageReport {
                 "cells": instrument.cells,
                 "unknown_cells": instrument.unknown_cells,
                 "unknown_ratio": ratio(instrument.unknown_cells, instrument.cells),
-                "unknown_percent": percent(instrument.unknown_cells, instrument.cells),
+                "unknown_percent": format_percent(instrument.unknown_cells, instrument.cells),
             })).collect::<Vec<_>>(),
         })
     }
@@ -167,7 +161,8 @@ fn ratio(numerator: u64, denominator: u64) -> String {
     format!("{numerator}/{denominator}")
 }
 
-fn percent(numerator: u64, denominator: u64) -> String {
+/// Format an unknown-cell percentage with the same rounding used by coverage reports.
+pub fn format_percent(numerator: u64, denominator: u64) -> String {
     if denominator == 0 {
         return "0.00%".into();
     }
@@ -279,7 +274,7 @@ fn ratio_within(numerator: u64, denominator: u64, max_percent: u8) -> bool {
 }
 
 fn primary_unknown_reason(row: &CoverageObservation) -> Option<UnknownReason> {
-    if row.execution_state != TradeState::Unknown && !row.unexplained_corporate_action {
+    if row.execution_state != TradeState::Unknown {
         return None;
     }
     Some(if row.source_conflict {
@@ -292,21 +287,16 @@ fn primary_unknown_reason(row: &CoverageObservation) -> Option<UnknownReason> {
         }
     } else if !row.has_reference_price {
         UnknownReason::MissingReferencePrice
-    } else if row.unexplained_corporate_action {
-        UnknownReason::UnexplainedCorporateAction
     } else {
         UnknownReason::OtherExecutionEvidence
     })
 }
 
 /// Adapt the validated Catalog and DerivedMarket to the pure coverage evaluator.
-/// `unexplained_actions` is populated by the corporate-action integrity stage;
-/// it is empty when no unresolved price discontinuity was found.
 pub fn evaluate_derived_market(
     catalog: &HistoricalCatalog,
     market: &DerivedMarket,
     corporate_action_version: impl Into<String>,
-    unexplained_actions: &BTreeSet<(InstrumentId, NaiveDate)>,
     thresholds: UnknownCoverageThresholds,
 ) -> Result<UnknownCoverageReport, String> {
     let table = super::etf_market::limit_rules::FundLimitRuleTable::official_v2()
@@ -369,27 +359,45 @@ pub fn evaluate_derived_market(
                     binding
                         .is_none_or(|binding| category.lifecycle.as_ref() != Some(binding.target()))
                 });
-            let rule_unknown = (!rule_is_supported).then(|| {
-                if category_binding_is_stale {
-                    RuleUnknownReason::CategoryUnknown
-                } else {
-                    binding.map_or(RuleUnknownReason::CategoryUnknown, |binding| {
-                        classify_unknown_rule(&table, binding, cell.session_date)
+            let is_v3 = market.evidence().semantic_version == Some(ExecutionStatusVersion::V3);
+            let rule_unknown = if is_v3 {
+                cell.reasons
+                    .contains("unknown_preopen_price_limit_rule")
+                    .then(|| {
+                        if category_binding_is_stale {
+                            RuleUnknownReason::CategoryUnknown
+                        } else {
+                            binding.map_or(RuleUnknownReason::CategoryUnknown, |binding| {
+                                classify_unknown_rule(&table, binding, cell.session_date)
+                            })
+                        }
                     })
-                }
-            });
+            } else {
+                (!rule_is_supported).then(|| {
+                    if category_binding_is_stale {
+                        RuleUnknownReason::CategoryUnknown
+                    } else {
+                        binding.map_or(RuleUnknownReason::CategoryUnknown, |binding| {
+                            classify_unknown_rule(&table, binding, cell.session_date)
+                        })
+                    }
+                })
+            };
             CoverageObservation {
                 instrument_id: cell.instrument_id.clone(),
                 session_date: cell.session_date,
                 execution_state: cell.state,
                 has_bar: cell.close.is_some(),
                 has_opening_halt_notice: opening.is_some_and(|item| item.halt.is_some()),
-                has_reference_price: opening.is_some_and(|item| item.reference.is_some()),
+                has_reference_price: if is_v3 {
+                    !cell.reasons.contains("missing_tdx_reference_price")
+                } else {
+                    opening.is_some_and(|item| item.reference.is_some())
+                },
                 source_conflict: cell.reasons.contains("sources_conflicting")
                     || cell.reasons.contains("sources_missing_or_conflicting")
                     || cell.reasons.contains("halt_trade_conflict"),
                 rule_unknown,
-                unexplained_corporate_action: unexplained_actions.contains(&key),
             }
         })
         .collect::<Vec<_>>();
@@ -537,7 +545,6 @@ mod tests {
             has_reference_price: true,
             source_conflict: false,
             rule_unknown: None,
-            unexplained_corporate_action: false,
         }
     }
 
@@ -1115,7 +1122,6 @@ mod tests {
         row.execution_state = TradeState::Unknown;
         row.source_conflict = true;
         row.rule_unknown = Some(RuleUnknownReason::Repealed);
-        row.unexplained_corporate_action = true;
         let first = assess(&sessions, &[life("159001", 1, None)], &[row.clone()]);
         let second = assess(&sessions, &[life("159001", 1, None)], &[row]);
         assert_eq!(first.unknowns.len(), 1);
@@ -1134,6 +1140,16 @@ mod tests {
         assert!(public_summary.get("catalog_version").is_none());
         assert!(public_summary.get("derived_market_version").is_none());
         assert!(public_summary.get("corporate_action_version").is_none());
+    }
+
+    #[test]
+    fn diagnostics_on_a_tradable_cell_do_not_create_unknown_coverage() {
+        let sessions = [date(1)];
+        let mut row = known("159001", 1);
+        row.rule_unknown = Some(RuleUnknownReason::CategoryUnknown);
+        let report = assess(&sessions, &[life("159001", 1, None)], &[row]);
+        assert!(report.unknowns.is_empty());
+        assert_eq!(report.unknown_cells, 0);
     }
 
     #[test]
