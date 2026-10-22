@@ -14,6 +14,7 @@ from scripts.mvp6_acceptance import (
     prior_run_identity,
     raw_integrity_failure,
     raw_hashes,
+    raw_snapshot_unchanged,
 )
 
 
@@ -370,8 +371,15 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
             raw.parent.mkdir(parents=True)
             raw.write_bytes(body)
             inventory = root / "inventory.json"
-            inventory.write_text(json.dumps({"request_records": [{"sha256": f"sha256:{digest}"}]}))
-            self.assertIsNone(raw_integrity_failure(raw_hashes(root, inventory)))
+            content = {"request_records": [{"url": "first", "sha256": f"sha256:{digest}"}]}
+            inventory.write_text(json.dumps(content))
+            before = raw_hashes(root, inventory)
+            self.assertIsNone(raw_integrity_failure(before))
+
+            content["request_records"][0]["url"] = "changed-metadata"
+            inventory.write_text(json.dumps(content))
+            after = raw_hashes(root, inventory)
+            self.assertFalse(raw_snapshot_unchanged(before, after))
 
             raw.write_bytes(b"tampered synthetic raw body")
             self.assertEqual(

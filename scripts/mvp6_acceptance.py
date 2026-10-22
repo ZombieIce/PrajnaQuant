@@ -95,6 +95,7 @@ class RawHashSnapshot:
     checked: dict[str, bool]
     request_records: int
     inventory_error: str | None = None
+    inventory_sha256: str | None = None
 
 
 def raw_snapshot_valid(snapshot: RawHashSnapshot | dict[str, bool]) -> bool:
@@ -119,6 +120,10 @@ def raw_integrity_failure(checked: RawHashSnapshot | dict[str, bool]) -> str | N
         values = checked
     invalid = sum(not valid for valid in values.values())
     return f"frozen Raw integrity failed: {invalid} object missing or mismatched" if invalid else None
+
+
+def raw_snapshot_unchanged(before: RawHashSnapshot, after: RawHashSnapshot) -> bool:
+    return before == after and raw_snapshot_valid(before) and raw_snapshot_valid(after)
 
 
 def verify_unknown_coverage(coverage: dict[str, Any]) -> dict[str, Any]:
@@ -800,12 +805,7 @@ def write_early_failure_report(
     normalized_unknown = normalize_unknown_coverage(unknown)
     raw_before = failure["raw_hashes_before"]
     raw_after = raw_hashes(acceptance.parent, raw_inventory)
-    raw_immutable = (
-        raw_before.checked == raw_after.checked
-        and raw_before.inventory_error == raw_after.inventory_error
-        and raw_snapshot_valid(raw_before)
-        and raw_snapshot_valid(raw_after)
-    )
+    raw_immutable = raw_snapshot_unchanged(raw_before, raw_after)
     artifacts = {
         "schema": EARLY_FAILURE_SCHEMA,
         "failure": {key: failure.get(key) for key in (
@@ -875,7 +875,7 @@ def write_post_main_failure_report(
 ) -> dict[str, Any]:
     normalized_unknown = normalize_unknown_coverage(unknown)
     raw_after = raw_hashes(acceptance.parent, raw_inventory)
-    raw_immutable = raw_before == raw_after and raw_snapshot_valid(raw_before) and raw_snapshot_valid(raw_after)
+    raw_immutable = raw_snapshot_unchanged(raw_before, raw_after)
     failure = {"criterion": criterion, "error": error}
     artifacts = {
         "schema": PHASE_FAILURE_SCHEMA,
@@ -922,9 +922,14 @@ def write_post_main_failure_report(
 
 def raw_hashes(root: Path, inventory: Path) -> RawHashSnapshot:
     try:
-        data = json.loads(inventory.read_text())
+        inventory_bytes = inventory.read_bytes()
     except (OSError, json.JSONDecodeError):
         return RawHashSnapshot({}, 0, "inventory cannot be read")
+    inventory_sha256 = hashlib.sha256(inventory_bytes).hexdigest()
+    try:
+        data = json.loads(inventory_bytes)
+    except json.JSONDecodeError:
+        return RawHashSnapshot({}, 0, "inventory cannot be read", inventory_sha256)
     records = data.get("request_records") if isinstance(data, dict) else None
     if not isinstance(records, list) or not records:
         return RawHashSnapshot({}, 0, "inventory has no request records")
@@ -953,6 +958,7 @@ def raw_hashes(root: Path, inventory: Path) -> RawHashSnapshot:
     return RawHashSnapshot(
         checked, len(records),
         "inventory contains a missing or invalid SHA-256" if malformed else None,
+        inventory_sha256,
     )
 
 
@@ -1467,8 +1473,7 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         },
         "unknown_coverage": run_spec["unknown_coverage"],
         "raw_immutable": (
-            (after := raw_hashes(root, raw_inventory)) == before
-            and raw_snapshot_valid(before) and raw_snapshot_valid(after)
+            raw_snapshot_unchanged(before, (after := raw_hashes(root, raw_inventory)))
         ),
         "non_blocking": {
             "small_grid": {"status": "not_run", "reason": "P16 non-blocking grid is not needed for the engineering ledger gate."},
