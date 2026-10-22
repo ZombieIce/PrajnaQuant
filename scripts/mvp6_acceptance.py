@@ -764,9 +764,15 @@ def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
         )
 
     python = data["python_cli"]
+    python_cli_result = python.get("cli") or {}
+    python_api_result = python.get("python") or {}
     python_cli_ok = (
-        python.get("cli") == python.get("python")
+        bool(python_cli_result)
+        and python_cli_result == python_api_result
         and python.get("api_action") == "replayed"
+        and python.get("api_entry_level") == API_REPLAY_LEVEL
+        and python.get("actual_result_level") == "full"
+        and python.get("table_hashes_match") is True
         and python.get("as_of_view_matches") is True
     )
 
@@ -1320,7 +1326,7 @@ def experiment_definition(
 
 def run_levels(
     definition: dict[str, Any], lake: Path, cli: Path, repository: Path,
-    output: Path, prefix: str, *, levels: tuple[str, ...],
+    output: Path, prefix: str, *, levels: tuple[str, ...], api_replay: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     import prajna
 
@@ -1352,32 +1358,59 @@ def run_levels(
                 original_error or f"CLI recorded {cli_result.get('failed_count')} failed Run(s)",
                 cli_result=cli_result, manifest=cli_manifest,
             )
-        run_ids = [run["run_id"] for run in cli_manifest["runs"]]
-        api_result = typed.run(
-            lake, repository=repository, level=prajna.ResultLevel(level), threads=1,
-        )
-        manifest = json.loads((api_result.path / "execution.json").read_text())
-        if api_result.action != "replayed" or cli_manifest != manifest:
+        try:
+            verify_manifest_level(cli_manifest, level)
+            level_results = manifest_results(cli_manifest)
+        except ValueError as error:
             raise RunPhaseError(
-                f"{prefix}_{level}_api_replay", "not_run",
-                "Python API did not replay CLI Execution: "
-                f"action={api_result.action}, "
-                f"experiment_match={cli_result.get('exp') == manifest.get('experiment_id')}, "
-                f"execution_match={cli_result.get('exe') == manifest.get('execution', {}).get('id')}, "
-                f"manifest_match={cli_manifest == manifest}",
-                cli_result=cli_result,
-                manifest=cli_manifest,
+                f"{prefix}_{level}_level", "failed", str(error),
+                cli_result=cli_result, manifest=cli_manifest,
+            ) from error
+        run_ids = [run["run_id"] for run in cli_manifest["runs"]]
+        cli_results[level] = {**cli_result, **level_results}
+        manifests[level] = cli_manifest
+
+    if api_replay:
+        final_level = levels[-1]
+        final_cli = cli_results[final_level]
+        try:
+            api_result = typed.run(
+                lake, repository=repository, level=prajna.ResultLevel(API_REPLAY_LEVEL), threads=1,
             )
-        if cli_result.get("exp") != manifest["experiment_id"] or cli_result.get("exe") != manifest["execution"]["id"]:
-            raise RuntimeError("Python API and CLI identities differ")
-        api_results[level] = {
+        except Exception as error:
+            raise RunPhaseError(
+                f"{prefix}_api_replay", "not_run",
+                f"Python API {API_REPLAY_LEVEL} replay failed: {error}",
+            ) from error
+        manifest = json.loads((api_result.path / "execution.json").read_text())
+        try:
+            verify_manifest_level(manifest, final_level)
+        except ValueError as error:
+            raise RunPhaseError(
+                f"{prefix}_api_replay_level", "failed", str(error),
+                cli_result=final_cli, manifest=manifests[final_level],
+            ) from error
+        if (api_result.action != "replayed" or manifest != manifests[final_level]
+                or final_cli.get("exp") != manifest.get("experiment_id")
+                or final_cli.get("exe") != manifest.get("execution", {}).get("id")):
+            raise RunPhaseError(
+                f"{prefix}_api_replay", "not_run",
+                "Python API did not replay the promoted CLI Execution: "
+                f"action={api_result.action}, "
+                f"experiment_match={final_cli.get('exp') == manifest.get('experiment_id')}, "
+                f"execution_match={final_cli.get('exe') == manifest.get('execution', {}).get('id')}, "
+                f"manifest_match={manifests[final_level] == manifest}, "
+                f"entry_level={API_REPLAY_LEVEL}, saved_level={manifest_result_level(manifest)}",
+                cli_result=final_cli,
+                manifest=manifests[final_level],
+            )
+        api_results[final_level] = {
             "experiment_id": manifest["experiment_id"],
             "execution_id": manifest["execution"]["id"],
             "action": api_result.action,
+            "entry_level": API_REPLAY_LEVEL,
             **manifest_results(manifest),
         }
-        cli_results[level] = {**cli_result, **manifest_results(cli_manifest)}
-        manifests[level] = manifest
     return cli_results, api_results, manifests
 
 
@@ -1417,11 +1450,43 @@ def compare_independent_levels(manifests_by_run: list[dict[str, Any]]) -> list[d
     return reports
 
 
+RESULT_LEVEL_ORDER = {"summary": 0, "standard": 1, "full": 2}
+API_REPLAY_LEVEL = "summary"
+
+
+def manifest_result_level(manifest: dict[str, Any]) -> str:
+    """Return the actual saved result level, independent of the creation default."""
+    runs = manifest.get("runs", [])
+    levels = [run.get("result_level") for run in runs]
+    if not runs or any(level not in RESULT_LEVEL_ORDER for level in levels):
+        raise ValueError("manifest has no valid saved result level")
+    if len(set(levels)) != 1:
+        raise ValueError(f"manifest mixes saved result levels: {sorted(set(levels))}")
+    return levels[0]
+
+
+def verify_manifest_level(manifest: dict[str, Any], expected: str) -> None:
+    actual = manifest_result_level(manifest)
+    if actual != expected:
+        raise ValueError(f"manifest saved level is {actual}, expected {expected}")
+
+
 def manifest_results(manifest: dict[str, Any]) -> dict[str, Any]:
     return {
+        "default_result_level": manifest.get("default_result_level"),
+        "result_level": manifest_result_level(manifest),
         "summary_logical_hash": manifest["summary_logical_hash"],
-        "runs": {run["run_id"]: {"status": run["status"], "table_hashes": run["table_hashes"]}
-                 for run in manifest["runs"]},
+        "runs": {
+            run["run_id"]: {
+                "status": run["status"],
+                "result_level": run.get("result_level"),
+                "table_hashes": run["table_hashes"],
+                "not_saved": run.get("not_saved", []),
+                "not_produced_by_engine": run.get("not_produced_by_engine", []),
+                "accounting_verified": run.get("accounting_verified"),
+            }
+            for run in manifest["runs"]
+        },
     }
 
 
@@ -1569,7 +1634,7 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         try:
             cli_results, api_results, manifests = run_levels(
                 definition, lake, cli, repository, output / f"independent-run-{index}", "main",
-                levels=("summary", "standard", "full"),
+                levels=("summary", "standard", "full"), api_replay=index == 1,
             )
         except Exception as error:
             manifest = getattr(error, "manifest", None) or {}
@@ -1860,16 +1925,25 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
             "cli": {
                 "experiment_id": main_results[0]["cli"]["full"]["exp"],
                 "execution_id": main_results[0]["cli"]["full"]["exe"],
+                "default_result_level": main_results[0]["cli"]["full"]["default_result_level"],
+                "result_level": main_results[0]["cli"]["full"]["result_level"],
                 "summary_logical_hash": main_results[0]["cli"]["full"]["summary_logical_hash"],
                 "runs": main_results[0]["cli"]["full"]["runs"],
             },
             "python": {
                 "experiment_id": main_results[0]["api"]["full"]["experiment_id"],
                 "execution_id": main_results[0]["api"]["full"]["execution_id"],
+                "default_result_level": main_results[0]["api"]["full"]["default_result_level"],
+                "result_level": main_results[0]["api"]["full"]["result_level"],
                 "summary_logical_hash": main_results[0]["api"]["full"]["summary_logical_hash"],
                 "runs": main_results[0]["api"]["full"]["runs"],
             },
             "api_action": main_results[0]["api"]["full"]["action"],
+            "api_entry_level": main_results[0]["api"]["full"]["entry_level"],
+            "actual_result_level": main_results[0]["api"]["full"]["result_level"],
+            "table_hashes_match": (
+                main_results[0]["cli"]["full"]["runs"] == main_results[0]["api"]["full"]["runs"]
+            ),
             "as_of_view_matches": as_of_matches,
         },
         "accounting": {

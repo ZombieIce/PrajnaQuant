@@ -12,12 +12,15 @@ from scripts.mvp6_acceptance import (
     build_pit_input,
     fixed_universe_diagnostics,
     identity_change,
+    manifest_result_level,
+    manifest_results,
     prior_run_identity,
     raw_integrity_failure,
     raw_hashes,
     raw_snapshot_unchanged,
     reconstruct_vector_close_nav,
     vector_open_nav,
+    verify_manifest_level,
     write_post_main_failure_report,
 )
 
@@ -110,6 +113,23 @@ def run_artifacts():
         "experiment_id": "experiment", "execution_id": "execution", "summary_logical_hash": "summary",
         "levels": levels,
     }
+    python_cli_snapshot = {
+        "experiment_id": "experiment",
+        "execution_id": "execution",
+        "default_result_level": "summary",
+        "result_level": "full",
+        "summary_logical_hash": "summary",
+        "runs": {
+            "run": {
+                "status": "completed",
+                "result_level": "full",
+                "table_hashes": {"account_valuations": "account", "fills": "fills"},
+                "not_saved": [],
+                "not_produced_by_engine": [],
+                "accounting_verified": True,
+            },
+        },
+    }
     return {
         "schema": "mvp6-acceptance-artifacts@1",
         "fixed_universe": universe_diagnostics(),
@@ -134,9 +154,12 @@ def run_artifacts():
         },
         "independent_runs": [independent, json.loads(json.dumps(independent))],
         "python_cli": {
-            "cli": {"experiment_id": "experiment", "execution_id": "execution", "summary_logical_hash": "summary", "runs": {"run": {"status": "completed", "table_hashes": {"account_valuations": "account", "fills": "fills"}}}},
-            "python": {"experiment_id": "experiment", "execution_id": "execution", "summary_logical_hash": "summary", "runs": {"run": {"status": "completed", "table_hashes": {"account_valuations": "account", "fills": "fills"}}}},
+            "cli": json.loads(json.dumps(python_cli_snapshot)),
+            "python": json.loads(json.dumps(python_cli_snapshot)),
             "api_action": "replayed",
+            "api_entry_level": "summary",
+            "actual_result_level": "full",
+            "table_hashes_match": True,
             "as_of_view_matches": True,
         },
         "accounting": {
@@ -401,6 +424,50 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
             "0", Decimal("1000"),
         )
         self.assertEqual(dividend_close, Decimal("1.099"))
+
+    def test_python_cli_requires_summary_replay_promoted_level_and_table_hashes(self):
+        mutations = (
+            lambda python_cli: python_cli.update(actual_result_level="standard"),
+            lambda python_cli: python_cli.update(api_entry_level="standard"),
+            lambda python_cli: python_cli.update(api_action="created"),
+            lambda python_cli: python_cli.update(table_hashes_match=False),
+            lambda python_cli: python_cli["python"]["runs"]["run"]["table_hashes"].update(
+                account_valuations="tampered",
+            ),
+        )
+        for mutate in mutations:
+            with self.subTest(mutation=mutate):
+                artifacts = run_artifacts()
+                mutate(artifacts["python_cli"])
+                result = self.invoke(artifacts)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                check = json.loads(result.stdout)["checks"]["python_as_of_and_cli"]
+                self.assertFalse(check["passed"])
+
+    def test_manifest_levels_use_promoted_runs_not_the_creation_default(self):
+        run = {
+            "run_id": "run", "status": "completed", "result_level": "full",
+            "table_hashes": {"account_valuations": "hash"}, "not_saved": [],
+            "not_produced_by_engine": [], "accounting_verified": True,
+        }
+        manifest = {
+            "default_result_level": "summary", "summary_logical_hash": "summary",
+            "runs": [run],
+        }
+
+        self.assertEqual(manifest_result_level(manifest), "full")
+        verify_manifest_level(manifest, "full")
+        with self.assertRaises(ValueError):
+            verify_manifest_level(manifest, "standard")
+        report = manifest_results(manifest)
+        self.assertEqual(report["default_result_level"], "summary")
+        self.assertEqual(report["result_level"], "full")
+        self.assertEqual(report["runs"]["run"]["table_hashes"], {"account_valuations": "hash"})
+
+        mixed = json.loads(json.dumps(manifest))
+        mixed["runs"].append({**run, "run_id": "other", "result_level": "standard"})
+        with self.assertRaises(ValueError):
+            manifest_result_level(mixed)
 
     def test_daily_accounting_requires_every_session_at_both_valuation_points(self):
         artifacts = run_artifacts()
