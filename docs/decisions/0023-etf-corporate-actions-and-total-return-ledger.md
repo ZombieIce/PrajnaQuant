@@ -112,3 +112,8 @@ Within the research-only MVP-6 TRI semantics selected by `mvp6-market-driven@1`,
 事件规范化与 TRI 由 #180 提供；#181 为 Fast Event 账户增加分红/清算应收和转换账本，为 Vector PIT 增加现金/应收非投资组件，并将 Return Basis、税率、覆盖报告与不完整原因写入 Run Spec/Summary，Standard/Full 保存非空的公司行动事件行。Summary 不含逐事件明细；缺失的 Vector 账本不能解释为零。`Complete` 覆盖只接受显式输入声明；从 TRI 映射的 `observed_raw_set_only` 不构成公告完整性证明。当前 synthetic API 与 ResultLevel 不替代真实 cninfo 解析、真实事件链、来源授权或 P0-2 验收。
 
 6b 基准为沪深300全收益指数，需声明来源、版本和日期对齐，不与价格指数混用。按 P24/P25 冻结本地授权原文、数据/规则/代码/环境与离线备份，两次独立执行所有 ResultLevel logical hash 一致；仓库只保存合成金标准、hash/身份、覆盖与守恒摘要、命令日志，不发布真实行情、公告 PDF 或逐日价格账本。#172 的许可、规则、公告与覆盖未决项均须先解决，设计采纳不等于真实验收通过。
+
+
+### #275：正常 lot full-target 投资预算
+
+#275 完成 #273 的 lot 预算迁移，复用 #274 的可投资权益（现金＋证券、排除应收），保留发放日 close 转桶、下一正常调仓投资及总 NAV 会计/报告。Lot 保留整手、实际费用、最低佣金和现金限量；F8 继续严格量化可行性规则。normal/action/terminal 使用 `fast_event@10/@11/@12`，旧 revision 保留旧行为。完整预算、版本边界和两票覆盖说明见 [ADR 0019 的 #275 修订](0019-fast-event-ledger-and-vector-parity.md#275正常-lot-full-target-投资预算)。不构成 #234/#235 或 MVP-6 验收通过。
