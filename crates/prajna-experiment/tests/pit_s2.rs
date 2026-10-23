@@ -562,6 +562,7 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
         "version": "synthetic-actions@1",
         "unexplained_jump_threshold_bps": 1,
     });
+    let pit_value = pit_input.clone();
     let pit_input = serde_json::from_value(pit_input).unwrap();
     let context = PitContext::build(&pit_input, lake.path(), &v7.dsv).unwrap();
     use prajna_research::etf_market::TradeState;
@@ -682,6 +683,45 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
     assert!(context.unknown_coverage.unknowns.iter().all(|cell| {
         cell.instrument_id != halt_id || cell.session_date != fixture::date_at(start, 3)
     }));
+
+    // Action-path Experiment identity: the corporate-action Run Spec and result
+    // must both carry the new vector@8 semantic version and persist it.
+    let mut action_definition = definition(&f, "vector");
+    action_definition["dsv"] = json!(v7.dsv);
+    action_definition["pit"] = pit_value;
+    let action_experiment = Experiment::parse(&action_definition.to_string(), lake.path()).unwrap();
+    let action_report = action_experiment.execute(lake.path(), 1).unwrap();
+    assert_eq!(
+        action_report.runs[0].status,
+        RunStatus::Completed,
+        "{:?}",
+        action_report.runs[0].error
+    );
+    assert_eq!(
+        action_report.runs[0].run_spec["engine"]["semantic_version"],
+        "vector@8"
+    );
+    assert_eq!(
+        action_report.runs[0]
+            .result
+            .as_ref()
+            .unwrap()
+            .semantic_version
+            .as_deref(),
+        Some("vector@8")
+    );
+    let stored = action_experiment
+        .execute_and_store(
+            lake.path(),
+            env!("CARGO_MANIFEST_DIR"),
+            ResultLevel::Summary,
+            1,
+        )
+        .unwrap();
+    assert_eq!(
+        stored.manifest.runs[0].run_spec.as_ref().unwrap()["engine"]["semantic_version"],
+        "vector@8"
+    );
 
     let report_path = lake.path().join("acceptance/mvp6-unknown-coverage.json");
     let first_report = std::fs::read(&report_path).unwrap();

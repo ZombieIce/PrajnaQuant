@@ -14,15 +14,16 @@ use prajna_data::{CorporateActionKind, CorporateActionRow};
 use prajna_domain::{InstrumentId, Notional, Quantity};
 use prajna_research::{
     corporate_actions::{ActionCoverageStatus, CorporateActionCoverage, CorporateActionSchedule},
+    etf_market::{DerivedMarket, MarketEvidence},
     fast_event::{
         FastEventConfig, FastEventCosts, FastEventError, FastEventResult, PortfolioRun, Rebalance,
         Sizing, SizingAdjustmentReason, run_fast_event_pit_with_actions,
     },
     pit_strategy::{self, RiskSignals},
-    strategy::{Decision, UnfilledEntry},
+    strategy::{Decision, ExecutionEvent, UnfilledEntry},
     vector::{
-        VectorCosts, VectorError, VectorExecutionKind, VectorPitSizing, VectorResult,
-        run_vector_pit_with_actions,
+        VectorCosts, VectorError, VectorExecution, VectorExecutionKind, VectorPitSizing,
+        VectorResult, run_vector_pit_with_actions,
     },
 };
 
@@ -46,14 +47,22 @@ enum Action {
 struct Scenario {
     capital: &'static str,
     action: Action,
+    pay_day: u32,
     commission: &'static str,
     /// `(decision session index, [(fixture instrument index, target weight)])`.
     decisions: Vec<(usize, Vec<(usize, f64)>)>,
     /// `(instrument index, session day, price)`; applied to open and close.
     price_overrides: Vec<(usize, u32, f64)>,
+    /// `(instrument index, session day, reference price)`; used to derive the
+    /// opening limit gates on an otherwise synthetically tradable bar.
+    reference_overrides: Vec<(usize, u32, &'static str)>,
 }
 
-fn action_row(action: Action, instrument_id: InstrumentId) -> Option<CorporateActionRow> {
+fn action_row(
+    action: Action,
+    instrument_id: InstrumentId,
+    pay_day: u32,
+) -> Option<CorporateActionRow> {
     let (kind, per_share) = match action {
         Action::None => return None,
         Action::Dividend(per_share) => (CorporateActionKind::Dividend, per_share),
@@ -70,7 +79,7 @@ fn action_row(action: Action, instrument_id: InstrumentId) -> Option<CorporateAc
         available_at: fixture::time(1, 15),
         record_date: dividend.then(|| fixture::date(2)),
         ex_date: dividend.then(|| fixture::date(3)),
-        pay_date: Some(fixture::date(4)),
+        pay_date: Some(fixture::date(pay_day)),
         effective_date: (!dividend).then(|| fixture::date(3)),
         cash_per_share: dividend.then(|| per_share.into()),
         share_ratio: None,
@@ -96,11 +105,33 @@ fn run(
             .map(|(instrument, day, price)| ((instrument, day), (price, price))),
     );
     let f = fixture::fixture_with_action_prices(lake.path(), overrides);
+    let market = if scenario.reference_overrides.is_empty() {
+        f.market.clone()
+    } else {
+        let mut evidence: MarketEvidence =
+            serde_json::from_value(f.input["market"].clone()).unwrap();
+        for (instrument, day, reference) in &scenario.reference_overrides {
+            let opening = evidence
+                .openings
+                .iter_mut()
+                .find(|opening| {
+                    opening.instrument_id == f.ids[*instrument]
+                        && opening.session_date == fixture::date(*day)
+                })
+                .expect("reference override opening");
+            opening
+                .reference
+                .as_mut()
+                .expect("synthetic opening reference")
+                .adjusted_previous_close = reference.parse().unwrap();
+        }
+        DerivedMarket::from_dataset(lake.path(), &f.dsv, &f.catalog, evidence).unwrap()
+    };
     let native =
         prajna_research::load_panel(lake.path(), &f.dsv, &"SZSE".parse().unwrap()).unwrap();
     let panel = pit_strategy::lifecycle_panel(&native, &f.catalog).unwrap();
     let instrument = f.ids[1].clone();
-    let action = action_row(scenario.action, instrument.clone());
+    let action = action_row(scenario.action, instrument.clone(), scenario.pay_day);
     let actions = CorporateActionSchedule::new(
         "synthetic-actions@1",
         action.iter().cloned().collect(),
@@ -158,7 +189,7 @@ fn run(
     (
         run_fast_event_pit_with_actions(
             &panel,
-            &f.market,
+            &market,
             &RiskSignals::default(),
             &config,
             &portfolios,
@@ -167,7 +198,7 @@ fn run(
         run_vector_pit_with_actions(
             &panel,
             &decisions,
-            &f.market,
+            &market,
             &RiskSignals::default(),
             &costs,
             config.initial_cash,
@@ -191,6 +222,14 @@ fn positions(result: &FastEventResult, session: usize) -> BTreeMap<InstrumentId,
         .iter()
         .map(|(id, marked)| (id.clone(), marked.quantity))
         .collect()
+}
+
+fn trace<'a>(vector: &'a VectorResult, session: &str) -> &'a VectorExecution {
+    vector
+        .executions
+        .iter()
+        .find(|execution| execution.session_date == session)
+        .expect("PIT execution trace")
 }
 
 fn sizing<'a>(vector: &'a VectorResult, session: &str) -> &'a VectorPitSizing {
@@ -236,6 +275,7 @@ fn ex_date_and_pay_date_open_size_from_investable_equity_then_invest_paid_cash()
     let (fast, vector) = run(Scenario {
         capital: "1000",
         action: Action::Dividend("0.5"),
+        pay_day: 4,
         commission: "0",
         decisions: vec![
             (0, vec![(1, 1.0)]),
@@ -243,6 +283,7 @@ fn ex_date_and_pay_date_open_size_from_investable_equity_then_invest_paid_cash()
             (3, vec![(1, 1.0)]),
         ],
         price_overrides: vec![],
+        reference_overrides: vec![],
     });
     let (fast, vector) = (fast.unwrap(), vector.unwrap());
     assert_identities(&fast);
@@ -307,9 +348,11 @@ fn zero_fee_targets_keep_intended_cash_without_renormalizing() {
     let (fast, vector) = run(Scenario {
         capital: "1000",
         action: Action::Dividend("0.5"),
+        pay_day: 4,
         commission: "0",
         decisions: vec![(0, vec![(1, 1.0)]), (1, vec![(1, 0.4), (0, 0.2)])],
         price_overrides: vec![],
+        reference_overrides: vec![],
     });
     let (fast, vector) = (fast.unwrap(), vector.unwrap());
     assert_identities(&fast);
@@ -354,9 +397,11 @@ fn nonzero_cost_rotation_uses_pre_trade_total_nav_for_cost_and_turnover() {
     let (fast, vector) = run(Scenario {
         capital: "1010.101010101010101010",
         action: Action::Dividend("0.5"),
+        pay_day: 4,
         commission: "0.01",
         decisions: vec![(0, vec![(1, 1.0)]), (1, vec![(0, 1.0)])],
         price_overrides: vec![],
+        reference_overrides: vec![],
     });
     let (fast, vector) = (fast.unwrap(), vector.unwrap());
     assert_identities(&fast);
@@ -374,6 +419,10 @@ fn nonzero_cost_rotation_uses_pre_trade_total_nav_for_cost_and_turnover() {
     assert_eq!(
         sizing.investable_equity.mantissa() - sizing.fees.mantissa(),
         n("490").mantissa()
+    );
+    assert_eq!(
+        sizing.desired_quantities.values().next().unwrap(),
+        &q("490")
     );
     let rotation = fast
         .fills
@@ -412,6 +461,9 @@ fn nonzero_cost_rotation_uses_pre_trade_total_nav_for_cost_and_turnover() {
         (vector.sessions[2].cost, vector.sessions[2].turnover),
         (0.01, 1.0)
     );
+    let components = vector.sessions[2].portfolio_components.as_ref().unwrap();
+    assert_eq!(components.available_cash_weight, 0.0);
+    assert_eq!(components.dividend_receivable_weight, 500.0 / 990.0);
 }
 
 #[test]
@@ -423,9 +475,11 @@ fn receivable_is_not_deducted_twice_in_the_rounding_proof() {
     let (fast, vector) = run(Scenario {
         capital: "2000",
         action: Action::Dividend("0.5"),
+        pay_day: 4,
         commission: "0",
         decisions: vec![(0, vec![(1, 1.0)]), (1, vec![(1, 0.5), (0, 0.5)])],
         price_overrides: (3..=10).map(|day| (0, day, 3.0)).collect(),
+        reference_overrides: vec![],
     });
     let (fast, vector) = (fast.unwrap(), vector.unwrap());
     assert_identities(&fast);
@@ -473,6 +527,7 @@ fn zero_investable_equity_waits_then_invests_only_paid_cash() {
     let (fast, vector) = run(Scenario {
         capital: "1000",
         action: Action::Liquidation("0.5"),
+        pay_day: 4,
         commission: "0",
         decisions: vec![
             (0, vec![(1, 1.0)]),
@@ -481,6 +536,7 @@ fn zero_investable_equity_waits_then_invests_only_paid_cash() {
             (3, vec![(2, 1.0)]),
         ],
         price_overrides: vec![],
+        reference_overrides: vec![],
     });
     let (fast, vector) = (fast.unwrap(), vector.unwrap());
     assert_identities(&fast);
@@ -541,9 +597,11 @@ fn skipped_buy_keeps_intended_cash_with_a_positive_receivable() {
     let (fast, vector) = run(Scenario {
         capital: "1000",
         action: Action::Dividend("0.5"),
+        pay_day: 4,
         commission: "0",
         decisions: vec![(0, vec![(1, 1.0)]), (1, vec![(1, 0.5), (2, 0.5)])],
         price_overrides: vec![],
+        reference_overrides: vec![],
     });
     let (fast, vector) = (fast.unwrap(), vector.unwrap());
     assert_identities(&fast);
@@ -580,13 +638,152 @@ fn skipped_buy_keeps_intended_cash_with_a_positive_receivable() {
 }
 
 #[test]
+fn blocked_sell_with_a_positive_receivable_defers_without_fills_or_fees() {
+    // Lower-limit sell block on the ex-date: the required sell is on the held
+    // instrument, so the whole target defers while the receivable stays in NAV.
+    let (fast, vector) = run(Scenario {
+        capital: "1000",
+        action: Action::Dividend("0.5"),
+        pay_day: 4,
+        commission: "0",
+        decisions: vec![(0, vec![(1, 1.0)]), (1, vec![(1, 0.5)])],
+        price_overrides: vec![],
+        reference_overrides: (3..=10)
+            .map(|day| (1, day, "0.555555555555555556"))
+            .collect(),
+    });
+    let (fast, vector) = (fast.unwrap(), vector.unwrap());
+    assert_identities(&fast);
+    assert_eq!(fast.fills.len(), 1, "blocked sell must not fill");
+    let held = fast.fills[0].fill.order().instrument_id().clone();
+    let attempt = fast
+        .attempts
+        .iter()
+        .find(|attempt| {
+            matches!(
+                &attempt.event,
+                ExecutionEvent::Deferred { attempt_session, .. }
+                    if attempt_session.session_date == fixture::date(3)
+            )
+        })
+        .expect("D3 deferral");
+    let ExecutionEvent::Deferred { blocked, .. } = &attempt.event else {
+        unreachable!()
+    };
+    assert_eq!(
+        blocked.iter().cloned().collect::<Vec<_>>(),
+        vec![held.clone()]
+    );
+    let after = portfolio(&fast, 2, false);
+    assert_eq!(
+        (after.cash, after.dividend_receivable, after.equity),
+        (n("0"), n("500"), n("1000"))
+    );
+    assert_eq!(positions(&fast, 2)[&held], q("1000"));
+    let event = trace(&vector, &fixture::date(3).to_string());
+    assert_eq!(event.kind, VectorExecutionKind::Deferred);
+    assert!(event.blocked.contains(&held));
+    let sizing = event.pit_sizing.as_ref().unwrap();
+    assert_eq!(
+        (sizing.equity, sizing.investable_equity, sizing.fees),
+        (n("1000"), n("500"), n("0"))
+    );
+    assert_eq!(sizing.required_sides[&held], "sell");
+    assert_eq!(
+        (vector.sessions[2].turnover, vector.sessions[2].cost),
+        (0.0, 0.0)
+    );
+}
+
+fn fee_only_scenario(reference: Option<&'static str>) -> (FastEventResult, VectorResult) {
+    // Price 1e9 keeps 3.75e-7 shares materially valued; the ex-date target
+    // differs from drift by 5e-13, so the quantity delta rounds to zero while a
+    // sell-side candidate fee remains. The dividend creates a 75 receivable and
+    // is paid only after the last retry.
+    let (fast, vector) = run(Scenario {
+        capital: "1000",
+        action: Action::Dividend("200000000"),
+        pay_day: 10,
+        commission: "0.5",
+        decisions: vec![(0, vec![(1, 0.5)]), (1, vec![(1, 0.4999999999995)])],
+        price_overrides: (1..=10).map(|day| (1, day, 1.0e9)).collect(),
+        reference_overrides: reference
+            .into_iter()
+            .flat_map(|price| (3..=10).map(move |day| (1, day, price)))
+            .collect(),
+    });
+    (fast.unwrap(), vector.unwrap())
+}
+
+#[test]
+fn fee_only_sell_with_a_positive_receivable_settles_once() {
+    let (fast, vector) = fee_only_scenario(None);
+    assert_identities(&fast);
+    assert_eq!(fast.fills.len(), 1);
+    let settlements = fast.account.fee_settlements();
+    assert_eq!(settlements.len(), 1);
+    let fee = &settlements[0];
+    assert_eq!(fee.fee_side(), Side::Sell);
+    assert_eq!(fee.fee_basis(), n("0.000000000375"));
+    assert_eq!(fee.total_fees(), n("0.0000000001875"));
+    assert_eq!(fee.executed_at(), fast.sessions[2].session.ts_open);
+    let after = portfolio(&fast, 2, false);
+    assert_eq!(
+        (after.cash, after.dividend_receivable, after.equity),
+        (n("374.9999999998125"), n("75"), n("824.9999999998125"))
+    );
+    let sizing = sizing(&vector, &fixture::date(3).to_string());
+    assert_eq!(
+        (sizing.equity, sizing.investable_equity, sizing.fees),
+        (n("825"), n("750"), n("0.0000000001875"))
+    );
+    assert!(sizing.cash_adjustments.is_empty());
+    assert_eq!(
+        sizing.desired_quantities.values().next().unwrap(),
+        &q("0.000000375")
+    );
+    let total_nav = "825".parse::<f64>().unwrap();
+    assert_eq!(
+        vector.sessions[2].turnover,
+        "0.000000000375".parse::<f64>().unwrap() / total_nav
+    );
+    assert_eq!(
+        vector.sessions[2].cost,
+        "0.0000000001875".parse::<f64>().unwrap() / total_nav
+    );
+}
+
+#[test]
+fn blocked_fee_only_sell_with_a_positive_receivable_defers_without_settlement() {
+    let (fast, vector) = fee_only_scenario(Some("1111111111.111111111111111111"));
+    assert_identities(&fast);
+    assert_eq!(fast.fills.len(), 1, "fee-only side must not create a fill");
+    assert!(fast.account.fee_settlements().is_empty());
+    let after = portfolio(&fast, 2, false);
+    assert_eq!(
+        (after.cash, after.dividend_receivable, after.equity),
+        (n("375"), n("75"), n("825"))
+    );
+    let event = trace(&vector, &fixture::date(3).to_string());
+    assert_eq!(event.kind, VectorExecutionKind::Deferred);
+    let sizing = event.pit_sizing.as_ref().unwrap();
+    assert_eq!(
+        (sizing.equity, sizing.investable_equity, sizing.fees),
+        (n("825"), n("750"), n("0.0000000001875"))
+    );
+    assert_eq!(sizing.required_sides.values().next().unwrap(), "sell");
+}
+
+#[test]
 fn exhausted_fees_and_invalid_targets_still_fail() {
     let (fast, vector) = run(Scenario {
         capital: "1000",
         action: Action::Dividend("0.5"),
+        pay_day: 4,
         commission: "0.5",
         decisions: vec![(0, vec![(1, 1.0)]), (1, vec![(0, 1.0)])],
         price_overrides: vec![],
+        reference_overrides: vec![],
     });
     for error in [
         fast.unwrap_err().to_string(),
@@ -598,9 +795,11 @@ fn exhausted_fees_and_invalid_targets_still_fail() {
     let (fast, vector) = run(Scenario {
         capital: "1000",
         action: Action::None,
+        pay_day: 4,
         commission: "0",
         decisions: vec![(0, vec![(1, 1.5)])],
         price_overrides: vec![],
+        reference_overrides: vec![],
     });
     let error = fast.unwrap_err().to_string();
     assert!(
