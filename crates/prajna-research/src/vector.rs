@@ -961,7 +961,9 @@ fn run_vector_inner(
                     book.equity(&decimal_marks.prices).map_err(sizing_error)?
                 };
                 let next_index = session_index + 1;
-                let mut next_marks = Marks::default();
+                // Preserve the Open field's source state so a missing next Bar
+                // carries valuation without making the price fresh.
+                let mut next_marks = decimal_marks.clone();
                 next_marks
                     .update(panel, next_index, PriceField::Open)
                     .map_err(sizing_error)?;
@@ -1648,6 +1650,24 @@ fn invalid_costs(message: impl Into<String>) -> VectorError {
 mod tests {
     use super::*;
     use prajna_account::FillCosts;
+
+    #[test]
+    fn ledger_equity_without_price_history_still_returns_missing_price() {
+        let instrument: InstrumentId = "A.SYNTH".parse().unwrap();
+        let state = ParitySizingState {
+            cash: Notional::ZERO,
+            dividend_receivable: Notional::ZERO,
+            liquidation_receivable: Notional::ZERO,
+            positions: BTreeMap::from([(instrument.clone(), "1".parse().unwrap())]),
+        };
+
+        assert!(matches!(
+            state.equity(&BTreeMap::new()),
+            Err(crate::fast_event::FastEventError::Ledger(
+                prajna_account::LedgerError::MissingPrice(id)
+            )) if id == instrument
+        ));
+    }
 
     #[test]
     fn corrected_fee_only_sell_is_blocked_by_the_actual_side_gate() {
