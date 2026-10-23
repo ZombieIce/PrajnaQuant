@@ -280,6 +280,7 @@ fn ex_date_and_pay_date_open_size_from_investable_equity_then_invest_paid_cash()
         decisions: vec![
             (0, vec![(1, 1.0)]),
             (1, vec![(1, 1.0)]),
+            (2, vec![(1, 1.0)]),
             (3, vec![(1, 1.0)]),
         ],
         price_overrides: vec![],
@@ -287,7 +288,11 @@ fn ex_date_and_pay_date_open_size_from_investable_equity_then_invest_paid_cash()
     });
     let (fast, vector) = (fast.unwrap(), vector.unwrap());
     assert_identities(&fast);
-    assert_eq!(fast.fills.len(), 2, "ex-date full target needs no trade");
+    assert_eq!(
+        fast.fills.len(),
+        2,
+        "ex-date and pay-date-open full targets need no trade"
+    );
 
     // D2 open buys 1000 shares at 1; D2 close locks 500 receivable. At the D3
     // open total NAV is 1000 but investable equity is 500, so 100% holds.
@@ -306,6 +311,32 @@ fn ex_date_and_pay_date_open_size_from_investable_equity_then_invest_paid_cash()
         &q("1000")
     );
 
+    // The D3-close Decision is a full target at the pay-date D4 open: the
+    // receivable is still unpaid, so it cannot fund a new buy or create a fill.
+    assert!(
+        fast.fills
+            .iter()
+            .all(|fill| fill.fill.executed_at() != fast.sessions[3].session.ts_open)
+    );
+    let pay_date_open = trace(&vector, &fixture::date(4).to_string());
+    assert_eq!(pay_date_open.kind, VectorExecutionKind::Executed);
+    let pay_date_sizing = pay_date_open.pit_sizing.as_ref().unwrap();
+    assert_eq!(
+        (
+            pay_date_sizing.equity,
+            pay_date_sizing.investable_equity,
+            pay_date_sizing.fees
+        ),
+        (n("1000"), n("500"), n("0"))
+    );
+    assert_eq!(
+        pay_date_sizing.desired_quantities.values().next().unwrap(),
+        &q("1000")
+    );
+    assert_eq!(
+        (vector.sessions[3].turnover, vector.sessions[3].cost),
+        (0.0, 0.0)
+    );
     // Pay-date open still excludes the receivable; close only moves buckets.
     let paid_open = portfolio(&fast, 3, false);
     assert_eq!(
