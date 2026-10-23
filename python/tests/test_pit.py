@@ -64,8 +64,12 @@ class PitTests(unittest.TestCase):
         self.data = json.loads(subprocess.check_output([PREPARE, self.lake], text=True))
         self.ids = self.data.pop('ids')
         self.params = self.data['parameter_space']['list'][0]
-        self.strategy = prajna.Strategy('pit_rotation', '1', bar_columns=(), factors=(
-            prajna.FactorDependency('momentum', 'etf_tri_momentum', {'lookback': 1}),
+        self.strategy = self.default_strategy()
+
+    def default_strategy(self):
+        return prajna.Strategy('pit_rotation', '1', bar_columns=(), factors=(
+            prajna.FactorDependency('momentum', 'etf_tri_momentum',
+                                    {'lookback': self.params['lookback']}),
         ))
 
     def experiment(self, engine='vector', python=False, pit=None):
@@ -127,6 +131,8 @@ class PitTests(unittest.TestCase):
         self.data = json.loads(subprocess.check_output(
             [str(PREPARE), str(self.lake), *flags], text=True))
         self.ids = self.data.pop('ids')
+        self.params = self.data['parameter_space']['list'][0]
+        self.strategy = self.default_strategy()
 
     def run_cli_failure(self, pit):
         experiment = self.experiment(pit=pit)
@@ -349,8 +355,16 @@ class PitTests(unittest.TestCase):
         result = self.experiment(python=True, pit=pit).run(
             self.lake, repository=self.repo, strategy=strategy, decide=flat_rotation,
             level=prajna.ResultLevel.FULL)
-        self.assertEqual(result.manifest['runs'][0]['status'], 'completed')
-        self.assertEqual(result.manifest['runs'][0]['table_hashes'], run['table_hashes'])
+        python_run = result.manifest['runs'][0]
+        self.assertEqual(python_run['status'], 'completed')
+        self.assertEqual(python_run['table_hashes'], run['table_hashes'])
+        self.assertEqual(python_run['run_spec']['pit']['fixed_universe'], FIXED_UNIVERSE)
+        for entry in python_run['run_spec']['session_inputs']:
+            universe_spec = entry['eligible']['universe']['run_spec']
+            self.assertEqual(universe_spec['fixed_list'], ['159002', '159003'])
+            self.assertEqual(universe_spec['fixed_list_version'], FIXED_UNIVERSE['version'])
+            self.assertIsNone(universe_spec.get('broad_index_version'))
+
 
     def test_explicit_null_without_broad_index_requires_versioned_list(self):
         self.load_fixture('null-no-broad-lake', '--no-broad-index')
@@ -416,6 +430,39 @@ class PitTests(unittest.TestCase):
         failed = self.run_cli_failure(pit)
         self.assertEqual(failed.returncode, 2)
         self.assertIn('invalid fixed Universe', failed.stderr)
+
+    def test_explicit_fixed_universe_below_minimum_fails_shared_engine(self):
+        pit = copy.deepcopy(self.data['pit'])
+        pit['fixed_universe'] = {'version': 'synthetic-fixed-etfs@1',
+                                 'codes': ['159002', '159003'],
+                                 'minimum_code_count': 3}
+        # The As-of selector keeps the configured codes; the shared Engine, not
+        # the binding, applies the minimum-included-code gate.
+        views, _ = self.generate_views(pit)
+        self.assertIn(self.ids[2], views[-1].universe)
+
+        cli, run = self.run_cli(pit, level='summary')
+        self.assertEqual(run['status'], 'failed')
+        self.assertEqual(run['run_spec']['pit']['fixed_universe']['minimum_code_count'], 3)
+        self.assertEqual(
+            run['run_spec']['session_inputs'][-1]['eligible']['universe']['run_spec']['fixed_list'],
+            ['159002', '159003'])
+        summary = prajna.read_run(str(self.lake), cli['exp'], cli['exe'], run['run_id'],
+                                  table='summary')
+        self.assertIn('P27-19 escalation', summary.to_pylist()[0]['error'])
+
+        experiment = self.experiment(python=True, pit=pit)
+        result = experiment.run(self.lake, repository=self.repo,
+                                strategy=self.view_strategy(), decide=flat_rotation,
+                                level=prajna.ResultLevel.SUMMARY)
+        python_run = result.manifest['runs'][0]
+        self.assertEqual(python_run['status'], 'failed')
+        self.assertEqual(python_run['run_spec']['pit']['fixed_universe'],
+                         pit['fixed_universe'])
+        summary = prajna.read_run(
+            str(self.lake), experiment.describe(self.lake).experiment_id,
+            result.manifest['execution']['id'], python_run['run_id'], table='summary')
+        self.assertIn('P27-19 escalation', summary.to_pylist()[0]['error'])
 
     def test_fixed_universe_lifecycle_matches_cli_after_termination(self):
         self.load_fixture('terminated-fixed-lake', '--terminated')
