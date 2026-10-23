@@ -701,13 +701,16 @@ pub(crate) fn generate_decisions(
     let plan = pit
         .map(|p| {
             let params: PitS2Params = serde_json::from_value(params.clone()).map_err(invalid)?;
-            pit_strategy::plan(
+            pit_strategy::plan_with_fixed_universe(
                 &p.catalog,
                 &p.market,
                 &p.tri,
                 &p.risk,
-                p.eligibility.clone(),
                 &params,
+                pit_strategy::PitUniverseSelection {
+                    eligibility: p.eligibility.clone(),
+                    fixed_universe: p.fixed_universe.as_ref(),
+                },
                 &panel.sessions,
             )
             .map_err(invalid)
