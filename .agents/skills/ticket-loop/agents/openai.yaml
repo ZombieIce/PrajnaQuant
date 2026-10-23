@@ -1,0 +1,5 @@
+interface:
+  display_name: "Ticket Loop"
+  short_description: "Drive one issue to an independently reviewed PR"
+policy:
+  allow_implicit_invocation: false
