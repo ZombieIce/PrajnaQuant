@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation, ROUND_FLOOR
+from decimal import Decimal, InvalidOperation, ROUND_FLOOR, ROUND_HALF_EVEN, localcontext
 import hashlib
 import json
 from pathlib import Path
@@ -471,6 +471,13 @@ def _close(left: Any, right: Any) -> bool:
         return False
 
 
+def ledger_notional(quantity: Decimal, price: Decimal) -> Decimal:
+    """Mirror prajna-domain scale-18 notional multiplication, ties to even."""
+    with localcontext() as context:
+        context.prec = 80  # Exact product of the two signed i128 mantissas.
+        return (quantity * price).quantize(Decimal("1e-18"), rounding=ROUND_HALF_EVEN)
+
+
 def ledger_oracle(
     valuation: dict[str, Any],
 ) -> tuple[Decimal, Decimal, Decimal, Decimal, Decimal]:
@@ -484,7 +491,7 @@ def ledger_oracle(
         quantity = dec(position["quantity"])
         price = dec(position["price"])
         market_value = dec(position["market_value"])
-        calculated_value = quantity * price
+        calculated_value = ledger_notional(quantity, price)
         if quantity < 0 or price <= 0 or calculated_value != market_value:
             raise ValueError("position quantity, raw valuation price, and market value do not reconcile")
         invested += calculated_value
@@ -703,7 +710,7 @@ def verify_main_evidence(
             price = dec(row["price"])
             proceeds = dec(row["proceeds"])
             if (not row.get("session_date") or not row.get("instrument_id")
-                    or quantity <= 0 or price <= 0 or proceeds != quantity * price):
+                    or quantity <= 0 or price <= 0 or proceeds != ledger_notional(quantity, price)):
                 terminal_errors.append({"kind": "invalid_terminal_settlement"})
         except (KeyError, InvalidOperation, TypeError):
             terminal_errors.append({"kind": "invalid_terminal_settlement"})
@@ -803,7 +810,7 @@ def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
             for instrument, position in row["positions"].items():
                 quantity, price = dec(position["quantity"]), dec(position["price"])
                 market_value = dec(position["market_value"])
-                if quantity < 0 or price <= 0 or quantity * price != market_value:
+                if quantity < 0 or price <= 0 or ledger_notional(quantity, price) != market_value:
                     accounting_errors.append({"session_date": row["session_date"], "instrument_id": instrument})
                 if reported_equity > 0:
                     weight = market_value / reported_equity

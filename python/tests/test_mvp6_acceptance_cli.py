@@ -12,6 +12,8 @@ from scripts.mvp6_acceptance import (
     build_pit_input,
     fixed_universe_diagnostics,
     identity_change,
+    ledger_notional,
+    ledger_oracle,
     manifest_result_level,
     manifest_results,
     prior_run_identity,
@@ -322,6 +324,22 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
                 result = self.invoke(artifacts)
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertFalse(json.loads(result.stdout)["checks"]["daily_parity"]["passed"])
+
+    def test_ledger_oracle_uses_scale_18_ties_even_without_tolerance(self):
+        for quantity, expected in (("0.000000000000000001", "0"),
+                                   ("0.000000000000000003", "0.000000000000000002"),
+                                   ("123456.123456123456123456", "15234.485634485634485634")):
+            price = "0.1234" if quantity.startswith("123") else "0.5"
+            with self.subTest(quantity=quantity):
+                value = ledger_notional(Decimal(quantity), Decimal(price))
+                self.assertEqual(value, Decimal(expected))
+                row = {"cash": "1", "dividend_receivable": "0", "positions": {
+                    "synthetic": {"quantity": quantity, "price": price, "market_value": expected},
+                }}
+                self.assertEqual(ledger_oracle(row)[2], value)
+                row["positions"]["synthetic"]["market_value"] = str(value + Decimal("1e-18"))
+                with self.assertRaises(ValueError):
+                    ledger_oracle(row)
 
     def test_daily_parity_recomputes_the_fast_ledger_as_an_independent_oracle(self):
         artifacts = run_artifacts()
