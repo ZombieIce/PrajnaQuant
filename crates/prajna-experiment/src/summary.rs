@@ -183,7 +183,9 @@ fn drawdown(
 }
 
 /// E11 metrics on daily close account NAV, normalized by initial account capital.
-/// Turnover and cost are fractions of raw-open pre-trade account equity.
+/// Turnover and cost are fractions of raw-open pre-trade total NAV. Normal F8
+/// parity reports the executed plan's candidate fee bases as turnover; lot,
+/// retry and external-execution fills keep their actual raw fill notional.
 pub(crate) fn summarize_fast(
     result: &prajna_research::fast_event::FastEventResult,
     sessions_per_year: u64,
@@ -204,7 +206,7 @@ pub(crate) fn summarize_fast(
     for fill in &result.fills {
         let entry = totals.entry(fill.fill.executed_at()).or_insert((0.0, 0.0));
         entry.0 += number(fill.fill.total_fees())?;
-        entry.1 += number(fill.fill.raw_notional())?;
+        entry.1 += number(fill.turnover_basis)?;
     }
     for fee in result.account.fee_settlements() {
         let entry = totals.entry(fee.executed_at()).or_insert((0.0, 0.0));
@@ -306,7 +308,7 @@ pub(crate) fn summarize_fast(
             .map(|s| s.to_string())
             .chain([
                 "Account and VP identities verified at every Session open-after and close; exact scale-18 ledger.".into(),
-                "Metrics use close account NAV; turnover/cost normalized by raw-open pre-trade account equity.".into(),
+                "Metrics use close account NAV; normal F8 turnover uses executed candidate fee bases and cost uses actual fees, both normalized by raw-open pre-trade total NAV; lot, retry and external-execution turnover keeps actual raw fill notional.".into(),
             ])
             .collect(),
         costs: prajna_research::vector::VectorCosts {

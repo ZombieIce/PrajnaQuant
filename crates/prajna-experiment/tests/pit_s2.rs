@@ -50,7 +50,7 @@ fn terminal_settlement_semantics_is_explicit_and_changes_run_identity() {
     );
     assert_eq!(
         enabled_run.run_spec["engine"]["semantic_version"],
-        "vector@6"
+        "vector@9"
     );
 }
 
@@ -69,7 +69,7 @@ fn shared_sizing_version_is_in_run_spec_and_result_and_reruns_are_stable() {
     let vector_run = &vector_experiment.expand(lake.path()).unwrap()[0];
     assert_eq!(
         vector_run.run_spec["engine"]["semantic_version"],
-        "vector@4"
+        "vector@7"
     );
 
     let mut parity_input = definition(&f, "fast_event");
@@ -80,9 +80,18 @@ fn shared_sizing_version_is_in_run_spec_and_result_and_reruns_are_stable() {
     let second = parity_experiment.execute(lake.path(), 1).unwrap();
     let run = &first.runs[0];
     assert_eq!(run.status, RunStatus::Completed);
-    assert_eq!(run.run_spec["engine"]["semantic_version"], "fast_event@4");
+    assert_eq!(run.run_spec["engine"]["semantic_version"], "fast_event@7");
     let fast = run.fast_event_result.as_ref().unwrap();
-    assert_eq!(fast.semantic_version, "fast_event@4");
+    assert_eq!(fast.semantic_version, "fast_event@7");
+    let summary = run.summary.as_ref().unwrap();
+    // Normal F8 reports the executed candidate fee basis (10,000) over the
+    // pre-trade total NAV, not the actual raw fill notional (9,995).
+    assert_eq!(summary.total_turnover, 1.0);
+    assert_eq!(
+        summary.total_cost,
+        5.0 / 10_000.0,
+        "commission 3 + slippage 2 over pre-trade total NAV"
+    );
     assert_eq!(run.run_id, second.runs[0].run_id);
     assert_eq!(
         serde_json::to_vec(&run.summary).unwrap(),
@@ -141,8 +150,8 @@ fn terminal_settlement_uses_last_catalog_bar_close_and_fast_vector_match() {
 
     let vector = vector_run.runs[0].result.as_ref().unwrap();
     let fast = fast_run.runs[0].fast_event_result.as_ref().unwrap();
-    assert_eq!(fast.semantic_version, "fast_event@6");
-    assert_eq!(vector.semantic_version.as_deref(), Some("vector@6"));
+    assert_eq!(fast.semantic_version, "fast_event@9");
+    assert_eq!(vector.semantic_version.as_deref(), Some("vector@9"));
     assert_eq!(vector.terminal_settlements.len(), 1);
     assert_eq!(fast.terminal_settlements.len(), 1);
     let vector_settlement = &vector.terminal_settlements[0];

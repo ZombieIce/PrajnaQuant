@@ -139,6 +139,10 @@ _Avoid_: 为了记费用而伪造零数量的 Order 或 Fill。
 
 ## Capital and experiments
 
+**Investable Equity**:
+投资预算，等于可用现金加证券估值，排除未支付分红应收与清算应收；正常 full-target 的目标权重、F8 drift、候选费用基数和扣费后目标数量使用它。
+_Avoid_: 把可投资权益当作总 NAV，或从应收中预支交易；总 NAV 仍包含应收并作为实际权重、收益、成本率与换手率的分母。
+
 **Trading Account**:
 持有实际现金、负债和仓位，并作为成交与清算账本权威的账户。
 

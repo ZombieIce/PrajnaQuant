@@ -93,7 +93,7 @@ Native DSV 价格按 Catalog 拆成生命周期面板，不把复用代码的另
 常规方向门禁按费用/数量 sizing 后的实际交易侧判断，而非目标成员身份：
 真正必需的受阻卖腿令整次目标延期；受阻买腿保留当前数量、不扣该腿费用，
 重算其他腿并保留现金，不重归一目标。涨停持仓可减仓、跌停持仓可加仓。
-PIT Vector/Fast 共用 F8 **金额与数量** sizing：按实际权益算逐项费用，再按扣费后权益
+PIT Vector/Fast 共用 F8 **金额与数量** sizing：按可投资权益算逐项费用，再按扣费后权益
 及原始价格算目标数量，所有操作按 Domain scale-18/half-even 的相同次序进行，
 不先对归一化费用或目标市值舍入。只有数量精确不变才回退到 fee-only 的 fee_side，
 不设 no-trade epsilon。Vector 保留精确 sizing 输入状态，不提交订单或成交账本；含公司行动的 `@2` PIT
@@ -102,10 +102,13 @@ Run 还将投资持仓、可用现金、分红/清算应收分桶，并用连续
 `CorporateActionSchedule`、税率、Return Basis 和逐标的覆盖状态进入 Run Spec。
 覆盖仅为 `observed_raw_set_only` 或 UNKNOWN 时，Summary 明确标记总回报不完整。
 `pit-s2@4` 仍记录原 PIT sizing/capital 语义；公司行动账本使用独立
-`corporate_action_ledger@1` 版本。`vector_parity + full_target` 在卖出结算后按实际现金
-（不含应收）预留未付费用并按 InstrumentId 只削减必要买腿，进入 `fast_event@4/@5/@6`
-与 `vector@4/@5/@6`；lot、独立 retry 与旧 Vector 仍为 `fast_event@1/@2/@3`、`vector@1`。
-Vector `executions[].pit_sizing` 保存计划的权益、费用、目标数量和必需方向；
+`corporate_action_ledger@1` 版本。自 #274 起正常 parity full-target 的目标权重、drift、候选费用基数与扣费后
+目标数量按可投资权益（可用现金＋证券，排除分红/清算应收）计算，应收仍计入总 NAV。
+`vector_parity + full_target` 在卖出结算后按实际现金（不含应收）预留未付费用并按
+InstrumentId 只削减必要买腿，进入 `fast_event@7/@8/@9` 与 `vector@7/@8/@9`；
+lot、独立 retry 与旧 Vector 仍为 `fast_event@1/@2/@3`、`vector@1`。
+Vector `executions[].pit_sizing` 保存计划的总 NAV（`equity`）、可投资权益
+（`investable_equity`）、费用、目标数量和必需方向；
 延期计划不代表已成交。手算回归见 `prajna-research/tests/pit_sides.rs`。
 
 Risk Notice 类型为 `holders_meeting`、`vote_suspension`、`termination_proposal`、`liquidation_notice`、
@@ -258,9 +261,10 @@ Fast Event Summary 在摘要完成后释放明细，不跨整个 Rayon 扫描保
 
 Fast Event E11 以**账户每日 close 权益 / 初始账户资本**为 NAV，收益从第二 Session
 开始，年化按 `sessions_per_year`；成交次数是 VP 执行尝试次数，不是 Fill 笔数。
-`total_turnover` 为各 Session raw Fill 成交额（加 fee-only 腿费用基数）/ open 前权益之和；
-`total_cost` 为费用 / 同一 open 前权益之和，均为无量纲值。Open 前权益 = open 后权益 +
-当次全部费用。精确账本与费用字符串不被指标 f64 替代。Vector 继续使用 ADR 0017 的
+`total_turnover` 为各 Session 换手分子 / open 前总 NAV 之和：正常非 retry parity
+full-target 使用已执行计划的候选费用基数（含 fee-only，不重复计数），lot、retry 与
+Accurate 路径保持实际 raw Fill 成交额；`total_cost` 为实际费用 / 同一 open 前总 NAV 之和，
+均为无量纲值。Open 前总 NAV = open 后权益 + 当次全部费用，包含应收。精确账本与费用字符串不被指标 f64 替代。Vector 继续使用 ADR 0017 的
 open NAV；两者估值点不同，不能直接用 Summary Sharpe 当作引擎对拍。
 仅验证合成数据，不建立真实市场、PIT、分红总回报、T+1/涨跌停或实盘结论。
 吞吐/RSS 原始证据和复跑命令见 [`poc/mvp3-benchmark`](../../poc/mvp3-benchmark/README.md)。

@@ -33,7 +33,7 @@ fn bind_corporate_action_engine_version(spec: &mut Value) -> Result<(), Experime
     let parity_path = uses_parity_sizing(spec, engine_kind);
     let semantic_version = match engine_kind {
         "fast_event" if parity_path => {
-            prajna_research::fast_event::CORPORATE_ACTION_PARITY_CASH_SEMANTIC_VERSION
+            prajna_research::fast_event::CORPORATE_ACTION_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION
         }
         "fast_event" => prajna_research::fast_event::CORPORATE_ACTION_SEMANTIC_VERSION,
         "vector" => prajna_research::vector::CORPORATE_ACTION_PIT_SIZING_SEMANTIC_VERSION,
@@ -63,7 +63,7 @@ fn bind_terminal_settlement_engine_version(spec: &mut Value) -> Result<(), Exper
     let parity_path = uses_parity_sizing(spec, engine_kind);
     let semantic_version = match engine_kind {
         "fast_event" if parity_path => {
-            prajna_research::fast_event::TERMINAL_SETTLEMENT_PARITY_CASH_ENGINE_VERSION
+            prajna_research::fast_event::TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION
         }
         "fast_event" => prajna_research::fast_event::TERMINAL_SETTLEMENT_ENGINE_VERSION,
         "vector" => prajna_research::vector::TERMINAL_SETTLEMENT_PIT_SIZING_ENGINE_VERSION,
@@ -343,7 +343,7 @@ mod tests {
             (
                 "fast_event",
                 Some("vector_parity"),
-                prajna_research::fast_event::CORPORATE_ACTION_PARITY_CASH_SEMANTIC_VERSION,
+                prajna_research::fast_event::CORPORATE_ACTION_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION,
             ),
             (
                 "fast_event",
@@ -378,7 +378,7 @@ mod tests {
             (
                 "fast_event",
                 Some("vector_parity"),
-                prajna_research::fast_event::TERMINAL_SETTLEMENT_PARITY_CASH_ENGINE_VERSION,
+                prajna_research::fast_event::TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION,
             ),
             (
                 "fast_event",
