@@ -107,6 +107,19 @@ fn run_sizing(
     Result<FastEventResult, FastEventError>,
     Result<VectorResult, VectorError>,
 ) {
+    run_allocated(scenario, sizing, lot, minimum, None)
+}
+
+fn run_allocated(
+    scenario: Scenario,
+    sizing: Sizing,
+    lot: &str,
+    minimum: &str,
+    allocations: Option<Vec<(VirtualPortfolioId, Notional)>>,
+) -> (
+    Result<FastEventResult, FastEventError>,
+    Result<VectorResult, VectorError>,
+) {
     let lake = fixture::lake();
     let mut overrides: BTreeMap<(usize, u32), (f64, f64)> =
         (3..=10).map(|day| ((1, day), (0.5, 0.5))).collect();
@@ -185,13 +198,17 @@ fn run_sizing(
         },
         lot_sizes: f.ids.iter().map(|id| (id.clone(), q(lot))).collect(),
     };
-    let portfolios = [PortfolioRun {
-        id: VP,
-        capital: config.initial_cash,
-        decisions: decisions.clone(),
-        unfilled_entry: UnfilledEntry::Skip,
-        rebalance: Rebalance::FullTarget,
-    }];
+    let portfolios = allocations
+        .unwrap_or_else(|| vec![(VP, config.initial_cash)])
+        .into_iter()
+        .map(|(id, capital)| PortfolioRun {
+            id,
+            capital,
+            decisions: decisions.clone(),
+            unfilled_entry: UnfilledEntry::Skip,
+            rebalance: Rebalance::FullTarget,
+        })
+        .collect::<Vec<_>>();
     let costs = VectorCosts {
         commission_rate: config.costs.commission_rate.to_f64(),
         buy_slippage_bps: 0.0,
@@ -1015,4 +1032,75 @@ fn lot_all_receivable_waits_then_reinvests_after_payment() {
         fast.sessions[4].session.ts_open
     );
     assert_eq!(fast.fills[1].fill.order().quantity(), q("1000"));
+}
+
+#[test]
+fn lot_receivable_budgets_are_virtual_portfolio_local_and_exclude_unallocated_cash() {
+    let (fast, _) = run_allocated(
+        Scenario {
+            capital: "3000",
+            action: Action::Dividend("0.5"),
+            pay_day: 8,
+            commission: "0",
+            decisions: vec![(0, vec![(1, 1.0)]), (1, vec![(1, 0.4), (0, 0.2)])],
+            price_overrides: vec![],
+            reference_overrides: vec![],
+        },
+        Sizing::Lot,
+        "100",
+        "0",
+        Some(vec![(VP, n("1000")), (VirtualPortfolioId(2), n("500"))]),
+    );
+    let fast = fast.unwrap();
+    for session in &fast.sessions {
+        for snapshot in [&session.open_after, &session.close] {
+            for field in [
+                |p: &PortfolioValuation| p.cash,
+                |p: &PortfolioValuation| p.equity,
+            ] {
+                assert_eq!(
+                    field(&snapshot.account).mantissa(),
+                    snapshot
+                        .portfolios
+                        .values()
+                        .map(|p| field(p).mantissa())
+                        .sum::<i128>()
+                        + n("1500").mantissa()
+                );
+            }
+            assert_eq!(
+                snapshot.account.dividend_receivable.mantissa(),
+                snapshot
+                    .portfolios
+                    .values()
+                    .map(|p| p.dividend_receivable.mantissa())
+                    .sum::<i128>()
+            );
+            assert!(snapshot.portfolios.values().all(|p| p.cash >= n("0") && p.positions.values().all(|v| v.quantity >= q("0"))));
+        }
+    }
+    let snapshot = &fast.sessions[2].open_after;
+    // VP1 budget 500 -> A 200, B 100, cash 200, receivable 500.
+    // VP2 budget 250 -> A 100, B target 50 rounds to zero, cash 150,
+    // receivable 250. The unallocated 1500 never funds either target.
+    assert_eq!(
+        (
+            snapshot.portfolios[&VP].cash,
+            snapshot.portfolios[&VP].dividend_receivable
+        ),
+        (n("200"), n("500"))
+    );
+    let second = &snapshot.portfolios[&VirtualPortfolioId(2)];
+    assert_eq!(
+        (second.cash, second.dividend_receivable, second.equity),
+        (n("150"), n("250"), n("500"))
+    );
+    assert_eq!(
+        second
+            .positions
+            .values()
+            .map(|p| p.market_value.mantissa())
+            .sum::<i128>(),
+        n("100").mantissa()
+    );
 }

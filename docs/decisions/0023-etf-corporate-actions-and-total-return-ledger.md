@@ -116,8 +116,4 @@ Within the research-only MVP-6 TRI semantics selected by `mvp6-market-driven@1`,
 
 ### #275：正常 lot full-target 投资预算
 
-#275 完成 #273 的第二个纵向交付：正常 Fast Event `lot + full_target` 与 #274 parity 共用可投资权益定义（同一估值时点的现金＋证券市值，总 NAV 扣除分红及清算应收）。目标比例不重新归一化，sum<1 保留主动现金；零可投资权益可继续等候支付，不能预支 date-only 发放日 open 的应收。到账只转桶，下一正常调仓使用现金。实际权重、收益及费用/换手分母仍为总 NAV；lot 换手分子仍是实际成交本金。
-
-Lot 保留整手向下取整、实际成交价内嵌滑点、实际 Fill 的佣金/税和最低佣金及现金限量；它不采用 F8 的严格量化缺口拒绝，也不要求数量/费用与 F8 相同。独立 retry、entry_only、Accurate 和 legacy Vector 不扩展；external execution 的分阶段 pre-open 基数继续原契约。正常 lot 使用 `fast_event@10`，含行动为 `fast_event@11`，terminal 为 `fast_event@12`，normalized Run 与实际结果一致。旧行为由旧 revision 重现，无新旧开关或历史覆盖。
-
-至此 #274/#275 覆盖已确认的 parity/lot 预算政策，修订 #264 的适用范围而不改其历史证据；合成回归不构成 #234 六项真实数据验收、#235 独立验收或 MVP-6 通过。
+#275 完成 #273 的 lot 预算迁移，复用 #274 的可投资权益（现金＋证券、排除应收），保留发放日 close 转桶、下一正常调仓投资及总 NAV 会计/报告。Lot 保留整手、实际费用、最低佣金和现金限量；F8 继续严格量化可行性规则。normal/action/terminal 使用 `fast_event@10/@11/@12`，旧 revision 保留旧行为。完整预算、版本边界和两票覆盖说明见 [ADR 0019 的 #275 修订](0019-fast-event-ledger-and-vector-parity.md#275正常-lot-full-target-投资预算)。不构成 #234/#235 或 MVP-6 验收通过。

@@ -1048,6 +1048,10 @@ fn run_with_execution(
             "Normal execution at the final in-lifecycle Bar open remains allowed; remaining Catalog-terminal positions settle at that session's raw Bar close without using actual liquidation cash or date.",
         );
     }
+    let normal_lot = !external_execution
+        && portfolios
+            .iter()
+            .any(|p| p.rebalance == Rebalance::FullTarget);
     Ok(FastEventResult {
         semantic_version: match (
             config.sizing,
@@ -1061,30 +1065,13 @@ fn run_with_execution(
                 CORPORATE_ACTION_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION
             }
             (Sizing::VectorParity, false, false) => INVESTABLE_EQUITY_PARITY_ENGINE_VERSION,
-            (Sizing::Lot, _, true)
-                if !external_execution
-                    && portfolios
-                        .iter()
-                        .any(|p| p.rebalance == Rebalance::FullTarget) =>
-            {
+            (Sizing::Lot, _, true) if normal_lot => {
                 TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_LOT_ENGINE_VERSION
             }
-            (Sizing::Lot, true, false)
-                if !external_execution
-                    && portfolios
-                        .iter()
-                        .any(|p| p.rebalance == Rebalance::FullTarget) =>
-            {
+            (Sizing::Lot, true, false) if normal_lot => {
                 CORPORATE_ACTION_INVESTABLE_EQUITY_LOT_ENGINE_VERSION
             }
-            (Sizing::Lot, false, false)
-                if !external_execution
-                    && portfolios
-                        .iter()
-                        .any(|p| p.rebalance == Rebalance::FullTarget) =>
-            {
-                INVESTABLE_EQUITY_LOT_ENGINE_VERSION
-            }
+            (Sizing::Lot, false, false) if normal_lot => INVESTABLE_EQUITY_LOT_ENGINE_VERSION,
             (Sizing::Lot, _, true) => TERMINAL_SETTLEMENT_ENGINE_VERSION,
             (Sizing::Lot, true, false) => CORPORATE_ACTION_SEMANTIC_VERSION,
             (Sizing::Lot, false, false) => SEMANTIC_VERSION,

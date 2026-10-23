@@ -2,7 +2,21 @@
 mod fixture;
 use prajna_experiment::{Experiment, ResultLevel, RunStatus, read_run_table};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::process::Command;
+
+fn assert_new_lot_identity(spec: &Value, id: &str, preceding: &str) {
+    let identity = |spec: &Value| {
+        format!(
+            "run:sha256:{:x}",
+            Sha256::digest(serde_json::to_vec(spec).unwrap())
+        )
+    };
+    assert_eq!(identity(spec), id);
+    let mut old = spec.clone();
+    old["engine"]["semantic_version"] = json!(preceding);
+    assert_ne!(identity(&old), id);
+}
 
 fn definition(f: &fixture::Fixture, engine: &str) -> Value {
     let mut value = json!({
@@ -132,6 +146,15 @@ fn shared_sizing_version_is_in_run_spec_and_result_and_reruns_are_stable() {
         let second = experiment.execute(lake.path(), 1).unwrap();
         let run = &first.runs[0];
         assert_eq!(run.status, RunStatus::Completed, "{:?}", run.error);
+        assert_new_lot_identity(
+            &run.run_spec,
+            &run.run_id,
+            if expected == "fast_event@10" {
+                "fast_event@1"
+            } else {
+                "fast_event@3"
+            },
+        );
         assert_eq!(run.run_id, second.runs[0].run_id);
         assert_eq!(
             run.fast_event_result.as_ref().unwrap().semantic_version,
@@ -815,6 +838,11 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
         "fast_event@11"
     );
     assert_eq!(first.runs[0].run_id, second.runs[0].run_id);
+    assert_new_lot_identity(
+        &first.runs[0].run_spec,
+        &first.runs[0].run_id,
+        "fast_event@2",
+    );
     let stored = lot
         .execute_and_store(
             lake.path(),
