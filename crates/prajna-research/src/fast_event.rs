@@ -285,7 +285,7 @@ pub(crate) fn weight(input: f64) -> Result<Notional, FastEventError> {
     Ok(crate::strategy::execution_decimal(input)?)
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct Marks {
     pub(crate) prices: BTreeMap<InstrumentId, Price>,
     sources: BTreeMap<InstrumentId, PriceSource>,

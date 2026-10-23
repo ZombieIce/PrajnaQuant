@@ -1,10 +1,10 @@
 #[path = "common/pit.rs"]
 mod fixture;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use polars::prelude::{NamedFrom, Series};
-use prajna_account::VirtualPortfolioId;
+use prajna_account::{Side, VirtualPortfolioId};
 use prajna_data::{CorporateActionKind, CorporateActionRow};
 use prajna_domain::{Notional, Quantity};
 use prajna_research::{
@@ -321,6 +321,248 @@ fn terminal_settlement_ignores_liquidation_action_facts() {
         "Vector permits the final Bar open trade before close settlement"
     );
     assert!(vector.terminal_settlements[0].quantity > "0".parse().unwrap());
+    for (fast_session, vector_session) in fast.sessions.iter().zip(&vector.sessions) {
+        let fast_open_equity = fast_session.open_after.account.equity.to_f64();
+        let vector_open_equity =
+            vector_session.nav / (1.0 + vector_session.gross_return) * 10_000.0;
+        assert!(
+            (fast_open_equity - vector_open_equity).abs() < 1e-8,
+            "complete-Bar open parity on {}",
+            fast_session.session.session_date
+        );
+    }
+}
+
+#[test]
+fn terminal_settlement_carries_same_field_open_across_missing_bars_without_enabling_execution() {
+    let lake = fixture::lake();
+    let f = fixture::fixture_with_missing_bars_and_action_prices(
+        lake.path(),
+        1.0,
+        true,
+        BTreeMap::from([
+            ((0, 4), (1.0, 0.9)),
+            ((1, 4), (1.0, 0.9)),
+            ((0, 7), (1.0, 0.9)),
+            ((1, 7), (1.0, 0.9)),
+        ]),
+        BTreeSet::from([(1, 5), (1, 6)]),
+    );
+    let native =
+        prajna_research::load_panel(lake.path(), &f.dsv, &"SZSE".parse().unwrap()).unwrap();
+    let panel = pit_strategy::lifecycle_panel(&native, &f.catalog).unwrap();
+    let a = f.ids[0].clone();
+    let b = f.ids[1].clone();
+    let actions = CorporateActionSchedule::new(
+        "synthetic-actions@269",
+        vec![CorporateActionRow {
+            announcement_id: "synthetic-dividend-gap".into(),
+            action_index: 0,
+            instrument_id: b.clone(),
+            kind: CorporateActionKind::Dividend,
+            announced_date: fixture::date(1),
+            announced_at: Some(fixture::time(1, 8)),
+            available_at: fixture::time(1, 15),
+            record_date: Some(fixture::date(4)),
+            ex_date: Some(fixture::date(5)),
+            pay_date: Some(fixture::date(6)),
+            effective_date: None,
+            cash_per_share: Some("0.1".into()),
+            share_ratio: None,
+            liquidation_cash_per_share: None,
+            source_raw_sha256: "synthetic".into(),
+            normalization_version: "synthetic-actions@1".into(),
+        }],
+        f.ids
+            .iter()
+            .map(|id| CorporateActionCoverage {
+                instrument_id: id.clone(),
+                start: fixture::date(1),
+                end: fixture::date(10),
+                observed_actions: usize::from(id == &b),
+                unapplied_action_dates: vec![],
+                unexplained_price_jumps: vec![],
+                status: ActionCoverageStatus::Complete,
+            })
+            .collect(),
+    )
+    .unwrap();
+    let decisions = vec![
+        Decision {
+            decision_session: panel.sessions[2].clone(),
+            ranked: vec![],
+            targets: BTreeMap::from([(a.clone(), 0.5), (b.clone(), 0.5)]),
+        },
+        Decision {
+            decision_session: panel.sessions[3].clone(),
+            ranked: vec![],
+            targets: BTreeMap::from([(a.clone(), 0.5)]),
+        },
+    ];
+    let config = FastEventConfig {
+        currency: "CNY".parse().unwrap(),
+        venue: "SZSE".parse().unwrap(),
+        initial_cash: "10000".parse().unwrap(),
+        sizing: Sizing::VectorParity,
+        costs: FastEventCosts::ZERO,
+        lot_sizes: BTreeMap::new(),
+    };
+    let portfolios = [PortfolioRun {
+        id: VirtualPortfolioId(1),
+        capital: config.initial_cash,
+        decisions: decisions.clone(),
+        unfilled_entry: UnfilledEntry::Skip,
+        rebalance: Rebalance::FullTarget,
+    }];
+    let vector_costs = VectorCosts {
+        commission_rate: 0.0,
+        buy_slippage_bps: 0.0,
+        sell_slippage_bps: 0.0,
+        buy_tax_rate: 0.0,
+        sell_tax_rate: 0.0,
+    };
+
+    let fast = run_fast_event_pit_with_terminal_settlement(
+        &panel,
+        &f.market,
+        &RiskSignals::default(),
+        &config,
+        &portfolios,
+        Some(&actions),
+    )
+    .unwrap();
+    let vector = run_vector_pit_with_terminal_settlement(
+        &panel,
+        &decisions,
+        &f.market,
+        &RiskSignals::default(),
+        &vector_costs,
+        config.initial_cash,
+        Some(&actions),
+    )
+    .unwrap();
+
+    assert_eq!(fast.semantic_version, "fast_event@6");
+    assert_eq!(vector.semantic_version.as_deref(), Some("vector@6"));
+    assert_eq!(fast.return_basis, ReturnBasis::TotalReturn);
+    assert_eq!(vector.return_basis, ReturnBasis::TotalReturn);
+    assert!(fast.corporate_action_completeness.is_complete);
+    assert!(vector.corporate_action_completeness.is_complete);
+    assert_eq!(
+        fast.sessions[3].open_after.portfolios[&VirtualPortfolioId(1)].positions[&b].quantity,
+        "5000".parse().unwrap(),
+        "the day-4 close decision must not execute at the same day's open"
+    );
+    assert!(vector.sessions[3].weights_after_execution.contains_key(&b));
+    assert!((vector.sessions[3].gross_return - 0.05).abs() < 1e-12);
+    assert!(vector.sessions[4].gross_return.abs() < 1e-12);
+    assert!(vector.sessions[5].gross_return.abs() < 1e-12);
+    assert!(vector.sessions[4].valuation_carried.contains(&b));
+    assert!(vector.sessions[5].valuation_carried.contains(&b));
+    assert!(!vector.sessions[6].valuation_carried.contains(&b));
+
+    for (fast_session, vector_session) in fast.sessions.iter().zip(&vector.sessions) {
+        let fast_open_equity = fast_session.open_after.account.equity.to_f64();
+        let vector_open_equity =
+            vector_session.nav / (1.0 + vector_session.gross_return) * 10_000.0;
+        assert!(
+            (fast_open_equity - vector_open_equity).abs() < 1e-8,
+            "gap-case open parity on {}",
+            fast_session.session.session_date
+        );
+    }
+
+    assert_eq!(
+        fast.sessions[4].open_sources[&b].session_date,
+        fixture::date(4)
+    );
+    assert_eq!(
+        fast.sessions[4].open_sources[&b].field,
+        prajna_research::fast_event::PriceField::Open
+    );
+    assert_eq!(
+        fast.sessions[4].close_sources[&b].session_date,
+        fixture::date(4)
+    );
+    assert_eq!(
+        fast.sessions[4].close_sources[&b].field,
+        prajna_research::fast_event::PriceField::Close
+    );
+    let missing_open = &fast.sessions[4].open_after.portfolios[&VirtualPortfolioId(1)];
+    assert_eq!(missing_open.positions[&b].quantity, "5000".parse().unwrap());
+    assert_eq!(missing_open.cash, Notional::ZERO);
+    assert_eq!(missing_open.dividend_receivable, "500".parse().unwrap());
+    assert_eq!(missing_open.equity, "10500".parse().unwrap());
+    let paid_dividend = &fast.sessions[5].close.portfolios[&VirtualPortfolioId(1)];
+    assert_eq!(
+        paid_dividend.positions[&b].quantity,
+        "5000".parse().unwrap()
+    );
+    assert_eq!(paid_dividend.cash, "500".parse().unwrap());
+    assert_eq!(paid_dividend.dividend_receivable, Notional::ZERO);
+    assert_eq!(
+        fast.sessions[5].close_sources[&b].session_date,
+        fixture::date(4)
+    );
+    assert_eq!(
+        fast.sessions[5].close_sources[&b].field,
+        prajna_research::fast_event::PriceField::Close
+    );
+    assert!(fast.fills.iter().all(|fill| {
+        fill.fill.executed_at() != panel.sessions[4].ts_open
+            && fill.fill.executed_at() != panel.sessions[5].ts_open
+    }));
+
+    for date in [fixture::date(5), fixture::date(6)] {
+        let deferred = vector
+            .executions
+            .iter()
+            .find(|execution| execution.session_date == date.to_string())
+            .expect("missing-Bar sell remains an explicit deferred attempt");
+        assert_eq!(
+            deferred.kind,
+            prajna_research::vector::VectorExecutionKind::Deferred
+        );
+        assert!(deferred.blocked.contains(&b));
+    }
+    let recovered = vector
+        .executions
+        .iter()
+        .find(|execution| execution.session_date == fixture::date(7).to_string())
+        .expect("pending sell is retried when a raw Bar returns");
+    assert_eq!(
+        recovered.kind,
+        prajna_research::vector::VectorExecutionKind::Executed
+    );
+    assert!(fast.fills.iter().any(|fill| {
+        fill.fill.executed_at() == panel.sessions[6].ts_open
+            && fill.fill.order().instrument_id() == &b
+            && fill.fill.order().side() == Side::Sell
+    }));
+
+    assert_eq!(fast.terminal_settlements.len(), 1);
+    assert_eq!(vector.terminal_settlements.len(), 1);
+    for settlement in [
+        &fast.terminal_settlements[0],
+        &vector.terminal_settlements[0],
+    ] {
+        assert_eq!(settlement.session_date, fixture::date(7));
+        assert_eq!(settlement.instrument_id, a);
+        assert_eq!(settlement.quantity, "5250".parse().unwrap());
+        assert_eq!(settlement.price, "0.9".parse().unwrap());
+        assert_eq!(settlement.proceeds, "4725".parse().unwrap());
+    }
+    let terminal_close = &fast.sessions[6].close.portfolios[&VirtualPortfolioId(1)];
+    assert!(terminal_close.positions.is_empty());
+    assert_eq!(terminal_close.cash, "9975".parse().unwrap());
+    assert_eq!(terminal_close.equity, terminal_close.cash);
+    let vector_terminal_close = vector.sessions[6]
+        .portfolio_components_close
+        .as_ref()
+        .unwrap();
+    assert_eq!(vector_terminal_close.available_cash_weight, 1.0);
+    assert_eq!(vector_terminal_close.dividend_receivable_weight, 0.0);
+    assert_eq!(vector_terminal_close.liquidation_receivable_weight, 0.0);
 }
 
 #[test]
