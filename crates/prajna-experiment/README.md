@@ -101,8 +101,10 @@ Run 还将投资持仓、可用现金、分红/清算应收分桶，并用连续
 逐日对拍。Fast Event 的定点现金、持仓、应收和绩效账本仍是权威；
 `CorporateActionSchedule`、税率、Return Basis 和逐标的覆盖状态进入 Run Spec。
 覆盖仅为 `observed_raw_set_only` 或 UNKNOWN 时，Summary 明确标记总回报不完整。
-`pit-s2@4` 仍记录原 PIT sizing/capital 语义；公司行动账本使用独立 `fast_event@2`
-与 `corporate_action_ledger@1` 版本。
+`pit-s2@4` 仍记录原 PIT sizing/capital 语义；公司行动账本使用独立
+`corporate_action_ledger@1` 版本。`vector_parity + full_target` 在卖出结算后按实际现金
+（不含应收）预留未付费用并按 InstrumentId 只削减必要买腿，进入 `fast_event@4/@5/@6`
+与 `vector@4/@5/@6`；lot、独立 retry 与旧 Vector 仍为 `fast_event@1/@2/@3`、`vector@1`。
 Vector `executions[].pit_sizing` 保存计划的权益、费用、目标数量和必需方向；
 延期计划不代表已成交。手算回归见 `prajna-research/tests/pit_sides.rs`。
 

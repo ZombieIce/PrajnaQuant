@@ -16,15 +16,17 @@ use crate::{
         CorporateActionProcessor, CorporateActionSchedule, ReturnBasis, apply_transition_to_vector,
     },
     factor::AvailabilityAssumption,
-    fast_event::{FastEventCosts, Marks, PriceField},
+    fast_event::{FastEventCosts, Marks, PriceField, SizingAdjustmentReason},
     parity_sizing::{ParityPlan, ParitySizingState, target_plan},
     strategy::{Decision, ExecutionEvent, ExecutionState, UnfilledEntry, execution_decimal},
     terminal_settlement::{TerminalSettlementEntry, TerminalSettlementSchedule},
 };
 
 const RETURN_TOLERANCE: f64 = 1e-12;
-pub const CORPORATE_ACTION_SEMANTIC_VERSION: &str = "vector@2";
-pub const TERMINAL_SETTLEMENT_ENGINE_VERSION: &str = "vector@3";
+/// PIT Vector shares the corrected full-target cash-feasible sizing plan.
+pub const PIT_SIZING_SEMANTIC_VERSION: &str = "vector@4";
+pub const CORPORATE_ACTION_PIT_SIZING_SEMANTIC_VERSION: &str = "vector@5";
+pub const TERMINAL_SETTLEMENT_PIT_SIZING_ENGINE_VERSION: &str = "vector@6";
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct VectorCosts {
@@ -50,6 +52,8 @@ pub struct VectorResult {
     pub pending_risk_exits: Vec<InstrumentId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pit_initial_capital: Option<Notional>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_version: Option<String>,
     #[serde(default, skip_serializing_if = "is_price_return")]
     pub return_basis: ReturnBasis,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -120,6 +124,23 @@ pub struct VectorPitSizing {
     pub fees: Notional,
     pub desired_quantities: BTreeMap<InstrumentId, Quantity>,
     pub required_sides: BTreeMap<InstrumentId, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cash_adjustments: Vec<VectorCashAdjustment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cash_residue: Option<Notional>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VectorCashAdjustment {
+    pub instrument_id: InstrumentId,
+    pub candidate_quantity: Quantity,
+    pub actual_quantity: Quantity,
+    pub candidate_principal: Notional,
+    pub actual_principal: Notional,
+    pub principal_budget: Notional,
+    pub reserved_fee: Notional,
+    pub cash_residue: Notional,
+    pub reason: SizingAdjustmentReason,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -326,6 +347,26 @@ struct SizedVectorTarget {
     plan: ParityPlan,
 }
 
+fn required_gates(
+    plan: &ParityPlan,
+    permits: impl Fn(&InstrumentId, bool) -> bool,
+) -> Result<(BTreeSet<InstrumentId>, BTreeSet<InstrumentId>), VectorError> {
+    let mut skipped_buys = BTreeSet::new();
+    let mut blocked_sells = BTreeSet::new();
+    for leg in &plan.legs {
+        match leg.required_side().map_err(sizing_error)? {
+            Some(Side::Buy) if !permits(&leg.instrument, true) => {
+                skipped_buys.insert(leg.instrument.clone());
+            }
+            Some(Side::Sell) if !permits(&leg.instrument, false) => {
+                blocked_sells.insert(leg.instrument.clone());
+            }
+            _ => {}
+        }
+    }
+    Ok((skipped_buys, blocked_sells))
+}
+
 fn pit_target_plan(
     panel: &Panel,
     market: &crate::etf_market::DerivedMarket,
@@ -336,13 +377,16 @@ fn pit_target_plan(
     costs: FastEventCosts,
 ) -> Result<SizedVectorTarget, VectorError> {
     let equity = current.equity(prices).map_err(sizing_error)?;
+    let receivables =
+        crate::fast_event::add(current.dividend_receivable, current.liquidation_receivable)
+            .map_err(sizing_error)?;
     let mut skipped_buys = targets
         .iter()
         .filter(|(id, w)| **w > 0.0 && !prices.contains_key(*id))
         .map(|(id, _)| id.clone())
         .collect::<BTreeSet<_>>();
     loop {
-        let plan = target_plan(
+        let mut plan = target_plan(
             equity,
             &current.positions,
             targets,
@@ -351,41 +395,34 @@ fn pit_target_plan(
             &skipped_buys,
         )
         .map_err(sizing_error)?;
-        let mut new_skipped = BTreeSet::new();
-        let mut blocked_sells = BTreeSet::new();
-        for leg in &plan.legs {
-            match leg.required_side().map_err(sizing_error)? {
-                Some(Side::Buy)
-                    if !crate::pit_strategy::permits(
-                        market,
-                        panel,
-                        &leg.instrument,
-                        session,
-                        true,
-                    ) =>
-                {
-                    new_skipped.insert(leg.instrument.clone());
-                }
-                Some(Side::Sell)
-                    if !crate::pit_strategy::permits(
-                        market,
-                        panel,
-                        &leg.instrument,
-                        session,
-                        false,
-                    ) =>
-                {
-                    blocked_sells.insert(leg.instrument.clone());
-                }
-                _ => {}
-            }
-        }
+        let gates = |id: &InstrumentId, buy: bool| {
+            crate::pit_strategy::permits(market, panel, id, session, buy)
+        };
+        let (new_skipped, mut blocked_sells) = required_gates(&plan, gates)?;
         if !new_skipped.is_empty() {
             skipped_buys.extend(new_skipped);
             continue;
         }
         let next = if blocked_sells.is_empty() {
-            Some(current.preview(&plan).map_err(sizing_error)?)
+            if let Some(error) =
+                crate::parity_sizing::settle_plan_cash(&mut plan, current.cash, receivables)
+                    .map_err(sizing_error)?
+            {
+                return Err(sizing_error(
+                    crate::fast_event::FastEventError::InvalidInput(error.into()),
+                ));
+            }
+            let (corrected_skipped, corrected_blocked) = required_gates(&plan, gates)?;
+            if !corrected_skipped.is_empty() {
+                skipped_buys.extend(corrected_skipped);
+                continue;
+            }
+            blocked_sells = corrected_blocked;
+            if blocked_sells.is_empty() {
+                Some(current.preview(&plan).map_err(sizing_error)?)
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -440,6 +477,22 @@ fn sizing_diagnostic(plan: &ParityPlan) -> Result<VectorPitSizing, VectorError> 
             .map(|leg| (leg.instrument.clone(), leg.desired))
             .collect(),
         required_sides: sides,
+        cash_adjustments: plan
+            .cash_adjustments
+            .iter()
+            .map(|adjustment| VectorCashAdjustment {
+                instrument_id: adjustment.instrument.clone(),
+                candidate_quantity: adjustment.candidate_quantity,
+                actual_quantity: adjustment.actual_quantity,
+                candidate_principal: adjustment.candidate_principal,
+                actual_principal: adjustment.actual_principal,
+                principal_budget: adjustment.principal_budget,
+                reserved_fee: adjustment.reserved_fee,
+                cash_residue: adjustment.cash_residue,
+                reason: SizingAdjustmentReason::QuantizationCashBudget,
+            })
+            .collect(),
+        cash_residue: (!plan.cash_adjustments.is_empty()).then_some(plan.cash_residue),
     })
 }
 
@@ -1160,6 +1213,16 @@ fn run_vector_inner(
     }
     Ok(VectorResult {
         pit_initial_capital: pit.map(|(_, _, capital)| capital),
+        semantic_version: pit.map(|_| {
+            if terminal_settlement.is_some() {
+                TERMINAL_SETTLEMENT_PIT_SIZING_ENGINE_VERSION
+            } else if actions.is_some() {
+                CORPORATE_ACTION_PIT_SIZING_SEMANTIC_VERSION
+            } else {
+                PIT_SIZING_SEMANTIC_VERSION
+            }
+            .to_owned()
+        }),
         sessions: result_sessions,
         decisions: result_decisions,
         executions: result_executions,
@@ -1579,4 +1642,41 @@ fn invalid_input(message: impl Into<String>) -> VectorError {
 
 fn invalid_costs(message: impl Into<String>) -> VectorError {
     VectorError::InvalidCosts(message.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use prajna_account::FillCosts;
+
+    #[test]
+    fn corrected_fee_only_sell_is_blocked_by_the_actual_side_gate() {
+        let instrument: InstrumentId = "A.SYNTH".parse().unwrap();
+        let plan = ParityPlan {
+            equity: "1000".parse().unwrap(),
+            total_fees: "1".parse().unwrap(),
+            turnover: Notional::ZERO,
+            legs: vec![crate::parity_sizing::ParityLeg {
+                instrument: instrument.clone(),
+                price: "1".parse().unwrap(),
+                current: "10".parse().unwrap(),
+                desired: "10".parse().unwrap(),
+                basis: "1".parse().unwrap(),
+                fee_side: Side::Sell,
+                fees: FillCosts {
+                    tax: "1".parse().unwrap(),
+                    ..FillCosts::ZERO
+                },
+                slip: Notional::ZERO,
+            }],
+            cash_adjustments: vec![],
+            cash_residue: Notional::ZERO,
+            after: "999".parse().unwrap(),
+            target_weight_sum: "0.1".parse().unwrap(),
+            retained_value: Notional::ZERO,
+        };
+        let (skipped, blocked) = required_gates(&plan, |_, buy| buy).unwrap();
+        assert!(skipped.is_empty());
+        assert_eq!(blocked.into_iter().collect::<Vec<_>>(), vec![instrument]);
+    }
 }
