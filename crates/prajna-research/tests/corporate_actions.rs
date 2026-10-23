@@ -493,6 +493,16 @@ fn terminal_settlement_carries_same_field_open_across_missing_bars_without_enabl
     assert_eq!(missing_open.cash, Notional::ZERO);
     assert_eq!(missing_open.dividend_receivable, "500".parse().unwrap());
     assert_eq!(missing_open.equity, "10500".parse().unwrap());
+    let vector_missing_open = vector.sessions[4].portfolio_components.as_ref().unwrap();
+    let missing_open_equity = missing_open.equity.to_f64();
+    assert!(vector_missing_open.available_cash_weight.abs() < 1e-12);
+    assert!(
+        (vector_missing_open.dividend_receivable_weight
+            - missing_open.dividend_receivable.to_f64() / missing_open_equity)
+            .abs()
+            < 1e-12
+    );
+    assert!(vector_missing_open.liquidation_receivable_weight.abs() < 1e-12);
     let paid_dividend = &fast.sessions[5].close.portfolios[&VirtualPortfolioId(1)];
     assert_eq!(
         paid_dividend.positions[&b].quantity,
@@ -500,6 +510,24 @@ fn terminal_settlement_carries_same_field_open_across_missing_bars_without_enabl
     );
     assert_eq!(paid_dividend.cash, "500".parse().unwrap());
     assert_eq!(paid_dividend.dividend_receivable, Notional::ZERO);
+    let vector_paid_dividend_close = vector.sessions[5]
+        .portfolio_components_close
+        .as_ref()
+        .unwrap();
+    let paid_dividend_equity = paid_dividend.equity.to_f64();
+    assert!(
+        (vector_paid_dividend_close.available_cash_weight
+            - paid_dividend.cash.to_f64() / paid_dividend_equity)
+            .abs()
+            < 1e-12
+    );
+    assert!(vector_paid_dividend_close.dividend_receivable_weight.abs() < 1e-12);
+    assert!(
+        vector_paid_dividend_close
+            .liquidation_receivable_weight
+            .abs()
+            < 1e-12
+    );
     assert_eq!(
         fast.sessions[5].close_sources[&b].session_date,
         fixture::date(4)
