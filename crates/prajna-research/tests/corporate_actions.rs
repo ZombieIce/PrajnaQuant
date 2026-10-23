@@ -344,7 +344,7 @@ fn terminal_settlement_carries_same_field_open_across_missing_bars_without_enabl
             ((0, 4), (1.0, 0.9)),
             ((1, 4), (1.0, 0.9)),
             ((0, 7), (1.0, 0.9)),
-            ((1, 7), (1.0, 0.9)),
+            ((1, 7), (0.99, 0.9)),
         ]),
         BTreeSet::from([(1, 5), (1, 6)]),
     );
@@ -456,7 +456,7 @@ fn terminal_settlement_carries_same_field_open_across_missing_bars_without_enabl
     assert!(vector.sessions[3].weights_after_execution.contains_key(&b));
     assert!((vector.sessions[3].gross_return - 0.05).abs() < 1e-12);
     assert!(vector.sessions[4].gross_return.abs() < 1e-12);
-    assert!(vector.sessions[5].gross_return.abs() < 1e-12);
+    assert!((vector.sessions[5].gross_return - (10_450.0 / 10_500.0 - 1.0)).abs() < 1e-12);
     assert!(vector.sessions[4].valuation_carried.contains(&b));
     assert!(vector.sessions[5].valuation_carried.contains(&b));
     assert!(!vector.sessions[6].valuation_carried.contains(&b));
@@ -568,6 +568,27 @@ fn terminal_settlement_carries_same_field_open_across_missing_bars_without_enabl
             && fill.fill.order().side() == Side::Sell
     }));
 
+    // Before the recovery Open, equity is 5,000 A + 5,000 B at 1.00 + 500
+    // dividend receivable = 10,500. The recovered B Open at 0.99 makes it
+    // 5,000 A + 4,950 B + 500 receivable = 10,450 before execution.
+    assert_eq!(
+        fast.sessions[6].open_sources[&b].session_date,
+        fixture::date(7)
+    );
+    assert_eq!(
+        fast.sessions[6].open_sources[&b].field,
+        prajna_research::fast_event::PriceField::Open
+    );
+    let recovered_fast_open = &fast.sessions[6].open_after.portfolios[&VirtualPortfolioId(1)];
+    assert_eq!(
+        recovered_fast_open.positions[&a].quantity,
+        "5225".parse().unwrap()
+    );
+    assert_eq!(recovered_fast_open.equity, "10450".parse().unwrap());
+    let recovered_vector_open_equity =
+        vector.sessions[6].nav / (1.0 + vector.sessions[6].gross_return) * 10_000.0;
+    assert!((recovered_vector_open_equity - 10_450.0).abs() < 1e-8);
+
     assert_eq!(fast.terminal_settlements.len(), 1);
     assert_eq!(vector.terminal_settlements.len(), 1);
     for settlement in [
@@ -576,13 +597,13 @@ fn terminal_settlement_carries_same_field_open_across_missing_bars_without_enabl
     ] {
         assert_eq!(settlement.session_date, fixture::date(7));
         assert_eq!(settlement.instrument_id, a);
-        assert_eq!(settlement.quantity, "5250".parse().unwrap());
+        assert_eq!(settlement.quantity, "5225".parse().unwrap());
         assert_eq!(settlement.price, "0.9".parse().unwrap());
-        assert_eq!(settlement.proceeds, "4725".parse().unwrap());
+        assert_eq!(settlement.proceeds, "4702.5".parse().unwrap());
     }
     let terminal_close = &fast.sessions[6].close.portfolios[&VirtualPortfolioId(1)];
     assert!(terminal_close.positions.is_empty());
-    assert_eq!(terminal_close.cash, "9975".parse().unwrap());
+    assert_eq!(terminal_close.cash, "9927.5".parse().unwrap());
     assert_eq!(terminal_close.equity, terminal_close.cash);
     let vector_terminal_close = vector.sessions[6]
         .portfolio_components_close
