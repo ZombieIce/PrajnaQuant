@@ -2439,7 +2439,7 @@ fn fast_rows(
         }
         "fills" => {
             for (index, fill) in result.fills.iter().enumerate() {
-                rows.push((format!("{index:020}"),json_payload(&serde_json::json!({"fill":fill.fill,"fee_basis":fill.fee_basis,"fee_side":fill.fee_side}))?));
+                rows.push((format!("{index:020}"),json_payload(&serde_json::json!({"fill":fill.fill,"fee_basis":fill.fee_basis,"turnover_basis":fill.turnover_basis,"fee_side":fill.fee_side}))?));
             }
         }
         "fee_settlements" => {

@@ -127,7 +127,7 @@ fn dividend_entitlement_becomes_receivable_then_cash_without_early_reinvestment(
     );
     assert_eq!(fast.return_basis, ReturnBasis::TotalReturn);
     assert_eq!(vector.return_basis, ReturnBasis::TotalReturn);
-    assert_eq!(fast.semantic_version, "fast_event@5");
+    assert_eq!(fast.semantic_version, "fast_event@8");
     assert_eq!(
         fast.corporate_action_dividend_tax_rate,
         Some("0.1".parse().unwrap())
@@ -442,8 +442,8 @@ fn terminal_settlement_carries_same_field_open_across_missing_bars_without_enabl
     )
     .unwrap();
 
-    assert_eq!(fast.semantic_version, "fast_event@6");
-    assert_eq!(vector.semantic_version.as_deref(), Some("vector@6"));
+    assert_eq!(fast.semantic_version, "fast_event@9");
+    assert_eq!(vector.semantic_version.as_deref(), Some("vector@9"));
     assert_eq!(fast.return_basis, ReturnBasis::TotalReturn);
     assert_eq!(vector.return_basis, ReturnBasis::TotalReturn);
     assert!(fast.corporate_action_completeness.is_complete);

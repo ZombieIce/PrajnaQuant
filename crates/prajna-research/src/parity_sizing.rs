@@ -59,9 +59,14 @@ pub(crate) struct ParityCashAdjustment {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ParityPlan {
-    pub equity: Notional,
+    /// Investment budget: available cash plus securities valuation, excluding
+    /// dividend and liquidation receivables. Targets, drift and candidate fees
+    /// use this base; reporting still normalizes by the total NAV.
+    pub investable_equity: Notional,
     pub total_fees: Notional,
-    pub turnover: Notional,
+    /// Sum of candidate fee bases for every planned leg, including fee-only
+    /// legs. This is the normal F8 turnover numerator.
+    pub candidate_basis: Notional,
     pub legs: Vec<ParityLeg>,
     /// Quantization-only buy reductions with their checked fixed-point evidence.
     pub cash_adjustments: Vec<ParityCashAdjustment>,
@@ -73,7 +78,7 @@ pub(crate) struct ParityPlan {
 }
 
 pub(crate) fn target_plan(
-    equity: Notional,
+    investable_equity: Notional,
     positions: &BTreeMap<InstrumentId, Quantity>,
     targets: &BTreeMap<InstrumentId, f64>,
     prices: &BTreeMap<InstrumentId, Price>,
@@ -81,9 +86,9 @@ pub(crate) fn target_plan(
     retained: &BTreeSet<InstrumentId>,
 ) -> Result<ParityPlan, FastEventError> {
     let mut plan = ParityPlan {
-        equity,
+        investable_equity,
         total_fees: Notional::ZERO,
-        turnover: Notional::ZERO,
+        candidate_basis: Notional::ZERO,
         legs: Vec::new(),
         cash_adjustments: Vec::new(),
         cash_residue: Notional::ZERO,
@@ -91,7 +96,7 @@ pub(crate) fn target_plan(
         target_weight_sum: Notional::ZERO,
         retained_value: Notional::ZERO,
     };
-    if equity == Notional::ZERO {
+    if investable_equity == Notional::ZERO {
         return Ok(plan);
     }
     let mut retained_value = Notional::ZERO;
@@ -123,7 +128,7 @@ pub(crate) fn target_plan(
             .unwrap_or(Quantity::ZERO);
         let target = weight(targets.get(&instrument).copied().unwrap_or(0.0))?;
         target_weight_sum = add(target_weight_sum, target)?;
-        let drift = value(current, price)?.checked_div_decimal(equity)?;
+        let drift = value(current, price)?.checked_div_decimal(investable_equity)?;
         let delta = sub(target, drift)?;
         let side = if delta >= Notional::ZERO {
             Side::Buy
@@ -131,13 +136,13 @@ pub(crate) fn target_plan(
             Side::Sell
         };
         let absolute = Notional::from_mantissa(delta.mantissa().abs())?;
-        let basis = equity.checked_mul_decimal(absolute)?;
+        let basis = investable_equity.checked_mul_decimal(absolute)?;
         let (fees, slip) = costs.fees(basis, side)?;
-        plan.turnover = add(plan.turnover, absolute)?;
+        plan.candidate_basis = add(plan.candidate_basis, basis)?;
         plan.total_fees = add(plan.total_fees, add(add(fees.commission, fees.tax)?, slip)?)?;
         inputs.push((instrument, price, current, target, basis, side, fees, slip));
     }
-    let after = sub(equity, plan.total_fees)?;
+    let after = sub(investable_equity, plan.total_fees)?;
     if after <= Notional::ZERO {
         return Err(FastEventError::InvalidInput(
             "costs exhaust pre-open equity".into(),
@@ -162,27 +167,26 @@ pub(crate) fn target_plan(
 }
 
 /// Exact (unquantized) target amounts leave `after * (1 - sum(targets))` for
-/// cash after deducting receivables and retained positions. The scale-18
-/// products are compared as 256-bit integers so the proof does not depend on
-/// a rounded reference value or a fixed epsilon.
+/// cash after reserving retained positions. Receivables are already outside the
+/// investable budget, so they are not deducted again. The scale-18 products are
+/// compared as 256-bit integers so the proof does not depend on a rounded
+/// reference value or a fixed epsilon.
 fn rounding_only_feasible(
     after: Notional,
     target_weight_sum: Notional,
-    receivables: Notional,
     retained_value: Notional,
 ) -> Result<bool, FastEventError> {
     let remaining_weight = sub("1".parse()?, target_weight_sum)?;
     if remaining_weight < Notional::ZERO {
         return Ok(false);
     }
-    let committed = add(receivables, retained_value)?;
     let scale: u128 = 1_000_000_000_000_000_000;
     let left = wide_mul(
         u128::try_from(after.mantissa()).map_err(|_| FixedPointError::Overflow)?,
         u128::try_from(remaining_weight.mantissa()).map_err(|_| FixedPointError::Overflow)?,
     );
     let right = wide_mul(
-        u128::try_from(committed.mantissa()).map_err(|_| FixedPointError::Overflow)?,
+        u128::try_from(retained_value.mantissa()).map_err(|_| FixedPointError::Overflow)?,
         scale,
     );
     Ok(left >= right)
@@ -202,7 +206,6 @@ fn wide_mul(left: u128, right: u128) -> (u128, u128) {
 pub(crate) fn settle_plan_cash(
     plan: &mut ParityPlan,
     cash: Notional,
-    receivables: Notional,
 ) -> Result<Option<&'static str>, FastEventError> {
     let after = plan.after;
     let target_weight_sum = plan.target_weight_sum;
@@ -252,7 +255,7 @@ pub(crate) fn settle_plan_cash(
         plan.cash_residue = budget;
         return Ok(None);
     }
-    if !rounding_only_feasible(after, target_weight_sum, receivables, retained_value)? {
+    if !rounding_only_feasible(after, target_weight_sum, retained_value)? {
         return Ok(Some(
             "full-target cash shortfall is not attributable to scale-18 rounding",
         ));
@@ -323,14 +326,25 @@ impl ParitySizingState {
         }
     }
 
-    pub fn equity(
+    /// Total NAV: available cash plus securities plus unsupported-spend
+    /// receivables. Reporting weights, returns and drawdowns use this base.
+    pub fn total_nav(
         &self,
         prices: &BTreeMap<InstrumentId, Price>,
     ) -> Result<Notional, FastEventError> {
-        let mut equity = add(
-            add(self.cash, self.dividend_receivable)?,
+        add(
+            add(self.investable_equity(prices)?, self.dividend_receivable)?,
             self.liquidation_receivable,
-        )?;
+        )
+    }
+
+    /// Investment budget: available cash plus securities, excluding dividend
+    /// and liquidation receivables. Targets and candidate fees use this base.
+    pub fn investable_equity(
+        &self,
+        prices: &BTreeMap<InstrumentId, Price>,
+    ) -> Result<Notional, FastEventError> {
+        let mut equity = self.cash;
         for (id, q) in &self.positions {
             let price = *prices
                 .get(id)
@@ -344,7 +358,7 @@ impl ParitySizingState {
         &self,
         prices: &BTreeMap<InstrumentId, Price>,
     ) -> Result<BTreeMap<InstrumentId, f64>, FastEventError> {
-        let equity = self.equity(prices)?;
+        let equity = self.total_nav(prices)?;
         self.positions
             .iter()
             .map(|(id, q)| {
@@ -454,7 +468,7 @@ mod tests {
             )
             .unwrap();
             assert_eq!(
-                settle_plan_cash(&mut plan, "1000".parse().unwrap(), Notional::ZERO).unwrap(),
+                settle_plan_cash(&mut plan, "1000".parse().unwrap()).unwrap(),
                 None
             );
             assert!(plan.cash_adjustments.is_empty());
@@ -477,12 +491,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            settle_plan_cash(
-                &mut plan,
-                "0.000000000000000002".parse().unwrap(),
-                Notional::ZERO
-            )
-            .unwrap(),
+            settle_plan_cash(&mut plan, "0.000000000000000002".parse().unwrap()).unwrap(),
             None
         );
         assert_eq!(plan.legs[0].desired, quantity("0.000000000000000001"));
@@ -491,27 +500,63 @@ mod tests {
     }
 
     #[test]
-    fn receivables_are_not_spendable_cash_and_fail_before_adjustment() {
-        let ids = [instrument("A.SYNTH")];
-        let prices = BTreeMap::from([(ids[0].clone(), price("1"))]);
-        let targets = BTreeMap::from([(ids[0].clone(), 1.0)]);
+    fn receivables_are_outside_the_investment_budget() {
+        let a = instrument("A.SYNTH");
+        let b = instrument("B.SYNTH");
+        let prices = BTreeMap::from([(a.clone(), price("1")), (b.clone(), price("1"))]);
         let mut plan = target_plan(
-            "1000".parse().unwrap(),
-            &BTreeMap::new(),
-            &targets,
+            "500".parse().unwrap(),
+            &BTreeMap::from([(a, quantity("500"))]),
+            &BTreeMap::from([(b.clone(), 1.0)]),
             &prices,
             FastEventCosts::ZERO,
             &BTreeSet::new(),
         )
         .unwrap();
-        let error = settle_plan_cash(&mut plan, Notional::ZERO, "1000".parse().unwrap())
-            .unwrap()
-            .unwrap();
-        assert!(
-            error.contains("not attributable to scale-18 rounding"),
-            "{error}"
+        assert_eq!(
+            settle_plan_cash(&mut plan, Notional::ZERO).unwrap(),
+            None,
+            "a 500 security sale funds the 500 investable target"
         );
         assert!(plan.cash_adjustments.is_empty());
+        assert_eq!(plan.investable_equity, "500".parse().unwrap());
+        assert_eq!(plan.candidate_basis, "1000".parse().unwrap());
+        assert_eq!(
+            plan.legs
+                .iter()
+                .find(|leg| leg.instrument == b)
+                .unwrap()
+                .desired,
+            quantity("500")
+        );
+    }
+
+    #[test]
+    fn rounding_proof_compares_retained_value_only() {
+        assert!(
+            rounding_only_feasible(
+                "1000".parse().unwrap(),
+                "0.5".parse().unwrap(),
+                "500".parse().unwrap()
+            )
+            .unwrap()
+        );
+        assert!(
+            !rounding_only_feasible(
+                "1000".parse().unwrap(),
+                "0.5".parse().unwrap(),
+                "500.000000000000000001".parse().unwrap()
+            )
+            .unwrap()
+        );
+        assert!(
+            !rounding_only_feasible(
+                "1000".parse().unwrap(),
+                "1.5".parse().unwrap(),
+                Notional::ZERO
+            )
+            .unwrap()
+        );
     }
 
     #[test]
@@ -530,7 +575,31 @@ mod tests {
             &BTreeSet::from([a]),
         )
         .unwrap();
-        let error = settle_plan_cash(&mut plan, Notional::ZERO, Notional::ZERO)
+        let error = settle_plan_cash(&mut plan, Notional::ZERO)
+            .unwrap()
+            .unwrap();
+        assert!(
+            error.contains("not attributable to scale-18 rounding"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn retained_value_shortfall_still_rejects_when_a_receivable_exists() {
+        let a = instrument("A.SYNTH");
+        let b = instrument("B.SYNTH");
+        let prices = BTreeMap::from([(a.clone(), price("1")), (b.clone(), price("1"))]);
+        let positions = BTreeMap::from([(a.clone(), quantity("500"))]);
+        let mut plan = target_plan(
+            "1000".parse().unwrap(),
+            &positions,
+            &BTreeMap::from([(b, 1.0)]),
+            &prices,
+            FastEventCosts::ZERO,
+            &BTreeSet::from([a]),
+        )
+        .unwrap();
+        let error = settle_plan_cash(&mut plan, "500".parse().unwrap())
             .unwrap()
             .unwrap();
         assert!(

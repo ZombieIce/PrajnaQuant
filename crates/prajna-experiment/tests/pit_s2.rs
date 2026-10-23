@@ -50,7 +50,7 @@ fn terminal_settlement_semantics_is_explicit_and_changes_run_identity() {
     );
     assert_eq!(
         enabled_run.run_spec["engine"]["semantic_version"],
-        "vector@6"
+        "vector@9"
     );
 }
 
@@ -69,7 +69,7 @@ fn shared_sizing_version_is_in_run_spec_and_result_and_reruns_are_stable() {
     let vector_run = &vector_experiment.expand(lake.path()).unwrap()[0];
     assert_eq!(
         vector_run.run_spec["engine"]["semantic_version"],
-        "vector@4"
+        "vector@7"
     );
 
     let mut parity_input = definition(&f, "fast_event");
@@ -80,9 +80,18 @@ fn shared_sizing_version_is_in_run_spec_and_result_and_reruns_are_stable() {
     let second = parity_experiment.execute(lake.path(), 1).unwrap();
     let run = &first.runs[0];
     assert_eq!(run.status, RunStatus::Completed);
-    assert_eq!(run.run_spec["engine"]["semantic_version"], "fast_event@4");
+    assert_eq!(run.run_spec["engine"]["semantic_version"], "fast_event@7");
     let fast = run.fast_event_result.as_ref().unwrap();
-    assert_eq!(fast.semantic_version, "fast_event@4");
+    assert_eq!(fast.semantic_version, "fast_event@7");
+    let summary = run.summary.as_ref().unwrap();
+    // Normal F8 reports the executed candidate fee basis (10,000) over the
+    // pre-trade total NAV, not the actual raw fill notional (9,995).
+    assert_eq!(summary.total_turnover, 1.0);
+    assert_eq!(
+        summary.total_cost,
+        5.0 / 10_000.0,
+        "commission 3 + slippage 2 over pre-trade total NAV"
+    );
     assert_eq!(run.run_id, second.runs[0].run_id);
     assert_eq!(
         serde_json::to_vec(&run.summary).unwrap(),
@@ -141,8 +150,8 @@ fn terminal_settlement_uses_last_catalog_bar_close_and_fast_vector_match() {
 
     let vector = vector_run.runs[0].result.as_ref().unwrap();
     let fast = fast_run.runs[0].fast_event_result.as_ref().unwrap();
-    assert_eq!(fast.semantic_version, "fast_event@6");
-    assert_eq!(vector.semantic_version.as_deref(), Some("vector@6"));
+    assert_eq!(fast.semantic_version, "fast_event@9");
+    assert_eq!(vector.semantic_version.as_deref(), Some("vector@9"));
     assert_eq!(vector.terminal_settlements.len(), 1);
     assert_eq!(fast.terminal_settlements.len(), 1);
     let vector_settlement = &vector.terminal_settlements[0];
@@ -553,6 +562,7 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
         "version": "synthetic-actions@1",
         "unexplained_jump_threshold_bps": 1,
     });
+    let pit_value = pit_input.clone();
     let pit_input = serde_json::from_value(pit_input).unwrap();
     let context = PitContext::build(&pit_input, lake.path(), &v7.dsv).unwrap();
     use prajna_research::etf_market::TradeState;
@@ -673,6 +683,82 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
     assert!(context.unknown_coverage.unknowns.iter().all(|cell| {
         cell.instrument_id != halt_id || cell.session_date != fixture::date_at(start, 3)
     }));
+
+    // Action-path Experiment identity: the corporate-action Run Spec and result
+    // must both carry the new vector@8 semantic version and persist it.
+    let mut action_definition = definition(&f, "vector");
+    action_definition["dsv"] = json!(v7.dsv);
+    action_definition["pit"] = pit_value.clone();
+    let action_experiment = Experiment::parse(&action_definition.to_string(), lake.path()).unwrap();
+    let action_report = action_experiment.execute(lake.path(), 1).unwrap();
+    assert_eq!(
+        action_report.runs[0].status,
+        RunStatus::Completed,
+        "{:?}",
+        action_report.runs[0].error
+    );
+    assert_eq!(
+        action_report.runs[0].run_spec["engine"]["semantic_version"],
+        "vector@8"
+    );
+    assert_eq!(
+        action_report.runs[0]
+            .result
+            .as_ref()
+            .unwrap()
+            .semantic_version
+            .as_deref(),
+        Some("vector@8")
+    );
+    let stored = action_experiment
+        .execute_and_store(
+            lake.path(),
+            env!("CARGO_MANIFEST_DIR"),
+            ResultLevel::Summary,
+            1,
+        )
+        .unwrap();
+    assert_eq!(
+        stored.manifest.runs[0].run_spec.as_ref().unwrap()["engine"]["semantic_version"],
+        "vector@8"
+    );
+
+    let mut fast_definition = definition(&f, "fast_event");
+    fast_definition["dsv"] = json!(v7.dsv);
+    fast_definition["pit"] = pit_value;
+    fast_definition["fast_event"]["sizing"] = json!("vector_parity");
+    let fast_experiment = Experiment::parse(&fast_definition.to_string(), lake.path()).unwrap();
+    let fast_report = fast_experiment.execute(lake.path(), 1).unwrap();
+    assert_eq!(
+        fast_report.runs[0].status,
+        RunStatus::Completed,
+        "{:?}",
+        fast_report.runs[0].error
+    );
+    assert_eq!(
+        fast_report.runs[0].run_spec["engine"]["semantic_version"],
+        "fast_event@8"
+    );
+    assert_eq!(
+        fast_report.runs[0]
+            .fast_event_result
+            .as_ref()
+            .unwrap()
+            .semantic_version,
+        "fast_event@8"
+    );
+    let stored = fast_experiment
+        .execute_and_store(
+            lake.path(),
+            env!("CARGO_MANIFEST_DIR"),
+            ResultLevel::Summary,
+            1,
+        )
+        .unwrap();
+    assert_eq!(
+        stored.manifest.runs[0].run_spec.as_ref().unwrap()["engine"]["semantic_version"],
+        "fast_event@8"
+    );
 
     let report_path = lake.path().join("acceptance/mvp6-unknown-coverage.json");
     let first_report = std::fs::read(&report_path).unwrap();

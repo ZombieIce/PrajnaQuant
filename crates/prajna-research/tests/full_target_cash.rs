@@ -86,7 +86,7 @@ fn non_pit_two_leg_quantization_regression_matches_account_and_cash_residue() {
     )
     .unwrap();
 
-    assert_eq!(result.semantic_version, "fast_event@4");
+    assert_eq!(result.semantic_version, "fast_event@7");
     assert_eq!(result.fills.len(), 2);
     assert_eq!(
         result.fills[0].fill.order().instrument_id(),
@@ -240,7 +240,7 @@ fn pit_vector_preview_and_fast_account_consume_the_same_corrected_quantities() {
     )
     .unwrap();
 
-    assert_eq!(fast.semantic_version, "fast_event@4");
+    assert_eq!(fast.semantic_version, "fast_event@7");
     assert_eq!(fast.fills.len(), 2);
     assert_eq!(
         fast.fills[1].fill.order().quantity(),
@@ -274,7 +274,7 @@ fn pit_vector_preview_and_fast_account_consume_the_same_corrected_quantities() {
         SizingAdjustmentReason::QuantizationCashBudget
     );
     assert_eq!(sizing.fees, "0.3".parse::<Notional>().unwrap());
-    assert_eq!(vector.semantic_version.as_deref(), Some("vector@4"));
+    assert_eq!(vector.semantic_version.as_deref(), Some("vector@7"));
     assert_eq!(
         vector.sessions[1].nav / (1.0 + vector.sessions[1].gross_return) * 1000.0,
         fast.sessions[1]

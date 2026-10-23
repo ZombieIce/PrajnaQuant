@@ -46,7 +46,7 @@ TRI 是理论总回报研究序列，链式累积隐含将分配权益继续计�
 
 权益登记日收盘的**实际持仓**锁定 Dividend Entitlement，按 VP 归属保存数量与公告每份金额；不是 Decision 目标权重，也不是除息日新买数量。锁定权利后卖出不取消该权利，除息日买入不获得本次权利。
 
-除息时将权利确认为应收分红并计入权益，不增加可用现金。发放日将该应收转入现金，不再产生收益；按公告有明确到账时刻则用该时刻，只有日期时保守在该日收盘确认可用，不用于当日 open 预支交易。此日期级规则由 owner 在 #173 实现会话中确认，须进入 Run Spec / Engine 语义版本，不能隐式选择开盘到账。发放本身不触发调仓，下一正常调仓才按现金预算再投资。
+除息时将权利确认为应收分红并计入权益，不增加可用现金。发放日将该应收转入现金，不再产生收益；按公告有明确到账时刻则用该时刻，只有日期时保守在该日收盘确认可用，不用于当日 open 预支交易。此日期级规则由 owner 在 #173 实现会话中确认，须进入 Run Spec / Engine 语义版本，不能隐式选择开盘到账。发放本身不触发调仓，下一正常调仓才按现金预算再投资。自 #274 起，未支付分红与清算应收不计入正常 parity full-target 的投资预算（可投资权益），但仍计入总 NAV；lot 的既有现金限量规则不在该扩展内。
 
 个人分红税默认 0、可配置且随 Run Spec 保存；分开保存 gross entitlement、税额及 net receivable，权益中只计可归属净额，不能把税藏入价格或忽略。精确扣缴时点/规则必须有依据；无法映射的税规则不能假装支持。定点运算沿用 Domain scale 18 / half-even；币种或公告指定结算舍入须显式版本化，不静默补差。
 
@@ -54,7 +54,7 @@ TRI 是理论总回报研究序列，链式累积隐含将分配权益继续计�
 
 `equity = available_cash + Σ(quantity × raw_valuation_price) + dividend_receivables + liquidation_receivables`。
 
-账户现金/数量/各类应收分别等于 VP 子账合计（现金另加 Unallocated Capital），账户权益等于子账权益加 Unallocated Capital。登记权利未在除息前重复计入权益；应收不是现金，不参与下单预算。每次事件、open 后和 close 均核验定点恒等式；估值来源与陈旧程度仍须记录。
+账户现金/数量/各类应收分别等于 VP 子账合计（现金另加 Unallocated Capital），账户权益等于子账权益加 Unallocated Capital。登记权利未在除息前重复计入权益；应收不是现金，不参与下单预算。自 #274 起，正常 parity full-target 的可投资权益显式排除应收，且量化可行性证明不再重复扣除。每次事件、open 后和 close 均核验定点恒等式；估值来源与陈旧程度仍须记录。
 
 ### 折算、非整手与终止清算（P20）
 
@@ -66,7 +66,7 @@ Risk Exit 未成功的终止持仓不消失，也不按末日行情强制平仓�
 
 Within the research-only MVP-6 TRI semantics selected by `mvp6-market-driven@1`, `etf-total-return-index@3` deliberately excludes liquidation rows from the TRI and derived action ledger (#254). This does not change P20's account-settlement requirement: terminal positions are handled by #255, which also owns disclosure that settlement does not use actual liquidation proceeds or dates.
 
-`mvp6-terminal-settlement@1` 是显式选择的研究估值语义：当 Catalog 生命周期在运行窗口内终止时，最后一个有 Bar 的 Session 开盘仍允许正常执行；若收盘时仍持有该标的，则按原始收盘价将持仓直接转为现金。该账户事件保留 Session、数量、价格与 proceeds，不生成 Order/Fill，不加收结算佣金或滑点；它不读取公告清算金额/日期，也不宣称实际清算款或完整最终总回报。Run Spec 与结果须披露“未按实际清算款与清算日期结算”，并说明最后 Bar 开盘交易仍按正常规则执行，收盘时按 Catalog 终止结算剩余持仓。若运行窗口内终止前没有可用 Bar close，运行显式失败，不以零价结算。此语义仅对 `terminal_settlement` 显式启用：Fast Event lot 继续使用 `fast_event@3`，Fast Event `vector_parity` 与全部 PIT Vector 使用 `fast_event@6` / `vector@6`（#263 共享量化现金可行计划）。未启用时既有行为和身份不变。启用该语义的 MVP-6 运行部分替代本节 P20 基于官方清算事实的终止清算路径；未启用时，P20 既有路径不变。该估值不代表官方清算权利，也不替代 P20 关于其他公司行动的账本要求。
+`mvp6-terminal-settlement@1` 是显式选择的研究估值语义：当 Catalog 生命周期在运行窗口内终止时，最后一个有 Bar 的 Session 开盘仍允许正常执行；若收盘时仍持有该标的，则按原始收盘价将持仓直接转为现金。该账户事件保留 Session、数量、价格与 proceeds，不生成 Order/Fill，不加收结算佣金或滑点；它不读取公告清算金额/日期，也不宣称实际清算款或完整最终总回报。Run Spec 与结果须披露“未按实际清算款与清算日期结算”，并说明最后 Bar 开盘交易仍按正常规则执行，收盘时按 Catalog 终止结算剩余持仓。若运行窗口内终止前没有可用 Bar close，运行显式失败，不以零价结算。此语义仅对 `terminal_settlement` 显式启用：Fast Event lot 继续使用 `fast_event@3`，Fast Event `vector_parity` 与全部 PIT Vector 使用 `fast_event@6` / `vector@6`（#263 共享量化现金可行计划；#274 起为 `fast_event@9` / `vector@9`）。未启用时既有行为和身份不变。启用该语义的 MVP-6 运行部分替代本节 P20 基于官方清算事实的终止清算路径；未启用时，P20 既有路径不变。该估值不代表官方清算权利，也不替代 P20 关于其他公司行动的账本要求。
 
 ### 公司行动完整性（P21）
 
@@ -78,7 +78,7 @@ Within the research-only MVP-6 TRI semantics selected by `mvp6-market-driven@1`,
 
 主运行为 Fast Event `lot + full_target`，其现金、持仓、费用、应收、折算与清算账本是绩效权威。成本沿用 P16 并保存（初始 100 万、lot 100、佣金 3bp/最低 5 元、双边滑点 2bp、税 0）；TRI 或 Corporate Action 不绕过成本配置。Accurate 仅作 Full workflow 冒烟，不取代平台账本。
 
-另建 Vector / Fast Event `vector_parity + full_target` 对拍：共享 PIT Universe、Eligible Set、Risk Exit、执行状态、原始估值点和公司行动时间轴；继续采用比例成本、无最低佣金与无整手的共同语义，不拿主运行 lot 结果要求逐值相同。Vector 在权重层显式分离投资部分、可用现金和应收非投资部分；除息记权利，发放只转桶，下一正常调仓才再投资。公司行动本身不计换手，非投资部分不随标的价格漂移。
+另建 Vector / Fast Event `vector_parity + full_target` 对拍：共享 PIT Universe、Eligible Set、Risk Exit、执行状态、原始估值点和公司行动时间轴；继续采用比例成本、无最低佣金与无整手的共同语义，不拿主运行 lot 结果要求逐值相同。Vector 在权重层显式分离投资部分、可用现金和应收非投资部分；除息记权利，发放只转桶，下一正常调仓才再投资。正常 full-target 目标与 F8 候选费用按可投资权益计算（#274），实际权重与报告分母仍为总 NAV。公司行动本身不计换手，非投资部分不随标的价格漂移。
 
 比例对拍允许连续数量、无份额取整；实际整数折算及 `corporate_action_rounding` 由 lot 权威账本单独验收，不静默混入 Vector 共同模式。Vector 不因此获得订单/逐笔账本或精确账户守恒证明。逐日比较相同 open 后与 close 的权益/NAV、投资/现金/应收比例、状态/延期轨迹及成本；延续 ADR 0019 的已登记数值容差，不能扩大容差掩盖重复分红或提前再投资。需独立手算/Python oracle，不能仅依靠共享代码自证。
 

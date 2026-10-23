@@ -439,7 +439,9 @@ impl EngineSettings {
                 serde_json::json!({"kind":"accurate_event", "semantic_version":ACCURATE_SEMANTIC_VERSION})
             } else {
                 let semantic_version = match self.fast.as_ref().map(|config| config.sizing) {
-                    Some(Sizing::VectorParity) => fast_event::PARITY_CASH_SEMANTIC_VERSION,
+                    Some(Sizing::VectorParity) => {
+                        fast_event::INVESTABLE_EQUITY_PARITY_ENGINE_VERSION
+                    }
                     _ => fast_event::SEMANTIC_VERSION,
                 };
                 serde_json::json!({"kind":"fast_event", "semantic_version": semantic_version})
