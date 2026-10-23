@@ -28,6 +28,16 @@ pub const TERMINAL_SETTLEMENT_ENGINE_VERSION: &str = "fast_event@3";
 pub const PARITY_CASH_SEMANTIC_VERSION: &str = "fast_event@4";
 pub const CORPORATE_ACTION_PARITY_CASH_SEMANTIC_VERSION: &str = "fast_event@5";
 pub const TERMINAL_SETTLEMENT_PARITY_CASH_ENGINE_VERSION: &str = "fast_event@6";
+/// Parity full-target plans now size from investable equity excluding
+/// receivables and report executed-plan candidate fee bases as turnover.
+pub const INVESTABLE_EQUITY_PARITY_ENGINE_VERSION: &str = "fast_event@7";
+pub const CORPORATE_ACTION_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION: &str = "fast_event@8";
+pub const TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION: &str = "fast_event@9";
+/// Normal lot full-target budgets exclude unpaid receivables; retry and
+/// entry-only execution keep their preceding contract.
+pub const INVESTABLE_EQUITY_LOT_ENGINE_VERSION: &str = "fast_event@10";
+pub const CORPORATE_ACTION_INVESTABLE_EQUITY_LOT_ENGINE_VERSION: &str = "fast_event@11";
+pub const TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_LOT_ENGINE_VERSION: &str = "fast_event@12";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sizing {
@@ -132,8 +142,13 @@ pub struct FastEventSession {
 #[derive(Debug, Clone)]
 pub struct FastEventFill {
     pub fill: Fill,
-    /// F8 weight-turnover base, which can differ from the actual raw Fill notional.
+    /// F8 candidate fee basis, retained after quantization correction; can
+    /// differ from the actual raw Fill notional. Used for fee accounting only.
     pub fee_basis: Notional,
+    /// Reported turnover numerator. Normal non-retry parity full-target plans
+    /// use the executed candidate fee basis; lot, retry and external-execution
+    /// paths keep the actual raw fill notional.
+    pub turnover_basis: Notional,
     pub fee_side: Side,
 }
 
@@ -285,7 +300,7 @@ pub(crate) fn weight(input: f64) -> Result<Notional, FastEventError> {
     Ok(crate::strategy::execution_decimal(input)?)
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct Marks {
     pub(crate) prices: BTreeMap<InstrumentId, Price>,
     sources: BTreeMap<InstrumentId, PriceSource>,
@@ -631,6 +646,7 @@ fn run_with_execution(
                     account.apply_fill(fill.clone())?;
                     fills.push(FastEventFill {
                         fee_basis: basis,
+                        turnover_basis: basis,
                         fee_side: Side::Sell,
                         fill,
                     });
@@ -853,6 +869,7 @@ fn run_with_execution(
                     ));
                 }
                 entry.fee_basis = actual.trade_notional();
+                entry.turnover_basis = entry.fill.raw_notional();
                 entry.fill = actual;
             }
             account.apply_fill(entry.fill.clone())?;
@@ -1023,20 +1040,38 @@ fn run_with_execution(
             "Missing prices carry the last valid price of the same field, never zero.",
         ]
     };
+    if config.sizing == Sizing::Lot && !external_execution {
+        assumptions.push("Normal lot full-target quantities use available cash plus securities at pre-trade valuation, excluding dividend and liquidation receivables; actual weights, cost and turnover use total NAV. Retry and entry-only retain their own budget rules.");
+    }
     if terminal_settlement.is_some() {
         assumptions.push(
             "Normal execution at the final in-lifecycle Bar open remains allowed; remaining Catalog-terminal positions settle at that session's raw Bar close without using actual liquidation cash or date.",
         );
     }
+    let normal_lot = !external_execution
+        && portfolios
+            .iter()
+            .any(|p| p.rebalance == Rebalance::FullTarget);
     Ok(FastEventResult {
         semantic_version: match (
             config.sizing,
             actions.is_some(),
             terminal_settlement.is_some(),
         ) {
-            (Sizing::VectorParity, _, true) => TERMINAL_SETTLEMENT_PARITY_CASH_ENGINE_VERSION,
-            (Sizing::VectorParity, true, false) => CORPORATE_ACTION_PARITY_CASH_SEMANTIC_VERSION,
-            (Sizing::VectorParity, false, false) => PARITY_CASH_SEMANTIC_VERSION,
+            (Sizing::VectorParity, _, true) => {
+                TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION
+            }
+            (Sizing::VectorParity, true, false) => {
+                CORPORATE_ACTION_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION
+            }
+            (Sizing::VectorParity, false, false) => INVESTABLE_EQUITY_PARITY_ENGINE_VERSION,
+            (Sizing::Lot, _, true) if normal_lot => {
+                TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_LOT_ENGINE_VERSION
+            }
+            (Sizing::Lot, true, false) if normal_lot => {
+                CORPORATE_ACTION_INVESTABLE_EQUITY_LOT_ENGINE_VERSION
+            }
+            (Sizing::Lot, false, false) if normal_lot => INVESTABLE_EQUITY_LOT_ENGINE_VERSION,
             (Sizing::Lot, _, true) => TERMINAL_SETTLEMENT_ENGINE_VERSION,
             (Sizing::Lot, true, false) => CORPORATE_ACTION_SEMANTIC_VERSION,
             (Sizing::Lot, false, false) => SEMANTIC_VERSION,
@@ -1430,6 +1465,7 @@ fn lot_fills(
     if run.rebalance == Rebalance::FullTarget {
         let equity = match attempt.pre_open_equity {
             Some(equity) => equity,
+            None if !attempt.retry => investable_budget(account, run.id, prices)?,
             None => account.value(prices)?.portfolios[&run.id].equity,
         };
         for (instrument, target) in attempt.applied {
@@ -1602,6 +1638,7 @@ fn lot_fills(
                     }
                     fills.push(FastEventFill {
                         fee_basis: fill.trade_notional(),
+                        turnover_basis: fill.raw_notional(),
                         fee_side: side,
                         fill,
                     });
@@ -1771,6 +1808,21 @@ fn parity_fills(
     )
 }
 
+// Same checked total-NAV/receivable distinction for both sizing consumers.
+fn investable_budget(
+    account: &TradingAccount,
+    id: VirtualPortfolioId,
+    prices: &BTreeMap<InstrumentId, Price>,
+) -> Result<Notional, FastEventError> {
+    let portfolio = &account.portfolios()[&id];
+    let total_nav = account.value(prices)?.portfolios[&id].equity;
+    let receivables = add(
+        portfolio.dividend_receivable(),
+        portfolio.liquidation_receivable(),
+    )?;
+    sub(total_nav, receivables)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn parity_fills_retaining(
     account: &TradingAccount,
@@ -1792,21 +1844,16 @@ fn parity_fills_retaining(
         });
     }
     let portfolio = &account.portfolios()[&id];
-    let equity = account.value(prices)?.portfolios[&id].equity;
-    let receivables = add(
-        portfolio.dividend_receivable(),
-        portfolio.liquidation_receivable(),
-    )?;
+    let investable_equity = investable_budget(account, id, prices)?;
     let mut plan = crate::parity_sizing::target_plan(
-        equity,
+        investable_equity,
         portfolio.positions(),
         targets,
         prices,
         costs,
         retained,
     )?;
-    let cash_error =
-        crate::parity_sizing::settle_plan_cash(&mut plan, portfolio.cash(), receivables)?;
+    let cash_error = crate::parity_sizing::settle_plan_cash(&mut plan, portfolio.cash())?;
     if let Some(error) = cash_error {
         if !defer_cash_error {
             return Err(invalid(error));
@@ -1871,6 +1918,7 @@ fn parity_fills_retaining(
                 fees,
             )?,
             fee_basis: basis,
+            turnover_basis: basis,
             fee_side,
         });
     }
@@ -1971,9 +2019,11 @@ fn parity_retry_fills_inner(
             )?;
             let next_cash = add(cash, fill.cash_delta())?;
             cash = next_cash;
+            let turnover_basis = fill.raw_notional();
             fills.push(FastEventFill {
                 fill,
                 fee_basis: budget,
+                turnover_basis,
                 fee_side: Side::Buy,
             });
         }

@@ -23,10 +23,11 @@ use crate::{
 };
 
 const RETURN_TOLERANCE: f64 = 1e-12;
-/// PIT Vector shares the corrected full-target cash-feasible sizing plan.
-pub const PIT_SIZING_SEMANTIC_VERSION: &str = "vector@4";
-pub const CORPORATE_ACTION_PIT_SIZING_SEMANTIC_VERSION: &str = "vector@5";
-pub const TERMINAL_SETTLEMENT_PIT_SIZING_ENGINE_VERSION: &str = "vector@6";
+/// PIT Vector targets and F8 candidate fees use investable equity while
+/// reporting keeps the total-NAV denominator.
+pub const PIT_SIZING_SEMANTIC_VERSION: &str = "vector@7";
+pub const CORPORATE_ACTION_PIT_SIZING_SEMANTIC_VERSION: &str = "vector@8";
+pub const TERMINAL_SETTLEMENT_PIT_SIZING_ENGINE_VERSION: &str = "vector@9";
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct VectorCosts {
@@ -120,7 +121,12 @@ pub struct VectorExecution {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VectorPitSizing {
+    /// Total NAV at normal target sizing (after any same-open Risk Exit cash
+    /// movement), including dividend and liquidation receivables.
     pub equity: Notional,
+    /// Investment budget used for targets and candidate fees: total NAV less
+    /// dividend and liquidation receivables.
+    pub investable_equity: Notional,
     pub fees: Notional,
     pub desired_quantities: BTreeMap<InstrumentId, Quantity>,
     pub required_sides: BTreeMap<InstrumentId, String>,
@@ -339,7 +345,11 @@ type EventGenerator<'a> = dyn FnMut(&PanelSession, &BTreeSet<InstrumentId>, Opti
 
 struct SizedVectorTarget {
     weights: BTreeMap<InstrumentId, f64>,
+    /// Executed-plan candidate fee bases divided by pre-trade total NAV.
     turnover: f64,
+    /// Total NAV at normal target sizing, including receivables.
+    total_nav: Notional,
+    /// Actual fees divided by pre-trade total NAV.
     cost: f64,
     blocked_sells: BTreeSet<InstrumentId>,
     skipped_buys: BTreeSet<InstrumentId>,
@@ -376,10 +386,8 @@ fn pit_target_plan(
     prices: &BTreeMap<InstrumentId, Price>,
     costs: FastEventCosts,
 ) -> Result<SizedVectorTarget, VectorError> {
-    let equity = current.equity(prices).map_err(sizing_error)?;
-    let receivables =
-        crate::fast_event::add(current.dividend_receivable, current.liquidation_receivable)
-            .map_err(sizing_error)?;
+    let total_nav = current.total_nav(prices).map_err(sizing_error)?;
+    let investable_equity = current.investable_equity(prices).map_err(sizing_error)?;
     let mut skipped_buys = targets
         .iter()
         .filter(|(id, w)| **w > 0.0 && !prices.contains_key(*id))
@@ -387,7 +395,7 @@ fn pit_target_plan(
         .collect::<BTreeSet<_>>();
     loop {
         let mut plan = target_plan(
-            equity,
+            investable_equity,
             &current.positions,
             targets,
             prices,
@@ -404,9 +412,8 @@ fn pit_target_plan(
             continue;
         }
         let next = if blocked_sells.is_empty() {
-            if let Some(error) =
-                crate::parity_sizing::settle_plan_cash(&mut plan, current.cash, receivables)
-                    .map_err(sizing_error)?
+            if let Some(error) = crate::parity_sizing::settle_plan_cash(&mut plan, current.cash)
+                .map_err(sizing_error)?
             {
                 return Err(sizing_error(
                     crate::fast_event::FastEventError::InvalidInput(error.into()),
@@ -433,8 +440,9 @@ fn pit_target_plan(
             .map_err(sizing_error)?;
         return Ok(SizedVectorTarget {
             weights,
-            turnover: decimal_float(plan.turnover)?,
-            cost: decimal_float(plan.total_fees)? / decimal_float(equity)?,
+            turnover: decimal_float(plan.candidate_basis)? / decimal_float(total_nav)?,
+            cost: decimal_float(plan.total_fees)? / decimal_float(total_nav)?,
+            total_nav,
             blocked_sells,
             skipped_buys,
             next,
@@ -454,7 +462,10 @@ fn sizing_error(error: crate::fast_event::FastEventError) -> VectorError {
     invalid_input(format!("PIT monetary sizing: {error}"))
 }
 
-fn sizing_diagnostic(plan: &ParityPlan) -> Result<VectorPitSizing, VectorError> {
+fn sizing_diagnostic(
+    plan: &ParityPlan,
+    total_nav: Notional,
+) -> Result<VectorPitSizing, VectorError> {
     let mut sides = BTreeMap::new();
     for leg in &plan.legs {
         if let Some(side) = leg.required_side().map_err(sizing_error)? {
@@ -469,7 +480,8 @@ fn sizing_diagnostic(plan: &ParityPlan) -> Result<VectorPitSizing, VectorError> 
         }
     }
     Ok(VectorPitSizing {
-        equity: plan.equity,
+        equity: total_nav,
+        investable_equity: plan.investable_equity,
         fees: plan.total_fees,
         desired_quantities: plan
             .legs
@@ -624,7 +636,9 @@ fn run_vector_inner(
             let book = sizing_state
                 .as_mut()
                 .ok_or_else(|| invalid_input("missing PIT sizing state"))?;
-            let before = book.equity(&decimal_marks.prices).map_err(sizing_error)?;
+            let before = book
+                .total_nav(&decimal_marks.prices)
+                .map_err(sizing_error)?;
             let mut sold = Notional::ZERO;
             let mut fees = Notional::ZERO;
             let active = risk.active_before_open(session.ts_open);
@@ -730,7 +744,7 @@ fn run_vector_inner(
                             skipped_buys: BTreeSet::new(),
                             pit_sizing: sized_target
                                 .as_ref()
-                                .map(|s| sizing_diagnostic(&s.plan))
+                                .map(|s| sizing_diagnostic(&s.plan, s.total_nav))
                                 .transpose()?,
                         });
                     }
@@ -836,7 +850,7 @@ fn run_vector_inner(
                             skipped_buys: skipped_buys.clone(),
                             pit_sizing: sized_target
                                 .as_ref()
-                                .map(|s| sizing_diagnostic(&s.plan))
+                                .map(|s| sizing_diagnostic(&s.plan, s.total_nav))
                                 .transpose()?,
                         });
                     }
@@ -876,7 +890,7 @@ fn run_vector_inner(
                 sizing_state
                     .as_ref()
                     .ok_or_else(|| invalid_input("missing PIT sizing state"))?
-                    .equity(&decimal_marks.prices)
+                    .total_nav(&decimal_marks.prices)
                     .map_err(sizing_error)?,
             )
         } else {
@@ -958,10 +972,13 @@ fn run_vector_inner(
                 let current_equity = if let Some(equity) = terminal_open_equity {
                     equity
                 } else {
-                    book.equity(&decimal_marks.prices).map_err(sizing_error)?
+                    book.total_nav(&decimal_marks.prices)
+                        .map_err(sizing_error)?
                 };
                 let next_index = session_index + 1;
-                let mut next_marks = Marks::default();
+                // Preserve the Open field's source state so a missing next Bar
+                // carries valuation without making the price fresh.
+                let mut next_marks = decimal_marks.clone();
                 next_marks
                     .update(panel, next_index, PriceField::Open)
                     .map_err(sizing_error)?;
@@ -986,7 +1003,9 @@ fn run_vector_inner(
                     }
                     next_processor.record(transitions);
                 }
-                let next_equity = next_book.equity(&next_marks.prices).map_err(sizing_error)?;
+                let next_equity = next_book
+                    .total_nav(&next_marks.prices)
+                    .map_err(sizing_error)?;
                 let current = decimal_float(current_equity)?;
                 let next = decimal_float(next_equity)?;
                 gross_return = next / current - 1.0;
@@ -1277,7 +1296,7 @@ fn vector_components(
     book: &ParitySizingState,
     prices: &BTreeMap<InstrumentId, prajna_domain::Price>,
 ) -> Result<VectorPortfolioComponents, VectorError> {
-    let equity = book.equity(prices).map_err(sizing_error)?;
+    let equity = book.total_nav(prices).map_err(sizing_error)?;
     if equity <= Notional::ZERO {
         return Err(invalid_input(
             "Vector portfolio equity must remain positive",
@@ -1650,12 +1669,30 @@ mod tests {
     use prajna_account::FillCosts;
 
     #[test]
+    fn ledger_equity_without_price_history_still_returns_missing_price() {
+        let instrument: InstrumentId = "A.SYNTH".parse().unwrap();
+        let state = ParitySizingState {
+            cash: Notional::ZERO,
+            dividend_receivable: Notional::ZERO,
+            liquidation_receivable: Notional::ZERO,
+            positions: BTreeMap::from([(instrument.clone(), "1".parse().unwrap())]),
+        };
+
+        assert!(matches!(
+            state.total_nav(&BTreeMap::new()),
+            Err(crate::fast_event::FastEventError::Ledger(
+                prajna_account::LedgerError::MissingPrice(id)
+            )) if id == instrument
+        ));
+    }
+
+    #[test]
     fn corrected_fee_only_sell_is_blocked_by_the_actual_side_gate() {
         let instrument: InstrumentId = "A.SYNTH".parse().unwrap();
         let plan = ParityPlan {
-            equity: "1000".parse().unwrap(),
+            investable_equity: "1000".parse().unwrap(),
             total_fees: "1".parse().unwrap(),
-            turnover: Notional::ZERO,
+            candidate_basis: "1".parse().unwrap(),
             legs: vec![crate::parity_sizing::ParityLeg {
                 instrument: instrument.clone(),
                 price: "1".parse().unwrap(),

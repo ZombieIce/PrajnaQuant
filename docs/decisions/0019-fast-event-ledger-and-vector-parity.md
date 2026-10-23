@@ -9,7 +9,7 @@ MVP-6 扩展（2026-10-15）：[#181](https://github.com/ZombieIce/PrajnaQuant/i
 - **账本数值**：现金、数量、价格与费用使用 Domain 定点十进制（i128，scale 18），乘除结果按 half-even 舍入到 scale 18，暂不做货币单位舍入。"现金＋Σ数量×估值价＝权益"在 Virtual Portfolio 与 Trading Account 两层都要求精确相等。与 f64 金标准（POC-0、Vector、Python）对拍时使用登记的容差。
 - **Virtual Portfolio 是子账**：Run 开始时为各 Virtual Portfolio 分配固定资本，余额为 Unallocated Capital。每个 Virtual Portfolio 有独立现金与持仓，订单不跨 Virtual Portfolio 净额化，每个 Fill 只归属一个 Virtual Portfolio。恒等式分三条：账户现金 = Σ Virtual Portfolio 现金 + Unallocated Capital；账户每个标的数量 = Σ Virtual Portfolio 该标的数量；账户权益 = Σ Virtual Portfolio 权益 + Unallocated Capital。MVP-3 中一个 Virtual Portfolio 只运行一个 Strategy。
 - **共用执行决策**：Fast Event 与 Vector 共用同一执行决策层（可交易性、[`ADR 0005`](0005-defer-rebalance-on-unavailable-exit.md) 整次延期、pending 替换），Fast Event 只在其后生成订单并记账。由于共享逻辑无法自证，对拍须有独立 Python 金标准作第三方裁判。
-- **口径差异显式化**：数量规则 `sizing`（`vector_parity` / `lot`）、调仓规则 `rebalance`（`full_target` / `entry_only`）与未成交买腿策略 `unfilled_entry`（`skip` / `retry`，默认 `skip`）都是 Run Spec 参数。`vector_parity` + `full_target` 精确复刻 [`ADR 0017`](0017-vector-engine-semantics.md) 的成本与权重口径：成本以 open 前权益 × 权重换手为基数，open 后持仓等于目标权重 × 扣费后权益，Fill 价为 raw open，滑点作为费用单列。这是与 Vector 对拍的唯一模式。`lot` 引入整手、最低佣金与含滑点的成交价。`entry_only` 只在 Fast Event 中实现，仅用于复现 POC-0 金标准，不作为通用调仓语义。
+- **口径差异显式化**：数量规则 `sizing`（`vector_parity` / `lot`）、调仓规则 `rebalance`（`full_target` / `entry_only`）与未成交买腿策略 `unfilled_entry`（`skip` / `retry`，默认 `skip`）都是 Run Spec 参数。`vector_parity` + `full_target` 精确复刻 [`ADR 0017`](0017-vector-engine-semantics.md) 的成本与权重口径：成本以 open 前可投资权益 × 预算内权重差为基数（#274 起可投资权益排除未支付应收；实际权重、成本率与换手率仍按总 NAV 报告），open 后持仓等于目标权重 × 扣费后权益，Fill 价为 raw open，滑点作为费用单列。这是与 Vector 对拍的唯一模式。`lot` 引入整手、最低佣金与含滑点的成交价。`entry_only` 只在 Fast Event 中实现，仅用于复现 POC-0 金标准，不作为通用调仓语义。
 
 ## Considered Options
 
@@ -176,4 +176,36 @@ clamp、资本补差或减费掩盖。PIT Vector 与 Fast 的非 retry `vector_p
 受影响路径使用 Fast Event `fast_event@4`（公司行动 `@5`，终止结算 `@6`）和
 Vector PIT `vector@4`（公司行动 `@5`，终止结算 `@6`）；lot 仍为 `fast_event@1/@2/@3`，
 旧 Static Universe `vector@1` 不变。规范化 Run Spec 与结果版本一致；历史资产不覆盖，
-旧行为由旧提交复现，不提供双模式 API。
+旧行为由旧提交复现，不提供双模式 API。该预算基础随后由 #274 改为可投资权益，版本为
+`fast_event@7/@8/@9` 与 `vector@7/@8/@9`；#263 的量化修正证明与历史证据保持历史。
+
+### 可投资权益 full-target 预算与报告（#274）
+
+正常 PIT Vector 与全部共享非 retry Fast Event parity full-target 消费路径按 spec #273 /
+ticket #274 修订 #263 的预算基础：
+
+- 总 NAV = 可用现金 + 证券估值 + 未支付分红/清算应收；可投资权益 = 可用现金 + 证券估值，
+  排除上述应收。两者用 checked Domain 定点运算区分，不做零截断或负数修正。
+- 目标权重与 F8 drift、候选费用基数、扣费后目标数量均以可投资权益为分母/本金；目标不重新
+  归一化，总和不足 1 的部分保留现金。实际证券、现金、应收权重、收益与回撤继续以总 NAV 归一。
+- 现金结算仍只使用实际现金与卖出所得；量化可行性证明只比较扣费后剩余预算与 retained 持仓，
+  已排除的应收不再重复扣除。真实资金不足、费用耗尽、无效目标与算术不支持仍失败；量化修正
+  保留原候选费用，不 clamp、不减费、不补资本。
+- 成本率为实际费用 / 调仓前总 NAV；正常 F8 换手率为已执行计划的候选费用基数合计（含
+  fee-only，不重复计数）/ 同一总 NAV，不以实际 Fill 本金或预算相对权重替代。lot、独立
+  retry 与 Accurate 保留原报告分子与既有身份规则。
+- 可投资权益为 0 而总 NAV 为正（例如仅余应收）时不产生交易/费用/零除，继续估值与事件
+  处理；发放或清算到账只在 close 转桶，不触发调仓，继续沿用既有 pending/Risk Exit 门禁。
+- ADR 0023 的应收权益恒等式、发放时点与账户/VP 两层守恒不变；覆盖 normal、action、
+  terminal 的受影响路径使用 Fast Event `fast_event@7/@8/@9` 与 Vector PIT
+  `vector@7/@8/@9`，规范化 Run Spec、结果版本与重跑稳定一致。lot 仍为
+  `fast_event@1/@2/@3`，旧 Static Universe `vector@1` 不变。
+
+
+### #275：正常 lot full-target 投资预算
+
+#275 完成 #273 的第二个纵向交付：正常 Fast Event `lot + full_target` 与 #274 parity 共用可投资权益定义（同一估值时点的现金＋证券市值，总 NAV 扣除分红及清算应收）。目标比例不重新归一化，sum<1 保留主动现金；零可投资权益可继续等候支付，不能预支 date-only 发放日 open 的应收。到账只转桶，下一正常调仓使用现金。实际权重、收益及费用/换手分母仍为总 NAV；lot 换手分子仍是实际成交本金。
+
+Lot 保留整手向下取整、实际成交价内嵌滑点、实际 Fill 的佣金/税和最低佣金及现金限量；它不采用 F8 的严格量化缺口拒绝，也不要求数量/费用与 F8 相同。独立 retry、entry_only、Accurate 和 legacy Vector 不扩展；external execution 的分阶段 pre-open 基数继续原契约。正常 lot 使用 `fast_event@10`，含行动为 `fast_event@11`，terminal 为 `fast_event@12`，normalized Run 与实际结果一致。旧行为由旧 revision 重现，无新旧开关或历史覆盖。
+
+至此 #274/#275 覆盖已确认的 parity/lot 预算政策，修订 #264 的适用范围而不改其历史证据；合成回归不构成 #234 六项真实数据验收、#235 独立验收或 MVP-6 通过。

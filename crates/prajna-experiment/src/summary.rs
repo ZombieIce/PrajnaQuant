@@ -183,7 +183,9 @@ fn drawdown(
 }
 
 /// E11 metrics on daily close account NAV, normalized by initial account capital.
-/// Turnover and cost are fractions of raw-open pre-trade account equity.
+/// Turnover and cost are fractions of raw-open pre-trade total NAV. Normal F8
+/// parity reports the executed plan's candidate fee bases as turnover; lot,
+/// retry and external-execution fills keep their actual raw fill notional.
 pub(crate) fn summarize_fast(
     result: &prajna_research::fast_event::FastEventResult,
     sessions_per_year: u64,
@@ -204,7 +206,7 @@ pub(crate) fn summarize_fast(
     for fill in &result.fills {
         let entry = totals.entry(fill.fill.executed_at()).or_insert((0.0, 0.0));
         entry.0 += number(fill.fill.total_fees())?;
-        entry.1 += number(fill.fill.raw_notional())?;
+        entry.1 += number(fill.turnover_basis)?;
     }
     for fee in result.account.fee_settlements() {
         let entry = totals.entry(fee.executed_at()).or_insert((0.0, 0.0));
@@ -306,7 +308,7 @@ pub(crate) fn summarize_fast(
             .map(|s| s.to_string())
             .chain([
                 "Account and VP identities verified at every Session open-after and close; exact scale-18 ledger.".into(),
-                "Metrics use close account NAV; turnover/cost normalized by raw-open pre-trade account equity.".into(),
+                "Metrics use close account NAV; normal F8 turnover uses executed candidate fee bases and cost uses actual fees, both normalized by raw-open pre-trade total NAV; lot, retry and external-execution turnover keeps actual raw fill notional.".into(),
             ])
             .collect(),
         costs: prajna_research::vector::VectorCosts {
@@ -333,10 +335,141 @@ pub(crate) fn summarize_fast(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use prajna_research::vector::{
-        VectorCosts, VectorExecution, VectorExecutionKind, VectorPending, VectorSession,
+    use prajna_account::{
+        Fill, FillCosts, FillPricing, Order, OrderId, ParityFeeSettlement, Side, TradingAccount,
+        VirtualPortfolioId,
+    };
+    use prajna_domain::{Currency, InstrumentId, Notional, TimestampNs, VenueId};
+    use prajna_research::{
+        PanelSession,
+        fast_event::{
+            FastEventConfig, FastEventCosts, FastEventFill, FastEventResult, FastEventSession,
+            Sizing,
+        },
+        vector::{VectorCosts, VectorExecution, VectorExecutionKind, VectorPending, VectorSession},
     };
     use std::collections::{BTreeMap, BTreeSet};
+
+    fn n(value: &str) -> Notional {
+        value.parse().unwrap()
+    }
+
+    #[test]
+    fn fast_turnover_counts_a_fee_only_settlement_once_over_pre_trade_total_nav() {
+        let instrument: InstrumentId = "A.SYNTH".parse().unwrap();
+        let fee_only: InstrumentId = "B.SYNTH".parse().unwrap();
+        let venue: VenueId = "SYNTH".parse().unwrap();
+        let currency = Currency::new("CNY").unwrap();
+        let portfolio = VirtualPortfolioId(1);
+        let ts: TimestampNs = "2023-01-02T09:30:00+08:00".parse().unwrap();
+        let ts_close: TimestampNs = "2023-01-02T15:00:00+08:00".parse().unwrap();
+        let mut account = TradingAccount::new(
+            currency.clone(),
+            venue.clone(),
+            n("1000"),
+            [(portfolio, n("1000"))],
+        )
+        .unwrap();
+        let order = Order::new(
+            OrderId(0),
+            portfolio,
+            instrument.clone(),
+            Side::Buy,
+            "90".parse().unwrap(),
+            ts,
+        )
+        .unwrap();
+        account.submit_order(order.clone()).unwrap();
+        let fill = Fill::new(
+            order,
+            ts,
+            "1".parse().unwrap(),
+            FillPricing::SeparateSlippage {
+                slippage: Notional::ZERO,
+            },
+            FillCosts {
+                commission: n("10"),
+                ..FillCosts::ZERO
+            },
+        )
+        .unwrap();
+        account.apply_fill(fill.clone()).unwrap();
+        account
+            .apply_fee_settlement(
+                ParityFeeSettlement::new(
+                    portfolio,
+                    fee_only,
+                    ts,
+                    n("50"),
+                    Side::Buy,
+                    FillCosts {
+                        commission: n("5"),
+                        ..FillCosts::ZERO
+                    },
+                    Notional::ZERO,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let valuation = account
+            .value(&BTreeMap::from([(instrument, "1".parse().unwrap())]))
+            .unwrap();
+        assert_eq!(valuation.account.equity, n("985"));
+        let result = FastEventResult {
+            semantic_version: prajna_research::fast_event::INVESTABLE_EQUITY_PARITY_ENGINE_VERSION,
+            config: FastEventConfig {
+                currency,
+                venue,
+                initial_cash: n("1000"),
+                sizing: Sizing::VectorParity,
+                costs: FastEventCosts::ZERO,
+                lot_sizes: BTreeMap::new(),
+            },
+            sessions: vec![FastEventSession {
+                session: PanelSession {
+                    session_date: "2023-01-02".parse().unwrap(),
+                    ts_open: ts,
+                    ts_close,
+                },
+                open_after: valuation.clone(),
+                close: valuation,
+                open_sources: BTreeMap::new(),
+                close_sources: BTreeMap::new(),
+            }],
+            attempts: vec![],
+            fills: vec![FastEventFill {
+                fill,
+                fee_basis: n("100"),
+                turnover_basis: n("100"),
+                fee_side: Side::Buy,
+            }],
+            sizing_adjustments: vec![],
+            account,
+            return_basis: ReturnBasis::PriceReturn,
+            corporate_action_schedule_version: None,
+            corporate_action_dividend_tax_rate: None,
+            corporate_action_coverage: vec![],
+            corporate_action_completeness: CorporateActionCompleteness::default(),
+            corporate_action_ledger: vec![],
+            terminal_settlements: vec![],
+            assumptions: vec![],
+            risk_exits: vec![],
+            pending_risk_exits: vec![],
+        };
+        let summary = summarize_fast(&result, 252, "none").unwrap();
+        // (fill candidate basis 100 + fee-only candidate basis 50) / pre-trade
+        // total NAV (985 equity + 15 fees). Actual raw fill notional is 90.
+        assert_eq!(summary.total_turnover, 0.15);
+        assert_eq!(summary.total_cost, 0.015);
+        assert_ne!(
+            summary.total_turnover, 0.14,
+            "raw fill notional is not used"
+        );
+        assert_ne!(
+            summary.total_turnover, 0.2,
+            "fee-only basis is counted once"
+        );
+    }
 
     fn result(nav_and_returns: &[(f64, f64)]) -> VectorResult {
         VectorResult {

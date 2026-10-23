@@ -33,9 +33,11 @@ fn bind_corporate_action_engine_version(spec: &mut Value) -> Result<(), Experime
     let parity_path = uses_parity_sizing(spec, engine_kind);
     let semantic_version = match engine_kind {
         "fast_event" if parity_path => {
-            prajna_research::fast_event::CORPORATE_ACTION_PARITY_CASH_SEMANTIC_VERSION
+            prajna_research::fast_event::CORPORATE_ACTION_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION
         }
-        "fast_event" => prajna_research::fast_event::CORPORATE_ACTION_SEMANTIC_VERSION,
+        "fast_event" => {
+            prajna_research::fast_event::CORPORATE_ACTION_INVESTABLE_EQUITY_LOT_ENGINE_VERSION
+        }
         "vector" => prajna_research::vector::CORPORATE_ACTION_PIT_SIZING_SEMANTIC_VERSION,
         "accurate_event" => {
             return Err(invalid(
@@ -63,9 +65,11 @@ fn bind_terminal_settlement_engine_version(spec: &mut Value) -> Result<(), Exper
     let parity_path = uses_parity_sizing(spec, engine_kind);
     let semantic_version = match engine_kind {
         "fast_event" if parity_path => {
-            prajna_research::fast_event::TERMINAL_SETTLEMENT_PARITY_CASH_ENGINE_VERSION
+            prajna_research::fast_event::TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION
         }
-        "fast_event" => prajna_research::fast_event::TERMINAL_SETTLEMENT_ENGINE_VERSION,
+        "fast_event" => {
+            prajna_research::fast_event::TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_LOT_ENGINE_VERSION
+        }
         "vector" => prajna_research::vector::TERMINAL_SETTLEMENT_PIT_SIZING_ENGINE_VERSION,
         _ => {
             return Err(invalid(format!(
@@ -78,7 +82,7 @@ fn bind_terminal_settlement_engine_version(spec: &mut Value) -> Result<(), Exper
 }
 
 /// PIT Vector always consumes the shared F8 plan; PIT Fast Event only does so
-/// with vector_parity. Lot runs retain their previous semantic identity.
+/// with vector_parity. Normal lot full-target has its own investable version.
 fn uses_parity_sizing(spec: &Value, engine_kind: &str) -> bool {
     engine_kind == "vector"
         || spec.pointer("/fast_event/sizing").and_then(Value::as_str) == Some("vector_parity")
@@ -343,12 +347,12 @@ mod tests {
             (
                 "fast_event",
                 Some("vector_parity"),
-                prajna_research::fast_event::CORPORATE_ACTION_PARITY_CASH_SEMANTIC_VERSION,
+                prajna_research::fast_event::CORPORATE_ACTION_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION,
             ),
             (
                 "fast_event",
                 Some("lot"),
-                prajna_research::fast_event::CORPORATE_ACTION_SEMANTIC_VERSION,
+                prajna_research::fast_event::CORPORATE_ACTION_INVESTABLE_EQUITY_LOT_ENGINE_VERSION,
             ),
             (
                 "vector",
@@ -378,12 +382,12 @@ mod tests {
             (
                 "fast_event",
                 Some("vector_parity"),
-                prajna_research::fast_event::TERMINAL_SETTLEMENT_PARITY_CASH_ENGINE_VERSION,
+                prajna_research::fast_event::TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION,
             ),
             (
                 "fast_event",
                 Some("lot"),
-                prajna_research::fast_event::TERMINAL_SETTLEMENT_ENGINE_VERSION,
+                prajna_research::fast_event::TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_LOT_ENGINE_VERSION,
             ),
             (
                 "vector",
