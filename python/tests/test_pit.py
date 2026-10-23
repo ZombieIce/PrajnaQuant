@@ -437,9 +437,14 @@ class PitTests(unittest.TestCase):
                                  'codes': ['159002', '159003'],
                                  'minimum_code_count': 3}
         # The As-of selector keeps the configured codes; the shared Engine, not
-        # the binding, applies the minimum-included-code gate.
+        # the binding, applies the minimum-included-code gate. The broad list is
+        # present but differs from this fixed subset, so the full expected
+        # Universe is asserted (the old binding would return the broad list).
         views, _ = self.generate_views(pit)
-        self.assertIn(self.ids[2], views[-1].universe)
+        expected = [[self.ids[1]]] * 3 + [[self.ids[1], self.ids[2]]] * 7
+        self.assertEqual([view.universe for view in views], expected)
+        self.assertNotIn(self.ids[0], [i for view in views for i in view.universe])
+        self.assertIn(self.ids[1], views[-1].universe)
 
         cli, run = self.run_cli(pit, level='summary')
         self.assertEqual(run['status'], 'failed')
