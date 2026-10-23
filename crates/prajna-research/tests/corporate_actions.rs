@@ -1228,7 +1228,7 @@ fn fractional_share_conversion_rounds_down_and_records_equity_difference() {
     )
     .unwrap();
     assert_eq!(
-        result.semantic_version, "fast_event@2",
+        result.semantic_version, "fast_event@11",
         "lot keeps the pre-cash-budget corporate-action identity"
     );
     let portfolio = &result.sessions[3].open_after.portfolios[&VirtualPortfolioId(1)];

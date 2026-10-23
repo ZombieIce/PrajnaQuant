@@ -334,3 +334,6 @@ fake 的原生账户显式为 unavailable，不伪造原生快照。
 和全部已存明细，包括诊断；证据变化或诊断不一致不能覆盖原 Execution。
 这里只验证合成 fake 与脚本 transport，真实 worker 对拍、差异分类验收与转换成本
 仍须另按 #133 A14–A16 执行，不设扫描吞吐门槛。
+
+
+正常 Fast Event `lot + full_target` 自 #275 使用 `fast_event@10`（行动 `@11`，terminal `@12`），目标基数为 pre-trade 现金＋证券估值，排除未支付应收，目标总和不足 1 不重新归一化。仍按整手、现金限量、最低佣金及实际成交费用执行；实际权重/成本率/换手率分母为总 NAV，lot 换手分子为实际成交本金。发放只转桶，后续正常调仓再投资。独立 retry、entry_only 与 Accurate 契约不扩展；历史结果不覆盖，旧 revision 重现旧行为。

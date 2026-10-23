@@ -173,7 +173,11 @@ fn accurate_run_identity_includes_backend_without_changing_legacy_specs() {
         assert_eq!(run.run_spec["engine"]["kind"], engine);
         assert_eq!(
             run.run_spec["engine"]["semantic_version"],
-            format!("{engine}@1")
+            if engine == "fast_event" {
+                "fast_event@10".to_string()
+            } else {
+                format!("{engine}@1")
+            }
         );
         // Frozen normalized inputs from the #138 branch base.
         let mut expected = json!({
@@ -183,7 +187,7 @@ fn accurate_run_identity_includes_backend_without_changing_legacy_specs() {
             "costs":{"commission_rate":"3f50624dd2f1a9fc","buy_slippage_bps":"4024000000000000",
                 "sell_slippage_bps":"4024000000000000","buy_tax_rate":"0000000000000000",
                 "sell_tax_rate":"0000000000000000"},
-            "engine":{"kind":engine,"semantic_version":format!("{engine}@1")},"seed":null
+            "engine":{"kind":engine,"semantic_version":if engine == "fast_event" { "fast_event@10".to_string() } else { format!("{engine}@1") }},"seed":null
         });
         if engine == "fast_event" {
             expected["fast_event"] = json!({

@@ -104,7 +104,7 @@ fn shared_sizing_version_is_in_run_spec_and_result_and_reruns_are_stable() {
     let lot_run = &lot_experiment.expand(lake.path()).unwrap()[0];
     assert_eq!(
         lot_run.run_spec["engine"]["semantic_version"],
-        "fast_event@1"
+        "fast_event@10"
     );
 
     let mut terminal_lot = terminal_settlement_definition(&f, "fast_event");
@@ -113,7 +113,7 @@ fn shared_sizing_version_is_in_run_spec_and_result_and_reruns_are_stable() {
     let terminal_run = &terminal_experiment.expand(lake.path()).unwrap()[0];
     assert_eq!(
         terminal_run.run_spec["engine"]["semantic_version"],
-        "fast_event@3"
+        "fast_event@12"
     );
     let terminal_report = terminal_experiment.execute(lake.path(), 1).unwrap();
     assert_eq!(
@@ -122,8 +122,44 @@ fn shared_sizing_version_is_in_run_spec_and_result_and_reruns_are_stable() {
             .as_ref()
             .unwrap()
             .semantic_version,
-        "fast_event@3"
+        "fast_event@12"
     );
+    for (experiment, expected) in [
+        (&lot_experiment, "fast_event@10"),
+        (&terminal_experiment, "fast_event@12"),
+    ] {
+        let first = experiment.execute(lake.path(), 1).unwrap();
+        let second = experiment.execute(lake.path(), 1).unwrap();
+        let run = &first.runs[0];
+        assert_eq!(run.status, RunStatus::Completed, "{:?}", run.error);
+        assert_eq!(run.run_id, second.runs[0].run_id);
+        assert_eq!(
+            run.fast_event_result.as_ref().unwrap().semantic_version,
+            expected
+        );
+        let stored = experiment
+            .execute_and_store(
+                lake.path(),
+                env!("CARGO_MANIFEST_DIR"),
+                ResultLevel::Standard,
+                1,
+            )
+            .unwrap();
+        assert_eq!(stored.manifest.runs[0].run_id, run.run_id);
+        assert_eq!(
+            stored.manifest.runs[0].run_spec.as_ref().unwrap()["engine"]["semantic_version"],
+            expected
+        );
+        read_run_table(
+            lake.path(),
+            &stored.manifest.experiment_id,
+            &stored.manifest.execution.id,
+            &run.run_id,
+            ResultLevel::Summary,
+            "summary",
+        )
+        .unwrap();
+    }
 }
 
 #[test]
@@ -758,6 +794,39 @@ fn v7_opening_evidence_builds_canonical_pit_context_deterministically() {
     assert_eq!(
         stored.manifest.runs[0].run_spec.as_ref().unwrap()["engine"]["semantic_version"],
         "fast_event@8"
+    );
+
+    fast_definition["fast_event"]["sizing"] = json!("lot");
+    let lot = Experiment::parse(&fast_definition.to_string(), lake.path()).unwrap();
+    let first = lot.execute(lake.path(), 1).unwrap();
+    let second = lot.execute(lake.path(), 1).unwrap();
+    assert_eq!(
+        first.runs[0].status,
+        RunStatus::Completed,
+        "{:?}",
+        first.runs[0].error
+    );
+    assert_eq!(
+        first.runs[0]
+            .fast_event_result
+            .as_ref()
+            .unwrap()
+            .semantic_version,
+        "fast_event@11"
+    );
+    assert_eq!(first.runs[0].run_id, second.runs[0].run_id);
+    let stored = lot
+        .execute_and_store(
+            lake.path(),
+            env!("CARGO_MANIFEST_DIR"),
+            ResultLevel::Standard,
+            1,
+        )
+        .unwrap();
+    assert_eq!(stored.manifest.runs[0].run_id, first.runs[0].run_id);
+    assert_eq!(
+        stored.manifest.runs[0].run_spec.as_ref().unwrap()["engine"]["semantic_version"],
+        "fast_event@11"
     );
 
     let report_path = lake.path().join("acceptance/mvp6-unknown-coverage.json");

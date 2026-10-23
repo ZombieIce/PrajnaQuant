@@ -95,6 +95,18 @@ fn run(
     Result<FastEventResult, FastEventError>,
     Result<VectorResult, VectorError>,
 ) {
+    run_sizing(scenario, Sizing::VectorParity, "1", "0")
+}
+
+fn run_sizing(
+    scenario: Scenario,
+    sizing: Sizing,
+    lot: &str,
+    minimum: &str,
+) -> (
+    Result<FastEventResult, FastEventError>,
+    Result<VectorResult, VectorError>,
+) {
     let lake = fixture::lake();
     let mut overrides: BTreeMap<(usize, u32), (f64, f64)> =
         (3..=10).map(|day| ((1, day), (0.5, 0.5))).collect();
@@ -165,12 +177,13 @@ fn run(
         currency: "CNY".parse().unwrap(),
         venue: "SZSE".parse().unwrap(),
         initial_cash: scenario.capital.parse().unwrap(),
-        sizing: Sizing::VectorParity,
+        sizing,
         costs: FastEventCosts {
             commission_rate: scenario.commission.parse().unwrap(),
+            minimum_commission: minimum.parse().unwrap(),
             ..FastEventCosts::ZERO
         },
-        lot_sizes: BTreeMap::new(),
+        lot_sizes: f.ids.iter().map(|id| (id.clone(), q(lot))).collect(),
     };
     let portfolios = [PortfolioRun {
         id: VP,
@@ -842,4 +855,164 @@ fn exhausted_fees_and_invalid_targets_still_fail() {
         error.contains("portfolio weights must sum to at most 1"),
         "{error}"
     );
+}
+
+#[test]
+fn lot_unpaid_and_payment_lifecycle_preserves_full_and_partial_targets() {
+    for targets in [vec![(1, 1.0)], vec![(1, 0.4), (0, 0.2)], vec![(0, 1.0)]] {
+        let (fast, _) = run_sizing(
+            Scenario {
+                capital: "1000",
+                action: Action::Dividend("0.5"),
+                pay_day: 4,
+                commission: "0",
+                decisions: vec![
+                    (0, vec![(1, 1.0)]),
+                    (1, targets.clone()),
+                    (2, targets.clone()),
+                    (
+                        3,
+                        targets
+                            .iter()
+                            .map(|(id, w)| (if *id == 0 { 2 } else { *id }, *w))
+                            .collect(),
+                    ),
+                ],
+                price_overrides: vec![],
+                reference_overrides: vec![],
+            },
+            Sizing::Lot,
+            "100",
+            "0",
+        );
+        let fast = fast.unwrap();
+        assert_identities(&fast);
+        assert_eq!(fast.semantic_version, "fast_event@11");
+        let ex = portfolio(&fast, 2, false);
+        assert_eq!(ex.equity, n("1000"));
+        assert_eq!(ex.dividend_receivable, n("500"));
+        // Independently: 500 investment budget, targets 40/20 -> 200/100
+        // securities and 200 cash; full hold -> 1000 shares at 0.5;
+        // full switch -> 500 shares at 1. No receivable is spendable.
+        let expected = if targets.len() == 2 {
+            vec![q("100"), q("400")]
+        } else if targets[0].0 == 1 {
+            vec![q("1000")]
+        } else {
+            vec![q("500")]
+        };
+        let mut actual = positions(&fast, 2).into_values().collect::<Vec<_>>();
+        actual.sort();
+        assert_eq!(actual, expected);
+        assert_eq!(ex.cash, if targets.len() == 2 { n("200") } else { n("0") });
+        assert!(
+            fast.fills
+                .iter()
+                .all(|fill| fill.fill.executed_at() != fast.sessions[3].session.ts_open)
+        );
+        let open = portfolio(&fast, 3, false);
+        let close = portfolio(&fast, 3, true);
+        assert_eq!(close.equity, open.equity);
+        assert_eq!(
+            close.cash.mantissa(),
+            open.cash.mantissa() + n("500").mantissa()
+        );
+        assert_eq!(close.dividend_receivable, n("0"));
+        assert!(
+            fast.fills.iter().any(|fill| fill.fill.executed_at()
+                == fast.sessions[if targets.len() == 1 && targets[0].0 == 1 {
+                    4
+                } else {
+                    7
+                }]
+                .session
+                .ts_open),
+            "{targets:?} {:?}",
+            fast.attempts
+        );
+    }
+}
+
+#[test]
+fn lot_unpaid_rotation_keeps_cash_limit_minimum_commission_and_actual_costs() {
+    let (fast, _) = run_sizing(
+        Scenario {
+            // Buy 1000 at 1 plus minimum commission 5, leaving zero cash.
+            capital: "1005",
+            action: Action::Dividend("0.5"),
+            pay_day: 8,
+            commission: "0.001",
+            decisions: vec![(0, vec![(1, 1.0)]), (1, vec![(0, 1.0)])],
+            price_overrides: vec![],
+            reference_overrides: vec![],
+        },
+        Sizing::Lot,
+        "100",
+        "5",
+    );
+    let fast = fast.unwrap();
+    assert_identities(&fast);
+    let rotation = fast
+        .fills
+        .iter()
+        .filter(|f| f.fill.executed_at() == fast.sessions[2].session.ts_open)
+        .collect::<Vec<_>>();
+    assert_eq!(rotation.len(), 2);
+    let buy = rotation
+        .iter()
+        .find(|f| f.fill.order().side() == Side::Buy)
+        .unwrap();
+    let sell = rotation
+        .iter()
+        .find(|f| f.fill.order().side() == Side::Sell)
+        .unwrap();
+    // Sell 1000 at .5 -> 500 - 5 = 495. Target principal 500 is
+    // insufficient with fees: buy 400 at 1 + 5 fee, cash 90.
+    assert_eq!(sell.fill.order().quantity(), q("1000"));
+    assert_eq!(buy.fill.order().quantity(), q("400"));
+    assert_eq!(sell.fill.total_fees(), n("5"));
+    assert_eq!(buy.fill.total_fees(), n("5"));
+    let after = portfolio(&fast, 2, false);
+    assert_eq!(
+        (after.cash, after.dividend_receivable, after.equity),
+        (n("90"), n("500"), n("990"))
+    );
+    assert_eq!(buy.turnover_basis, n("400"));
+}
+
+#[test]
+fn lot_all_receivable_waits_then_reinvests_after_payment() {
+    let (fast, _) = run_sizing(
+        Scenario {
+            capital: "1000",
+            action: Action::Liquidation("1"),
+            pay_day: 4,
+            commission: "0",
+            decisions: vec![
+                (0, vec![(1, 1.0)]),
+                (1, vec![(2, 1.0)]),
+                (2, vec![(2, 1.0)]),
+                (3, vec![(2, 1.0)]),
+            ],
+            price_overrides: vec![],
+            reference_overrides: vec![],
+        },
+        Sizing::Lot,
+        "100",
+        "0",
+    );
+    let fast = fast.unwrap();
+    assert_identities(&fast);
+    let ex = portfolio(&fast, 2, false);
+    assert_eq!(
+        (ex.cash, ex.liquidation_receivable, ex.equity),
+        (n("0"), n("1000"), n("1000"))
+    );
+    assert!(ex.positions.is_empty());
+    assert_eq!(fast.fills.len(), 2);
+    assert_eq!(
+        fast.fills[1].fill.executed_at(),
+        fast.sessions[4].session.ts_open
+    );
+    assert_eq!(fast.fills[1].fill.order().quantity(), q("1000"));
 }

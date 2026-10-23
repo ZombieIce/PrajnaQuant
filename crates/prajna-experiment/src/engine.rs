@@ -442,6 +442,9 @@ impl EngineSettings {
                     Some(Sizing::VectorParity) => {
                         fast_event::INVESTABLE_EQUITY_PARITY_ENGINE_VERSION
                     }
+                    Some(Sizing::Lot) if self.rebalance == Rebalance::FullTarget => {
+                        fast_event::INVESTABLE_EQUITY_LOT_ENGINE_VERSION
+                    }
                     _ => fast_event::SEMANTIC_VERSION,
                 };
                 serde_json::json!({"kind":"fast_event", "semantic_version": semantic_version})

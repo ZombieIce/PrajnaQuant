@@ -112,3 +112,12 @@ Within the research-only MVP-6 TRI semantics selected by `mvp6-market-driven@1`,
 事件规范化与 TRI 由 #180 提供；#181 为 Fast Event 账户增加分红/清算应收和转换账本，为 Vector PIT 增加现金/应收非投资组件，并将 Return Basis、税率、覆盖报告与不完整原因写入 Run Spec/Summary，Standard/Full 保存非空的公司行动事件行。Summary 不含逐事件明细；缺失的 Vector 账本不能解释为零。`Complete` 覆盖只接受显式输入声明；从 TRI 映射的 `observed_raw_set_only` 不构成公告完整性证明。当前 synthetic API 与 ResultLevel 不替代真实 cninfo 解析、真实事件链、来源授权或 P0-2 验收。
 
 6b 基准为沪深300全收益指数，需声明来源、版本和日期对齐，不与价格指数混用。按 P24/P25 冻结本地授权原文、数据/规则/代码/环境与离线备份，两次独立执行所有 ResultLevel logical hash 一致；仓库只保存合成金标准、hash/身份、覆盖与守恒摘要、命令日志，不发布真实行情、公告 PDF 或逐日价格账本。#172 的许可、规则、公告与覆盖未决项均须先解决，设计采纳不等于真实验收通过。
+
+
+### #275：正常 lot full-target 投资预算
+
+#275 完成 #273 的第二个纵向交付：正常 Fast Event `lot + full_target` 与 #274 parity 共用可投资权益定义（同一估值时点的现金＋证券市值，总 NAV 扣除分红及清算应收）。目标比例不重新归一化，sum<1 保留主动现金；零可投资权益可继续等候支付，不能预支 date-only 发放日 open 的应收。到账只转桶，下一正常调仓使用现金。实际权重、收益及费用/换手分母仍为总 NAV；lot 换手分子仍是实际成交本金。
+
+Lot 保留整手向下取整、实际成交价内嵌滑点、实际 Fill 的佣金/税和最低佣金及现金限量；它不采用 F8 的严格量化缺口拒绝，也不要求数量/费用与 F8 相同。独立 retry、entry_only、Accurate 和 legacy Vector 不扩展；external execution 的分阶段 pre-open 基数继续原契约。正常 lot 使用 `fast_event@10`，含行动为 `fast_event@11`，terminal 为 `fast_event@12`，normalized Run 与实际结果一致。旧行为由旧 revision 重现，无新旧开关或历史覆盖。
+
+至此 #274/#275 覆盖已确认的 parity/lot 预算政策，修订 #264 的适用范围而不改其历史证据；合成回归不构成 #234 六项真实数据验收、#235 独立验收或 MVP-6 通过。

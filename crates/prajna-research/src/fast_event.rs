@@ -33,6 +33,11 @@ pub const TERMINAL_SETTLEMENT_PARITY_CASH_ENGINE_VERSION: &str = "fast_event@6";
 pub const INVESTABLE_EQUITY_PARITY_ENGINE_VERSION: &str = "fast_event@7";
 pub const CORPORATE_ACTION_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION: &str = "fast_event@8";
 pub const TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION: &str = "fast_event@9";
+/// Normal lot full-target budgets exclude unpaid receivables; retry and
+/// entry-only execution keep their preceding contract.
+pub const INVESTABLE_EQUITY_LOT_ENGINE_VERSION: &str = "fast_event@10";
+pub const CORPORATE_ACTION_INVESTABLE_EQUITY_LOT_ENGINE_VERSION: &str = "fast_event@11";
+pub const TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_LOT_ENGINE_VERSION: &str = "fast_event@12";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sizing {
@@ -1035,6 +1040,9 @@ fn run_with_execution(
             "Missing prices carry the last valid price of the same field, never zero.",
         ]
     };
+    if config.sizing == Sizing::Lot && !external_execution {
+        assumptions.push("Normal lot full-target quantities use available cash plus securities at pre-trade valuation, excluding dividend and liquidation receivables; actual weights, cost and turnover use total NAV. Retry and entry-only retain their own budget rules.");
+    }
     if terminal_settlement.is_some() {
         assumptions.push(
             "Normal execution at the final in-lifecycle Bar open remains allowed; remaining Catalog-terminal positions settle at that session's raw Bar close without using actual liquidation cash or date.",
@@ -1053,6 +1061,30 @@ fn run_with_execution(
                 CORPORATE_ACTION_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION
             }
             (Sizing::VectorParity, false, false) => INVESTABLE_EQUITY_PARITY_ENGINE_VERSION,
+            (Sizing::Lot, _, true)
+                if !external_execution
+                    && portfolios
+                        .iter()
+                        .any(|p| p.rebalance == Rebalance::FullTarget) =>
+            {
+                TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_LOT_ENGINE_VERSION
+            }
+            (Sizing::Lot, true, false)
+                if !external_execution
+                    && portfolios
+                        .iter()
+                        .any(|p| p.rebalance == Rebalance::FullTarget) =>
+            {
+                CORPORATE_ACTION_INVESTABLE_EQUITY_LOT_ENGINE_VERSION
+            }
+            (Sizing::Lot, false, false)
+                if !external_execution
+                    && portfolios
+                        .iter()
+                        .any(|p| p.rebalance == Rebalance::FullTarget) =>
+            {
+                INVESTABLE_EQUITY_LOT_ENGINE_VERSION
+            }
             (Sizing::Lot, _, true) => TERMINAL_SETTLEMENT_ENGINE_VERSION,
             (Sizing::Lot, true, false) => CORPORATE_ACTION_SEMANTIC_VERSION,
             (Sizing::Lot, false, false) => SEMANTIC_VERSION,
@@ -1446,6 +1478,7 @@ fn lot_fills(
     if run.rebalance == Rebalance::FullTarget {
         let equity = match attempt.pre_open_equity {
             Some(equity) => equity,
+            None if !attempt.retry => investable_budget(account, run.id, prices)?,
             None => account.value(prices)?.portfolios[&run.id].equity,
         };
         for (instrument, target) in attempt.applied {
@@ -1788,6 +1821,21 @@ fn parity_fills(
     )
 }
 
+// Same checked total-NAV/receivable distinction for both sizing consumers.
+fn investable_budget(
+    account: &TradingAccount,
+    id: VirtualPortfolioId,
+    prices: &BTreeMap<InstrumentId, Price>,
+) -> Result<Notional, FastEventError> {
+    let portfolio = &account.portfolios()[&id];
+    let total_nav = account.value(prices)?.portfolios[&id].equity;
+    let receivables = add(
+        portfolio.dividend_receivable(),
+        portfolio.liquidation_receivable(),
+    )?;
+    sub(total_nav, receivables)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn parity_fills_retaining(
     account: &TradingAccount,
@@ -1809,12 +1857,7 @@ fn parity_fills_retaining(
         });
     }
     let portfolio = &account.portfolios()[&id];
-    let total_nav = account.value(prices)?.portfolios[&id].equity;
-    let receivables = add(
-        portfolio.dividend_receivable(),
-        portfolio.liquidation_receivable(),
-    )?;
-    let investable_equity = sub(total_nav, receivables)?;
+    let investable_equity = investable_budget(account, id, prices)?;
     let mut plan = crate::parity_sizing::target_plan(
         investable_equity,
         portfolio.positions(),
