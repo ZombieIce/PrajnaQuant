@@ -383,21 +383,23 @@ def verify_fixed_universe(diagnostics: dict[str, Any], expected_session_count: i
 
 def verify_dividend_ledger(actions: list[dict[str, Any]]) -> tuple[bool, list[dict[str, Any]]]:
     errors = []
-    groups: dict[tuple[Any, Any, Any], dict[str, list[dict[str, Any]]]] = {}
+    groups: dict[tuple[Any, Any, Any, Any], dict[str, list[dict[str, Any]]]] = {}
     for event in actions:
-        if not event.get("instrument_id", "").startswith("159919"):
-            continue
         kind = event.get("kind")
         if kind not in {"dividend_entitlement", "dividend_receivable", "dividend_paid"}:
             continue
         if (event.get("portfolio_id") is None or not event.get("announcement_id")
                 or type(event.get("action_index")) is not int):
             errors.append({"kind": "missing_dividend_identity"})
-        key = (event.get("portfolio_id"), event.get("announcement_id"), event.get("action_index"))
+        instrument = event.get("instrument_id")
+        if not isinstance(instrument, str) or not instrument:
+            errors.append({"kind": "missing_dividend_instrument"})
+        key = (event.get("portfolio_id"), event.get("announcement_id"), event.get("action_index"), instrument)
         groups.setdefault(key, {}).setdefault(kind, []).append(event)
-    if not groups:
+    required = [transitions for key, transitions in groups.items() if isinstance(key[-1], str) and key[-1].startswith("159919")]
+    if not required:
         errors.append({"kind": "missing_dividend_ledger"})
-    if not any(transitions.get("dividend_paid") for transitions in groups.values()):
+    if not any(transitions.get("dividend_paid") for transitions in required):
         errors.append({"kind": "missing_dividend_payment"})
     for key, transitions in groups.items():
         entitlement = transitions.get("dividend_entitlement", [])
