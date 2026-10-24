@@ -14,6 +14,7 @@ from scripts.mvp6_acceptance import (
     identity_change,
     ledger_notional,
     ledger_oracle,
+    parity_cost_fraction,
     manifest_result_level,
     manifest_results,
     prior_run_identity,
@@ -425,7 +426,7 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
         self.assertEqual(vector_open_nav(session), Decimal(1))
         close_nav = reconstruct_vector_close_nav(
             session, {instrument: "1"}, {instrument: "10"}, {instrument: "10.5"},
-            "0", Decimal("1000"),
+            Decimal("1000"),
         )
         self.assertEqual(close_nav, Decimal("1.05"))
         self.assertNotEqual(close_nav, Decimal(str(session["nav"])))
@@ -439,9 +440,17 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
         }
         dividend_close = reconstruct_vector_close_nav(
             dividend_session, {instrument: "0.99"}, {instrument: "9.9"}, {instrument: "10.89"},
-            "0", Decimal("1000"),
+            Decimal("1000"),
         )
         self.assertEqual(dividend_close, Decimal("1.099"))
+
+    def test_parity_cost_uses_current_open_before_fees_not_previous_close(self):
+        row = accounting_valuations()[0]
+        # Current open-before equity is 1005; previous close may differ.
+        self.assertEqual(parity_cost_fraction(row, Decimal("5")), Decimal(5) / Decimal(1005))
+        self.assertNotEqual(parity_cost_fraction(row, Decimal("5")), Decimal(5) / Decimal(900))
+        with self.assertRaises(ValueError):
+            parity_cost_fraction(row, Decimal("-1"))
 
     def test_python_cli_requires_summary_replay_promoted_level_and_table_hashes(self):
         mutations = (

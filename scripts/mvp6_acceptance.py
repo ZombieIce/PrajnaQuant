@@ -498,6 +498,14 @@ def ledger_oracle(
     return cash + dividend + liquidation + invested, cash, invested, dividend, liquidation
 
 
+def parity_cost_fraction(open_after: dict[str, Any], fees: Decimal) -> Decimal:
+    """Match Vector's fee fraction of same-Session pre-trade open equity."""
+    equity = ledger_oracle(open_after)[0]
+    if not fees.is_finite() or fees < 0 or equity + fees <= 0:
+        raise ValueError("invalid parity fees or pre-trade equity")
+    return fees / (equity + fees)
+
+
 def vector_open_nav(session: dict[str, Any]) -> Decimal:
     """Return the same-Session open-after NAV from a Vector session row.
 
@@ -519,7 +527,6 @@ def reconstruct_vector_close_nav(
     open_weights: dict[str, Any],
     open_prices: dict[str, Any],
     close_prices: dict[str, Any],
-    close_entitlement: Any,
     initial_cash: Decimal,
 ) -> Decimal:
     """Reconstruct the same-Session close NAV from Vector's open-after evidence.
@@ -527,7 +534,8 @@ def reconstruct_vector_close_nav(
     ``nav`` includes the next Session open mark, so it cannot be used as the close
     NAV when the current close differs from the next open. Revalue the Vector
     open-after weights at the current raw close, keep cash/receivable weights, and
-    add closing-date dividend entitlements. Prices are shared raw inputs; the
+    leave registration-date entitlements outside NAV until ex-date accrual.
+    Prices are shared raw inputs; the
     weights, NAV and action ledger remain Vector-owned observations.
     """
     if not initial_cash.is_finite() or initial_cash <= 0:
@@ -558,13 +566,7 @@ def reconstruct_vector_close_nav(
                 or not close_price.is_finite() or open_price <= 0 or close_price <= 0):
             raise ValueError(f"invalid Vector weight or valuation price for {instrument}")
         revaluation += weight * close_price / open_price
-    try:
-        entitlement = dec(close_entitlement or "0")
-    except (InvalidOperation, TypeError) as error:
-        raise ValueError("invalid closing-date dividend entitlement") from error
-    if not entitlement.is_finite() or entitlement < 0:
-        raise ValueError("closing-date dividend entitlement is outside its valid range")
-    equity = open_nav * initial_cash * revaluation + entitlement
+    equity = open_nav * initial_cash * revaluation
     if not equity.is_finite() or equity <= 0:
         raise ValueError("reconstructed Vector close equity is not finite and positive")
     return equity / initial_cash
@@ -1743,20 +1745,6 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         date, instrument = row.get("session_date"), row.get("instrument_id")
         if isinstance(date, str) and isinstance(instrument, str):
             vector_weights_by_date.setdefault(date, {})[instrument] = row.get("weight")
-    vector_entitlements_by_date: dict[str, Decimal] = {}
-    for action in vector_actions:
-        if action.get("kind") != "dividend_entitlement":
-            continue
-        date = action.get("session_date")
-        if not isinstance(date, str):
-            continue
-        try:
-            amount = dec(action["net_amount"])
-        except (KeyError, InvalidOperation, TypeError) as error:
-            raise ValueError("Vector dividend entitlement has no valid net amount") from error
-        if not amount.is_finite() or amount < 0:
-            raise ValueError("Vector dividend entitlement net amount is outside its valid range")
-        vector_entitlements_by_date[date] = vector_entitlements_by_date.get(date, Decimal(0)) + amount
     terminal_close_prices = {
         (row["session_date"], row["instrument_id"]): row["price"]
         for row in fast_terminal_settlements
@@ -1797,14 +1785,13 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         }
 
     parity_days = []
-    previous_close_equity = dec(parity_fast_definition["fast_event"]["initial_cash"])
     parity_initial_cash = dec(parity_fast_definition["fast_event"]["initial_cash"])
     vector_by_date = {row["session_date"]: row for row in vector_sessions}
     for date in expected_sessions:
         vector = vector_by_date[date]
         fast_open_row = fast_account_by_point[(date, "open_after")]
         fast_close_row = fast_account_by_point[(date, "close")]
-        fast_cost = fast_fees_by_date.get(date, Decimal(0)) / previous_close_equity
+        fast_cost = parity_cost_fraction(fast_open_row, fast_fees_by_date.get(date, Decimal(0)))
         vector_components_open = vector.get("portfolio_components")
         vector_components_close = vector.get("portfolio_components_close")
         open_prices = {
@@ -1827,7 +1814,7 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         try:
             vector_close_nav = float(reconstruct_vector_close_nav(
                 vector, vector_weights_by_date.get(date, {}), open_prices, close_prices,
-                vector_entitlements_by_date.get(date, "0"), parity_initial_cash,
+                parity_initial_cash,
             ))
         except (InvalidOperation, TypeError, ValueError):
             vector_close_nav = None
@@ -1846,7 +1833,6 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
             "vector_trajectory": vector_executions_by_date.get(date, []),
             "fast_trajectory": fast_attempts_by_date.get(date, []),
         })
-        previous_close_equity = dec(fast_close_row["equity"])
 
     mark_run_phase("daily_accounting")
     excluded = main_run["run_spec"].get("execution_exclusions", [])
@@ -1877,7 +1863,7 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
 
     all_run_specs = [run["run_spec"] for run in main_full_manifest["runs"]]
     run_spec = all_run_specs[0]
-    engine = run_spec["engine"]
+    engine = run_spec["fast_event"]
     action_rows = []
     for action in main_full_tables["corporate_actions"]:
         enriched = dict(action)
