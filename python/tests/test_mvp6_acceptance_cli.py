@@ -15,6 +15,9 @@ from scripts.mvp6_acceptance import (
     ledger_notional,
     ledger_oracle,
     parity_cost_fraction,
+    native_fees_by_date,
+    native_trajectories,
+    normalized_trajectory,
     manifest_result_level,
     manifest_results,
     prior_run_identity,
@@ -443,6 +446,28 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
             Decimal("1000"),
         )
         self.assertEqual(dividend_close, Decimal("1.099"))
+
+    def test_native_fee_mapping_includes_fee_only_settlements_once(self):
+        fills = [{"fill": {"executed_at": "2026-01-05T09:30:00Z", "total_fees": "2"}}]
+        settlements = [{"executed_at": "2026-01-05T09:30:00Z", "total_fees": "3"}]
+        self.assertEqual(native_fees_by_date(fills, settlements), {DATES[0]: Decimal(5)})
+        self.assertEqual(native_fees_by_date([], settlements), {DATES[0]: Decimal(3)})
+
+    def test_native_risk_exit_mapping_preserves_status_instrument_and_pending(self):
+        rows = [
+            {"record_type": "risk_exit", "attempt": {
+                "session_date": DATES[0], "instrument_id": "159919.SZSE", "executed": False}},
+            {"record_type": "risk_exit_pending_at_end", "instrument_id": "159919.SZSE"},
+        ]
+        vector = native_trajectories(rows, DATES[-1])
+        fast = native_trajectories([{**row, "portfolio_id": 1} for row in rows], DATES[-1])
+        self.assertEqual(vector, fast)
+        self.assertEqual(vector[DATES[-1]][0]["kind"], "risk_exit_pending_at_end")
+        self.assertEqual(vector[DATES[0]][0]["blocked"], ["159919.SZSE"])
+        rows[0]["attempt"]["executed"] = True
+        changed = native_trajectories(rows, DATES[-1])
+        self.assertNotEqual(normalized_trajectory(vector[DATES[0]]),
+                            normalized_trajectory(changed[DATES[0]]))
 
     def test_parity_cost_uses_current_open_before_fees_not_previous_close(self):
         row = accounting_valuations()[0]

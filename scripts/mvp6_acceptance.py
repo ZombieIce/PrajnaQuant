@@ -572,6 +572,43 @@ def reconstruct_vector_close_nav(
     return equity / initial_cash
 
 
+def native_trajectories(rows: list[dict[str, Any]], last_date: str) -> dict[str, list[dict[str, Any]]]:
+    """Map native execution and persistent risk-exit records to shared events."""
+    by_date: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        record = row.get("record_type")
+        if record == "risk_exit":
+            attempt = row["attempt"]
+            date = attempt["session_date"]
+            if not isinstance(attempt["executed"], bool):
+                raise ValueError("risk-exit status must be boolean")
+            event = {"kind": "risk_exit_executed" if attempt["executed"] else "risk_exit_deferred",
+                     "blocked": [attempt["instrument_id"]], "skipped_buys": []}
+        elif record == "risk_exit_pending_at_end":
+            date = last_date
+            event = {"kind": record, "blocked": [row["instrument_id"]], "skipped_buys": []}
+        elif row.get("session_date") and record in (None, "attempt"):
+            date = row["session_date"]
+            event = {"kind": row["kind"], "blocked": row.get("blocked", []),
+                     "skipped_buys": row.get("skipped_buys", [])}
+        else:
+            continue
+        by_date.setdefault(date, []).append(event)
+    return by_date
+
+
+def native_fees_by_date(fills: list[dict[str, Any]], settlements: list[dict[str, Any]]) -> dict[str, Decimal]:
+    """Count each fill and fee-only settlement exactly once."""
+    fees: dict[str, Decimal] = {}
+    for row in [*(item["fill"] for item in fills), *settlements]:
+        date = row["executed_at"][:10]
+        amount = dec(row["total_fees"])
+        if not amount.is_finite() or amount < 0:
+            raise ValueError("invalid native fee amount")
+        fees[date] = fees.get(date, Decimal(0)) + amount
+    return fees
+
+
 def normalized_trajectory(rows: list[dict[str, Any]]) -> list[tuple[str, tuple[str, ...], tuple[str, ...]]]:
     kinds = {"entries_retried": "retryable_execution", "retryable_execution": "retryable_execution"}
     normalized = []
@@ -1715,6 +1752,7 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     mark_run_phase("daily_parity")
     fast_accounts = read_table(lake_dirs[0], fast_manifest, fast_run["run_id"], "account_valuations")
     fast_fills = read_table(lake_dirs[0], fast_manifest, fast_run["run_id"], "fills")
+    fast_fee_settlements = read_table(lake_dirs[0], fast_manifest, fast_run["run_id"], "fee_settlements")
     fast_attempts = read_table(lake_dirs[0], fast_manifest, fast_run["run_id"], "orders")
     fast_terminal_settlements = read_table(
         lake_dirs[0], fast_manifest, fast_run["run_id"], "terminal_settlements",
@@ -1755,25 +1793,9 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         for row in fast_accounts
         if row.get("scope") == "account"
     }
-    vector_executions_by_date: dict[str, list[dict[str, Any]]] = {}
-    for event in vector_executions:
-        if event.get("session_date"):
-            vector_executions_by_date.setdefault(event["session_date"], []).append({
-                "kind": event.get("kind"), "blocked": event.get("blocked", []),
-                "skipped_buys": event.get("skipped_buys", []),
-            })
-    fast_attempts_by_date: dict[str, list[dict[str, Any]]] = {}
-    for attempt in fast_attempts:
-        if attempt.get("record_type") == "attempt" and attempt.get("session_date"):
-            fast_attempts_by_date.setdefault(attempt["session_date"], []).append({
-                "kind": attempt.get("kind"), "blocked": attempt.get("blocked", []),
-                "skipped_buys": attempt.get("skipped_buys", []),
-            })
-    fast_fees_by_date: dict[str, Decimal] = {}
-    for row in fast_fills:
-        fill = row["fill"]
-        date = fill["executed_at"][:10]
-        fast_fees_by_date[date] = fast_fees_by_date.get(date, Decimal(0)) + dec(fill["total_fees"])
+    vector_executions_by_date = native_trajectories(vector_executions, expected_sessions[-1])
+    fast_attempts_by_date = native_trajectories(fast_attempts, expected_sessions[-1])
+    fast_fees_by_date = native_fees_by_date(fast_fills, fast_fee_settlements)
 
     def fast_components(row: dict[str, Any]) -> dict[str, float]:
         equity, cash, invested, dividend, liquidation = ledger_oracle(row)
@@ -1949,10 +1971,15 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
                 "total_fees": row["fill"]["total_fees"],
                 "costs": row["fill"]["costs"],
                 "slippage": row["fill"]["slippage"],
-            } for row in main_full_tables["fills"]],
+            } for row in main_full_tables["fills"]] + [{
+                "session_date": row["executed_at"][:10],
+                "instrument_id": row["instrument_id"],
+                "total_fees": row["total_fees"], "costs": row["costs"],
+                "slippage": row["slippage"],
+            } for row in main_full_tables["fee_settlements"]],
             "forbidden_cells": forbidden_cells,
             "trades": trades,
-            "fees_present": bool(main_full_tables["fills"]),
+            "fees_present": bool(main_full_tables["fills"] or main_full_tables["fee_settlements"]),
         },
         "unknown_coverage": run_spec["unknown_coverage"],
         "raw_immutable": raw_immutable,
