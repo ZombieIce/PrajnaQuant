@@ -615,6 +615,8 @@ def verify_action_postings(main: dict[str, Any]) -> dict[str, Any]:
                         raise ValueError("portfolio NAV identity mismatch")
                     total_equity += dec(observed["equity"])
                     for instrument, position in observed["positions"].items():
+                        if dec(position["quantity"]) <= 0:
+                            raise ValueError("nonpositive exported portfolio holding")
                         total_market_values[instrument] = total_market_values.get(instrument, Decimal(0)) + dec(position["market_value"])
                         parent = account["positions"].get(instrument)
                         if parent is None or dec(position["price"]) != dec(parent["price"]):
@@ -635,6 +637,8 @@ def verify_action_postings(main: dict[str, Any]) -> dict[str, Any]:
                 if dec(account["equity"]) != total_equity + unallocated:
                     errors.append({"kind": "portfolio_account_equity_mismatch", "session_date": date,
                                    "valuation_point": point})
+                if set(total_market_values) != set(account["positions"]):
+                    raise ValueError("portfolio/account position map mismatch")
                 for instrument in set(total_market_values) | set(account["positions"]):
                     parent_value = dec(account["positions"].get(instrument, {}).get("market_value", "0"))
                     if total_market_values.get(instrument, Decimal(0)) != parent_value:

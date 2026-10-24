@@ -320,6 +320,24 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
         self.assertIn("portfolio_account_market_value_mismatch", {error["kind"] for error in errors})
         self.assertNotIn("portfolio_account_equity_mismatch", {error["kind"] for error in errors})
 
+    def test_zero_quantity_exported_positions_reject_native_map_contradictions(self):
+        for scope in ("account", "portfolio", "both"):
+            with self.subTest(scope=scope):
+                artifacts = run_artifacts()
+                evidence = artifacts["main_run"]["postings"]
+                rows = []
+                if scope in ("account", "both"):
+                    rows.append(evidence["account_valuations"][0])
+                if scope in ("portfolio", "both"):
+                    rows.append(evidence["portfolio_valuations"][0])
+                for row in rows:
+                    row["positions"]["159952.SZSE"] = {"quantity": "0", "price": "1", "market_value": "0"}
+                invocation = self.invoke(artifacts)
+                self.assertEqual(invocation.returncode, 1, invocation.stderr)
+                checks = json.loads(invocation.stdout)["checks"]
+                self.assertFalse(checks["main_run"]["action_postings"]["passed"])
+                self.assertFalse(checks["daily_accounting"]["passed"])
+
     def test_multi_vp_aggregation_includes_unallocated_and_common_marks(self):
         date = DATES[0]
         main = {"actions": [], "terminal_settlements": [], "postings": {
