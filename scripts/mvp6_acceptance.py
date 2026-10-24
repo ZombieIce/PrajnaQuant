@@ -56,6 +56,7 @@ UNKNOWN_LIMITS = {
     "per_instrument_unknown_percent": Decimal("20"),
 }
 ACTIVE_POST_MAIN_RUN: dict[str, Any] | None = None
+ACTIVE_INITIALIZATION: dict[str, Any] | None = None
 
 
 def dec(value: Any) -> Decimal:
@@ -498,6 +499,136 @@ def ledger_oracle(
     return cash + dividend + liquidation + invested, cash, invested, dividend, liquidation
 
 
+def verify_action_postings(main: dict[str, Any]) -> dict[str, Any]:
+    """Reconcile native events against every VP/account open-after and close state."""
+    errors = []
+    evidence = main.get("postings", {})
+    try:
+        dates = evidence["expected_sessions"]
+        initial = evidence["initial_portfolios"]
+        if not dates or len(dates) != len(set(dates)) or dates != sorted(dates) or not initial:
+            raise ValueError("missing/invalid posting timeline or initial portfolios")
+        states = {row["id"]: {"cash": dec(row["capital"]), "dividend_receivable": Decimal(0),
+                              "liquidation_receivable": Decimal(0), "positions": {}} for row in initial}
+        if len(states) != len(initial) or any(state["cash"] < 0 for state in states.values()):
+            raise ValueError("invalid initial portfolio identity/capital")
+        vp_rows = {(row["session_date"], row["valuation_point"], row["portfolio_id"]): row
+                   for row in evidence["portfolio_valuations"]}
+        account_rows = {(row["session_date"], row["valuation_point"]): row
+                        for row in evidence["account_valuations"]}
+        expected = {(date, point) for date in dates for point in ("open_after", "close")}
+        if (set(account_rows) != expected or len(account_rows) != len(evidence["account_valuations"])
+                or set(vp_rows) != {(date, point, pid) for date, point in expected for pid in states}
+                or len(vp_rows) != len(evidence["portfolio_valuations"])):
+            raise ValueError("posting valuation coverage/identity mismatch")
+        events: dict[tuple[str, str], list[tuple[str, dict[str, Any]]]] = {}
+        def add(date: str, point: str, kind: str, row: dict[str, Any]) -> None:
+            if (date, point) not in expected:
+                raise ValueError("posting outside valuation timeline")
+            events.setdefault((date, point), []).append((kind, row))
+        for action in main.get("actions", []):
+            kind = action["kind"]
+            if kind not in {"dividend_entitlement", "dividend_receivable", "dividend_paid",
+                            "share_conversion", "liquidation_receivable", "liquidation_paid",
+                            "liquidation_amount_unknown"}:
+                raise ValueError("unsupported corporate-action posting")
+            point = "close" if kind in {"dividend_entitlement", "dividend_paid", "liquidation_paid"} else "open_after"
+            add(action["session_date"], point, kind, action)
+        for fill in evidence["fills"]:
+            add(fill["executed_at"][:10], "open_after", "fill", fill)
+        for fee in evidence["fee_settlements"]:
+            add(fee["executed_at"][:10], "open_after", "fee", fee)
+        for terminal in main.get("terminal_settlements", []):
+            add(terminal["session_date"], "close", "terminal", terminal)
+        tax_rate = dec(evidence["dividend_tax_rate"])
+        if not tax_rate.is_finite() or not 0 <= tax_rate <= 1:
+            raise ValueError("invalid dividend tax rate")
+        for date in dates:
+            for point in ("open_after", "close"):
+                for kind, event in events.get((date, point), []):
+                    pid = event["order"]["portfolio_id"] if kind == "fill" else event["portfolio_id"]
+                    state = states[pid]
+                    instrument = event["order"]["instrument_id"] if kind == "fill" else event["instrument_id"]
+                    quantities = state["positions"]
+                    held = quantities.get(instrument, Decimal(0))
+                    if kind in {"fill", "fee"}:
+                        fees = dec(event["total_fees"])
+                        components = [dec(event["costs"][key])
+                                      for key in ("commission", "minimum_commission_top_up", "tax")]
+                        components.append(dec(event["slippage"]))
+                        if any(not value.is_finite() or value < 0 for value in components) or sum(components) != fees:
+                            raise ValueError("native posting fee components do not reconcile")
+                    if kind == "fill":
+                        order = event["order"]
+                        quantity, price, fees = dec(order["quantity"]), dec(event["raw_price"]), dec(event["total_fees"])
+                        if order["side"] not in {"Buy", "Sell"} or quantity <= 0 or price <= 0 or fees < 0:
+                            raise ValueError("invalid native fill posting")
+                        sign = Decimal(1) if order["side"] == "Buy" else Decimal(-1)
+                        delta = -sign * ledger_notional(quantity, price) - fees
+                        if delta != dec(event["cash_delta"]):
+                            raise ValueError("fill cash delta does not reconcile")
+                        state["cash"] += delta
+                        quantities[instrument] = held + sign * quantity
+                    elif kind == "fee":
+                        fees = dec(event["total_fees"])
+                        if fees <= 0 or dec(event["cash_delta"]) != -fees:
+                            raise ValueError("fee-only cash delta does not reconcile")
+                        state["cash"] -= fees
+                    elif kind == "dividend_entitlement":
+                        if (dec(event["quantity_before"]) != held or dec(event["quantity_after"]) != held
+                                or dec(event["tax_amount"]) != ledger_notional(dec(event["gross_amount"]), tax_rate)):
+                            raise ValueError("dividend registration holdings/tax mismatch")
+                    elif kind in {"share_conversion", "liquidation_receivable", "liquidation_amount_unknown"}:
+                        if dec(event["quantity_before"]) != held:
+                            raise ValueError("corporate-action pre-event holding mismatch")
+                        quantities[instrument] = dec(event["quantity_after"])
+                        if kind == "liquidation_receivable":
+                            state["liquidation_receivable"] += dec(event["net_amount"])
+                    elif kind == "terminal":
+                        if held != dec(event["quantity"]) or dec(event["proceeds"]) != ledger_notional(held, dec(event["price"])):
+                            raise ValueError("terminal holding/proceeds mismatch")
+                        quantities[instrument] = Decimal(0)
+                        state["cash"] += dec(event["proceeds"])
+                    else:
+                        bucket = "dividend_receivable" if kind.startswith("dividend") else "liquidation_receivable"
+                        amount = dec(event["net_amount"])
+                        if amount < 0 or not amount.is_finite():
+                            raise ValueError("invalid action posting amount")
+                        if kind.endswith("paid"):
+                            state[bucket] -= amount
+                            state["cash"] += amount
+                        else:
+                            state[bucket] += amount
+                totals = {key: Decimal(0) for key in ("cash", "dividend_receivable", "liquidation_receivable")}
+                total_positions: dict[str, Decimal] = {}
+                for pid, state in states.items():
+                    observed = vp_rows[(date, point, pid)]
+                    if ledger_oracle(observed)[0] != dec(observed["equity"]):
+                        raise ValueError("portfolio NAV identity mismatch")
+                    for key in totals:
+                        if not state[key].is_finite() or state[key] < 0 or state[key] != dec(observed[key]):
+                            errors.append({"kind": "action_state_transition", "session_date": date,
+                                           "valuation_point": point, "portfolio_id": pid, "field": key})
+                        totals[key] += dec(observed[key])
+                    actual = {instrument: dec(position["quantity"]) for instrument, position in observed["positions"].items()}
+                    predicted = {instrument: quantity for instrument, quantity in state["positions"].items() if quantity != 0}
+                    if predicted != {instrument: quantity for instrument, quantity in actual.items() if quantity != 0}:
+                        errors.append({"kind": "action_position_transition", "session_date": date,
+                                       "valuation_point": point, "portfolio_id": pid})
+                    for instrument, quantity in actual.items():
+                        total_positions[instrument] = total_positions.get(instrument, Decimal(0)) + quantity
+                account = account_rows[(date, point)]
+                totals["cash"] += dec(account.get("unallocated_capital", "0"))
+                if any(value != dec(account[key]) for key, value in totals.items()):
+                    raise ValueError("portfolio/account posting bucket mismatch")
+                actual = {instrument: dec(position["quantity"]) for instrument, position in account["positions"].items()}
+                if {k: v for k, v in total_positions.items() if v != 0} != {k: v for k, v in actual.items() if v != 0}:
+                    raise ValueError("portfolio/account holding mismatch")
+    except (KeyError, TypeError, ValueError, InvalidOperation) as error:
+        errors.append({"kind": "invalid_action_posting_evidence", "reason": str(error)})
+    return result(not errors, errors=errors)
+
+
 def parity_cost_fraction(open_after: dict[str, Any], fees: Decimal) -> Decimal:
     """Match Vector's fee fraction of same-Session pre-trade open equity."""
     equity = ledger_oracle(open_after)[0]
@@ -758,16 +889,17 @@ def verify_main_evidence(
         and not terminal_errors
     )
     universe_check = verify_fixed_universe(fixed_universe, session_input_count)
+    postings = verify_action_postings(main)
     main_ok = (
         main.get("sizing") == "lot" and main.get("rebalance") == "full_target"
         and main.get("return_basis") == "total_return" and dividend and split_traceable
-        and terminal_traceable and universe_check["passed"]
+        and terminal_traceable and universe_check["passed"] and postings["passed"]
     )
     return result(
         main_ok, dividend_ledger=dividend, dividend_errors=dividend_errors,
         split_ledger=split_traceable, split_errors=split_errors,
         terminal_settlement=terminal_traceable, terminal_errors=terminal_errors,
-        fixed_universe=universe_check,
+        fixed_universe=universe_check, action_postings=postings,
     )
 
 
@@ -786,6 +918,8 @@ def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
         data.get("accounting", {}).get("session_input_count", 0),
     )
 
+    if main.get("postings", {}).get("account_valuations") != data.get("accounting", {}).get("valuations"):
+        main_check.update(passed=False, status="failed", posting_account_mismatch=True)
     parity_check = verify_parity(data.get("parity", {}))
 
     independent = data["independent_runs"]
@@ -913,6 +1047,7 @@ def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
         and bool(accounting.get("fills")) and not fee_errors
         and accounting.get("fees_present") is True and not blocked_trades
         and main_check["split_ledger"] and main_check["terminal_settlement"]
+        and main_check["action_postings"]["passed"]
     )
 
     checks = {
@@ -1107,10 +1242,12 @@ def source_evidence_context(
     return_basis: str,
 ) -> dict[str, Any]:
     """Return the scope, source and risk context required on every report path."""
-    coverage = coverage or {}
-    pit_base = pit_base or {}
-    corporate_action_dataset = coverage.get("corporate_action_dataset") or {}
-    p21 = coverage.get("p21") or {}
+    coverage = coverage if isinstance(coverage, dict) else {}
+    pit_base = pit_base if isinstance(pit_base, dict) else {}
+    corporate_action_dataset = coverage.get("corporate_action_dataset")
+    corporate_action_dataset = corporate_action_dataset if isinstance(corporate_action_dataset, dict) else {}
+    p21 = coverage.get("p21")
+    p21 = p21 if isinstance(p21, dict) else {}
     return {
         "decision_window": {"start": "2023-01-01", "end": "2026-09-30", "preheat": "60 Sessions"},
         "return_basis": return_basis,
@@ -1123,9 +1260,40 @@ def source_evidence_context(
         "terms_conclusion": coverage.get("terms_conclusion"),
         "unknown_semantics": "P27-23.5 narrowed UNKNOWN to data defects; no-Bar and unknown rules are excluded.",
         "execution_limitations": list(EXECUTION_LIMITATIONS),
-        "risk_notice_count": len(pit_base.get("risk_notices", [])),
+        "risk_notice_count": (len(pit_base.get("risk_notices", []))
+                              if isinstance(pit_base.get("risk_notices", []), list) else None),
         "cninfo_index_supplied": "cninfo_index" in pit_base,
     }
+
+
+def write_initialization_failure_report(context: dict[str, Any], error: str) -> dict[str, Any]:
+    """Persist unavailable evidence as unverified before any engine can start."""
+    reason = "Input initialization failed before this criterion could be verified."
+    checks = {name: result(False, status="not_run", reason=reason) for name in (
+        "main_run", "daily_parity", "reproducibility", "python_as_of_and_cli",
+        "daily_accounting", "unknown_floor", "frozen_raw_immutable",
+    )}
+    checks["main_run"] = result(False, stage="input_initialization", error=error)
+    output = context["output"]
+    report = {
+        "schema": "mvp6-local-engineering-report@1", "issue": 234,
+        "classification": "platform engineering acceptance; not strategy historical performance",
+        "verification": {"schema": "mvp6-acceptance-verification@1", "passed": False, "checks": checks},
+        "failure": {"stage": "input_initialization", "status": "failed", "error": error},
+        "non_blocking": {name: {"status": "not_run", "reason": reason}
+                         for name in ("small_grid", "accurate_smoke", "legacy_comparison")},
+        "source_evidence": source_evidence_context(
+            context.get("coverage"), context.get("pit_base"),
+            return_basis="total_return (planned; input initialization did not complete)",
+        ),
+        "local_artifacts": {"directory": str(output),
+                            "frozen_raw_inventory": str(context["raw_inventory"])},
+    }
+    write_json(output / "mvp6-acceptance-report.json", report)
+    return {"passed": False, "checks": {name: item["status"] for name, item in checks.items()},
+            "per_etf_unknown_coverage": [],
+            "conclusion": "Platform engineering acceptance only; this is not strategy historical performance.",
+            "report": str(output / "mvp6-acceptance-report.json")}
 
 
 def write_early_failure_report(
@@ -1588,12 +1756,19 @@ def as_of_decisions_match(lake: Path, dsv: str, pit: dict[str, Any], vector_mani
 
 
 def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
-    global ACTIVE_POST_MAIN_RUN
+    global ACTIVE_POST_MAIN_RUN, ACTIVE_INITIALIZATION
     ACTIVE_POST_MAIN_RUN = None
+    ACTIVE_INITIALIZATION = None
     root = Path(args.root).expanduser().resolve()
     expected_root = (Path.home() / "PrajnaData" / "mvp-6").resolve()
     if root != expected_root:
         raise ValueError("real-data execution is restricted to ~/PrajnaData/mvp-6")
+    acceptance = root / "acceptance"
+    raw_inventory = acceptance / "mvp6-raw-inventory.json"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    output = acceptance / f"issue-234-{stamp}"
+    output.mkdir(parents=True, exist_ok=False)
+    ACTIVE_INITIALIZATION = {"output": output, "raw_inventory": raw_inventory}
     if sys.version_info[:2] != (3, 12):
         raise ValueError("run with the project Python 3.12 environment")
     cli = Path(args.cli).resolve()
@@ -1601,7 +1776,6 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     if not cli.is_file():
         raise ValueError(f"prajna-experiment binary not found: {cli}")
 
-    acceptance = root / "acceptance"
     input_path = Path(args.pit_input).expanduser().resolve() if args.pit_input else (
         acceptance / "issue-224-rerun-20261022T100126" / "pit-input.json"
     )
@@ -1611,8 +1785,14 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     unknown_path = acceptance / "mvp6-unknown-coverage.json"
     raw_inventory = acceptance / "mvp6-raw-inventory.json"
     coverage = json.loads(coverage_path.read_text())
+    if not isinstance(coverage, dict):
+        raise ValueError("coverage input must be a JSON object")
     unknown = json.loads(unknown_path.read_text())
     pit_base = json.loads(input_path.read_text())
+    if not isinstance(unknown, dict) or not isinstance(pit_base, dict):
+        raise ValueError("UNKNOWN and PIT inputs must be JSON objects")
+    # Only validated object containers enter the minimal failure context.
+    ACTIVE_INITIALIZATION.update(coverage=coverage, pit_base=pit_base)
     frozen_opening_path = acceptance / "mvp6-opening-evidence-v3.json"
     frozen_opening = json.loads(frozen_opening_path.read_text())
     if (frozen_opening.get("semantic_version") != "szse-derived-open@3"
@@ -1622,9 +1802,6 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     dsv = coverage["corporate_action_dataset"]["dsv"]
     catalog_version = unknown["catalog_version"]
 
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    output = acceptance / f"issue-234-{stamp}"
-    output.mkdir(parents=True, exist_ok=False)
     before = raw_hashes(root, raw_inventory)
     write_json(output / "frozen-input-evidence.json", {
         "data_read_only": True,
@@ -1636,7 +1813,8 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         "p21_status": coverage.get("p21", {}).get("status"),
         "historical_capture_status": coverage.get("historical_capture_status"),
         "terms_conclusion": coverage.get("terms_conclusion"),
-        "risk_notice_count": len(pit_base.get("risk_notices", [])),
+        "risk_notice_count": (len(pit_base.get("risk_notices", []))
+                              if isinstance(pit_base.get("risk_notices", []), list) else None),
         "cninfo_index_supplied": "cninfo_index" in pit_base,
     })
 
@@ -1671,6 +1849,7 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         pit_inputs.append(pit)
         write_json(output / f"independent-run-{index}" / "pit-input.json", pit)
 
+    ACTIVE_INITIALIZATION = None
     main_manifests = []
     main_results = []
     for index, (lake, pit) in enumerate(zip(lake_dirs, pit_inputs), start=1):
@@ -1746,7 +1925,7 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     main_lake = lake_dirs[0]
     main_full_tables = {
         name: read_table(main_lake, main_full_manifest, main_run["run_id"], name)
-        for name in ("account_valuations", "fills", "fee_settlements", "corporate_actions", "terminal_settlements")
+        for name in ("account_valuations", "portfolio_valuations", "fills", "fee_settlements", "corporate_actions", "terminal_settlements")
     }
     fast_run = fast_manifest["runs"][0]
     mark_run_phase("daily_parity")
@@ -1902,6 +2081,15 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         "rebalance": engine.get("rebalance"),
         "return_basis": return_basis,
         "actions": action_rows,
+        "postings": {
+            "expected_sessions": expected_sessions,
+            "initial_portfolios": engine["portfolios"],
+            "dividend_tax_rate": run_spec["corporate_action_schedule"]["dividend_tax_rate"],
+            "portfolio_valuations": main_full_tables["portfolio_valuations"],
+            "account_valuations": valuations,
+            "fills": [row["fill"] for row in main_full_tables["fills"]],
+            "fee_settlements": main_full_tables["fee_settlements"],
+        },
         "terminal_settlement_version": run_spec.get("terminal_settlement", {}).get("semantic_version"),
         "terminal_settlements": main_full_tables["terminal_settlements"],
     }
@@ -2035,7 +2223,8 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
 
 
 def main() -> int:
-    global ACTIVE_POST_MAIN_RUN
+    global ACTIVE_POST_MAIN_RUN, ACTIVE_INITIALIZATION
+    ACTIVE_INITIALIZATION = None
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     verify = subparsers.add_parser("verify", help="verify a local or synthetic artifact JSON")
@@ -2055,6 +2244,12 @@ def main() -> int:
         print(json.dumps(summary, indent=2, sort_keys=True))
         return 0 if summary["passed"] else 1
     except Exception as error:
+        if ACTIVE_INITIALIZATION is not None:
+            context = ACTIVE_INITIALIZATION
+            ACTIVE_INITIALIZATION = None
+            summary = write_initialization_failure_report(context, str(error))
+            print(json.dumps(summary, indent=2, sort_keys=True))
+            return 1
         if ACTIVE_POST_MAIN_RUN is not None:
             context = ACTIVE_POST_MAIN_RUN
             try:

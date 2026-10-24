@@ -1,4 +1,6 @@
 """The MVP-6 acceptance CLI validates synthetic artifacts without market data."""
+import contextlib
+import io
 import hashlib
 import json
 import subprocess
@@ -7,6 +9,9 @@ import tempfile
 from decimal import Decimal
 from pathlib import Path
 import unittest
+from unittest.mock import patch
+
+from scripts import mvp6_acceptance as acceptance_runner
 
 from scripts.mvp6_acceptance import (
     build_pit_input,
@@ -104,7 +109,41 @@ def dividend_action(kind, date):
     }
 
 
+def posting_fixture():
+    accounts = []
+    for index, date in enumerate(DATES):
+        for point in ("open_after", "close"):
+            paid = index == 2 and point == "close"
+            receivable = "5" if index > 0 and not paid else "0"
+            cash = "975" if paid else "970"
+            split = index > 0
+            accounts.append({
+                "session_date": date, "valuation_point": point, "cash": cash,
+                "dividend_receivable": receivable, "liquidation_receivable": "0",
+                "equity": str(Decimal(cash) + Decimal(receivable) + 625),
+                "unallocated_capital": "0", "accounting_verified": True,
+                "positions": {
+                    "159919.SZSE": {"quantity": "5", "price": "5", "market_value": "25"},
+                    "159560.SZSE": {"quantity": "200" if split else "100",
+                                    "price": "3" if split else "6", "market_value": "600"},
+                },
+            })
+    portfolios = [{**json.loads(json.dumps(row)), "portfolio_id": 1, "scope": "vp"} for row in accounts]
+    fills = [{
+        "order": {"portfolio_id": 1, "instrument_id": instrument, "side": "Buy", "quantity": quantity},
+        "executed_at": DATES[0] + "T09:30:00Z", "raw_price": price,
+        "total_fees": fees, "cash_delta": delta,
+        "costs": {"commission": fees, "minimum_commission_top_up": "0", "tax": "0"}, "slippage": "0",
+    } for instrument, quantity, price, fees, delta in (
+        ("159919.SZSE", "5", "5", "5", "-30"), ("159560.SZSE", "100", "6", "0", "-600"),
+    )]
+    return {"expected_sessions": DATES, "initial_portfolios": [{"id": 1, "capital": "1600"}],
+            "dividend_tax_rate": "0", "portfolio_valuations": portfolios,
+            "account_valuations": accounts, "fills": fills, "fee_settlements": []}
+
+
 def run_artifacts():
+    postings = posting_fixture()
     levels = {
         "summary": {"run_ids": ["run"], "summary_logical_hash": "summary", "table_hashes": {},
                     "runs": [{"status": "completed"}]},
@@ -151,6 +190,7 @@ def run_artifacts():
                  "theoretical_quantity": "200", "residual_quantity": "0",
                  "corporate_action_rounding": "0", "valuation_price": "6"},
             ],
+            "postings": postings,
             "terminal_settlement_version": "mvp6-terminal-settlement@1",
             "terminal_settlements": [],
         },
@@ -171,10 +211,11 @@ def run_artifacts():
         "accounting": {
             "expected_sessions": DATES,
             "session_input_count": len(DATES),
-            "valuations": accounting_valuations(),
-            "fills": [{"session_date": DATES[1], "instrument_id": "159919.SZSE", "total_fees": "5",
-                       "costs": {"commission": "3", "minimum_commission_top_up": "2", "tax": "0"},
-                       "slippage": "0"}],
+            "valuations": postings["account_valuations"],
+            "fills": [{"session_date": fill["executed_at"][:10],
+                       "instrument_id": fill["order"]["instrument_id"],
+                       "total_fees": fill["total_fees"], "costs": fill["costs"], "slippage": fill["slippage"]}
+                      for fill in postings["fills"]],
             "forbidden_cells": [{"instrument_id": "159612.SZSE", "session_date": "2026-01-05", "state": "halted"}],
             "trades": [{"instrument_id": "159919.SZSE", "session_date": "2026-01-05"}],
             "fees_present": True,
@@ -204,10 +245,112 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
         self.assertTrue(all(item["passed"] for item in report["checks"].values()))
         weights = report["checks"]["daily_accounting"]["weight_summaries"][0]
         self.assertEqual(weights["cash_remainder"]["amount"], "970")
-        self.assertEqual(weights["position_weight_total"], "0.025")
-        self.assertEqual(weights["cash_and_position_weight"], "0.995")
-        self.assertEqual(weights["receivable_weight"], "0.005")
-        self.assertEqual(weights["total_weight"], "1.000")
+        self.assertAlmostEqual(float(weights["position_weight_total"]), 625 / 1595)
+        self.assertAlmostEqual(float(weights["cash_and_position_weight"]), 1)
+        self.assertEqual(Decimal(weights["receivable_weight"]), Decimal(0))
+        self.assertAlmostEqual(float(weights["total_weight"]), 1)
+
+    def test_dividend_postings_reject_consistently_inflated_action_chain(self):
+        artifacts = run_artifacts()
+        for action in artifacts["main_run"]["actions"][:3]:
+            action.update(gross_amount="5000000", net_amount="5000000")
+        result = self.invoke(artifacts)
+        checks = json.loads(result.stdout)["checks"]
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertFalse(checks["main_run"]["passed"])
+        self.assertFalse(checks["daily_accounting"]["passed"])
+        self.assertTrue(checks["main_run"]["action_postings"]["errors"])
+
+    def test_postings_reject_registration_holdings_split_and_account_contradictions(self):
+        mutations = (
+            lambda a: [event.update(quantity_before="6", quantity_after="6")
+                       for event in a["main_run"]["actions"][:3]],
+            lambda a: a["main_run"]["actions"][3].update(quantity_before="50", quantity_after="100",
+                theoretical_quantity="100", residual_quantity="0"),
+            lambda a: a["main_run"]["postings"]["fills"][0].update(cash_delta="0"),
+            lambda a: a["main_run"]["postings"]["portfolio_valuations"][0].update(portfolio_id=2),
+            lambda a: a["main_run"]["postings"].pop("portfolio_valuations"),
+        )
+        for mutate in mutations:
+            with self.subTest(mutate=mutate):
+                artifacts = run_artifacts()
+                mutate(artifacts)
+                result = self.invoke(artifacts)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertFalse(json.loads(result.stdout)["checks"]["main_run"]["action_postings"]["passed"])
+
+    def test_postings_account_for_same_session_trades_fees_and_multiple_payments(self):
+        artifacts = run_artifacts()
+        main = artifacts["main_run"]
+        postings = main["postings"]
+        for action in list(main["actions"][:3]):
+            main["actions"].append({**action, "announcement_id": "second-dividend", "action_index": 2,
+                                    "gross_amount": "2", "net_amount": "2"})
+        postings["fills"].append({
+            "order": {"portfolio_id": 1, "instrument_id": "159919.SZSE", "side": "Sell", "quantity": "1"},
+            "executed_at": DATES[2] + "T09:30:00Z", "raw_price": "5", "total_fees": "1", "cash_delta": "4",
+            "costs": {"commission": "1", "minimum_commission_top_up": "0", "tax": "0"}, "slippage": "0",
+        })
+        postings["fee_settlements"].append({
+            "portfolio_id": 1, "instrument_id": "159919.SZSE", "executed_at": DATES[2] + "T09:30:00Z",
+            "total_fees": "2", "cash_delta": "-2", "slippage": "0",
+            "costs": {"commission": "2", "minimum_commission_top_up": "0", "tax": "0"},
+        })
+        for rows in (postings["account_valuations"], postings["portfolio_valuations"]):
+            for row in rows:
+                if row["session_date"] == DATES[1]:
+                    row.update(dividend_receivable="7", equity="1602")
+                elif row["session_date"] == DATES[2]:
+                    row["positions"]["159919.SZSE"].update(quantity="4", market_value="20")
+                    row.update(cash="972" if row["valuation_point"] == "open_after" else "979",
+                               dividend_receivable="7" if row["valuation_point"] == "open_after" else "0", equity="1599")
+        result = self.invoke(artifacts)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        # A payment contradiction cannot hide behind an otherwise valid static NAV.
+        for rows in (postings["account_valuations"], postings["portfolio_valuations"]):
+            rows[-1].update(cash="980", equity="1600")
+        result = self.invoke(artifacts)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertFalse(json.loads(result.stdout)["checks"]["main_run"]["action_postings"]["passed"])
+
+    def test_initialization_failures_persist_all_outcomes_and_original_error(self):
+        cases = ("missing_coverage", "malformed_coverage", "malformed_unknown", "malformed_pit",
+                 "malformed_opening", "opening_mismatch", "missing_raw", "missing_cli")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                home = Path(directory)
+                root = home / "PrajnaData/mvp-6"
+                inputs = root / "acceptance"
+                inputs.mkdir(parents=True)
+                cli = home / "dummy-cli"
+                if case != "missing_cli":
+                    cli.touch()
+                if case != "missing_coverage":
+                    (inputs / "mvp6-coverage.json").write_text("{" if case == "malformed_coverage" else json.dumps({"corporate_action_dataset": {"dsv": "synthetic"}}))
+                (inputs / "mvp6-unknown-coverage.json").write_text("[" if case == "malformed_unknown" else json.dumps({"catalog_version": "synthetic"}))
+                pit = inputs / "pit.json"
+                pit.write_text("{" if case == "malformed_pit" else json.dumps({"catalog": {"coverage": {"start": "2022-10-10", "end": "2026-09-30"}}}))
+                (inputs / "mvp6-opening-evidence-v3.json").write_text("[" if case == "malformed_opening" else json.dumps({
+                    "semantic_version": "szse-derived-open@3",
+                    "start": "2023-01-01" if case == "opening_mismatch" else "2022-10-10", "end": "2026-09-30"}))
+                stdout = io.StringIO()
+                with patch.object(Path, "home", return_value=home), patch.object(sys, "argv", [
+                    str(CLI), "run", "--root", str(root), "--cli", str(cli), "--pit-input", str(pit),
+                ]), contextlib.redirect_stdout(stdout):
+                    code = acceptance_runner.main()
+                self.assertEqual(code, 1)
+                summary = json.loads(stdout.getvalue())
+                report = json.loads(Path(summary["report"]).read_text())
+                checks = report["verification"]["checks"]
+                self.assertEqual(len(checks), 7)
+                self.assertEqual(checks["main_run"]["status"], "failed")
+                self.assertTrue(report["failure"]["error"])
+                for name, check in checks.items():
+                    self.assertFalse(check["passed"])
+                    if name != "main_run":
+                        expected = "failed" if case == "missing_raw" and name in {"unknown_floor", "frozen_raw_immutable"} else "not_run"
+                        self.assertEqual(check["status"], expected)
+                self.assertEqual(checks["main_run"]["error"], report["failure"]["error"])
 
     def test_cli_rejects_negative_cash_weight_even_when_nav_identity_holds(self):
         artifacts = run_artifacts()
