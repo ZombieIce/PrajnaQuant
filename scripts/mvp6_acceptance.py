@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_FLOOR, ROUND_HALF_EVEN, localcontext
 import hashlib
@@ -55,6 +55,13 @@ UNKNOWN_LIMITS = {
     "total_unknown_percent": Decimal("5"),
     "per_instrument_unknown_percent": Decimal("20"),
 }
+# P27-5: the decision window excludes the warm-up Sessions that only exist to
+# prime the momentum factor. The coverage floor is evaluated inside this window.
+DECISION_WINDOW = {"start": "2023-01-01", "end": "2026-09-30"}
+# The native contract serializes TradeState in upper case; a value outside this
+# set means the cell cannot establish that a Fill was legal.
+NATIVE_TRADE_STATES = frozenset({"TRADABLE", "HALTED", "UNKNOWN"})
+BLOCKED_TRADE_STATES = frozenset({"HALTED", "UNKNOWN"})
 ACTIVE_POST_MAIN_RUN: dict[str, Any] | None = None
 ACTIVE_INITIALIZATION: dict[str, Any] | None = None
 
@@ -83,6 +90,7 @@ def build_pit_input(pit_base: dict[str, Any], frozen_opening: dict[str, Any]) ->
 
 
 def normalize_unknown_coverage(coverage: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a native report as input-range provenance, never as the gate."""
     instruments: dict[str, dict[str, Any]] = {}
     for item in coverage.get("instruments", []):
         symbol = item.get("symbol", item.get("native_symbol"))
@@ -94,6 +102,9 @@ def normalize_unknown_coverage(coverage: dict[str, Any]) -> dict[str, Any]:
         if type(item.get("unknown_cells")) is int:
             totals["unknown_cells"] += item["unknown_cells"]
     return {
+        "scope": "input_range",
+        "start": coverage.get("decision_window_start"),
+        "end": coverage.get("decision_window_end"),
         "engineering_acceptance": coverage.get("engineering_acceptance"),
         "unknown_cells": coverage.get("unknown_cells"),
         "denominator_cells": coverage.get("denominator_cells"),
@@ -139,17 +150,244 @@ def raw_snapshot_unchanged(before: RawHashSnapshot, after: RawHashSnapshot) -> b
     return before == after and raw_snapshot_valid(before) and raw_snapshot_valid(after)
 
 
-def verify_unknown_coverage(coverage: dict[str, Any]) -> dict[str, Any]:
+def normalize_trade_state(value: Any) -> str | None:
+    """Return the native upper-case TradeState, or None when it is unreadable."""
+    if not isinstance(value, str):
+        return None
+    state = value.strip().upper()
+    return state or None
+
+
+def forbidden_trade_cells(excluded: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep every excluded native cell that is not explicitly TRADABLE.
+
+    `MarketCell.state` serializes `TradeState` in upper case, so a lower-case
+    filter silently produced empty forbidden-trade evidence. A cell whose state
+    is unreadable stays in the evidence so verification fails instead of
+    treating it as tradable.
+    """
+    evidence = []
+    for cell in excluded:
+        state = normalize_trade_state(cell.get("state"))
+        if state != "TRADABLE":
+            evidence.append({**cell, "state": state})
+    return evidence
+
+
+def iso_date(value: Any) -> str:
+    """Return an ISO-8601 date string, or raise ValueError."""
+    if not isinstance(value, str):
+        raise ValueError("date is not an ISO-8601 string")
+    date.fromisoformat(value)
+    return value
+
+
+def native_session_grid(run_spec: dict[str, Any]) -> list[tuple[str, set[str]]]:
+    """Return the native Session calendar with its lifecycle membership."""
+    sessions = run_spec.get("session_inputs")
+    if not isinstance(sessions, list) or not sessions:
+        raise ValueError("Run Spec has no Session inputs for the coverage grid")
+    grid: list[tuple[str, set[str]]] = []
+    previous = ""
+    for row in sessions:
+        eligible = row.get("eligible") if isinstance(row, dict) else None
+        universe = eligible.get("universe") if isinstance(eligible, dict) else None
+        universe = universe if isinstance(universe, dict) else {}
+        session_spec = universe.get("run_spec")
+        session_spec = session_spec if isinstance(session_spec, dict) else {}
+        decision, members = session_spec.get("decision_session"), universe.get("members")
+        if not isinstance(decision, str) or not isinstance(members, list):
+            raise ValueError("Run Spec Session has no native lifecycle membership")
+        iso_date(decision)
+        if decision <= previous:
+            raise ValueError("Run Spec Session dates are not strictly increasing")
+        previous = decision
+        if not all(isinstance(member, str) for member in members):
+            raise ValueError("Run Spec Session membership is not a list of instruments")
+        if len(set(members)) != len(members):
+            raise ValueError("Run Spec Session membership repeats an instrument")
+        grid.append((decision, set(members)))
+    return grid
+
+
+def decision_window_coverage(
+    native: dict[str, Any], run_spec: dict[str, Any],
+) -> dict[str, Any]:
+    """Separate the warm-up input scope from the P27-6 decision coverage gate.
+
+    The native UNKNOWN report counts every Session in the Dataset, warm-up
+    included. P27-6 counts Instrument x Session cells inside the decision window
+    only, bounded by the same native lifecycle membership the Run Spec records
+    per Session. The native report stays scope-labelled as input-range
+    provenance and is reconciled against the Run Spec summary.
+    """
+    instruments = native.get("instruments")
+    if not isinstance(instruments, list) or not instruments:
+        raise ValueError("native coverage report has no instrument rows")
+    rows: dict[str, tuple[str, int, int]] = {}
+    for item in instruments:
+        instrument_id = item.get("instrument_id")
+        symbol = item.get("native_symbol")
+        cells, unknown = item.get("cells"), item.get("unknown_cells")
+        if (not isinstance(instrument_id, str) or not isinstance(symbol, str)
+                or type(cells) is not int or type(unknown) is not int
+                or cells <= 0 or not 0 <= unknown <= cells):
+            raise ValueError("native coverage report has an invalid instrument row")
+        if instrument_id in rows:
+            raise ValueError("native coverage report repeats an instrument")
+        rows[instrument_id] = (symbol, cells, unknown)
+    native_start = iso_date(native.get("decision_window_start"))
+    native_end = iso_date(native.get("decision_window_end"))
+    if native_start > native_end:
+        raise ValueError("native coverage report has an invalid input window")
+    grid = native_session_grid(run_spec)
+    full = dict.fromkeys(rows, 0)
+    window = dict.fromkeys(rows, 0)
+    membership: dict[str, set[str]] = {}
+    window_sessions = warmup_sessions = post_window_sessions = 0
+    for session_date, members in grid:
+        membership[session_date] = members
+        in_window = DECISION_WINDOW["start"] <= session_date <= DECISION_WINDOW["end"]
+        if session_date < DECISION_WINDOW["start"]:
+            warmup_sessions += 1
+        elif session_date > DECISION_WINDOW["end"]:
+            post_window_sessions += 1
+        else:
+            window_sessions += 1
+        for instrument_id in members:
+            if instrument_id not in rows:
+                raise ValueError("Run Spec membership is outside the native coverage report")
+            full[instrument_id] += 1
+            if in_window:
+                window[instrument_id] += 1
+    if any(full[instrument_id] != cells for instrument_id, (_, cells, _) in rows.items()):
+        raise ValueError("native coverage grid does not match the Run Spec lifecycle membership")
+    if sum(full.values()) != native.get("denominator_cells"):
+        raise ValueError("native coverage denominator does not reconcile")
+    unknown_window = dict.fromkeys(rows, 0)
+    unknown_total = 0
+    for cell in native.get("unknowns", []):
+        instrument_id = cell.get("instrument_id") if isinstance(cell, dict) else None
+        session_date = cell.get("session_date") if isinstance(cell, dict) else None
+        if (instrument_id not in rows or session_date not in membership
+                or instrument_id not in membership[session_date]):
+            raise ValueError("native UNKNOWN cell is outside the lifecycle grid")
+        unknown_total += 1
+        if DECISION_WINDOW["start"] <= session_date <= DECISION_WINDOW["end"]:
+            unknown_window[instrument_id] += 1
+    if unknown_total != native.get("unknown_cells"):
+        raise ValueError("native UNKNOWN cell count does not reconcile")
+    summary = run_spec.get("unknown_coverage")
+    if not isinstance(summary, dict):
+        raise ValueError("Run Spec has no native UNKNOWN coverage summary")
+    summary_window = summary.get("decision_window")
+    summary_window = summary_window if isinstance(summary_window, dict) else {}
+    if (summary.get("thresholds") != native.get("thresholds")
+            or summary.get("denominator_cells") != native.get("denominator_cells")
+            or summary.get("unknown_cells") != native.get("unknown_cells")
+            or summary.get("version") != native.get("version")
+            or summary.get("engineering_acceptance") != native.get("engineering_acceptance")
+            or summary_window.get("start") != native_start
+            or summary_window.get("end") != native_end):
+        raise ValueError("native UNKNOWN report does not match the Run Spec summary")
+    summary_rows = summary.get("instruments")
+    summary_instruments = [
+        (row.get("symbol"), row.get("cells"), row.get("unknown_cells"))
+        for row in summary_rows if isinstance(row, dict)
+    ] if isinstance(summary_rows, list) else []
+    if (not isinstance(summary_rows, list)
+            or len(summary_instruments) != len(summary_rows)
+            or not all(isinstance(symbol, str) and type(cells) is int and type(unknown) is int
+                       for symbol, cells, unknown in summary_instruments)
+            or sorted(summary_instruments) != sorted(rows.values())):
+        raise ValueError("native UNKNOWN instruments do not match the Run Spec summary")
+    symbols = sorted({symbol for symbol, _, _ in rows.values()})
+
+    def per_symbol(
+        cells_by_id: dict[str, int], unknown_by_id: dict[str, int],
+    ) -> list[dict[str, Any]]:
+        return [{
+            "symbol": symbol,
+            "cells": sum(cells_by_id[item] for item in rows if rows[item][0] == symbol),
+            "unknown_cells": sum(unknown_by_id[item] for item in rows if rows[item][0] == symbol),
+        } for symbol in symbols]
+
+    thresholds = summary.get("thresholds")
+    decision = {
+        "scope": "decision_window",
+        "start": DECISION_WINDOW["start"],
+        "end": DECISION_WINDOW["end"],
+        "input_session_count": len(grid),
+        "session_count": window_sessions,
+        "warmup_session_count": warmup_sessions,
+        "post_window_session_count": post_window_sessions,
+        "denominator_cells": sum(window.values()),
+        "unknown_cells": sum(unknown_window.values()),
+        "thresholds": thresholds,
+        "instruments": per_symbol(window, unknown_window),
+        "grid_source": "native run_spec.session_inputs lifecycle membership",
+        "unknown_source": "native acceptance/mvp6-unknown-coverage.json",
+        "native_cells_reconciled": True,
+    }
+    decision["engineering_acceptance"] = evaluate_decision_window(decision)["status"]
+    return {
+        "decision_window": decision,
+        "input_range": {
+            "scope": "input_range",
+            "start": native_start,
+            "end": native_end,
+            "session_count": len(grid),
+            "denominator_cells": native.get("denominator_cells"),
+            "unknown_cells": native.get("unknown_cells"),
+            "thresholds": thresholds,
+            "instruments": per_symbol(full, {item: rows[item][2] for item in rows}),
+            "engineering_acceptance": native.get("engineering_acceptance"),
+            "version": native.get("version"),
+            "run_spec_verified": True,
+        },
+    }
+
+
+def evaluate_decision_window(block: dict[str, Any] | None) -> dict[str, Any]:
+    """Recompute the P27-6 UNKNOWN floor from the decision-window counts alone."""
+    if not isinstance(block, dict):
+        return result(False, total_percent=None, per_instrument=[], errors=[
+            {"kind": "missing_decision_window"},
+        ])
     errors: list[dict[str, Any]] = []
-    aggregate_unknown = coverage.get("unknown_cells")
-    aggregate_cells = coverage.get("denominator_cells")
-    thresholds = coverage.get("thresholds", {})
+    if block.get("scope") != "decision_window":
+        errors.append({"kind": "invalid_coverage_scope"})
+    if block.get("start") != DECISION_WINDOW["start"] or block.get("end") != DECISION_WINDOW["end"]:
+        errors.append({"kind": "decision_window_mismatch"})
+    session_count = block.get("session_count")
+    input_count = block.get("input_session_count")
+    if (type(session_count) is not int or type(input_count) is not int
+            or session_count <= 0 or input_count < session_count):
+        errors.append({"kind": "invalid_decision_window_sessions"})
+    warmup = block.get("warmup_session_count")
+    post_window = block.get("post_window_session_count")
+    if (type(warmup) is not int or type(post_window) is not int
+            or warmup < 0 or post_window < 0
+            or (type(session_count) is int and type(input_count) is int
+                and session_count + warmup + post_window != input_count)):
+        errors.append({"kind": "invalid_decision_window_sessions"})
+    if block.get("native_cells_reconciled") is not True:
+        errors.append({"kind": "native_coverage_not_reconciled"})
+    aggregate_unknown = block.get("unknown_cells")
+    aggregate_cells = block.get("denominator_cells")
+    thresholds = block.get("thresholds")
+    thresholds = thresholds if isinstance(thresholds, dict) else {}
     total_limit = thresholds.get("total_unknown_percent")
     instrument_limit = thresholds.get("per_instrument_unknown_percent")
     counts: dict[str, list[int]] = {}
-    for item in coverage.get("instruments", []):
-        symbol = item.get("symbol")
-        cells, unknown = item.get("cells"), item.get("unknown_cells")
+    instruments = block.get("instruments")
+    if not isinstance(instruments, list):
+        errors.append({"kind": "invalid_instrument_coverage"})
+        instruments = []
+    for item in instruments:
+        symbol = item.get("symbol") if isinstance(item, dict) else None
+        cells = item.get("cells") if isinstance(item, dict) else None
+        unknown = item.get("unknown_cells") if isinstance(item, dict) else None
         if not isinstance(symbol, str) or not symbol or type(cells) is not int or type(unknown) is not int:
             errors.append({"kind": "invalid_instrument_coverage"})
             continue
@@ -205,13 +443,94 @@ def verify_unknown_coverage(coverage: dict[str, Any]) -> dict[str, Any]:
     if any(item["percent"] is None or Decimal(str(item["percent"])) > instrument_limit_dec
            for item in per_instrument):
         errors.append({"kind": "per_instrument_unknown_percent_over_limit"})
-    if coverage.get("engineering_acceptance") != "passed":
-        errors.append({"kind": "coverage_report_not_accepted"})
     return result(
         not errors,
         total_percent=float(total_percent) if total_percent is not None else None,
         per_instrument=per_instrument,
         errors=errors,
+    )
+
+
+def verify_unknown_coverage(coverage: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate the decision-window floor and reconcile it with the input range."""
+    coverage = coverage if isinstance(coverage, dict) else {}
+    decision = coverage.get("decision_window")
+    gate = evaluate_decision_window(decision)
+    errors = list(gate["errors"])
+    input_range = coverage.get("input_range")
+    if not isinstance(input_range, dict):
+        errors.append({"kind": "missing_input_range_scope"})
+        input_range = {}
+    if input_range.get("scope") != "input_range":
+        errors.append({"kind": "input_range_scope_missing"})
+    if input_range.get("run_spec_verified") is not True:
+        errors.append({"kind": "input_range_not_verified_against_run_spec"})
+    try:
+        range_start = iso_date(input_range.get("start"))
+        range_end = iso_date(input_range.get("end"))
+    except ValueError:
+        range_start = range_end = ""
+        errors.append({"kind": "invalid_input_range_window"})
+    if range_start > range_end:
+        errors.append({"kind": "invalid_input_range_window"})
+    elif isinstance(decision, dict):
+        window_start, window_end = decision.get("start"), decision.get("end")
+        if (isinstance(window_start, str) and isinstance(window_end, str)
+                and (range_start > window_start or range_end < window_end)):
+            errors.append({"kind": "decision_window_outside_input_range"})
+    input_counts: dict[str, list[int]] = {}
+    input_rows = input_range.get("instruments")
+    input_rows = input_rows if isinstance(input_rows, list) else []
+    for item in input_rows:
+        symbol = item.get("symbol") if isinstance(item, dict) else None
+        cells = item.get("cells") if isinstance(item, dict) else None
+        unknown = item.get("unknown_cells") if isinstance(item, dict) else None
+        if (not isinstance(symbol, str) or not symbol or type(cells) is not int
+                or type(unknown) is not int or cells <= 0 or not 0 <= unknown <= cells):
+            errors.append({"kind": "invalid_input_range_instrument"})
+            continue
+        totals = input_counts.setdefault(symbol, [0, 0])
+        totals[0] += cells
+        totals[1] += unknown
+    if set(input_counts) != set(FIXED_UNIVERSE["codes"]):
+        errors.append({"kind": "input_range_fixed_universe_mismatch"})
+    aggregate_range_cells = input_range.get("denominator_cells")
+    aggregate_range_unknown = input_range.get("unknown_cells")
+    if type(aggregate_range_cells) is not int or type(aggregate_range_unknown) is not int:
+        errors.append({"kind": "invalid_input_range_total"})
+    elif (sum(item[0] for item in input_counts.values()) != aggregate_range_cells
+          or sum(item[1] for item in input_counts.values()) != aggregate_range_unknown):
+        errors.append({"kind": "input_range_reconciliation"})
+    for item in gate["per_instrument"]:
+        cells, unknown = input_counts.get(item["symbol"], [-1, -1])
+        if item["cells"] > cells or item["unknown_cells"] > unknown:
+            errors.append({
+                "kind": "decision_window_not_within_input_range", "symbol": item["symbol"],
+            })
+    if (type(aggregate_range_cells) is int and isinstance(decision, dict)
+            and type(decision.get("denominator_cells")) is int
+            and aggregate_range_cells < decision["denominator_cells"]):
+        errors.append({"kind": "decision_window_not_within_input_range"})
+    if isinstance(decision, dict):
+        declared = decision.get("engineering_acceptance")
+        if declared != gate["status"] or gate["status"] != "passed":
+            errors.append({"kind": "coverage_report_not_accepted"})
+    return result(
+        not errors,
+        total_percent=gate["total_percent"],
+        per_instrument=gate["per_instrument"],
+        errors=errors,
+        decision_window={
+            "start": decision.get("start") if isinstance(decision, dict) else None,
+            "end": decision.get("end") if isinstance(decision, dict) else None,
+            "session_count": decision.get("session_count") if isinstance(decision, dict) else None,
+            "warmup_session_count": (
+                decision.get("warmup_session_count") if isinstance(decision, dict) else None
+            ),
+            "post_window_session_count": (
+                decision.get("post_window_session_count") if isinstance(decision, dict) else None
+            ),
+        },
     )
 
 
@@ -235,7 +554,13 @@ def verify_early_failure(data: dict[str, Any]) -> dict[str, Any]:
         "reproducibility": result(False, status="not_run", reason=reason),
         "python_as_of_and_cli": result(False, status="not_run", reason=reason),
         "daily_accounting": result(False, status="not_run", reason=reason),
-        "unknown_floor": verify_unknown_coverage(normalize_unknown_coverage(data["unknown_coverage"])),
+        "unknown_floor": result(
+            False, status="not_run",
+            reason=(
+                "The decision-window UNKNOWN floor needs the per-Session lifecycle membership "
+                "produced by the main Run, which did not complete."
+            ),
+        ),
         "frozen_raw_immutable": result(data.get("raw_immutable") is True),
     }
     return {
@@ -297,7 +622,17 @@ def verify_post_main_failure(data: dict[str, Any]) -> dict[str, Any]:
         )
     else:
         checks[failed_check] = result(False, error=failure.get("error", "post-main phase failed"))
-    checks["unknown_floor"] = verify_unknown_coverage(data["unknown_coverage"])
+    coverage = data.get("unknown_coverage")
+    if isinstance(coverage, dict) and isinstance(coverage.get("decision_window"), dict):
+        checks["unknown_floor"] = verify_unknown_coverage(coverage)
+    elif failed_check != "unknown_floor":
+        checks["unknown_floor"] = result(
+            False, status="not_run",
+            reason=(
+                "The post-main phase stopped before the decision-window coverage evidence "
+                "was assembled from native Session membership."
+            ),
+        )
     checks["frozen_raw_immutable"] = result(data.get("raw_immutable") is True)
     non_blocking = data.get("non_blocking", {})
     non_blocking_errors = []
@@ -1063,11 +1398,34 @@ def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
         except (KeyError, InvalidOperation, TypeError):
             fee_errors.append({"kind": "invalid_fill_fee"})
 
-    blocked = {
-        (cell["instrument_id"], cell["session_date"])
-        for cell in accounting.get("forbidden_cells", [])
-        if cell.get("state") in {"unknown", "halted"}
-    }
+    blocked: set[tuple[Any, Any]] = set()
+    trade_state_errors = []
+    for cell in accounting.get("forbidden_cells", []):
+        state = normalize_trade_state(cell.get("state") if isinstance(cell, dict) else None)
+        if state not in NATIVE_TRADE_STATES:
+            trade_state_errors.append({
+                "kind": "invalid_trade_state",
+                "instrument_id": cell.get("instrument_id") if isinstance(cell, dict) else None,
+                "session_date": cell.get("session_date") if isinstance(cell, dict) else None,
+            })
+        elif state in BLOCKED_TRADE_STATES:
+            blocked.add((cell.get("instrument_id"), cell.get("session_date")))
+    exclusion_states = accounting.get("execution_exclusion_states")
+    if (not isinstance(exclusion_states, dict) or not all(
+            isinstance(state, str) and type(count) is int and count >= 0
+            for state, count in exclusion_states.items())):
+        trade_state_errors.append({"kind": "invalid_execution_exclusion_states"})
+    else:
+        expected_blocked = sum(
+            count for state, count in exclusion_states.items()
+            if normalize_trade_state(state) in BLOCKED_TRADE_STATES)
+        expected_invalid = sum(
+            count for state, count in exclusion_states.items()
+            if normalize_trade_state(state) not in NATIVE_TRADE_STATES)
+        if len(blocked) != expected_blocked or len(trade_state_errors) != expected_invalid:
+            # Empty forbidden-cell evidence cannot pass when the native Run Spec
+            # recorded non-tradable cells (the lower-case filter regression).
+            trade_state_errors.append({"kind": "forbidden_cell_evidence_mismatch"})
     blocked_trades = [
         trade for trade in accounting.get("trades", [])
         if (trade.get("instrument_id"), trade.get("session_date")) in blocked
@@ -1076,6 +1434,7 @@ def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
         bool(expected_sessions) and not accounting_errors and not weight_errors
         and bool(accounting.get("fills")) and not fee_errors
         and accounting.get("fees_present") is True and not blocked_trades
+        and not trade_state_errors
         and main_check["split_ledger"] and main_check["terminal_settlement"]
         and main_check["action_postings"]["passed"]
     )
@@ -1087,7 +1446,8 @@ def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
         "python_as_of_and_cli": result(python_cli_ok),
         "daily_accounting": result(accounting_ok, valuation_errors=accounting_errors,
                                    weight_errors=weight_errors, weight_summaries=weight_summaries,
-                                   fee_errors=fee_errors, blocked_trades=len(blocked_trades)),
+                                   fee_errors=fee_errors, blocked_trades=len(blocked_trades),
+                                   trade_state_errors=trade_state_errors),
         "unknown_floor": verify_unknown_coverage(data["unknown_coverage"]),
         "frozen_raw_immutable": result(data.get("raw_immutable") is True),
     }
@@ -1279,7 +1639,7 @@ def source_evidence_context(
     p21 = coverage.get("p21")
     p21 = p21 if isinstance(p21, dict) else {}
     return {
-        "decision_window": {"start": "2023-01-01", "end": "2026-09-30", "preheat": "60 Sessions"},
+        "decision_window": {**DECISION_WINDOW, "preheat": "60 Sessions"},
         "return_basis": return_basis,
         "universe_claim": "retrospective_static",
         "survivorship_bias": True,
@@ -1376,11 +1736,11 @@ def write_early_failure_report(
     safe_summary = {
         "passed": False,
         "checks": {name: check["status"] for name, check in verification["checks"].items()},
+        "unknown_coverage_scope": "input_range",
         "per_etf_unknown_coverage": [
             {
                 "code": item["symbol"],
                 "unknown_cells": item["unknown_cells"],
-                "cells": item["cells"],
                 "unknown_percent": 100 * item["unknown_cells"] / item["cells"] if item["cells"] else None,
             }
             for item in normalized_unknown["instruments"]
@@ -1398,6 +1758,7 @@ def write_post_main_failure_report(
     engine_completed: bool = False, main_evidence: dict[str, Any] | None = None,
     fixed_universe: dict[str, Any] | None = None, session_input_count: int = 0,
     return_basis: str | None = None,
+    decision_window_coverage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_unknown = normalize_unknown_coverage(unknown)
     raw_after = raw_hashes(acceptance.parent, raw_inventory)
@@ -1417,10 +1778,14 @@ def write_post_main_failure_report(
             "reason": "The old-system comparator for the legacy window is not available in this workspace.",
         },
     }
+    published_coverage = (
+        decision_window_coverage
+        if isinstance(decision_window_coverage, dict) else normalized_unknown
+    )
     artifacts = {
         "schema": PHASE_FAILURE_SCHEMA,
         "failure": failure,
-        "unknown_coverage": normalized_unknown,
+        "unknown_coverage": published_coverage,
         "raw_immutable": raw_immutable,
         "non_blocking": non_blocking,
         "engine_completed": engine_completed,
@@ -1452,7 +1817,7 @@ def write_post_main_failure_report(
             "verified_after_run": sum(raw_after.checked.values()),
             "unavailable_capture_records": raw_before.unavailable_records,
         },
-        "unknown_coverage": normalized_unknown,
+        "unknown_coverage": published_coverage,
         "local_artifacts": {
             "directory": str(output),
             "rerun_command": "python scripts/mvp6_acceptance.py run --root ~/PrajnaData/mvp-6",
@@ -1463,10 +1828,12 @@ def write_post_main_failure_report(
     return {
         "passed": False,
         "checks": {name: check["status"] for name, check in verification["checks"].items()},
+        "unknown_coverage_scope": (
+            "decision_window" if isinstance(decision_window_coverage, dict) else "input_range"
+        ),
         "per_etf_unknown_coverage": [
             {
                 "code": item["symbol"], "unknown_cells": item["unknown_cells"],
-                "cells": item["cells"],
                 "unknown_percent": 100 * item["unknown_cells"] / item["cells"] if item["cells"] else None,
             }
             for item in normalized_unknown["instruments"]
@@ -1930,8 +2297,17 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         "unknown": unknown, "raw_before": before, "criterion": "daily_parity",
         "coverage": coverage, "pit_base": pit_base, "engine_completed": True,
         "main_evidence": None, "fixed_universe": None, "session_input_count": 0,
-        "return_basis": None,
+        "return_basis": None, "decision_window_coverage": None,
     }
+    mark_run_phase("unknown_floor")
+    native_coverage_path = lake_dirs[0] / "acceptance" / "mvp6-unknown-coverage.json"
+    native_coverage = json.loads(native_coverage_path.read_text())
+    if not isinstance(native_coverage, dict):
+        raise ValueError("native UNKNOWN coverage report must be a JSON object")
+    coverage_evidence = decision_window_coverage(
+        native_coverage, main_manifests[0]["full"]["runs"][0]["run_spec"],
+    )
+    ACTIVE_POST_MAIN_RUN["decision_window_coverage"] = coverage_evidence
     mark_run_phase("daily_parity")
     vector_definition = experiment_definition(dsv, catalog_version, pit_inputs[0], "vector")
     parity_fast_definition = experiment_definition(
@@ -2067,7 +2443,11 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
 
     mark_run_phase("daily_accounting")
     excluded = main_run["run_spec"].get("execution_exclusions", [])
-    forbidden_cells = [cell for cell in excluded if cell.get("state") in {"unknown", "halted"}]
+    forbidden_cells = forbidden_trade_cells(excluded)
+    exclusion_states: dict[str, int] = {}
+    for cell in excluded:
+        state = normalize_trade_state(cell.get("state")) or "UNREADABLE"
+        exclusion_states[state] = exclusion_states.get(state, 0) + 1
     trades = []
     for row in main_full_tables["fills"]:
         fill = row["fill"]
@@ -2196,10 +2576,11 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
                 "slippage": row["slippage"],
             } for row in main_full_tables["fee_settlements"]],
             "forbidden_cells": forbidden_cells,
+            "execution_exclusion_states": exclusion_states,
             "trades": trades,
             "fees_present": bool(main_full_tables["fills"] or main_full_tables["fee_settlements"]),
         },
-        "unknown_coverage": run_spec["unknown_coverage"],
+        "unknown_coverage": coverage_evidence,
         "raw_immutable": raw_immutable,
         "non_blocking": {
             "small_grid": {"status": "not_run", "reason": "P16 non-blocking grid is not needed for the engineering ledger gate."},
@@ -2235,13 +2616,14 @@ def run_acceptance(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         "details": evidence,
     }
     write_json(output / "mvp6-acceptance-report.json", report)
-    public_unknown = evidence["unknown_coverage"]["instruments"]
+    public_unknown = evidence["unknown_coverage"]["decision_window"]["instruments"]
     safe_summary = {
         "passed": verification["passed"],
         "checks": {name: item["passed"] for name, item in verification["checks"].items()},
+        # #172: only the per-ETF UNKNOWN count and percentage are publishable;
+        # denominators and detailed counts stay local.
         "per_etf_unknown_coverage": [
             {"code": item["symbol"], "unknown_cells": item["unknown_cells"],
-             "cells": item["cells"],
              "unknown_percent": 100 * item["unknown_cells"] / item["cells"] if item["cells"] else None}
             for item in public_unknown
             if item.get("symbol") in FIXED_UNIVERSE["codes"]
@@ -2293,6 +2675,7 @@ def main() -> int:
                     fixed_universe=context.get("fixed_universe"),
                     session_input_count=context.get("session_input_count") or 0,
                     return_basis=context.get("return_basis"),
+                    decision_window_coverage=context.get("decision_window_coverage"),
                 )
                 ACTIVE_POST_MAIN_RUN = None
                 print(json.dumps(summary, indent=2, sort_keys=True))
