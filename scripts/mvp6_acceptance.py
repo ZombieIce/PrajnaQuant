@@ -922,6 +922,8 @@ def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
 
     if main.get("postings", {}).get("account_valuations") != data.get("accounting", {}).get("valuations"):
         main_check.update(passed=False, status="failed", posting_account_mismatch=True)
+        main_check["action_postings"].update(passed=False, status="failed")
+        main_check["action_postings"]["errors"].append({"kind": "posting_account_evidence_mismatch"})
     parity_check = verify_parity(data.get("parity", {}))
 
     independent = data["independent_runs"]

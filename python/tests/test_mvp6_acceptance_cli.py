@@ -279,6 +279,17 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertFalse(json.loads(result.stdout)["checks"]["main_run"]["action_postings"]["passed"])
 
+    def test_postings_reject_divergent_account_evidence_even_with_static_nav_identity(self):
+        artifacts = json.loads(json.dumps(run_artifacts()))
+        row = artifacts["accounting"]["valuations"][0]
+        row.update(cash="971", equity="1596")
+        result = self.invoke(artifacts)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        checks = json.loads(result.stdout)["checks"]
+        self.assertFalse(checks["main_run"]["passed"])
+        self.assertFalse(checks["daily_accounting"]["passed"])
+        self.assertTrue(checks["main_run"]["posting_account_mismatch"])
+
     def test_postings_account_for_same_session_trades_fees_and_multiple_payments(self):
         artifacts = run_artifacts()
         main = artifacts["main_run"]
