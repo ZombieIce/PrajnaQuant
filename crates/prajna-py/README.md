@@ -483,6 +483,15 @@ Inputs are rebuilt/validated by Rust; there is no Python Catalog or trading core
 The typed built-in Experiment and the same CLI definition share Experiment,
 Execution and Run IDs and every saved logical hash under the same code/environment.
 
+The optional `pit.fixed_universe` object is consumed by the same shared Rust PIT
+plan as the CLI, for both the built-in Experiment and Python callbacks: an
+explicit valid selector uses fixed-list membership, an omitted field keeps the
+versioned MVP-6 default, and an explicit `null` keeps the legacy broad-index
+selector. A fixed selector never silently falls back to the broad-index list;
+an invalid fixed list fails with the CLI's validation error, and the broad-index
+path still requires a versioned list. The minimum included-code check remains in
+the shared Engine for CLI and Python-hosted execution.
+
 Python callbacks also accept PIT Experiments using `PythonStrategy(id, version)`;
 these retain their own strategy/Execution identities and Python provenance.
 Their parameters are the strict PIT S2 object (`lookback`, `top_k`,

@@ -36,6 +36,13 @@ def flat_rotation(view, params, previous):
     )
 
 
+FIXED_UNIVERSE = {
+    'version': 'synthetic-fixed-etfs@1',
+    'codes': ['159002', '159003'],
+    'minimum_code_count': 2,
+}
+
+
 class PitTests(unittest.TestCase):
     def setUp(self):
         if not PREPARE.is_file():
@@ -57,11 +64,15 @@ class PitTests(unittest.TestCase):
         self.data = json.loads(subprocess.check_output([PREPARE, self.lake], text=True))
         self.ids = self.data.pop('ids')
         self.params = self.data['parameter_space']['list'][0]
-        self.strategy = prajna.Strategy('pit_rotation', '1', bar_columns=(), factors=(
-            prajna.FactorDependency('momentum', 'etf_tri_momentum', {'lookback': 1}),
+        self.strategy = self.default_strategy()
+
+    def default_strategy(self):
+        return prajna.Strategy('pit_rotation', '1', bar_columns=(), factors=(
+            prajna.FactorDependency('momentum', 'etf_tri_momentum',
+                                    {'lookback': self.params['lookback']}),
         ))
 
-    def experiment(self, engine='vector', python=False):
+    def experiment(self, engine='vector', python=False, pit=None):
         return prajna.Experiment(
             dataset_version=prajna.DatasetVersion(self.data['dsv']),
             universe=prajna.Universe(self.data['universe']), venue=prajna.Venue('SZSE'),
@@ -73,7 +84,7 @@ class PitTests(unittest.TestCase):
                     sizing='lot', rebalance='full_target', minimum_commission='5',
                     portfolios=[prajna.Capital(1, '10000')], lot_size_source=prajna.LotSizeSource()))),
             costs=prajna.Costs(0.0003, 2, 2), parameter_space=prajna.List([self.params]),
-            pit=self.data['pit'],
+            pit=self.data['pit'] if pit is None else pit,
         )
 
     def generate(self, decide, pit=None, params=None, strategy=None):
@@ -82,6 +93,84 @@ class PitTests(unittest.TestCase):
             strategy=strategy or self.strategy, decide=decide, params=params or self.params,
             pit=self.data['pit'] if pit is None else pit,
         )
+
+    def view_strategy(self):
+        # A factor-free declaration on every Session exposes one View per
+        # Session, so plan inputs can be compared without a cadence offset.
+        return prajna.Strategy('pit_rotation', '1', bar_columns=(), rebalance_every=1)
+
+    def fixed_pit(self):
+        pit = copy.deepcopy(self.data['pit'])
+        pit['fixed_universe'] = copy.deepcopy(FIXED_UNIVERSE)
+        return pit
+
+    def generate_views(self, pit, strategy=None):
+        """Collect the public As-of Views and flat Decisions for one PIT config."""
+        seen, decisions = [], []
+        def decide(view, params, previous):
+            seen.append(view)
+            decision = flat_rotation(view, params, previous)
+            decisions.append(decision)
+            return decision
+        returned = self.generate(decide, pit=pit, strategy=strategy or self.view_strategy())
+        self.assertEqual(len(returned), len(decisions))
+        return seen, decisions
+
+    def run_cli(self, pit, level='full'):
+        experiment = self.experiment(pit=pit)
+        definition = self.base / 'pit-definition.json'
+        definition.write_text(experiment.to_json())
+        output = json.loads(subprocess.check_output([
+            CLI, 'run', definition, '--lake', self.lake, '--level', level, '--threads', '1',
+        ], cwd=self.repo, env=self.git_env, text=True))
+        run = json.loads((self.execution_path(output) / 'execution.json').read_text())['runs'][0]
+        return output, run
+
+    def load_fixture(self, name, *flags):
+        self.lake = self.base / name
+        self.data = json.loads(subprocess.check_output(
+            [str(PREPARE), str(self.lake), *flags], text=True))
+        self.ids = self.data.pop('ids')
+        self.params = self.data['parameter_space']['list'][0]
+        self.strategy = self.default_strategy()
+
+    def run_cli_failure(self, pit):
+        experiment = self.experiment(pit=pit)
+        definition = self.base / 'pit-definition.json'
+        definition.write_text(experiment.to_json())
+        return subprocess.run([
+            CLI, 'run', definition, '--lake', self.lake, '--level', 'summary',
+        ], cwd=self.repo, env=self.git_env, text=True, capture_output=True)
+
+    def execution_path(self, cli):
+        def identity_hex(identity):
+            return identity.split(':sha256:')[1]
+        return (self.lake / 'experiments' / identity_hex(cli['exp'])
+                / 'executions' / identity_hex(cli['exe']))
+
+    def assert_plan_matches_views(self, run_spec, views):
+        inputs = {entry['eligible']['universe']['run_spec']['decision_session']: entry
+                  for entry in run_spec['session_inputs']}
+        self.assertEqual(sorted(inputs), [f'2023-01-{day:02}' for day in range(1, 11)])
+        self.assertEqual([view.session_date for view in views], sorted(inputs))
+        for view in views:
+            entry = inputs[view.session_date]
+            self.assertEqual(view.universe, entry['eligible']['universe']['members'])
+            self.assertEqual(view.eligible, entry['eligible']['members'])
+            self.assertEqual(view.risk_excluded, entry['risk_excluded'])
+
+    def assert_decisions_match_cli(self, cli, run, views, decisions):
+        rows = prajna.read_run(str(self.lake), cli['exp'], cli['exe'], run['run_id'],
+                               table='decisions', result_level='full').to_pylist()
+        cli_dates = {row['decision_session'] for row in rows}
+        actual = sorted((views[index].session_date, instrument, rank,
+                         decision.targets.get(instrument), score)
+                        for index, decision in enumerate(decisions)
+                        if views[index].session_date in cli_dates
+                        for instrument, score, rank in decision.ranked)
+        expected = sorted((row['decision_session'], row['instrument_id'], row['rank'],
+                           row['target_weight'], row['score']) for row in rows)
+        self.assertEqual(actual, expected)
 
     def test_pit_preserves_declared_factor_warmup_window_and_cadence(self):
         strategy = prajna.Strategy(
@@ -233,3 +322,167 @@ class PitTests(unittest.TestCase):
                 self.assertEqual(replay.action, 'replayed')
                 self.assertEqual(result.manifest['execution']['id'], replay.manifest['execution']['id'])
                 self.assertEqual(result.manifest['runs'], replay.manifest['runs'])
+
+    def test_fixed_universe_without_broad_index_matches_cli(self):
+        self.load_fixture('no-broad-lake', '--no-broad-index')
+        self.assertIsNone(self.data['pit']['catalog']['broad_indices'])
+        pit = self.fixed_pit()
+        views, decisions = self.generate_views(pit)
+
+        # Fixed membership follows the official lifetime only; no broad-index
+        # list, fund classification or Python-side inclusion is consulted.
+        for day, view in enumerate(views, 1):
+            self.assertEqual(view.session_date, f'2023-01-{day:02}')
+            expected = [self.ids[1]] + ([self.ids[2]] if day >= 4 else [])
+            self.assertEqual(view.universe, expected)
+            self.assertNotIn(self.ids[0], view.eligible)
+        self.assertEqual(views[3].eligible, [self.ids[1]])
+        self.assertIn(self.ids[0], views[4].risk_excluded)
+
+        cli, run = self.run_cli(pit)
+        self.assertEqual(run['status'], 'completed')
+        self.assertEqual(run['run_spec']['pit']['fixed_universe'], FIXED_UNIVERSE)
+        universe_spec = run['run_spec']['session_inputs'][0]['eligible']['universe']['run_spec']
+        self.assertEqual(universe_spec['fixed_list'], ['159002', '159003'])
+        self.assertEqual(universe_spec['fixed_list_version'], FIXED_UNIVERSE['version'])
+        self.assertIsNone(universe_spec.get('broad_index_version'))
+        self.assert_plan_matches_views(run['run_spec'], views)
+        self.assert_decisions_match_cli(cli, run, views, decisions)
+
+        # End-to-end callback Engine values agree with the CLI built-in S2 run.
+        strategy = prajna.Strategy('pit_rotation', '1', bar_columns=(),
+                                   rebalance_every=self.params['rebalance_every'])
+        result = self.experiment(python=True, pit=pit).run(
+            self.lake, repository=self.repo, strategy=strategy, decide=flat_rotation,
+            level=prajna.ResultLevel.FULL)
+        python_run = result.manifest['runs'][0]
+        self.assertEqual(python_run['status'], 'completed')
+        self.assertEqual(python_run['table_hashes'], run['table_hashes'])
+        self.assertEqual(python_run['run_spec']['pit']['fixed_universe'], FIXED_UNIVERSE)
+        for entry in python_run['run_spec']['session_inputs']:
+            universe_spec = entry['eligible']['universe']['run_spec']
+            self.assertEqual(universe_spec['fixed_list'], ['159002', '159003'])
+            self.assertEqual(universe_spec['fixed_list_version'], FIXED_UNIVERSE['version'])
+            self.assertIsNone(universe_spec.get('broad_index_version'))
+
+
+    def test_explicit_null_without_broad_index_requires_versioned_list(self):
+        self.load_fixture('null-no-broad-lake', '--no-broad-index')
+        pit = copy.deepcopy(self.data['pit'])
+        pit['fixed_universe'] = None
+        with self.assertRaisesRegex(ValueError,
+                                    'broad-index PIT selection requires a versioned list'):
+            self.generate(lambda view, params, previous: prajna.Decision({}), pit=pit,
+                          strategy=self.view_strategy())
+        failed = self.run_cli_failure(pit)
+        self.assertEqual(failed.returncode, 2)
+        self.assertIn('broad-index PIT selection requires a versioned list', failed.stderr)
+
+    def test_pit_default_and_explicit_null_keep_existing_contract(self):
+        # Explicit null retains the legacy broad-index selector.
+        broad_pit = copy.deepcopy(self.data['pit'])
+        self.assertIsNone(broad_pit['fixed_universe'])
+        broad_views, broad_decisions = self.generate_views(broad_pit)
+        cli, run = self.run_cli(broad_pit)
+        self.assertEqual(run['status'], 'completed')
+        self.assertIsNone(run['run_spec']['pit'].get('fixed_universe'))
+        self.assert_plan_matches_views(run['run_spec'], broad_views)
+        self.assert_decisions_match_cli(cli, run, broad_views, broad_decisions)
+        self.assertIn(self.ids[0], broad_views[1].universe)
+        self.assertNotIn(self.ids[0], broad_views[-1].universe)
+        self.assertNotIn(self.ids[1], broad_views[-1].universe)
+
+        # A missing field keeps the versioned MVP-6 default instead of the
+        # broad-index selector; its empty included list still fails the Engine
+        # minimum and is never silently widened by the binding.
+        default_pit = copy.deepcopy(self.data['pit'])
+        del default_pit['fixed_universe']
+        self.assertEqual(self.generate(
+            lambda view, params, previous: prajna.Decision({}), pit=default_pit), [])
+        cli, run = self.run_cli(default_pit, level='summary')
+        self.assertEqual(run['status'], 'failed')
+        self.assertEqual(run['run_spec']['pit']['fixed_universe']['version'],
+                         'mvp6-fixed-etf@2')
+        self.assertEqual(run['run_spec']['pit']['fixed_universe']['codes'], [])
+        for entry in run['run_spec']['session_inputs']:
+            self.assertEqual(entry['eligible']['universe']['run_spec']['fixed_list'], [])
+        summary = prajna.read_run(str(self.lake), cli['exp'], cli['exe'], run['run_id'],
+                                  table='summary')
+        self.assertIn('P27-19 escalation', summary.to_pylist()[0]['error'])
+
+        # The Python strategy entry applies the same Engine threshold.
+        experiment = self.experiment(python=True, pit=default_pit)
+        result = experiment.run(self.lake, repository=self.repo,
+                                strategy=self.view_strategy(), decide=flat_rotation,
+                                level=prajna.ResultLevel.SUMMARY)
+        run = result.manifest['runs'][0]
+        self.assertEqual(run['status'], 'failed')
+        summary = prajna.read_run(
+            str(self.lake), experiment.describe(self.lake).experiment_id,
+            result.manifest['execution']['id'], run['run_id'], table='summary')
+        self.assertIn('P27-19 escalation', summary.to_pylist()[0]['error'])
+
+    def test_invalid_fixed_universe_is_rejected_by_python_and_cli(self):
+        pit = copy.deepcopy(self.data['pit'])
+        pit['fixed_universe'] = {'version': '', 'codes': ['159002']}
+        with self.assertRaisesRegex(ValueError, 'invalid fixed Universe'):
+            self.generate(lambda view, params, previous: prajna.Decision({}), pit=pit)
+        failed = self.run_cli_failure(pit)
+        self.assertEqual(failed.returncode, 2)
+        self.assertIn('invalid fixed Universe', failed.stderr)
+
+    def test_explicit_fixed_universe_below_minimum_fails_shared_engine(self):
+        pit = copy.deepcopy(self.data['pit'])
+        pit['fixed_universe'] = {'version': 'synthetic-fixed-etfs@1',
+                                 'codes': ['159002', '159003'],
+                                 'minimum_code_count': 3}
+        # The As-of selector keeps the configured codes; the shared Engine, not
+        # the binding, applies the minimum-included-code gate. The broad list is
+        # present but differs from this fixed subset, so the full expected
+        # Universe is asserted (the old binding would return the broad list).
+        views, _ = self.generate_views(pit)
+        expected = [[self.ids[1]]] * 3 + [[self.ids[1], self.ids[2]]] * 7
+        self.assertEqual([view.universe for view in views], expected)
+        self.assertNotIn(self.ids[0], [i for view in views for i in view.universe])
+        self.assertIn(self.ids[1], views[-1].universe)
+
+        cli, run = self.run_cli(pit, level='summary')
+        self.assertEqual(run['status'], 'failed')
+        self.assertEqual(run['run_spec']['pit']['fixed_universe']['minimum_code_count'], 3)
+        self.assertEqual(
+            run['run_spec']['session_inputs'][-1]['eligible']['universe']['run_spec']['fixed_list'],
+            ['159002', '159003'])
+        summary = prajna.read_run(str(self.lake), cli['exp'], cli['exe'], run['run_id'],
+                                  table='summary')
+        self.assertIn('P27-19 escalation', summary.to_pylist()[0]['error'])
+
+        experiment = self.experiment(python=True, pit=pit)
+        result = experiment.run(self.lake, repository=self.repo,
+                                strategy=self.view_strategy(), decide=flat_rotation,
+                                level=prajna.ResultLevel.SUMMARY)
+        python_run = result.manifest['runs'][0]
+        self.assertEqual(python_run['status'], 'failed')
+        self.assertEqual(python_run['run_spec']['pit']['fixed_universe'],
+                         pit['fixed_universe'])
+        summary = prajna.read_run(
+            str(self.lake), experiment.describe(self.lake).experiment_id,
+            result.manifest['execution']['id'], python_run['run_id'], table='summary')
+        self.assertIn('P27-19 escalation', summary.to_pylist()[0]['error'])
+
+    def test_fixed_universe_lifecycle_matches_cli_after_termination(self):
+        self.load_fixture('terminated-fixed-lake', '--terminated')
+        pit = self.fixed_pit()
+        pit['fixed_universe'] = {'version': 'synthetic-fixed-etfs@1',
+                                 'codes': ['159001', '159002', '159003'],
+                                 'minimum_code_count': 3}
+        views, decisions = self.generate_views(pit)
+        cli, run = self.run_cli(pit)
+        self.assertEqual(run['status'], 'completed')
+        self.assert_plan_matches_views(run['run_spec'], views)
+        self.assert_decisions_match_cli(cli, run, views, decisions)
+        by_day = {view.session_date: view for view in views}
+        self.assertNotIn(self.ids[2], by_day['2023-01-03'].universe)
+        self.assertIn(self.ids[2], by_day['2023-01-04'].universe)
+        self.assertIn(self.ids[0], by_day['2023-01-07'].universe)
+        self.assertNotIn(self.ids[0], by_day['2023-01-08'].universe)
+        self.assertIn(self.ids[0], by_day['2023-01-05'].risk_excluded)
