@@ -603,10 +603,23 @@ def verify_action_postings(main: dict[str, Any]) -> dict[str, Any]:
                             state[bucket] += amount
                 totals = {key: Decimal(0) for key in ("cash", "dividend_receivable", "liquidation_receivable")}
                 total_positions: dict[str, Decimal] = {}
+                total_market_values: dict[str, Decimal] = {}
+                total_equity = Decimal(0)
+                account = account_rows[(date, point)]
+                unallocated = dec(account.get("unallocated_capital", "0"))
+                if not unallocated.is_finite() or unallocated < 0:
+                    raise ValueError("invalid unallocated capital")
                 for pid, state in states.items():
                     observed = vp_rows[(date, point, pid)]
                     if ledger_oracle(observed)[0] != dec(observed["equity"]):
                         raise ValueError("portfolio NAV identity mismatch")
+                    total_equity += dec(observed["equity"])
+                    for instrument, position in observed["positions"].items():
+                        total_market_values[instrument] = total_market_values.get(instrument, Decimal(0)) + dec(position["market_value"])
+                        parent = account["positions"].get(instrument)
+                        if parent is None or dec(position["price"]) != dec(parent["price"]):
+                            errors.append({"kind": "portfolio_account_price_mismatch", "session_date": date,
+                                           "valuation_point": point, "instrument_id": instrument})
                     for key in totals:
                         if not state[key].is_finite() or state[key] < 0 or state[key] != dec(observed[key]):
                             errors.append({"kind": "action_state_transition", "session_date": date,
@@ -619,8 +632,17 @@ def verify_action_postings(main: dict[str, Any]) -> dict[str, Any]:
                                        "valuation_point": point, "portfolio_id": pid})
                     for instrument, quantity in actual.items():
                         total_positions[instrument] = total_positions.get(instrument, Decimal(0)) + quantity
-                account = account_rows[(date, point)]
-                totals["cash"] += dec(account.get("unallocated_capital", "0"))
+                if dec(account["equity"]) != total_equity + unallocated:
+                    errors.append({"kind": "portfolio_account_equity_mismatch", "session_date": date,
+                                   "valuation_point": point})
+                for instrument in set(total_market_values) | set(account["positions"]):
+                    parent_value = dec(account["positions"].get(instrument, {}).get("market_value", "0"))
+                    if total_market_values.get(instrument, Decimal(0)) != parent_value:
+                        errors.append({"kind": "portfolio_account_market_value_mismatch", "session_date": date,
+                                       "valuation_point": point, "instrument_id": instrument})
+                if ledger_oracle(account)[0] != dec(account["equity"]):
+                    raise ValueError("account NAV identity mismatch")
+                totals["cash"] += unallocated
                 if any(value != dec(account[key]) for key, value in totals.items()):
                     raise ValueError("portfolio/account posting bucket mismatch")
                 actual = {instrument: dec(position["quantity"]) for instrument, position in account["positions"].items()}

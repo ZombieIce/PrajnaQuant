@@ -21,6 +21,7 @@ from scripts.mvp6_acceptance import (
     ledger_oracle,
     parity_cost_fraction,
     native_fees_by_date,
+    verify_action_postings,
     native_trajectories,
     normalized_trajectory,
     manifest_result_level,
@@ -289,6 +290,77 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
         self.assertFalse(checks["main_run"]["passed"])
         self.assertFalse(checks["daily_accounting"]["passed"])
         self.assertTrue(checks["main_run"]["posting_account_mismatch"])
+
+    def test_vp_account_valuation_contradictions_reject_balanced_local_nav(self):
+        for index in (0, 1):
+            for price, value, equity in (("6", "30", "1600"),
+                                         ("5.000000000000000001", "25.000000000000000005", "1595.000000000000000005")):
+                with self.subTest(index=index, price=price):
+                    artifacts = run_artifacts()
+                    row = artifacts["main_run"]["postings"]["portfolio_valuations"][index]
+                    row["positions"]["159919.SZSE"].update(price=price, market_value=value)
+                    row["equity"] = equity
+                    result = self.invoke(artifacts)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    checks = json.loads(result.stdout)["checks"]
+                    self.assertFalse(checks["main_run"]["passed"])
+                    self.assertFalse(checks["daily_accounting"]["passed"])
+                    kinds = {error["kind"] for error in checks["main_run"]["action_postings"]["errors"]}
+                    self.assertIn("portfolio_account_equity_mismatch", kinds)
+                    self.assertIn("portfolio_account_market_value_mismatch", kinds)
+
+    def test_per_instrument_value_offsets_do_not_hide_balanced_equity(self):
+        artifacts = run_artifacts()
+        row = artifacts["main_run"]["postings"]["portfolio_valuations"][0]
+        row["positions"]["159919.SZSE"].update(price="6", market_value="30")
+        row["positions"]["159560.SZSE"].update(price="5.95", market_value="595")
+        result = self.invoke(artifacts)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        errors = json.loads(result.stdout)["checks"]["main_run"]["action_postings"]["errors"]
+        self.assertIn("portfolio_account_market_value_mismatch", {error["kind"] for error in errors})
+        self.assertNotIn("portfolio_account_equity_mismatch", {error["kind"] for error in errors})
+
+    def test_multi_vp_aggregation_includes_unallocated_and_common_marks(self):
+        date = DATES[0]
+        main = {"actions": [], "terminal_settlements": [], "postings": {
+            "expected_sessions": [date], "dividend_tax_rate": "0", "fee_settlements": [],
+            "initial_portfolios": [{"id": 1, "capital": "100"}, {"id": 2, "capital": "200"}],
+            "fills": [], "portfolio_valuations": [], "account_valuations": [],
+        }}
+        evidence = main["postings"]
+        for pid, capital, quantity in ((1, 100, 1), (2, 200, 2)):
+            evidence["fills"].append({
+                "order": {"portfolio_id": pid, "instrument_id": "159919.SZSE", "side": "Buy", "quantity": str(quantity)},
+                "executed_at": date + "T09:30:00Z", "raw_price": "10", "total_fees": "0",
+                "cash_delta": str(-10 * quantity), "slippage": "0",
+                "costs": {"commission": "0", "minimum_commission_top_up": "0", "tax": "0"},
+            })
+            for point in ("open_after", "close"):
+                evidence["portfolio_valuations"].append({
+                    "session_date": date, "valuation_point": point, "portfolio_id": pid,
+                    "cash": str(capital - 10 * quantity), "equity": str(capital),
+                    "dividend_receivable": "0", "liquidation_receivable": "0",
+                    "positions": {"159919.SZSE": {"quantity": str(quantity), "price": "10", "market_value": str(10 * quantity)}},
+                })
+        for point in ("open_after", "close"):
+            evidence["account_valuations"].append({
+                "session_date": date, "valuation_point": point, "cash": "277", "equity": "307",
+                "dividend_receivable": "0", "liquidation_receivable": "0", "unallocated_capital": "7",
+                "positions": {"159919.SZSE": {"quantity": "3", "price": "10", "market_value": "30"}},
+            })
+        self.assertTrue(verify_action_postings(main)["passed"])
+        balanced = json.loads(json.dumps(main))
+        rows = balanced["postings"]["portfolio_valuations"]
+        rows[0]["positions"]["159919.SZSE"].update(price="12", market_value="12")
+        rows[0]["equity"] = "102"
+        rows[2]["positions"]["159919.SZSE"].update(price="9", market_value="18")
+        rows[2]["equity"] = "198"
+        check = verify_action_postings(balanced)
+        self.assertFalse(check["passed"])
+        self.assertIn("portfolio_account_price_mismatch", {error["kind"] for error in check["errors"]})
+        for row in evidence["account_valuations"]:
+            row.update(unallocated_capital="-1", cash="269", equity="299")
+        self.assertFalse(verify_action_postings(main)["passed"])
 
     def test_postings_account_for_same_session_trades_fees_and_multiple_payments(self):
         artifacts = run_artifacts()
