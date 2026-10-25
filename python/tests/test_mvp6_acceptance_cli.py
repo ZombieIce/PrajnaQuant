@@ -15,7 +15,9 @@ from scripts import mvp6_acceptance as acceptance_runner
 
 from scripts.mvp6_acceptance import (
     build_pit_input,
+    decision_window_coverage,
     fixed_universe_diagnostics,
+    forbidden_trade_cells,
     identity_change,
     ledger_notional,
     ledger_oracle,
@@ -44,12 +46,93 @@ DATES = ["2026-01-05", "2026-01-06", "2026-01-07"]
 
 
 def unknown_coverage():
+    """Decision-window gate plus scope-labelled input-range provenance."""
+    thresholds = {"total_unknown_percent": 5, "per_instrument_unknown_percent": 20}
     return {
-        "engineering_acceptance": "passed", "unknown_cells": 5, "denominator_cells": 300,
+        "input_range": {
+            "scope": "input_range", "start": "2022-10-10", "end": "2026-09-30",
+            "session_count": 360, "denominator_cells": 360, "unknown_cells": 5,
+            "thresholds": dict(thresholds),
+            "instruments": [{"symbol": code, "cells": 72, "unknown_cells": 1}
+                            for code in FIXED_CODES],
+            "engineering_acceptance": "passed", "version": "mvp6-unknown-coverage@2",
+            "run_spec_verified": True,
+        },
+        "decision_window": {
+            "scope": "decision_window", "start": "2023-01-01", "end": "2026-09-30",
+            "input_session_count": 360, "session_count": 300, "warmup_session_count": 60,
+            "post_window_session_count": 0,
+            "denominator_cells": 300, "unknown_cells": 5,
+            "thresholds": dict(thresholds),
+            "instruments": [{"symbol": code, "cells": 60, "unknown_cells": 1}
+                            for code in FIXED_CODES],
+            "grid_source": "native run_spec.session_inputs lifecycle membership",
+            "unknown_source": "native acceptance/mvp6-unknown-coverage.json",
+            "native_cells_reconciled": True, "engineering_acceptance": "passed",
+        },
+    }
+
+
+NATIVE_GRID_SESSIONS = ["2022-12-30", "2023-01-01", "2023-06-01", "2026-09-30", "2026-10-01"]
+NATIVE_GRID_MEMBERS = {
+    "2022-12-30": ["159919.SZSE", "159612.SZSE", "159952.SZSE", "159522.SZSE"],
+    "2023-01-01": ["159919.SZSE", "159612.SZSE", "159952.SZSE", "159522.SZSE"],
+    "2023-06-01": ["159919.SZSE", "159612.SZSE", "159952.SZSE", "159560.SZSE"],
+    "2026-09-30": ["159919.SZSE", "159612.SZSE", "159952.SZSE", "159560.SZSE"],
+    "2026-10-01": ["159919.SZSE", "159612.SZSE", "159952.SZSE", "159560.SZSE"],
+}
+
+
+def native_coverage_report():
+    """Native input-range coverage over a grid that includes warm-up Sessions."""
+    return {
+        "version": "mvp6-unknown-coverage@2",
+        "decision_window_start": NATIVE_GRID_SESSIONS[0],
+        "decision_window_end": NATIVE_GRID_SESSIONS[-1],
+        "denominator_cells": 20,
+        "unknown_cells": 2,
         "thresholds": {"total_unknown_percent": 5, "per_instrument_unknown_percent": 20},
+        "engineering_acceptance": "failed",
         "instruments": [
-            {"symbol": code, "cells": 60, "unknown_cells": 1} for code in FIXED_CODES
+            {"instrument_id": f"{code}.SZSE", "native_symbol": code, "cells": cells,
+             "unknown_cells": unknown}
+            for code, cells, unknown in (
+                ("159919", 5, 0), ("159612", 5, 2), ("159952", 5, 0),
+                ("159560", 3, 0), ("159522", 2, 0),
+            )
         ],
+        "unknowns": [
+            {"instrument_id": "159612.SZSE", "session_date": NATIVE_GRID_SESSIONS[0],
+             "reason": "missing_bar_without_halt_notice"},
+            {"instrument_id": "159612.SZSE", "session_date": NATIVE_GRID_SESSIONS[-1],
+             "reason": "missing_bar_without_halt_notice"},
+        ],
+    }
+
+
+def native_run_spec(report):
+    """Run Spec shaped like the native manifest: per-Session lifecycle members."""
+    return {
+        "session_inputs": [
+            {"eligible": {"universe": {
+                "members": list(NATIVE_GRID_MEMBERS[date]),
+                "run_spec": {"decision_session": date},
+            }}} for date in NATIVE_GRID_SESSIONS
+        ],
+        "unknown_coverage": {
+            "version": report["version"],
+            "decision_window": {"start": report["decision_window_start"],
+                                "end": report["decision_window_end"]},
+            "denominator_cells": report["denominator_cells"],
+            "unknown_cells": report["unknown_cells"],
+            "thresholds": dict(report["thresholds"]),
+            "engineering_acceptance": report["engineering_acceptance"],
+            "instruments": [
+                {"symbol": item["native_symbol"], "cells": item["cells"],
+                 "unknown_cells": item["unknown_cells"]}
+                for item in report["instruments"]
+            ],
+        },
     }
 
 
@@ -218,6 +301,7 @@ def run_artifacts():
                        "total_fees": fill["total_fees"], "costs": fill["costs"], "slippage": fill["slippage"]}
                       for fill in postings["fills"]],
             "forbidden_cells": [{"instrument_id": "159612.SZSE", "session_date": "2026-01-05", "state": "halted"}],
+            "execution_exclusion_states": {"HALTED": 1},
             "trades": [{"instrument_id": "159919.SZSE", "session_date": "2026-01-05"}],
             "fees_present": True,
         },
@@ -449,7 +533,10 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
                 for name, check in checks.items():
                     self.assertFalse(check["passed"])
                     if name != "main_run":
-                        expected = "failed" if case == "missing_raw" and name in {"unknown_floor", "frozen_raw_immutable"} else "not_run"
+                        expected = (
+                            "failed" if case == "missing_raw" and name == "frozen_raw_immutable"
+                            else "not_run"
+                        )
                         self.assertEqual(check["status"], expected)
                 self.assertEqual(checks["main_run"]["error"], report["failure"]["error"])
 
@@ -489,7 +576,7 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
     def test_cli_rejects_nav_mismatch_and_unknown_floor_overrun(self):
         artifacts = run_artifacts()
         artifacts["accounting"]["valuations"][0]["equity"] = "1001"
-        artifacts["unknown_coverage"]["unknown_cells"] = 16
+        artifacts["unknown_coverage"]["decision_window"]["unknown_cells"] = 16
         result = self.invoke(artifacts)
         self.assertEqual(result.returncode, 1, result.stderr)
         report = json.loads(result.stdout)
@@ -507,14 +594,14 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
         for mutate in cases:
             with self.subTest(mutation=mutate):
                 artifacts = run_artifacts()
-                mutate(artifacts["unknown_coverage"])
+                mutate(artifacts["unknown_coverage"]["decision_window"])
                 result = self.invoke(artifacts)
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertFalse(json.loads(result.stdout)["checks"]["unknown_floor"]["passed"])
 
     def test_unknown_coverage_cannot_raise_ticket_limits(self):
         artifacts = run_artifacts()
-        coverage = artifacts["unknown_coverage"]
+        coverage = artifacts["unknown_coverage"]["decision_window"]
         coverage["unknown_cells"] = 100
         coverage["denominator_cells"] = 300
         coverage["thresholds"] = {
@@ -532,6 +619,198 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
         self.assertFalse(check["passed"])
         self.assertIn("total_unknown_percent_over_limit", [e["kind"] for e in check["errors"]])
         self.assertIn("per_instrument_unknown_percent_over_limit", [e["kind"] for e in check["errors"]])
+
+    def test_decision_window_gate_rejects_warmup_diluted_unknowns(self):
+        artifacts = run_artifacts()
+        coverage = artifacts["unknown_coverage"]
+        # Identical UNKNOWNs in both scopes: 16/360 passes the full input range
+        # while 16/300 breaches the decision-window floor. Warm-up must not
+        # dilute the UNKNOWN share.
+        unknowns = dict(zip(FIXED_CODES, (4, 3, 3, 3, 3)))
+        coverage["input_range"]["unknown_cells"] = 16
+        coverage["input_range"]["instruments"] = [
+            {"symbol": code, "cells": 72, "unknown_cells": unknown}
+            for code, unknown in unknowns.items()
+        ]
+        coverage["decision_window"]["unknown_cells"] = 16
+        coverage["decision_window"]["instruments"] = [
+            {"symbol": code, "cells": 60, "unknown_cells": unknown}
+            for code, unknown in unknowns.items()
+        ]
+
+        result = self.invoke(artifacts)
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        check = json.loads(result.stdout)["checks"]["unknown_floor"]
+        self.assertFalse(check["passed"])
+        self.assertIn("total_unknown_percent_over_limit", [e["kind"] for e in check["errors"]])
+        self.assertAlmostEqual(check["total_percent"], 16 / 300 * 100, places=9)
+        self.assertLess(16 / 360 * 100, 5)
+
+    def test_unknown_floor_rejects_missing_empty_or_inconsistent_windows(self):
+        cases = (
+            ("missing_decision_window", lambda coverage: coverage.pop("decision_window")),
+            ("decision_window_mismatch",
+             lambda coverage: coverage["decision_window"].update(start="2022-10-10")),
+            ("decision_window_mismatch",
+             lambda coverage: coverage["decision_window"].update(
+                 start="2026-01-01", end="2023-01-01")),
+            ("invalid_aggregate_denominator",
+             lambda coverage: coverage["decision_window"].update(denominator_cells=0)),
+            ("invalid_decision_window_sessions",
+             lambda coverage: coverage["decision_window"].update(session_count=0)),
+            ("native_coverage_not_reconciled",
+             lambda coverage: coverage["decision_window"].update(native_cells_reconciled=False)),
+            ("input_range_scope_missing",
+             lambda coverage: coverage["input_range"].update(scope="decision_window")),
+            ("decision_window_outside_input_range",
+             lambda coverage: coverage["input_range"].update(start="2024-01-01")),
+            ("decision_window_not_within_input_range",
+             lambda coverage: coverage["decision_window"]["instruments"][0].update(cells=80)),
+        )
+        for kind, mutate in cases:
+            with self.subTest(kind=kind):
+                artifacts = run_artifacts()
+                mutate(artifacts["unknown_coverage"])
+                result = self.invoke(artifacts)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                check = json.loads(result.stdout)["checks"]["unknown_floor"]
+                self.assertFalse(check["passed"])
+                self.assertIn(kind, [error["kind"] for error in check["errors"]])
+
+    def test_decision_window_boundaries_and_lifecycle_follow_native_membership(self):
+        report = native_coverage_report()
+
+        evidence = decision_window_coverage(report, native_run_spec(report))
+
+        window = evidence["decision_window"]
+        # 2023-01-01 and 2026-09-30 are counted once; the adjacent Sessions and
+        # the warm-up Session are excluded. 159522 ends and 159560 starts at
+        # their native lifecycle boundaries.
+        self.assertEqual(window["denominator_cells"], 12)
+        self.assertEqual(window["unknown_cells"], 0)
+        self.assertEqual(window["session_count"], 3)
+        self.assertEqual(window["warmup_session_count"], 1)
+        self.assertEqual(window["post_window_session_count"], 1)
+        self.assertEqual(
+            {item["symbol"]: item["cells"] for item in window["instruments"]},
+            {"159522": 1, "159560": 2, "159612": 3, "159919": 3, "159952": 3},
+        )
+        self.assertEqual(window["engineering_acceptance"], "passed")
+        self.assertEqual(evidence["input_range"]["scope"], "input_range")
+        self.assertEqual(evidence["input_range"]["denominator_cells"], 20)
+        self.assertEqual(evidence["input_range"]["unknown_cells"], 2)
+
+    def test_decision_window_rejects_native_grid_and_run_spec_mismatches(self):
+        mismatches = (
+            "native cells",
+            "unknown outside grid",
+            "run spec summary",
+            "session order",
+        )
+        for mismatch in mismatches:
+            with self.subTest(mismatch=mismatch):
+                report = native_coverage_report()
+                run_spec = native_run_spec(report)
+                if mismatch == "native cells":
+                    report["instruments"][0]["cells"] = 4
+                    report["denominator_cells"] = 19
+                elif mismatch == "unknown outside grid":
+                    report["unknowns"][0]["session_date"] = "2023-07-01"
+                elif mismatch == "run spec summary":
+                    run_spec["unknown_coverage"]["denominator_cells"] = 21
+                else:
+                    run_spec["session_inputs"].reverse()
+                with self.assertRaises(ValueError):
+                    decision_window_coverage(report, run_spec)
+
+    def test_forbidden_trade_cells_follow_the_native_upper_case_state_contract(self):
+        excluded = [
+            {"instrument_id": "159612.SZSE", "session_date": DATES[0], "state": "HALTED"},
+            {"instrument_id": "159919.SZSE", "session_date": DATES[0], "state": "UNKNOWN"},
+            {"instrument_id": "159952.SZSE", "session_date": DATES[0], "state": "TRADABLE"},
+            {"instrument_id": "159560.SZSE", "session_date": DATES[0], "state": "odd_state"},
+            {"instrument_id": "159522.SZSE", "session_date": DATES[0], "state": None},
+        ]
+
+        kept = forbidden_trade_cells(excluded)
+
+        self.assertEqual(
+            [cell["instrument_id"] for cell in kept],
+            ["159612.SZSE", "159919.SZSE", "159560.SZSE", "159522.SZSE"],
+        )
+        self.assertEqual(
+            [cell["state"] for cell in kept], ["HALTED", "UNKNOWN", "ODD_STATE", None],
+        )
+
+    def test_blocked_fills_use_the_native_state_contract_and_unknown_states_fail(self):
+        cases = (
+            ("TRADABLE", "legal"),
+            ("HALTED", "blocked"),
+            ("UNKNOWN", "blocked"),
+            ("halted", "blocked"),
+            ("odd_state", "invalid"),
+        )
+        for state, expected in cases:
+            with self.subTest(state=state):
+                artifacts = run_artifacts()
+                cell = artifacts["accounting"]["forbidden_cells"][0]
+                fill = artifacts["main_run"]["postings"]["fills"][1]
+                cell.update(instrument_id=fill["order"]["instrument_id"],
+                            session_date=fill["executed_at"][:10])
+                cell["state"] = state
+                artifacts["accounting"]["execution_exclusion_states"] = {state.upper(): 1}
+                # Keep the incomplete trades summary: the native Fill must decide legality.
+                result = self.invoke(artifacts)
+                check = json.loads(result.stdout)["checks"]["daily_accounting"]
+                if expected == "legal":
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertTrue(check["passed"])
+                    continue
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertFalse(check["passed"])
+                if expected == "blocked":
+                    self.assertEqual(check["blocked_trades"], 1)
+                else:
+                    self.assertEqual(
+                        check["trade_state_errors"][0]["kind"], "invalid_trade_state")
+
+    def test_native_fill_legality_uses_instrument_and_date_without_trade_summary(self):
+        for instrument, session, blocked in (
+            ("159560.SZSE", DATES[0], 1),
+            ("159560.SZSE", DATES[1], 0),
+            ("159612.SZSE", DATES[0], 0),
+        ):
+            with self.subTest(instrument=instrument, session=session):
+                artifacts = run_artifacts()
+                artifacts["accounting"].pop("trades")
+                artifacts["accounting"]["forbidden_cells"] = [{
+                    "instrument_id": instrument, "session_date": session, "state": "HALTED",
+                }]
+                result = self.invoke(artifacts)
+                check = json.loads(result.stdout)["checks"]["daily_accounting"]
+                self.assertEqual(result.returncode, blocked, result.stderr)
+                self.assertEqual(check["blocked_trades"], blocked)
+                self.assertEqual(check["passed"], not blocked)
+
+    def test_empty_forbidden_cell_evidence_cannot_pass(self):
+        artifacts = run_artifacts()
+        artifacts["accounting"]["forbidden_cells"] = []
+
+        dropped = self.invoke(artifacts)
+
+        self.assertEqual(dropped.returncode, 1, dropped.stderr)
+        check = json.loads(dropped.stdout)["checks"]["daily_accounting"]
+        self.assertFalse(check["passed"])
+        self.assertIn("forbidden_cell_evidence_mismatch",
+                      [error["kind"] for error in check["trade_state_errors"]])
+
+        artifacts = run_artifacts()
+        artifacts["accounting"]["forbidden_cells"] = []
+        artifacts["accounting"]["execution_exclusion_states"] = {}
+        legal = self.invoke(artifacts)
+        self.assertEqual(legal.returncode, 0, legal.stderr)
+        self.assertTrue(json.loads(legal.stdout)["checks"]["daily_accounting"]["passed"])
 
     def test_main_run_requires_dividend_transitions_and_consistent_split_arithmetic(self):
         cases = (
@@ -998,7 +1277,9 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
         for name in ("daily_parity", "reproducibility", "python_as_of_and_cli", "daily_accounting"):
             self.assertEqual(report["checks"][name]["status"], "not_run")
             self.assertFalse(report["checks"][name]["passed"])
-        self.assertEqual(report["checks"]["unknown_floor"]["status"], "passed")
+        self.assertEqual(report["checks"]["unknown_floor"]["status"], "not_run")
+        self.assertFalse(report["checks"]["unknown_floor"]["passed"])
+        self.assertIn("did not complete", report["checks"]["unknown_floor"]["reason"])
         self.assertEqual(report["checks"]["frozen_raw_immutable"]["status"], "passed")
 
     def test_post_main_phase_failure_still_emits_all_blocking_checks(self):
@@ -1076,6 +1357,31 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
         missing_engine_main = json.loads(missing_engine.stdout)["checks"]["main_run"]
         self.assertFalse(missing_engine_main["passed"])
         self.assertEqual(missing_engine_main["status"], "not_run")
+
+    def test_post_main_failure_summary_uses_its_declared_coverage_scope(self):
+        coverage = unknown_coverage()
+        snapshot = acceptance_runner.RawHashSnapshot({"synthetic": True}, 1)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir)
+            with patch.object(acceptance_runner, "raw_hashes", return_value=snapshot):
+                for scoped in (None, coverage):
+                    with self.subTest(decision_window=scoped is not None):
+                        summary = write_post_main_failure_report(
+                            output=output, acceptance=output, raw_inventory=output / "inventory.json",
+                            unknown=coverage["input_range"], criterion="daily_parity",
+                            error="synthetic late failure", raw_before=snapshot,
+                            engine_completed=True, decision_window_coverage=scoped,
+                        )
+                        scope = "decision_window" if scoped is not None else "input_range"
+                        self.assertEqual(summary["unknown_coverage_scope"], scope)
+                        expected = coverage[scope]["instruments"]
+                        self.assertEqual(summary["per_etf_unknown_coverage"], [
+                            {"code": row["symbol"], "unknown_cells": row["unknown_cells"],
+                             "unknown_percent": 100 * row["unknown_cells"] / row["cells"]}
+                            for row in expected
+                        ])
+                        self.assertTrue(all("cells" not in row for row in
+                                            summary["per_etf_unknown_coverage"]))
 
     def test_post_main_report_retains_source_context_and_raw_inventory_location(self):
         with tempfile.TemporaryDirectory() as temp_dir:
