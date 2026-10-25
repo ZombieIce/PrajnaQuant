@@ -745,6 +745,7 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
 
     def test_blocked_fills_use_the_native_state_contract_and_unknown_states_fail(self):
         cases = (
+            ("TRADABLE", "legal"),
             ("HALTED", "blocked"),
             ("UNKNOWN", "blocked"),
             ("halted", "blocked"),
@@ -754,14 +755,18 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
             with self.subTest(state=state):
                 artifacts = run_artifacts()
                 cell = artifacts["accounting"]["forbidden_cells"][0]
+                fill = artifacts["main_run"]["postings"]["fills"][1]
+                cell.update(instrument_id=fill["order"]["instrument_id"],
+                            session_date=fill["executed_at"][:10])
                 cell["state"] = state
                 artifacts["accounting"]["execution_exclusion_states"] = {state.upper(): 1}
-                artifacts["accounting"]["trades"] = [{
-                    "instrument_id": cell["instrument_id"],
-                    "session_date": cell["session_date"],
-                }]
+                # Keep the incomplete trades summary: the native Fill must decide legality.
                 result = self.invoke(artifacts)
                 check = json.loads(result.stdout)["checks"]["daily_accounting"]
+                if expected == "legal":
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertTrue(check["passed"])
+                    continue
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertFalse(check["passed"])
                 if expected == "blocked":
@@ -769,6 +774,24 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
                 else:
                     self.assertEqual(
                         check["trade_state_errors"][0]["kind"], "invalid_trade_state")
+
+    def test_native_fill_legality_uses_instrument_and_date_without_trade_summary(self):
+        for instrument, session, blocked in (
+            ("159560.SZSE", DATES[0], 1),
+            ("159560.SZSE", DATES[1], 0),
+            ("159612.SZSE", DATES[0], 0),
+        ):
+            with self.subTest(instrument=instrument, session=session):
+                artifacts = run_artifacts()
+                artifacts["accounting"].pop("trades")
+                artifacts["accounting"]["forbidden_cells"] = [{
+                    "instrument_id": instrument, "session_date": session, "state": "HALTED",
+                }]
+                result = self.invoke(artifacts)
+                check = json.loads(result.stdout)["checks"]["daily_accounting"]
+                self.assertEqual(result.returncode, blocked, result.stderr)
+                self.assertEqual(check["blocked_trades"], blocked)
+                self.assertEqual(check["passed"], not blocked)
 
     def test_empty_forbidden_cell_evidence_cannot_pass(self):
         artifacts = run_artifacts()

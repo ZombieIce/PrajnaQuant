@@ -1426,10 +1426,18 @@ def verify_artifacts(data: dict[str, Any]) -> dict[str, Any]:
             # Empty forbidden-cell evidence cannot pass when the native Run Spec
             # recorded non-tradable cells (the lower-case filter regression).
             trade_state_errors.append({"kind": "forbidden_cell_evidence_mismatch"})
-    blocked_trades = [
-        trade for trade in accounting.get("trades", [])
-        if (trade.get("instrument_id"), trade.get("session_date")) in blocked
-    ]
+    # The summary can omit trades; check the actual native Fill postings.
+    blocked_trades = []
+    for fill in data["main_run"].get("postings", {}).get("fills", []):
+        try:
+            instrument = fill["order"]["instrument_id"]
+            timestamp = fill["executed_at"]
+            if not isinstance(instrument, str) or not isinstance(timestamp, str):
+                raise ValueError("invalid Fill identity or execution timestamp")
+            if (instrument, date.fromisoformat(timestamp[:10]).isoformat()) in blocked:
+                blocked_trades.append(fill)
+        except (KeyError, TypeError, ValueError):
+            trade_state_errors.append({"kind": "invalid_trade_fill"})
     accounting_ok = (
         bool(expected_sessions) and not accounting_errors and not weight_errors
         and bool(accounting.get("fills")) and not fee_errors
