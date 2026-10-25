@@ -1335,6 +1335,31 @@ class Mvp6AcceptanceCliTests(unittest.TestCase):
         self.assertFalse(missing_engine_main["passed"])
         self.assertEqual(missing_engine_main["status"], "not_run")
 
+    def test_post_main_failure_summary_uses_its_declared_coverage_scope(self):
+        coverage = unknown_coverage()
+        snapshot = acceptance_runner.RawHashSnapshot({"synthetic": True}, 1)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir)
+            with patch.object(acceptance_runner, "raw_hashes", return_value=snapshot):
+                for scoped in (None, coverage):
+                    with self.subTest(decision_window=scoped is not None):
+                        summary = write_post_main_failure_report(
+                            output=output, acceptance=output, raw_inventory=output / "inventory.json",
+                            unknown=coverage["input_range"], criterion="daily_parity",
+                            error="synthetic late failure", raw_before=snapshot,
+                            engine_completed=True, decision_window_coverage=scoped,
+                        )
+                        scope = "decision_window" if scoped is not None else "input_range"
+                        self.assertEqual(summary["unknown_coverage_scope"], scope)
+                        expected = coverage[scope]["instruments"]
+                        self.assertEqual(summary["per_etf_unknown_coverage"], [
+                            {"code": row["symbol"], "unknown_cells": row["unknown_cells"],
+                             "unknown_percent": 100 * row["unknown_cells"] / row["cells"]}
+                            for row in expected
+                        ])
+                        self.assertTrue(all("cells" not in row for row in
+                                            summary["per_etf_unknown_coverage"]))
+
     def test_post_main_report_retains_source_context_and_raw_inventory_location(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

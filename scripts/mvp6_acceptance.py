@@ -1825,6 +1825,10 @@ def write_post_main_failure_report(
         },
     }
     write_json(output / "mvp6-acceptance-report.json", report)
+    public_unknown = (
+        decision_window_coverage["decision_window"]["instruments"]
+        if isinstance(decision_window_coverage, dict) else normalized_unknown["instruments"]
+    )
     return {
         "passed": False,
         "checks": {name: check["status"] for name, check in verification["checks"].items()},
@@ -1836,7 +1840,7 @@ def write_post_main_failure_report(
                 "code": item["symbol"], "unknown_cells": item["unknown_cells"],
                 "unknown_percent": 100 * item["unknown_cells"] / item["cells"] if item["cells"] else None,
             }
-            for item in normalized_unknown["instruments"]
+            for item in public_unknown
             if item["symbol"] in FIXED_UNIVERSE["codes"]
         ],
         "conclusion": "Platform engineering acceptance only; this is not strategy historical performance.",
