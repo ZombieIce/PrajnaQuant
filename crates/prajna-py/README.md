@@ -535,6 +535,9 @@ same Rust constructors and validation are used by callback Experiment execution.
 
 `python/tests/test_pit.py` and the synthetic-only `pit_fixture` Cargo example cover
 3 lifecycles × 10 Sessions, adversarial buys/availability, buffer boundaries,
-CLI identities/hashes, Python S2/common Engine values and replay. This remains
-6a price engineering with explicit empty-action coverage, not real historical
-PIT evidence, a real-market P0 closure or dividend total-return validation.
+CLI identities/hashes, Python S2/common Engine values and replay. Those tests
+remain synthetic evidence; they alone do not prove real historical PIT or
+dividend total return. The separate fixed-list MVP-6 local engineering audit has
+completed with qualified owner acceptance: see [STATUS](../../docs/STATUS.md).
+It retains survivorship/execution assumptions, real untriggered-path limits and
+the evidence-handling process failure; it is not unbiased strategy performance.

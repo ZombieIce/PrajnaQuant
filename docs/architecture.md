@@ -1,4 +1,23 @@
-# 实际系统架构（2026-09-23 扫描）
+# 实际系统架构
+
+## 新平台现状（2026-10-26）
+
+```text
+不可变 Raw → 版本化 Dataset / Arrow、Parquet → Factor DAG / Cache
+  → Strategy Decision → Vector / Fast Event / 受限 Accurate Backend
+  → Rust Account / Metrics → Experiment / Execution / Run / ResultLevel
+Python prajna → 类型化定义、受限 As-of Decision、Arrow 研究及结果读取
+旧 quant-research → 本地 Axum API → React 行情/Universe/已保存报告
+```
+
+Domain、Data、Research、Account、Adapter、Experiment 和 PyO3 分属 `crates/prajna-*`；Rust 保有执行、账本和绩效权威。入口见 [Experiment](../crates/prajna-experiment/README.md)、[Python](../crates/prajna-py/README.md) 和 [Backend](../backends/nautilus/README.md)。Python 回调产生目标，不读取账户/成交、不构成第二个回测核心；能力路由只支持已实现的共同语义子集，PIT ETF 路径不接 Accurate。
+
+MVP-6 固定名单工程场景按 [#182](https://github.com/ZombieIce/PrajnaQuant/issues/182#issuecomment-6406038887)有保留签收，六项 pass、流程 fail 和数据/执行/真实未触发路径限制见 [STATUS](STATUS.md)。跨市场交易规则、通用订单簿、Paper/Live 与新平台统一 Web 作业尚未交付。
+
+## 旧 A 股系统扫描范围
+
+以下是 2026-09-23 / Batch 2 的旧系统模块与证据，文件名未注明时指 `crates/quant-research/src/`。其中 Python/CI/缓存的缺失描述只代表当时旧路径，不能覆盖上面的新平台实现。
+
 
 ## Batch 2 增量（2026-09-25）
 

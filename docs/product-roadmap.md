@@ -17,11 +17,13 @@
 | MVP-3 | Portfolio、Virtual Portfolio、Fast Event L1 | 开工前由项目负责人审阅 POC-0 B2 正式结论与适用范围；实现验收为 S1/S2/S3 逐日现金＋持仓＝权益、费用可追溯，并与 Vector 在共同语义下对拍。B2 `adopt` 仅适用于登记合成负载，不等于生产 Engine 选型。 |
 | MVP-4 | Nautilus Adapter 与 Accurate Backend | Backend 隔离于自有 Domain；固定金标准与 Fast Event 的差异可解释，转换成本实测 |
 | MVP-5 | Python 研究/策略入口与 PyO3 | Python 定义可驱动 Rust 执行；逐 bar callback 的适用规模由 B3 结果约束。逐 bar callback 依 [ADR 0021](decisions/0021-python-strategy-entry-and-decision-boundary.md) 推迟；验收见 [#154 P16](https://github.com/ZombieIce/PrajnaQuant/issues/154)。 |
-| MVP-6 | 真实 ETF Rotation 纵向验收 | 历史 Universe、分红/价格口径、交易状态可知性与逐日账本证据满足当前 P0 门槛，结果可重放 |
+| MVP-6 | 固定名单真实 ETF 工程验收（按 #171 P27 及后续裁决收窄） | #235 第二轮六项工程 pass；#182 有保留签收，流程 fail 和适用限制保留，不证明完整历史 Universe 或无偏业绩 |
 | 后续 | Crypto/Cross Venue、美国市场；再到 Paper/Live | 各 Venue 的数据、执行、风险和账户契约单独验收 |
 
 阶段编号表示依赖，不要求所有 POC 工作串行，也不表示当前 ETF 代码须重写。POC 可使用合成数据推进；真实历史业绩对外解释仍受 [`priorities.md`](priorities.md) 的 P0 门槛约束。已实现的 React 页面可继续维护，但 Web、新实盘、分布式、GPU、Kubernetes、微服务、完整 DSL、L2/L3/L4、AMM/MEV 均不作为此轮平台 MVP 验收项。
 
-## 最近的一个开发任务
+## 当前阶段与后续选择
 
-MVP-1 首批可并行票据：D7 `execution_status` 表；独立 Vector 金标准（因子部分）；`prajna-research` crate 与 D7 面板读取。随后为 normalizer v3、64×252 v2 fixture（变化的 open）、Factor Registry/Cache、Vector Engine 与 S2 端到端验收。任何历史 ETF 结果继续保留现有风险标注。
+POC-0 至 MVP-6 的阶段交付已形成代码、合成验证与有限真实工程证据；MVP-6 milestone 已关闭，签收依据为 [#182 裁决](https://github.com/ZombieIce/PrajnaQuant/issues/182#issuecomment-6406038887)，不表示 POC 中所有候选被采纳或未知项已解决。Factor/Cache、实验身份、三级受限引擎及 Python 入口的当前能力见 [STATUS](STATUS.md)。
+
+下一阶段尚未据本文件授权实施。可由负责人选择研究闭环（基准、样本外验证、参数/成本敏感性）或新市场接入；任何选择需先明确数据、执行和验收契约，再开票。Crypto/Cross Venue、美国市场及 Paper/Live 仍是后续路线，不因 MVP 收口自动成为已实现能力。
