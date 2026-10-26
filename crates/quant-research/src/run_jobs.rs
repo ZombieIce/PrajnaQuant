@@ -23,15 +23,23 @@ use std::{
     fs,
     io::Write,
     path::{Path as FsPath, PathBuf},
+    process::{Child, Command, ExitStatus, Stdio},
     sync::{Arc, Condvar, Mutex},
     thread,
 };
 use uuid::Uuid;
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use rustix::process::{Pid, Signal, kill_process_group};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use std::os::unix::process::CommandExt;
+
 const MAX_QUEUED: usize = 8;
 const MAX_DATE_SPAN_DAYS: i64 = 3661;
 const MAX_SNAPSHOT_ROWS: i64 = 2_000_000;
 const MAX_UNIVERSE_INSTRUMENTS: usize = 100;
+const EXPERIMENT_TASK_TYPE: &str = "prajna_experiment";
+const EXPERIMENT_TASK_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -70,6 +78,38 @@ pub struct RunJob {
     #[serde(skip)]
     config: Option<ExperimentConfig>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExperimentTaskStatus {
+    Queued,
+    Running,
+    Succeeded,
+    Failed,
+    Interrupted,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExperimentTask {
+    pub task_id: Uuid,
+    pub task_type: String,
+    pub task_version: u32,
+    pub status: ExperimentTaskStatus,
+    pub stage: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub request_sha256: String,
+    pub idempotency_key: String,
+    pub process_group_id: Option<u32>,
+    pub result: Option<Value>,
+    pub error: Option<RunError>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SubmitExperimentTask {
+    pub idempotency_key: String,
+    pub definition: Value,
+}
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SubmitRun {
     pub kind: String,
@@ -94,6 +134,7 @@ pub struct Preflight {
 pub struct RunJobApi(Arc<Inner>);
 struct Inner {
     output: PathBuf,
+    experiment_cli: PathBuf,
     gate: Mutex<Store>,
     wake: Condvar,
     universes: Arc<UniverseStore>,
@@ -101,15 +142,39 @@ struct Inner {
 #[derive(Default)]
 struct Store {
     jobs: HashMap<Uuid, RunJob>,
+    tasks: HashMap<Uuid, ExperimentTask>,
     idempotency: HashMap<String, (String, Uuid)>,
-    queue: VecDeque<Uuid>,
+    task_idempotency: HashMap<String, (String, Uuid)>,
+    queue: VecDeque<QueueItem>,
     active: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum QueueItem {
+    LegacyRun(Uuid),
+    ExperimentTask(Uuid),
+}
+
+enum QueuedWork {
+    LegacyRun(Box<RunJob>),
+    ExperimentTask(Box<ExperimentTask>),
 }
 
 impl RunJobApi {
     pub fn start(output: PathBuf, universes: Arc<UniverseStore>) -> Self {
+        let experiment_cli = std::env::var_os("PRAJNA_EXPERIMENT_CLI")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("prajna-experiment"));
+        Self::start_with_cli(output, universes, experiment_cli)
+    }
+    fn start_with_cli(
+        output: PathBuf,
+        universes: Arc<UniverseStore>,
+        experiment_cli: PathBuf,
+    ) -> Self {
         let api = Self(Arc::new(Inner {
             output,
+            experiment_cli,
             gate: Mutex::new(Store::default()),
             wake: Condvar::new(),
             universes,
@@ -122,53 +187,124 @@ impl RunJobApi {
             .expect("run worker thread starts");
         api
     }
+    #[cfg(test)]
+    fn without_worker(
+        output: PathBuf,
+        universes: Arc<UniverseStore>,
+        experiment_cli: PathBuf,
+    ) -> Self {
+        Self(Arc::new(Inner {
+            output,
+            experiment_cli,
+            gate: Mutex::new(Store::default()),
+            wake: Condvar::new(),
+            universes,
+        }))
+    }
     pub fn router(self) -> Router {
         Router::new()
             .route("/api/v1/research-snapshots", get(list_snapshots))
             .route("/api/v1/runs", get(list_runs).post(submit))
             .route("/api/v1/runs/preflight", post(preflight))
             .route("/api/v1/runs/{id}", get(get_run))
+            .route(
+                "/api/v1/tasks/experiments",
+                get(list_experiment_tasks).post(submit_experiment_task),
+            )
+            .route("/api/v1/tasks/experiments/{id}", get(get_experiment_task))
             .with_state(self)
     }
     fn recover(&self) {
         let jobs_dir = self.0.output.join("runs");
-        let Ok(entries) = fs::read_dir(&jobs_dir) else {
+        let mut store = self.0.gate.lock().expect("run store lock");
+        if let Ok(entries) = fs::read_dir(&jobs_dir) {
+            for entry in entries.flatten() {
+                let directory = entry.path();
+                let path = directory.join("run.json");
+                let Ok(bytes) = fs::read(path) else { continue };
+                let Ok(mut job) = serde_json::from_slice::<RunJob>(&bytes) else {
+                    continue;
+                };
+                match job.status {
+                    RunStatus::Queued => {
+                        job.config = read_request(&directory).map(|r| r.config);
+                        if job.config.is_some() {
+                            store.queue.push_back(QueueItem::LegacyRun(job.run_id))
+                        } else {
+                            fail_job(
+                                &mut job,
+                                "worker_interrupted",
+                                "queued request payload is missing",
+                            )
+                        }
+                    }
+                    RunStatus::Running => fail_job(
+                        &mut job,
+                        "worker_interrupted",
+                        "process stopped while the run was executing; no experiment was committed",
+                    ),
+                    RunStatus::Succeeded | RunStatus::Failed => {}
+                }
+                store.idempotency.insert(
+                    job.idempotency_key.clone(),
+                    (job.request_sha256.clone(), job.run_id),
+                );
+                let _ = persist_job(&self.0.output, &job);
+                store.jobs.insert(job.run_id, job);
+            }
+        }
+
+        let tasks_dir = self.0.output.join("tasks");
+        let Ok(entries) = fs::read_dir(&tasks_dir) else {
             return;
         };
-        let mut store = self.0.gate.lock().expect("run store lock");
         for entry in entries.flatten() {
             let directory = entry.path();
-            let path = directory.join("run.json");
+            let path = directory.join("task.json");
             let Ok(bytes) = fs::read(path) else { continue };
-            let Ok(mut job) = serde_json::from_slice::<RunJob>(&bytes) else {
+            let Ok(mut task) = serde_json::from_slice::<ExperimentTask>(&bytes) else {
                 continue;
             };
-            match job.status {
-                RunStatus::Queued => {
-                    job.config = read_request(&directory).map(|r| r.config);
-                    if job.config.is_some() {
-                        store.queue.push_back(job.run_id)
-                    } else {
-                        fail_job(
-                            &mut job,
-                            "worker_interrupted",
-                            "queued request payload is missing",
-                        )
-                    }
-                }
-                RunStatus::Running => fail_job(
-                    &mut job,
-                    "worker_interrupted",
-                    "process stopped while the run was executing; no experiment was committed",
-                ),
-                RunStatus::Succeeded | RunStatus::Failed => {}
+            if task.task_type != EXPERIMENT_TASK_TYPE
+                || task.task_version != EXPERIMENT_TASK_VERSION
+            {
+                continue;
             }
-            store.idempotency.insert(
-                job.idempotency_key.clone(),
-                (job.request_sha256.clone(), job.run_id),
+            let cleanup_error = task.process_group_id.and_then(|process_group_id| {
+                terminate_process_group(process_group_id)
+                    .err()
+                    .map(|error| {
+                        let message = format!(
+                            "could not terminate experiment process group {process_group_id}: {error}"
+                        );
+                        (
+                            process_group_id,
+                            blocker("process_group_cleanup_failed", &message),
+                        )
+                    })
+            });
+            match task.status {
+                ExperimentTaskStatus::Queued | ExperimentTaskStatus::Running => interrupt_task(
+                    &mut task,
+                    "service restarted before the experiment task completed",
+                ),
+                ExperimentTaskStatus::Succeeded
+                | ExperimentTaskStatus::Failed
+                | ExperimentTaskStatus::Interrupted => {}
+            }
+            task.process_group_id = cleanup_error
+                .as_ref()
+                .map(|(process_group_id, _)| *process_group_id);
+            if let Some((_, error)) = cleanup_error {
+                task.error = Some(error);
+                task.updated_at = chrono::Utc::now().to_rfc3339();
+            }
+            store.task_idempotency.insert(
+                task.idempotency_key.clone(),
+                (task.request_sha256.clone(), task.task_id),
             );
-            let _ = persist_job(&self.0.output, &job);
-            store.jobs.insert(job.run_id, job);
+            let _ = persist_experiment_task(&self.0.output, &task);
+            store.tasks.insert(task.task_id, task);
         }
     }
     fn submit(&self, request: SubmitRun) -> Result<(RunJob, bool), ApiFailure> {
@@ -271,10 +407,71 @@ impl RunJobApi {
         store
             .idempotency
             .insert(request.idempotency_key, (request_hash, job.run_id));
-        store.queue.push_back(job.run_id);
+        store.queue.push_back(QueueItem::LegacyRun(job.run_id));
         store.jobs.insert(job.run_id, job.clone());
         self.0.wake.notify_one();
         Ok((job, true))
+    }
+    fn submit_experiment_task(
+        &self,
+        request: SubmitExperimentTask,
+    ) -> Result<(ExperimentTask, bool), ApiFailure> {
+        validate_experiment_task_request(&request)?;
+        let request_hash = canonical_experiment_task_hash(&request)?;
+        let mut store = self
+            .0
+            .gate
+            .lock()
+            .map_err(|_| ApiFailure::internal("run store lock poisoned"))?;
+        if let Some((old_hash, task_id)) = store.task_idempotency.get(&request.idempotency_key) {
+            if old_hash != &request_hash {
+                return Err(ApiFailure::new(
+                    StatusCode::CONFLICT,
+                    "idempotency_conflict",
+                    "idempotency_key was already used for a different experiment task",
+                    Value::Null,
+                ));
+            }
+            let task = store
+                .tasks
+                .get(task_id)
+                .ok_or_else(|| ApiFailure::internal("task idempotency index is inconsistent"))?;
+            return Ok((task.clone(), false));
+        }
+        if store.queue.len() + usize::from(store.active) >= MAX_QUEUED {
+            return Err(ApiFailure::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "queue_full",
+                "run queue is full; retry after an existing job finishes",
+                Value::Null,
+            ));
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        let task = ExperimentTask {
+            task_id: Uuid::new_v4(),
+            task_type: EXPERIMENT_TASK_TYPE.into(),
+            task_version: EXPERIMENT_TASK_VERSION,
+            status: ExperimentTaskStatus::Queued,
+            stage: "queued".into(),
+            created_at: now.clone(),
+            updated_at: now,
+            request_sha256: request_hash.clone(),
+            idempotency_key: request.idempotency_key.clone(),
+            process_group_id: None,
+            result: None,
+            error: None,
+        };
+        persist_experiment_request(&self.0.output, task.task_id, &request)?;
+        persist_experiment_task(&self.0.output, &task)?;
+        store
+            .task_idempotency
+            .insert(request.idempotency_key, (request_hash, task.task_id));
+        store
+            .queue
+            .push_back(QueueItem::ExperimentTask(task.task_id));
+        store.tasks.insert(task.task_id, task.clone());
+        self.0.wake.notify_one();
+        Ok((task, true))
     }
     fn inspect(&self, request: &SubmitRun) -> Preflight {
         let mut blockers = Vec::new();
@@ -529,6 +726,9 @@ impl RunJobApi {
     fn get(&self, id: Uuid) -> Option<RunJob> {
         self.0.gate.lock().ok()?.jobs.get(&id).cloned()
     }
+    fn get_experiment_task(&self, id: Uuid) -> Option<ExperimentTask> {
+        self.0.gate.lock().ok()?.tasks.get(&id).cloned()
+    }
     fn list(&self) -> Vec<RunJob> {
         let mut jobs = self
             .0
@@ -540,39 +740,198 @@ impl RunJobApi {
         jobs.truncate(100);
         jobs
     }
+    fn list_experiment_tasks(&self) -> Vec<ExperimentTask> {
+        let mut tasks = self
+            .0
+            .gate
+            .lock()
+            .map(|g| g.tasks.values().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        tasks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        tasks.truncate(100);
+        tasks
+    }
     fn worker_loop(&self) {
         loop {
-            let job = {
+            {
                 let mut store = self.0.gate.lock().expect("run store lock");
                 while store.queue.is_empty() {
                     store = self.0.wake.wait(store).expect("run store lock")
                 }
-                let id = store.queue.pop_front().expect("queued id");
-                store.active = true;
-                let job = store.jobs.get_mut(&id).expect("queued job");
-                job.status = RunStatus::Running;
-                job.stage = "validating_fixed_inputs".into();
-                job.updated_at = chrono::Utc::now().to_rfc3339();
-                let _ = persist_job(&self.0.output, job);
-                job.clone()
-            };
-            let result = self.execute(&job);
-            let mut store = self.0.gate.lock().expect("run store lock");
-            let target = store.jobs.get_mut(&job.run_id).expect("active job");
-            match result {
-                Ok(id) => {
-                    target.status = RunStatus::Succeeded;
-                    target.stage = "complete".into();
-                    target.experiment_id = Some(id);
-                    target.error = None
-                }
-                Err(error) => fail_job(target, &error.code, &error.message),
             }
-            target.updated_at = chrono::Utc::now().to_rfc3339();
-            let _ = persist_job(&self.0.output, target);
-            store.active = false;
-            self.0.wake.notify_all();
+            self.process_next_queued();
         }
+    }
+    fn process_next_queued(&self) -> bool {
+        let work = {
+            let mut store = self.0.gate.lock().expect("run store lock");
+            let Some(item) = store.queue.pop_front() else {
+                return false;
+            };
+            store.active = true;
+            match item {
+                QueueItem::LegacyRun(id) => {
+                    let job = store.jobs.get_mut(&id).expect("queued job");
+                    job.status = RunStatus::Running;
+                    job.stage = "validating_fixed_inputs".into();
+                    job.updated_at = chrono::Utc::now().to_rfc3339();
+                    let _ = persist_job(&self.0.output, job);
+                    QueuedWork::LegacyRun(Box::new(job.clone()))
+                }
+                QueueItem::ExperimentTask(id) => {
+                    let task = store.tasks.get_mut(&id).expect("queued experiment task");
+                    task.status = ExperimentTaskStatus::Running;
+                    task.stage = "starting_experiment_cli".into();
+                    task.updated_at = chrono::Utc::now().to_rfc3339();
+                    let _ = persist_experiment_task(&self.0.output, task);
+                    QueuedWork::ExperimentTask(Box::new(task.clone()))
+                }
+            }
+        };
+
+        match work {
+            QueuedWork::LegacyRun(job) => {
+                let result = self.execute(&job);
+                let mut store = self.0.gate.lock().expect("run store lock");
+                let target = store.jobs.get_mut(&job.run_id).expect("active job");
+                match result {
+                    Ok(id) => {
+                        target.status = RunStatus::Succeeded;
+                        target.stage = "complete".into();
+                        target.experiment_id = Some(id);
+                        target.error = None
+                    }
+                    Err(error) => fail_job(target, &error.code, &error.message),
+                }
+                target.updated_at = chrono::Utc::now().to_rfc3339();
+                let _ = persist_job(&self.0.output, target);
+            }
+            QueuedWork::ExperimentTask(task) => {
+                let result = self.execute_experiment_task(&task);
+                let mut store = self.0.gate.lock().expect("run store lock");
+                let target = store
+                    .tasks
+                    .get_mut(&task.task_id)
+                    .expect("active experiment task");
+                match result {
+                    Ok(result) => {
+                        target.status = ExperimentTaskStatus::Succeeded;
+                        target.stage = "complete".into();
+                        target.result = Some(result);
+                        target.process_group_id = None;
+                        target.error = None;
+                    }
+                    Err(error) => {
+                        fail_experiment_task(target, &error.code, &error.message);
+                    }
+                }
+                target.updated_at = chrono::Utc::now().to_rfc3339();
+                let _ = persist_experiment_task(&self.0.output, target);
+            }
+        }
+        let mut store = self.0.gate.lock().expect("run store lock");
+        store.active = false;
+        self.0.wake.notify_all();
+        true
+    }
+    fn execute_experiment_task(&self, task: &ExperimentTask) -> Result<Value, RunError> {
+        let directory = experiment_task_dir(&self.0.output, task.task_id);
+        let request = read_experiment_request(&directory).ok_or_else(|| {
+            run_error(
+                "task_request_missing",
+                "persisted experiment task request is missing or invalid",
+            )
+        })?;
+        validate_experiment_task_request(&request).map_err(|error| error.0)?;
+        if canonical_experiment_task_hash(&request).map_err(|error| error.0)? != task.request_sha256
+        {
+            return Err(run_error(
+                "task_request_changed",
+                "persisted experiment task definition does not match its frozen identity",
+            ));
+        }
+        let definition_path = directory.join("experiment.json");
+        let definition_bytes = fs::read(&definition_path)
+            .map_err(|error| run_error("task_definition_missing", &error.to_string()))?;
+        let definition: Value = serde_json::from_slice(&definition_bytes)
+            .map_err(|error| run_error("task_definition_invalid", &error.to_string()))?;
+        if definition != request.definition {
+            return Err(run_error(
+                "task_definition_changed",
+                "persisted CLI definition does not match the frozen task request",
+            ));
+        }
+
+        let stdout_path = directory.join("cli.stdout");
+        let stdout = fs::File::create(&stdout_path)
+            .map_err(|error| run_error("task_output_create_failed", &error.to_string()))?;
+        let mut command = Command::new(&self.0.experiment_cli);
+        command
+            .arg("run")
+            .arg(&definition_path)
+            .arg("--lake")
+            .arg(&self.0.output)
+            .arg("--level")
+            .arg("summary")
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::null());
+        let mut process = ExperimentProcessGroup::spawn(&mut command)
+            .map_err(|error| run_error("experiment_cli_spawn_failed", &error.to_string()))?;
+        let group_id = process.process_group_id();
+        self.set_experiment_process_group(task.task_id, Some(group_id))?;
+        let status = process
+            .wait()
+            .map_err(|error| run_error("process_group_cleanup_failed", &error.to_string()))?;
+        self.set_experiment_process_group(task.task_id, None)?;
+        if !status.success() {
+            return Err(RunError {
+                code: "experiment_cli_failed".into(),
+                message: "prajna-experiment exited unsuccessfully".into(),
+                details: json!({"exit_code": status.code()}),
+            });
+        }
+        let bytes = fs::read(&stdout_path)
+            .map_err(|error| run_error("experiment_cli_output_missing", &error.to_string()))?;
+        let result: Value = serde_json::from_slice(&bytes)
+            .map_err(|error| run_error("experiment_cli_output_invalid", &error.to_string()))?;
+        if result.get("exp").and_then(Value::as_str).is_none()
+            || result.get("exe").and_then(Value::as_str).is_none()
+        {
+            return Err(run_error(
+                "experiment_cli_identity_missing",
+                "prajna-experiment output must contain string exp and exe identities",
+            ));
+        }
+        let result_bytes = serde_json::to_vec_pretty(&result)
+            .map_err(|error| run_error("experiment_cli_output_invalid", &error.to_string()))?;
+        atomic_write(&directory.join("result.json"), &result_bytes)
+            .map_err(|error| run_error("task_result_persist_failed", &error.to_string()))?;
+        let _ = fs::remove_file(stdout_path);
+        Ok(result)
+    }
+    fn set_experiment_process_group(
+        &self,
+        task_id: Uuid,
+        process_group_id: Option<u32>,
+    ) -> Result<(), RunError> {
+        let mut store = self
+            .0
+            .gate
+            .lock()
+            .map_err(|_| run_error("task_store_lock_failed", "task store lock poisoned"))?;
+        let task = store
+            .tasks
+            .get_mut(&task_id)
+            .ok_or_else(|| run_error("task_missing", "experiment task is missing"))?;
+        task.process_group_id = process_group_id;
+        task.stage = if process_group_id.is_some() {
+            "running_experiment_cli".into()
+        } else {
+            "reading_experiment_result".into()
+        };
+        task.updated_at = chrono::Utc::now().to_rfc3339();
+        persist_experiment_task(&self.0.output, task).map_err(|error| error.0)
     }
     fn execute(&self, job: &RunJob) -> Result<Uuid, RunError> {
         let request = read_request(&self.0.output.join("runs").join(job.run_id.to_string()))
@@ -679,6 +1038,47 @@ async fn preflight(State(api): State<RunJobApi>, Json(request): Json<SubmitRun>)
 }
 async fn list_runs(State(api): State<RunJobApi>) -> Response {
     Json(json!({"items":api.list()})).into_response()
+}
+async fn list_experiment_tasks(State(api): State<RunJobApi>) -> Response {
+    Json(json!({"items":api.list_experiment_tasks()})).into_response()
+}
+async fn submit_experiment_task(
+    State(api): State<RunJobApi>,
+    Json(request): Json<SubmitExperimentTask>,
+) -> Response {
+    match api.submit_experiment_task(request) {
+        Ok((task, created)) => (
+            if created {
+                StatusCode::ACCEPTED
+            } else {
+                StatusCode::OK
+            },
+            Json(json!({"task":task,"created":created})),
+        )
+            .into_response(),
+        Err(error) => error.into_response(),
+    }
+}
+async fn get_experiment_task(State(api): State<RunJobApi>, Path(id): Path<String>) -> Response {
+    let Ok(id) = Uuid::parse_str(&id) else {
+        return ApiFailure::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "invalid experiment task id",
+            Value::Null,
+        )
+        .into_response();
+    };
+    match api.get_experiment_task(id) {
+        Some(task) => Json(task).into_response(),
+        None => ApiFailure::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "experiment task not found",
+            Value::Null,
+        )
+        .into_response(),
+    }
 }
 async fn list_snapshots(State(api): State<RunJobApi>) -> Response {
     let directory = api.0.output.join("snapshots");
@@ -795,6 +1195,35 @@ fn canonical_hash(request: &SubmitRun) -> Result<String, ApiFailure> {
         .map(|b| format!("{:x}", Sha256::digest(b)))
         .map_err(ApiFailure::from_error)
 }
+fn validate_experiment_task_request(request: &SubmitExperimentTask) -> Result<(), ApiFailure> {
+    if request.idempotency_key.trim().is_empty() || request.idempotency_key.len() > 128 {
+        return Err(ApiFailure::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "idempotency_key must contain 1 to 128 characters",
+            Value::Null,
+        ));
+    }
+    if !request.definition.is_object() {
+        return Err(ApiFailure::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "experiment definition must be a JSON object",
+            Value::Null,
+        ));
+    }
+    Ok(())
+}
+fn canonical_experiment_task_hash(request: &SubmitExperimentTask) -> Result<String, ApiFailure> {
+    let value = json!({
+        "task_type": EXPERIMENT_TASK_TYPE,
+        "task_version": EXPERIMENT_TASK_VERSION,
+        "definition": &request.definition,
+    });
+    serde_json::to_vec(&value)
+        .map(|bytes| format!("{:x}", Sha256::digest(bytes)))
+        .map_err(ApiFailure::from_error)
+}
 fn blocker(code: &str, message: &str) -> RunError {
     RunError {
         code: code.into(),
@@ -851,8 +1280,57 @@ fn fail_job(job: &mut RunJob, code: &str, message: &str) {
     job.updated_at = chrono::Utc::now().to_rfc3339();
     job.error = Some(blocker(code, message))
 }
+fn fail_experiment_task(task: &mut ExperimentTask, code: &str, message: &str) {
+    task.status = ExperimentTaskStatus::Failed;
+    task.stage = "failed".into();
+    if code != "process_group_cleanup_failed" {
+        task.process_group_id = None;
+    }
+    task.updated_at = chrono::Utc::now().to_rfc3339();
+    task.error = Some(blocker(code, message));
+}
+fn interrupt_task(task: &mut ExperimentTask, message: &str) {
+    task.status = ExperimentTaskStatus::Interrupted;
+    task.stage = "interrupted".into();
+    task.process_group_id = None;
+    task.updated_at = chrono::Utc::now().to_rfc3339();
+    task.error = Some(blocker("worker_interrupted", message));
+}
 fn read_request(directory: &FsPath) -> Option<SubmitRun> {
     serde_json::from_slice(&fs::read(directory.join("request.json")).ok()?).ok()
+}
+fn experiment_task_dir(root: &FsPath, task_id: Uuid) -> PathBuf {
+    root.join("tasks").join(task_id.to_string())
+}
+fn read_experiment_request(directory: &FsPath) -> Option<SubmitExperimentTask> {
+    serde_json::from_slice(&fs::read(directory.join("request.json")).ok()?).ok()
+}
+fn persist_experiment_request(
+    root: &FsPath,
+    task_id: Uuid,
+    request: &SubmitExperimentTask,
+) -> Result<(), ApiFailure> {
+    let dir = experiment_task_dir(root, task_id);
+    fs::create_dir_all(&dir).map_err(ApiFailure::from_error)?;
+    atomic_write(
+        &dir.join("request.json"),
+        &serde_json::to_vec_pretty(request).map_err(ApiFailure::from_error)?,
+    )
+    .map_err(ApiFailure::from_error)?;
+    atomic_write(
+        &dir.join("experiment.json"),
+        &serde_json::to_vec_pretty(&request.definition).map_err(ApiFailure::from_error)?,
+    )
+    .map_err(ApiFailure::from_error)
+}
+fn persist_experiment_task(root: &FsPath, task: &ExperimentTask) -> Result<(), ApiFailure> {
+    let dir = experiment_task_dir(root, task.task_id);
+    fs::create_dir_all(&dir).map_err(ApiFailure::from_error)?;
+    atomic_write(
+        &dir.join("task.json"),
+        &serde_json::to_vec_pretty(task).map_err(ApiFailure::from_error)?,
+    )
+    .map_err(ApiFailure::from_error)
 }
 fn persist_request(root: &FsPath, id: Uuid, request: &SubmitRun) -> Result<(), ApiFailure> {
     let dir = root.join("runs").join(id.to_string());
@@ -880,6 +1358,98 @@ fn atomic_write(path: &FsPath, bytes: &[u8]) -> std::io::Result<()> {
     fs::rename(temp, path)
 }
 
+struct ExperimentProcessGroup {
+    child: Child,
+    process_group_id: u32,
+    finished: bool,
+}
+
+impl ExperimentProcessGroup {
+    fn spawn(command: &mut Command) -> std::io::Result<Self> {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        command.process_group(0);
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "experiment task process groups require macOS or Linux",
+        ));
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            let child = command.spawn()?;
+            let process_group_id = child.id();
+            Ok(Self {
+                child,
+                process_group_id,
+                finished: false,
+            })
+        }
+    }
+
+    fn process_group_id(&self) -> u32 {
+        self.process_group_id
+    }
+
+    fn wait(&mut self) -> std::io::Result<ExitStatus> {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            let status = self.child.wait()?;
+            terminate_process_group(self.process_group_id)?;
+            self.finished = true;
+            Ok(status)
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "experiment task process groups require macOS or Linux",
+            ))
+        }
+    }
+
+    #[cfg(test)]
+    fn terminate(&mut self) -> std::io::Result<ExitStatus> {
+        terminate_process_group(self.process_group_id)?;
+        let status = self.child.wait()?;
+        self.finished = true;
+        Ok(status)
+    }
+}
+
+impl Drop for ExperimentProcessGroup {
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        let _ = terminate_process_group(self.process_group_id);
+        let _ = self.child.wait();
+        self.finished = true;
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn terminate_process_group(process_group_id: u32) -> std::io::Result<()> {
+    if process_group_id <= 1 || process_group_id > i32::MAX as u32 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid experiment process group id",
+        ));
+    }
+    let process_group = Pid::from_raw(process_group_id as i32)
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    match kill_process_group(process_group, Signal::KILL) {
+        Ok(()) | Err(rustix::io::Errno::SRCH) => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn terminate_process_group(_process_group_id: u32) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "experiment task process groups require macOS or Linux",
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::universe_api::UniverseDraft;
@@ -891,7 +1461,11 @@ mod tests {
     use chrono::{Duration, NaiveDate};
     use duckdb::Connection;
     use sha2::{Digest, Sha256};
-    use std::sync::Arc;
+    use std::{
+        sync::Arc,
+        time::{Duration as StdDuration, Instant},
+    };
+    use tower::ServiceExt;
 
     #[test]
     fn request_requires_bounded_dates_and_matching_version() {
@@ -906,6 +1480,37 @@ mod tests {
         let (api, request, _dir) = fixture();
         let (first, created) = api.submit(request.clone()).unwrap();
         assert!(created);
+        let first_json = serde_json::to_value(&first).unwrap();
+        let legacy_fields = first_json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            legacy_fields,
+            [
+                "run_id",
+                "kind",
+                "status",
+                "stage",
+                "created_at",
+                "updated_at",
+                "request_sha256",
+                "idempotency_key",
+                "universe_id",
+                "version_id",
+                "universe_content_hash",
+                "snapshot_id",
+                "snapshot_sha256",
+                "config_sha256",
+                "diagnostic",
+                "experiment_id",
+                "error",
+            ]
+            .into_iter()
+            .collect()
+        );
         let (duplicate, created) = api.submit(request.clone()).unwrap();
         assert!(!created);
         assert_eq!(first.run_id, duplicate.run_id);
@@ -919,6 +1524,15 @@ mod tests {
         let experiment_id = api.execute(&first).unwrap();
         let experiment =
             crate::experiment::load_experiment(&api.0.output, &experiment_id.to_string()).unwrap();
+        assert_eq!(experiment.experiment_id, experiment_id);
+        assert!(
+            api.0
+                .output
+                .join("experiments")
+                .join(experiment_id.to_string())
+                .join("experiment.json")
+                .is_file()
+        );
         assert_eq!(experiment.snapshot.snapshot_id, request.snapshot_id);
         assert_eq!(experiment.snapshot.sha256, first.snapshot_sha256);
         assert_eq!(
@@ -1103,6 +1717,7 @@ mod tests {
         persist_job(dir.path(), &job).unwrap();
         let api = RunJobApi(Arc::new(Inner {
             output: dir.path().into(),
+            experiment_cli: PathBuf::from("prajna-experiment"),
             gate: Mutex::new(Store::default()),
             wake: Condvar::new(),
             universes: Arc::new(UniverseStore::new(dir.path())),
@@ -1119,6 +1734,367 @@ mod tests {
                 .idempotency
                 .contains_key("stable-key")
         )
+    }
+
+    #[test]
+    fn restart_requeues_legacy_queued_job_with_its_original_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::from_u128(9);
+        let job = sample_job(id);
+        let request = sample_request();
+        persist_request(dir.path(), id, &request).unwrap();
+        persist_job(dir.path(), &job).unwrap();
+        let api = RunJobApi::without_worker(
+            dir.path().into(),
+            Arc::new(UniverseStore::new(dir.path())),
+            PathBuf::from("prajna-experiment"),
+        );
+
+        api.recover();
+
+        let recovered = api.get(id).unwrap();
+        assert!(matches!(recovered.status, RunStatus::Queued));
+        assert_eq!(recovered.run_id, id);
+        let store = api.0.gate.lock().unwrap();
+        assert!(matches!(store.queue.front(), Some(QueueItem::LegacyRun(run_id)) if *run_id == id));
+        assert!(store.jobs.get(&id).unwrap().config.is_some());
+        assert!(store.idempotency.contains_key("stable-key"));
+    }
+
+    #[test]
+    fn restart_marks_unfinished_experiment_tasks_interrupted_without_requeueing() {
+        for (task_id, status) in [
+            (Uuid::from_u128(10), ExperimentTaskStatus::Queued),
+            (Uuid::from_u128(11), ExperimentTaskStatus::Running),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let request = SubmitExperimentTask {
+                idempotency_key: format!("task-{}", task_id.as_u128()),
+                definition: json!({"name":"synthetic restart fixture"}),
+            };
+            persist_experiment_request(dir.path(), task_id, &request).unwrap();
+            let mut task = sample_experiment_task(task_id, status);
+            task.request_sha256 = canonical_experiment_task_hash(&request).unwrap();
+            task.idempotency_key = request.idempotency_key.clone();
+            persist_experiment_task(dir.path(), &task).unwrap();
+
+            let api = RunJobApi::without_worker(
+                dir.path().into(),
+                Arc::new(UniverseStore::new(dir.path())),
+                PathBuf::from("prajna-experiment"),
+            );
+            api.recover();
+
+            let recovered = api.get_experiment_task(task_id).unwrap();
+            assert!(matches!(
+                recovered.status,
+                ExperimentTaskStatus::Interrupted
+            ));
+            assert_eq!(recovered.error.unwrap().code, "worker_interrupted");
+            assert_eq!(recovered.process_group_id, None);
+            let store = api.0.gate.lock().unwrap();
+            assert!(store.queue.is_empty());
+            assert!(
+                store
+                    .task_idempotency
+                    .contains_key(&request.idempotency_key)
+            );
+        }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn restart_terminates_persisted_experiment_process_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let ready_path = dir.path().join("restart-group-ready");
+        let marker_path = dir.path().join("restart-group-survived");
+        let mut command = Command::new("/bin/sh");
+        command.arg("-c").arg(format!(
+            "(/bin/sleep 0.5; /usr/bin/touch {}) & /usr/bin/touch {}; wait",
+            shell_quote(&marker_path),
+            shell_quote(&ready_path),
+        ));
+        let mut process = ExperimentProcessGroup::spawn(&mut command).unwrap();
+        let deadline = Instant::now() + StdDuration::from_secs(5);
+        while !ready_path.is_file() {
+            assert!(
+                Instant::now() < deadline,
+                "process group helper did not start"
+            );
+            std::thread::sleep(StdDuration::from_millis(10));
+        }
+
+        let task_id = Uuid::from_u128(12);
+        let request = SubmitExperimentTask {
+            idempotency_key: "running-after-restart".into(),
+            definition: json!({"name":"synthetic restart fixture"}),
+        };
+        let mut task = sample_experiment_task(task_id, ExperimentTaskStatus::Running);
+        task.process_group_id = Some(process.process_group_id());
+        task.request_sha256 = canonical_experiment_task_hash(&request).unwrap();
+        task.idempotency_key = request.idempotency_key.clone();
+        persist_experiment_request(dir.path(), task_id, &request).unwrap();
+        persist_experiment_task(dir.path(), &task).unwrap();
+
+        let api = RunJobApi::without_worker(
+            dir.path().into(),
+            Arc::new(UniverseStore::new(dir.path())),
+            PathBuf::from("prajna-experiment"),
+        );
+        api.recover();
+        let recovered = api.get_experiment_task(task_id).unwrap();
+        assert!(matches!(
+            recovered.status,
+            ExperimentTaskStatus::Interrupted
+        ));
+        assert_eq!(recovered.process_group_id, None);
+        let _ = process.child.wait();
+        process.finished = true;
+        std::thread::sleep(StdDuration::from_millis(600));
+        assert!(
+            !marker_path.exists(),
+            "restart left a task child process running"
+        );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn restart_reports_process_group_cleanup_failure_and_retains_group_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let task_id = Uuid::from_u128(13);
+        let mut task = sample_experiment_task(task_id, ExperimentTaskStatus::Running);
+        task.process_group_id = Some(1);
+        persist_experiment_task(dir.path(), &task).unwrap();
+        let api = RunJobApi::without_worker(
+            dir.path().into(),
+            Arc::new(UniverseStore::new(dir.path())),
+            PathBuf::from("prajna-experiment"),
+        );
+
+        api.recover();
+
+        let recovered = api.get_experiment_task(task_id).unwrap();
+        assert!(matches!(
+            recovered.status,
+            ExperimentTaskStatus::Interrupted
+        ));
+        assert_eq!(recovered.process_group_id, Some(1));
+        assert_eq!(
+            recovered.error.unwrap().code,
+            "process_group_cleanup_failed"
+        );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn experiment_process_group_cleanup_stops_descendants() {
+        let dir = tempfile::tempdir().unwrap();
+        let ready_path = dir.path().join("descendant-ready");
+        let marker_path = dir.path().join("descendant-survived");
+        let mut command = Command::new("/bin/sh");
+        command.arg("-c").arg(format!(
+            "(/bin/sleep 0.5; /usr/bin/touch {}) & /usr/bin/touch {}; wait",
+            shell_quote(&marker_path),
+            shell_quote(&ready_path),
+        ));
+        let mut process = ExperimentProcessGroup::spawn(&mut command).unwrap();
+        let deadline = Instant::now() + StdDuration::from_secs(5);
+        while !ready_path.is_file() {
+            assert!(
+                Instant::now() < deadline,
+                "process group helper did not start"
+            );
+            std::thread::sleep(StdDuration::from_millis(10));
+        }
+
+        match process.terminate() {
+            Ok(status) => assert!(!status.success()),
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                eprintln!("SKIP: sandbox denies process-group signaling");
+                let _ = process.child.kill();
+                let _ = process.child.wait();
+                process.finished = true;
+                std::thread::sleep(StdDuration::from_millis(600));
+                return;
+            }
+            Err(error) => panic!("process-group cleanup failed: {error}"),
+        }
+        std::thread::sleep(StdDuration::from_millis(600));
+        assert!(!marker_path.exists(), "a child process outlived its group");
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn successful_cli_exit_cleans_up_process_group_descendants() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker_path = dir.path().join("successful-cli-child-survived");
+        let mut command = Command::new("/bin/sh");
+        command.arg("-c").arg(format!(
+            "(/bin/sleep 0.5; /usr/bin/touch {}) & exit 0",
+            shell_quote(&marker_path),
+        ));
+        let mut process = ExperimentProcessGroup::spawn(&mut command).unwrap();
+
+        match process.wait() {
+            Ok(status) => assert!(status.success()),
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                eprintln!("SKIP: sandbox denies process-group signaling");
+                let _ = process.child.wait();
+                process.finished = true;
+                return;
+            }
+            Err(error) => panic!("process-group cleanup failed: {error}"),
+        }
+        std::thread::sleep(StdDuration::from_millis(600));
+        assert!(
+            !marker_path.exists(),
+            "a child process outlived a successful CLI"
+        );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn experiment_task_api_uses_versioned_shared_queue_and_persists_cli_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let args_path = dir.path().join("cli-args.txt");
+        let pid_path = dir.path().join("cli-pid.txt");
+        let release_path = dir.path().join("release-cli");
+        let cli_path = dir.path().join("prajna-experiment");
+        let script = format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\necho $$ > {}\n[ \"$1\" = run ] || exit 91\n[ -f \"$2\" ] || exit 92\nwhile [ ! -f {} ]; do /bin/sleep 0.02; done\nprintf '{{\"exp\":\"exp:sha256:synthetic\",\"exe\":\"exe:sha256:synthetic\",\"action\":\"created\"}}\\n'\n",
+            shell_quote(&args_path),
+            shell_quote(&pid_path),
+            shell_quote(&release_path),
+        );
+        fs::write(&cli_path, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&cli_path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let (api, legacy_request, _fixture_dir) = fixture_with_cli(cli_path);
+        let submitted = json!({
+            "idempotency_key": "experiment-task-key",
+            "definition": {"name": "synthetic experiment", "parameters": {"lookback": 2}}
+        });
+        let (status, accepted) = api_json(
+            &api,
+            "POST",
+            "/api/v1/tasks/experiments",
+            Some(submitted.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let task_id = accepted["task"]["task_id"].as_str().unwrap();
+        assert_eq!(accepted["created"], true);
+        assert_eq!(accepted["task"]["task_type"], "prajna_experiment");
+        assert_eq!(accepted["task"]["task_version"], 1);
+        assert_eq!(accepted["task"]["status"], "queued");
+
+        let (status, duplicate) = api_json(
+            &api,
+            "POST",
+            "/api/v1/tasks/experiments",
+            Some(submitted.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(duplicate["created"], false);
+        assert_eq!(duplicate["task"]["task_id"], task_id);
+
+        let mut conflict = submitted.clone();
+        conflict["definition"]["name"] = json!("different definition");
+        let (status, rejected) =
+            api_json(&api, "POST", "/api/v1/tasks/experiments", Some(conflict)).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(rejected["error"]["code"], "idempotency_conflict");
+
+        let (status, list) = api_json(&api, "GET", "/api/v1/tasks/experiments", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(list["items"][0]["task_id"], task_id);
+
+        let (status, legacy) = api_json(
+            &api,
+            "POST",
+            "/api/v1/runs",
+            Some(serde_json::to_value(&legacy_request).unwrap()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        assert_eq!(legacy["run"]["kind"], "etf_strategy");
+        assert_eq!(legacy["run"]["status"], "queued");
+        let legacy_run_id = Uuid::parse_str(legacy["run"]["run_id"].as_str().unwrap()).unwrap();
+        assert_eq!(api.0.gate.lock().unwrap().queue.len(), 2);
+
+        let worker_api = api.clone();
+        let worker = std::thread::spawn(move || worker_api.process_next_queued());
+        let deadline = Instant::now() + StdDuration::from_secs(5);
+        let running_task = loop {
+            let task = api
+                .get_experiment_task(Uuid::parse_str(task_id).unwrap())
+                .unwrap();
+            if task.process_group_id.is_some() {
+                break task;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "task process group was not recorded"
+            );
+            std::thread::sleep(StdDuration::from_millis(10));
+        };
+        let process_group_id = running_task.process_group_id.unwrap();
+        while !pid_path.is_file() {
+            assert!(Instant::now() < deadline, "fake CLI did not start");
+            std::thread::sleep(StdDuration::from_millis(10));
+        }
+        assert_eq!(
+            fs::read_to_string(pid_path).unwrap().trim(),
+            process_group_id.to_string()
+        );
+        fs::write(release_path, "continue").unwrap();
+        assert!(worker.join().unwrap());
+        assert_eq!(api.0.gate.lock().unwrap().queue.len(), 1);
+        let (status, detail) = api_json(
+            &api,
+            "GET",
+            &format!("/api/v1/tasks/experiments/{task_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(detail["status"], "succeeded", "{detail}");
+        assert_eq!(detail["task_type"], "prajna_experiment");
+        assert_eq!(detail["task_version"], 1);
+        assert_eq!(detail["result"]["exp"], "exp:sha256:synthetic");
+        assert_eq!(detail["result"]["exe"], "exe:sha256:synthetic");
+        assert_eq!(detail["process_group_id"], Value::Null);
+
+        let task_dir = api.0.output.join("tasks").join(task_id);
+        assert!(task_dir.join("task.json").is_file());
+        assert!(task_dir.join("request.json").is_file());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fs::read(task_dir.join("experiment.json")).unwrap())
+                .unwrap(),
+            submitted["definition"]
+        );
+        let args = fs::read_to_string(args_path).unwrap();
+        let args = args.lines().collect::<Vec<_>>();
+        assert_eq!(args[0], "run");
+        assert_eq!(PathBuf::from(args[1]), task_dir.join("experiment.json"));
+        assert_eq!(args[2], "--lake");
+        assert_eq!(PathBuf::from(args[3]), api.0.output);
+        assert_eq!(&args[4..], &["--level", "summary"]);
+
+        assert!(api.process_next_queued());
+        let legacy_detail = api.get(legacy_run_id).unwrap();
+        assert!(matches!(legacy_detail.status, RunStatus::Succeeded));
+        let experiment_id = legacy_detail.experiment_id.unwrap();
+        let experiment =
+            crate::experiment::load_experiment(&api.0.output, &experiment_id.to_string()).unwrap();
+        assert_eq!(experiment.experiment_id, experiment_id);
+        assert_eq!(experiment.snapshot.snapshot_id, legacy_request.snapshot_id);
+        assert!(api.0.gate.lock().unwrap().queue.is_empty());
     }
     fn sample_request() -> SubmitRun {
         SubmitRun {
@@ -1163,6 +2139,56 @@ mod tests {
         }
     }
 
+    fn sample_experiment_task(task_id: Uuid, status: ExperimentTaskStatus) -> ExperimentTask {
+        ExperimentTask {
+            task_id,
+            task_type: EXPERIMENT_TASK_TYPE.into(),
+            task_version: EXPERIMENT_TASK_VERSION,
+            status,
+            stage: "running_experiment_cli".into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+            request_sha256: "request-hash".into(),
+            idempotency_key: "experiment-task-key".into(),
+            process_group_id: None,
+            result: None,
+            error: None,
+        }
+    }
+
+    fn shell_quote(path: &FsPath) -> String {
+        format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+    }
+
+    async fn api_json(
+        api: &RunJobApi,
+        method: &str,
+        uri: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
+        let bytes = body
+            .map(|value| serde_json::to_vec(&value).unwrap())
+            .unwrap_or_default();
+        let response = api
+            .clone()
+            .router()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(bytes))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, serde_json::from_slice(&body).unwrap())
+    }
+
     fn member(code: &str, exchange: &str) -> ManualMember {
         ManualMember {
             instrument: Instrument {
@@ -1182,6 +2208,10 @@ mod tests {
         }
     }
     fn fixture() -> (RunJobApi, SubmitRun, tempfile::TempDir) {
+        fixture_with_cli(PathBuf::from("prajna-experiment"))
+    }
+
+    fn fixture_with_cli(experiment_cli: PathBuf) -> (RunJobApi, SubmitRun, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let universe_store = Arc::new(UniverseStore::new(root));
@@ -1274,12 +2304,7 @@ mod tests {
                 ..ExperimentConfig::default()
             },
         };
-        let api = RunJobApi(Arc::new(Inner {
-            output: root.into(),
-            gate: Mutex::new(Store::default()),
-            wake: Condvar::new(),
-            universes: universe_store,
-        }));
+        let api = RunJobApi::without_worker(root.into(), universe_store, experiment_cli);
         (api, request, dir)
     }
 }
