@@ -18,7 +18,6 @@ static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 static SECURITY_EVIDENCE_LOCK: Mutex<()> = Mutex::new(());
 
 /// One independently sourced claim about a security field.
-///
 /// `observed_at` is the local observation time, not a publication timestamp.
 /// `effective_from` and `effective_to_exclusive` describe the claimed valid
 /// interval `[start, end)` when the source provides one.
@@ -65,7 +64,6 @@ pub enum FieldEvidence<T> {
 }
 
 /// Evidence for a Shanghai/Shenzhen stock or ETF.
-///
 /// Establishment and listing are independent evidence fields. This record does
 /// not contain Raw market coverage, derive tradability windows, or combine
 /// pre-listing NAV/predecessor observations into trading history. Callers
