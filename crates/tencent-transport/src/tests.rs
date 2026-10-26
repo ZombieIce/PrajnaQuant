@@ -3,9 +3,9 @@ use std::collections::VecDeque;
 use chrono::NaiveDate;
 
 use crate::{
-    CANDIDATE_HOSTS, DEFAULT_HTTP_SETTINGS, DEFAULT_REFERER, DEFAULT_USER_AGENT, DailyRequest,
-    FetchErrorKind, HttpReply, HttpRequest, HttpTransport, TransportFailure, TransportFailureKind,
-    fetch_unadjusted_daily,
+    CANDIDATE_HOSTS, CandidateAction, DEFAULT_HTTP_SETTINGS, DEFAULT_REFERER, DEFAULT_USER_AGENT,
+    DailyRequest, FetchErrorKind, HttpReply, HttpRequest, HttpTransport, TransportFailure,
+    TransportFailureKind, fetch_unadjusted_daily, fetch_unadjusted_daily_with_policy,
 };
 
 const VALID_BODY: &[u8] = br#"{"code":0,"data":{"sh600519":{"day":[]}}}"#;
@@ -190,6 +190,106 @@ fn body_read_failure_stops_candidate_fallback() {
     assert_eq!(error.kind, FetchErrorKind::BodyRead);
     assert_eq!(error.to_string(), "response body read failed");
     assert_eq!(transport.requests.len(), 1);
+}
+
+fn access_restriction_policy(
+    consecutive_restrictions: &mut usize,
+) -> impl FnMut(&crate::CandidateFailure, Option<&[u8]>) -> CandidateAction + '_ {
+    move |failure, response_body| {
+        let restricted = matches!(failure.status_code, Some(403 | 501))
+            || response_body.is_some_and(|body| {
+                let text = String::from_utf8_lossy(body).to_lowercase();
+                ["captcha", "验证码", "访问验证"]
+                    .iter()
+                    .any(|marker| text.contains(marker))
+            });
+        if restricted {
+            *consecutive_restrictions += 1;
+        } else {
+            *consecutive_restrictions = 0;
+        }
+        if *consecutive_restrictions >= 2 {
+            CandidateAction::Stop
+        } else {
+            CandidateAction::Continue
+        }
+    }
+}
+
+#[test]
+fn candidate_policy_stops_after_two_http_or_captcha_restrictions_before_next_host() {
+    let scenarios = vec![
+        (
+            vec![
+                Err(
+                    TransportFailure::new(TransportFailureKind::HttpStatus, "HTTP 403")
+                        .with_status_code(403),
+                ),
+                Err(
+                    TransportFailure::new(TransportFailureKind::HttpStatus, "HTTP 501")
+                        .with_status_code(501),
+                ),
+                reply("https://synthetic.invalid/accepted", VALID_BODY.to_vec()),
+            ],
+            true,
+            2,
+            2,
+        ),
+        (
+            vec![
+                reply(
+                    "https://synthetic.invalid/captcha-1",
+                    b"CAPTCHA required".to_vec(),
+                ),
+                reply(
+                    "https://synthetic.invalid/captcha-2",
+                    "访问验证".as_bytes().to_vec(),
+                ),
+                reply("https://synthetic.invalid/accepted", VALID_BODY.to_vec()),
+            ],
+            true,
+            2,
+            2,
+        ),
+        (
+            vec![
+                Err(
+                    TransportFailure::new(TransportFailureKind::HttpStatus, "HTTP 403")
+                        .with_status_code(403),
+                ),
+                Err(TransportFailure::new(
+                    TransportFailureKind::Request,
+                    "synthetic network failure",
+                )),
+                reply("https://synthetic.invalid/accepted", VALID_BODY.to_vec()),
+            ],
+            false,
+            3,
+            0,
+        ),
+    ];
+
+    for (replies, should_stop, expected_requests, expected_restrictions) in scenarios {
+        let mut transport = QueueTransport::new(replies);
+        let mut consecutive_restrictions = 0;
+        let result = {
+            let mut policy = access_restriction_policy(&mut consecutive_restrictions);
+            fetch_unadjusted_daily_with_policy(
+                &day_request("sh600519", "2026-09-14", "2026-09-18"),
+                &mut transport,
+                |bytes| bytes == VALID_BODY,
+                &mut policy,
+            )
+        };
+
+        assert_eq!(result.is_err(), should_stop);
+        if let Err(error) = result {
+            assert_eq!(error.kind, FetchErrorKind::PolicyStopped);
+            assert_eq!(error.candidate_failures.len(), 2);
+        }
+        assert_eq!(transport.requests.len(), expected_requests);
+        assert_eq!(consecutive_restrictions, expected_restrictions);
+    }
 }
 
 #[test]

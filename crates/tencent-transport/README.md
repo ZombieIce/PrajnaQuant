@@ -14,6 +14,8 @@ The transport sends a GET to `/appstock/app/fqkline/get` with the `param` query,
 
 For each candidate, request errors and HTTP status errors advance to the next listed candidate. An empty body or a body rejected by the caller's acceptance predicate also advances. A body-read or client-build error returns immediately, matching the former warehouse call. If no candidate is accepted, `FetchError` includes the legacy error message and per-candidate kind, host, status code when available, and message.
 
+Callers that enforce a source-stop rule can use fetch_unadjusted_daily_with_policy. Its callback sees request/status failures and rejected payloads, including response bytes for detecting CAPTCHA pages, before the loop can try another candidate. Return CandidateAction::Stop to receive FetchErrorKind::PolicyStopped. Keep state in the callback across logical cells and reset it after a successful return. The legacy fetch_unadjusted_daily entry point always continues fallback to preserve the warehouse contract.
+
 The caller supplies the payload acceptance predicate. The legacy warehouse uses its existing `data`-object check; a Raw collector can apply its own JSON shape check without making this crate depend on `serde_json`. A successful `RawDailyResponse` contains the final URL after redirects and the exact body bytes; it does not contain a vendor publication timestamp or local `observed_at`.
 
 This extraction adds no host, proxy, header variation, or access-control workaround. Higher-level collection must preserve the repository's source-stop policy and must not treat an access-control response as permission to invent another route.

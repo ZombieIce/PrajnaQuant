@@ -382,6 +382,65 @@ fn fetch_bytes(url: &str, referer: &str) -> Result<Vec<u8>> {
         .to_vec())
 }
 
+fn days_in_month(year: i32, month: u32) -> Result<u32> {
+    let first_next = if month == 12 {
+        NaiveDate::from_ymd_opt(year + 1, 1, 1)
+    } else {
+        NaiveDate::from_ymd_opt(year, month + 1, 1)
+    }
+    .context("invalid calendar month")?;
+    Ok((first_next - chrono::Duration::days(1)).day())
+}
+
+fn parse_date(text: &str) -> Result<NaiveDate> {
+    NaiveDate::parse_from_str(text, "%Y-%m-%d")
+        .or_else(|_| NaiveDate::parse_from_str(text, "%Y%m%d"))
+        .with_context(|| format!("invalid source date {text}"))
+}
+
+fn trim_nul_space(bytes: &[u8]) -> &[u8] {
+    let end = bytes
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(bytes.len());
+    bytes[..end].trim_ascii()
+}
+
+fn read_f64(bytes: &[u8], offset: usize) -> Result<f64> {
+    Ok(f64::from_le_bytes(
+        bytes
+            .get(offset..offset + 8)
+            .context("short TDX price block")?
+            .try_into()?,
+    ))
+}
+
+fn number_text(value: &Value) -> Result<String> {
+    let text = match value {
+        Value::String(value) => value.clone(),
+        Value::Number(value) => value.to_string(),
+        _ => bail!("source numeric field is invalid"),
+    };
+    format_number(parse_f64(&text)?)
+}
+
+fn parse_f64(text: &str) -> Result<f64> {
+    let value: f64 = text
+        .parse()
+        .context("source numeric field cannot be parsed")?;
+    if !value.is_finite() {
+        bail!("source numeric field is not finite")
+    }
+    Ok(value)
+}
+
+fn format_number(value: f64) -> Result<String> {
+    if !value.is_finite() {
+        bail!("numeric value is not finite")
+    }
+    Ok(format!("{value:.10}"))
+}
+
 #[cfg(test)]
 mod tencent_transport_compat_tests {
     use std::collections::VecDeque;
@@ -472,63 +531,4 @@ mod tencent_transport_compat_tests {
             CANDIDATE_HOSTS[..2]
         );
     }
-}
-
-fn days_in_month(year: i32, month: u32) -> Result<u32> {
-    let first_next = if month == 12 {
-        NaiveDate::from_ymd_opt(year + 1, 1, 1)
-    } else {
-        NaiveDate::from_ymd_opt(year, month + 1, 1)
-    }
-    .context("invalid calendar month")?;
-    Ok((first_next - chrono::Duration::days(1)).day())
-}
-
-fn parse_date(text: &str) -> Result<NaiveDate> {
-    NaiveDate::parse_from_str(text, "%Y-%m-%d")
-        .or_else(|_| NaiveDate::parse_from_str(text, "%Y%m%d"))
-        .with_context(|| format!("invalid source date {text}"))
-}
-
-fn trim_nul_space(bytes: &[u8]) -> &[u8] {
-    let end = bytes
-        .iter()
-        .position(|byte| *byte == 0)
-        .unwrap_or(bytes.len());
-    bytes[..end].trim_ascii()
-}
-
-fn read_f64(bytes: &[u8], offset: usize) -> Result<f64> {
-    Ok(f64::from_le_bytes(
-        bytes
-            .get(offset..offset + 8)
-            .context("short TDX price block")?
-            .try_into()?,
-    ))
-}
-
-fn number_text(value: &Value) -> Result<String> {
-    let text = match value {
-        Value::String(value) => value.clone(),
-        Value::Number(value) => value.to_string(),
-        _ => bail!("source numeric field is invalid"),
-    };
-    format_number(parse_f64(&text)?)
-}
-
-fn parse_f64(text: &str) -> Result<f64> {
-    let value: f64 = text
-        .parse()
-        .context("source numeric field cannot be parsed")?;
-    if !value.is_finite() {
-        bail!("source numeric field is not finite")
-    }
-    Ok(value)
-}
-
-fn format_number(value: f64) -> Result<String> {
-    if !value.is_finite() {
-        bail!("numeric value is not finite")
-    }
-    Ok(format!("{value:.10}"))
 }

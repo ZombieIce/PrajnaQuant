@@ -115,12 +115,22 @@ pub struct CandidateFailure {
     pub message: String,
 }
 
+/// Action a caller policy chooses after observing a candidate outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CandidateAction {
+    /// Keep the default behavior: accept a valid response or try the next candidate.
+    Continue,
+    /// Stop before another candidate is requested.
+    Stop,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FetchErrorKind {
     InvalidInput,
     ClientBuild,
     BodyRead,
     EndpointsUnavailable,
+    PolicyStopped,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,19 +158,39 @@ impl fmt::Display for FetchError {
 
 impl Error for FetchError {}
 
-/// Fetch one explicit, bounded, unadjusted daily response.
+/// Fetch one explicit, bounded, unadjusted daily response with legacy candidate fallback.
 ///
-/// The predicate preserves consumer-specific payload acceptance while this module owns the
-/// request parameters, headers, timeout settings, fixed candidate order, and raw response
-/// provenance. A rejected or empty candidate advances only through [`CANDIDATE_HOSTS`].
+/// This compatibility entry point always continues to the next candidate after request errors,
+/// status errors, empty bodies, or rejected payloads.
 pub fn fetch_unadjusted_daily<T, V>(
     request: &DailyRequest,
     transport: &mut T,
-    mut accepts_response: V,
+    accepts_response: V,
 ) -> Result<RawDailyResponse, FetchError>
 where
     T: HttpTransport,
     V: FnMut(&[u8]) -> bool,
+{
+    fetch_unadjusted_daily_with_policy(request, transport, accepts_response, |_, _| {
+        CandidateAction::Continue
+    })
+}
+
+/// Fetch a daily response while letting the caller stop candidate fallback.
+///
+/// The policy observes rejected payloads, including their bytes, and request/status failures
+/// before the loop can try another candidate. Keep state in the callback across logical cells
+/// to enforce a source-wide stop rule. Reset that state in the caller after a successful return.
+pub fn fetch_unadjusted_daily_with_policy<T, V, P>(
+    request: &DailyRequest,
+    transport: &mut T,
+    mut accepts_response: V,
+    mut candidate_policy: P,
+) -> Result<RawDailyResponse, FetchError>
+where
+    T: HttpTransport,
+    V: FnMut(&[u8]) -> bool,
+    P: FnMut(&CandidateFailure, Option<&[u8]>) -> CandidateAction,
 {
     validate_request(request)?;
 
@@ -179,24 +209,34 @@ where
             settings: DEFAULT_HTTP_SETTINGS,
         };
         match transport.get(&http_request) {
-            Ok(reply) if reply.bytes.is_empty() => failures.push(CandidateFailure {
-                host,
-                kind: CandidateFailureKind::EmptyResponse,
-                status_code: None,
-                message: "empty or invalid data object".into(),
-            }),
-            Ok(reply) if accepts_response(&reply.bytes) => {
+            Ok(reply) if !reply.bytes.is_empty() && accepts_response(&reply.bytes) => {
                 return Ok(RawDailyResponse {
                     source: reply.source,
                     bytes: reply.bytes,
                 });
             }
-            Ok(_) => failures.push(CandidateFailure {
-                host,
-                kind: CandidateFailureKind::InvalidResponse,
-                status_code: None,
-                message: "empty or invalid data object".into(),
-            }),
+            Ok(reply) => {
+                let kind = if reply.bytes.is_empty() {
+                    CandidateFailureKind::EmptyResponse
+                } else {
+                    CandidateFailureKind::InvalidResponse
+                };
+                let failure = CandidateFailure {
+                    host,
+                    kind,
+                    status_code: None,
+                    message: "empty or invalid data object".into(),
+                };
+                if record_candidate_failure(
+                    &mut failures,
+                    failure,
+                    Some(&reply.bytes),
+                    &mut candidate_policy,
+                ) == CandidateAction::Stop
+                {
+                    return Err(policy_stopped_error(failures));
+                }
+            }
             Err(failure)
                 if matches!(
                     failure.kind,
@@ -212,18 +252,29 @@ where
                 };
                 return Err(FetchError::new(kind, failure.message));
             }
-            Err(failure) => failures.push(CandidateFailure {
-                host,
-                kind: match failure.kind {
-                    TransportFailureKind::Request => CandidateFailureKind::Request,
-                    TransportFailureKind::HttpStatus => CandidateFailureKind::HttpStatus,
-                    TransportFailureKind::BodyRead | TransportFailureKind::ClientBuild => {
-                        unreachable!("immediate failure kinds are handled above")
-                    }
-                },
-                status_code: failure.status_code,
-                message: failure.message,
-            }),
+            Err(failure) => {
+                let candidate_failure = CandidateFailure {
+                    host,
+                    kind: match failure.kind {
+                        TransportFailureKind::Request => CandidateFailureKind::Request,
+                        TransportFailureKind::HttpStatus => CandidateFailureKind::HttpStatus,
+                        TransportFailureKind::BodyRead | TransportFailureKind::ClientBuild => {
+                            unreachable!("immediate failure kinds are handled above")
+                        }
+                    },
+                    status_code: failure.status_code,
+                    message: failure.message,
+                };
+                if record_candidate_failure(
+                    &mut failures,
+                    candidate_failure,
+                    None,
+                    &mut candidate_policy,
+                ) == CandidateAction::Stop
+                {
+                    return Err(policy_stopped_error(failures));
+                }
+            }
         }
     }
 
@@ -237,6 +288,32 @@ where
         message: format!("Tencent K-line endpoints are unavailable: {details}"),
         candidate_failures: failures,
     })
+}
+
+fn record_candidate_failure<P>(
+    failures: &mut Vec<CandidateFailure>,
+    failure: CandidateFailure,
+    response_body: Option<&[u8]>,
+    candidate_policy: &mut P,
+) -> CandidateAction
+where
+    P: FnMut(&CandidateFailure, Option<&[u8]>) -> CandidateAction,
+{
+    failures.push(failure);
+    candidate_policy(
+        failures
+            .last()
+            .expect("the candidate failure was just recorded"),
+        response_body,
+    )
+}
+
+fn policy_stopped_error(candidate_failures: Vec<CandidateFailure>) -> FetchError {
+    FetchError {
+        kind: FetchErrorKind::PolicyStopped,
+        message: "Tencent K-line candidate fetch stopped by caller policy".into(),
+        candidate_failures,
+    }
 }
 
 fn validate_request(request: &DailyRequest) -> Result<(), FetchError> {
