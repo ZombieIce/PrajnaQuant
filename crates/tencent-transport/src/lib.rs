@@ -68,6 +68,8 @@ pub struct TransportFailure {
     pub kind: TransportFailureKind,
     pub status_code: Option<u16>,
     pub message: String,
+    /// Error-response bytes when the adapter could read them.
+    pub response_body: Option<Vec<u8>>,
 }
 
 impl TransportFailure {
@@ -76,11 +78,18 @@ impl TransportFailure {
             kind,
             status_code: None,
             message: message.into(),
+            response_body: None,
         }
     }
 
     pub fn with_status_code(mut self, status_code: u16) -> Self {
         self.status_code = Some(status_code);
+        self
+    }
+
+    /// Attach the original bytes from an unsuccessful HTTP response.
+    pub fn with_response_body(mut self, response_body: Vec<u8>) -> Self {
+        self.response_body = Some(response_body);
         self
     }
 }
@@ -179,8 +188,10 @@ where
 /// Fetch a daily response while letting the caller stop candidate fallback.
 ///
 /// The policy observes rejected payloads, including their bytes, and request/status failures
-/// before the loop can try another candidate. Keep state in the callback across logical cells
-/// to enforce a source-wide stop rule. Reset that state in the caller after a successful return.
+/// before the loop can try another candidate. Readable HTTP error bodies are included; request
+/// failures and unreadable error bodies pass `None`. Keep state in the callback across logical
+/// cells to enforce a source-wide stop rule. Reset that state in the caller after a successful
+/// return.
 pub fn fetch_unadjusted_daily_with_policy<T, V, P>(
     request: &DailyRequest,
     transport: &mut T,
@@ -253,6 +264,7 @@ where
                 return Err(FetchError::new(kind, failure.message));
             }
             Err(failure) => {
+                let response_body = failure.response_body;
                 let candidate_failure = CandidateFailure {
                     host,
                     kind: match failure.kind {
@@ -268,7 +280,7 @@ where
                 if record_candidate_failure(
                     &mut failures,
                     candidate_failure,
-                    None,
+                    response_body.as_deref(),
                     &mut candidate_policy,
                 ) == CandidateAction::Stop
                 {
@@ -395,10 +407,16 @@ impl HttpTransport for ReqwestTransport {
                 TransportFailure::new(TransportFailureKind::Request, error.to_string())
             })?;
         let status_code = response.status().as_u16();
-        let response = response.error_for_status().map_err(|error| {
-            TransportFailure::new(TransportFailureKind::HttpStatus, error.to_string())
-                .with_status_code(status_code)
-        })?;
+        if let Err(error) = response.error_for_status_ref() {
+            let message = error.to_string();
+            let response_body = response.bytes().ok().map(|bytes| bytes.to_vec());
+            let mut failure = TransportFailure::new(TransportFailureKind::HttpStatus, message)
+                .with_status_code(status_code);
+            if let Some(response_body) = response_body {
+                failure = failure.with_response_body(response_body);
+            }
+            return Err(failure);
+        }
         let source = response.url().to_string();
         let bytes = response
             .bytes()

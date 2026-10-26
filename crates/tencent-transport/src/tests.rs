@@ -1,4 +1,9 @@
-use std::collections::VecDeque;
+use std::{
+    collections::VecDeque,
+    io::{BufRead, BufReader, Write},
+    net::TcpListener,
+    thread::{self, JoinHandle},
+};
 
 use chrono::NaiveDate;
 
@@ -46,6 +51,72 @@ fn reply(source: &str, bytes: impl Into<Vec<u8>>) -> Result<HttpReply, Transport
         source: source.into(),
         bytes: bytes.into(),
     })
+}
+
+fn local_http_server(responses: Vec<(u16, Vec<u8>)>) -> (String, JoinHandle<usize>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind synthetic HTTP server");
+    let address = listener.local_addr().unwrap();
+    let handle = thread::spawn(move || {
+        let mut served = 0;
+        for (status, body) in responses {
+            let (stream, _) = listener.accept().expect("accept synthetic HTTP request");
+            let mut reader = BufReader::new(stream);
+            let mut line = Vec::new();
+            loop {
+                line.clear();
+                assert_ne!(
+                    reader
+                        .read_until(b'\n', &mut line)
+                        .expect("read synthetic HTTP request"),
+                    0,
+                    "request ended before headers were complete"
+                );
+                if line == b"\r\n" {
+                    break;
+                }
+            }
+
+            let reason = match status {
+                200 => "OK",
+                429 => "Too Many Requests",
+                503 => "Service Unavailable",
+                _ => "Synthetic Response",
+            };
+            write!(
+                reader.get_mut(),
+                "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .expect("write synthetic HTTP headers");
+            reader
+                .get_mut()
+                .write_all(&body)
+                .expect("write synthetic HTTP body");
+            reader
+                .get_mut()
+                .flush()
+                .expect("flush synthetic HTTP response");
+            served += 1;
+        }
+        served
+    });
+
+    (format!("http://{address}/appstock/app/fqkline/get"), handle)
+}
+
+struct RoutedReqwestTransport {
+    inner: crate::ReqwestTransport,
+    url: String,
+    requests: Vec<HttpRequest>,
+}
+
+impl HttpTransport for RoutedReqwestTransport {
+    fn get(&mut self, request: &HttpRequest) -> Result<HttpReply, TransportFailure> {
+        self.requests.push(request.clone());
+        let mut routed_request = request.clone();
+        routed_request.url.clone_from(&self.url);
+        self.inner.get(&routed_request)
+    }
 }
 
 #[test]
@@ -140,7 +211,8 @@ fn exhausted_candidates_report_each_existing_candidate_error() {
         )),
         Err(
             TransportFailure::new(TransportFailureKind::HttpStatus, "HTTP 501")
-                .with_status_code(501),
+                .with_status_code(501)
+                .with_response_body(b"CAPTCHA required".to_vec()),
         ),
         Err(
             TransportFailure::new(TransportFailureKind::HttpStatus, "HTTP 429")
@@ -290,6 +362,45 @@ fn candidate_policy_stops_after_two_http_or_captcha_restrictions_before_next_hos
         assert_eq!(transport.requests.len(), expected_requests);
         assert_eq!(consecutive_restrictions, expected_restrictions);
     }
+}
+
+#[test]
+fn reqwest_http_error_captcha_bodies_reach_policy_before_candidate_fallback() {
+    let (url, server) = local_http_server(vec![
+        (429, b"CAPTCHA required".to_vec()),
+        (503, "访问验证".as_bytes().to_vec()),
+    ]);
+    let mut transport = RoutedReqwestTransport {
+        inner: crate::ReqwestTransport::new(),
+        url,
+        requests: Vec::new(),
+    };
+    let mut consecutive_restrictions = 0;
+    let result = {
+        let mut policy = access_restriction_policy(&mut consecutive_restrictions);
+        fetch_unadjusted_daily_with_policy(
+            &day_request("sh600519", "2026-09-14", "2026-09-18"),
+            &mut transport,
+            |bytes| bytes == VALID_BODY,
+            &mut policy,
+        )
+    };
+    let served = server.join().unwrap();
+
+    let error = result.unwrap_err();
+    assert_eq!(error.kind, FetchErrorKind::PolicyStopped);
+    assert_eq!(error.candidate_failures.len(), 2);
+    assert_eq!(
+        error
+            .candidate_failures
+            .iter()
+            .map(|failure| failure.status_code)
+            .collect::<Vec<_>>(),
+        [Some(429), Some(503)]
+    );
+    assert_eq!(served, 2);
+    assert_eq!(transport.requests.len(), 2);
+    assert_eq!(consecutive_restrictions, 2);
 }
 
 #[test]
