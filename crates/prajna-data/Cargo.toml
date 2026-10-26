@@ -15,7 +15,7 @@ regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 tempfile = "3.14"
 fs2 = "=0.4.3"
-chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
 chrono-tz = "0.10"
 csv = "1.4"
 parquet = { version = "=58.4.0", default-features = false, features = ["arrow", "zstd"] }
