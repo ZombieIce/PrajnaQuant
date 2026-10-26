@@ -79,7 +79,7 @@ POC-0 已按获确认的拆分发布为 [13 张本地执行票据](../.scratch/p
 | Vector / Fast Event | 已实现共同语义子集及精确 Fast 账户/VP 账本；固定名单验收核对逐日账本、费用、两存储重放、Python/CLI 与 Vector/Fast 对拍 |
 | Accurate | 已接真实 Nautilus worker、独立合成金标准及差异分类；单 Venue/币种、long-only、lot 等受限映射；PIT ETF 不接 Accurate，成本/规模缺口见 [A16](../poc/mvp4-cost/adr0013/README.md) |
 | Python | 本地 `prajna` 已提供类型化实验、Arrow 读取、As-of Decision 和两阶段共用 Rust 执行；逐 bar 推迟，Notebook/依赖闭包和性能边界见 [绑定文档](../crates/prajna-py/README.md) |
-| MVP-7 task service boundary | T01 在既有 `quant-research` Axum 服务增加带类型/版本的 Experiment task API，共用本机串行队列，通过 `prajna-experiment` 子进程写入同一输出根目录；新任务重启标 `interrupted`，旧诊断 Run 行为与 JSON 身份保持不变。清理过程组须验证任务与本次进程代际标记，无法验证时拒绝发信号；失败任务保存退出码和最多 16 KiB stderr，即使清理失败也将 CLI `RunError` 保存在 `details.cli_error` 并跨重启保留。合成 API/持久化/重启测试覆盖诊断保留；当前沙箱不能验证活进程组检查与清理。HTTP 取消、重试和浏览器工作流尚未接入。契约见 [ADR 0025](decisions/0025-local-experiment-task-process-boundary.md) |
+| MVP-7 task service boundary | T01 在既有 `quant-research` Axum 服务增加带类型/版本的 Experiment task API，共用本机串行队列，通过 `prajna-experiment` 子进程写入同一输出根目录；新任务重启标 `interrupted`，旧诊断 Run 行为与 JSON 身份保持不变。清理过程组须验证任务与本次进程代际标记，无法验证时拒绝发信号；失败任务保存退出码和最多 16 KiB stderr，即使清理失败也将 CLI `RunError` 保存在 `details.cli_error` 并跨重启保留。CLI 退出和清理检查后，若后代仍持有 stderr 则限时读取并以 `stderr_capture_incomplete` 标明部分诊断，避免堵住共享队列。合成 API/持久化/重启与队列推进测试覆盖诊断保留；当前沙箱不能验证活进程组检查与清理。HTTP 取消、重试和浏览器工作流尚未接入。契约见 [ADR 0025](decisions/0025-local-experiment-task-process-boundary.md) |
 | 真实 ETF 工程验证 | 固定名单、规定决策窗口加独立预热；覆盖门禁排除预热，禁止成交核对原生 Fill；Raw 完整性、重算、账本、事件抽查、覆盖/证据等级及仓库/PR/Issue 公开范围复核通过 |
 | 旧 A 股 / Web | 旧仓库、ETF 研究和本地 Axum/React 保留；生产日更、股票回测、远程认证及新平台统一 Web 作业未由本轮验收 |
 

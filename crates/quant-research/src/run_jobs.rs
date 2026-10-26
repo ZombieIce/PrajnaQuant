@@ -24,11 +24,17 @@ use std::{
     io::{Read, Write},
     path::{Path as FsPath, PathBuf},
     process::{Child, ChildStderr, Command, ExitStatus, Stdio},
-    sync::{Arc, Condvar, Mutex},
+    sync::{
+        Arc, Condvar, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
+    time::{Duration, Instant},
 };
 use uuid::Uuid;
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use rustix::process::{Pid, Signal, kill_process_group};
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -41,6 +47,8 @@ const MAX_UNIVERSE_INSTRUMENTS: usize = 100;
 const EXPERIMENT_TASK_TYPE: &str = "prajna_experiment";
 const EXPERIMENT_TASK_VERSION: u32 = 1;
 const MAX_CLI_STDERR_BYTES: usize = 16 * 1024;
+const STDERR_CAPTURE_STOP_TIMEOUT: Duration = Duration::from_millis(200);
+const STDERR_CAPTURE_POLL_INTERVAL: Duration = Duration::from_millis(5);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -921,15 +929,19 @@ impl RunJobApi {
                 "CLI stderr pipe is missing",
             )
         })?;
-        let stderr_reader = thread::spawn(move || read_bounded_stderr(stderr));
+        let stop_stderr_capture = Arc::new(AtomicBool::new(false));
+        let reader_stop_signal = Arc::clone(&stop_stderr_capture);
+        let stderr_reader = thread::spawn(move || read_bounded_stderr(stderr, reader_stop_signal));
         self.set_experiment_process_group(task.task_id, Some(group_id), Some(process_generation))?;
         let wait = match process.wait() {
             Ok(wait) => wait,
             Err(error) => {
+                stop_stderr_capture.store(true, Ordering::Release);
                 drop(stderr_reader);
                 return Err(process_group_cleanup_error(error));
             }
         };
+        stop_stderr_capture.store(true, Ordering::Release);
         let stderr = match stderr_reader.join() {
             Ok(Ok(stderr)) => Ok(stderr),
             Ok(Err(error)) => Err(run_error(
@@ -1427,6 +1439,7 @@ fn atomic_write(path: &FsPath, bytes: &[u8]) -> std::io::Result<()> {
 struct BoundedStderr {
     text: String,
     truncated: bool,
+    capture_incomplete: bool,
 }
 
 #[derive(Debug)]
@@ -1470,6 +1483,7 @@ fn cli_result_details(status: &ExitStatus, stderr: &BoundedStderr) -> Value {
         "exit_code": status.code(),
         "stderr": stderr.text,
         "stderr_truncated": stderr.truncated,
+        "stderr_capture_incomplete": stderr.capture_incomplete,
     });
     #[cfg(unix)]
     if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(status) {
@@ -1529,7 +1543,56 @@ fn preserve_cli_error_on_cleanup(cleanup_error: &mut RunError, previous: Option<
     }
 }
 
-fn read_bounded_stderr(mut stderr: ChildStderr) -> std::io::Result<BoundedStderr> {
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn read_bounded_stderr(
+    mut stderr: ChildStderr,
+    stop_requested: Arc<AtomicBool>,
+) -> std::io::Result<BoundedStderr> {
+    let flags = fcntl_getfl(&stderr).map_err(std::io::Error::from)?;
+    fcntl_setfl(&stderr, flags | OFlags::NONBLOCK).map_err(std::io::Error::from)?;
+    let mut retained = Vec::with_capacity(MAX_CLI_STDERR_BYTES);
+    let mut buffer = [0_u8; 4096];
+    let mut truncated = false;
+    let mut capture_incomplete = false;
+    let mut stop_deadline = None;
+    loop {
+        let now = Instant::now();
+        if stop_deadline.is_none() && stop_requested.load(Ordering::Acquire) {
+            let flags = fcntl_getfl(&stderr).map_err(std::io::Error::from)?;
+            fcntl_setfl(&stderr, flags | OFlags::NONBLOCK).map_err(std::io::Error::from)?;
+            stop_deadline = Some(now + STDERR_CAPTURE_STOP_TIMEOUT);
+        }
+        if stop_deadline.is_some_and(|deadline| now >= deadline) {
+            capture_incomplete = true;
+            break;
+        }
+        match stderr.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => {
+                let remaining = MAX_CLI_STDERR_BYTES.saturating_sub(retained.len());
+                let keep = remaining.min(read);
+                retained.extend_from_slice(&buffer[..keep]);
+                truncated |= keep < read;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(STDERR_CAPTURE_POLL_INTERVAL);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(BoundedStderr {
+        text: String::from_utf8_lossy(&retained).into_owned(),
+        truncated,
+        capture_incomplete,
+    })
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn read_bounded_stderr(
+    mut stderr: ChildStderr,
+    _stop_requested: Arc<AtomicBool>,
+) -> std::io::Result<BoundedStderr> {
     let mut retained = Vec::with_capacity(MAX_CLI_STDERR_BYTES);
     let mut buffer = [0_u8; 4096];
     let mut truncated = false;
@@ -1546,6 +1609,7 @@ fn read_bounded_stderr(mut stderr: ChildStderr) -> std::io::Result<BoundedStderr
     Ok(BoundedStderr {
         text: String::from_utf8_lossy(&retained).into_owned(),
         truncated,
+        capture_incomplete: false,
     })
 }
 
@@ -2461,6 +2525,7 @@ mod tests {
         let pid_path = dir.path().join("cli-pid.txt");
         let release_path = dir.path().join("release-cli");
         let cli_path = dir.path().join("prajna-experiment");
+        let inspector_path = dir.path().join("empty-ps");
         let script = format!(
             "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\necho $$ > {}\n[ \"$1\" = run ] || exit 91\n[ -f \"$2\" ] || exit 92\nwhile [ ! -f {} ]; do /bin/sleep 0.02; done\nprintf '{{\"exp\":\"exp:sha256:synthetic\",\"exe\":\"exe:sha256:synthetic\",\"action\":\"created\"}}\\n'\n",
             shell_quote(&args_path),
@@ -2468,13 +2533,16 @@ mod tests {
             shell_quote(&release_path),
         );
         fs::write(&cli_path, script).unwrap();
+        fs::write(&inspector_path, "#!/bin/sh\nexit 0\n").unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&cli_path, fs::Permissions::from_mode(0o755)).unwrap();
+            fs::set_permissions(&inspector_path, fs::Permissions::from_mode(0o755)).unwrap();
         }
 
-        let (api, legacy_request, _fixture_dir) = fixture_with_cli(cli_path);
+        let (api, legacy_request, _fixture_dir) =
+            fixture_with_cli_and_process_inspector(cli_path, inspector_path);
         let submitted = json!({
             "idempotency_key": "experiment-task-key",
             "definition": {"name": "synthetic experiment", "parameters": {"lookback": 2}}
@@ -2604,18 +2672,22 @@ mod tests {
         const EXPECTED_STDERR_LIMIT: usize = 16 * 1024;
         let dir = tempfile::tempdir().unwrap();
         let cli_path = dir.path().join("failing-prajna-experiment");
+        let inspector_path = dir.path().join("empty-ps");
         fs::write(
             &cli_path,
             "#!/bin/sh\nprintf 'synthetic failure cause\\n' >&2\n/usr/bin/head -c 32768 /dev/zero | /usr/bin/tr '\\000' x >&2\nexit 23\n",
         )
         .unwrap();
+        fs::write(&inspector_path, "#!/bin/sh\nexit 0\n").unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&cli_path, fs::Permissions::from_mode(0o755)).unwrap();
+            fs::set_permissions(&inspector_path, fs::Permissions::from_mode(0o755)).unwrap();
         }
 
-        let (api, _legacy_request, _fixture_dir) = fixture_with_cli(cli_path.clone());
+        let (api, _legacy_request, _fixture_dir) =
+            fixture_with_cli_and_process_inspector(cli_path.clone(), inspector_path);
         let (status, accepted) = api_json(
             &api,
             "POST",
@@ -2670,6 +2742,10 @@ mod tests {
         assert_eq!(after_restart["error"]["details"]["exit_code"], 23);
         assert_eq!(after_restart["error"]["details"]["stderr"], stderr);
         assert_eq!(after_restart["error"]["details"]["stderr_truncated"], true);
+        assert_eq!(
+            after_restart["error"]["details"]["stderr_capture_incomplete"],
+            false
+        );
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -2786,6 +2862,147 @@ mod tests {
             serde_json::from_slice(&fs::read(task_dir.join("task.json")).unwrap()).unwrap();
         assert_eq!(persisted_after_restart["error"]["details"], failure_details);
     }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn cleanup_failure_bounds_inherited_stderr_and_advances_shared_queue() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli_path = dir.path().join("inherited-stderr-prajna-experiment");
+        let inspector_path = dir.path().join("denied-ps");
+        let release_path = dir.path().join("release-stderr-descendant");
+        let descendant_done_path = dir.path().join("stderr-descendant-done");
+        let release_descendant_on_drop = ReleaseDescendantOnDrop(release_path.clone());
+        let script = format!(
+            "#!/bin/sh\nif /usr/bin/grep -q 'hold-stderr-open' \"$2\"; then\n  printf 'synthetic failure before descendant\n' >&2\n  (while [ ! -f {} ]; do /bin/sleep 0.02; done; printf 'released\n' > {}) &\n  exit 23\nfi\nprintf '{{\"exp\":\"exp:sha256:synthetic\",\"exe\":\"exe:sha256:synthetic\"}}\\n'\n",
+            shell_quote(&release_path),
+            shell_quote(&descendant_done_path),
+        );
+        fs::write(&cli_path, script).unwrap();
+        fs::write(&inspector_path, "#!/bin/sh\nexit 1\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&cli_path, fs::Permissions::from_mode(0o755)).unwrap();
+            fs::set_permissions(&inspector_path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let (api, legacy_request, _fixture_dir) =
+            fixture_with_cli_and_process_inspector(cli_path, inspector_path);
+        let (status, accepted) = api_json(
+            &api,
+            "POST",
+            "/api/v1/tasks/experiments",
+            Some(json!({
+                "idempotency_key": "inherited-stderr-cleanup-key",
+                "definition": {"name":"synthetic hold-stderr-open task"}
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let task_id = Uuid::parse_str(accepted["task"]["task_id"].as_str().unwrap()).unwrap();
+
+        let (status, legacy) = api_json(
+            &api,
+            "POST",
+            "/api/v1/runs",
+            Some(serde_json::to_value(&legacy_request).unwrap()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let legacy_run_id = Uuid::parse_str(legacy["run"]["run_id"].as_str().unwrap()).unwrap();
+        assert_eq!(api.0.gate.lock().unwrap().queue.len(), 2);
+
+        let worker_api = api.clone();
+        let (worker_done, worker_result) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let _ = worker_done.send(worker_api.process_next_queued());
+        });
+        let first_work = worker_result.recv_timeout(StdDuration::from_secs(5));
+        if !matches!(&first_work, Ok(true)) {
+            let task_dir = api.0.output.join("tasks").join(task_id.to_string());
+            let task_json = fs::read_to_string(task_dir.join("task.json")).unwrap_or_default();
+            panic!(
+                "cleanup failure left the shared queue worker blocked on descendant-held stderr: {first_work:?}; task={task_json}"
+            );
+        }
+        assert!(
+            !descendant_done_path.exists(),
+            "descendant should still own stderr when the task worker returns"
+        );
+
+        let (status, failed) = api_json(
+            &api,
+            "GET",
+            &format!("/api/v1/tasks/experiments/{task_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(failed["status"], "failed");
+        assert_eq!(
+            failed["error"]["code"],
+            "process_group_ownership_unverified"
+        );
+        let cli_error = &failed["error"]["details"]["cli_error"];
+        assert_eq!(cli_error["code"], "experiment_cli_failed");
+        assert_eq!(cli_error["details"]["exit_code"], 23);
+        assert_eq!(
+            cli_error["details"]["stderr"],
+            "synthetic failure before descendant\n"
+        );
+        assert_eq!(cli_error["details"]["stderr_capture_incomplete"], true);
+
+        let task_dir = api.0.output.join("tasks").join(task_id.to_string());
+        let persisted_task: Value =
+            serde_json::from_slice(&fs::read(task_dir.join("task.json")).unwrap()).unwrap();
+        assert_eq!(persisted_task["status"], "failed");
+        assert_eq!(
+            persisted_task["error"]["details"]["cli_error"]["details"]["exit_code"],
+            23
+        );
+        assert_eq!(
+            persisted_task["error"]["details"]["cli_error"]["details"]["stderr_capture_incomplete"],
+            true
+        );
+
+        assert!(
+            api.process_next_queued(),
+            "following legacy run did not advance"
+        );
+        let legacy_job = api.get(legacy_run_id).unwrap();
+        assert!(matches!(legacy_job.status, RunStatus::Succeeded));
+        let persisted_run: Value = serde_json::from_slice(
+            &fs::read(
+                api.0
+                    .output
+                    .join("runs")
+                    .join(legacy_run_id.to_string())
+                    .join("run.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(persisted_run["status"], "succeeded");
+
+        drop(release_descendant_on_drop);
+        let cleanup_deadline = Instant::now() + StdDuration::from_secs(2);
+        while !descendant_done_path.exists() && Instant::now() < cleanup_deadline {
+            thread::sleep(StdDuration::from_millis(10));
+        }
+        assert!(
+            descendant_done_path.exists(),
+            "synthetic stderr writer did not exit"
+        );
+    }
+
+    struct ReleaseDescendantOnDrop(PathBuf);
+
+    impl Drop for ReleaseDescendantOnDrop {
+        fn drop(&mut self) {
+            let _ = fs::write(&self.0, b"release\n");
+        }
+    }
+
     fn sample_request() -> SubmitRun {
         SubmitRun {
             kind: "etf_strategy".into(),
