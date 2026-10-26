@@ -23,6 +23,7 @@ prajna-domain = { path = "../prajna-domain" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["arbitrary_precision"] }
 sha2 = "0.10"
+tencent-transport = { path = "../tencent-transport" }
 zip = { version = "6.0", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
