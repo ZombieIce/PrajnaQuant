@@ -2,23 +2,23 @@
 
 ## Project Scope
 
-项目主路线是 Rust-first 的多市场研究、并行回测与未来实盘平台；当前先执行 POC-0，再按三级引擎与能力路由分阶段建设。目标决策见根目录 `ARCHITECTURE.md`，交付顺序见 `docs/product-roadmap.md`，领域词汇见 `CONTEXT.md`。现有实现仍是 A 股日频仓库和 ETF Rotation 纵向场景，React 页面已经存在；新平台 MVP 暂不以 Web 为验收项。不得把多市场、三级引擎、严格 PIT、分红总回报、Python 研究平台或实盘当作现有能力。功能/风险状态见 `docs/STATUS.md`。
+项目主路线是 Rust-first 多市场研究、并行回测与未来实盘平台。POC-0 至 MVP-6 已分阶段交付；MVP-6 按[负责人裁决](https://github.com/ZombieIce/PrajnaQuant/issues/182#issuecomment-6406038887)有保留签收：第二轮六项工程复核 pass，证据处理流程 fail 与第一轮 fail 保留。当前已有 Domain/Data、Factor/Cache、Experiment、Vector/Fast Event、受限 Accurate Backend 和本地 Python/PyO3 Decision 入口；真实验证限固定名单 ETF 工程场景。目标见 `ARCHITECTURE.md`，阶段见 `docs/product-roadmap.md`，词汇见 `CONTEXT.md`，当前能力及限制见 `docs/STATUS.md`。完整历史 Universe、无偏策略业绩、多市场实盘及新平台统一 Web 工作流仍未验收。
 
 ## Architecture Principles
 
-依据当前实现：Rust 为数据写入、研究计算、回测、指标与只读 API 的主实现；Python `warehouse.py` 是独立早期入库原型；React 只展示报告。不要为了文档设想改写正确代码。避免新增第二套量化核心。证据优先级：代码与可运行测试 > 当前配置/schema > 最新 ADR > STATUS > HANDOFF > README > 旧文档/注释。
+Rust 是数据、因子、执行、账户、成本和绩效权威；`python/prajna` 通过 PyO3 声明实验、读取 Arrow 结果并生成受限 Decision；`warehouse.py` 是独立早期入库原型。React 展示旧报告与行情并管理本地 Universe。不要为了文档设想改写正确代码。避免新增第二套量化核心。证据优先级：代码与可运行测试 > 当前配置/schema > 最新 ADR > STATUS > HANDOFF > README > 旧文档/注释。
 
 ## Rust Responsibilities
 
-`src/` 管理采集、原文、DuckDB 和导出；`crates/quant-research/src/` 管理特征、因子研究、综合评分、排序、调仓、成交、账户、绩效、实验和 Axum API。当前报告以 Rust 计算为 canonical。`docs/decisions/` 说明已确认的边界；未决方案只写提案。
+新平台由 `crates/prajna-domain`、`prajna-data`、`prajna-research`、`prajna-account`、`prajna-adapter`、`prajna-experiment` 与 `prajna-py` 分担契约、存储、研究、账本、Backend、实验和绑定。旧 `src/` 管理 DuckDB 仓库，`crates/quant-research/src/` 保留 ETF 研究/回测及 Axum API；两条路径的身份、报告和验证范围分别说明。Rust 计算为 canonical。`docs/decisions/` 说明已确认的边界；未决方案只写提案。
 
 ## Python Responsibilities
 
-现有 `warehouse.py` 仅为样本入库原型。目标是让 Python 承担因子探索、统计分析与研究实验，通过明确版本和时间语义的数据/结果契约与 Rust 互通；回测及绩效权威继续在 Rust。当前没有 Python 调用 Rust 的正式接口、研究包或回测引擎。不得宣称已接通。
+本地 `prajna` 包已接通 Rust Experiment、Arrow 研究/结果读取和 As-of Decision 生成，入口及构建见 `crates/prajna-py/README.md`。Decision 回调不读取账户/成交；实际执行、成本和绩效继续由 Rust 负责。Python 逐 bar 回调推迟，Notebook 可复现性和依赖闭包有明确限制；这不是完整研究产品或 Python 量化核心。`warehouse.py` 仍仅为早期入库原型。
 
 ## React Responsibilities
 
-`apps/web/` 是当前服务端实际托管的界面。目标界面还包括选股池、股票/ETF K 线及更完整的因子和策略报告。展示、排序和交互应与后端报告语义一致；不得让浏览器成为绩效/因子结果的权威计算方。仓库中的旧 HTML 页面未被当前 `server.rs` 引用。
+`apps/web/` 由旧 `quant-research` 服务托管，已有本地 Universe、股票/ETF K 线及已保存因子/策略报告；新平台 MVP 不以 Web 为验收项，统一新实验作业界面尚未接通。展示、排序和交互应与后端报告语义一致；不得让浏览器成为绩效/因子结果的权威计算方。仓库中的旧 HTML 页面未被当前 `server.rs` 引用。
 
 ## Quant Correctness Rules
 
@@ -37,7 +37,7 @@ POC-0 与新平台实现按当前任务的 spec/ADR 确定时间语义；修改�
 
 ## Portfolio Accounting Rules
 
-现金、数量、成交价、佣金、税、滑点必须可追溯。逐日验 `NAV ≈ cash + Σ(quantity × 当日估值价)`；长仓数量和权重非负，解释现金余量与总权重。不得把停牌/缺行情默认为零价或可成交。交易成本配置必须随结果保存。
+现金、数量、成交价、佣金、税、滑点必须可追溯。逐日按路径核对 `NAV ≈ cash + Σ(quantity × 当日估值价) + receivables`，旧无应收路径的 receivables 为零；未支付应收计入总权益但不作可花现金；长仓数量和权重非负，解释现金余量与总权重。不得把停牌/缺行情默认为零价或可成交。交易成本配置必须随结果保存。
 
 ## Development Rules
 
@@ -57,7 +57,7 @@ CI（`.github/workflows/`）分两条：`CI` 的 `lightweight` job 是合并必�
 
 修改 `prajna-py` 或 `python/prajna` 时，先按 [`crates/prajna-py/README.md`](crates/prajna-py/README.md) 激活 Python 3.12 venv 并安装 maturin，再跑 `cargo test -p prajna-py --locked --offline`、`cargo clippy -p prajna-py --all-targets --locked --offline -- -D warnings`、`maturin develop --locked --offline` 与 `python -m unittest discover -s python/tests -v`。轻量 CI 包含上述绑定测试与 DuckDB / `quant-research` 依赖图守卫。
 
-仓库缺少独立端到端的 3 ETF / 10 日金标准用例。每次相关变更需检查 look-ahead、日期对齐、现金持仓恒等式与成本。不要把编译通过当量化正确性证明。
+新平台已有独立合成金标准与 PIT/公司行动 3 ETF × 10 Session 对拍（`poc/mvp1-golden/`、`poc/mvp3-golden/`、`crates/prajna-research/tests/pit_s2.rs`、`crates/prajna-research/tests/corporate_actions.rs`）。修改相关路径时检查 look-ahead、日期对齐、含应收的账户恒等式与成本；合成覆盖、真实已触发事件和未触发路径分别报告。编译通过不代替量化验证。
 
 ## New Agent Startup
 

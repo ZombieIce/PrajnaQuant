@@ -1,12 +1,12 @@
 # Prajna Quant 目标架构基线
 
-状态：**目标架构决策**，2026-09-26。本文记录本轮 Grill、调研与 POC 讨论达成的方向；不是现有功能清单。当前代码与验证状态以 [`docs/architecture.md`](docs/architecture.md)、[`docs/STATUS.md`](docs/STATUS.md) 和测试为准。下文“已确定”表示设计方向已确定，不表示已经实现或经真实数据验证。
+状态：**目标架构决策**，2026-09-26；当前起点校准于 2026-10-26。本文记录本轮 Grill、调研与 POC 讨论达成的方向；不是现有功能清单。当前代码与验证状态以 [`docs/architecture.md`](docs/architecture.md)、[`docs/STATUS.md`](docs/STATUS.md) 和测试为准。下文“已确定”表示设计方向已确定，不表示已经实现或经真实数据验证。
 
 ## 目标与当前起点
 
 目标是 Rust-first 的多市场、多策略研究、并行回测与未来实盘平台，覆盖 A 股股票和 ETF、美股、Crypto CEX，以及 Hyperliquid、Aster、edgeX 一类订单簿 / 永续合约 Venue，并最终支持跨 Venue 策略。核心价值是大规模回测吞吐、统一研究流程、可复现结果、回测到实盘的策略接口连续性和市场扩展能力。微秒级 HFT 延迟不是当前优化目标。
 
-当前仓库是 A 股日频仓库和 ETF Rotation 纵向场景：Rust 已有日线入库、不可变发布、有限因子评价、ETF 日频回测、参数网格、结果 API；React 已有网页；Python `warehouse.py` 只是早期入库原型。尚无本文定义的三级引擎、通用 Factor Registry/持久 Cache、跨市场 Domain、Python 策略绑定、Nautilus Adapter 或 Live Runtime。已有 ETF 结果仍受历史 Universe、分红总回报及真实执行状态证据约束。
+当前新平台已有自有 Domain、不可变 Raw/版本化 Dataset、封闭 Factor 定义及持久 Cache、Experiment/Run/ResultLevel、Rayon 扫描、Vector/Fast Event 与受限 Nautilus Accurate Adapter，并有本地 Python/PyO3 As-of Decision/研究读取入口。旧 A 股仓库、ETF 回测和 React 页面保留。MVP-6 在固定名单场景完成六项工程复核，按[负责人裁决](https://github.com/ZombieIce/PrajnaQuant/issues/182#issuecomment-6406038887)有保留签收；流程 fail 与适用限制保留。这不是完整历史 Universe、所有市场规则、任意策略跨引擎或 Live Runtime 的验收。
 
 ## 已确定的目标边界
 
@@ -14,7 +14,7 @@
 
 Rust 拥有数据写入、因子执行、回测、组合账户、成本、绩效、实验和并行运行时，并保留未来 Live Runtime 的计算核心。Python 负责研究、Notebook、因子/策略/实验定义、优化和可视化；Python 策略入口采用 Python 宿主调用 Rust 扩展、每个决策 Session 一次的纯 Decision 函数；逐 bar 回调依 [ADR 0021](docs/decisions/0021-python-strategy-entry-and-decision-boundary.md) 推迟。Rust 是账户、成本和绩效报告的权威。现有 [`ADR 0001`](docs/decisions/0001-computation-ownership.md) 仍描述当前实现。
 
-平台维护自己的 Domain Core。NautilusTrader 是 Accurate Event Engine 和未来 Live 的首个 Backend 候选，由 Adapter 接入；Accurate 的闭环 Order / Fill / Reject 边界、平台账本与成本权威、worker 和 Backend 身份见 [ADR 0020](docs/decisions/0020-accurate-event-adapter-and-ledger-authority.md)。Barter、LEAN、WonderTrader、VeighNa 是特定领域的参考，不决定平台 Domain。Arrow、Parquet、Polars、Rayon、Tokio、PyO3 是目标技术角色或待评估依赖，不等于当前仓库已接入。
+平台维护自己的 Domain Core。NautilusTrader 是 Accurate Event Engine 和未来 Live 的首个 Backend 候选，由 Adapter 接入；Accurate 的闭环 Order / Fill / Reject 边界、平台账本与成本权威、worker 和 Backend 身份见 [ADR 0020](docs/decisions/0020-accurate-event-adapter-and-ledger-authority.md)。Barter、LEAN、WonderTrader、VeighNa 是特定领域的参考，不决定平台 Domain。Arrow、Parquet、Polars、Rayon 与 PyO3 已用于新平台；Tokio 用于现有服务等 I/O 路径，具体边界以 Cargo 与代码为准，技术接入不等于各项目标能力验收。
 
 ### 三级引擎与能力路由
 
@@ -36,13 +36,13 @@ Portfolio 是资金与风险管理的一等对象：Trading Account 可分配资
 
 ### 数据与研究对象
 
-MVP-6 深市 ETF 目标契约见 [ADR 0022](docs/decisions/0022-historical-etf-catalog-and-derived-execution-status.md)（历史生命周期、PIT Universe / Eligible Set、推导开盘状态与 Risk Exit）和 [ADR 0023](docs/decisions/0023-etf-corporate-actions-and-total-return-ledger.md)（顺序 TRI、分红应收/发放、折算与清算、Fast Event 权威及 Vector 总回报对拍）。#175～#180 已实现离线/合成部分；#180 增加结构化公司行动表与合成 TRI，但不解析真实 cninfo 附件、不证明公告覆盖，也不等于分红账本或 Vector 总回报验收。[#172 审计](docs/research/mvp-6-source-gate-audit.md)未决项仍阻断真实数据验收，不以代码或设计采纳宣称 P0 关闭。
+MVP-6 深市 ETF 目标契约见 [ADR 0022](docs/decisions/0022-historical-etf-catalog-and-derived-execution-status.md)（历史生命周期、PIT Universe / Eligible Set、推导开盘状态与 Risk Exit）和 [ADR 0023](docs/decisions/0023-etf-corporate-actions-and-total-return-ledger.md)（顺序 TRI、分红应收/发放、折算与清算、Fast Event 权威及 Vector 总回报对拍）。原始广义真实数据目标已由 [#171 P27 及后续裁决](https://github.com/ZombieIce/PrajnaQuant/issues/171#issuecomment-6250843867)收窄为固定名单工程场景；分红/拆分账本、共同语义日对拍和 Python/CLI 重放已在该范围复核。终止持仓按最后行情收盘估值，未使用实际清算金额/日期；部分真实路径未触发，仍依合成覆盖。[来源审计](docs/research/mvp-6-source-gate-audit.md)历史未决项不改写为全市场数据已验证，适用边界以 [STATUS](docs/STATUS.md) 为准。
 
 目标 Data Lake 分为不可覆盖的 `raw/`、可版本化重建的 `normalized/`、`features/` 和 `results/`。原始字节、来源、采集时间及 hash 保留；Normalizer 修订产生新的 Dataset Version，不覆写旧版。目标使用 Parquet 持久化、Arrow 作列式交换契约、Polars 作研究与 ETL；Rust 热路径是否采用 Custom SoA 待基准结果决定。此处是目标分工，现有 `data-core/` / DuckDB / Parquet 发布链继续按当前 ADR 0008 运作。
 
-Factor 是版本化对象，至少记录 ID、定义、参数、依赖、Universe、频率、输入字段、窗口、观察/可用时刻、方向、缺失规则、Dataset Version、来源及输出 schema。MVP 目标含 Factor Registry 与按完整输入身份键控的 Factor Cache，使共享因子可跨 Run 复用。未来收益标签只用于评价。当前固定信号目录及一次网格内评分复用不能称为这一目标已完成。
+Factor 是版本化对象，至少记录 ID、定义、参数、依赖、Universe、频率、输入字段、窗口、观察/可用时刻、方向、缺失规则、Dataset Version、来源及输出 schema。MVP 目标含 Factor Registry 与按完整输入身份键控的 Factor Cache，使共享因子可跨 Run 复用。未来收益标签只用于评价。新平台已有封闭 Factor Registry、依赖图和持久 Cache；旧 `quant-research` 固定信号目录与它分开，不代表支持任意用户因子插件。
 
-Experiment 包含策略与版本、Universe、数据版本、参数空间、成本模型、引擎、种子和多个 Run。目标 Run 身份由规范化有效配置、引擎语义版本、Dataset manifest、成本模型和 seed（仅随机性 Engine）确定，代码修订与编译环境决定 Experiment Execution 身份（[ADR 0018](docs/decisions/0018-run-spec-experiment-execution-identity.md)）；结果应能回答“什么代码、数据与参数生成了它”。脏工作树需记录差异摘要或明确标为不可完全复现。`ResultLevel` 为 `Summary`（扫描默认）、`Standard`（曲线、交易等）和 `Full`（事件、订单、成交、持仓、诊断）；每级明确数据可用性，避免把省略字段解释成零或无事件。当前实验 UUID 与 JSON 报告尚不满足该目标身份契约。
+Experiment 包含策略与版本、Universe、数据版本、参数空间、成本模型、引擎、种子和多个 Run。目标 Run 身份由规范化有效配置、引擎语义版本、Dataset manifest、成本模型和 seed（仅随机性 Engine）确定，代码修订与编译环境决定 Experiment Execution 身份（[ADR 0018](docs/decisions/0018-run-spec-experiment-execution-identity.md)）；结果应能回答“什么代码、数据与参数生成了它”。脏工作树需记录差异摘要或明确标为不可完全复现。`ResultLevel` 为 `Summary`（扫描默认）、`Standard`（曲线、交易等）和 `Full`（事件、订单、成交、持仓、诊断）；每级明确数据可用性，避免把省略字段解释成零或无事件。新平台 `prajna-experiment` 已实现该身份及分级存储契约；旧 `quant-research` UUID/JSON 报告不自动升级为新身份结果。
 
 单机优先：以 Run 为 CPU 并行单位，Rayon 执行；Tokio 用于 I/O。数据读取按证券、日期和列裁剪，并用流式/分块路径处理大于内存的数据集。是否需要分布式、何时拆分单次回测或采用其他运行时由测量决定。
 

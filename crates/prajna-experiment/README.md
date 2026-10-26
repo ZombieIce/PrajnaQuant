@@ -1,6 +1,6 @@
 # prajna-experiment
 
-合成数据 Vector / Fast Event / Accurate Event Experiment CLI，复用 Rust 策略、指标与 ResultLevel 存储契约（ADR 0017/0018/0019/0020）。事件路径提供运行内精确账本验证；不建立真实市场/PIT 结论。
+Vector / Fast Event / 受限 Accurate Event Experiment CLI，复用 Rust 策略、指标与 ResultLevel 存储契约（ADR 0017/0018/0019/0020）。合成验证与固定名单真实 ETF 工程验收分开；当前最终范围和有保留签收见 [STATUS](../../docs/STATUS.md)，不建立完整历史 Universe 或无偏业绩结论。
 
 ```text
 prajna-experiment run <experiment.json> --lake <dir> [--level summary|standard|full]
@@ -59,7 +59,7 @@ cd "$repo"
 新增、显式选择 `strategy: "s2_pit_rotation"`；旧 `s2_rotation`、Static Universe、
 Factor 与旧 Run 身份不变。此路径只接受 SZSE、`availability_assumption: "none"`、
 `unfilled_entry: "skip"` 和 `full_target`，支持 Vector 与 Fast Event，不接 Accurate；Python 入口见 `prajna-py`。
-DSV 可来自 `szse-etf-frozen@1`（6a）或 `@2`（含结构化公司行动表）；无网络采集或真实历史数据验收。
+此节记录 #177 初始契约，DSV 从 `szse-etf-frozen@1`（6a）/`@2`（结构化公司行动表）起步；后续固定名单与含行动版本由现有 PIT 输入路径消费，最终真实工程范围见 [STATUS](../../docs/STATUS.md)。CLI 运行消费本机冻结输入，不在回测中补采数据。
 
 定义新增 `pit` 对象（不得用已计算的候选集/任意评分代替原始证据）：
 
@@ -137,9 +137,9 @@ Vector/Fast 日对拍见 [`prajna-research/tests/pit_s2.rs`](../prajna-research/
 公司行动 golden 在 [`corporate_actions.rs`](../prajna-research/tests/corporate_actions.rs)
 覆盖分红登记/除息/发放、应收不投资、
 折算取整、终止清算和未知金额。Summary/Vector Result 声明 Return Basis、税率、
-覆盖报告及不完整原因；Standard 结果另保存公司行动事件行。当前 Normalizer 仍只接受
-结构化 `corporateActions` 字段，不解析 cninfo 附件或证明公告全集；真实覆盖、历史
-控制样本与 P0-2 验收仍未通过。#178 Python PIT 视图复用同一 Rust 输入和执行层，
+覆盖报告及不完整原因；Standard 结果另保存公司行动事件行。这里的结构化 Normalizer 不自行证明 cninfo
+公告全集；真实固定名单验收已按后续裁决完成，不外推完整公告覆盖、历史
+控制样本或广义 P0-2 无偏业绩。#178 Python PIT 视图复用同一 Rust 输入和执行层，
 见 [`prajna-py`](../prajna-py/README.md)。
 
 ## stdout JSON 与退出码
@@ -180,7 +180,7 @@ cargo test -p prajna-experiment --locked --offline
 Rust `Experiment::run_definitions` 可在不执行策略时返回排序去重的 Run Spec/ID，
 `canonical_json` 保留引用；CLI `run` 显式报错 `requires Python host`，退出 2，
 不创建 Execution 或静默跳过。Python 的类型化定义与现有 Rust 策略执行入口见
-[`prajna-py`](../prajna-py/README.md)；Python Decision 执行尚未实现。
+[`prajna-py`](../prajna-py/README.md)；Python Decision 已经由本地包的两阶段执行接通，CLI 仍不直接运行 Python 引用。
 S2 的九个参数及默认 Run Spec 字节保持不变；显式 `unfilled_entry: "skip"`
 与缺省同一身份，`retry` 进入身份。BuyAndHold 固定 retry；MA 默认 skip，也可显式 retry。
 运行前通过 `prajna-research::engine::Engine` 校验 Strategy × Engine × 模式：
@@ -332,8 +332,9 @@ fake 的原生账户显式为 unavailable，不伪造原生快照。
 三张诊断表沿用精确字符串 JSON payload 的 Parquet logical hash；Full 的空表仍保存，
 较低等级只在 `not_saved` 中声明省略，不能解释为零事件。重放/提升会校验 Summary
 和全部已存明细，包括诊断；证据变化或诊断不一致不能覆盖原 Execution。
-这里只验证合成 fake 与脚本 transport，真实 worker 对拍、差异分类验收与转换成本
-仍须另按 #133 A14–A16 执行，不设扫描吞吐门槛。
+上述 transport 契约与 fake 测试本身不等于真实 Backend 验收。真实 worker 的独立合成
+对拍及差异分类见 [A15](../../poc/mvp4-correctness/README.md)，转换成本与未测规模
+见 [A16](../../poc/mvp4-cost/adr0013/README.md)；不设扫描吞吐门槛，不外推 PIT ETF 支持。
 
 
 正常 Fast Event `lot + full_target` 自 #275 使用 `fast_event@10`（行动 `@11`，terminal `@12`），目标基数为 pre-trade 现金＋证券估值，排除未支付应收，目标总和不足 1 不重新归一化。仍按整手、现金限量、最低佣金及实际成交费用执行；实际权重/成本率/换手率分母为总 NAV，lot 换手分子为实际成交本金。发放只转桶，后续正常调仓再投资。独立 retry、entry_only 与 Accurate 契约不扩展；历史结果不覆盖，旧 revision 重现旧行为。

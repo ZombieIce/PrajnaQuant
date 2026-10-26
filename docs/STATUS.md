@@ -1,5 +1,7 @@
 # Project Status
 
+当前收口状态见 [MVP 收口现状](#mvp-收口现状2026-10-26)；带日期的 POC/旧 A 股记录保留当时证据，不作当前能力清单。
+
 2026-09-30 GitHub Issue #15 在分支 `15-manifest-dataset-version` 实现 `prajna-data` 的 D8 Manifest 与 Dataset Version：`Manifest::new` 对 inputs/table 排序并按受限 JCS(core) 计算 `dsv:sha256:<hex>`；provenance 不参与身份。manifest 写至 `manifests/<dsv_hex>.json`，先同步 staging 文件再原子 rename；现存相同 core 幂等，core 不同时报错；读取会重算并验证 DSV。固定手写 JCS/DSV 向量及 provenance、core 字段变化、顺序、篡改、幂等与冲突测试均通过。轻量 CI 对应的本地验证通过。PR [#40](https://github.com/ZombieIce/PrajnaQuant/pull/40)；Independent review: see PR #40。
 
 2026-09-30 GitHub Issue #13 实现 `prajna-data` 的受限 JCS、schema fingerprint 与 Arrow logical hash。hash 按主键排序，解码字典列，拒绝重复键和 Appendix A 外类型；schema fingerprint 排除 `prajna.dsv`。两行 `sessions` 测试向量（含 null、负 Decimal128 和多字节 UTF-8）已提交为 hex fixture，并发布到 [spec Issue #7](https://github.com/ZombieIce/PrajnaQuant/issues/7#issuecomment-5902283970)；独立 `xxd -r -p | shasum -a 256` 输出 `2c627a1813303394238717869776a089234b08da095a9c1bae0198ca26c2b58c`。定向 test/clippy、格式与新 crate 依赖守卫通过。轻量 `quant-research` test 中既有 Parquet round-trip 用例因本机约 2.98 GB 可用空间低于 10 GiB reserve gate 而返回 `unresolved`；其余过滤后用例通过。实现者双轴自查无剩余发现。PR [#37](https://github.com/ZombieIce/PrajnaQuant/pull/37)；Independent review: see PR #37。
@@ -46,7 +48,7 @@
 
 2026-09-27 POC 构建资源边界已实现：默认应用仍启用 `app` feature；使用 `--no-default-features` 的 benchmark 依赖图排除 DuckDB 和仓库数据库 crate，并复用 workspace `target/`。warm-cache dev/release 构建及空间增量见 [原始记录](../poc/poc0-benchmark/README.md#shared-lightweight-poc-build-path)；cold build 未测，未清理缓存。测量时按 10 GiB 保留线执行闸门。
 
-用户已确定新主路线为 Rust-first、多市场、三级回测引擎与未来实盘的平台；现阶段先做 [`POC-0`](poc-0-benchmark-spec.md)。完整目标见根目录 [`ARCHITECTURE.md`](../ARCHITECTURE.md)，新交付顺序见 [`product-roadmap.md`](product-roadmap.md)。目前没有 Vector / Fast Event / Accurate 三级生产实现、生产 Nautilus Adapter、持久 Factor Cache、跨市场账户、生产 Python/PyO3 策略入口或 Live Runtime。POC-0 票据 08 的固定合成 fixture 已通过 Adapter 项目订单、Fill、账户与成本对拍；Nautilus 原生订单仅提交 3 笔，Rust 参考含停牌拒单共 4 次尝试，原生生命周期仍 `unresolved`；票据 08 的早期吞吐快照也仍是探索性记录，正式 B2 吞吐结论以顶部 Issue #3 注册测量为准。现有 React 页面是已实现资产，新平台 MVP 不以 Web 为验收项。以下扫描记录描述旧 A 股纵向场景的代码与数据证据，不能升级为新目标能力。
+历史 POC-0 起点（不代表当前实现）：用户已确定新主路线为 Rust-first、多市场、三级回测引擎与未来实盘的平台；当时先做 [`POC-0`](poc-0-benchmark-spec.md)。完整目标见根目录 [`ARCHITECTURE.md`](../ARCHITECTURE.md)，新交付顺序见 [`product-roadmap.md`](product-roadmap.md)。目前没有 Vector / Fast Event / Accurate 三级生产实现、生产 Nautilus Adapter、持久 Factor Cache、跨市场账户、生产 Python/PyO3 策略入口或 Live Runtime。POC-0 票据 08 的固定合成 fixture 已通过 Adapter 项目订单、Fill、账户与成本对拍；Nautilus 原生订单仅提交 3 笔，Rust 参考含停牌拒单共 4 次尝试，原生生命周期仍 `unresolved`；票据 08 的早期吞吐快照也仍是探索性记录，正式 B2 吞吐结论以顶部 Issue #3 注册测量为准。现有 React 页面是已实现资产，新平台 MVP 不以 Web 为验收项。以下扫描记录描述旧 A 股纵向场景的代码与数据证据，不能升级为新目标能力。
 
 POC-0 工作范围与验收已发布为本地 [`ready-for-agent` spec](../.scratch/poc-0-benchmark/spec.md)。独立 [`poc/b1-layout`](../poc/b1-layout/README.md) 标量读取 smoke 只对拍三种布局的动量；票据 02 的 SoA、票据 03 的 Arrow 完整 S2 候选和票据 04 的 Polars 候选已验收。票据 05 的版本化 Parquet 写入/复读、列/row group 裁剪与三候选对拍已由用户验收：10,000,029 行、404,509,661 字节的源文件在本机 Linux VM 以 Docker 256 MiB cgroup 限制成功复读，子进程 RSS 58,933,248 字节，容器峰值触及 256 MiB、无 OOM。macOS `RLIMIT_AS` 失败记录仍保留。票据 06 已完成确定性 64 × 252 合成面板的 S2 参数扫描与冷热因子缓存对比，正确性和 checksum 通过；Custom SoA 结论为 `defer`，miss/hit 两线程吞吐相对最佳替代分别 +8.99%/+0.32%，未达到 20% 采纳门槛。报告中的全进程 RSS 为 107,905,024 字节；不代表真实市场/PIT。自研 Fast Event 仍只有票据 07 的最小原型；Nautilus Adapter 的固定 S1 对拍见票据 08。票据 10 基础 PyO3 callback comparison 与票据 11 S2/S3、GIL 并行边界测量均已由用户验收；票据 09 原归档数据因转换边界、并行方式及 RSS 范围不同，独立选型结论仍 unresolved，正式 B2 注册负载和模式的结论以顶部 Issue #3 为准。
 
@@ -66,9 +68,30 @@ POC-0 已按获确认的拆分发布为 [13 张本地执行票据](../.scratch/p
 
 ## Current Phase
 
+
+### MVP 收口现状（2026-10-26）
+
+**MVP-6 有保留签收，milestone 已关闭。** [#235 第二轮](https://github.com/ZombieIce/PrajnaQuant/issues/235#issuecomment-6400855766)六项工程复核全部 pass；[#182 最终裁决](https://github.com/ZombieIce/PrajnaQuant/issues/182#issuecomment-6406038887)接受工程边界并保留证据处理流程 fail、第一轮 fail 和事件记录，不能表述为无保留整体通过。这里只校准已发生的验证状态，本次文档修改没有重跑引擎或补充真实数据证明。
+
+| 范围 | 当前能力及证据 |
+| --- | --- |
+| Domain / Data | scale-18 定点、证券/时间契约、不可变 Raw、版本化 Dataset、Arrow/Parquet 和重建校验；真实输入及详细证据仅存本机 |
+| Factor / Cache / Experiment | 封闭因子定义、依赖图、持久 Cache、Grid/List、Run 身份与 Execution 来源、Summary/Standard/Full、重放/提升/diff 和 Run 级并行；定义与入口见 [Experiment](../crates/prajna-experiment/README.md) |
+| Vector / Fast Event | 已实现共同语义子集及精确 Fast 账户/VP 账本；固定名单验收核对逐日账本、费用、两存储重放、Python/CLI 与 Vector/Fast 对拍 |
+| Accurate | 已接真实 Nautilus worker、独立合成金标准及差异分类；单 Venue/币种、long-only、lot 等受限映射；PIT ETF 不接 Accurate，成本/规模缺口见 [A16](../poc/mvp4-cost/adr0013/README.md) |
+| Python | 本地 `prajna` 已提供类型化实验、Arrow 读取、As-of Decision 和两阶段共用 Rust 执行；逐 bar 推迟，Notebook/依赖闭包和性能边界见 [绑定文档](../crates/prajna-py/README.md) |
+| 真实 ETF 工程验证 | 固定名单、规定决策窗口加独立预热；覆盖门禁排除预热，禁止成交核对原生 Fill；Raw 完整性、重算、账本、事件抽查、覆盖/证据等级及仓库/PR/Issue 公开范围复核通过 |
+| 旧 A 股 / Web | 旧仓库、ETF 研究和本地 Axum/React 保留；生产日更、股票回测、远程认证及新平台统一 Web 作业未由本轮验收 |
+
+适用限制：固定名单为 `retrospective_static`，有幸存者偏差；UNKNOWN 定义已收窄，不能据低占比推断所有历史事实可靠。成交采用首笔成交价，有同 Session 卖买资金先后和复牌订单参与假设；终止按最后行情收盘估值，并非实际清算款或到账日。真实场景未触发非整手/非零取整余数及实际终止持仓退出/结算，继续依既有合成覆盖，不从零事件推断真实走通。该结论仅为工程验收，不作为策略历史业绩、完整历史 Universe 或实盘正确性证明。
+
+公开边界：真实行情、账本、详细计数、hash/运行身份和报告仅留本机；历史公开例外按 [#182 有限保留裁决](https://github.com/ZombieIce/PrajnaQuant/issues/182#issuecomment-6399837187)，当前文档已定向清理。仓库/PR/Issue 扫描 pass 与聊天工具输出处理流程 fail 分开记录，不声称既有日志或外部副本已撤回。
+
+以下阶段实现细节保留原验证范围；“尚未验证/未通过”指该阶段当时的证据，不能替代上面的最终收口状态。后面的旧 A 股扫描另有适用范围说明。
+
 MVP-0 数据层现有 D7 instruments、bars、sessions 的 Arrow schema、Domain/RecordBatch 双向转换和 Parquet 读写；写入固定 ZSTD level 3、65,536 row group，记录规范 DSV 并校验主键按存储值字节序严格递增；读取校验表名、schema version 与字段定义。Bar 反序列化需调用方提供 Session 以验证区间。MVP-1 M3 已增加 D7 `execution_status` schema v1、行类型、Arrow 双向转换与通用 Parquet 读写，主键为 `(instrument_id, session_date)`，`available_at` 可空；无记录表示 UNKNOWN 且不可交易。MVP-1 M4 的 `synthetic-etf-daily` v3 已将状态接入 Normalizer、publish 和 rebuild：每个标的×calendar session（含缺 bar 日）一行，override 覆盖默认，按 fixture timezone 转换 `available_at`；可选 `opens` 使用逐日 open 计算 high/low。发布 manifest 含排序后的四张表；v1/v2 的输出与 fixture DSV 保持不变。`prajna-data` 按 `(id, version)` 注册 Normalizer，Raw 数值字面量直接解析为 scale-18 定点数，按 D6 的 `normalized/<table>/<dsv>/` 布局发布，以 manifest 标识已提交版本；同 DSV 写入由文件锁串行化。`rebuild_dataset` 可由 manifest 与不可变 Raw 重算并逐字段验证 manifest core，但不发布 Parquet。MVP-0 契约（身份、定点、切日、Raw 布局、DSV/逻辑 hash）与对应实现/测试位置见 [`ADR 0015`](decisions/0015-mvp-0-data-contracts.md)；schema 7 发布链未改，字段映射见 [`schema-7-publish-manifest-mapping.md`](contracts/schema-7-publish-manifest-mapping.md)。验证层次：`cargo fmt --all -- --check`、`cargo clippy -p prajna-data --all-targets --locked --offline -- -D warnings`、`cargo test -p prajna-data --locked --offline` 均通过；v3 的 30 行状态、两条 override、bars 逻辑 hash、幂等发布与删除 `normalized/` 后 rebuild 有 Rust 集成测试。Full workflow 的 `pyarrow-interop` job 仍用 v1 发布三表并校验 schema、metadata、行数与抽样数值（出现跳过即失败，[运行 36880462840](https://github.com/ZombieIce/PrajnaQuant/actions/runs/36880462840) 通过）；以上全部只用合成 fixture。未实现：Crypto 日线 UTC→`+08:00` 重采样的拒绝规则、Python 端逻辑 hash、真实数据 Normalizer、已发布快照导入、分区、quarantine、CLI。该能力不证明真实市场数据、PIT 或量化收益。
 
-MVP-6 历史 Catalog/PIT Universe（#175）已有离线输入构建模块：核验 Raw 引用、生命周期 ID/代码复用、双向名录差异与覆盖门禁、公告双时态属性和每 Session 的 Universe/Run Spec 输入片段；三生命周期 × 十 Session 合成测试验证。当前名录仅作诊断，不改变冻结历史版本。真实历史名录重建、公告完整提取与国内宽基清单未验证，#172 来源门禁仍 unresolved，不能宣称真实 PIT 或 #175 最终验收。契约及缺口见 [`pit-universe-contract.md`](pit-universe-contract.md)。#176 离线双源执行证据/方向门禁、Eligible Set 和独立 `etf_tri_momentum@1` 输入构建：冻结 DSV 原文重建校验、PIT 限价/证据、61/60/20 Session 与金额阈值、HALTED 延续/UNKNOWN 缺失及缓存身份；合成 fixture 验证，不证明真实开盘可成交或公司行动覆盖。#177 新增显式 `s2_pit_rotation` 的 Experiment/Run/结果消费：逐 Session PIT/Eligible 与输入/规则身份在 Summary 也保留，独立持久 Risk Exit、HALTED/UNKNOWN/方向门禁和普通 pending 替换；3×10 手算 lot 守恒与 Vector/Fast `vector_parity + full_target` 日对拍通过合成验证。#231 新增独立固定名单 Universe 选择器，将名单与版本纳入 Experiment/Run Spec 身份，按 Catalog 生命周期筛上市与终止，并在 Run Spec 披露 `retrospective_static` 和 `survivorship_bias`；61 Session 门槛与 Vector/Fast Event 日对拍通过合成验证。既有宽基 PIT 选择及其身份保持不变；固定名单不构成经验证的完整历史 Universe，也未使用真实 ETF 数据。#221 新增由 v4 Dataset、公开身份表与本机逐字段 Raw citations 离线组装 CatalogInput 的模块：按 TDX 逐日代码表对齐生命周期（代码复用与显式 `legal_name_change` 全称变更）、每行 `contract` 引用提供 `contract_raw_sha256`、公告日期从冻结 Raw 取得并按 P6 生效、更名公告晚于新全称生效日时物理身份从可知 Session 开始、身份/代码表差异按证据等级记录、排除或保留为 UNKNOWN，正式身份无 TDX 代码表时保留其官方存续期，二级无代码表佐证只排除该二级生命周期（全部行均为二级时整代码排除），官方存续期内代码表退出后的有价 Bar 只记 source disagreement，UNKNOWN 覆盖分母按公告存续期而不是代码表首末次出现；更名 P6 空档已接入 v6 逐行隔离与 v4 市场加载/UNKNOWN 覆盖链路，保留空档前后有效 Bar；更名日期与全称引用须绑定同一公告 Raw。合成测试覆盖上市前后、终止、复用、全称变更、缺行、不一致、合同与字段级证据；真实 v4 Dataset、身份表与 citations 尚未验证。持仓方向回归另验 sizing 后实际 side（含费用反转）、受阻买入冻结数量、增量 Retry 与整次卖出延期。PIT Vector 显式本金纳入身份，与 Fast 共用实际资金/raw price 的货币→数量 sizing 顺序；精确持仓输入不从 f64 NAV/权重重建，相邻 fee-only/数量 quantum 与不同本金、价格、费用分项有手算合成回归。共享 `vector_parity + full_target` 计划在卖出结算后按实际现金（不含应收）预留未付费用并按 InstrumentId 升序只削减必要买腿；仅当未量化计划可支付时才修正，否则明确失败；受影响路径为 `fast_event@4/@5/@6` 与 `vector@4/@5/@6`，lot、独立 retry 与旧 Vector 保持原身份。#180 新增 `szse-etf-frozen@2` 的结构化 Corporate Action 规范化表及顺序 TRI；已知事件/规则进入 DSV、Factor Cache 与 PIT Run 身份，价格跳变漏检形成 UNKNOWN，合成测试覆盖分红、折算、迟到公告、漏检和无事件回归。#181 接入 action-aware PIT Fast Event/Vector：Fast Event 将分红权利、净额应收/发放、折算取整和终止清算记入定点账本；Vector 将现金与应收拆分为非投资部分并逐日对拍。Run Spec/Summary 声明 Return Basis、税率、逐 ETF 覆盖及不完整原因，Standard/Full 保存非空事件行；3×10 合成金标准验证事件账本与无行动 price-return 回归。`observed_raw_set_only` 仍明确标为不完整，未知清算金额不置零。可选 `mvp6-terminal-settlement@1` 研究估值语义在 Catalog 于运行窗口内终止时，按最后一个终止前 Bar 的原始 close 将持仓直接结转现金；Fast Event lot 使用 `fast_event@3`，Fast Event `vector_parity` 与 PIT Vector 在 #263 后使用 `fast_event@6` / `vector@6`，并保存独立结算记录，披露未使用实际清算款/日期，无可用 Bar 时失败。仅 3×10 合成 fixture 验证，不代表真实清算金额、日期或最终收益。#274 将正常 parity full-target 的目标权重、drift、F8 候选费用基数与扣费后目标数量改为排除分红/清算应收的可投资权益，应收仍计入总 NAV；成本率与换手率改用调仓前总 NAV 分母，换手率分子为已执行候选费用基数（含 fee-only）。受影响路径为 `fast_event@7/@8/@9` 与 `vector@7/@8/@9`，独立 retry、Accurate 与旧 Static Universe Vector 保持既有规则；#275 将正常 lot full-target 接入同一可投资权益定义，保留整手/最低佣金/实际费用/现金限量，normal/action/terminal 身份为 fast_event@10/@11/@12；仅合成回归；保留真实输入的定向本机复跑（非 #234 验收）见 PR，#234 六项验收未通过。 #254 新增 `mvp6-market-driven@1` TRI 规则版本：仅该版本跳过所有 liquidation 事实并记录诊断；行动 Dataset 与既有规则版本身份不变，终止结算仍由 #255 处理。`DerivedMarket` 可从 Raw provenance 重建绑定 v4 市场 DSV 的 @7 Dataset；合成 v4→@7→TRI 回归验证缺日期/金额清算被跳过并记录、旧语义仍报错、分红/折算数值一致及行动账本排除清算。未运行真实数据。`cninfo-fund-index@1`（#202）增加 Rust 本机公告采集、158xxx/159xxx 管理人 orgId 映射、逐基金分页核对、v2 多标签分类、公告全称序列及 v1 PDF 字段提取；标准 Manifest 绑定规则/提取器版本和 PDF Raw，缺口保留 unknown，详见 [`cninfo-fund-index-contract.md`](cninfo-fund-index-contract.md)。仅合成 Mock/提取边界验证；Poppler 外部工具、真实附件排版及真实采集尚未验证，名称可用时刻仍待 P6 日历连接，事件金额/登记日待新浪/Session 契约连接，旧 Bars Normalizer 不变。公告全集证明与 P0-2 真实收益验收未通过。旧 Static Universe 路径不变；#178 Python PIT View 已接同一 Catalog/Eligible、已可知状态和 Rust 动量；固定名单 `fixed_universe` 的显式、缺省与显式 null 语义与 CLI 共用同一 Rust plan，生成时不再回退 broad-index，无效名单与生命周期边界一致，最低数量仍由共用 Engine 检查；正权重/排序受 Eligible 与风险排除约束、零目标可请求离池退出，执行仍由共用 Engine 负责；合成 Python/CLI 身份/hash 与回调 S2 对拍验证见 `prajna-py`，不证明真实 PIT。契约见 [`derived-etf-input-contract.md`](derived-etf-input-contract.md) 与 [`Experiment`](../crates/prajna-experiment/README.md)。
+MVP-6 历史 Catalog/PIT Universe（#175）已有离线输入构建模块：核验 Raw 引用、生命周期 ID/代码复用、双向名录差异与覆盖门禁、公告双时态属性和每 Session 的 Universe/Run Spec 输入片段；三生命周期 × 十 Session 合成测试验证。当前名录仅作诊断，不改变冻结历史版本。真实历史名录重建、公告完整提取与国内宽基清单未验证，#172 来源门禁仍 unresolved，不能宣称真实 PIT 或 #175 最终验收。契约及缺口见 [`pit-universe-contract.md`](pit-universe-contract.md)。#176 离线双源执行证据/方向门禁、Eligible Set 和独立 `etf_tri_momentum@1` 输入构建：冻结 DSV 原文重建校验、PIT 限价/证据、61/60/20 Session 与金额阈值、HALTED 延续/UNKNOWN 缺失及缓存身份；合成 fixture 验证，不证明真实开盘可成交或公司行动覆盖。#177 新增显式 `s2_pit_rotation` 的 Experiment/Run/结果消费：逐 Session PIT/Eligible 与输入/规则身份在 Summary 也保留，独立持久 Risk Exit、HALTED/UNKNOWN/方向门禁和普通 pending 替换；3×10 手算 lot 守恒与 Vector/Fast `vector_parity + full_target` 日对拍通过合成验证。#231 新增独立固定名单 Universe 选择器，将名单与版本纳入 Experiment/Run Spec 身份，按 Catalog 生命周期筛上市与终止，并在 Run Spec 披露 `retrospective_static` 和 `survivorship_bias`；61 Session 门槛与 Vector/Fast Event 日对拍通过合成验证。既有宽基 PIT 选择及其身份保持不变；固定名单不构成经验证的完整历史 Universe，也未使用真实 ETF 数据。#221 新增由 v4 Dataset、公开身份表与本机逐字段 Raw citations 离线组装 CatalogInput 的模块：按 TDX 逐日代码表对齐生命周期（代码复用与显式 `legal_name_change` 全称变更）、每行 `contract` 引用提供 `contract_raw_sha256`、公告日期从冻结 Raw 取得并按 P6 生效、更名公告晚于新全称生效日时物理身份从可知 Session 开始、身份/代码表差异按证据等级记录、排除或保留为 UNKNOWN，正式身份无 TDX 代码表时保留其官方存续期，二级无代码表佐证只排除该二级生命周期（全部行均为二级时整代码排除），官方存续期内代码表退出后的有价 Bar 只记 source disagreement，UNKNOWN 覆盖分母按公告存续期而不是代码表首末次出现；更名 P6 空档已接入 v6 逐行隔离与 v4 市场加载/UNKNOWN 覆盖链路，保留空档前后有效 Bar；更名日期与全称引用须绑定同一公告 Raw。合成测试覆盖上市前后、终止、复用、全称变更、缺行、不一致、合同与字段级证据；真实 v4 Dataset、身份表与 citations 尚未验证。持仓方向回归另验 sizing 后实际 side（含费用反转）、受阻买入冻结数量、增量 Retry 与整次卖出延期。PIT Vector 显式本金纳入身份，与 Fast 共用实际资金/raw price 的货币→数量 sizing 顺序；精确持仓输入不从 f64 NAV/权重重建，相邻 fee-only/数量 quantum 与不同本金、价格、费用分项有手算合成回归。共享 `vector_parity + full_target` 计划在卖出结算后按实际现金（不含应收）预留未付费用并按 InstrumentId 升序只削减必要买腿；仅当未量化计划可支付时才修正，否则明确失败；受影响路径为 `fast_event@4/@5/@6` 与 `vector@4/@5/@6`，lot、独立 retry 与旧 Vector 保持原身份。#180 新增 `szse-etf-frozen@2` 的结构化 Corporate Action 规范化表及顺序 TRI；已知事件/规则进入 DSV、Factor Cache 与 PIT Run 身份，价格跳变漏检形成 UNKNOWN，合成测试覆盖分红、折算、迟到公告、漏检和无事件回归。#181 接入 action-aware PIT Fast Event/Vector：Fast Event 将分红权利、净额应收/发放、折算取整和终止清算记入定点账本；Vector 将现金与应收拆分为非投资部分并逐日对拍。Run Spec/Summary 声明 Return Basis、税率、逐 ETF 覆盖及不完整原因，Standard/Full 保存非空事件行；3×10 合成金标准验证事件账本与无行动 price-return 回归。`observed_raw_set_only` 仍明确标为不完整，未知清算金额不置零。可选 `mvp6-terminal-settlement@1` 研究估值语义在 Catalog 于运行窗口内终止时，按最后一个终止前 Bar 的原始 close 将持仓直接结转现金；Fast Event lot 使用 `fast_event@3`，Fast Event `vector_parity` 与 PIT Vector 在 #263 后使用 `fast_event@6` / `vector@6`，并保存独立结算记录，披露未使用实际清算款/日期，无可用 Bar 时失败。仅 3×10 合成 fixture 验证，不代表真实清算金额、日期或最终收益。#274 将正常 parity full-target 的目标权重、drift、F8 候选费用基数与扣费后目标数量改为排除分红/清算应收的可投资权益，应收仍计入总 NAV；成本率与换手率改用调仓前总 NAV 分母，换手率分子为已执行候选费用基数（含 fee-only）。受影响路径为 `fast_event@7/@8/@9` 与 `vector@7/@8/@9`，独立 retry、Accurate 与旧 Static Universe Vector 保持既有规则；#275 将正常 lot full-target 接入同一可投资权益定义，保留整手/最低佣金/实际费用/现金限量，normal/action/terminal 身份为 fast_event@10/@11/@12；仅合成回归；保留真实输入的定向本机复跑（非 #234 验收）见 PR，当时 #234 六项验收未通过，现以本节顶部最终收口状态为准。 #254 新增 `mvp6-market-driven@1` TRI 规则版本：仅该版本跳过所有 liquidation 事实并记录诊断；行动 Dataset 与既有规则版本身份不变，终止结算仍由 #255 处理。`DerivedMarket` 可从 Raw provenance 重建绑定 v4 市场 DSV 的 @7 Dataset；合成 v4→@7→TRI 回归验证缺日期/金额清算被跳过并记录、旧语义仍报错、分红/折算数值一致及行动账本排除清算。未运行真实数据。`cninfo-fund-index@1`（#202）增加 Rust 本机公告采集、158xxx/159xxx 管理人 orgId 映射、逐基金分页核对、v2 多标签分类、公告全称序列及 v1 PDF 字段提取；标准 Manifest 绑定规则/提取器版本和 PDF Raw，缺口保留 unknown，详见 [`cninfo-fund-index-contract.md`](cninfo-fund-index-contract.md)。仅合成 Mock/提取边界验证；Poppler 外部工具、真实附件排版及真实采集尚未验证，名称可用时刻仍待 P6 日历连接，事件金额/登记日待新浪/Session 契约连接，旧 Bars Normalizer 不变。公告全集证明与 P0-2 真实收益验收未通过。旧 Static Universe 路径不变；#178 Python PIT View 已接同一 Catalog/Eligible、已可知状态和 Rust 动量；固定名单 `fixed_universe` 的显式、缺省与显式 null 语义与 CLI 共用同一 Rust plan，生成时不再回退 broad-index，无效名单与生命周期边界一致，最低数量仍由共用 Engine 检查；正权重/排序受 Eligible 与风险排除约束、零目标可请求离池退出，执行仍由共用 Engine 负责；合成 Python/CLI 身份/hash 与回调 S2 对拍验证见 `prajna-py`，不证明真实 PIT。契约见 [`derived-etf-input-contract.md`](derived-etf-input-contract.md) 与 [`Experiment`](../crates/prajna-experiment/README.md)。
 
 MVP-6 #201 新增 `szse-etf-frozen@3`：可配置代码段（默认含 158xxx）、TDX 主源/腾讯逐格补位、每 Bar 的 `bar_sources` 来源与除权参考价、补位成交额 null；旧 v1/v2 身份与输出不变。合成测试验证参考价分红/折算跳变、无成交阻止补位、来源修订与重放；补位采集工具按 #172 §3 直连/限速/退避/停源，仅用合成响应测试。#203 新增 `szse-etf-frozen@4` 的逐日完整 TDX 代码表及 Catalog v2 生命周期/法定全称消费，Catalog v1 与 Normalizer v1-v3 身份不变；合成测试覆盖配置范围、空/缺失快照、代码缺席重现、全称变更和版本化名称清单。#204 新增 `szse-etf-frozen@5`：新浪 qfq/hfq 来源精确解析、生命周期切分以及 TDX 参考价、因子事件、cninfo 结构化行动的 fail-closed 三方校验；研究回放按行动日期映射到 Catalog 生命周期身份，缺少发放日/清算金额列为覆盖缺口。仅合成数据验证，未用真实行情/公告验收；公告完整性和真实收益仍未证明。#205 增加显式 `szse-derived-open@2`：消费 v3/v4 来源/TDX 昨收与 Catalog 生命周期边界、官方文号/类别/PIT 限价规则、越界行情报错、UNKNOWN 不成交，保留旧 v1 身份；Eligible 固定 Session 窗口不跳过补位缺金额，cninfo 分类风险经 P6 日历连接 Rust RiskSignals 与 Experiment。合成测试覆盖停牌/无 Bar、涨跌停方向、除权参考价、缺证据/规则、补位缺金额、生命周期切分及 Vector/Fast 持久风险退出。未用真实行情/公告重建；实际宽基名单仍未验证。#217 已增加 [SZSE 基金限价规则目录](szse-fund-limit-rules.md) 和公开版本化配置，覆盖法规制度切换、0.001 tick、默认 10% 与官方特例 20%；五只固定 ETF 的基金级 PIT 类别赋值来源尚未验证，配置逐只标注覆盖窗口内 UNKNOWN，不含 Raw 哈希，也不声称上市/终止生命周期。#232 新增离线 UNKNOWN 覆盖评估：按 Catalog 生命周期与决策 Session 计分母，逐格只归属一个原因并记录 Catalog、Derived Market、执行状态、规则表与公司行动版本；5% 总量和 20% 单 ETF 底线进入 Run Spec，超限标为工程验收失败但保留完成的运行结果；逐格报告写入本机 acceptance 目录，公开 Run Spec 摘要只含逐 ETF 数量/比例。边界与确定性以合成 fixture 验证，不代表真实行情覆盖或 MVP-6 最终验收。MVP-6 票据 #174 已实现离线部分：`freeze_raw` 冻结本地供应商原文为 `file_import` Raw，带媒体类型、来源、端点、观察时间、条款结论、覆盖与缺口；`szse-etf-frozen` v1 Normalizer 直接解码冻结原文——深交所 `monthList` 月历 JSON（须为完整自然月）、TDX `g4day` ZIP 的 `sz*.cod/.md1`（主 Bars）、腾讯 `fqkline` 未复权 `day`（仅对拍）、cninfo 公告查询 JSON（标题关键词分类，未命中记 `unclassified`）——生成 Bars、`source_crosscheck` 与 `announcements`，DSV 只由原文字节与 Normalizer 版本决定。范围限 159000–159999；同一事实（含按证券/日期保留的无成交观察）的重复下载去重，取值不同或有成交/无成交冲突则 `source_revision_conflict`；仅修订包可生成新 DSV，不保留旧 Bar。Bars 的 `available_at` 保持 Unknown（无来源证据）；公告仅在公告日之后、冻结日历连续覆盖下的下一个会话收盘起可用，否则 fail-closed；不推导执行状态，缺行或无成交记录记 UNKNOWN 缺口。仅合成供应商格式 fixture 验证；[#172](https://github.com/ZombieIce/PrajnaQuant/issues/172) 的用途授权子项已由负责人解决；来源覆盖、公告全集、双源配对与 PIT 规则映射由 [#190](https://github.com/ZombieIce/PrajnaQuant/issues/190) 补审，当前仍为 `unresolved`，#179 开工门禁未通过；[#206](https://github.com/ZombieIce/PrajnaQuant/issues/206) 增加本机 TDX/SZSE Raw 导入与覆盖门禁、候选代码导出，以及 Sina/CNInfo/Tencent 本地采集入口；v4 仅在窗口覆盖闭合时发布。实现与合成测试已覆盖工作流，但本票未执行新网络采集，也未证明真实源覆盖、P21 对拍、全期间规则或 PIT；不得解释为 MVP-6 完成或真实收益验收。
 
@@ -79,7 +102,7 @@ MVP-6 本机采集与冻结的当前验证边界：已执行完整窗口行情�
 
 ### MVP-1 D7 面板与 Factor 定义模型
 
-`prajna-research` 的 `load_panel` 已能校验 DSV manifest 并读取 schema v1 的 instruments、sessions、bars，按 Venue 生成有序 Session/Instrument 列表及完整 instrument × session Polars 网格。缺 bar 保持价格 null 且 `has_bar=false`；`close_available_at` 保留源 available_at 的 UTC 纳秒值，不推定为 close。M6 Factor 定义模型实现了四种封闭的 v1 种类、强类型参数与窗口/有限权重校验；canonical JSON 将权重编码为 IEEE-754 bit pattern 十六进制字符串，区分 `0.0` 与 `-0.0`。`RotationScore` 依赖可拓扑排序、去重及检测环；status、Availability Assumption 字符串和 v1 Arrow/Polars 长表 schema 已定义。验证限于单元/集成契约测试与 `synthetic-etf-daily` v1 的 3×10 面板 fixture；`compute_base` 已用 Polars lazy 实现 momentum、样本 volatility 与 trend_filter，按完整 Session 网格计算所需窗口、状态优先级与输入最大可用时刻，支持显式 TreatUnknownAsTsClose 假设；`compute_composite` 已按 `(instrument_id, session_date)` 对齐依赖，传播 `insufficient_window > missing_input > unknown_availability`、计算加权 rotation_score 并在 trend=0 时过滤，所有行保留依赖中已知 available_at 的最大值（全部未知则 null）。依赖角色、schema、键网格和状态/值不一致显式报错；零权重不免除依赖，trend=None 不依赖 trend_filter。`compute` 按 FactorGraph 拓扑序直接计算整棵依赖树，同次调用复用共享定义，无持久缓存。3×10 v1 DSV 手算、状态组合、乱序键对齐、trend 过滤、缺失窗口和可用时刻测试覆盖其合成口径。尚未实现持久缓存或执行，不代表真实数据、PIT 或量化结果能力。
+`prajna-research` 的 `load_panel` 已能校验 DSV manifest 并读取 schema v1 的 instruments、sessions、bars，按 Venue 生成有序 Session/Instrument 列表及完整 instrument × session Polars 网格。缺 bar 保持价格 null 且 `has_bar=false`；`close_available_at` 保留源 available_at 的 UTC 纳秒值，不推定为 close。M6 Factor 定义模型实现了四种封闭的 v1 种类、强类型参数与窗口/有限权重校验；canonical JSON 将权重编码为 IEEE-754 bit pattern 十六进制字符串，区分 `0.0` 与 `-0.0`。`RotationScore` 依赖可拓扑排序、去重及检测环；status、Availability Assumption 字符串和 v1 Arrow/Polars 长表 schema 已定义。验证限于单元/集成契约测试与 `synthetic-etf-daily` v1 的 3×10 面板 fixture；`compute_base` 已用 Polars lazy 实现 momentum、样本 volatility 与 trend_filter，按完整 Session 网格计算所需窗口、状态优先级与输入最大可用时刻，支持显式 TreatUnknownAsTsClose 假设；`compute_composite` 已按 `(instrument_id, session_date)` 对齐依赖，传播 `insufficient_window > missing_input > unknown_availability`、计算加权 rotation_score 并在 trend=0 时过滤，所有行保留依赖中已知 available_at 的最大值（全部未知则 null）。依赖角色、schema、键网格和状态/值不一致显式报错；零权重不免除依赖，trend=None 不依赖 trend_filter。`compute` 按 FactorGraph 拓扑序直接计算整棵依赖树，同次调用复用共享定义，无持久缓存。3×10 v1 DSV 手算、状态组合、乱序键对齐、trend 过滤、缺失窗口和可用时刻测试覆盖其合成口径。上述描述限直接 compute 路径；持久缓存与执行见下文 M9/Vector/Fast 实现，合成验证不代表真实数据/PIT 能力。
 
 M9 Factor Cache 身份键由 `cache::key::FactorKey` 确定性生成；`cache::store::FactorCache` 按依赖拓扑逐节点查缓存、仅计算未命中节点，并将 `values.parquet` 与含 key object、fv、字节 SHA-256 和行数的 `meta.json` 写入 staging 后 fsync、原子发布。命中校验键、文件 hash、schema 和行数；损坏返回 Integrity，不静默删除或重算。并发发布时逻辑内容相同则复用，内容不同时返回 Conflict；`compute_count` 支持观察实际计算次数。集成测试以合成 3×10 面板验证 rotation_score 的首次 4 节点计算、二次零计算、Parquet 字节稳定、损坏拒绝、并发相同/不同结果及 staging 清理。以上不代表真实数据或 point-in-time 能力。
 
@@ -124,7 +147,11 @@ Rust [`prajna-adapter`](../crates/prajna-adapter/README.md) 已提供与进程�
 
 验收结论为**部分通过**，逐项代码/测试/真实数据/API/浏览器证据见 [`handoffs/batch1-integration-acceptance.md`](handoffs/batch1-integration-acceptance.md)。A 执行延期与审计、B 通用冻结快照/状态输入、C 发布版本/固定快照复跑在共享工作区完成集成。最终真实实验 `4e076758-8069-4e0e-9269-1d3f9d574159` 使用 Universe `d8811237-6c37-4189-86b8-9b05fbccc405` 的版本 `3fcfed9c-b8c1-4cce-a933-bc2b79ebf0da`、快照 `fe1dd8a3-d227-4e06-bb98-f0a6b3be0f34`；241 日、32 笔成交、逐日账本最大 NAV 误差 0。快照没有交易状态列，报告 `execution_status_mode=legacy_bar_only`，所以真实执行状态仍未验收。五 ETF 行情日期覆盖完整，但逐行来源缺失使总体审计为 `unverified`；Universe 成员是 `retrospective_static`，实验成员覆盖为 `gaps`，不升级为 verified PIT。
 
-## P0 — Correctness
+## 旧 A 股路径：Correctness 与产品扫描
+
+以下 P0/P1/P2、Completed/Missing、风险及问题保留旧 `quant-research`/Web 扫描范围；其缺失项不覆盖新平台已实现的 Factor Cache、Python 绑定、CI 或公司行动账本。新平台范围与最终验证状态见上方“Current Phase”。
+
+### P0 — Correctness
 
 1. **历史 ETF universe 的幸存者偏差（已确认机制）**：`sql/schema.sql::research.etf_daily_bar` 按 `core.instrument.asset_class` 当前值过滤历史；`data.rs` 对该视图全量出快照。无交易所历史名录、上市/退市有效期和可知时刻，也无最短上市历史门槛。历史回测的选股全集不可信为 PIT；以当前观察池解释结果。
 2. **ETF 原始价不是总回报（已确认机制）**：`data.rs` 读未复权 open/close，`backtest.rs` 未处理分红/拆分/现金派发，实验假设也明确分红只在源价体现时才反映。长期收益/排名可能失真；影响大小待逐产品验证。
@@ -132,19 +159,19 @@ Rust [`prajna-adapter`](../crates/prajna-adapter/README.md) 已提供与进程�
 
 P0-1 历史 ETF PIT、P0-2 公司行动/总回报仍未解决；P0-3 超额持仓触发机制、交易状态 fail-closed 和未执行腿审计已有代码及合成测试，但状态来源历史覆盖/可知时点、旧快照兼容路径与目标 underfill 语义仍未验收，因此继续标为未解决。静态检查**没有找到**未来收益进入策略分数、rolling 读未来下标、反向 shift、backfill 或全样本归一化。严格 PIT、分红和真实市场交易可执行性仍未被完整证明。`docs/time-model.md` 细述时序和未决边界。
 
-## P1 — ETF Rotation MVP
+### P1 — ETF Rotation MVP
 
 轮动评分、趋势过滤、Top-N、等权目标、下一行情日开盘成交、成本和参数网格已实现；因子/策略配置没有正式解耦；Universe 已有管理 API 和版本感知 runner 入口，但既有 CLI/Web 尚未连接运行入口，benchmark、归一化、权重模式未可配置。常规仓库快照运行需要合格 ETF 历史和至少 1000 条沪深300基准行；本批隔离五 ETF 场景明确不使用基准。优先任务见 HANDOFF，仅推荐一个。
 
-## P2 — Research Platform
+### P2 — Research Platform
 
 Signal Registry Lite、单因子 Pearson/Rank IC、分组/multi-horizon 报告、结果读取 API 与 ECharts 图已实现一部分；新增的 Universe 写 API 仅管理配置，不启动作业。通用因子版本、参数元数据、缓存、因子相关矩阵、因子值分布、组合换手、研究 Python 包、实验服务 API 均缺失。当前报告的自相关与 Top 分位成分更换率是部分诊断，不是组合换手。
 
-## P3 — Future
+### P3 — Future
 
 严格 PIT ETF/股票数据、财务披露时点、行业/指数历史成分、分钟/实盘、分布式执行、生产级数据发布和十年数据查询优化仍是未来方向；旧设计文件详述目标，不能视为当前状态。
 
-## Completed
+### Completed
 
 - Rust 仓库：原文/hash/run、版本化日线、ETF 当前分类、基础日历/状态/复权因子表与研究视图、Parquet 导出。
 - Rust 研究：快照 manifest/hash、带日历与标签口径的单因子评价（Pearson/Rank IC、coverage/missing、Top 分位更换与分数自相关）、综合轮动评分、批量参数扫描、T 后下一行情日开盘模拟、绩效/成本汇总、实验 JSON。
@@ -155,25 +182,25 @@ Signal Registry Lite、单因子 Pearson/Rank IC、分组/multi-horizon 报告�
 - 策略详情新增持仓资金占用率及各标的持股数量曲线，两者与净值/回撤共用所选日期区间；新增逐标的已实现、浮动与总盈亏表。盈亏使用移动加权平均成本并披露成本/估值规则；旧报告无字段时明确提示重跑。口径与兼容规则见 `docs/decisions/0006-instrument-pnl-attribution.md`。
 - 发布差异接口与重复发布保护有单测；Batch 2 集成全工作区为仓库 14 项、研究 56 项通过，真实五 ETF opt-in 1 项默认 ignored。格式、Clippy 和前端构建均通过；真实状态覆盖仍未验。
 
-## In Progress
+### In Progress
 
 Batch 2 的增量同步/行情页已有代码、隔离小样本和合成浏览器验收；仍待可信五 ETF 状态源的历史覆盖与可用时刻、带真实状态快照复跑、生产股票证券身份与日线验证、生产调度启用、历史 PIT 成员和公司行动。既有 `research-output/` 历史样本不自动升级为新规则结果。
 
-## Missing
+### Missing
 
 - 历史 ETF 名录与上市/退市日期、可信历史交易状态源及可知时刻、涨跌停规则执行、公司行动/分红总回报。
 - Factor Values 持久缓存、因子值分布统计和相关矩阵；独立订单流水/可查询持仓时序 API；统一策略 ID/版本。回测报告内已有逐日持仓快照，但尚无独立持仓查询接口。MVP-1 M13 的独立标准库因子值/status、排名与 Vector 组合结果金标准已覆盖 3×10 和 64×252 v2（含 trend20）合成 fixture（见 `poc/mvp1-golden/`）；这不是 PIT 或真实市场数据验证。
 - 后端 Sortino、Win Rate、Benchmark Return、Excess Return、Tracking Error、Information Ratio。
 - 历史指数成分 provider 和完整覆盖证明；当前指数 Universe API 对历史成分明确返回空、unknown/gaps。
 - React 的基准/超额净值、月度收益热图、年度收益、逐日持仓权重、组合换手、成交与交易成本明细；因子值分布与相关热图。策略详情现有逐日资金占用率、持股数量和期末逐标的盈亏摘要。
-- 实验/Universe API 的完整 cursor 分页、日期范围与大型序列聚合仍缺；证券搜索和日线 API 已有范围与 cursor，但十年生产性能未验。Universe 历史成分 provider、完整覆盖的独立跨交易所日历尚未连接；ETF 快照已有 SZSE 完整月份旁车及共同缺日校验；异步运行状态/队列与网页发起新运行尚无。独立 CI、迁移回填/版本管理工具、Python 研究包。
-- 初级产品目标已有显式证券列表的股票/ETF 通用研究快照、增量同步/恢复、证券 K 线 API/页面代码及合成或隔离小样本测试；仍缺生产股票快照验收、股票回测、正式 Python 因子研究互通、已启用的日更调度与远程认证/部署配置。现有 Rust 本地 CLI/loopback API 不等于这些生产能力。
+- 实验/Universe API 的完整 cursor 分页、日期范围与大型序列聚合仍缺；证券搜索和日线 API 已有范围与 cursor，但十年生产性能未验。Universe 历史成分 provider、完整覆盖的独立跨交易所日历尚未连接；ETF 快照已有 SZSE 完整月份旁车及共同缺日校验；异步运行状态/队列与网页发起新运行尚无。旧路径迁移回填/版本管理工具及与新平台研究包的统一产品工作流。
+- 初级产品目标已有显式证券列表的股票/ETF 通用研究快照、增量同步/恢复、证券 K 线 API/页面代码及合成或隔离小样本测试；仍缺生产股票快照验收、股票回测、旧 Web 与新 Python 研究入口互通、已启用的日更调度与远程认证/部署配置。现有 Rust 本地 CLI/loopback API 不等于这些生产能力。
 
-## Known Bugs
+### Known Bugs
 
 - 旧 `factor_dashboard.html` 仍有重叠收益累计图，但**不被当前服务使用**。轮动策略被误标成单动量的页面问题已在本批修复，见集成验收；若 API 摘要无新 `score_mode`，页面标为评分口径未知。
 
-## Test Coverage and Gaps
+### Test Coverage and Gaps
 
 - 新增的固定样例覆盖真实 `rotation_scores`→Top-1→回测路径、D 收盘信号/下一行情日开盘成交、买卖与换仓、100 股手数、比例佣金/最低佣金、双向滑点、末日信号未执行、每日现金/整数持仓/最近收盘估值与 NAV 恒等式，以及缺单 ETF bar 时跳过卖出和沿用旧 close。固定场景手算成本为佣金 700、税 0、滑点 630、总成本 1,330；这些是合成数据回归值，不是实际数据验收。
 - 回测 JSON 现记录逐日证券持仓、市值及资金占用率曲线和逐标的盈亏归因。3 ETF×10 日固定账本校验每日现金+持仓市值=权益、占用率公式、加权平均成本归因，以及标的盈亏合计=组合期末权益变化；旧 JSON 缺字段时保持可读并显示无持仓快照提示。策略页展示占用率、标的持股数量曲线和盈亏表。盈亏契约见 `docs/decisions/0006-instrument-pnl-attribution.md`。
@@ -183,14 +210,14 @@ Batch 2 的增量同步/行情页已有代码、隔离小样本和合成浏览�
 - Universe HTTP handler 的 test-only 3 证券×10 交易日合成 fixture 覆盖 D4 三成员、D10 空池、完整覆盖与能力阻断；该 fixture 的 `verified_pit` 仅代表合成真值。前端构建通过。真实历史成分和生产数据验证未完成。
 - 既有测试另覆盖仓库入库/版本/锁、基础 rolling、排名统计、手数及单笔成本、参数展开。
 
-## Technical Debt
+### Technical Debt
 
 - Rust 与 Python 重复行情入库原型；Rust 动量/轮动分数有多条路径，统一口径/版本未完成。保留现状，权威边界见 `architecture.md`。
 - `backtest.rs::metrics` 是权威；未使用旧 `dashboard.html` 自算绩效。React 计算最多 60 个报告日的简单滚动 Rank IC 均值；它是展示派生值，未持久化在 Rust 报告。
 - `server.rs` 完整加载/返回大 JSON，无分页/降采样；API 前缀 `/api` 和 `/api/v1` 不统一；前端 JS 构建约 1.27 MB（本轮 build 警告）。
 - 本轮对本机 402 MB DuckDB 只读查询 `research.etf_daily_bar` 分源计数时发生 DuckDB `OutOfMemoryException`，提示临时磁盘使用达到 20.6 GiB 上限。它是该视图大范围查询的已观察可扩展性问题；未分析执行计划前不归因到特定 JOIN。快照 manifest 曾记录约 143.6 万 ETF 行，不能据此推断全市场覆盖。
 
-## Risks
+### Risks
 
 - 缺旧仓卖出 open 或状态不明确/不可交易会延期整笔调仓；目标买腿缺 open/状态不明确/不可交易会跳过并写原因，仍可能造成 Top-N underfill；缺估值 bar 沿用旧收盘价。旧格式快照仍按 bar-only 行为成交；新版状态快照也未执行 side-specific 涨跌停限制。
 - 当前 ETF 分类与证券名称来自当前观察，不支持历史退市产品；原始价格复权/分红缺失；`observed_at` 不等于公开时刻。
@@ -198,7 +225,7 @@ Batch 2 的增量同步/行情页已有代码、隔离小样本和合成浏览�
 - `signal-research` 当前默认 horizon 按日历开盘标签推进；显式 `close_to_close` 诊断 horizon 按单证券有效 bar 计，不一定等于 n 个市场交易日。旧报告未写入独立因子口径版本。
 - 本地数据目录被忽略，新 Agent 无法只凭 Git 仓库复现已有真实数据结果；需注明数据获取/快照来源与 hash。
 
-## Open Questions
+### Open Questions
 
 1. 研究基准是 ETF 价格收益还是含分红总回报？需要具体 ETF 分红/拆分样本和数据源证据。
 2. 历史 ETF universe 的权威名录、上市/终止日期及可知时刻从何获得？未解决前结果只能限定为当前观察池实验。
