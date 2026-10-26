@@ -68,8 +68,6 @@ POC-0 已按获确认的拆分发布为 [13 张本地执行票据](../.scratch/p
 
 ## Current Phase
 
-
-
 ### MVP 收口现状（2026-10-26）
 
 **MVP-6 有保留签收，milestone 已关闭。** [#235 第二轮](https://github.com/ZombieIce/PrajnaQuant/issues/235#issuecomment-6400855766)六项工程复核全部 pass；[#182 最终裁决](https://github.com/ZombieIce/PrajnaQuant/issues/182#issuecomment-6406038887)接受工程边界并保留证据处理流程 fail、第一轮 fail 和事件记录，不能表述为无保留整体通过。这里只校准已发生的验证状态，本次文档修改没有重跑引擎或补充真实数据证明。
