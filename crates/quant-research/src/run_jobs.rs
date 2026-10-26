@@ -138,6 +138,7 @@ pub struct RunJobApi(Arc<Inner>);
 struct Inner {
     output: PathBuf,
     experiment_cli: PathBuf,
+    process_inspector: PathBuf,
     gate: Mutex<Store>,
     wake: Condvar,
     universes: Arc<UniverseStore>,
@@ -178,6 +179,7 @@ impl RunJobApi {
         let api = Self(Arc::new(Inner {
             output,
             experiment_cli,
+            process_inspector: PathBuf::from("ps"),
             gate: Mutex::new(Store::default()),
             wake: Condvar::new(),
             universes,
@@ -196,9 +198,24 @@ impl RunJobApi {
         universes: Arc<UniverseStore>,
         experiment_cli: PathBuf,
     ) -> Self {
+        Self::without_worker_with_process_inspector(
+            output,
+            universes,
+            experiment_cli,
+            PathBuf::from("ps"),
+        )
+    }
+    #[cfg(test)]
+    fn without_worker_with_process_inspector(
+        output: PathBuf,
+        universes: Arc<UniverseStore>,
+        experiment_cli: PathBuf,
+        process_inspector: PathBuf,
+    ) -> Self {
         Self(Arc::new(Inner {
             output,
             experiment_cli,
+            process_inspector,
             gate: Mutex::new(Store::default()),
             wake: Condvar::new(),
             universes,
@@ -275,15 +292,20 @@ impl RunJobApi {
             }
             let process_group_generation = task.process_group_generation;
             let cleanup_error = task.process_group_id.and_then(|process_group_id| {
-                terminate_process_group(process_group_id, task.task_id, process_group_generation)
-                    .err()
-                    .map(|error| {
-                        (
-                            process_group_id,
-                            process_group_generation,
-                            process_group_cleanup_error(error),
-                        )
-                    })
+                terminate_process_group(
+                    process_group_id,
+                    task.task_id,
+                    process_group_generation,
+                    &self.0.process_inspector,
+                )
+                .err()
+                .map(|error| {
+                    (
+                        process_group_id,
+                        process_group_generation,
+                        process_group_cleanup_error(error),
+                    )
+                })
             });
             match task.status {
                 ExperimentTaskStatus::Queued | ExperimentTaskStatus::Running => interrupt_task(
@@ -300,7 +322,8 @@ impl RunJobApi {
             task.process_group_generation = cleanup_error
                 .as_ref()
                 .and_then(|(_, generation, _)| *generation);
-            if let Some((_, _, error)) = cleanup_error {
+            if let Some((_, _, mut error)) = cleanup_error {
+                preserve_cli_error_on_cleanup(&mut error, task.error.as_ref());
                 task.error = Some(error);
                 task.updated_at = chrono::Utc::now().to_rfc3339();
             }
@@ -884,9 +907,13 @@ impl RunJobApi {
             .stdin(Stdio::null())
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::piped());
-        let mut process =
-            ExperimentProcessGroup::spawn(&mut command, task.task_id, process_generation)
-                .map_err(|error| run_error("experiment_cli_spawn_failed", &error.to_string()))?;
+        let mut process = ExperimentProcessGroup::spawn_with_process_inspector(
+            &mut command,
+            task.task_id,
+            process_generation,
+            self.0.process_inspector.clone(),
+        )
+        .map_err(|error| run_error("experiment_cli_spawn_failed", &error.to_string()))?;
         let group_id = process.process_group_id();
         let stderr = process.take_stderr().ok_or_else(|| {
             run_error(
@@ -896,40 +923,35 @@ impl RunJobApi {
         })?;
         let stderr_reader = thread::spawn(move || read_bounded_stderr(stderr));
         self.set_experiment_process_group(task.task_id, Some(group_id), Some(process_generation))?;
-        let status = match process.wait() {
-            Ok(status) => status,
+        let wait = match process.wait() {
+            Ok(wait) => wait,
             Err(error) => {
                 drop(stderr_reader);
                 return Err(process_group_cleanup_error(error));
             }
         };
+        let stderr = match stderr_reader.join() {
+            Ok(Ok(stderr)) => Ok(stderr),
+            Ok(Err(error)) => Err(run_error(
+                "experiment_cli_stderr_capture_failed",
+                &error.to_string(),
+            )),
+            Err(_) => Err(run_error(
+                "experiment_cli_stderr_capture_failed",
+                "CLI stderr capture worker stopped unexpectedly",
+            )),
+        };
+        if let Some(cleanup_error) = wait.cleanup_error {
+            return Err(process_group_cleanup_error_with_cli(
+                cleanup_error,
+                &wait.status,
+                &stderr,
+            ));
+        }
         self.set_experiment_process_group(task.task_id, None, None)?;
-        let stderr = stderr_reader
-            .join()
-            .map_err(|_| {
-                run_error(
-                    "experiment_cli_stderr_capture_failed",
-                    "CLI stderr capture worker stopped unexpectedly",
-                )
-            })?
-            .map_err(|error| {
-                run_error("experiment_cli_stderr_capture_failed", &error.to_string())
-            })?;
-        if !status.success() {
-            let mut details = json!({
-                "exit_code": status.code(),
-                "stderr": stderr.text,
-                "stderr_truncated": stderr.truncated,
-            });
-            #[cfg(unix)]
-            if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(&status) {
-                details["signal"] = json!(signal);
-            }
-            return Err(RunError {
-                code: "experiment_cli_failed".into(),
-                message: "prajna-experiment exited unsuccessfully".into(),
-                details,
-            });
+        let stderr = stderr?;
+        if let Some(error) = experiment_cli_error(&wait.status, &stderr) {
+            return Err(error);
         }
         let bytes = fs::read(&stdout_path)
             .map_err(|error| run_error("experiment_cli_output_missing", &error.to_string()))?;
@@ -1442,6 +1464,71 @@ fn process_group_cleanup_error(error: ProcessGroupCleanupError) -> RunError {
     }
 }
 
+fn cli_result_details(status: &ExitStatus, stderr: &BoundedStderr) -> Value {
+    let mut details = json!({
+        "success": status.success(),
+        "exit_code": status.code(),
+        "stderr": stderr.text,
+        "stderr_truncated": stderr.truncated,
+    });
+    #[cfg(unix)]
+    if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(status) {
+        details["signal"] = json!(signal);
+    }
+    details
+}
+
+fn experiment_cli_error(status: &ExitStatus, stderr: &BoundedStderr) -> Option<RunError> {
+    if status.success() {
+        return None;
+    }
+    Some(RunError {
+        code: "experiment_cli_failed".into(),
+        message: "prajna-experiment exited unsuccessfully".into(),
+        details: cli_result_details(status, stderr),
+    })
+}
+
+fn process_group_cleanup_error_with_cli(
+    error: ProcessGroupCleanupError,
+    status: &ExitStatus,
+    stderr: &Result<BoundedStderr, RunError>,
+) -> RunError {
+    let mut cleanup_error = process_group_cleanup_error(error);
+    match stderr {
+        Ok(stderr) => {
+            if let Some(cli_error) = experiment_cli_error(status, stderr) {
+                cleanup_error.details = json!({"cli_error": cli_error});
+            } else {
+                cleanup_error.details = json!({
+                    "cli_result": cli_result_details(status, stderr),
+                });
+            }
+        }
+        Err(capture_error) => {
+            let mut details = json!({
+                "exit_code": status.code(),
+                "stderr_capture_error": {
+                    "code": capture_error.code,
+                    "message": capture_error.message,
+                },
+            });
+            #[cfg(unix)]
+            if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(status) {
+                details["signal"] = json!(signal);
+            }
+            cleanup_error.details = details;
+        }
+    }
+    cleanup_error
+}
+
+fn preserve_cli_error_on_cleanup(cleanup_error: &mut RunError, previous: Option<&RunError>) {
+    if let Some(cli_error) = previous.and_then(|error| error.details.get("cli_error")) {
+        cleanup_error.details = json!({"cli_error": cli_error});
+    }
+}
+
 fn read_bounded_stderr(mut stderr: ChildStderr) -> std::io::Result<BoundedStderr> {
     let mut retained = Vec::with_capacity(MAX_CLI_STDERR_BYTES);
     let mut buffer = [0_u8; 4096];
@@ -1467,14 +1554,35 @@ struct ExperimentProcessGroup {
     process_group_id: u32,
     task_id: Uuid,
     process_generation: Uuid,
+    process_inspector: PathBuf,
     finished: bool,
 }
 
+struct ProcessGroupWait {
+    status: ExitStatus,
+    cleanup_error: Option<ProcessGroupCleanupError>,
+}
+
 impl ExperimentProcessGroup {
+    #[cfg(test)]
     fn spawn(
         command: &mut Command,
         task_id: Uuid,
         process_generation: Uuid,
+    ) -> std::io::Result<Self> {
+        Self::spawn_with_process_inspector(
+            command,
+            task_id,
+            process_generation,
+            PathBuf::from("ps"),
+        )
+    }
+
+    fn spawn_with_process_inspector(
+        command: &mut Command,
+        task_id: Uuid,
+        process_generation: Uuid,
+        process_inspector: PathBuf,
     ) -> std::io::Result<Self> {
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         command
@@ -1498,6 +1606,7 @@ impl ExperimentProcessGroup {
                 process_group_id,
                 task_id,
                 process_generation,
+                process_inspector,
                 finished: false,
             })
         }
@@ -1511,17 +1620,22 @@ impl ExperimentProcessGroup {
         self.child.stderr.take()
     }
 
-    fn wait(&mut self) -> Result<ExitStatus, ProcessGroupCleanupError> {
+    fn wait(&mut self) -> Result<ProcessGroupWait, ProcessGroupCleanupError> {
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
             let status = self.child.wait().map_err(ProcessGroupCleanupError::Io)?;
-            terminate_process_group(
+            let cleanup_error = terminate_process_group(
                 self.process_group_id,
                 self.task_id,
                 Some(self.process_generation),
-            )?;
-            self.finished = true;
-            Ok(status)
+                &self.process_inspector,
+            )
+            .err();
+            self.finished = cleanup_error.is_none();
+            Ok(ProcessGroupWait {
+                status,
+                cleanup_error,
+            })
         }
         #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         {
@@ -1538,6 +1652,7 @@ impl ExperimentProcessGroup {
             self.process_group_id,
             self.task_id,
             Some(self.process_generation),
+            &self.process_inspector,
         )?;
         let status = self.child.wait()?;
         self.finished = true;
@@ -1554,6 +1669,7 @@ impl Drop for ExperimentProcessGroup {
             self.process_group_id,
             self.task_id,
             Some(self.process_generation),
+            &self.process_inspector,
         );
         let _ = self.child.wait();
         self.finished = true;
@@ -1565,6 +1681,7 @@ fn terminate_process_group(
     process_group_id: u32,
     task_id: Uuid,
     process_generation: Option<Uuid>,
+    process_inspector: &FsPath,
 ) -> Result<(), ProcessGroupCleanupError> {
     if process_group_id <= 1 || process_group_id > i32::MAX as u32 {
         return Err(ProcessGroupCleanupError::Io(std::io::Error::new(
@@ -1572,8 +1689,13 @@ fn terminate_process_group(
             "invalid experiment process group id",
         )));
     }
-    let ownership = verify_process_group_owner(process_group_id, task_id, process_generation)
-        .map_err(|_| ProcessGroupCleanupError::OwnershipUnverified)?;
+    let ownership = verify_process_group_owner(
+        process_group_id,
+        task_id,
+        process_generation,
+        process_inspector,
+    )
+    .map_err(|_| ProcessGroupCleanupError::OwnershipUnverified)?;
     match ownership {
         ProcessGroupOwnership::Absent => return Ok(()),
         ProcessGroupOwnership::Owned => {}
@@ -1603,8 +1725,9 @@ fn verify_process_group_owner(
     process_group_id: u32,
     task_id: Uuid,
     process_generation: Option<Uuid>,
+    process_inspector: &FsPath,
 ) -> std::io::Result<ProcessGroupOwnership> {
-    let members = process_group_members(process_group_id)?;
+    let members = process_group_members(process_group_id, process_inspector)?;
     if members.is_empty() {
         return Ok(ProcessGroupOwnership::Absent);
     }
@@ -1612,7 +1735,7 @@ fn verify_process_group_owner(
         return Ok(ProcessGroupOwnership::Unverified);
     };
     for pid in members {
-        let mut command = Command::new("ps");
+        let mut command = Command::new(process_inspector);
         #[cfg(target_os = "macos")]
         command.args(["-Eww", "-p"]);
         #[cfg(target_os = "linux")]
@@ -1628,7 +1751,7 @@ fn verify_process_group_owner(
             return Ok(ProcessGroupOwnership::Owned);
         }
     }
-    if process_group_members(process_group_id)?.is_empty() {
+    if process_group_members(process_group_id, process_inspector)?.is_empty() {
         Ok(ProcessGroupOwnership::Absent)
     } else {
         Ok(ProcessGroupOwnership::Unverified)
@@ -1649,8 +1772,13 @@ fn process_listing_matches_owner(listing: &str, task_id: Uuid, process_generatio
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn process_group_members(process_group_id: u32) -> std::io::Result<Vec<u32>> {
-    let output = Command::new("ps").args(["-axo", "pid=,pgid="]).output()?;
+fn process_group_members(
+    process_group_id: u32,
+    process_inspector: &FsPath,
+) -> std::io::Result<Vec<u32>> {
+    let output = Command::new(process_inspector)
+        .args(["-axo", "pid=,pgid="])
+        .output()?;
     if !output.status.success() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
@@ -1674,6 +1802,7 @@ fn terminate_process_group(
     _process_group_id: u32,
     _task_id: Uuid,
     _process_generation: Option<Uuid>,
+    _process_inspector: &FsPath,
 ) -> Result<(), ProcessGroupCleanupError> {
     Err(ProcessGroupCleanupError::Io(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
@@ -1949,6 +2078,7 @@ mod tests {
         let api = RunJobApi(Arc::new(Inner {
             output: dir.path().into(),
             experiment_cli: PathBuf::from("prajna-experiment"),
+            process_inspector: PathBuf::from("ps"),
             gate: Mutex::new(Store::default()),
             wake: Condvar::new(),
             universes: Arc::new(UniverseStore::new(dir.path())),
@@ -2296,7 +2426,18 @@ mod tests {
             ExperimentProcessGroup::spawn(&mut command, task_id, process_generation).unwrap();
 
         match process.wait() {
-            Ok(status) => assert!(status.success()),
+            Ok(wait) => {
+                assert!(wait.status.success());
+                if let Some(error) = wait.cleanup_error {
+                    if error.kind() == std::io::ErrorKind::PermissionDenied {
+                        eprintln!("SKIP: sandbox denies process-group inspection/signaling");
+                        let _ = process.child.wait();
+                        process.finished = true;
+                        return;
+                    }
+                    panic!("process-group cleanup failed: {error:?}");
+                }
+            }
             Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
                 eprintln!("SKIP: sandbox denies process-group signaling");
                 let _ = process.child.wait();
@@ -2530,6 +2671,121 @@ mod tests {
         assert_eq!(after_restart["error"]["details"]["stderr"], stderr);
         assert_eq!(after_restart["error"]["details"]["stderr_truncated"], true);
     }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_cli_diagnostic_survives_process_group_cleanup_failure_and_restart() {
+        const EXPECTED_STDERR_LIMIT: usize = 16 * 1024;
+        let dir = tempfile::tempdir().unwrap();
+        let cli_path = dir.path().join("failing-prajna-experiment");
+        let inspector_path = dir.path().join("denied-ps");
+        fs::write(
+            &cli_path,
+            "#!/bin/sh\nprintf 'synthetic cleanup-failure cause\\n' >&2\n/usr/bin/head -c 32768 /dev/zero | /usr/bin/tr '\\000' x >&2\nexit 23\n",
+        )
+        .unwrap();
+        fs::write(&inspector_path, "#!/bin/sh\nexit 1\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&cli_path, fs::Permissions::from_mode(0o755)).unwrap();
+            fs::set_permissions(&inspector_path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let (api, _legacy_request, _fixture_dir) =
+            fixture_with_cli_and_process_inspector(cli_path.clone(), inspector_path.clone());
+        let (status, accepted) = api_json(
+            &api,
+            "POST",
+            "/api/v1/tasks/experiments",
+            Some(json!({
+                "idempotency_key": "failing-cli-cleanup-key",
+                "definition": {"name":"synthetic cleanup-failing task"}
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let task_id = Uuid::parse_str(accepted["task"]["task_id"].as_str().unwrap()).unwrap();
+
+        assert!(api.process_next_queued());
+        let (status, failed) = api_json(
+            &api,
+            "GET",
+            &format!("/api/v1/tasks/experiments/{task_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(failed["status"], "failed");
+        assert_eq!(
+            failed["error"]["code"],
+            "process_group_ownership_unverified"
+        );
+        assert_eq!(
+            failed["error"]["details"]["cli_error"]["code"],
+            "experiment_cli_failed"
+        );
+        let failure_details = failed["error"]["details"].clone();
+        let cli_details = &failed["error"]["details"]["cli_error"]["details"];
+        assert_eq!(cli_details["exit_code"], 23);
+        let stderr = cli_details["stderr"].as_str().unwrap();
+        assert!(stderr.starts_with("synthetic cleanup-failure cause\n"));
+        assert_eq!(stderr.len(), EXPECTED_STDERR_LIMIT);
+        assert_eq!(cli_details["stderr_truncated"], true);
+
+        let task_dir = api.0.output.join("tasks").join(task_id.to_string());
+        let persisted: Value =
+            serde_json::from_slice(&fs::read(task_dir.join("task.json")).unwrap()).unwrap();
+        assert_eq!(
+            persisted["error"]["details"]["cli_error"]["details"]["exit_code"],
+            23
+        );
+        assert_eq!(
+            persisted["error"]["details"]["cli_error"]["details"]["stderr"],
+            stderr
+        );
+
+        let restarted = RunJobApi::without_worker_with_process_inspector(
+            api.0.output.clone(),
+            Arc::new(UniverseStore::new(&api.0.output)),
+            cli_path,
+            inspector_path,
+        );
+        restarted.recover();
+        restarted.recover();
+        let (status, after_restart) = api_json(
+            &restarted,
+            "GET",
+            &format!("/api/v1/tasks/experiments/{task_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            after_restart["error"]["code"],
+            "process_group_ownership_unverified"
+        );
+        assert_eq!(after_restart["error"]["details"], failure_details);
+        assert_eq!(
+            after_restart["error"]["details"]["cli_error"]["code"],
+            "experiment_cli_failed"
+        );
+        assert_eq!(
+            after_restart["error"]["details"]["cli_error"]["details"]["exit_code"],
+            23
+        );
+        assert_eq!(
+            after_restart["error"]["details"]["cli_error"]["details"]["stderr"],
+            stderr
+        );
+        assert_eq!(
+            after_restart["error"]["details"]["cli_error"]["details"]["stderr_truncated"],
+            true
+        );
+        let persisted_after_restart: Value =
+            serde_json::from_slice(&fs::read(task_dir.join("task.json")).unwrap()).unwrap();
+        assert_eq!(persisted_after_restart["error"]["details"], failure_details);
+    }
     fn sample_request() -> SubmitRun {
         SubmitRun {
             kind: "etf_strategy".into(),
@@ -2647,6 +2903,13 @@ mod tests {
     }
 
     fn fixture_with_cli(experiment_cli: PathBuf) -> (RunJobApi, SubmitRun, tempfile::TempDir) {
+        fixture_with_cli_and_process_inspector(experiment_cli, PathBuf::from("ps"))
+    }
+
+    fn fixture_with_cli_and_process_inspector(
+        experiment_cli: PathBuf,
+        process_inspector: PathBuf,
+    ) -> (RunJobApi, SubmitRun, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let universe_store = Arc::new(UniverseStore::new(root));
@@ -2739,7 +3002,12 @@ mod tests {
                 ..ExperimentConfig::default()
             },
         };
-        let api = RunJobApi::without_worker(root.into(), universe_store, experiment_cli);
+        let api = RunJobApi::without_worker_with_process_inspector(
+            root.into(),
+            universe_store,
+            experiment_cli,
+            process_inspector,
+        );
         (api, request, dir)
     }
 }
