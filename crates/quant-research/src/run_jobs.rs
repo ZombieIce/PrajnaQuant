@@ -21,9 +21,9 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, VecDeque},
     fs,
-    io::Write,
+    io::{Read, Write},
     path::{Path as FsPath, PathBuf},
-    process::{Child, Command, ExitStatus, Stdio},
+    process::{Child, ChildStderr, Command, ExitStatus, Stdio},
     sync::{Arc, Condvar, Mutex},
     thread,
 };
@@ -40,6 +40,7 @@ const MAX_SNAPSHOT_ROWS: i64 = 2_000_000;
 const MAX_UNIVERSE_INSTRUMENTS: usize = 100;
 const EXPERIMENT_TASK_TYPE: &str = "prajna_experiment";
 const EXPERIMENT_TASK_VERSION: u32 = 1;
+const MAX_CLI_STDERR_BYTES: usize = 16 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -101,6 +102,8 @@ pub struct ExperimentTask {
     pub request_sha256: String,
     pub idempotency_key: String,
     pub process_group_id: Option<u32>,
+    #[serde(default)]
+    pub process_group_generation: Option<Uuid>,
     pub result: Option<Value>,
     pub error: Option<RunError>,
 }
@@ -270,16 +273,15 @@ impl RunJobApi {
             {
                 continue;
             }
+            let process_group_generation = task.process_group_generation;
             let cleanup_error = task.process_group_id.and_then(|process_group_id| {
-                terminate_process_group(process_group_id)
+                terminate_process_group(process_group_id, task.task_id, process_group_generation)
                     .err()
                     .map(|error| {
-                        let message = format!(
-                            "could not terminate experiment process group {process_group_id}: {error}"
-                        );
                         (
                             process_group_id,
-                            blocker("process_group_cleanup_failed", &message),
+                            process_group_generation,
+                            process_group_cleanup_error(error),
                         )
                     })
             });
@@ -294,8 +296,11 @@ impl RunJobApi {
             }
             task.process_group_id = cleanup_error
                 .as_ref()
-                .map(|(process_group_id, _)| *process_group_id);
-            if let Some((_, error)) = cleanup_error {
+                .map(|(process_group_id, _, _)| *process_group_id);
+            task.process_group_generation = cleanup_error
+                .as_ref()
+                .and_then(|(_, generation, _)| *generation);
+            if let Some((_, _, error)) = cleanup_error {
                 task.error = Some(error);
                 task.updated_at = chrono::Utc::now().to_rfc3339();
             }
@@ -458,6 +463,7 @@ impl RunJobApi {
             request_sha256: request_hash.clone(),
             idempotency_key: request.idempotency_key.clone(),
             process_group_id: None,
+            process_group_generation: None,
             result: None,
             error: None,
         };
@@ -819,10 +825,11 @@ impl RunJobApi {
                         target.stage = "complete".into();
                         target.result = Some(result);
                         target.process_group_id = None;
+                        target.process_group_generation = None;
                         target.error = None;
                     }
                     Err(error) => {
-                        fail_experiment_task(target, &error.code, &error.message);
+                        fail_experiment_task(target, error);
                     }
                 }
                 target.updated_at = chrono::Utc::now().to_rfc3339();
@@ -865,6 +872,7 @@ impl RunJobApi {
         let stdout_path = directory.join("cli.stdout");
         let stdout = fs::File::create(&stdout_path)
             .map_err(|error| run_error("task_output_create_failed", &error.to_string()))?;
+        let process_generation = Uuid::new_v4();
         let mut command = Command::new(&self.0.experiment_cli);
         command
             .arg("run")
@@ -875,20 +883,52 @@ impl RunJobApi {
             .arg("summary")
             .stdin(Stdio::null())
             .stdout(Stdio::from(stdout))
-            .stderr(Stdio::null());
-        let mut process = ExperimentProcessGroup::spawn(&mut command)
-            .map_err(|error| run_error("experiment_cli_spawn_failed", &error.to_string()))?;
+            .stderr(Stdio::piped());
+        let mut process =
+            ExperimentProcessGroup::spawn(&mut command, task.task_id, process_generation)
+                .map_err(|error| run_error("experiment_cli_spawn_failed", &error.to_string()))?;
         let group_id = process.process_group_id();
-        self.set_experiment_process_group(task.task_id, Some(group_id))?;
-        let status = process
-            .wait()
-            .map_err(|error| run_error("process_group_cleanup_failed", &error.to_string()))?;
-        self.set_experiment_process_group(task.task_id, None)?;
+        let stderr = process.take_stderr().ok_or_else(|| {
+            run_error(
+                "experiment_cli_stderr_missing",
+                "CLI stderr pipe is missing",
+            )
+        })?;
+        let stderr_reader = thread::spawn(move || read_bounded_stderr(stderr));
+        self.set_experiment_process_group(task.task_id, Some(group_id), Some(process_generation))?;
+        let status = match process.wait() {
+            Ok(status) => status,
+            Err(error) => {
+                drop(stderr_reader);
+                return Err(process_group_cleanup_error(error));
+            }
+        };
+        self.set_experiment_process_group(task.task_id, None, None)?;
+        let stderr = stderr_reader
+            .join()
+            .map_err(|_| {
+                run_error(
+                    "experiment_cli_stderr_capture_failed",
+                    "CLI stderr capture worker stopped unexpectedly",
+                )
+            })?
+            .map_err(|error| {
+                run_error("experiment_cli_stderr_capture_failed", &error.to_string())
+            })?;
         if !status.success() {
+            let mut details = json!({
+                "exit_code": status.code(),
+                "stderr": stderr.text,
+                "stderr_truncated": stderr.truncated,
+            });
+            #[cfg(unix)]
+            if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(&status) {
+                details["signal"] = json!(signal);
+            }
             return Err(RunError {
                 code: "experiment_cli_failed".into(),
                 message: "prajna-experiment exited unsuccessfully".into(),
-                details: json!({"exit_code": status.code()}),
+                details,
             });
         }
         let bytes = fs::read(&stdout_path)
@@ -914,6 +954,7 @@ impl RunJobApi {
         &self,
         task_id: Uuid,
         process_group_id: Option<u32>,
+        process_group_generation: Option<Uuid>,
     ) -> Result<(), RunError> {
         let mut store = self
             .0
@@ -925,6 +966,7 @@ impl RunJobApi {
             .get_mut(&task_id)
             .ok_or_else(|| run_error("task_missing", "experiment task is missing"))?;
         task.process_group_id = process_group_id;
+        task.process_group_generation = process_group_generation;
         task.stage = if process_group_id.is_some() {
             "running_experiment_cli".into()
         } else {
@@ -1280,19 +1322,21 @@ fn fail_job(job: &mut RunJob, code: &str, message: &str) {
     job.updated_at = chrono::Utc::now().to_rfc3339();
     job.error = Some(blocker(code, message))
 }
-fn fail_experiment_task(task: &mut ExperimentTask, code: &str, message: &str) {
+fn fail_experiment_task(task: &mut ExperimentTask, error: RunError) {
     task.status = ExperimentTaskStatus::Failed;
     task.stage = "failed".into();
-    if code != "process_group_cleanup_failed" {
+    if !error.code.starts_with("process_group_") {
         task.process_group_id = None;
+        task.process_group_generation = None;
     }
     task.updated_at = chrono::Utc::now().to_rfc3339();
-    task.error = Some(blocker(code, message));
+    task.error = Some(error);
 }
 fn interrupt_task(task: &mut ExperimentTask, message: &str) {
     task.status = ExperimentTaskStatus::Interrupted;
     task.stage = "interrupted".into();
     task.process_group_id = None;
+    task.process_group_generation = None;
     task.updated_at = chrono::Utc::now().to_rfc3339();
     task.error = Some(blocker("worker_interrupted", message));
 }
@@ -1358,16 +1402,88 @@ fn atomic_write(path: &FsPath, bytes: &[u8]) -> std::io::Result<()> {
     fs::rename(temp, path)
 }
 
+struct BoundedStderr {
+    text: String,
+    truncated: bool,
+}
+
+#[derive(Debug)]
+enum ProcessGroupCleanupError {
+    OwnershipUnverified,
+    Io(std::io::Error),
+}
+
+impl From<std::io::Error> for ProcessGroupCleanupError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl ProcessGroupCleanupError {
+    #[cfg(test)]
+    fn kind(&self) -> std::io::ErrorKind {
+        match self {
+            Self::OwnershipUnverified => std::io::ErrorKind::PermissionDenied,
+            Self::Io(error) => error.kind(),
+        }
+    }
+}
+
+fn process_group_cleanup_error(error: ProcessGroupCleanupError) -> RunError {
+    match error {
+        ProcessGroupCleanupError::OwnershipUnverified => blocker(
+            "process_group_ownership_unverified",
+            "process group task ownership or generation could not be verified; cleanup was refused",
+        ),
+        ProcessGroupCleanupError::Io(error) => blocker(
+            "process_group_cleanup_failed",
+            &format!("could not clean up experiment process group: {error}"),
+        ),
+    }
+}
+
+fn read_bounded_stderr(mut stderr: ChildStderr) -> std::io::Result<BoundedStderr> {
+    let mut retained = Vec::with_capacity(MAX_CLI_STDERR_BYTES);
+    let mut buffer = [0_u8; 4096];
+    let mut truncated = false;
+    loop {
+        let read = stderr.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        let remaining = MAX_CLI_STDERR_BYTES.saturating_sub(retained.len());
+        let keep = remaining.min(read);
+        retained.extend_from_slice(&buffer[..keep]);
+        truncated |= keep < read;
+    }
+    Ok(BoundedStderr {
+        text: String::from_utf8_lossy(&retained).into_owned(),
+        truncated,
+    })
+}
+
 struct ExperimentProcessGroup {
     child: Child,
     process_group_id: u32,
+    task_id: Uuid,
+    process_generation: Uuid,
     finished: bool,
 }
 
 impl ExperimentProcessGroup {
-    fn spawn(command: &mut Command) -> std::io::Result<Self> {
+    fn spawn(
+        command: &mut Command,
+        task_id: Uuid,
+        process_generation: Uuid,
+    ) -> std::io::Result<Self> {
         #[cfg(any(target_os = "macos", target_os = "linux"))]
-        command.process_group(0);
+        command
+            .process_group(0)
+            .env("PRAJNA_EXPERIMENT_TASK_ID", task_id.to_string())
+            .env(
+                "PRAJNA_EXPERIMENT_PROCESS_GENERATION",
+                process_generation.to_string(),
+            );
         #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         return Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
@@ -1380,6 +1496,8 @@ impl ExperimentProcessGroup {
             Ok(Self {
                 child,
                 process_group_id,
+                task_id,
+                process_generation,
                 finished: false,
             })
         }
@@ -1389,26 +1507,38 @@ impl ExperimentProcessGroup {
         self.process_group_id
     }
 
-    fn wait(&mut self) -> std::io::Result<ExitStatus> {
+    fn take_stderr(&mut self) -> Option<ChildStderr> {
+        self.child.stderr.take()
+    }
+
+    fn wait(&mut self) -> Result<ExitStatus, ProcessGroupCleanupError> {
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
-            let status = self.child.wait()?;
-            terminate_process_group(self.process_group_id)?;
+            let status = self.child.wait().map_err(ProcessGroupCleanupError::Io)?;
+            terminate_process_group(
+                self.process_group_id,
+                self.task_id,
+                Some(self.process_generation),
+            )?;
             self.finished = true;
             Ok(status)
         }
         #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         {
-            Err(std::io::Error::new(
+            Err(ProcessGroupCleanupError::Io(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
                 "experiment task process groups require macOS or Linux",
-            ))
+            )))
         }
     }
 
     #[cfg(test)]
-    fn terminate(&mut self) -> std::io::Result<ExitStatus> {
-        terminate_process_group(self.process_group_id)?;
+    fn terminate(&mut self) -> Result<ExitStatus, ProcessGroupCleanupError> {
+        terminate_process_group(
+            self.process_group_id,
+            self.task_id,
+            Some(self.process_generation),
+        )?;
         let status = self.child.wait()?;
         self.finished = true;
         Ok(status)
@@ -1420,34 +1550,135 @@ impl Drop for ExperimentProcessGroup {
         if self.finished {
             return;
         }
-        let _ = terminate_process_group(self.process_group_id);
+        let _ = terminate_process_group(
+            self.process_group_id,
+            self.task_id,
+            Some(self.process_generation),
+        );
         let _ = self.child.wait();
         self.finished = true;
     }
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn terminate_process_group(process_group_id: u32) -> std::io::Result<()> {
+fn terminate_process_group(
+    process_group_id: u32,
+    task_id: Uuid,
+    process_generation: Option<Uuid>,
+) -> Result<(), ProcessGroupCleanupError> {
     if process_group_id <= 1 || process_group_id > i32::MAX as u32 {
-        return Err(std::io::Error::new(
+        return Err(ProcessGroupCleanupError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "invalid experiment process group id",
-        ));
+        )));
     }
-    let process_group = Pid::from_raw(process_group_id as i32)
-        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let ownership = verify_process_group_owner(process_group_id, task_id, process_generation)
+        .map_err(|_| ProcessGroupCleanupError::OwnershipUnverified)?;
+    match ownership {
+        ProcessGroupOwnership::Absent => return Ok(()),
+        ProcessGroupOwnership::Owned => {}
+        ProcessGroupOwnership::Unverified => {
+            return Err(ProcessGroupCleanupError::OwnershipUnverified);
+        }
+    }
+    let process_group = Pid::from_raw(process_group_id as i32).ok_or_else(|| {
+        ProcessGroupCleanupError::Io(std::io::Error::from(std::io::ErrorKind::InvalidInput))
+    })?;
     match kill_process_group(process_group, Signal::KILL) {
         Ok(()) | Err(rustix::io::Errno::SRCH) => Ok(()),
-        Err(error) => Err(error.into()),
+        Err(error) => Err(ProcessGroupCleanupError::Io(error.into())),
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProcessGroupOwnership {
+    Absent,
+    Owned,
+    Unverified,
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn verify_process_group_owner(
+    process_group_id: u32,
+    task_id: Uuid,
+    process_generation: Option<Uuid>,
+) -> std::io::Result<ProcessGroupOwnership> {
+    let members = process_group_members(process_group_id)?;
+    if members.is_empty() {
+        return Ok(ProcessGroupOwnership::Absent);
+    }
+    let Some(process_generation) = process_generation else {
+        return Ok(ProcessGroupOwnership::Unverified);
+    };
+    for pid in members {
+        let mut command = Command::new("ps");
+        #[cfg(target_os = "macos")]
+        command.args(["-Eww", "-p"]);
+        #[cfg(target_os = "linux")]
+        command.args(["eww", "-p"]);
+        let output = match command.arg(pid.to_string()).output() {
+            Ok(output) if output.status.success() => output,
+            Ok(_) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        let process = String::from_utf8_lossy(&output.stdout);
+        if process_listing_matches_owner(&process, task_id, process_generation) {
+            return Ok(ProcessGroupOwnership::Owned);
+        }
+    }
+    if process_group_members(process_group_id)?.is_empty() {
+        Ok(ProcessGroupOwnership::Absent)
+    } else {
+        Ok(ProcessGroupOwnership::Unverified)
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn process_listing_matches_owner(listing: &str, task_id: Uuid, process_generation: Uuid) -> bool {
+    let task_marker = format!("PRAJNA_EXPERIMENT_TASK_ID={task_id}");
+    let generation_marker = format!("PRAJNA_EXPERIMENT_PROCESS_GENERATION={process_generation}");
+    let mut has_task = false;
+    let mut has_generation = false;
+    for field in listing.split_whitespace() {
+        has_task |= field == task_marker;
+        has_generation |= field == generation_marker;
+    }
+    has_task && has_generation
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn process_group_members(process_group_id: u32) -> std::io::Result<Vec<u32>> {
+    let output = Command::new("ps").args(["-axo", "pid=,pgid="]).output()?;
+    if !output.status.success() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "could not inspect process groups; refusing cleanup",
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout
+        .lines()
+        .filter_map(|line| {
+            let mut columns = line.split_whitespace();
+            let pid = columns.next()?.parse::<u32>().ok()?;
+            let pgid = columns.next()?.parse::<u32>().ok()?;
+            (pgid == process_group_id).then_some(pid)
+        })
+        .collect())
+}
+
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn terminate_process_group(_process_group_id: u32) -> std::io::Result<()> {
-    Err(std::io::Error::new(
+fn terminate_process_group(
+    _process_group_id: u32,
+    _task_id: Uuid,
+    _process_generation: Option<Uuid>,
+) -> Result<(), ProcessGroupCleanupError> {
+    Err(ProcessGroupCleanupError::Io(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "experiment task process groups require macOS or Linux",
-    ))
+    )))
 }
 
 #[cfg(test)]
@@ -1804,17 +2035,50 @@ mod tests {
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
+    fn process_listing_requires_exact_task_and_generation_markers() {
+        let task_id = Uuid::from_u128(120);
+        let process_generation = Uuid::from_u128(1200);
+        let matching = format!(
+            "123 42 PRAJNA_EXPERIMENT_TASK_ID={task_id} PRAJNA_EXPERIMENT_PROCESS_GENERATION={process_generation}"
+        );
+        assert!(process_listing_matches_owner(
+            &matching,
+            task_id,
+            process_generation
+        ));
+        assert!(!process_listing_matches_owner(
+            &matching,
+            Uuid::from_u128(121),
+            process_generation
+        ));
+        assert!(!process_listing_matches_owner(
+            &matching,
+            task_id,
+            Uuid::from_u128(1201)
+        ));
+        assert!(!process_listing_matches_owner(
+            &format!("123 42 PRAJNA_EXPERIMENT_TASK_ID={task_id}"),
+            task_id,
+            process_generation
+        ));
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
     fn restart_terminates_persisted_experiment_process_group() {
         let dir = tempfile::tempdir().unwrap();
         let ready_path = dir.path().join("restart-group-ready");
         let marker_path = dir.path().join("restart-group-survived");
+        let task_id = Uuid::from_u128(12);
+        let process_generation = Uuid::from_u128(1200);
         let mut command = Command::new("/bin/sh");
         command.arg("-c").arg(format!(
             "(/bin/sleep 0.5; /usr/bin/touch {}) & /usr/bin/touch {}; wait",
             shell_quote(&marker_path),
             shell_quote(&ready_path),
         ));
-        let mut process = ExperimentProcessGroup::spawn(&mut command).unwrap();
+        let mut process =
+            ExperimentProcessGroup::spawn(&mut command, task_id, process_generation).unwrap();
         let deadline = Instant::now() + StdDuration::from_secs(5);
         while !ready_path.is_file() {
             assert!(
@@ -1824,13 +2088,13 @@ mod tests {
             std::thread::sleep(StdDuration::from_millis(10));
         }
 
-        let task_id = Uuid::from_u128(12);
         let request = SubmitExperimentTask {
             idempotency_key: "running-after-restart".into(),
             definition: json!({"name":"synthetic restart fixture"}),
         };
         let mut task = sample_experiment_task(task_id, ExperimentTaskStatus::Running);
         task.process_group_id = Some(process.process_group_id());
+        task.process_group_generation = Some(process_generation);
         task.request_sha256 = canonical_experiment_task_hash(&request).unwrap();
         task.idempotency_key = request.idempotency_key.clone();
         persist_experiment_request(dir.path(), task_id, &request).unwrap();
@@ -1847,7 +2111,21 @@ mod tests {
             recovered.status,
             ExperimentTaskStatus::Interrupted
         ));
-        assert_eq!(recovered.process_group_id, None);
+        if recovered.process_group_id.is_some() {
+            let cleanup_code = recovered.error.as_ref().unwrap().code.as_str();
+            assert!(
+                matches!(
+                    cleanup_code,
+                    "process_group_cleanup_failed" | "process_group_ownership_unverified"
+                ),
+                "unexpected cleanup error while retaining the process group: {cleanup_code}"
+            );
+            eprintln!("SKIP: sandbox denies process-group inspection/signaling ({cleanup_code})");
+            let _ = process.child.kill();
+            let _ = process.child.wait();
+            process.finished = true;
+            return;
+        }
         let _ = process.child.wait();
         process.finished = true;
         std::thread::sleep(StdDuration::from_millis(600));
@@ -1855,6 +2133,82 @@ mod tests {
             !marker_path.exists(),
             "restart left a task child process running"
         );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn restart_does_not_terminate_a_process_group_owned_by_a_different_task() {
+        let dir = tempfile::tempdir().unwrap();
+        let ready_path = dir.path().join("mismatched-group-ready");
+        let marker_path = dir.path().join("mismatched-group-survived");
+        let actual_task_id = Uuid::from_u128(120);
+        let actual_generation = Uuid::from_u128(1200);
+        let mut command = Command::new("/bin/sh");
+        command
+            .env("PRAJNA_EXPERIMENT_TASK_ID", actual_task_id.to_string())
+            .env(
+                "PRAJNA_EXPERIMENT_PROCESS_GENERATION",
+                actual_generation.to_string(),
+            )
+            .arg("-c")
+            .arg(format!(
+                "(/bin/sleep 0.5; /usr/bin/touch {}) & /usr/bin/touch {}; wait",
+                shell_quote(&marker_path),
+                shell_quote(&ready_path),
+            ));
+        let mut process =
+            ExperimentProcessGroup::spawn(&mut command, actual_task_id, actual_generation).unwrap();
+        let deadline = Instant::now() + StdDuration::from_secs(5);
+        while !ready_path.is_file() {
+            assert!(
+                Instant::now() < deadline,
+                "mismatched process group helper did not start"
+            );
+            std::thread::sleep(StdDuration::from_millis(10));
+        }
+
+        for (task_id, generation) in [
+            (Uuid::from_u128(121), Some(actual_generation)),
+            (actual_task_id, Some(Uuid::from_u128(1201))),
+            (actual_task_id, None),
+        ] {
+            let output = dir.path().join(task_id.to_string());
+            let request = SubmitExperimentTask {
+                idempotency_key: format!("stale-owner-{task_id}"),
+                definition: json!({"name":"synthetic stale process group"}),
+            };
+            let mut task = sample_experiment_task(task_id, ExperimentTaskStatus::Running);
+            task.process_group_id = Some(process.process_group_id());
+            task.process_group_generation = generation;
+            task.request_sha256 = canonical_experiment_task_hash(&request).unwrap();
+            task.idempotency_key = request.idempotency_key.clone();
+            persist_experiment_request(&output, task_id, &request).unwrap();
+            persist_experiment_task(&output, &task).unwrap();
+
+            let api = RunJobApi::without_worker(
+                output.clone(),
+                Arc::new(UniverseStore::new(&output)),
+                PathBuf::from("prajna-experiment"),
+            );
+            api.recover();
+            let recovered = api.get_experiment_task(task_id).unwrap();
+            assert!(matches!(
+                recovered.status,
+                ExperimentTaskStatus::Interrupted
+            ));
+            assert_eq!(recovered.process_group_id, Some(process.process_group_id()));
+            assert_eq!(
+                recovered.error.unwrap().code,
+                "process_group_ownership_unverified"
+            );
+        }
+
+        std::thread::sleep(StdDuration::from_millis(600));
+        assert!(
+            marker_path.is_file(),
+            "recovery terminated a process group owned by another task"
+        );
+        let _ = process.terminate();
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -1891,13 +2245,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ready_path = dir.path().join("descendant-ready");
         let marker_path = dir.path().join("descendant-survived");
+        let task_id = Uuid::new_v4();
+        let process_generation = Uuid::new_v4();
         let mut command = Command::new("/bin/sh");
         command.arg("-c").arg(format!(
             "(/bin/sleep 0.5; /usr/bin/touch {}) & /usr/bin/touch {}; wait",
             shell_quote(&marker_path),
             shell_quote(&ready_path),
         ));
-        let mut process = ExperimentProcessGroup::spawn(&mut command).unwrap();
+        let mut process =
+            ExperimentProcessGroup::spawn(&mut command, task_id, process_generation).unwrap();
         let deadline = Instant::now() + StdDuration::from_secs(5);
         while !ready_path.is_file() {
             assert!(
@@ -1917,7 +2274,7 @@ mod tests {
                 std::thread::sleep(StdDuration::from_millis(600));
                 return;
             }
-            Err(error) => panic!("process-group cleanup failed: {error}"),
+            Err(error) => panic!("process-group cleanup failed: {error:?}"),
         }
         std::thread::sleep(StdDuration::from_millis(600));
         assert!(!marker_path.exists(), "a child process outlived its group");
@@ -1928,12 +2285,15 @@ mod tests {
     fn successful_cli_exit_cleans_up_process_group_descendants() {
         let dir = tempfile::tempdir().unwrap();
         let marker_path = dir.path().join("successful-cli-child-survived");
+        let task_id = Uuid::new_v4();
+        let process_generation = Uuid::new_v4();
         let mut command = Command::new("/bin/sh");
         command.arg("-c").arg(format!(
             "(/bin/sleep 0.5; /usr/bin/touch {}) & exit 0",
             shell_quote(&marker_path),
         ));
-        let mut process = ExperimentProcessGroup::spawn(&mut command).unwrap();
+        let mut process =
+            ExperimentProcessGroup::spawn(&mut command, task_id, process_generation).unwrap();
 
         match process.wait() {
             Ok(status) => assert!(status.success()),
@@ -1943,7 +2303,7 @@ mod tests {
                 process.finished = true;
                 return;
             }
-            Err(error) => panic!("process-group cleanup failed: {error}"),
+            Err(error) => panic!("process-group cleanup failed: {error:?}"),
         }
         std::thread::sleep(StdDuration::from_millis(600));
         assert!(
@@ -2096,6 +2456,80 @@ mod tests {
         assert_eq!(experiment.snapshot.snapshot_id, legacy_request.snapshot_id);
         assert!(api.0.gate.lock().unwrap().queue.is_empty());
     }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_cli_diagnostic_and_exit_code_survive_api_persistence_and_restart() {
+        const EXPECTED_STDERR_LIMIT: usize = 16 * 1024;
+        let dir = tempfile::tempdir().unwrap();
+        let cli_path = dir.path().join("failing-prajna-experiment");
+        fs::write(
+            &cli_path,
+            "#!/bin/sh\nprintf 'synthetic failure cause\\n' >&2\n/usr/bin/head -c 32768 /dev/zero | /usr/bin/tr '\\000' x >&2\nexit 23\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&cli_path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let (api, _legacy_request, _fixture_dir) = fixture_with_cli(cli_path.clone());
+        let (status, accepted) = api_json(
+            &api,
+            "POST",
+            "/api/v1/tasks/experiments",
+            Some(json!({
+                "idempotency_key": "failing-cli-key",
+                "definition": {"name":"synthetic failing task"}
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let task_id = Uuid::parse_str(accepted["task"]["task_id"].as_str().unwrap()).unwrap();
+
+        assert!(api.process_next_queued());
+        let (status, failed) = api_json(
+            &api,
+            "GET",
+            &format!("/api/v1/tasks/experiments/{task_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(failed["status"], "failed");
+        assert_eq!(failed["error"]["code"], "experiment_cli_failed");
+        assert_eq!(failed["error"]["details"]["exit_code"], 23);
+        let stderr = failed["error"]["details"]["stderr"].as_str().unwrap();
+        assert!(stderr.starts_with("synthetic failure cause\n"));
+        assert_eq!(stderr.len(), EXPECTED_STDERR_LIMIT);
+        assert_eq!(failed["error"]["details"]["stderr_truncated"], true);
+
+        let task_dir = api.0.output.join("tasks").join(task_id.to_string());
+        let persisted: Value =
+            serde_json::from_slice(&fs::read(task_dir.join("task.json")).unwrap()).unwrap();
+        assert_eq!(persisted["error"]["details"]["exit_code"], 23);
+        assert_eq!(persisted["error"]["details"]["stderr"], stderr);
+
+        let restarted = RunJobApi::without_worker(
+            api.0.output.clone(),
+            Arc::new(UniverseStore::new(&api.0.output)),
+            cli_path,
+        );
+        restarted.recover();
+        let (status, after_restart) = api_json(
+            &restarted,
+            "GET",
+            &format!("/api/v1/tasks/experiments/{task_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(after_restart["error"]["code"], "experiment_cli_failed");
+        assert_eq!(after_restart["error"]["details"]["exit_code"], 23);
+        assert_eq!(after_restart["error"]["details"]["stderr"], stderr);
+        assert_eq!(after_restart["error"]["details"]["stderr_truncated"], true);
+    }
     fn sample_request() -> SubmitRun {
         SubmitRun {
             kind: "etf_strategy".into(),
@@ -2151,6 +2585,7 @@ mod tests {
             request_sha256: "request-hash".into(),
             idempotency_key: "experiment-task-key".into(),
             process_group_id: None,
+            process_group_generation: None,
             result: None,
             error: None,
         }
