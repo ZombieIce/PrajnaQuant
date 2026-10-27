@@ -78,8 +78,13 @@ fn selection(input: &Path, symbol: &str, venue: &str, kind: InstrumentKind, clos
     let native = format!("{}{symbol}", if venue == "XSHG" { "sh" } else { "sz" });
     // Two identical facts on day one; day two is deliberately absent.
     let row = json!(["2026-01-05", "10.000", close, "12.000", "9.000", "1.25"]);
-    let body =
-        serde_json::to_vec(&json!({"code":0, "data":{native:{"day":[row.clone(),row]}}})).unwrap();
+    let code = if kind == InstrumentKind::Equity {
+        json!("0")
+    } else {
+        json!(0)
+    };
+    let body = serde_json::to_vec(&json!({"code":code, "data":{native:{"day":[row.clone(),row]}}}))
+        .unwrap();
     let run = DailyRawCollector::new(Transport(body), input)
         .unwrap()
         .collect(DailyRawRequest {
@@ -144,6 +149,52 @@ fn cli(root: &Path, selection: Option<&Value>, receipt: &str, success: bool) {
 }
 fn receipt(root: &Path, name: &str) -> DailyPublicationReceipt {
     serde_json::from_slice(&fs::read(root.join(name)).unwrap()).unwrap()
+}
+
+#[test]
+fn repeated_publication_does_not_duplicate_selected_raw_provenance() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("lake");
+    let mut selected = selection(&root, "510300", "XSHG", InstrumentKind::Etf, "11.123");
+    let hash = selected["raw_sha256s"][0].as_str().unwrap().to_owned();
+    let raw = prajna_data::RawStore::open(&root).unwrap();
+    let original = raw.sources(&hash).unwrap();
+    for _ in 0..4 {
+        cli(&root, Some(&selected), "same.json", true);
+        assert_eq!(raw.sources(&hash).unwrap(), original);
+    }
+    #[cfg(unix)]
+    {
+        let alias = temp.path().join("alias");
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        selected["raw_root"] = json!(alias);
+        cli(&root, Some(&selected), "same.json", true);
+        assert_eq!(raw.sources(&hash).unwrap(), original);
+    }
+    let other = temp.path().join("other");
+    for _ in 0..2 {
+        cli(&other, Some(&selected), "copied.json", true);
+        assert_eq!(
+            prajna_data::RawStore::open(&other)
+                .unwrap()
+                .sources(&hash)
+                .unwrap(),
+            original
+        );
+    }
+    let refreshed = selection(&root, "510300", "XSHG", InstrumentKind::Etf, "11.123");
+    let expected = raw.sources(&hash).unwrap();
+    assert_eq!(expected.len(), original.len() + 1);
+    for _ in 0..2 {
+        cli(&other, Some(&refreshed), "refreshed.json", true);
+        assert_eq!(
+            prajna_data::RawStore::open(&other)
+                .unwrap()
+                .sources(&hash)
+                .unwrap(),
+            expected
+        );
+    }
 }
 
 #[test]

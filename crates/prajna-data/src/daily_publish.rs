@@ -11,7 +11,7 @@ use crate::{
     SecuritySnapshotId, SourceKind, SourceRecordInput,
     daily_raw::{
         ChunkStatus, DailyRawReport, METHOD_VERSION, RawResponseOutcome, SecurityKind,
-        checked_output_path, validate_raw_root,
+        checked_output_path, successful_response_code, validate_raw_root,
     },
     default_mvp6_root, publish_dataset, read_manifest, rebuild_dataset,
     session_calendar::{CalendarInput, CalendarStore, CalendarVersionId},
@@ -193,7 +193,9 @@ fn validate(
             .as_object()
             .ok_or("missing daily response data")?;
         require(
-            body["code"] == 0 && data.len() == 1 && data.contains_key(&report.native_symbol),
+            successful_response_code(body.get("code"))
+                && data.len() == 1
+                && data.contains_key(&report.native_symbol),
             "Raw response security or status mismatch",
         )?;
         let rows = data[&report.native_symbol]["day"]
@@ -271,7 +273,12 @@ pub fn publish_daily(
     }
     let target = RawStore::open(&root)?;
     for hash in &recipe.raw_sha256s {
+        let mut existing = target.sources(hash)?;
         for record in source.sources(hash)? {
+            if existing.contains(&record) {
+                continue;
+            }
+            existing.push(record.clone());
             target.put(
                 &source.get(hash)?,
                 SourceRecordInput {
