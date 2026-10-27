@@ -38,3 +38,33 @@ The local import command and fixed-version Rust read API for XSHG/XSHE are docum
 `cn-stock-etf-daily` v1 is constructed with one explicit #328 calendar version and one explicit #329 security-evidence snapshot id via `NormalizerRegistry::with_cn_stock_etf_daily_v1`. The Raw set must contain those byte-exact versions plus Tencent unadjusted daily responses with a pinned `tencent-fqkline-day/1` source record. Prices stay exact scale-18 decimals, Equity/ETF volume is declared lots × 100, amount stays `null` because the source has no amount field, and `available_at` stays Unknown. Missing quotes stay missing; Sessions are never deleted; identical duplicates deduplicate and contradictory duplicates fail closed. Later appended source records or a revised evidence/calendar version cannot change an already published Dataset Version. The existing MVP-6 SZSE Normalizers and identities are untouched.
 
 The local `prajna-publish-daily` command assembles explicit collection-report/Raw selections with pinned calendar/security versions, publishes one security per Dataset, and saves frozen rebuild receipts. CLI-to-Dataset tests are synthetic only; real coverage, adjustment and corporate actions remain unverified. Commands, selection JSON and failure/retry semantics: [Shanghai/Shenzhen daily normalizer](../../docs/contracts/shanghai-shenzhen-daily-normalizer.md).
+
+## Read-only Dataset preview
+
+`prajna-preview-dataset` lists every committed Dataset Version in one explicit
+local root and reads one version's instruments, raw unadjusted daily Bars, frozen
+security-evidence lifecycle fields, actual Session/Bar coverage, gaps and Bar
+sources. It never normalizes, publishes, collects, downloads or writes a Dataset,
+Raw object, receipt or the MVP-6 archive; a missing root is an error rather than a
+new directory. Catalog entries are discovered from verified manifests with no
+mutable "latest" pointer; the required instruments, sessions and bars tables are
+read and row-count checked before listing, and invalid manifests or unreadable
+tables are reported separately so they cannot masquerade as coverage.
+
+```sh
+prajna-preview-dataset catalog --root <LOCAL>
+prajna-preview-dataset show --root <LOCAL> --dsv <DSV>
+prajna-preview-dataset bars --root <LOCAL> --dsv <DSV> --instrument <ID> \
+  [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--limit 1..=1000] [--offset N]
+```
+
+Stdout is one JSON envelope (`schema_version` plus `data` or `error`); invalid
+input or not-found exits 2, I/O or integrity failures exit 1. Unknown and missing
+facts stay explicit: amount/available_at remain null with Unknown semantics,
+lifecycle without a committed evidence snapshot stays Unknown, and Sessions in
+the observed Bar range without a Bar are listed as gaps rather than halts or zero
+Bars. Tests publish synthetic XSHG/XSHE stock and ETF Datasets through the
+production publisher and cover revisions, invalid manifests, missing tables,
+an empty committed Dataset, pagination and read-only behavior; no real data is
+validated. Full fields,
+limits and compatibility: [Dataset preview contract](../../docs/contracts/dataset-preview-read.md).
