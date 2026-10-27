@@ -1,5 +1,8 @@
 mod common;
 
+#[path = "common/cn_daily.rs"]
+mod cn_daily;
+
 use std::fs;
 
 use polars::prelude::{DataType, TimeUnit, TimeZone};
@@ -18,10 +21,10 @@ fn instrument_ids(panel: &Panel) -> Vec<String> {
         .collect::<Vec<_>>()
 }
 
-fn panel_error(calendar: Vec<common::cn_daily::CalendarVenue>) -> PanelError {
-    let dataset = common::cn_daily::SyntheticDailyDataset::publish(
+fn panel_error(calendar: Vec<cn_daily::CalendarVenue>) -> PanelError {
+    let dataset = cn_daily::SyntheticDailyDataset::publish(
         &calendar,
-        common::cn_daily::shanghai_shenzhen_records(),
+        cn_daily::shanghai_shenzhen_records(),
         &[],
     );
     load_panel_for_venues(
@@ -185,9 +188,9 @@ const SHARED_DATES: [&str; 3] = ["2026-01-05", "2026-01-06", "2026-01-07"];
 
 #[test]
 fn loads_a_shared_shanghai_shenzhen_session_axis_and_preserves_missing_bars() {
-    let dataset = common::cn_daily::SyntheticDailyDataset::publish(
-        &common::cn_daily::matched_calendar(&SHARED_DATES),
-        common::cn_daily::shanghai_shenzhen_records(),
+    let dataset = cn_daily::SyntheticDailyDataset::publish(
+        &cn_daily::matched_calendar(&SHARED_DATES),
+        cn_daily::shanghai_shenzhen_records(),
         &[("510300", "2026-01-06")],
     );
     let panel = load_panel_for_venues(
@@ -198,14 +201,8 @@ fn loads_a_shared_shanghai_shenzhen_session_axis_and_preserves_missing_bars() {
     .unwrap();
 
     assert_eq!(panel.sessions.len(), 3);
-    assert_eq!(
-        panel.sessions[0].session_date,
-        common::cn_daily::date("2026-01-05")
-    );
-    assert_eq!(
-        panel.sessions[2].session_date,
-        common::cn_daily::date("2026-01-07")
-    );
+    assert_eq!(panel.sessions[0].session_date, cn_daily::date("2026-01-05"));
+    assert_eq!(panel.sessions[2].session_date, cn_daily::date("2026-01-07"));
     assert_eq!(
         panel.sessions[0].ts_open,
         TimestampNs::parse("2026-01-05T09:30:00+08:00").unwrap()
@@ -277,9 +274,9 @@ fn explicit_single_venue_loading_matches_the_legacy_panel_entry() {
     assert_eq!(explicit.instruments, legacy.instruments);
     assert!(explicit.grid.equals_missing(&legacy.grid));
 
-    let dataset = common::cn_daily::SyntheticDailyDataset::publish(
-        &common::cn_daily::matched_calendar(&SHARED_DATES),
-        common::cn_daily::shanghai_shenzhen_records(),
+    let dataset = cn_daily::SyntheticDailyDataset::publish(
+        &cn_daily::matched_calendar(&SHARED_DATES),
+        cn_daily::shanghai_shenzhen_records(),
         &[],
     );
     let xshg = venue("XSHG");
@@ -293,11 +290,11 @@ fn explicit_single_venue_loading_matches_the_legacy_panel_entry() {
 
 #[test]
 fn rejects_venues_whose_session_dates_differ_without_filling_the_gap() {
-    let mut calendars = common::cn_daily::matched_calendar(&SHARED_DATES);
+    let mut calendars = cn_daily::matched_calendar(&SHARED_DATES);
     calendars[1].dates = vec!["2026-01-05", "2026-01-07"];
-    let dataset = common::cn_daily::SyntheticDailyDataset::publish(
+    let dataset = cn_daily::SyntheticDailyDataset::publish(
         &calendars,
-        common::cn_daily::shanghai_shenzhen_records(),
+        cn_daily::shanghai_shenzhen_records(),
         &[],
     );
 
@@ -326,7 +323,7 @@ fn rejects_venues_whose_session_dates_differ_without_filling_the_gap() {
 
 #[test]
 fn rejects_venues_whose_open_or_close_times_differ() {
-    let mut calendars = common::cn_daily::matched_calendar(&SHARED_DATES);
+    let mut calendars = cn_daily::matched_calendar(&SHARED_DATES);
     calendars[1].open = "09:31:00";
     match panel_error(calendars) {
         PanelError::InconsistentSessionAxis(message) => {
@@ -338,7 +335,7 @@ fn rejects_venues_whose_open_or_close_times_differ() {
         other => panic!("unexpected error: {other:?}"),
     }
 
-    let mut calendars = common::cn_daily::matched_calendar(&SHARED_DATES);
+    let mut calendars = cn_daily::matched_calendar(&SHARED_DATES);
     calendars[1].close = "15:01:00";
     match panel_error(calendars) {
         PanelError::InconsistentSessionAxis(message) => {
@@ -353,9 +350,9 @@ fn rejects_venues_whose_open_or_close_times_differ() {
 
 #[test]
 fn rejects_empty_duplicate_or_absent_venue_selections() {
-    let dataset = common::cn_daily::SyntheticDailyDataset::publish(
-        &common::cn_daily::matched_calendar(&SHARED_DATES),
-        common::cn_daily::shanghai_shenzhen_records(),
+    let dataset = cn_daily::SyntheticDailyDataset::publish(
+        &cn_daily::matched_calendar(&SHARED_DATES),
+        cn_daily::shanghai_shenzhen_records(),
         &[],
     );
     let root = dataset.root();
@@ -379,10 +376,10 @@ fn rejects_empty_duplicate_or_absent_venue_selections() {
         other => panic!("unexpected error: {other:?}"),
     }
 
-    let mut records = common::cn_daily::shanghai_shenzhen_records();
+    let mut records = cn_daily::shanghai_shenzhen_records();
     records.retain(|record| record.instrument_id.venue().as_str() == "XSHG");
-    let dataset = common::cn_daily::SyntheticDailyDataset::publish(
-        &common::cn_daily::matched_calendar(&SHARED_DATES),
+    let dataset = cn_daily::SyntheticDailyDataset::publish(
+        &cn_daily::matched_calendar(&SHARED_DATES),
         records,
         &[],
     );

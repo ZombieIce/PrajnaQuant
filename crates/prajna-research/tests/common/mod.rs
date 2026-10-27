@@ -2,8 +2,6 @@ use std::path::Path;
 
 use prajna_data::{NormalizerRegistry, RawStore, SourceKind, SourceRecordInput, publish_dataset};
 
-pub mod cn_daily;
-
 const FIXTURE: &[u8] = include_bytes!("../../../../poc/poc0-benchmark/fixtures/dataset-v1.json");
 
 pub fn publish_v1(lake_root: &Path) -> String {
