@@ -1,89 +1,47 @@
 # Agent 工作约定
 
-## Project Scope
+## Project Scope and Authority
 
-项目主路线是 Rust-first 多市场研究、并行回测与未来实盘平台。POC-0 至 MVP-6 已分阶段交付；MVP-6 按[负责人裁决](https://github.com/ZombieIce/PrajnaQuant/issues/182#issuecomment-6406038887)有保留签收：第二轮六项工程复核 pass，证据处理流程 fail 与第一轮 fail 保留。当前已有 Domain/Data、Factor/Cache、Experiment、Vector/Fast Event、受限 Accurate Backend 和本地 Python/PyO3 Decision 入口；真实验证限固定名单 ETF 工程场景。目标见 `ARCHITECTURE.md`，阶段见 `docs/product-roadmap.md`，词汇见 `CONTEXT.md`，当前能力及限制见 `docs/STATUS.md`。完整历史 Universe、无偏策略业绩、多市场实盘及新平台统一 Web 工作流仍未验收。
+项目主路线是 Rust-first 多市场研究、并行回测与未来实盘平台。目标见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段见 [product-roadmap](docs/product-roadmap.md)，词汇见 [CONTEXT.md](CONTEXT.md)，当前能力、验证范围和限制以 [STATUS](docs/STATUS.md) 为准。POC-0～MVP-6 已分阶段交付；MVP-6 的[有保留签收](https://github.com/ZombieIce/PrajnaQuant/issues/182#issuecomment-6406038887)、六项工程 pass、证据处理流程 fail 与第一轮 fail 保留。
 
-## Architecture Principles
+Web 非验收项仅指 MVP-0～6；MVP-7 按 [#286](https://github.com/ZombieIce/PrajnaQuant/issues/286) 的产品闭环及[研究优先裁决](https://github.com/ZombieIce/PrajnaQuant/issues/286#issuecomment-6435307888)推进。阶段目标不表示现有能力已验收。
 
-Rust 是数据、因子、执行、账户、成本和绩效权威；`python/prajna` 通过 PyO3 声明实验、读取 Arrow 结果并生成受限 Decision；`warehouse.py` 是独立早期入库原型。React 展示旧报告与行情并管理本地 Universe。不要为了文档设想改写正确代码。避免新增第二套量化核心。证据优先级：代码与可运行测试 > 当前配置/schema > 最新 ADR > STATUS > HANDOFF > README > 旧文档/注释。
+Rust 是数据、因子、执行、账户、成本和绩效权威，避免新增第二套量化核心。新平台 `crates/prajna-{domain,data,research,account,adapter,experiment,py}` 分担契约、存储、研究、账本、Backend、实验和绑定；旧 `src/` 是 DuckDB 仓库，`crates/quant-research/src/` 保留 ETF 研究/回测及 Axum API，两条路径的身份、报告和验证范围分别说明。已确认边界写入 `docs/decisions/`，未决方案只写提案。
 
-## Rust Responsibilities
+`python/prajna` 通过 PyO3 声明实验、读取 Arrow、生成受限 As-of Decision；回调不读取账户/成交，实际执行和绩效由 Rust 负责。逐 bar 回调推迟，Notebook/依赖闭包限制及构建见 [prajna-py README](crates/prajna-py/README.md)。`warehouse.py` 是独立早期入库原型。`apps/web/` 由旧服务托管，展示、排序和交互应与后端语义一致，浏览器不得成为因子/绩效权威；旧 HTML 未被当前 `server.rs` 引用。
 
-新平台由 `crates/prajna-domain`、`prajna-data`、`prajna-research`、`prajna-account`、`prajna-adapter`、`prajna-experiment` 与 `prajna-py` 分担契约、存储、研究、账本、Backend、实验和绑定。旧 `src/` 管理 DuckDB 仓库，`crates/quant-research/src/` 保留 ETF 研究/回测及 Axum API；两条路径的身份、报告和验证范围分别说明。Rust 计算为 canonical。`docs/decisions/` 说明已确认的边界；未决方案只写提案。
+证据优先级：代码与可运行测试 > 当前配置/schema > 最新 ADR > STATUS > HANDOFF > README > 旧文档/注释。不要为了文档设想改写正确代码。区分配置要求、代码实现、已有测试与实际数据验证；无证据标 Unknown/Unresolved。
 
-## Python Responsibilities
+## Quant Correctness and Evidence
 
-本地 `prajna` 包已接通 Rust Experiment、Arrow 研究/结果读取和 As-of Decision 生成，入口及构建见 `crates/prajna-py/README.md`。Decision 回调不读取账户/成交；实际执行、成本和绩效继续由 Rust 负责。Python 逐 bar 回调推迟，Notebook 可复现性和依赖闭包有明确限制；这不是完整研究产品或 Python 量化核心。`warehouse.py` 仍仅为早期入库原型。
+- 因子说明输入字段、窗口、可观测/可用时刻、方向、缺失规则、版本/来源；未来收益仅作评价标签，`forward_return` 不进入评分。
+- 当前 A 股/ETF 策略用 T 日收盘含当日 close 形成信号，下一可用日 open 执行。检查 rolling 边界、shift、缺失填充、全样本归一化、基准日期与历史 Universe 可知性；基本面按公开时间而非报告期末可用。
+- 新平台时间语义按当前 spec/ADR；修改或复用 A 股/ETF 执行时序前读 [time-model](docs/time-model.md)，先给事件序列和可手算小例。`observed_at` 是本地采集时间，不是历史发布时间。
+- 现金、数量、成交价、佣金、税、滑点可追溯，成本配置随结果保存。逐日核对 `NAV ≈ cash + Σ(quantity × 当日估值价) + receivables`；旧无应收路径为零，应收计权益但不可花费。长仓数量/权重非负，解释余量现金和总权重；停牌/缺行情不视为零价或可成交。
+- 历史 ETF 成分、上市/退市、价格分红调整缺 PIT 证明时，结果与文档披露幸存者及收益口径风险。合成覆盖、真实已触发事件、真实未触发路径分别报告；编译通过不代替量化验证。
+- 真实行情、原文、请求日志、因子/标签、账本/NAV/绩效、详细覆盖、hash 和 Run/Execution 身份仅留本机，不进入公开仓库、Issue/PR 或聊天/工具输出。公开只用代码、合成 fixture 与允许的文字结论；历史有限保留不扩大、不再次传播，旧验收档案不改写。具体任务的证据范围按当前 Issue/spec 裁决。
 
-## React Responsibilities
+## Startup and Reading
 
-`apps/web/` 由旧 `quant-research` 服务托管，已有本地 Universe、股票/ETF K 线及已保存因子/策略报告；新平台 MVP 不以 Web 为验收项，统一新实验作业界面尚未接通。展示、排序和交互应与后端报告语义一致；不得让浏览器成为绩效/因子结果的权威计算方。仓库中的旧 HTML 页面未被当前 `server.rs` 引用。
+新会话先读本文件，运行 `git status`、`git log -5 --oneline`，保留用户未提交文件。按任务范围读当前 GitHub Issue/评论、spec、相关代码和测试；读取方式与当前状态刷新见 [issue-tracker](docs/agents/issue-tracker.md)。已固定 head/spec 的资料按需复用，输入或 head 变化时刷新相关部分，不每轮全量重复输出。
 
-## Quant Correctness Rules
+- **新平台：**读 `ARCHITECTURE.md`、相关 ADR；按需读路线图、CONTEXT、STATUS。交接读 Issue/PR 与 `HANDOFF.md` 入口，逐票历史按需查 [archive](docs/handoffs/poc-0-mvp-0-handoff-archive.md)。构建资源任务另读 [benchmark spec](docs/poc-0-benchmark-spec.md) 与票据 13。
+- **旧 A 股实现或复用其契约：**按修改范围读 README 与 `docs/` 下 `architecture.md`、`time-model.md`、`data-model.md`、`factor-system.md`、`strategy-system.md`、`backtest-engine.md`、`STATUS.md`、`priorities.md` 及相关 ADR；不通读无关历史。
 
-- 任何因子必须说明输入字段、窗口、可观测时刻、可用时刻、方向、缺失规则、版本/来源；未来收益只能用于评价标签。
-- 若历史 ETF 成分、上市/退市和价格分红调整无法做 point-in-time 证明，应在结果与文档显式披露幸存者和收益口径风险。
-- 区分配置要求、代码实现、已有测试和实际数据验证。没有证据时标记 Unknown/Unresolved。
+## Ticket Workflow
 
-## Look-ahead Bias Rules
+一票一 Issue、一条从最新 `main` 拉出的 `<issue>-<slug>` 分支、一个含 `Closes #<issue>` 的 PR。只认领无 blocker 且 `ready-for-agent` 的票；口径未定先 `needs-triage`，等负责人定稿。只提交/推送自己的分支，不直推 main、不 force push 共享分支、不自行合并。一个工作区同一时间只承载一个分支，并行任务使用独立 worktree。
 
-- 当前策略 T 日收盘含当日 close 形成信号，下一可用日 open 执行。不得用 T 日 close 同时成交，或把 `forward_return` 输入评分。
-- 核查 rolling 边界、shift 方向、缺失填充、全样本归一化、基准日期和历史 universe 的可知性。基本面按公开时间而非报告期末决定可用时刻。
+一票是一项可独立验收的行为或契约；同一薄纵向切片可涉及页面/API/持久化层，不合并多个独立行为。Prepare 估算包含测试；预计超过约 800 changed lines 或涉及多个独立契约，先在 Issue 提拆分并等负责人确认。此澄清不放宽现有票的验收。不得改写验收迎合实现或修改其他票状态/结论，调整在对应 Issue 提议。
 
-## Time Model Rules
+负责人可直接启动 [implement-ticket](.agents/skills/implement-ticket/SKILL.md) / [review-pr](.agents/skills/review-pr/SKILL.md)，或授权 [ticket-loop](.agents/skills/ticket-loop/SKILL.md) 协调启动。实现者完成验收映射、定向验证和 `Self-check (implementer)`，不充当独立 reviewer、不自行启动 reviewer；每次独立 review/re-review 使用未参与实现且不继承实现上下文的新会话。普通票可由一名 reviewer 检查 Spec 与 Standards；高风险展开双轴并行，风险判定见 review-pr。显式 [code-review](.agents/skills/code-review/SKILL.md) 保留，不是普通票强制自查。票据不使用 implement-spec 的一 spec 一 PR 流程。
 
-POC-0 与新平台实现按当前任务的 spec/ADR 确定时间语义；修改或复用现有 A 股/ETF 执行时序时再读 `docs/time-model.md`。变更执行时序前先给出事件序列和小型可人工验算用例；`observed_at` 是本地采集时间，不是历史发布时间。
+Review 结论以 PR 评论为准；每个发现由实现者回应，任何新 push（含文档）均需独立 review 覆盖最终 head。必需验证未完成不称可合并；负责人合并。授权、worktree 保留/清理与 tracker 操作的共同契约见 [issue-tracker](docs/agents/issue-tracker.md)。
 
-## Portfolio Accounting Rules
+## Verification and Completion
 
-现金、数量、成交价、佣金、税、滑点必须可追溯。逐日按路径核对 `NAV ≈ cash + Σ(quantity × 当日估值价) + receivables`，旧无应收路径的 receivables 为零；未支付应收计入总权益但不作可花现金；长仓数量和权重非负，解释现金余量与总权重。不得把停牌/缺行情默认为零价或可成交。交易成本配置必须随结果保存。
+按改动范围执行 [定向验证规则](docs/agents/verification.md)：纯文档做 diff/链接/一致性检查；代码验证受影响入口，按需选 feature，不因例行交接编译全 workspace。该文档承接 Python 3.12/PyO3 环境、CI 来源及合成金标准要求；具体 CI 命令以 `.github/workflows/` 为准。
 
-## Development Rules
+交接在 PR 描述记录验收映射、命令结果、失败/环境限制、风险判断、验证范围、开放问题和唯一建议下一步；review 结论留 PR 评论。`HANDOFF.md` 仅作入口，不随 PR 修改。`docs/STATUS.md` 仅在能力、风险、量化口径或验证状态实际改变时在对应主题改一条，不追加逐票流水，纯文档/流程 PR 不改。重要契约变化才更新 ADR/API/README，尽量在 review 前完成，避免后续 push 使审查过期。
 
-本轮文档记录的是现状，不构成开发许可。改动前读相关代码和测试，先 `git status`，保留用户的未提交文件。接口、数据 schema 或量化口径变更时同步文档与必要 ADR。
-
-一张票据对应一个 GitHub Issue、一个从最新 `main` 拉出的分支 `<issue>-<slug>` 和一个 PR，PR 描述写 `Closes #<issue>`。Agent 可以在自己的分支上提交和推送，不得直接推 `main`、不得 force push 共享分支、不得自行合并。实现完成后，由未参与实现的 agent 对照 Issue/spec 和仓库规范在 PR 上独立 review；实现 agent 处理发现并把复核结果写成 PR 评论。仍有问题时如实记录，不宣称验收通过。合并由项目负责人执行。一个工作区同一时间只承载一个分支，并行任务使用独立的 `git worktree`。不得改写验收条目去迎合实现，也不得修改其他票据的状态或结论；确需调整时在对应 Issue 评论中提出。
-
-票据规模门槛：一张票只改一处接口。开工前估算改动量；预计改动（含测试）超过约 800 行或涉及多个接口时，先在 Issue 评论提出拆分方案，等负责人确认后再实现。口径未定的票标 `needs-triage`，等负责人定稿后再标 `ready-for-agent`；只认领 `ready-for-agent` 的票。
-
-## Testing Rules
-
-项目默认使用 Python 3.12；创建 venv 使用 `python3.12 -m venv .venv`，运行 Python 测试前确认所用解释器为 3.12。涉及 PyO3 时显式设置 `PYO3_PYTHON` 指向该解释器，避免选到系统 Python。本机运行 `prajna-experiment` 测试前设置 `PRAJNA_TEST_PYTHON` 为 3.12 解释器；进程控制测试由 CI 覆盖，沙箱内跳过不算失败。
-
-实现票据时按改动范围验证：运行 `cargo fmt --all -- --check`，优先对受影响的 crate 使用 `cargo test -p <crate> --locked --offline` 和 `cargo clippy -p <crate> --all-targets --locked --offline -- -D warnings`，按需选择 feature。非必要不编译或测试整个 worktree/workspace；仅在票据明确要求、跨 crate 变更或定向验证无法覆盖风险时运行全 workspace 验证，并在交接中说明原因。Python 改动按范围运行相关测试（仓库原型测试为 `.venv/bin/python -m unittest discover -s tests -v`）；前端改动运行 `cd apps/web && npm run build`。纯文档改动检查 diff，无需编译。
-
-CI（`.github/workflows/`）分两条：`CI` 的 `lightweight` job 是合并必需检查，只跑不含 DuckDB 的轻量路径：依赖图守卫、`cargo fmt --all -- --check`、`cargo clippy -p quant-research --no-default-features --all-targets --locked -- -D warnings`、`cargo test -p quant-research --no-default-features --locked`，以及不装 Nautilus 的 POC Python 测试。本地复现时加 `--offline`。`Full` workflow 由手动或每晚触发，跑 `--workspace`（bundled DuckDB）、`b3-pyo3`、Nautilus 集成（出现跳过即失败）与前端构建，不阻塞合并。只能在 `app` 下编译的测试与 example 必须加 feature gate；测试不得依赖未入库的本地产物或特定工作目录。
-
-修改 `prajna-py` 或 `python/prajna` 时，先按 [`crates/prajna-py/README.md`](crates/prajna-py/README.md) 激活 Python 3.12 venv 并安装 maturin，再跑 `cargo test -p prajna-py --locked --offline`、`cargo clippy -p prajna-py --all-targets --locked --offline -- -D warnings`、`maturin develop --locked --offline` 与 `python -m unittest discover -s python/tests -v`。轻量 CI 包含上述绑定测试与 DuckDB / `quant-research` 依赖图守卫。
-
-新平台已有独立合成金标准与 PIT/公司行动 3 ETF × 10 Session 对拍（`poc/mvp1-golden/`、`poc/mvp3-golden/`、`crates/prajna-research/tests/pit_s2.rs`、`crates/prajna-research/tests/corporate_actions.rs`）。修改相关路径时检查 look-ahead、日期对齐、含应收的账户恒等式与成本；合成覆盖、真实已触发事件和未触发路径分别报告。编译通过不代替量化验证。
-
-## New Agent Startup
-
-每次新对话先读 `AGENTS.md`，运行 `git status`、`git log -5 --oneline`，再按任务范围加载资料：
-
-- **POC-0 / 新平台实现：**读当前 GitHub Issue（`gh issue view <N> --comments`）与对应 spec、`ARCHITECTURE.md`、相关 ADR、任务代码和测试；需要阶段顺序时读 `docs/product-roadmap.md`，需要领域词汇时读 `CONTEXT.md`，需要现状时读 `docs/STATUS.md`；需要交接时读 Issue 评论、相关 PR 描述与 `HANDOFF.md` 入口（逐票历史在 `docs/handoffs/poc-0-mvp-0-handoff-archive.md`，按需查阅）。构建资源任务另读 `docs/poc-0-benchmark-spec.md` 与票据 13。旧 A 股路线文档不作为这一路径的启动必读项。
-- **旧 A 股实现或明确复用其契约：**按修改范围读取 `README.md`、`docs/architecture.md`、`docs/time-model.md`、`docs/data-model.md`、`docs/factor-system.md`、`docs/strategy-system.md`、`docs/backtest-engine.md`、`docs/STATUS.md`、`docs/priorities.md` 及相关 ADR；只读与任务有关的部分。
-
-完成任务所需的代码与测试阅读后，再进行相关验证；不要为了履行启动清单通读无关历史文档。
-
-## Agent Completion Checklist
-
-运行相关测试、formatter/lint；复查未来函数、时序、组合核算和交易成本；完成独立 agent review 并处理发现。`HANDOFF.md` 是入口，不随 PR 修改；交接写在 PR 描述（已验证命令、失败与环境限制、开放问题、唯一建议下一步），review 结论以 PR 评论为准。`docs/STATUS.md` 仅在能力、风险、量化口径或验证状态实际变化时更新，并在对应主题下改一条，不追加逐票流水；纯文档/流程类 PR 不改。仅在发生重要决策/契约变化时更新 ADR、API、README。不因补文档而在 review 后再推提交，避免 review 落后于最新 push 和并行 PR 冲突。
-
-## Agent skills
-
-The project owner starts ticket work with `/implement-ticket` and starts independent review in a fresh agent session with `/review-pr`. The upstream `implement` skill's `/code-review` step is implementer self-check only; label that PR section `Self-check (implementer)`. Do not use `implement-spec`'s one-spec/one-PR workflow for tickets.
-
-### Issue tracker
-
-Issues, specs and PRs live on GitHub (`ZombieIce/PrajnaQuant`); `.scratch/` is a read-only archive of the earlier local tracker. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Use the five default triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Use the single-context layout with a root `CONTEXT.md` and decisions in `docs/decisions/`. See `docs/agents/domain.md`.
+项目 tracker 为 GitHub `ZombieIce/PrajnaQuant`，`.scratch/` 只读；五种 triage label 见 [triage-labels](docs/agents/triage-labels.md)。领域文档采用根 `CONTEXT.md` 与 `docs/decisions/`，见 [domain](docs/agents/domain.md)。
