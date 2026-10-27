@@ -16,8 +16,8 @@ pub mod sina_adjust_factor;
 
 pub use frozen::{FrozenSourceMeta, freeze_raw};
 pub use normalizer::{
-    LifecycleRange, NormalizationIssue, NormalizationOutput, NormalizedTables, Normalizer,
-    NormalizerRegistry, RawInput, SzseEtfFrozen,
+    CnStockEtfDaily, LifecycleRange, NormalizationIssue, NormalizationOutput, NormalizedTables,
+    Normalizer, NormalizerRegistry, RawInput, SzseEtfFrozen,
 };
 pub use publish::{PublishError, RebuildError, publish_dataset, rebuild_dataset};
 

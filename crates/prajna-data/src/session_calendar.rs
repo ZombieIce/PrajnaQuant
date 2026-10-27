@@ -51,6 +51,13 @@ pub struct CalendarInput {
 }
 
 impl CalendarInput {
+    /// Parses and validates the exact bytes of a pinned calendar version.
+    pub fn parse_and_validate(bytes: &[u8]) -> Result<Self, CalendarError> {
+        let mut input: Self = serde_json::from_slice(bytes)?;
+        input.normalize_and_validate()?;
+        Ok(input)
+    }
+
     fn normalize_and_validate(&mut self) -> Result<(), CalendarError> {
         if self.schema_version != 1 {
             return Err(CalendarError::Invalid(
@@ -211,8 +218,7 @@ impl CalendarStore {
     }
 
     pub fn import_json(&self, bytes: &[u8]) -> Result<CalendarVersionId, CalendarError> {
-        let mut input: CalendarInput = serde_json::from_slice(bytes)?;
-        input.normalize_and_validate()?;
+        let input = CalendarInput::parse_and_validate(bytes)?;
         let canonical = serde_json::to_vec(&input)?;
         let version = CalendarVersionId(format!("sha256:{}", sha256(&canonical)));
         let path = self.object_path(&version)?;
