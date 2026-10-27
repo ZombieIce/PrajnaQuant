@@ -32,3 +32,9 @@ Select with `prajna-select-security-evidence --root <LOCAL> --select <INSTRUMENT
 ## Independent session calendar
 
 The local import command and fixed-version Rust read API for XSHG/XSHE are documented in the [session calendar input contract](../../docs/contracts/shanghai-shenzhen-session-calendar.md). This input is separate from market Raw; its tests use synthetic calendars only.
+
+## Versioned Shanghai/Shenzhen stock/ETF daily normalizer
+
+`cn-stock-etf-daily` v1 is constructed with one explicit #328 calendar version and one explicit #329 security-evidence snapshot id via `NormalizerRegistry::with_cn_stock_etf_daily_v1`. The Raw set must contain those byte-exact versions plus Tencent unadjusted daily responses with a pinned `tencent-fqkline-day/1` source record. Prices stay exact scale-18 decimals, Equity/ETF volume is declared lots × 100, amount stays `null` because the source has no amount field, and `available_at` stays Unknown. Missing quotes stay missing; Sessions are never deleted; identical duplicates deduplicate and contradictory duplicates fail closed. Later appended source records or a revised evidence/calendar version cannot change an already published Dataset Version. The existing MVP-6 SZSE Normalizers and identities are untouched.
+
+The tests are synthetic only and cover XSHG/XSHE stock/ETF publication, Dataset read/rebuild, pinned-version isolation, invalid/out-of-range/inexact decimals, invalid OHLC, negative volume, missing dates and duplicate conflicts. No production collection-report assembly, real coverage, adjustment or corporate action is included. Contract: [Shanghai/Shenzhen daily normalizer](../../docs/contracts/shanghai-shenzhen-daily-normalizer.md).

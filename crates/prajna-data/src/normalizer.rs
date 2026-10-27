@@ -4,13 +4,15 @@ use arrow_array::RecordBatch;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+mod cn_daily;
 mod synthetic_etf_daily;
 mod szse_etf_frozen;
 pub use crate::sina_adjust_factor::LifecycleRange;
+pub use cn_daily::CnStockEtfDaily;
 pub(crate) use szse_etf_frozen::FactsSessionDocument;
 pub use szse_etf_frozen::SzseEtfFrozen;
 
-use crate::{SourceKind, SourceRecord};
+use crate::{SecuritySnapshotId, SourceKind, SourceRecord, session_calendar::CalendarVersionId};
 
 /// Raw bytes and their content identity supplied to a Normalizer.
 #[derive(Debug, Clone)]
@@ -116,6 +118,19 @@ impl NormalizerRegistry {
         registry.register(SzseEtfFrozen::v3(vec![(158000, 159999)]).expect("builtin ranges"));
         registry.register(SzseEtfFrozen::v4(vec![(158000, 159999)]).expect("builtin ranges"));
         registry
+    }
+
+    /// Registers the v1 XSHG/XSHE stock/ETF daily Normalizer pinned to one
+    /// #328 calendar version and one #329 security-evidence snapshot.
+    pub fn with_cn_stock_etf_daily_v1(
+        calendar_version: CalendarVersionId,
+        snapshot_id: SecuritySnapshotId,
+    ) -> Result<Self, String> {
+        let mut registry = Self::with_builtins();
+        if !registry.register(CnStockEtfDaily::v1(calendar_version, snapshot_id)) {
+            return Err("cn-stock-etf-daily v1 is already registered".into());
+        }
+        Ok(registry)
     }
 
     pub fn with_sina_adjustment_v5(lifecycles: Vec<LifecycleRange>) -> Result<Self, String> {
