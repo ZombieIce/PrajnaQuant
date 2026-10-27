@@ -72,5 +72,6 @@ read; reimporting the same input into a fresh root reproduces the same version.
 The receipt is a local selector, not a mutable latest pointer. Keep real input,
 source details and version identities in the configured local area; do not copy
 them into public artifacts or tool output. No real source or full history was
-validated by this contract. Daily Normalizer and Dataset publication remain
-later work.
+validated by this contract. The separate `cn-stock-etf-daily` v1 contract now
+consumes a pinned calendar version to publish synthetic daily Datasets; real
+calendar wiring and production input assembly remain #289 work.
