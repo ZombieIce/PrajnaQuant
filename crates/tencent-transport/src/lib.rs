@@ -158,6 +158,18 @@ impl FetchError {
             candidate_failures: Vec::new(),
         }
     }
+
+    fn with_candidate_failures(
+        kind: FetchErrorKind,
+        message: impl Into<String>,
+        candidate_failures: Vec<CandidateFailure>,
+    ) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            candidate_failures,
+        }
+    }
 }
 
 impl fmt::Display for FetchError {
@@ -265,18 +277,18 @@ where
                 {
                     return Err(policy_stopped_error(failures));
                 }
-                return Err(FetchError {
-                    kind: FetchErrorKind::BodyRead,
-                    message: failure.message,
-                    candidate_failures: failures,
-                });
+                return Err(FetchError::with_candidate_failures(
+                    FetchErrorKind::BodyRead,
+                    failure.message,
+                    failures,
+                ));
             }
             Err(failure) if failure.kind == TransportFailureKind::ClientBuild => {
-                return Err(FetchError {
-                    kind: FetchErrorKind::ClientBuild,
-                    message: failure.message,
-                    candidate_failures: failures,
-                });
+                return Err(FetchError::with_candidate_failures(
+                    FetchErrorKind::ClientBuild,
+                    failure.message,
+                    failures,
+                ));
             }
             Err(failure) => {
                 let response_body = failure.response_body;

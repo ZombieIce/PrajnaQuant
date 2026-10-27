@@ -2,9 +2,10 @@ use std::{
     cell::RefCell,
     collections::VecDeque,
     fs,
+    process::{Command, Stdio},
     rc::Rc,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use chrono::NaiveDate;
@@ -24,6 +25,43 @@ struct FixtureTransport {
 impl HttpTransport for FixtureTransport {
     fn get(&mut self, request: &HttpRequest) -> Result<HttpReply, TransportFailure> {
         self.requests.borrow_mut().push(request.clone());
+        self.replies
+            .pop_front()
+            .expect("one configured reply for each requested candidate")
+    }
+}
+
+struct TimedFixtureTransport {
+    replies: VecDeque<Result<HttpReply, TransportFailure>>,
+    timing: FakeTiming,
+    request_starts: Arc<Mutex<Vec<Duration>>>,
+}
+
+struct ProcessFixtureTransport {
+    reply: Option<HttpReply>,
+    request_times_root: std::path::PathBuf,
+}
+
+impl HttpTransport for ProcessFixtureTransport {
+    fn get(&mut self, request: &HttpRequest) -> Result<HttpReply, TransportFailure> {
+        assert_eq!(request.host, "https://web.ifzq.gtimg.cn");
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+            .to_string();
+        let path = self
+            .request_times_root
+            .join(format!("start-{}.txt", std::process::id()));
+        fs::write(path, timestamp).unwrap();
+        Ok(self.reply.take().expect("one synthetic reply"))
+    }
+}
+
+impl HttpTransport for TimedFixtureTransport {
+    fn get(&mut self, request: &HttpRequest) -> Result<HttpReply, TransportFailure> {
+        assert_eq!(request.host, "https://web.ifzq.gtimg.cn");
+        self.request_starts.lock().unwrap().push(self.timing.now());
         self.replies
             .pop_front()
             .expect("one configured reply for each requested candidate")
@@ -409,6 +447,154 @@ fn consecutive_same_domain_requests_are_spaced_by_at_least_one_second() {
     assert_eq!(requests.borrow().len(), 2);
     assert_eq!(*timing.sleeps.lock().unwrap(), vec![Duration::from_secs(1)]);
     assert_eq!(*timing.now.lock().unwrap(), Duration::from_secs(1));
+}
+
+#[test]
+fn concurrent_collectors_serialize_same_domain_adapter_calls() {
+    let root = tempfile::tempdir().unwrap();
+    let timing = FakeTiming::default();
+    let request_starts = Arc::new(Mutex::new(Vec::new()));
+    let (first_reply, _) = valid_reply(
+        "sh600519",
+        "https://synthetic.invalid/first",
+        &["2026-01-05"],
+    );
+    let (second_reply, _) = valid_reply(
+        "sh600519",
+        "https://synthetic.invalid/second",
+        &["2026-01-05"],
+    );
+    let first_transport = TimedFixtureTransport {
+        replies: VecDeque::from([Ok(first_reply)]),
+        timing: timing.clone(),
+        request_starts: Arc::clone(&request_starts),
+    };
+    let second_transport = TimedFixtureTransport {
+        replies: VecDeque::from([Ok(second_reply)]),
+        timing: timing.clone(),
+        request_starts: Arc::clone(&request_starts),
+    };
+    let first_collector =
+        DailyRawCollector::new_with_timing(first_transport, root.path(), Arc::new(timing.clone()))
+            .unwrap();
+    let second_collector =
+        DailyRawCollector::new_with_timing(second_transport, root.path(), Arc::new(timing.clone()))
+            .unwrap();
+
+    let first = std::thread::spawn(move || {
+        let mut collector = first_collector;
+        collector.collect(request("600519", Venue::Xshg, SecurityKind::Stock))
+    });
+    let second = std::thread::spawn(move || {
+        let mut collector = second_collector;
+        collector.collect(request("600519", Venue::Xshg, SecurityKind::Stock))
+    });
+
+    assert_eq!(
+        first.join().unwrap().unwrap().report.status,
+        CollectionStatus::Complete
+    );
+    assert_eq!(
+        second.join().unwrap().unwrap().report.status,
+        CollectionStatus::Complete
+    );
+    let mut starts = request_starts.lock().unwrap().clone();
+    starts.sort_unstable();
+    assert_eq!(starts.len(), 2);
+    assert!(starts[1].saturating_sub(starts[0]) >= Duration::from_secs(1));
+}
+
+#[test]
+fn cross_process_same_domain_request_starts_are_spaced() {
+    const CHILD_ROOT_ENV: &str = "PRAJNA_DAILY_RAW_PACING_TEST_ROOT";
+    if let Some(root) = std::env::var_os(CHILD_ROOT_ENV) {
+        let root = std::path::PathBuf::from(root);
+        let pid = std::process::id();
+        fs::write(root.join(format!("ready-{pid}")), b"ready").unwrap();
+        let start_deadline = Instant::now() + Duration::from_secs(15);
+        while !root.join("go").exists() && Instant::now() < start_deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            root.join("go").exists(),
+            "parent must release the test barrier"
+        );
+        let bytes = serde_json::json!({
+            "code": 0,
+            "data": {"sh600519": {"day": [["2026-01-05", "10", "11", "12", "9", "100"]]}}
+        });
+        let collector = DailyRawCollector::new_with_timing(
+            ProcessFixtureTransport {
+                reply: Some(HttpReply {
+                    source: "https://synthetic.invalid/process".into(),
+                    bytes: serde_json::to_vec(&bytes).unwrap(),
+                }),
+                request_times_root: root.clone(),
+            },
+            &root,
+            Arc::new(prajna_data::daily_raw::SystemDailyRawTiming),
+        )
+        .unwrap();
+        let mut collector = collector;
+        let run = collector
+            .collect(request("600519", Venue::Xshg, SecurityKind::Stock))
+            .unwrap();
+        assert_eq!(run.report.status, CollectionStatus::Complete);
+        return;
+    }
+
+    let root = tempfile::tempdir().unwrap();
+    let executable = std::env::current_exe().unwrap();
+    let mut children = (0..2)
+        .map(|_| {
+            Command::new(&executable)
+                .arg("--exact")
+                .arg("cross_process_same_domain_request_starts_are_spaced")
+                .env(CHILD_ROOT_ENV, root.path())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let ready_deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let ready_count = fs::read_dir(root.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with("ready-"))
+            .count();
+        if ready_count == 2 || Instant::now() >= ready_deadline {
+            fs::write(root.path().join("go"), b"go").unwrap();
+            assert_eq!(ready_count, 2, "both pacing test processes must start");
+            break;
+        }
+        for child in &mut children {
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "child process exited early"
+            );
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    for child in children {
+        assert!(child.wait_with_output().unwrap().status.success());
+    }
+
+    let mut timestamps = fs::read_dir(root.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("start-"))
+        .map(|entry| {
+            fs::read_to_string(entry.path())
+                .unwrap()
+                .parse::<u128>()
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    timestamps.sort_unstable();
+    assert_eq!(timestamps.len(), 2);
+    assert!(timestamps[1].saturating_sub(timestamps[0]) >= 1_000);
 }
 
 #[test]

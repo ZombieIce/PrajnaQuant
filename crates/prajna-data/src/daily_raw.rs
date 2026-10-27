@@ -7,8 +7,8 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
     ffi::OsString,
-    fs::{self, File},
-    io::Write,
+    fs::{self, File, OpenOptions},
+    io::{Read, Seek, SeekFrom, Write},
     path::{Component, Path, PathBuf},
     sync::{
         Arc, Mutex, OnceLock,
@@ -18,6 +18,7 @@ use std::{
 };
 
 use chrono::{Duration, NaiveDate, SecondsFormat, Utc};
+use fs2::FileExt;
 use prajna_domain::{InstrumentId, VenueId};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -32,8 +33,17 @@ const MAX_REQUEST_RETRIES: u32 = 3;
 const SOURCE_ID: &str = "tencent_fqkline_daily";
 const INGESTED_BY: &str = "prajna-daily-raw/1";
 static NEXT_REPORT_ID: AtomicU64 = AtomicU64::new(0);
+static NEXT_PACING_REQUEST_ID: AtomicU64 = AtomicU64::new(0);
 static SYSTEM_EPOCH: OnceLock<Instant> = OnceLock::new();
-static SYSTEM_REQUEST_TIMES: OnceLock<Arc<Mutex<BTreeMap<String, StdDuration>>>> = OnceLock::new();
+
+#[derive(Default)]
+struct DomainPacingState {
+    last_request_at: Option<StdDuration>,
+    last_marker: Option<String>,
+}
+
+type DomainMutexRegistry = Mutex<BTreeMap<(PathBuf, String), Arc<Mutex<DomainPacingState>>>>;
+static DOMAIN_MUTEXES: OnceLock<DomainMutexRegistry> = OnceLock::new();
 
 /// Clock and sleeper seam for deterministic request-pacing and retry tests.
 pub trait DailyRawTiming: Send + Sync {
@@ -55,9 +65,18 @@ impl DailyRawTiming for SystemDailyRawTiming {
     }
 }
 
-fn system_request_times() -> Arc<Mutex<BTreeMap<String, StdDuration>>> {
-    SYSTEM_REQUEST_TIMES
-        .get_or_init(|| Arc::new(Mutex::new(BTreeMap::new())))
+fn system_rate_limit_root() -> PathBuf {
+    std::env::temp_dir().join("prajna-tencent-rate-limit")
+}
+
+fn domain_mutex(rate_limit_root: &Path, domain: &str) -> Arc<Mutex<DomainPacingState>> {
+    let registry = DOMAIN_MUTEXES.get_or_init(|| Mutex::new(BTreeMap::new()));
+    let mut registry = registry
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    registry
+        .entry((rate_limit_root.to_path_buf(), domain.to_owned()))
+        .or_insert_with(|| Arc::new(Mutex::new(DomainPacingState::default())))
         .clone()
 }
 
@@ -281,7 +300,7 @@ impl Error for DailyRawError {}
 struct PacedTransport<'a, T> {
     transport: &'a mut T,
     timing: &'a dyn DailyRawTiming,
-    request_times: &'a Mutex<BTreeMap<String, StdDuration>>,
+    rate_limit_root: &'a Path,
 }
 
 impl<T: tencent_transport::HttpTransport> tencent_transport::HttpTransport
@@ -292,21 +311,92 @@ impl<T: tencent_transport::HttpTransport> tencent_transport::HttpTransport
         request: &tencent_transport::HttpRequest,
     ) -> Result<tencent_transport::HttpReply, tencent_transport::TransportFailure> {
         let domain = rate_limit_domain(request.host);
-        let mut request_times = self
-            .request_times
+        let domain_mutex = domain_mutex(self.rate_limit_root, &domain);
+        let mut domain_state = domain_mutex
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(previous) = request_times.get(&domain).copied() {
-            let elapsed = self.timing.now().saturating_sub(previous);
-            let remaining = MIN_REQUEST_INTERVAL.saturating_sub(elapsed);
-            if !remaining.is_zero() {
-                self.timing.sleep(remaining);
-            }
+        fs::create_dir_all(self.rate_limit_root).map_err(pacing_failure)?;
+        let lock_path = self
+            .rate_limit_root
+            .join(format!("{}.lock", domain.replace('.', "_")));
+        let mut lock_file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(lock_path)
+            .map_err(pacing_failure)?;
+        FileExt::lock_exclusive(&lock_file).map_err(pacing_failure)?;
+        let previous_marker = read_request_marker(&mut lock_file).map_err(pacing_failure)?;
+        let marker_changed = match domain_state.last_marker.as_deref() {
+            Some(last_marker) => previous_marker.as_deref() != Some(last_marker),
+            None => previous_marker.is_some(),
+        };
+        let remaining = domain_state.last_request_at.map_or_else(
+            || {
+                if marker_changed {
+                    MIN_REQUEST_INTERVAL
+                } else {
+                    StdDuration::ZERO
+                }
+            },
+            |previous| {
+                MIN_REQUEST_INTERVAL.saturating_sub(self.timing.now().saturating_sub(previous))
+            },
+        );
+        let remaining = if marker_changed {
+            MIN_REQUEST_INTERVAL
+        } else {
+            remaining
+        };
+        if !remaining.is_zero() {
+            sleep_for_duration(self.timing, remaining);
         }
-        request_times.insert(domain, self.timing.now());
-        drop(request_times);
-        self.transport.get(request)
+        let request_marker = format!(
+            "{}-{}",
+            std::process::id(),
+            NEXT_PACING_REQUEST_ID.fetch_add(1, Ordering::Relaxed)
+        );
+        lock_file.set_len(0).map_err(pacing_failure)?;
+        lock_file.seek(SeekFrom::Start(0)).map_err(pacing_failure)?;
+        lock_file
+            .write_all(request_marker.as_bytes())
+            .map_err(pacing_failure)?;
+        lock_file.write_all(b"\n").map_err(pacing_failure)?;
+        lock_file.sync_data().map_err(pacing_failure)?;
+        domain_state.last_request_at = Some(self.timing.now());
+        domain_state.last_marker = Some(request_marker);
+        let result = self.transport.get(request);
+        let _ = FileExt::unlock(&lock_file);
+        result
     }
+}
+
+fn read_request_marker(file: &mut File) -> std::io::Result<Option<String>> {
+    file.seek(SeekFrom::Start(0))?;
+    let mut marker = String::new();
+    file.read_to_string(&mut marker)?;
+    let marker = marker.trim();
+    Ok((!marker.is_empty()).then(|| marker.to_owned()))
+}
+
+fn sleep_for_duration(timing: &dyn DailyRawTiming, duration: StdDuration) {
+    let started = timing.now();
+    loop {
+        let elapsed = timing.now().saturating_sub(started);
+        let remaining = duration.saturating_sub(elapsed);
+        if remaining.is_zero() {
+            return;
+        }
+        timing.sleep(remaining);
+    }
+}
+
+fn pacing_failure(error: std::io::Error) -> tencent_transport::TransportFailure {
+    tencent_transport::TransportFailure::new(
+        tencent_transport::TransportFailureKind::ClientBuild,
+        format!("daily Raw request pacing could not be enforced: {error}"),
+    )
 }
 
 fn rate_limit_domain(host: &str) -> String {
@@ -344,41 +434,36 @@ pub struct DailyRawCollector<T> {
     root: PathBuf,
     raw: RawStore,
     timing: Arc<dyn DailyRawTiming>,
-    request_times: Arc<Mutex<BTreeMap<String, StdDuration>>>,
+    rate_limit_root: PathBuf,
     consecutive_restrictions: usize,
     source_stopped: bool,
 }
 
 impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
     pub fn new(transport: T, raw_root: impl AsRef<Path>) -> Result<Self, DailyRawError> {
-        Self::with_timing_and_state(
+        Self::with_timing_and_rate_limit_root(
             transport,
             raw_root,
             Arc::new(SystemDailyRawTiming),
-            system_request_times(),
+            system_rate_limit_root(),
         )
     }
 
-    /// Creates a collector with an injected clock/sleeper and isolated pacing state.
+    /// Creates a collector with an injected clock/sleeper and Raw-root-local pacing locks.
     /// Production callers should use [`DailyRawCollector::new`].
     pub fn new_with_timing(
         transport: T,
         raw_root: impl AsRef<Path>,
         timing: Arc<dyn DailyRawTiming>,
     ) -> Result<Self, DailyRawError> {
-        Self::with_timing_and_state(
-            transport,
-            raw_root,
-            timing,
-            Arc::new(Mutex::new(BTreeMap::new())),
-        )
+        Self::with_timing_and_rate_limit_root(transport, raw_root, timing, PathBuf::new())
     }
 
-    fn with_timing_and_state(
+    fn with_timing_and_rate_limit_root(
         transport: T,
         raw_root: impl AsRef<Path>,
         timing: Arc<dyn DailyRawTiming>,
-        request_times: Arc<Mutex<BTreeMap<String, StdDuration>>>,
+        configured_rate_limit_root: PathBuf,
     ) -> Result<Self, DailyRawError> {
         let root = canonicalize_candidate(raw_root.as_ref())?;
         let legacy_root = canonicalize_candidate(&default_mvp6_root())?;
@@ -388,12 +473,17 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
             ));
         }
         let raw = RawStore::open(&root).map_err(|error| DailyRawError(error.to_string()))?;
+        let rate_limit_root = if configured_rate_limit_root.as_os_str().is_empty() {
+            root.join(".daily-raw-rate-limit")
+        } else {
+            configured_rate_limit_root
+        };
         Ok(Self {
             transport,
             root,
             raw,
             timing,
-            request_times,
+            rate_limit_root,
             consecutive_restrictions: 0,
             source_stopped: false,
         })
@@ -447,7 +537,7 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
             let native_symbol_for_records = &native_symbol;
             let kind_for_records = request.kind;
             let timing = Arc::clone(&self.timing);
-            let request_times = Arc::clone(&self.request_times);
+            let rate_limit_root = self.rate_limit_root.clone();
             let transport = &mut self.transport;
             let restriction_count = &mut self.consecutive_restrictions;
             let fetch_result = {
@@ -457,7 +547,7 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
                         let mut paced_transport = PacedTransport {
                             transport,
                             timing: timing.as_ref(),
-                            request_times: request_times.as_ref(),
+                            rate_limit_root: &rate_limit_root,
                         };
                         let mut policy =
                             |failure: &tencent_transport::CandidateFailure,
