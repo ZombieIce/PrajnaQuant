@@ -97,6 +97,6 @@ range, first/last Bar, unit labels and warnings (for example a missing source).
   are unchanged; this entry rejects the archive root rather than mixing them.
 - Checked-in tests publish synthetic XSHG/XSHE stock and ETF Datasets through
   `prajna-publish-daily`, then cover catalog/detail/bars, gaps, Unknown
-  lifecycle, revisions, invalid manifests, missing tables, pagination and
-  read-only behavior. No real calendar, evidence, market coverage or Hash is
+  lifecycle, revisions, invalid manifests, missing tables, a committed Dataset
+  with empty tables, pagination and read-only behavior. No real calendar, evidence, market coverage or Hash is
   validated or published by these tests.
