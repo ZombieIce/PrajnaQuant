@@ -1,12 +1,16 @@
 //! Production read entry: synthetic stock/ETF publication followed by the
 //! read-only Dataset preview. Everything here is synthetic and local.
 
+use arrow_array::RecordBatch;
 use chrono::NaiveDate;
 use prajna_data::{
-    EvidenceSource, FieldEvidence, SecurityEvidenceRecord, SecurityEvidenceStore,
+    EvidenceSource, FieldEvidence, Manifest, ManifestCore, ManifestProvenance, ManifestTable,
+    NormalizerIdentity, SecurityEvidenceRecord, SecurityEvidenceStore, bars_to_record_batch,
     daily_publish::DailyPublicationReceipt,
     daily_raw::{DailyRawCollector, DailyRawRequest, SecurityKind, Venue},
+    instruments_to_record_batch, logical_hash, schema_fingerprint,
     session_calendar::CalendarStore,
+    sessions_to_record_batch, write_manifest, write_parquet,
 };
 use prajna_domain::{InstrumentId, InstrumentKind, Price, Quantity};
 use serde_json::{Value, json};
@@ -555,4 +559,89 @@ fn a_revision_adds_a_version_and_keeps_the_old_one_readable() {
     assert_eq!(second["items"][0]["close"], "12.456");
     assert_eq!(first["dsv"], first_dsv);
     assert_eq!(second["dsv"], second_dsv);
+}
+
+#[test]
+fn empty_committed_dataset_is_readable_with_explicit_empty_coverage() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("lake");
+    let instruments = instruments_to_record_batch(&[]).unwrap();
+    let sessions = sessions_to_record_batch(&[]).unwrap();
+    let bars = bars_to_record_batch(&[]).unwrap();
+    let table = |name: &str, batch: &RecordBatch, keys: &[&str]| ManifestTable {
+        table: name.into(),
+        schema_version: 1,
+        schema_fingerprint: schema_fingerprint(batch.schema().as_ref()).unwrap(),
+        logical_hash: logical_hash(
+            name,
+            batch.schema().as_ref(),
+            std::slice::from_ref(batch),
+            keys,
+        )
+        .unwrap(),
+        row_count: 0,
+    };
+    let manifest = Manifest::new(
+        ManifestCore {
+            manifest_version: 1,
+            normalizer: NormalizerIdentity {
+                id: "synthetic-empty".into(),
+                version: "1".into(),
+                config_sha256: format!("sha256:{}", "0".repeat(64)),
+            },
+            inputs: Vec::new(),
+            tables: vec![
+                table("instruments", &instruments, &["instrument_id"]),
+                table("sessions", &sessions, &["venue_id", "session_date"]),
+                table("bars", &bars, &["instrument_id", "session_date"]),
+            ],
+        },
+        ManifestProvenance {
+            files: Vec::new(),
+            writer: json!({}),
+            created_at: "2026-10-27T00:00:00Z".into(),
+            git_rev: None,
+            git_dirty: None,
+            host: None,
+            synthetic_assumptions: vec!["empty synthetic Dataset".into()],
+            coverage: json!({}),
+            ignored_input_fields: Vec::new(),
+        },
+    )
+    .unwrap();
+    let hex = dsv_hex(&manifest.dsv);
+    for (name, batch) in [
+        ("instruments", &instruments),
+        ("sessions", &sessions),
+        ("bars", &bars),
+    ] {
+        let directory = root.join("normalized").join(name).join(hex);
+        fs::create_dir_all(&directory).unwrap();
+        write_parquet(directory.join("part-00000.parquet"), batch, &manifest.dsv).unwrap();
+    }
+    write_manifest(&root, &manifest).unwrap();
+
+    let catalog = preview_json(&root, &["catalog"]);
+    assert_eq!(catalog["datasets"].as_array().unwrap().len(), 1);
+    assert_eq!(catalog["datasets"][0]["instruments"], 0);
+    assert_eq!(catalog["datasets"][0]["sessions"], 0);
+    assert_eq!(catalog["datasets"][0]["bars"], 0);
+    assert!(catalog["datasets"][0]["first_session"].is_null());
+    assert!(catalog["invalid_manifests"].as_array().unwrap().is_empty());
+
+    let show = preview_json(&root, &["show", "--dsv", &manifest.dsv]);
+    assert!(show["instruments"].as_array().unwrap().is_empty());
+    assert!(show["venues"].as_array().unwrap().is_empty());
+    assert_eq!(show["coverage"], json!({}));
+    let (_, error) = preview_error(
+        &root,
+        &[
+            "bars",
+            "--dsv",
+            &manifest.dsv,
+            "--instrument",
+            "510300.XSHG",
+        ],
+    );
+    assert_eq!(error["error"]["code"], "dataset_not_found");
 }

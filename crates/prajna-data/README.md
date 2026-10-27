@@ -64,5 +64,6 @@ lifecycle without a committed evidence snapshot stays Unknown, and Sessions in
 the observed Bar range without a Bar are listed as gaps rather than halts or zero
 Bars. Tests publish synthetic XSHG/XSHE stock and ETF Datasets through the
 production publisher and cover revisions, invalid manifests, missing tables,
-pagination and read-only behavior; no real data is validated. Full fields,
+an empty committed Dataset, pagination and read-only behavior; no real data is
+validated. Full fields,
 limits and compatibility: [Dataset preview contract](../../docs/contracts/dataset-preview-read.md).
