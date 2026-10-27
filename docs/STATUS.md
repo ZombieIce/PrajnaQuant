@@ -74,7 +74,7 @@ POC-0 已按获确认的拆分发布为 [13 张本地执行票据](../.scratch/p
 
 | 范围 | 当前能力及证据 |
 | --- | --- |
-| Domain / Data | scale-18 定点、证券/时间契约、不可变 Raw、版本化 Dataset、Arrow/Parquet 和重建校验；SecurityEvidenceStore 记录 XSHG/XSHE 股票/ETF 的独立生命周期和交易条款证据、来源与 Unknown/Conflict 状态，按 SHA-256 保留修订（合成验证）；独立沪深 Session 日历支持本机导入、来源/覆盖与固定版本读取及重建（合成验证），尚未验证真实日历或接入 Dataset 发布；真实输入及详细证据仅存本机，契约见 [日历输入](contracts/shanghai-shenzhen-session-calendar.md) |
+| Domain / Data | scale-18 定点、证券/时间契约、不可变 Raw、版本化 Dataset、Arrow/Parquet 和重建校验；SecurityEvidenceStore 记录 XSHG/XSHE 股票/ETF 的独立生命周期和交易条款证据、来源与 Unknown/Conflict 状态，按 SHA-256 保留修订；固定选择按内容寻址保存所选证据版本和发布门禁，只有 Known 正值的 lot/price/size 增量才产生可执行条款，其余显式不可发布（合成验证）；独立沪深 Session 日历支持本机导入、来源/覆盖与固定版本读取及重建（合成验证），尚未验证真实日历或接入 Dataset 发布；真实输入及详细证据仅存本机，契约见 [日历输入](contracts/shanghai-shenzhen-session-calendar.md) |
 | Factor / Cache / Experiment | 封闭因子定义、依赖图、持久 Cache、Grid/List、Run 身份与 Execution 来源、Summary/Standard/Full、重放/提升/diff 和 Run 级并行；定义与入口见 [Experiment](../crates/prajna-experiment/README.md) |
 | Vector / Fast Event | 已实现共同语义子集及精确 Fast 账户/VP 账本；固定名单验收核对逐日账本、费用、两存储重放、Python/CLI 与 Vector/Fast 对拍 |
 | Accurate | 已接真实 Nautilus worker、独立合成金标准及差异分类；单 Venue/币种、long-only、lot 等受限映射；PIT ETF 不接 Accurate，成本/规模缺口见 [A16](../poc/mvp4-cost/adr0013/README.md) |

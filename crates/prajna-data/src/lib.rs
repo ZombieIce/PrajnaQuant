@@ -46,8 +46,10 @@ pub use normalized::{
 };
 pub use raw::{RawStore, RawStoreError, SourceKind, SourceRecord, SourceRecordInput};
 pub use security_evidence::{
-    EvidenceClaim, EvidenceSource, FieldEvidence, SecurityEvidenceError, SecurityEvidenceRecord,
-    SecurityEvidenceStore, SecurityEvidenceVersionId,
+    EvidenceClaim, EvidenceSource, ExecutionTerms, FieldEvidence, PublicationIssue,
+    PublicationIssueCode, PublicationStatus, SECURITY_SNAPSHOT_SCHEMA_VERSION,
+    SecurityEvidenceError, SecurityEvidenceRecord, SecurityEvidenceSnapshot, SecurityEvidenceStore,
+    SecurityEvidenceVersionId, SecurityInstrumentSnapshot, SecuritySnapshotId, publication_status,
 };
 
 use std::{cmp::Ordering, fmt};

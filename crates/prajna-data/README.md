@@ -23,6 +23,12 @@ OHLCV, amount, currency, and timezone units are marked `unknown` unless a later 
 
 The production HTTP adapter is exercised only through the shared transport. The checked-in tests use synthetic transport replies and cover stocks/ETFs, repeat/revision, empty/error/retry, sequential/concurrent/cross-process request pacing, bounded exponential backoff, terminal BodyRead diagnostics, source-bounded chunking, stop-on-restriction, and hash-free CLI errors with local diagnostics. No live collection, source reachability, or real-market coverage is claimed by these tests. This command does not publish a normalized Dataset, perform adjustment, derive corporate actions, schedule collection, expose a task API, or serve a page.
 
+## Fixed security-evidence snapshots
+
+`SecurityEvidenceStore::select_snapshot` takes explicit `(InstrumentId, SecurityEvidenceVersionId)` pairs, reads those exact versions, and writes a content-addressed snapshot below `<root>/security-evidence-snapshots/`. The snapshot embeds records, version ids, and the publication gate; identical sets are idempotent, revisions create a new id, old ids stay readable, and there is no mutable latest pointer. The gate requires Known positive `lot_size`, `price_increment`, and `size_increment`; Unknown, Conflict, NotApplicable, and non-positive terms stay explicit `PublicationIssue`s without defaults, so a blocked instrument is not constructed as an executable `InstrumentSpec` or published Dataset. Lifecycle evidence remains separate from market coverage and `observed_at`; no tradable window or `available_at` is derived.
+
+Select with `prajna-select-security-evidence --root <LOCAL> --select <INSTRUMENT_ID>=<sha256:EVIDENCE_VERSION> [...]` and read an old selection with `--read <sha256:SNAPSHOT_ID>`. The CLI prints the snapshot id, counts, and blocked field/code reasons. Real evidence and detailed identities remain in the configured local root.
+
 ## Independent session calendar
 
 The local import command and fixed-version Rust read API for XSHG/XSHE are documented in the [session calendar input contract](../../docs/contracts/shanghai-shenzhen-session-calendar.md). This input is separate from market Raw; its tests use synthetic calendars only.
