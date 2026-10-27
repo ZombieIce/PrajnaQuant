@@ -21,17 +21,34 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, VecDeque},
     fs,
-    io::Write,
+    io::{Read, Write},
     path::{Path as FsPath, PathBuf},
-    sync::{Arc, Condvar, Mutex},
+    process::{Child, ChildStderr, Command, ExitStatus, Stdio},
+    sync::{
+        Arc, Condvar, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
+    time::{Duration, Instant},
 };
 use uuid::Uuid;
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use rustix::process::{Pid, Signal, kill_process_group};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use std::os::unix::process::CommandExt;
 
 const MAX_QUEUED: usize = 8;
 const MAX_DATE_SPAN_DAYS: i64 = 3661;
 const MAX_SNAPSHOT_ROWS: i64 = 2_000_000;
 const MAX_UNIVERSE_INSTRUMENTS: usize = 100;
+const EXPERIMENT_TASK_TYPE: &str = "prajna_experiment";
+const EXPERIMENT_TASK_VERSION: u32 = 1;
+const MAX_CLI_STDERR_BYTES: usize = 16 * 1024;
+const STDERR_CAPTURE_STOP_TIMEOUT: Duration = Duration::from_millis(200);
+const STDERR_CAPTURE_POLL_INTERVAL: Duration = Duration::from_millis(5);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -70,6 +87,40 @@ pub struct RunJob {
     #[serde(skip)]
     config: Option<ExperimentConfig>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExperimentTaskStatus {
+    Queued,
+    Running,
+    Succeeded,
+    Failed,
+    Interrupted,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExperimentTask {
+    pub task_id: Uuid,
+    pub task_type: String,
+    pub task_version: u32,
+    pub status: ExperimentTaskStatus,
+    pub stage: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub request_sha256: String,
+    pub idempotency_key: String,
+    pub process_group_id: Option<u32>,
+    #[serde(default)]
+    pub process_group_generation: Option<Uuid>,
+    pub result: Option<Value>,
+    pub error: Option<RunError>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SubmitExperimentTask {
+    pub idempotency_key: String,
+    pub definition: Value,
+}
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SubmitRun {
     pub kind: String,
@@ -94,6 +145,8 @@ pub struct Preflight {
 pub struct RunJobApi(Arc<Inner>);
 struct Inner {
     output: PathBuf,
+    experiment_cli: PathBuf,
+    process_inspector: PathBuf,
     gate: Mutex<Store>,
     wake: Condvar,
     universes: Arc<UniverseStore>,
@@ -101,15 +154,40 @@ struct Inner {
 #[derive(Default)]
 struct Store {
     jobs: HashMap<Uuid, RunJob>,
+    tasks: HashMap<Uuid, ExperimentTask>,
     idempotency: HashMap<String, (String, Uuid)>,
-    queue: VecDeque<Uuid>,
+    task_idempotency: HashMap<String, (String, Uuid)>,
+    queue: VecDeque<QueueItem>,
     active: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum QueueItem {
+    LegacyRun(Uuid),
+    ExperimentTask(Uuid),
+}
+
+enum QueuedWork {
+    LegacyRun(Box<RunJob>),
+    ExperimentTask(Box<ExperimentTask>),
 }
 
 impl RunJobApi {
     pub fn start(output: PathBuf, universes: Arc<UniverseStore>) -> Self {
+        let experiment_cli = std::env::var_os("PRAJNA_EXPERIMENT_CLI")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("prajna-experiment"));
+        Self::start_with_cli(output, universes, experiment_cli)
+    }
+    fn start_with_cli(
+        output: PathBuf,
+        universes: Arc<UniverseStore>,
+        experiment_cli: PathBuf,
+    ) -> Self {
         let api = Self(Arc::new(Inner {
             output,
+            experiment_cli,
+            process_inspector: PathBuf::from("ps"),
             gate: Mutex::new(Store::default()),
             wake: Condvar::new(),
             universes,
@@ -122,53 +200,147 @@ impl RunJobApi {
             .expect("run worker thread starts");
         api
     }
+    #[cfg(test)]
+    fn without_worker(
+        output: PathBuf,
+        universes: Arc<UniverseStore>,
+        experiment_cli: PathBuf,
+    ) -> Self {
+        Self::without_worker_with_process_inspector(
+            output,
+            universes,
+            experiment_cli,
+            PathBuf::from("ps"),
+        )
+    }
+    #[cfg(test)]
+    fn without_worker_with_process_inspector(
+        output: PathBuf,
+        universes: Arc<UniverseStore>,
+        experiment_cli: PathBuf,
+        process_inspector: PathBuf,
+    ) -> Self {
+        Self(Arc::new(Inner {
+            output,
+            experiment_cli,
+            process_inspector,
+            gate: Mutex::new(Store::default()),
+            wake: Condvar::new(),
+            universes,
+        }))
+    }
     pub fn router(self) -> Router {
         Router::new()
             .route("/api/v1/research-snapshots", get(list_snapshots))
             .route("/api/v1/runs", get(list_runs).post(submit))
             .route("/api/v1/runs/preflight", post(preflight))
             .route("/api/v1/runs/{id}", get(get_run))
+            .route(
+                "/api/v1/tasks/experiments",
+                get(list_experiment_tasks).post(submit_experiment_task),
+            )
+            .route("/api/v1/tasks/experiments/{id}", get(get_experiment_task))
             .with_state(self)
     }
     fn recover(&self) {
         let jobs_dir = self.0.output.join("runs");
-        let Ok(entries) = fs::read_dir(&jobs_dir) else {
+        let mut store = self.0.gate.lock().expect("run store lock");
+        if let Ok(entries) = fs::read_dir(&jobs_dir) {
+            for entry in entries.flatten() {
+                let directory = entry.path();
+                let path = directory.join("run.json");
+                let Ok(bytes) = fs::read(path) else { continue };
+                let Ok(mut job) = serde_json::from_slice::<RunJob>(&bytes) else {
+                    continue;
+                };
+                match job.status {
+                    RunStatus::Queued => {
+                        job.config = read_request(&directory).map(|r| r.config);
+                        if job.config.is_some() {
+                            store.queue.push_back(QueueItem::LegacyRun(job.run_id))
+                        } else {
+                            fail_job(
+                                &mut job,
+                                "worker_interrupted",
+                                "queued request payload is missing",
+                            )
+                        }
+                    }
+                    RunStatus::Running => fail_job(
+                        &mut job,
+                        "worker_interrupted",
+                        "process stopped while the run was executing; no experiment was committed",
+                    ),
+                    RunStatus::Succeeded | RunStatus::Failed => {}
+                }
+                store.idempotency.insert(
+                    job.idempotency_key.clone(),
+                    (job.request_sha256.clone(), job.run_id),
+                );
+                let _ = persist_job(&self.0.output, &job);
+                store.jobs.insert(job.run_id, job);
+            }
+        }
+
+        let tasks_dir = self.0.output.join("tasks");
+        let Ok(entries) = fs::read_dir(&tasks_dir) else {
             return;
         };
-        let mut store = self.0.gate.lock().expect("run store lock");
         for entry in entries.flatten() {
             let directory = entry.path();
-            let path = directory.join("run.json");
+            let path = directory.join("task.json");
             let Ok(bytes) = fs::read(path) else { continue };
-            let Ok(mut job) = serde_json::from_slice::<RunJob>(&bytes) else {
+            let Ok(mut task) = serde_json::from_slice::<ExperimentTask>(&bytes) else {
                 continue;
             };
-            match job.status {
-                RunStatus::Queued => {
-                    job.config = read_request(&directory).map(|r| r.config);
-                    if job.config.is_some() {
-                        store.queue.push_back(job.run_id)
-                    } else {
-                        fail_job(
-                            &mut job,
-                            "worker_interrupted",
-                            "queued request payload is missing",
-                        )
-                    }
-                }
-                RunStatus::Running => fail_job(
-                    &mut job,
-                    "worker_interrupted",
-                    "process stopped while the run was executing; no experiment was committed",
-                ),
-                RunStatus::Succeeded | RunStatus::Failed => {}
+            if task.task_type != EXPERIMENT_TASK_TYPE
+                || task.task_version != EXPERIMENT_TASK_VERSION
+            {
+                continue;
             }
-            store.idempotency.insert(
-                job.idempotency_key.clone(),
-                (job.request_sha256.clone(), job.run_id),
+            let process_group_generation = task.process_group_generation;
+            let cleanup_error = task.process_group_id.and_then(|process_group_id| {
+                terminate_process_group(
+                    process_group_id,
+                    task.task_id,
+                    process_group_generation,
+                    &self.0.process_inspector,
+                )
+                .err()
+                .map(|error| {
+                    (
+                        process_group_id,
+                        process_group_generation,
+                        process_group_cleanup_error(error),
+                    )
+                })
+            });
+            match task.status {
+                ExperimentTaskStatus::Queued | ExperimentTaskStatus::Running => interrupt_task(
+                    &mut task,
+                    "service restarted before the experiment task completed",
+                ),
+                ExperimentTaskStatus::Succeeded
+                | ExperimentTaskStatus::Failed
+                | ExperimentTaskStatus::Interrupted => {}
+            }
+            task.process_group_id = cleanup_error
+                .as_ref()
+                .map(|(process_group_id, _, _)| *process_group_id);
+            task.process_group_generation = cleanup_error
+                .as_ref()
+                .and_then(|(_, generation, _)| *generation);
+            if let Some((_, _, mut error)) = cleanup_error {
+                preserve_cli_error_on_cleanup(&mut error, task.error.as_ref());
+                task.error = Some(error);
+                task.updated_at = chrono::Utc::now().to_rfc3339();
+            }
+            store.task_idempotency.insert(
+                task.idempotency_key.clone(),
+                (task.request_sha256.clone(), task.task_id),
             );
-            let _ = persist_job(&self.0.output, &job);
-            store.jobs.insert(job.run_id, job);
+            let _ = persist_experiment_task(&self.0.output, &task);
+            store.tasks.insert(task.task_id, task);
         }
     }
     fn submit(&self, request: SubmitRun) -> Result<(RunJob, bool), ApiFailure> {
@@ -271,10 +443,72 @@ impl RunJobApi {
         store
             .idempotency
             .insert(request.idempotency_key, (request_hash, job.run_id));
-        store.queue.push_back(job.run_id);
+        store.queue.push_back(QueueItem::LegacyRun(job.run_id));
         store.jobs.insert(job.run_id, job.clone());
         self.0.wake.notify_one();
         Ok((job, true))
+    }
+    fn submit_experiment_task(
+        &self,
+        request: SubmitExperimentTask,
+    ) -> Result<(ExperimentTask, bool), ApiFailure> {
+        validate_experiment_task_request(&request)?;
+        let request_hash = canonical_experiment_task_hash(&request)?;
+        let mut store = self
+            .0
+            .gate
+            .lock()
+            .map_err(|_| ApiFailure::internal("run store lock poisoned"))?;
+        if let Some((old_hash, task_id)) = store.task_idempotency.get(&request.idempotency_key) {
+            if old_hash != &request_hash {
+                return Err(ApiFailure::new(
+                    StatusCode::CONFLICT,
+                    "idempotency_conflict",
+                    "idempotency_key was already used for a different experiment task",
+                    Value::Null,
+                ));
+            }
+            let task = store
+                .tasks
+                .get(task_id)
+                .ok_or_else(|| ApiFailure::internal("task idempotency index is inconsistent"))?;
+            return Ok((task.clone(), false));
+        }
+        if store.queue.len() + usize::from(store.active) >= MAX_QUEUED {
+            return Err(ApiFailure::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "queue_full",
+                "run queue is full; retry after an existing job finishes",
+                Value::Null,
+            ));
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        let task = ExperimentTask {
+            task_id: Uuid::new_v4(),
+            task_type: EXPERIMENT_TASK_TYPE.into(),
+            task_version: EXPERIMENT_TASK_VERSION,
+            status: ExperimentTaskStatus::Queued,
+            stage: "queued".into(),
+            created_at: now.clone(),
+            updated_at: now,
+            request_sha256: request_hash.clone(),
+            idempotency_key: request.idempotency_key.clone(),
+            process_group_id: None,
+            process_group_generation: None,
+            result: None,
+            error: None,
+        };
+        persist_experiment_request(&self.0.output, task.task_id, &request)?;
+        persist_experiment_task(&self.0.output, &task)?;
+        store
+            .task_idempotency
+            .insert(request.idempotency_key, (request_hash, task.task_id));
+        store
+            .queue
+            .push_back(QueueItem::ExperimentTask(task.task_id));
+        store.tasks.insert(task.task_id, task.clone());
+        self.0.wake.notify_one();
+        Ok((task, true))
     }
     fn inspect(&self, request: &SubmitRun) -> Preflight {
         let mut blockers = Vec::new();
@@ -529,6 +763,9 @@ impl RunJobApi {
     fn get(&self, id: Uuid) -> Option<RunJob> {
         self.0.gate.lock().ok()?.jobs.get(&id).cloned()
     }
+    fn get_experiment_task(&self, id: Uuid) -> Option<ExperimentTask> {
+        self.0.gate.lock().ok()?.tasks.get(&id).cloned()
+    }
     fn list(&self) -> Vec<RunJob> {
         let mut jobs = self
             .0
@@ -540,39 +777,237 @@ impl RunJobApi {
         jobs.truncate(100);
         jobs
     }
+    fn list_experiment_tasks(&self) -> Vec<ExperimentTask> {
+        let mut tasks = self
+            .0
+            .gate
+            .lock()
+            .map(|g| g.tasks.values().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        tasks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        tasks.truncate(100);
+        tasks
+    }
     fn worker_loop(&self) {
         loop {
-            let job = {
+            {
                 let mut store = self.0.gate.lock().expect("run store lock");
                 while store.queue.is_empty() {
                     store = self.0.wake.wait(store).expect("run store lock")
                 }
-                let id = store.queue.pop_front().expect("queued id");
-                store.active = true;
-                let job = store.jobs.get_mut(&id).expect("queued job");
-                job.status = RunStatus::Running;
-                job.stage = "validating_fixed_inputs".into();
-                job.updated_at = chrono::Utc::now().to_rfc3339();
-                let _ = persist_job(&self.0.output, job);
-                job.clone()
-            };
-            let result = self.execute(&job);
-            let mut store = self.0.gate.lock().expect("run store lock");
-            let target = store.jobs.get_mut(&job.run_id).expect("active job");
-            match result {
-                Ok(id) => {
-                    target.status = RunStatus::Succeeded;
-                    target.stage = "complete".into();
-                    target.experiment_id = Some(id);
-                    target.error = None
-                }
-                Err(error) => fail_job(target, &error.code, &error.message),
             }
-            target.updated_at = chrono::Utc::now().to_rfc3339();
-            let _ = persist_job(&self.0.output, target);
-            store.active = false;
-            self.0.wake.notify_all();
+            self.process_next_queued();
         }
+    }
+    fn process_next_queued(&self) -> bool {
+        let work = {
+            let mut store = self.0.gate.lock().expect("run store lock");
+            let Some(item) = store.queue.pop_front() else {
+                return false;
+            };
+            store.active = true;
+            match item {
+                QueueItem::LegacyRun(id) => {
+                    let job = store.jobs.get_mut(&id).expect("queued job");
+                    job.status = RunStatus::Running;
+                    job.stage = "validating_fixed_inputs".into();
+                    job.updated_at = chrono::Utc::now().to_rfc3339();
+                    let _ = persist_job(&self.0.output, job);
+                    QueuedWork::LegacyRun(Box::new(job.clone()))
+                }
+                QueueItem::ExperimentTask(id) => {
+                    let task = store.tasks.get_mut(&id).expect("queued experiment task");
+                    task.status = ExperimentTaskStatus::Running;
+                    task.stage = "starting_experiment_cli".into();
+                    task.updated_at = chrono::Utc::now().to_rfc3339();
+                    let _ = persist_experiment_task(&self.0.output, task);
+                    QueuedWork::ExperimentTask(Box::new(task.clone()))
+                }
+            }
+        };
+
+        match work {
+            QueuedWork::LegacyRun(job) => {
+                let result = self.execute(&job);
+                let mut store = self.0.gate.lock().expect("run store lock");
+                let target = store.jobs.get_mut(&job.run_id).expect("active job");
+                match result {
+                    Ok(id) => {
+                        target.status = RunStatus::Succeeded;
+                        target.stage = "complete".into();
+                        target.experiment_id = Some(id);
+                        target.error = None
+                    }
+                    Err(error) => fail_job(target, &error.code, &error.message),
+                }
+                target.updated_at = chrono::Utc::now().to_rfc3339();
+                let _ = persist_job(&self.0.output, target);
+            }
+            QueuedWork::ExperimentTask(task) => {
+                let result = self.execute_experiment_task(&task);
+                let mut store = self.0.gate.lock().expect("run store lock");
+                let target = store
+                    .tasks
+                    .get_mut(&task.task_id)
+                    .expect("active experiment task");
+                match result {
+                    Ok(result) => {
+                        target.status = ExperimentTaskStatus::Succeeded;
+                        target.stage = "complete".into();
+                        target.result = Some(result);
+                        target.process_group_id = None;
+                        target.process_group_generation = None;
+                        target.error = None;
+                    }
+                    Err(error) => {
+                        fail_experiment_task(target, error);
+                    }
+                }
+                target.updated_at = chrono::Utc::now().to_rfc3339();
+                let _ = persist_experiment_task(&self.0.output, target);
+            }
+        }
+        let mut store = self.0.gate.lock().expect("run store lock");
+        store.active = false;
+        self.0.wake.notify_all();
+        true
+    }
+    fn execute_experiment_task(&self, task: &ExperimentTask) -> Result<Value, RunError> {
+        let directory = experiment_task_dir(&self.0.output, task.task_id);
+        let request = read_experiment_request(&directory).ok_or_else(|| {
+            run_error(
+                "task_request_missing",
+                "persisted experiment task request is missing or invalid",
+            )
+        })?;
+        validate_experiment_task_request(&request).map_err(|error| error.0)?;
+        if canonical_experiment_task_hash(&request).map_err(|error| error.0)? != task.request_sha256
+        {
+            return Err(run_error(
+                "task_request_changed",
+                "persisted experiment task definition does not match its frozen identity",
+            ));
+        }
+        let definition_path = directory.join("experiment.json");
+        let definition_bytes = fs::read(&definition_path)
+            .map_err(|error| run_error("task_definition_missing", &error.to_string()))?;
+        let definition: Value = serde_json::from_slice(&definition_bytes)
+            .map_err(|error| run_error("task_definition_invalid", &error.to_string()))?;
+        if definition != request.definition {
+            return Err(run_error(
+                "task_definition_changed",
+                "persisted CLI definition does not match the frozen task request",
+            ));
+        }
+
+        let stdout_path = directory.join("cli.stdout");
+        let stdout = fs::File::create(&stdout_path)
+            .map_err(|error| run_error("task_output_create_failed", &error.to_string()))?;
+        let process_generation = Uuid::new_v4();
+        let mut command = Command::new(&self.0.experiment_cli);
+        command
+            .arg("run")
+            .arg(&definition_path)
+            .arg("--lake")
+            .arg(&self.0.output)
+            .arg("--level")
+            .arg("summary")
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::piped());
+        let mut process = ExperimentProcessGroup::spawn_with_process_inspector(
+            &mut command,
+            task.task_id,
+            process_generation,
+            self.0.process_inspector.clone(),
+        )
+        .map_err(|error| run_error("experiment_cli_spawn_failed", &error.to_string()))?;
+        let group_id = process.process_group_id();
+        let stderr = process.take_stderr().ok_or_else(|| {
+            run_error(
+                "experiment_cli_stderr_missing",
+                "CLI stderr pipe is missing",
+            )
+        })?;
+        let stop_stderr_capture = Arc::new(AtomicBool::new(false));
+        let reader_stop_signal = Arc::clone(&stop_stderr_capture);
+        let stderr_reader = thread::spawn(move || read_bounded_stderr(stderr, reader_stop_signal));
+        self.set_experiment_process_group(task.task_id, Some(group_id), Some(process_generation))?;
+        let wait = match process.wait() {
+            Ok(wait) => wait,
+            Err(error) => {
+                stop_stderr_capture.store(true, Ordering::Release);
+                drop(stderr_reader);
+                return Err(process_group_cleanup_error(error));
+            }
+        };
+        stop_stderr_capture.store(true, Ordering::Release);
+        let stderr = match stderr_reader.join() {
+            Ok(Ok(stderr)) => Ok(stderr),
+            Ok(Err(error)) => Err(run_error(
+                "experiment_cli_stderr_capture_failed",
+                &error.to_string(),
+            )),
+            Err(_) => Err(run_error(
+                "experiment_cli_stderr_capture_failed",
+                "CLI stderr capture worker stopped unexpectedly",
+            )),
+        };
+        if let Some(cleanup_error) = wait.cleanup_error {
+            return Err(process_group_cleanup_error_with_cli(
+                cleanup_error,
+                &wait.status,
+                &stderr,
+            ));
+        }
+        self.set_experiment_process_group(task.task_id, None, None)?;
+        let stderr = stderr?;
+        if let Some(error) = experiment_cli_error(&wait.status, &stderr) {
+            return Err(error);
+        }
+        let bytes = fs::read(&stdout_path)
+            .map_err(|error| run_error("experiment_cli_output_missing", &error.to_string()))?;
+        let result: Value = serde_json::from_slice(&bytes)
+            .map_err(|error| run_error("experiment_cli_output_invalid", &error.to_string()))?;
+        if result.get("exp").and_then(Value::as_str).is_none()
+            || result.get("exe").and_then(Value::as_str).is_none()
+        {
+            return Err(run_error(
+                "experiment_cli_identity_missing",
+                "prajna-experiment output must contain string exp and exe identities",
+            ));
+        }
+        let result_bytes = serde_json::to_vec_pretty(&result)
+            .map_err(|error| run_error("experiment_cli_output_invalid", &error.to_string()))?;
+        atomic_write(&directory.join("result.json"), &result_bytes)
+            .map_err(|error| run_error("task_result_persist_failed", &error.to_string()))?;
+        let _ = fs::remove_file(stdout_path);
+        Ok(result)
+    }
+    fn set_experiment_process_group(
+        &self,
+        task_id: Uuid,
+        process_group_id: Option<u32>,
+        process_group_generation: Option<Uuid>,
+    ) -> Result<(), RunError> {
+        let mut store = self
+            .0
+            .gate
+            .lock()
+            .map_err(|_| run_error("task_store_lock_failed", "task store lock poisoned"))?;
+        let task = store
+            .tasks
+            .get_mut(&task_id)
+            .ok_or_else(|| run_error("task_missing", "experiment task is missing"))?;
+        task.process_group_id = process_group_id;
+        task.process_group_generation = process_group_generation;
+        task.stage = if process_group_id.is_some() {
+            "running_experiment_cli".into()
+        } else {
+            "reading_experiment_result".into()
+        };
+        task.updated_at = chrono::Utc::now().to_rfc3339();
+        persist_experiment_task(&self.0.output, task).map_err(|error| error.0)
     }
     fn execute(&self, job: &RunJob) -> Result<Uuid, RunError> {
         let request = read_request(&self.0.output.join("runs").join(job.run_id.to_string()))
@@ -679,6 +1114,47 @@ async fn preflight(State(api): State<RunJobApi>, Json(request): Json<SubmitRun>)
 }
 async fn list_runs(State(api): State<RunJobApi>) -> Response {
     Json(json!({"items":api.list()})).into_response()
+}
+async fn list_experiment_tasks(State(api): State<RunJobApi>) -> Response {
+    Json(json!({"items":api.list_experiment_tasks()})).into_response()
+}
+async fn submit_experiment_task(
+    State(api): State<RunJobApi>,
+    Json(request): Json<SubmitExperimentTask>,
+) -> Response {
+    match api.submit_experiment_task(request) {
+        Ok((task, created)) => (
+            if created {
+                StatusCode::ACCEPTED
+            } else {
+                StatusCode::OK
+            },
+            Json(json!({"task":task,"created":created})),
+        )
+            .into_response(),
+        Err(error) => error.into_response(),
+    }
+}
+async fn get_experiment_task(State(api): State<RunJobApi>, Path(id): Path<String>) -> Response {
+    let Ok(id) = Uuid::parse_str(&id) else {
+        return ApiFailure::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "invalid experiment task id",
+            Value::Null,
+        )
+        .into_response();
+    };
+    match api.get_experiment_task(id) {
+        Some(task) => Json(task).into_response(),
+        None => ApiFailure::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "experiment task not found",
+            Value::Null,
+        )
+        .into_response(),
+    }
 }
 async fn list_snapshots(State(api): State<RunJobApi>) -> Response {
     let directory = api.0.output.join("snapshots");
@@ -795,6 +1271,35 @@ fn canonical_hash(request: &SubmitRun) -> Result<String, ApiFailure> {
         .map(|b| format!("{:x}", Sha256::digest(b)))
         .map_err(ApiFailure::from_error)
 }
+fn validate_experiment_task_request(request: &SubmitExperimentTask) -> Result<(), ApiFailure> {
+    if request.idempotency_key.trim().is_empty() || request.idempotency_key.len() > 128 {
+        return Err(ApiFailure::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "idempotency_key must contain 1 to 128 characters",
+            Value::Null,
+        ));
+    }
+    if !request.definition.is_object() {
+        return Err(ApiFailure::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "experiment definition must be a JSON object",
+            Value::Null,
+        ));
+    }
+    Ok(())
+}
+fn canonical_experiment_task_hash(request: &SubmitExperimentTask) -> Result<String, ApiFailure> {
+    let value = json!({
+        "task_type": EXPERIMENT_TASK_TYPE,
+        "task_version": EXPERIMENT_TASK_VERSION,
+        "definition": &request.definition,
+    });
+    serde_json::to_vec(&value)
+        .map(|bytes| format!("{:x}", Sha256::digest(bytes)))
+        .map_err(ApiFailure::from_error)
+}
 fn blocker(code: &str, message: &str) -> RunError {
     RunError {
         code: code.into(),
@@ -851,8 +1356,59 @@ fn fail_job(job: &mut RunJob, code: &str, message: &str) {
     job.updated_at = chrono::Utc::now().to_rfc3339();
     job.error = Some(blocker(code, message))
 }
+fn fail_experiment_task(task: &mut ExperimentTask, error: RunError) {
+    task.status = ExperimentTaskStatus::Failed;
+    task.stage = "failed".into();
+    if !error.code.starts_with("process_group_") {
+        task.process_group_id = None;
+        task.process_group_generation = None;
+    }
+    task.updated_at = chrono::Utc::now().to_rfc3339();
+    task.error = Some(error);
+}
+fn interrupt_task(task: &mut ExperimentTask, message: &str) {
+    task.status = ExperimentTaskStatus::Interrupted;
+    task.stage = "interrupted".into();
+    task.process_group_id = None;
+    task.process_group_generation = None;
+    task.updated_at = chrono::Utc::now().to_rfc3339();
+    task.error = Some(blocker("worker_interrupted", message));
+}
 fn read_request(directory: &FsPath) -> Option<SubmitRun> {
     serde_json::from_slice(&fs::read(directory.join("request.json")).ok()?).ok()
+}
+fn experiment_task_dir(root: &FsPath, task_id: Uuid) -> PathBuf {
+    root.join("tasks").join(task_id.to_string())
+}
+fn read_experiment_request(directory: &FsPath) -> Option<SubmitExperimentTask> {
+    serde_json::from_slice(&fs::read(directory.join("request.json")).ok()?).ok()
+}
+fn persist_experiment_request(
+    root: &FsPath,
+    task_id: Uuid,
+    request: &SubmitExperimentTask,
+) -> Result<(), ApiFailure> {
+    let dir = experiment_task_dir(root, task_id);
+    fs::create_dir_all(&dir).map_err(ApiFailure::from_error)?;
+    atomic_write(
+        &dir.join("request.json"),
+        &serde_json::to_vec_pretty(request).map_err(ApiFailure::from_error)?,
+    )
+    .map_err(ApiFailure::from_error)?;
+    atomic_write(
+        &dir.join("experiment.json"),
+        &serde_json::to_vec_pretty(&request.definition).map_err(ApiFailure::from_error)?,
+    )
+    .map_err(ApiFailure::from_error)
+}
+fn persist_experiment_task(root: &FsPath, task: &ExperimentTask) -> Result<(), ApiFailure> {
+    let dir = experiment_task_dir(root, task.task_id);
+    fs::create_dir_all(&dir).map_err(ApiFailure::from_error)?;
+    atomic_write(
+        &dir.join("task.json"),
+        &serde_json::to_vec_pretty(task).map_err(ApiFailure::from_error)?,
+    )
+    .map_err(ApiFailure::from_error)
 }
 fn persist_request(root: &FsPath, id: Uuid, request: &SubmitRun) -> Result<(), ApiFailure> {
     let dir = root.join("runs").join(id.to_string());
@@ -880,6 +1436,444 @@ fn atomic_write(path: &FsPath, bytes: &[u8]) -> std::io::Result<()> {
     fs::rename(temp, path)
 }
 
+struct BoundedStderr {
+    text: String,
+    truncated: bool,
+    capture_incomplete: bool,
+}
+
+#[derive(Debug)]
+enum ProcessGroupCleanupError {
+    OwnershipUnverified,
+    Io(std::io::Error),
+}
+
+impl From<std::io::Error> for ProcessGroupCleanupError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl ProcessGroupCleanupError {
+    #[cfg(test)]
+    fn kind(&self) -> std::io::ErrorKind {
+        match self {
+            Self::OwnershipUnverified => std::io::ErrorKind::PermissionDenied,
+            Self::Io(error) => error.kind(),
+        }
+    }
+}
+
+fn process_group_cleanup_error(error: ProcessGroupCleanupError) -> RunError {
+    match error {
+        ProcessGroupCleanupError::OwnershipUnverified => blocker(
+            "process_group_ownership_unverified",
+            "process group task ownership or generation could not be verified; cleanup was refused",
+        ),
+        ProcessGroupCleanupError::Io(error) => blocker(
+            "process_group_cleanup_failed",
+            &format!("could not clean up experiment process group: {error}"),
+        ),
+    }
+}
+
+fn cli_result_details(status: &ExitStatus, stderr: &BoundedStderr) -> Value {
+    let mut details = json!({
+        "success": status.success(),
+        "exit_code": status.code(),
+        "stderr": stderr.text,
+        "stderr_truncated": stderr.truncated,
+        "stderr_capture_incomplete": stderr.capture_incomplete,
+    });
+    #[cfg(unix)]
+    if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(status) {
+        details["signal"] = json!(signal);
+    }
+    details
+}
+
+fn experiment_cli_error(status: &ExitStatus, stderr: &BoundedStderr) -> Option<RunError> {
+    if status.success() {
+        return None;
+    }
+    Some(RunError {
+        code: "experiment_cli_failed".into(),
+        message: "prajna-experiment exited unsuccessfully".into(),
+        details: cli_result_details(status, stderr),
+    })
+}
+
+fn process_group_cleanup_error_with_cli(
+    error: ProcessGroupCleanupError,
+    status: &ExitStatus,
+    stderr: &Result<BoundedStderr, RunError>,
+) -> RunError {
+    let mut cleanup_error = process_group_cleanup_error(error);
+    match stderr {
+        Ok(stderr) => {
+            if let Some(cli_error) = experiment_cli_error(status, stderr) {
+                cleanup_error.details = json!({"cli_error": cli_error});
+            } else {
+                cleanup_error.details = json!({
+                    "cli_result": cli_result_details(status, stderr),
+                });
+            }
+        }
+        Err(capture_error) => {
+            let mut details = json!({
+                "exit_code": status.code(),
+                "stderr_capture_error": {
+                    "code": capture_error.code,
+                    "message": capture_error.message,
+                },
+            });
+            #[cfg(unix)]
+            if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(status) {
+                details["signal"] = json!(signal);
+            }
+            cleanup_error.details = details;
+        }
+    }
+    cleanup_error
+}
+
+fn preserve_cli_error_on_cleanup(cleanup_error: &mut RunError, previous: Option<&RunError>) {
+    if let Some(cli_error) = previous.and_then(|error| error.details.get("cli_error")) {
+        cleanup_error.details = json!({"cli_error": cli_error});
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn read_bounded_stderr(
+    mut stderr: ChildStderr,
+    stop_requested: Arc<AtomicBool>,
+) -> std::io::Result<BoundedStderr> {
+    let flags = fcntl_getfl(&stderr).map_err(std::io::Error::from)?;
+    fcntl_setfl(&stderr, flags | OFlags::NONBLOCK).map_err(std::io::Error::from)?;
+    let mut retained = Vec::with_capacity(MAX_CLI_STDERR_BYTES);
+    let mut buffer = [0_u8; 4096];
+    let mut truncated = false;
+    let mut capture_incomplete = false;
+    let mut stop_deadline = None;
+    loop {
+        let now = Instant::now();
+        if stop_deadline.is_none() && stop_requested.load(Ordering::Acquire) {
+            let flags = fcntl_getfl(&stderr).map_err(std::io::Error::from)?;
+            fcntl_setfl(&stderr, flags | OFlags::NONBLOCK).map_err(std::io::Error::from)?;
+            stop_deadline = Some(now + STDERR_CAPTURE_STOP_TIMEOUT);
+        }
+        if stop_deadline.is_some_and(|deadline| now >= deadline) {
+            capture_incomplete = true;
+            break;
+        }
+        match stderr.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => {
+                let remaining = MAX_CLI_STDERR_BYTES.saturating_sub(retained.len());
+                let keep = remaining.min(read);
+                retained.extend_from_slice(&buffer[..keep]);
+                truncated |= keep < read;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(STDERR_CAPTURE_POLL_INTERVAL);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(BoundedStderr {
+        text: String::from_utf8_lossy(&retained).into_owned(),
+        truncated,
+        capture_incomplete,
+    })
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn read_bounded_stderr(
+    mut stderr: ChildStderr,
+    _stop_requested: Arc<AtomicBool>,
+) -> std::io::Result<BoundedStderr> {
+    let mut retained = Vec::with_capacity(MAX_CLI_STDERR_BYTES);
+    let mut buffer = [0_u8; 4096];
+    let mut truncated = false;
+    loop {
+        let read = stderr.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        let remaining = MAX_CLI_STDERR_BYTES.saturating_sub(retained.len());
+        let keep = remaining.min(read);
+        retained.extend_from_slice(&buffer[..keep]);
+        truncated |= keep < read;
+    }
+    Ok(BoundedStderr {
+        text: String::from_utf8_lossy(&retained).into_owned(),
+        truncated,
+        capture_incomplete: false,
+    })
+}
+
+struct ExperimentProcessGroup {
+    child: Child,
+    process_group_id: u32,
+    task_id: Uuid,
+    process_generation: Uuid,
+    process_inspector: PathBuf,
+    finished: bool,
+}
+
+struct ProcessGroupWait {
+    status: ExitStatus,
+    cleanup_error: Option<ProcessGroupCleanupError>,
+}
+
+impl ExperimentProcessGroup {
+    #[cfg(test)]
+    fn spawn(
+        command: &mut Command,
+        task_id: Uuid,
+        process_generation: Uuid,
+    ) -> std::io::Result<Self> {
+        Self::spawn_with_process_inspector(
+            command,
+            task_id,
+            process_generation,
+            PathBuf::from("ps"),
+        )
+    }
+
+    fn spawn_with_process_inspector(
+        command: &mut Command,
+        task_id: Uuid,
+        process_generation: Uuid,
+        process_inspector: PathBuf,
+    ) -> std::io::Result<Self> {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        command
+            .process_group(0)
+            .env("PRAJNA_EXPERIMENT_TASK_ID", task_id.to_string())
+            .env(
+                "PRAJNA_EXPERIMENT_PROCESS_GENERATION",
+                process_generation.to_string(),
+            );
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "experiment task process groups require macOS or Linux",
+        ));
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            let child = command.spawn()?;
+            let process_group_id = child.id();
+            Ok(Self {
+                child,
+                process_group_id,
+                task_id,
+                process_generation,
+                process_inspector,
+                finished: false,
+            })
+        }
+    }
+
+    fn process_group_id(&self) -> u32 {
+        self.process_group_id
+    }
+
+    fn take_stderr(&mut self) -> Option<ChildStderr> {
+        self.child.stderr.take()
+    }
+
+    fn wait(&mut self) -> Result<ProcessGroupWait, ProcessGroupCleanupError> {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            let status = self.child.wait().map_err(ProcessGroupCleanupError::Io)?;
+            let cleanup_error = terminate_process_group(
+                self.process_group_id,
+                self.task_id,
+                Some(self.process_generation),
+                &self.process_inspector,
+            )
+            .err();
+            self.finished = cleanup_error.is_none();
+            Ok(ProcessGroupWait {
+                status,
+                cleanup_error,
+            })
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        {
+            Err(ProcessGroupCleanupError::Io(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "experiment task process groups require macOS or Linux",
+            )))
+        }
+    }
+
+    #[cfg(test)]
+    fn terminate(&mut self) -> Result<ExitStatus, ProcessGroupCleanupError> {
+        terminate_process_group(
+            self.process_group_id,
+            self.task_id,
+            Some(self.process_generation),
+            &self.process_inspector,
+        )?;
+        let status = self.child.wait()?;
+        self.finished = true;
+        Ok(status)
+    }
+}
+
+impl Drop for ExperimentProcessGroup {
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        let _ = terminate_process_group(
+            self.process_group_id,
+            self.task_id,
+            Some(self.process_generation),
+            &self.process_inspector,
+        );
+        let _ = self.child.wait();
+        self.finished = true;
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn terminate_process_group(
+    process_group_id: u32,
+    task_id: Uuid,
+    process_generation: Option<Uuid>,
+    process_inspector: &FsPath,
+) -> Result<(), ProcessGroupCleanupError> {
+    if process_group_id <= 1 || process_group_id > i32::MAX as u32 {
+        return Err(ProcessGroupCleanupError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid experiment process group id",
+        )));
+    }
+    let ownership = verify_process_group_owner(
+        process_group_id,
+        task_id,
+        process_generation,
+        process_inspector,
+    )
+    .map_err(|_| ProcessGroupCleanupError::OwnershipUnverified)?;
+    match ownership {
+        ProcessGroupOwnership::Absent => return Ok(()),
+        ProcessGroupOwnership::Owned => {}
+        ProcessGroupOwnership::Unverified => {
+            return Err(ProcessGroupCleanupError::OwnershipUnverified);
+        }
+    }
+    let process_group = Pid::from_raw(process_group_id as i32).ok_or_else(|| {
+        ProcessGroupCleanupError::Io(std::io::Error::from(std::io::ErrorKind::InvalidInput))
+    })?;
+    match kill_process_group(process_group, Signal::KILL) {
+        Ok(()) | Err(rustix::io::Errno::SRCH) => Ok(()),
+        Err(error) => Err(ProcessGroupCleanupError::Io(error.into())),
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProcessGroupOwnership {
+    Absent,
+    Owned,
+    Unverified,
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn verify_process_group_owner(
+    process_group_id: u32,
+    task_id: Uuid,
+    process_generation: Option<Uuid>,
+    process_inspector: &FsPath,
+) -> std::io::Result<ProcessGroupOwnership> {
+    let members = process_group_members(process_group_id, process_inspector)?;
+    if members.is_empty() {
+        return Ok(ProcessGroupOwnership::Absent);
+    }
+    let Some(process_generation) = process_generation else {
+        return Ok(ProcessGroupOwnership::Unverified);
+    };
+    for pid in members {
+        let mut command = Command::new(process_inspector);
+        #[cfg(target_os = "macos")]
+        command.args(["-Eww", "-p"]);
+        #[cfg(target_os = "linux")]
+        command.args(["eww", "-p"]);
+        let output = match command.arg(pid.to_string()).output() {
+            Ok(output) if output.status.success() => output,
+            Ok(_) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        let process = String::from_utf8_lossy(&output.stdout);
+        if process_listing_matches_owner(&process, task_id, process_generation) {
+            return Ok(ProcessGroupOwnership::Owned);
+        }
+    }
+    if process_group_members(process_group_id, process_inspector)?.is_empty() {
+        Ok(ProcessGroupOwnership::Absent)
+    } else {
+        Ok(ProcessGroupOwnership::Unverified)
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn process_listing_matches_owner(listing: &str, task_id: Uuid, process_generation: Uuid) -> bool {
+    let task_marker = format!("PRAJNA_EXPERIMENT_TASK_ID={task_id}");
+    let generation_marker = format!("PRAJNA_EXPERIMENT_PROCESS_GENERATION={process_generation}");
+    let mut has_task = false;
+    let mut has_generation = false;
+    for field in listing.split_whitespace() {
+        has_task |= field == task_marker;
+        has_generation |= field == generation_marker;
+    }
+    has_task && has_generation
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn process_group_members(
+    process_group_id: u32,
+    process_inspector: &FsPath,
+) -> std::io::Result<Vec<u32>> {
+    let output = Command::new(process_inspector)
+        .args(["-axo", "pid=,pgid="])
+        .output()?;
+    if !output.status.success() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "could not inspect process groups; refusing cleanup",
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout
+        .lines()
+        .filter_map(|line| {
+            let mut columns = line.split_whitespace();
+            let pid = columns.next()?.parse::<u32>().ok()?;
+            let pgid = columns.next()?.parse::<u32>().ok()?;
+            (pgid == process_group_id).then_some(pid)
+        })
+        .collect())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn terminate_process_group(
+    _process_group_id: u32,
+    _task_id: Uuid,
+    _process_generation: Option<Uuid>,
+    _process_inspector: &FsPath,
+) -> Result<(), ProcessGroupCleanupError> {
+    Err(ProcessGroupCleanupError::Io(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "experiment task process groups require macOS or Linux",
+    )))
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::universe_api::UniverseDraft;
@@ -891,7 +1885,11 @@ mod tests {
     use chrono::{Duration, NaiveDate};
     use duckdb::Connection;
     use sha2::{Digest, Sha256};
-    use std::sync::Arc;
+    use std::{
+        sync::Arc,
+        time::{Duration as StdDuration, Instant},
+    };
+    use tower::ServiceExt;
 
     #[test]
     fn request_requires_bounded_dates_and_matching_version() {
@@ -906,6 +1904,37 @@ mod tests {
         let (api, request, _dir) = fixture();
         let (first, created) = api.submit(request.clone()).unwrap();
         assert!(created);
+        let first_json = serde_json::to_value(&first).unwrap();
+        let legacy_fields = first_json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            legacy_fields,
+            [
+                "run_id",
+                "kind",
+                "status",
+                "stage",
+                "created_at",
+                "updated_at",
+                "request_sha256",
+                "idempotency_key",
+                "universe_id",
+                "version_id",
+                "universe_content_hash",
+                "snapshot_id",
+                "snapshot_sha256",
+                "config_sha256",
+                "diagnostic",
+                "experiment_id",
+                "error",
+            ]
+            .into_iter()
+            .collect()
+        );
         let (duplicate, created) = api.submit(request.clone()).unwrap();
         assert!(!created);
         assert_eq!(first.run_id, duplicate.run_id);
@@ -919,6 +1948,15 @@ mod tests {
         let experiment_id = api.execute(&first).unwrap();
         let experiment =
             crate::experiment::load_experiment(&api.0.output, &experiment_id.to_string()).unwrap();
+        assert_eq!(experiment.experiment_id, experiment_id);
+        assert!(
+            api.0
+                .output
+                .join("experiments")
+                .join(experiment_id.to_string())
+                .join("experiment.json")
+                .is_file()
+        );
         assert_eq!(experiment.snapshot.snapshot_id, request.snapshot_id);
         assert_eq!(experiment.snapshot.sha256, first.snapshot_sha256);
         assert_eq!(
@@ -1103,6 +2141,8 @@ mod tests {
         persist_job(dir.path(), &job).unwrap();
         let api = RunJobApi(Arc::new(Inner {
             output: dir.path().into(),
+            experiment_cli: PathBuf::from("prajna-experiment"),
+            process_inspector: PathBuf::from("ps"),
             gate: Mutex::new(Store::default()),
             wake: Condvar::new(),
             universes: Arc::new(UniverseStore::new(dir.path())),
@@ -1120,6 +2160,849 @@ mod tests {
                 .contains_key("stable-key")
         )
     }
+
+    #[test]
+    fn restart_requeues_legacy_queued_job_with_its_original_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::from_u128(9);
+        let job = sample_job(id);
+        let request = sample_request();
+        persist_request(dir.path(), id, &request).unwrap();
+        persist_job(dir.path(), &job).unwrap();
+        let api = RunJobApi::without_worker(
+            dir.path().into(),
+            Arc::new(UniverseStore::new(dir.path())),
+            PathBuf::from("prajna-experiment"),
+        );
+
+        api.recover();
+
+        let recovered = api.get(id).unwrap();
+        assert!(matches!(recovered.status, RunStatus::Queued));
+        assert_eq!(recovered.run_id, id);
+        let store = api.0.gate.lock().unwrap();
+        assert!(matches!(store.queue.front(), Some(QueueItem::LegacyRun(run_id)) if *run_id == id));
+        assert!(store.jobs.get(&id).unwrap().config.is_some());
+        assert!(store.idempotency.contains_key("stable-key"));
+    }
+
+    #[test]
+    fn restart_marks_unfinished_experiment_tasks_interrupted_without_requeueing() {
+        for (task_id, status) in [
+            (Uuid::from_u128(10), ExperimentTaskStatus::Queued),
+            (Uuid::from_u128(11), ExperimentTaskStatus::Running),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let request = SubmitExperimentTask {
+                idempotency_key: format!("task-{}", task_id.as_u128()),
+                definition: json!({"name":"synthetic restart fixture"}),
+            };
+            persist_experiment_request(dir.path(), task_id, &request).unwrap();
+            let mut task = sample_experiment_task(task_id, status);
+            task.request_sha256 = canonical_experiment_task_hash(&request).unwrap();
+            task.idempotency_key = request.idempotency_key.clone();
+            persist_experiment_task(dir.path(), &task).unwrap();
+
+            let api = RunJobApi::without_worker(
+                dir.path().into(),
+                Arc::new(UniverseStore::new(dir.path())),
+                PathBuf::from("prajna-experiment"),
+            );
+            api.recover();
+
+            let recovered = api.get_experiment_task(task_id).unwrap();
+            assert!(matches!(
+                recovered.status,
+                ExperimentTaskStatus::Interrupted
+            ));
+            assert_eq!(recovered.error.unwrap().code, "worker_interrupted");
+            assert_eq!(recovered.process_group_id, None);
+            let store = api.0.gate.lock().unwrap();
+            assert!(store.queue.is_empty());
+            assert!(
+                store
+                    .task_idempotency
+                    .contains_key(&request.idempotency_key)
+            );
+        }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn process_listing_requires_exact_task_and_generation_markers() {
+        let task_id = Uuid::from_u128(120);
+        let process_generation = Uuid::from_u128(1200);
+        let matching = format!(
+            "123 42 PRAJNA_EXPERIMENT_TASK_ID={task_id} PRAJNA_EXPERIMENT_PROCESS_GENERATION={process_generation}"
+        );
+        assert!(process_listing_matches_owner(
+            &matching,
+            task_id,
+            process_generation
+        ));
+        assert!(!process_listing_matches_owner(
+            &matching,
+            Uuid::from_u128(121),
+            process_generation
+        ));
+        assert!(!process_listing_matches_owner(
+            &matching,
+            task_id,
+            Uuid::from_u128(1201)
+        ));
+        assert!(!process_listing_matches_owner(
+            &format!("123 42 PRAJNA_EXPERIMENT_TASK_ID={task_id}"),
+            task_id,
+            process_generation
+        ));
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn restart_terminates_persisted_experiment_process_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let ready_path = dir.path().join("restart-group-ready");
+        let marker_path = dir.path().join("restart-group-survived");
+        let task_id = Uuid::from_u128(12);
+        let process_generation = Uuid::from_u128(1200);
+        let mut command = Command::new("/bin/sh");
+        command.arg("-c").arg(format!(
+            "(/bin/sleep 0.5; /usr/bin/touch {}) & /usr/bin/touch {}; wait",
+            shell_quote(&marker_path),
+            shell_quote(&ready_path),
+        ));
+        let mut process =
+            ExperimentProcessGroup::spawn(&mut command, task_id, process_generation).unwrap();
+        let deadline = Instant::now() + StdDuration::from_secs(5);
+        while !ready_path.is_file() {
+            assert!(
+                Instant::now() < deadline,
+                "process group helper did not start"
+            );
+            std::thread::sleep(StdDuration::from_millis(10));
+        }
+
+        let request = SubmitExperimentTask {
+            idempotency_key: "running-after-restart".into(),
+            definition: json!({"name":"synthetic restart fixture"}),
+        };
+        let mut task = sample_experiment_task(task_id, ExperimentTaskStatus::Running);
+        task.process_group_id = Some(process.process_group_id());
+        task.process_group_generation = Some(process_generation);
+        task.request_sha256 = canonical_experiment_task_hash(&request).unwrap();
+        task.idempotency_key = request.idempotency_key.clone();
+        persist_experiment_request(dir.path(), task_id, &request).unwrap();
+        persist_experiment_task(dir.path(), &task).unwrap();
+
+        let api = RunJobApi::without_worker(
+            dir.path().into(),
+            Arc::new(UniverseStore::new(dir.path())),
+            PathBuf::from("prajna-experiment"),
+        );
+        api.recover();
+        let recovered = api.get_experiment_task(task_id).unwrap();
+        assert!(matches!(
+            recovered.status,
+            ExperimentTaskStatus::Interrupted
+        ));
+        if recovered.process_group_id.is_some() {
+            let cleanup_code = recovered.error.as_ref().unwrap().code.as_str();
+            assert!(
+                matches!(
+                    cleanup_code,
+                    "process_group_cleanup_failed" | "process_group_ownership_unverified"
+                ),
+                "unexpected cleanup error while retaining the process group: {cleanup_code}"
+            );
+            eprintln!("SKIP: sandbox denies process-group inspection/signaling ({cleanup_code})");
+            let _ = process.child.kill();
+            let _ = process.child.wait();
+            process.finished = true;
+            return;
+        }
+        let _ = process.child.wait();
+        process.finished = true;
+        std::thread::sleep(StdDuration::from_millis(600));
+        assert!(
+            !marker_path.exists(),
+            "restart left a task child process running"
+        );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn restart_does_not_terminate_a_process_group_owned_by_a_different_task() {
+        let dir = tempfile::tempdir().unwrap();
+        let ready_path = dir.path().join("mismatched-group-ready");
+        let marker_path = dir.path().join("mismatched-group-survived");
+        let actual_task_id = Uuid::from_u128(120);
+        let actual_generation = Uuid::from_u128(1200);
+        let mut command = Command::new("/bin/sh");
+        command
+            .env("PRAJNA_EXPERIMENT_TASK_ID", actual_task_id.to_string())
+            .env(
+                "PRAJNA_EXPERIMENT_PROCESS_GENERATION",
+                actual_generation.to_string(),
+            )
+            .arg("-c")
+            .arg(format!(
+                "(/bin/sleep 0.5; /usr/bin/touch {}) & /usr/bin/touch {}; wait",
+                shell_quote(&marker_path),
+                shell_quote(&ready_path),
+            ));
+        let mut process =
+            ExperimentProcessGroup::spawn(&mut command, actual_task_id, actual_generation).unwrap();
+        let deadline = Instant::now() + StdDuration::from_secs(5);
+        while !ready_path.is_file() {
+            assert!(
+                Instant::now() < deadline,
+                "mismatched process group helper did not start"
+            );
+            std::thread::sleep(StdDuration::from_millis(10));
+        }
+
+        for (task_id, generation) in [
+            (Uuid::from_u128(121), Some(actual_generation)),
+            (actual_task_id, Some(Uuid::from_u128(1201))),
+            (actual_task_id, None),
+        ] {
+            let output = dir.path().join(task_id.to_string());
+            let request = SubmitExperimentTask {
+                idempotency_key: format!("stale-owner-{task_id}"),
+                definition: json!({"name":"synthetic stale process group"}),
+            };
+            let mut task = sample_experiment_task(task_id, ExperimentTaskStatus::Running);
+            task.process_group_id = Some(process.process_group_id());
+            task.process_group_generation = generation;
+            task.request_sha256 = canonical_experiment_task_hash(&request).unwrap();
+            task.idempotency_key = request.idempotency_key.clone();
+            persist_experiment_request(&output, task_id, &request).unwrap();
+            persist_experiment_task(&output, &task).unwrap();
+
+            let api = RunJobApi::without_worker(
+                output.clone(),
+                Arc::new(UniverseStore::new(&output)),
+                PathBuf::from("prajna-experiment"),
+            );
+            api.recover();
+            let recovered = api.get_experiment_task(task_id).unwrap();
+            assert!(matches!(
+                recovered.status,
+                ExperimentTaskStatus::Interrupted
+            ));
+            assert_eq!(recovered.process_group_id, Some(process.process_group_id()));
+            assert_eq!(
+                recovered.error.unwrap().code,
+                "process_group_ownership_unverified"
+            );
+        }
+
+        std::thread::sleep(StdDuration::from_millis(600));
+        assert!(
+            marker_path.is_file(),
+            "recovery terminated a process group owned by another task"
+        );
+        let _ = process.terminate();
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn restart_reports_process_group_cleanup_failure_and_retains_group_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let task_id = Uuid::from_u128(13);
+        let mut task = sample_experiment_task(task_id, ExperimentTaskStatus::Running);
+        task.process_group_id = Some(1);
+        persist_experiment_task(dir.path(), &task).unwrap();
+        let api = RunJobApi::without_worker(
+            dir.path().into(),
+            Arc::new(UniverseStore::new(dir.path())),
+            PathBuf::from("prajna-experiment"),
+        );
+
+        api.recover();
+
+        let recovered = api.get_experiment_task(task_id).unwrap();
+        assert!(matches!(
+            recovered.status,
+            ExperimentTaskStatus::Interrupted
+        ));
+        assert_eq!(recovered.process_group_id, Some(1));
+        assert_eq!(
+            recovered.error.unwrap().code,
+            "process_group_cleanup_failed"
+        );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn experiment_process_group_cleanup_stops_descendants() {
+        let dir = tempfile::tempdir().unwrap();
+        let ready_path = dir.path().join("descendant-ready");
+        let marker_path = dir.path().join("descendant-survived");
+        let task_id = Uuid::new_v4();
+        let process_generation = Uuid::new_v4();
+        let mut command = Command::new("/bin/sh");
+        command.arg("-c").arg(format!(
+            "(/bin/sleep 0.5; /usr/bin/touch {}) & /usr/bin/touch {}; wait",
+            shell_quote(&marker_path),
+            shell_quote(&ready_path),
+        ));
+        let mut process =
+            ExperimentProcessGroup::spawn(&mut command, task_id, process_generation).unwrap();
+        let deadline = Instant::now() + StdDuration::from_secs(5);
+        while !ready_path.is_file() {
+            assert!(
+                Instant::now() < deadline,
+                "process group helper did not start"
+            );
+            std::thread::sleep(StdDuration::from_millis(10));
+        }
+
+        match process.terminate() {
+            Ok(status) => assert!(!status.success()),
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                eprintln!("SKIP: sandbox denies process-group signaling");
+                let _ = process.child.kill();
+                let _ = process.child.wait();
+                process.finished = true;
+                std::thread::sleep(StdDuration::from_millis(600));
+                return;
+            }
+            Err(error) => panic!("process-group cleanup failed: {error:?}"),
+        }
+        std::thread::sleep(StdDuration::from_millis(600));
+        assert!(!marker_path.exists(), "a child process outlived its group");
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn successful_cli_exit_cleans_up_process_group_descendants() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker_path = dir.path().join("successful-cli-child-survived");
+        let task_id = Uuid::new_v4();
+        let process_generation = Uuid::new_v4();
+        let mut command = Command::new("/bin/sh");
+        command.arg("-c").arg(format!(
+            "(/bin/sleep 0.5; /usr/bin/touch {}) & exit 0",
+            shell_quote(&marker_path),
+        ));
+        let mut process =
+            ExperimentProcessGroup::spawn(&mut command, task_id, process_generation).unwrap();
+
+        match process.wait() {
+            Ok(wait) => {
+                assert!(wait.status.success());
+                if let Some(error) = wait.cleanup_error {
+                    if error.kind() == std::io::ErrorKind::PermissionDenied {
+                        eprintln!("SKIP: sandbox denies process-group inspection/signaling");
+                        let _ = process.child.wait();
+                        process.finished = true;
+                        return;
+                    }
+                    panic!("process-group cleanup failed: {error:?}");
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                eprintln!("SKIP: sandbox denies process-group signaling");
+                let _ = process.child.wait();
+                process.finished = true;
+                return;
+            }
+            Err(error) => panic!("process-group cleanup failed: {error:?}"),
+        }
+        std::thread::sleep(StdDuration::from_millis(600));
+        assert!(
+            !marker_path.exists(),
+            "a child process outlived a successful CLI"
+        );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn experiment_task_api_uses_versioned_shared_queue_and_persists_cli_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let args_path = dir.path().join("cli-args.txt");
+        let pid_path = dir.path().join("cli-pid.txt");
+        let release_path = dir.path().join("release-cli");
+        let cli_path = dir.path().join("prajna-experiment");
+        let inspector_path = dir.path().join("empty-ps");
+        let script = format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\necho $$ > {}\n[ \"$1\" = run ] || exit 91\n[ -f \"$2\" ] || exit 92\nwhile [ ! -f {} ]; do /bin/sleep 0.02; done\nprintf '{{\"exp\":\"exp:sha256:synthetic\",\"exe\":\"exe:sha256:synthetic\",\"action\":\"created\"}}\\n'\n",
+            shell_quote(&args_path),
+            shell_quote(&pid_path),
+            shell_quote(&release_path),
+        );
+        fs::write(&cli_path, script).unwrap();
+        fs::write(&inspector_path, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&cli_path, fs::Permissions::from_mode(0o755)).unwrap();
+            fs::set_permissions(&inspector_path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let (api, legacy_request, _fixture_dir) =
+            fixture_with_cli_and_process_inspector(cli_path, inspector_path);
+        let submitted = json!({
+            "idempotency_key": "experiment-task-key",
+            "definition": {"name": "synthetic experiment", "parameters": {"lookback": 2}}
+        });
+        let (status, accepted) = api_json(
+            &api,
+            "POST",
+            "/api/v1/tasks/experiments",
+            Some(submitted.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let task_id = accepted["task"]["task_id"].as_str().unwrap();
+        assert_eq!(accepted["created"], true);
+        assert_eq!(accepted["task"]["task_type"], "prajna_experiment");
+        assert_eq!(accepted["task"]["task_version"], 1);
+        assert_eq!(accepted["task"]["status"], "queued");
+
+        let (status, duplicate) = api_json(
+            &api,
+            "POST",
+            "/api/v1/tasks/experiments",
+            Some(submitted.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(duplicate["created"], false);
+        assert_eq!(duplicate["task"]["task_id"], task_id);
+
+        let mut conflict = submitted.clone();
+        conflict["definition"]["name"] = json!("different definition");
+        let (status, rejected) =
+            api_json(&api, "POST", "/api/v1/tasks/experiments", Some(conflict)).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(rejected["error"]["code"], "idempotency_conflict");
+
+        let (status, list) = api_json(&api, "GET", "/api/v1/tasks/experiments", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(list["items"][0]["task_id"], task_id);
+
+        let (status, legacy) = api_json(
+            &api,
+            "POST",
+            "/api/v1/runs",
+            Some(serde_json::to_value(&legacy_request).unwrap()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        assert_eq!(legacy["run"]["kind"], "etf_strategy");
+        assert_eq!(legacy["run"]["status"], "queued");
+        let legacy_run_id = Uuid::parse_str(legacy["run"]["run_id"].as_str().unwrap()).unwrap();
+        assert_eq!(api.0.gate.lock().unwrap().queue.len(), 2);
+
+        let worker_api = api.clone();
+        let worker = std::thread::spawn(move || worker_api.process_next_queued());
+        let deadline = Instant::now() + StdDuration::from_secs(5);
+        let running_task = loop {
+            let task = api
+                .get_experiment_task(Uuid::parse_str(task_id).unwrap())
+                .unwrap();
+            if task.process_group_id.is_some() {
+                break task;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "task process group was not recorded"
+            );
+            std::thread::sleep(StdDuration::from_millis(10));
+        };
+        let process_group_id = running_task.process_group_id.unwrap();
+        while !pid_path.is_file() {
+            assert!(Instant::now() < deadline, "fake CLI did not start");
+            std::thread::sleep(StdDuration::from_millis(10));
+        }
+        assert_eq!(
+            fs::read_to_string(pid_path).unwrap().trim(),
+            process_group_id.to_string()
+        );
+        fs::write(release_path, "continue").unwrap();
+        assert!(worker.join().unwrap());
+        assert_eq!(api.0.gate.lock().unwrap().queue.len(), 1);
+        let (status, detail) = api_json(
+            &api,
+            "GET",
+            &format!("/api/v1/tasks/experiments/{task_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(detail["status"], "succeeded", "{detail}");
+        assert_eq!(detail["task_type"], "prajna_experiment");
+        assert_eq!(detail["task_version"], 1);
+        assert_eq!(detail["result"]["exp"], "exp:sha256:synthetic");
+        assert_eq!(detail["result"]["exe"], "exe:sha256:synthetic");
+        assert_eq!(detail["process_group_id"], Value::Null);
+
+        let task_dir = api.0.output.join("tasks").join(task_id);
+        assert!(task_dir.join("task.json").is_file());
+        assert!(task_dir.join("request.json").is_file());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fs::read(task_dir.join("experiment.json")).unwrap())
+                .unwrap(),
+            submitted["definition"]
+        );
+        let args = fs::read_to_string(args_path).unwrap();
+        let args = args.lines().collect::<Vec<_>>();
+        assert_eq!(args[0], "run");
+        assert_eq!(PathBuf::from(args[1]), task_dir.join("experiment.json"));
+        assert_eq!(args[2], "--lake");
+        assert_eq!(PathBuf::from(args[3]), api.0.output);
+        assert_eq!(&args[4..], &["--level", "summary"]);
+
+        assert!(api.process_next_queued());
+        let legacy_detail = api.get(legacy_run_id).unwrap();
+        assert!(matches!(legacy_detail.status, RunStatus::Succeeded));
+        let experiment_id = legacy_detail.experiment_id.unwrap();
+        let experiment =
+            crate::experiment::load_experiment(&api.0.output, &experiment_id.to_string()).unwrap();
+        assert_eq!(experiment.experiment_id, experiment_id);
+        assert_eq!(experiment.snapshot.snapshot_id, legacy_request.snapshot_id);
+        assert!(api.0.gate.lock().unwrap().queue.is_empty());
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_cli_diagnostic_and_exit_code_survive_api_persistence_and_restart() {
+        const EXPECTED_STDERR_LIMIT: usize = 16 * 1024;
+        let dir = tempfile::tempdir().unwrap();
+        let cli_path = dir.path().join("failing-prajna-experiment");
+        let inspector_path = dir.path().join("empty-ps");
+        fs::write(
+            &cli_path,
+            "#!/bin/sh\nprintf 'synthetic failure cause\\n' >&2\n/usr/bin/head -c 32768 /dev/zero | /usr/bin/tr '\\000' x >&2\nexit 23\n",
+        )
+        .unwrap();
+        fs::write(&inspector_path, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&cli_path, fs::Permissions::from_mode(0o755)).unwrap();
+            fs::set_permissions(&inspector_path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let (api, _legacy_request, _fixture_dir) =
+            fixture_with_cli_and_process_inspector(cli_path.clone(), inspector_path);
+        let (status, accepted) = api_json(
+            &api,
+            "POST",
+            "/api/v1/tasks/experiments",
+            Some(json!({
+                "idempotency_key": "failing-cli-key",
+                "definition": {"name":"synthetic failing task"}
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let task_id = Uuid::parse_str(accepted["task"]["task_id"].as_str().unwrap()).unwrap();
+
+        assert!(api.process_next_queued());
+        let (status, failed) = api_json(
+            &api,
+            "GET",
+            &format!("/api/v1/tasks/experiments/{task_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(failed["status"], "failed");
+        assert_eq!(failed["error"]["code"], "experiment_cli_failed");
+        assert_eq!(failed["error"]["details"]["exit_code"], 23);
+        let stderr = failed["error"]["details"]["stderr"].as_str().unwrap();
+        assert!(stderr.starts_with("synthetic failure cause\n"));
+        assert_eq!(stderr.len(), EXPECTED_STDERR_LIMIT);
+        assert_eq!(failed["error"]["details"]["stderr_truncated"], true);
+
+        let task_dir = api.0.output.join("tasks").join(task_id.to_string());
+        let persisted: Value =
+            serde_json::from_slice(&fs::read(task_dir.join("task.json")).unwrap()).unwrap();
+        assert_eq!(persisted["error"]["details"]["exit_code"], 23);
+        assert_eq!(persisted["error"]["details"]["stderr"], stderr);
+
+        let restarted = RunJobApi::without_worker(
+            api.0.output.clone(),
+            Arc::new(UniverseStore::new(&api.0.output)),
+            cli_path,
+        );
+        restarted.recover();
+        let (status, after_restart) = api_json(
+            &restarted,
+            "GET",
+            &format!("/api/v1/tasks/experiments/{task_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(after_restart["error"]["code"], "experiment_cli_failed");
+        assert_eq!(after_restart["error"]["details"]["exit_code"], 23);
+        assert_eq!(after_restart["error"]["details"]["stderr"], stderr);
+        assert_eq!(after_restart["error"]["details"]["stderr_truncated"], true);
+        assert_eq!(
+            after_restart["error"]["details"]["stderr_capture_incomplete"],
+            false
+        );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_cli_diagnostic_survives_process_group_cleanup_failure_and_restart() {
+        const EXPECTED_STDERR_LIMIT: usize = 16 * 1024;
+        let dir = tempfile::tempdir().unwrap();
+        let cli_path = dir.path().join("failing-prajna-experiment");
+        let inspector_path = dir.path().join("denied-ps");
+        fs::write(
+            &cli_path,
+            "#!/bin/sh\nprintf 'synthetic cleanup-failure cause\\n' >&2\n/usr/bin/head -c 32768 /dev/zero | /usr/bin/tr '\\000' x >&2\nexit 23\n",
+        )
+        .unwrap();
+        fs::write(&inspector_path, "#!/bin/sh\nexit 1\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&cli_path, fs::Permissions::from_mode(0o755)).unwrap();
+            fs::set_permissions(&inspector_path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let (api, _legacy_request, _fixture_dir) =
+            fixture_with_cli_and_process_inspector(cli_path.clone(), inspector_path.clone());
+        let (status, accepted) = api_json(
+            &api,
+            "POST",
+            "/api/v1/tasks/experiments",
+            Some(json!({
+                "idempotency_key": "failing-cli-cleanup-key",
+                "definition": {"name":"synthetic cleanup-failing task"}
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let task_id = Uuid::parse_str(accepted["task"]["task_id"].as_str().unwrap()).unwrap();
+
+        assert!(api.process_next_queued());
+        let (status, failed) = api_json(
+            &api,
+            "GET",
+            &format!("/api/v1/tasks/experiments/{task_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(failed["status"], "failed");
+        assert_eq!(
+            failed["error"]["code"],
+            "process_group_ownership_unverified"
+        );
+        assert_eq!(
+            failed["error"]["details"]["cli_error"]["code"],
+            "experiment_cli_failed"
+        );
+        let failure_details = failed["error"]["details"].clone();
+        let cli_details = &failed["error"]["details"]["cli_error"]["details"];
+        assert_eq!(cli_details["exit_code"], 23);
+        let stderr = cli_details["stderr"].as_str().unwrap();
+        assert!(stderr.starts_with("synthetic cleanup-failure cause\n"));
+        assert_eq!(stderr.len(), EXPECTED_STDERR_LIMIT);
+        assert_eq!(cli_details["stderr_truncated"], true);
+
+        let task_dir = api.0.output.join("tasks").join(task_id.to_string());
+        let persisted: Value =
+            serde_json::from_slice(&fs::read(task_dir.join("task.json")).unwrap()).unwrap();
+        assert_eq!(
+            persisted["error"]["details"]["cli_error"]["details"]["exit_code"],
+            23
+        );
+        assert_eq!(
+            persisted["error"]["details"]["cli_error"]["details"]["stderr"],
+            stderr
+        );
+
+        let restarted = RunJobApi::without_worker_with_process_inspector(
+            api.0.output.clone(),
+            Arc::new(UniverseStore::new(&api.0.output)),
+            cli_path,
+            inspector_path,
+        );
+        restarted.recover();
+        restarted.recover();
+        let (status, after_restart) = api_json(
+            &restarted,
+            "GET",
+            &format!("/api/v1/tasks/experiments/{task_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            after_restart["error"]["code"],
+            "process_group_ownership_unverified"
+        );
+        assert_eq!(after_restart["error"]["details"], failure_details);
+        assert_eq!(
+            after_restart["error"]["details"]["cli_error"]["code"],
+            "experiment_cli_failed"
+        );
+        assert_eq!(
+            after_restart["error"]["details"]["cli_error"]["details"]["exit_code"],
+            23
+        );
+        assert_eq!(
+            after_restart["error"]["details"]["cli_error"]["details"]["stderr"],
+            stderr
+        );
+        assert_eq!(
+            after_restart["error"]["details"]["cli_error"]["details"]["stderr_truncated"],
+            true
+        );
+        let persisted_after_restart: Value =
+            serde_json::from_slice(&fs::read(task_dir.join("task.json")).unwrap()).unwrap();
+        assert_eq!(persisted_after_restart["error"]["details"], failure_details);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn cleanup_failure_bounds_inherited_stderr_and_advances_shared_queue() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli_path = dir.path().join("inherited-stderr-prajna-experiment");
+        let inspector_path = dir.path().join("denied-ps");
+        let release_path = dir.path().join("release-stderr-descendant");
+        let descendant_done_path = dir.path().join("stderr-descendant-done");
+        let release_descendant_on_drop = ReleaseDescendantOnDrop(release_path.clone());
+        let script = format!(
+            "#!/bin/sh\nif /usr/bin/grep -q 'hold-stderr-open' \"$2\"; then\n  printf 'synthetic failure before descendant\n' >&2\n  (while [ ! -f {} ]; do /bin/sleep 0.02; done; printf 'released\n' > {}) &\n  exit 23\nfi\nprintf '{{\"exp\":\"exp:sha256:synthetic\",\"exe\":\"exe:sha256:synthetic\"}}\\n'\n",
+            shell_quote(&release_path),
+            shell_quote(&descendant_done_path),
+        );
+        fs::write(&cli_path, script).unwrap();
+        fs::write(&inspector_path, "#!/bin/sh\nexit 1\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&cli_path, fs::Permissions::from_mode(0o755)).unwrap();
+            fs::set_permissions(&inspector_path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let (api, legacy_request, _fixture_dir) =
+            fixture_with_cli_and_process_inspector(cli_path, inspector_path);
+        let (status, accepted) = api_json(
+            &api,
+            "POST",
+            "/api/v1/tasks/experiments",
+            Some(json!({
+                "idempotency_key": "inherited-stderr-cleanup-key",
+                "definition": {"name":"synthetic hold-stderr-open task"}
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let task_id = Uuid::parse_str(accepted["task"]["task_id"].as_str().unwrap()).unwrap();
+
+        let (status, legacy) = api_json(
+            &api,
+            "POST",
+            "/api/v1/runs",
+            Some(serde_json::to_value(&legacy_request).unwrap()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let legacy_run_id = Uuid::parse_str(legacy["run"]["run_id"].as_str().unwrap()).unwrap();
+        assert_eq!(api.0.gate.lock().unwrap().queue.len(), 2);
+
+        let worker_api = api.clone();
+        let (worker_done, worker_result) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let _ = worker_done.send(worker_api.process_next_queued());
+        });
+        let first_work = worker_result.recv_timeout(StdDuration::from_secs(5));
+        if !matches!(&first_work, Ok(true)) {
+            let task_dir = api.0.output.join("tasks").join(task_id.to_string());
+            let task_json = fs::read_to_string(task_dir.join("task.json")).unwrap_or_default();
+            panic!(
+                "cleanup failure left the shared queue worker blocked on descendant-held stderr: {first_work:?}; task={task_json}"
+            );
+        }
+        assert!(
+            !descendant_done_path.exists(),
+            "descendant should still own stderr when the task worker returns"
+        );
+
+        let (status, failed) = api_json(
+            &api,
+            "GET",
+            &format!("/api/v1/tasks/experiments/{task_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(failed["status"], "failed");
+        assert_eq!(
+            failed["error"]["code"],
+            "process_group_ownership_unverified"
+        );
+        let cli_error = &failed["error"]["details"]["cli_error"];
+        assert_eq!(cli_error["code"], "experiment_cli_failed");
+        assert_eq!(cli_error["details"]["exit_code"], 23);
+        assert_eq!(
+            cli_error["details"]["stderr"],
+            "synthetic failure before descendant\n"
+        );
+        assert_eq!(cli_error["details"]["stderr_capture_incomplete"], true);
+
+        let task_dir = api.0.output.join("tasks").join(task_id.to_string());
+        let persisted_task: Value =
+            serde_json::from_slice(&fs::read(task_dir.join("task.json")).unwrap()).unwrap();
+        assert_eq!(persisted_task["status"], "failed");
+        assert_eq!(
+            persisted_task["error"]["details"]["cli_error"]["details"]["exit_code"],
+            23
+        );
+        assert_eq!(
+            persisted_task["error"]["details"]["cli_error"]["details"]["stderr_capture_incomplete"],
+            true
+        );
+
+        assert!(
+            api.process_next_queued(),
+            "following legacy run did not advance"
+        );
+        let legacy_job = api.get(legacy_run_id).unwrap();
+        assert!(matches!(legacy_job.status, RunStatus::Succeeded));
+        let persisted_run: Value = serde_json::from_slice(
+            &fs::read(
+                api.0
+                    .output
+                    .join("runs")
+                    .join(legacy_run_id.to_string())
+                    .join("run.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(persisted_run["status"], "succeeded");
+
+        drop(release_descendant_on_drop);
+        let cleanup_deadline = Instant::now() + StdDuration::from_secs(2);
+        while !descendant_done_path.exists() && Instant::now() < cleanup_deadline {
+            thread::sleep(StdDuration::from_millis(10));
+        }
+        assert!(
+            descendant_done_path.exists(),
+            "synthetic stderr writer did not exit"
+        );
+    }
+
+    struct ReleaseDescendantOnDrop(PathBuf);
+
+    impl Drop for ReleaseDescendantOnDrop {
+        fn drop(&mut self) {
+            let _ = fs::write(&self.0, b"release\n");
+        }
+    }
+
     fn sample_request() -> SubmitRun {
         SubmitRun {
             kind: "etf_strategy".into(),
@@ -1163,6 +3046,57 @@ mod tests {
         }
     }
 
+    fn sample_experiment_task(task_id: Uuid, status: ExperimentTaskStatus) -> ExperimentTask {
+        ExperimentTask {
+            task_id,
+            task_type: EXPERIMENT_TASK_TYPE.into(),
+            task_version: EXPERIMENT_TASK_VERSION,
+            status,
+            stage: "running_experiment_cli".into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+            request_sha256: "request-hash".into(),
+            idempotency_key: "experiment-task-key".into(),
+            process_group_id: None,
+            process_group_generation: None,
+            result: None,
+            error: None,
+        }
+    }
+
+    fn shell_quote(path: &FsPath) -> String {
+        format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+    }
+
+    async fn api_json(
+        api: &RunJobApi,
+        method: &str,
+        uri: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
+        let bytes = body
+            .map(|value| serde_json::to_vec(&value).unwrap())
+            .unwrap_or_default();
+        let response = api
+            .clone()
+            .router()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(bytes))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, serde_json::from_slice(&body).unwrap())
+    }
+
     fn member(code: &str, exchange: &str) -> ManualMember {
         ManualMember {
             instrument: Instrument {
@@ -1182,6 +3116,17 @@ mod tests {
         }
     }
     fn fixture() -> (RunJobApi, SubmitRun, tempfile::TempDir) {
+        fixture_with_cli(PathBuf::from("prajna-experiment"))
+    }
+
+    fn fixture_with_cli(experiment_cli: PathBuf) -> (RunJobApi, SubmitRun, tempfile::TempDir) {
+        fixture_with_cli_and_process_inspector(experiment_cli, PathBuf::from("ps"))
+    }
+
+    fn fixture_with_cli_and_process_inspector(
+        experiment_cli: PathBuf,
+        process_inspector: PathBuf,
+    ) -> (RunJobApi, SubmitRun, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let universe_store = Arc::new(UniverseStore::new(root));
@@ -1274,12 +3219,12 @@ mod tests {
                 ..ExperimentConfig::default()
             },
         };
-        let api = RunJobApi(Arc::new(Inner {
-            output: root.into(),
-            gate: Mutex::new(Store::default()),
-            wake: Condvar::new(),
-            universes: universe_store,
-        }));
+        let api = RunJobApi::without_worker_with_process_inspector(
+            root.into(),
+            universe_store,
+            experiment_cli,
+            process_inspector,
+        );
         (api, request, dir)
     }
 }
