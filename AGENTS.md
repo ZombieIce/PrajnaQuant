@@ -42,6 +42,6 @@ Review 结论以 PR 评论为准；每个发现由实现者回应，任何新 pu
 
 按改动范围执行 [定向验证规则](docs/agents/verification.md)：纯文档做 diff/链接/一致性检查；代码验证受影响入口，按需选 feature，不因例行交接编译全 workspace。该文档承接 Python 3.12/PyO3 环境、CI 来源及合成金标准要求；具体 CI 命令以 `.github/workflows/` 为准。
 
-交接在 PR 描述记录验收映射、命令结果、失败/环境限制、风险判断、验证范围、开放问题和唯一建议下一步；review 结论留 PR 评论。`HANDOFF.md` 仅作入口，不随 PR 修改。`docs/STATUS.md` 仅在能力、风险、量化口径或验证状态实际改变时在对应主题改一条，不追加逐票流水，纯文档/流程 PR 不改。重要契约变化才更新 ADR/API/README，尽量在 review 前完成，避免后续 push 使审查过期。
+交接在 PR 描述记录验收映射、命令结果、失败/环境限制、风险判断、验证范围、开放问题和唯一建议下一步；review 结论留 PR 评论。`HANDOFF.md` 仅作入口，不随 PR 修改。`docs/STATUS.md` 仅在能力、风险、量化口径或验证状态实际改变时在对应主题改一条，不追加逐票流水，纯文档/流程 PR 不改。接口、数据 schema 或量化口径变更时同步文档与必要 ADR；重要决策/契约变化同步相关 API/README。尽量在 review 前完成，避免后续 push 使审查过期。
 
 项目 tracker 为 GitHub `ZombieIce/PrajnaQuant`，`.scratch/` 只读；五种 triage label 见 [triage-labels](docs/agents/triage-labels.md)。领域文档采用根 `CONTEXT.md` 与 `docs/decisions/`，见 [domain](docs/agents/domain.md)。
