@@ -40,6 +40,8 @@ pub enum PanelError {
     Polars(polars::error::PolarsError),
     InvalidManifest(String),
     InvalidTableData(String),
+    InvalidVenueSelection(String),
+    InconsistentSessionAxis(String),
 }
 
 impl fmt::Display for PanelError {
@@ -54,6 +56,12 @@ impl fmt::Display for PanelError {
             Self::InvalidTableData(message) => {
                 write!(formatter, "invalid panel table data: {message}")
             }
+            Self::InvalidVenueSelection(message) => {
+                write!(formatter, "invalid Venue selection: {message}")
+            }
+            Self::InconsistentSessionAxis(message) => {
+                write!(formatter, "inconsistent shared Session axis: {message}")
+            }
         }
     }
 }
@@ -64,7 +72,10 @@ impl Error for PanelError {
             Self::Manifest(error) => Some(error),
             Self::Data(error) => Some(error),
             Self::Polars(error) => Some(error),
-            Self::InvalidManifest(_) | Self::InvalidTableData(_) => None,
+            Self::InvalidManifest(_)
+            | Self::InvalidTableData(_)
+            | Self::InvalidVenueSelection(_)
+            | Self::InconsistentSessionAxis(_) => None,
         }
     }
 }
@@ -96,11 +107,58 @@ impl From<polars::error::PolarsError> for PanelError {
     }
 }
 
+/// Loads the complete research panel for one Venue.
+///
+/// This is the legacy single-Venue entry. Its Instrument set, Session axis and
+/// grid are unchanged; callers that need a shared axis across Venues use
+/// [`load_panel_for_venues`].
 pub fn load_panel(
     lake_root: impl AsRef<Path>,
     dsv: &str,
     venue: &VenueId,
 ) -> Result<Panel, PanelError> {
+    load_panel_inner(
+        lake_root,
+        dsv,
+        std::slice::from_ref(venue),
+        VenueRequirements::Legacy,
+    )
+}
+
+/// Loads a research panel over an explicit, non-empty set of Venues that share
+/// exactly one Session axis.
+///
+/// Instruments retain their real Venue identity from the Dataset. Every
+/// requested Venue must contribute Instruments and Sessions; the Session date
+/// sets and the open/close instants of every shared date must be identical.
+/// A disagreement is a structural [`PanelError::InconsistentSessionAxis`]; the
+/// loader never fills a Session, synthesizes a Venue, or turns a one-sided
+/// calendar into a halt. Missing Bars remain absent (`has_bar = false` and null
+/// prices), not zero prices.
+pub fn load_panel_for_venues(
+    lake_root: impl AsRef<Path>,
+    dsv: &str,
+    venues: &[VenueId],
+) -> Result<Panel, PanelError> {
+    load_panel_inner(lake_root, dsv, venues, VenueRequirements::EveryVenuePresent)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum VenueRequirements {
+    /// Preserve the historical single-Venue behavior, including an empty panel
+    /// when the Dataset has no matching rows.
+    Legacy,
+    /// Reject a selected Venue without Instruments or Sessions.
+    EveryVenuePresent,
+}
+
+fn load_panel_inner(
+    lake_root: impl AsRef<Path>,
+    dsv: &str,
+    venues: &[VenueId],
+    requirements: VenueRequirements,
+) -> Result<Panel, PanelError> {
+    let venues = selected_venues(venues)?;
     let lake_root = lake_root.as_ref();
     let manifest = read_panel_manifest(lake_root, dsv)?;
 
@@ -108,9 +166,13 @@ pub fn load_panel(
     let (_, sessions_batches) = read_table(lake_root, &manifest, "sessions")?;
     let (_, bars_batches) = read_table(lake_root, &manifest, "bars")?;
 
-    let instruments = read_instruments(&instruments_batches, venue)?;
-    let sessions = read_sessions(&sessions_batches, venue)?;
-    let bars = read_bars(&bars_batches, venue, &instruments, &sessions)?;
+    let instruments = read_instruments(&instruments_batches, &venues)?;
+    let sessions_by_venue = read_sessions(&sessions_batches, &venues)?;
+    if requirements == VenueRequirements::EveryVenuePresent {
+        require_every_venue_present(&venues, &instruments, &sessions_by_venue)?;
+    }
+    let sessions = shared_sessions(&venues, &sessions_by_venue)?;
+    let bars = read_bars(&bars_batches, &venues, &instruments, &sessions)?;
     let grid = build_grid(&instruments, &sessions, &bars)?;
 
     Ok(Panel {
@@ -118,6 +180,46 @@ pub fn load_panel(
         instruments,
         grid,
     })
+}
+
+fn selected_venues(venues: &[VenueId]) -> Result<BTreeSet<VenueId>, PanelError> {
+    if venues.is_empty() {
+        return Err(PanelError::InvalidVenueSelection(
+            "at least one Venue is required".into(),
+        ));
+    }
+    let mut selected = BTreeSet::new();
+    for venue in venues {
+        if !selected.insert(venue.clone()) {
+            return Err(PanelError::InvalidVenueSelection(format!(
+                "duplicate Venue {venue}"
+            )));
+        }
+    }
+    Ok(selected)
+}
+
+fn require_every_venue_present(
+    venues: &BTreeSet<VenueId>,
+    instruments: &[InstrumentId],
+    sessions: &VenueSessions,
+) -> Result<(), PanelError> {
+    for venue in venues {
+        if !instruments
+            .iter()
+            .any(|instrument| instrument.venue() == venue)
+        {
+            return Err(PanelError::InvalidVenueSelection(format!(
+                "the Dataset has no Instruments for Venue {venue}"
+            )));
+        }
+        if sessions.get(venue).is_none_or(BTreeMap::is_empty) {
+            return Err(PanelError::InvalidVenueSelection(format!(
+                "the Dataset has no Sessions for Venue {venue}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 pub fn load_execution_status(
@@ -212,17 +314,17 @@ fn read_panel_manifest(lake_root: &Path, dsv: &str) -> Result<prajna_data::Manif
 
 fn read_instruments(
     batches: &[RecordBatch],
-    venue: &VenueId,
+    venues: &BTreeSet<VenueId>,
 ) -> Result<Vec<InstrumentId>, PanelError> {
     let mut instruments = BTreeSet::new();
     for batch in batches {
         let ids = column::<StringArray>(batch, 0, "instruments", "instrument_id")?;
-        let venues = column::<StringArray>(batch, 1, "instruments", "venue_id")?;
+        let row_venues = column::<StringArray>(batch, 1, "instruments", "venue_id")?;
         for row in 0..batch.num_rows() {
-            let row_venue = required_string(venues, row, "instruments", "venue_id")?;
-            if row_venue != venue.as_str() {
+            let row_venue = required_string(row_venues, row, "instruments", "venue_id")?;
+            let Some(venue) = venues.iter().find(|venue| venue.as_str() == row_venue) else {
                 continue;
-            }
+            };
             let id = required_string(ids, row, "instruments", "instrument_id")?
                 .parse::<InstrumentId>()
                 .map_err(|error| invalid_table("instruments", error.to_string()))?;
@@ -243,20 +345,23 @@ fn read_instruments(
     Ok(instruments.into_iter().collect())
 }
 
+type VenueSessions = BTreeMap<VenueId, BTreeMap<NaiveDate, PanelSession>>;
+
 fn read_sessions(
     batches: &[RecordBatch],
-    venue: &VenueId,
-) -> Result<Vec<PanelSession>, PanelError> {
-    let mut sessions = BTreeMap::new();
+    venues: &BTreeSet<VenueId>,
+) -> Result<VenueSessions, PanelError> {
+    let mut sessions: VenueSessions = BTreeMap::new();
     for batch in batches {
-        let venues = column::<StringArray>(batch, 0, "sessions", "venue_id")?;
+        let row_venues = column::<StringArray>(batch, 0, "sessions", "venue_id")?;
         let dates = column::<Date32Array>(batch, 1, "sessions", "session_date")?;
         let opens = column::<TimestampNanosecondArray>(batch, 2, "sessions", "ts_open")?;
         let closes = column::<TimestampNanosecondArray>(batch, 3, "sessions", "ts_close")?;
         for row in 0..batch.num_rows() {
-            if required_string(venues, row, "sessions", "venue_id")? != venue.as_str() {
+            let row_venue = required_string(row_venues, row, "sessions", "venue_id")?;
+            let Some(venue) = venues.iter().find(|venue| venue.as_str() == row_venue) else {
                 continue;
-            }
+            };
             let session_date =
                 date32_to_naive_date(required_date(dates, row, "sessions", "session_date")?)?;
             let ts_open = TimestampNs::from_unix_nanos(required_timestamp(
@@ -272,6 +377,8 @@ fn read_sessions(
                 )
             })?;
             if sessions
+                .entry(venue.clone())
+                .or_default()
                 .insert(
                     session_date,
                     PanelSession {
@@ -289,7 +396,52 @@ fn read_sessions(
             }
         }
     }
-    Ok(sessions.into_values().collect())
+    Ok(sessions)
+}
+
+/// Verifies that every selected Venue publishes exactly the same Session dates
+/// and open/close instants. No Session is added, removed, or inferred.
+fn shared_sessions(
+    venues: &BTreeSet<VenueId>,
+    sessions: &VenueSessions,
+) -> Result<Vec<PanelSession>, PanelError> {
+    let reference_venue = venues.iter().next().ok_or_else(|| {
+        PanelError::InvalidVenueSelection("at least one Venue is required".into())
+    })?;
+    let empty = BTreeMap::new();
+    let reference = sessions.get(reference_venue).unwrap_or(&empty);
+
+    for venue in venues.iter().skip(1) {
+        let other = sessions.get(venue).unwrap_or(&empty);
+        for (date, session) in reference {
+            let Some(other_session) = other.get(date) else {
+                return Err(PanelError::InconsistentSessionAxis(format!(
+                    "{reference_venue} has Session {date} but {venue} does not"
+                )));
+            };
+            if other_session.ts_open != session.ts_open
+                || other_session.ts_close != session.ts_close
+            {
+                return Err(PanelError::InconsistentSessionAxis(format!(
+                    "{reference_venue} and {venue} disagree on Session {date}: \
+                     {reference_venue} open {} close {}; {venue} open {} close {}",
+                    session.ts_open,
+                    session.ts_close,
+                    other_session.ts_open,
+                    other_session.ts_close,
+                )));
+            }
+        }
+        for date in other.keys() {
+            if !reference.contains_key(date) {
+                return Err(PanelError::InconsistentSessionAxis(format!(
+                    "{venue} has Session {date} but {reference_venue} does not"
+                )));
+            }
+        }
+    }
+
+    Ok(reference.values().cloned().collect())
 }
 
 #[derive(Clone, Copy)]
@@ -301,7 +453,7 @@ struct BarValues {
 
 fn read_bars(
     batches: &[RecordBatch],
-    venue: &VenueId,
+    venues: &BTreeSet<VenueId>,
     instruments: &[InstrumentId],
     sessions: &[PanelSession],
 ) -> Result<BTreeMap<(InstrumentId, NaiveDate), BarValues>, PanelError> {
@@ -321,7 +473,7 @@ fn read_bars(
             let id = required_string(ids, row, "bars", "instrument_id")?
                 .parse::<InstrumentId>()
                 .map_err(|error| invalid_table("bars", error.to_string()))?;
-            if id.venue() != venue {
+            if !venues.contains(id.venue()) {
                 continue;
             }
             if !instrument_ids.contains(&id) {
