@@ -11,6 +11,7 @@ mod normalizer;
 mod publish;
 mod raw;
 mod security_evidence;
+pub mod session_calendar;
 pub mod sina_adjust_factor;
 
 pub use frozen::{FrozenSourceMeta, freeze_raw};
