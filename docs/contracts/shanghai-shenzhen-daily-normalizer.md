@@ -74,8 +74,12 @@ Publication fails before any normalized file or manifest is written when:
 - a security-evidence publication gate is blocked (Unknown, Conflict,
   NotApplicable or non-positive execution term);
 - a daily response has no pinned source/method record, an unsupported native
-  symbol, an instrument absent from the snapshot, a missing/malformed `day`
-  array or row, or no valid Bar at all;
+  symbol, an instrument absent from the snapshot, or a missing/malformed `day`
+  array or row;
+- the complete pinned daily input set yields no valid Bar
+  (`empty_daily_bars`). A well-formed response with an empty `day` array or an
+  empty `data` object is accepted when another pinned response yields Bars; its
+  dates remain missing and are never turned into zero Bars;
 - a row has an invalid date, a date outside the venue's declared coverage or on
   a covered non-session date, a price/volume that is not an exact scale-18
   decimal or is out of range, an invalid OHLC relationship, or a negative
@@ -88,4 +92,11 @@ This contract is synthetic-verified only; no real calendar, evidence or market
 coverage is asserted. It does not publish a collection report, choose a source,
 derive adjusted series or corporate actions, or open stock research/backtests.
 The existing MVP-6 `szse-etf-frozen` rules, versions, identities and archives are
-unchanged; this Normalizer has a separate id and version.
+unchanged; this Normalizer has a separate id and version. Its immutable-input
+identity basis is recorded in the [ADR 0011 supplement](../decisions/0011-immutable-data-and-reproducible-runs.md).
+
+Production assembly (#289) remains responsible for choosing the exact Raw set:
+it must not include predecessor/pre-listing rows for a reused code, and it must
+exclude blocked-evidence instruments from the pinned snapshot when unrelated
+securities must publish. v1 intentionally fails the whole publication for any
+blocked selected instrument and does not derive a lifecycle/tradability gate.

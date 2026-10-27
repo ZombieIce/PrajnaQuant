@@ -314,8 +314,21 @@ fn four_venue_kind_combinations_publish_read_and_rebuild() {
         row("2026-01-06", "10.20", "10.30", "10.40", "10.10", "124"),
         row("2026-01-07", "10.30", "10.40", "10.50", "10.20", "125"),
     ];
-    let mut hashes = vec![scenario.daily("600519", "XSHG", &rows)];
-    hashes.extend(scenario.all_four().into_iter().skip(1));
+    let etf_rows = [
+        row(
+            "2026-01-05",
+            "10.111111111111111111",
+            "10.222222222222222222",
+            "10.333333333333333333",
+            "10.011111111111111111",
+            "100",
+        ),
+        row("2026-01-06", "10.20", "10.30", "10.40", "10.10", "100"),
+        row("2026-01-07", "10.30", "10.40", "10.50", "10.20", "100"),
+    ];
+    let mut hashes = scenario.all_four();
+    hashes[0] = scenario.daily("600519", "XSHG", &rows);
+    hashes[1] = scenario.daily("510300", "XSHG", &etf_rows);
 
     assert!(scenario.registry.contains("cn-stock-etf-daily", "1"));
     let manifest = scenario.publish(&hashes).unwrap();
@@ -368,6 +381,7 @@ fn four_venue_kind_combinations_publish_read_and_rebuild() {
         .unwrap();
     assert_eq!(etf.kind(), InstrumentKind::Etf);
     assert_eq!(etf.price_increment(), Price::parse("0.001").unwrap());
+    assert_eq!(etf.size_increment(), Quantity::parse("1").unwrap());
     assert_eq!(etf.lot_size(), Some(Quantity::parse("100").unwrap()));
     let stock = instruments
         .iter()
@@ -375,6 +389,7 @@ fn four_venue_kind_combinations_publish_read_and_rebuild() {
         .unwrap();
     assert_eq!(stock.kind(), InstrumentKind::Equity);
     assert_eq!(stock.price_increment(), Price::parse("0.01").unwrap());
+    assert_eq!(stock.size_increment(), Quantity::parse("1").unwrap());
 
     let bars = read_bars(&scenario.root, &manifest);
     assert_eq!(bars.len(), 12);
@@ -407,6 +422,31 @@ fn four_venue_kind_combinations_publish_read_and_rebuild() {
     );
     assert_eq!(precise.volume(), Quantity::parse("12300").unwrap());
     assert_eq!(precise.ts_open(), sh.ts_open());
+    let etf_bar = bars
+        .iter()
+        .find(|bar| {
+            bar.instrument_id().to_string() == "510300.XSHG"
+                && bar.session_date() == date("2026-01-05")
+        })
+        .unwrap();
+    assert_eq!(
+        etf_bar.open(),
+        Price::parse("10.111111111111111111").unwrap()
+    );
+    assert_eq!(
+        etf_bar.close(),
+        Price::parse("10.222222222222222222").unwrap()
+    );
+    assert_eq!(
+        etf_bar.high(),
+        Price::parse("10.333333333333333333").unwrap()
+    );
+    assert_eq!(
+        etf_bar.low(),
+        Price::parse("10.011111111111111111").unwrap()
+    );
+    assert_eq!(etf_bar.volume(), Quantity::parse("10000").unwrap());
+    assert_eq!(etf_bar.ts_open(), sh.ts_open());
     let other_venue = bars
         .iter()
         .find(|bar| {
@@ -414,6 +454,11 @@ fn four_venue_kind_combinations_publish_read_and_rebuild() {
                 && bar.session_date() == date("2026-01-05")
         })
         .unwrap();
+    assert_eq!(other_venue.open(), Price::parse("10.00").unwrap());
+    assert_eq!(other_venue.close(), Price::parse("10.10").unwrap());
+    assert_eq!(other_venue.high(), Price::parse("10.20").unwrap());
+    assert_eq!(other_venue.low(), Price::parse("9.90").unwrap());
+    assert_eq!(other_venue.volume(), Quantity::parse("10000").unwrap());
     assert_eq!(other_venue.ts_open(), sz.ts_open());
 
     let sources = read_dataset_table(&scenario.root, &manifest, "bar_sources")
@@ -456,6 +501,7 @@ fn missing_quotes_stay_absent_and_identical_duplicates_are_deduplicated() {
     let h1 = scenario.daily("600519", "XSHG", &rows);
     let mut hashes = scenario.all_four();
     hashes[0] = h1;
+    hashes.push(scenario.daily("600519", "XSHG", &[]));
 
     let manifest = scenario.publish(&hashes).unwrap();
     let bars = read_bars(&scenario.root, &manifest);
@@ -602,6 +648,15 @@ fn pinned_inputs_and_blocked_evidence_fail_closed() {
         error,
         PublishError::Validation(issues)
             if issues.iter().any(|issue| issue.code == "missing_daily_raw")
+    ));
+    scenario.assert_no_dataset();
+
+    let empty = scenario.daily("600519", "XSHG", &[]);
+    let error = scenario.publish(&[empty]).unwrap_err();
+    assert!(matches!(
+        error,
+        PublishError::Validation(issues)
+            if issues.iter().any(|issue| issue.code == "empty_daily_bars")
     ));
     scenario.assert_no_dataset();
 
