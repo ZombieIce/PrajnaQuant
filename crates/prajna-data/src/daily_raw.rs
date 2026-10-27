@@ -10,7 +10,11 @@ use std::{
     fs::{self, File},
     io::Write,
     path::{Component, Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Duration as StdDuration, Instant},
 };
 
 use chrono::{Duration, NaiveDate, SecondsFormat, Utc};
@@ -23,9 +27,39 @@ use crate::{RawStore, SourceKind, SourceRecordInput, default_mvp6_root};
 pub const METHOD_VERSION: &str = "tencent-fqkline-day/1";
 pub const REPORT_SCHEMA_VERSION: u32 = 1;
 pub const MAX_REQUEST_CALENDAR_DAYS: i64 = 800;
+pub const MIN_REQUEST_INTERVAL: StdDuration = StdDuration::from_secs(1);
+const MAX_REQUEST_RETRIES: u32 = 3;
 const SOURCE_ID: &str = "tencent_fqkline_daily";
 const INGESTED_BY: &str = "prajna-daily-raw/1";
 static NEXT_REPORT_ID: AtomicU64 = AtomicU64::new(0);
+static SYSTEM_EPOCH: OnceLock<Instant> = OnceLock::new();
+static SYSTEM_REQUEST_TIMES: OnceLock<Arc<Mutex<BTreeMap<String, StdDuration>>>> = OnceLock::new();
+
+/// Clock and sleeper seam for deterministic request-pacing and retry tests.
+pub trait DailyRawTiming: Send + Sync {
+    fn now(&self) -> StdDuration;
+    fn sleep(&self, duration: StdDuration);
+}
+
+/// Production monotonic clock and thread sleeper used by [`DailyRawCollector::new`].
+#[derive(Debug, Default)]
+pub struct SystemDailyRawTiming;
+
+impl DailyRawTiming for SystemDailyRawTiming {
+    fn now(&self) -> StdDuration {
+        SYSTEM_EPOCH.get_or_init(Instant::now).elapsed()
+    }
+
+    fn sleep(&self, duration: StdDuration) {
+        std::thread::sleep(duration);
+    }
+}
+
+fn system_request_times() -> Arc<Mutex<BTreeMap<String, StdDuration>>> {
+    SYSTEM_REQUEST_TIMES
+        .get_or_init(|| Arc::new(Mutex::new(BTreeMap::new())))
+        .clone()
+}
 
 /// The explicitly configured domestic exchange.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -244,18 +278,108 @@ impl std::fmt::Display for DailyRawError {
 
 impl Error for DailyRawError {}
 
+struct PacedTransport<'a, T> {
+    transport: &'a mut T,
+    timing: &'a dyn DailyRawTiming,
+    request_times: &'a Mutex<BTreeMap<String, StdDuration>>,
+}
+
+impl<T: tencent_transport::HttpTransport> tencent_transport::HttpTransport
+    for PacedTransport<'_, T>
+{
+    fn get(
+        &mut self,
+        request: &tencent_transport::HttpRequest,
+    ) -> Result<tencent_transport::HttpReply, tencent_transport::TransportFailure> {
+        let domain = rate_limit_domain(request.host);
+        let mut request_times = self
+            .request_times
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(previous) = request_times.get(&domain).copied() {
+            let elapsed = self.timing.now().saturating_sub(previous);
+            let remaining = MIN_REQUEST_INTERVAL.saturating_sub(elapsed);
+            if !remaining.is_zero() {
+                self.timing.sleep(remaining);
+            }
+        }
+        request_times.insert(domain, self.timing.now());
+        drop(request_times);
+        self.transport.get(request)
+    }
+}
+
+fn rate_limit_domain(host: &str) -> String {
+    let host = host
+        .split_once("://")
+        .map_or(host, |(_, authority)| authority)
+        .split('/')
+        .next()
+        .unwrap_or(host);
+    if host == "gtimg.cn" || host.ends_with(".gtimg.cn") {
+        "gtimg.cn".into()
+    } else if host == "qq.com" || host.ends_with(".qq.com") {
+        "qq.com".into()
+    } else {
+        host.into()
+    }
+}
+
+fn retry_delay(retry_index: u32) -> StdDuration {
+    StdDuration::from_secs(1_u64 << retry_index)
+}
+
+fn is_retryable(error: &tencent_transport::FetchError) -> bool {
+    matches!(
+        error.kind,
+        tencent_transport::FetchErrorKind::BodyRead
+            | tencent_transport::FetchErrorKind::EndpointsUnavailable
+    )
+}
+
 /// Collects one configured security through the shared Tencent transport and persists
 /// Raw objects plus a per-invocation report beneath an explicit local Raw root.
 pub struct DailyRawCollector<T> {
     transport: T,
     root: PathBuf,
     raw: RawStore,
+    timing: Arc<dyn DailyRawTiming>,
+    request_times: Arc<Mutex<BTreeMap<String, StdDuration>>>,
     consecutive_restrictions: usize,
     source_stopped: bool,
 }
 
 impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
     pub fn new(transport: T, raw_root: impl AsRef<Path>) -> Result<Self, DailyRawError> {
+        Self::with_timing_and_state(
+            transport,
+            raw_root,
+            Arc::new(SystemDailyRawTiming),
+            system_request_times(),
+        )
+    }
+
+    /// Creates a collector with an injected clock/sleeper and isolated pacing state.
+    /// Production callers should use [`DailyRawCollector::new`].
+    pub fn new_with_timing(
+        transport: T,
+        raw_root: impl AsRef<Path>,
+        timing: Arc<dyn DailyRawTiming>,
+    ) -> Result<Self, DailyRawError> {
+        Self::with_timing_and_state(
+            transport,
+            raw_root,
+            timing,
+            Arc::new(Mutex::new(BTreeMap::new())),
+        )
+    }
+
+    fn with_timing_and_state(
+        transport: T,
+        raw_root: impl AsRef<Path>,
+        timing: Arc<dyn DailyRawTiming>,
+        request_times: Arc<Mutex<BTreeMap<String, StdDuration>>>,
+    ) -> Result<Self, DailyRawError> {
         let root = canonicalize_candidate(raw_root.as_ref())?;
         let legacy_root = canonicalize_candidate(&default_mvp6_root())?;
         if root == legacy_root || root.starts_with(&legacy_root) {
@@ -268,6 +392,8 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
             transport,
             root,
             raw,
+            timing,
+            request_times,
             consecutive_restrictions: 0,
             source_stopped: false,
         })
@@ -320,78 +446,88 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
             let instrument_id_for_records = &instrument_id;
             let native_symbol_for_records = &native_symbol;
             let kind_for_records = request.kind;
+            let timing = Arc::clone(&self.timing);
+            let request_times = Arc::clone(&self.request_times);
+            let transport = &mut self.transport;
             let restriction_count = &mut self.consecutive_restrictions;
             let fetch_result = {
-                let mut policy = |failure: &tencent_transport::CandidateFailure,
-                                  response_body: Option<&[u8]>| {
-                    candidate_failures.push(CandidateFailureSummary {
-                        host: failure.host.to_owned(),
-                        kind: format!("{:?}", failure.kind),
-                        status_code: failure.status_code,
-                        message: failure.message.clone(),
-                    });
-                    if let Some(bytes) = response_body {
-                        match store_raw(
-                            raw,
-                            RawStoreRequest {
-                                bytes,
-                                instrument_id: instrument_id_for_records,
-                                native_symbol: native_symbol_for_records,
-                                kind: kind_for_records,
-                                range,
-                                chunk_index: index as u32,
-                                source: failure.host,
-                                outcome: RawResponseOutcome::RejectedCandidateResponse,
-                                content_type: "application/octet-stream",
-                            },
-                        ) {
-                            Ok(reference) => raw_objects.push(reference),
-                            Err(error) => {
-                                storage_error = Some(error);
-                                return tencent_transport::CandidateAction::Stop;
-                            }
+                let mut final_result = None;
+                for retry_index in 0..=MAX_REQUEST_RETRIES {
+                    let attempt_result = {
+                        let mut paced_transport = PacedTransport {
+                            transport,
+                            timing: timing.as_ref(),
+                            request_times: request_times.as_ref(),
+                        };
+                        let mut policy =
+                            |failure: &tencent_transport::CandidateFailure,
+                             response_body: Option<&[u8]>| {
+                                candidate_failures.push(CandidateFailureSummary {
+                                    host: failure.host.to_owned(),
+                                    kind: format!("{:?}", failure.kind),
+                                    status_code: failure.status_code,
+                                    message: failure.message.clone(),
+                                });
+                                if let Some(bytes) = response_body {
+                                    match store_raw(
+                                        raw,
+                                        RawStoreRequest {
+                                            bytes,
+                                            instrument_id: instrument_id_for_records,
+                                            native_symbol: native_symbol_for_records,
+                                            kind: kind_for_records,
+                                            range,
+                                            chunk_index: index as u32,
+                                            source: failure.host,
+                                            outcome: RawResponseOutcome::RejectedCandidateResponse,
+                                            content_type: "application/octet-stream",
+                                        },
+                                    ) {
+                                        Ok(reference) => raw_objects.push(reference),
+                                        Err(error) => {
+                                            storage_error = Some(error);
+                                            return tencent_transport::CandidateAction::Stop;
+                                        }
+                                    }
+                                }
+
+                                if is_source_restriction(failure, response_body) {
+                                    *restriction_count += 1;
+                                } else {
+                                    *restriction_count = 0;
+                                }
+                                if *restriction_count >= 2 {
+                                    tencent_transport::CandidateAction::Stop
+                                } else {
+                                    tencent_transport::CandidateAction::Continue
+                                }
+                            };
+
+                        tencent_transport::fetch_unadjusted_daily_with_policy(
+                            &daily_request,
+                            &mut paced_transport,
+                            |bytes| parse_response_dates(bytes, &native_symbol).is_ok(),
+                            &mut policy,
+                        )
+                    };
+                    match &attempt_result {
+                        Err(error) if retry_index < MAX_REQUEST_RETRIES && is_retryable(error) => {
+                            timing.sleep(retry_delay(retry_index));
+                        }
+                        _ => {
+                            final_result = Some(attempt_result);
+                            break;
                         }
                     }
-
-                    if is_source_restriction(failure, response_body) {
-                        *restriction_count += 1;
-                    } else {
-                        *restriction_count = 0;
-                    }
-                    if *restriction_count >= 2 {
-                        tencent_transport::CandidateAction::Stop
-                    } else {
-                        tencent_transport::CandidateAction::Continue
-                    }
-                };
-
-                tencent_transport::fetch_unadjusted_daily_with_policy(
-                    &daily_request,
-                    &mut self.transport,
-                    |bytes| parse_response_dates(bytes, &native_symbol).is_ok(),
-                    &mut policy,
-                )
+                }
+                final_result.expect("one bounded transport attempt always runs")
             };
             if let Some(error) = storage_error {
                 return Err(error);
             }
 
-            let candidate_attempts = match &fetch_result {
-                Ok(_) => candidate_failures.len() as u32 + 1,
-                Err(error) if !error.candidate_failures.is_empty() => {
-                    error.candidate_failures.len() as u32
-                }
-                Err(error)
-                    if matches!(
-                        error.kind,
-                        tencent_transport::FetchErrorKind::ClientBuild
-                            | tencent_transport::FetchErrorKind::InvalidInput
-                    ) =>
-                {
-                    0
-                }
-                Err(_) => 1,
-            };
+            let candidate_attempts =
+                candidate_failures.len() as u32 + u32::from(fetch_result.is_ok());
             let mut chunk = ChunkReport {
                 index: index as u32,
                 requested_range: range,
@@ -638,7 +774,7 @@ fn is_source_restriction(
     failure: &tencent_transport::CandidateFailure,
     response_body: Option<&[u8]>,
 ) -> bool {
-    matches!(failure.status_code, Some(403 | 501))
+    matches!(failure.status_code, Some(401 | 403 | 429 | 501))
         || response_body.is_some_and(|body| {
             let text = String::from_utf8_lossy(body).to_lowercase();
             ["captcha", "验证码", "访问验证"]
@@ -785,4 +921,19 @@ fn next_report_id() -> String {
         "tencent-daily-raw-v1-{stamp}-{}-{sequence}",
         std::process::id()
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rate_limit_domain;
+
+    #[test]
+    fn candidate_urls_are_grouped_by_tencent_registrable_domain() {
+        assert_eq!(rate_limit_domain("https://web.ifzq.gtimg.cn"), "gtimg.cn");
+        assert_eq!(rate_limit_domain("https://ifzq.gtimg.cn"), "gtimg.cn");
+        assert_eq!(
+            rate_limit_domain("https://proxy.finance.qq.com/ifzqgtimg"),
+            "qq.com"
+        );
+    }
 }

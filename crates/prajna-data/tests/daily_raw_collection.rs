@@ -1,10 +1,17 @@
-use std::{cell::RefCell, collections::VecDeque, fs, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::VecDeque,
+    fs,
+    rc::Rc,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use chrono::NaiveDate;
 use prajna_data::RawStore;
 use prajna_data::daily_raw::{
-    ChunkStatus, CollectionStatus, DailyRawCollector, DailyRawRequest, RawResponseOutcome,
-    SecurityKind, Venue,
+    ChunkStatus, CollectionStatus, DailyRawCollector, DailyRawRequest, DailyRawTiming,
+    RawResponseOutcome, SecurityKind, Venue,
 };
 use tencent_transport::{HttpReply, HttpRequest, HttpTransport, TransportFailure};
 
@@ -21,6 +28,31 @@ impl HttpTransport for FixtureTransport {
             .pop_front()
             .expect("one configured reply for each requested candidate")
     }
+}
+
+#[derive(Clone, Default)]
+struct FakeTiming {
+    now: Arc<Mutex<Duration>>,
+    sleeps: Arc<Mutex<Vec<Duration>>>,
+}
+
+impl DailyRawTiming for FakeTiming {
+    fn now(&self) -> Duration {
+        *self.now.lock().unwrap()
+    }
+
+    fn sleep(&self, duration: Duration) {
+        self.sleeps.lock().unwrap().push(duration);
+        *self.now.lock().unwrap() += duration;
+    }
+}
+
+fn collector(
+    transport: FixtureTransport,
+    raw_root: impl AsRef<std::path::Path>,
+) -> DailyRawCollector<FixtureTransport> {
+    DailyRawCollector::new_with_timing(transport, raw_root, Arc::new(FakeTiming::default()))
+        .unwrap()
 }
 
 fn date(value: &str) -> NaiveDate {
@@ -69,7 +101,7 @@ fn stock_collection_preserves_raw_bytes_and_persists_a_readable_coverage_report(
         replies: VecDeque::from([Ok(reply)]),
         requests: Rc::clone(&requests),
     };
-    let mut collector = DailyRawCollector::new(transport, root.path()).unwrap();
+    let mut collector = collector(transport, root.path());
 
     let run = collector
         .collect(request("600519", Venue::Xshg, SecurityKind::Stock))
@@ -173,7 +205,7 @@ fn etf_repeats_reuse_identical_raw_and_revisions_preserve_prior_bytes() {
         replies: VecDeque::from([Ok(first_reply), Ok(same_reply), Ok(revised_reply)]),
         requests,
     };
-    let mut collector = DailyRawCollector::new(transport, root.path()).unwrap();
+    let mut collector = collector(transport, root.path());
     let mut request = request("159952", Venue::Xshe, SecurityKind::Etf);
     request.start = date("2026-02-02");
     request.end = request.start;
@@ -214,27 +246,19 @@ fn empty_and_failed_attempts_keep_prior_raw_and_can_be_retried() {
         &["2026-01-05"],
     );
     let requests = Rc::new(RefCell::new(Vec::new()));
+    let mut replies = VecDeque::from([Ok(success), Ok(empty)]);
+    replies.extend((0..12).map(|_| {
+        Err(TransportFailure::new(
+            tencent_transport::TransportFailureKind::Request,
+            "synthetic network failure",
+        ))
+    }));
+    replies.push_back(Ok(retry));
     let transport = FixtureTransport {
-        replies: VecDeque::from([
-            Ok(success),
-            Ok(empty),
-            Err(TransportFailure::new(
-                tencent_transport::TransportFailureKind::Request,
-                "synthetic network failure",
-            )),
-            Err(TransportFailure::new(
-                tencent_transport::TransportFailureKind::Request,
-                "synthetic network failure",
-            )),
-            Err(TransportFailure::new(
-                tencent_transport::TransportFailureKind::Request,
-                "synthetic network failure",
-            )),
-            Ok(retry),
-        ]),
+        replies,
         requests: Rc::clone(&requests),
     };
-    let mut collector = DailyRawCollector::new(transport, root.path()).unwrap();
+    let mut collector = collector(transport, root.path());
     let request = request("600519", Venue::Xshg, SecurityKind::Stock);
 
     let successful_run = collector.collect(request.clone()).unwrap();
@@ -250,7 +274,7 @@ fn empty_and_failed_attempts_keep_prior_raw_and_can_be_retried() {
     assert_eq!(empty_run.report.summary.accepted_response_chunks, 1);
     assert_eq!(error_run.report.status, CollectionStatus::Failed);
     assert_eq!(error_run.report.chunks[0].status, ChunkStatus::Failed);
-    assert_eq!(error_run.report.chunks[0].candidate_attempts, 3);
+    assert_eq!(error_run.report.chunks[0].candidate_attempts, 12);
     assert_eq!(retry_run.report.status, CollectionStatus::Complete);
     assert!(successful_run.report_path.exists());
     assert!(empty_run.report_path.exists());
@@ -268,7 +292,123 @@ fn empty_and_failed_attempts_keep_prior_raw_and_can_be_retried() {
         retry_run.report.chunks[0].raw_objects[0].raw_sha256,
         original_hash
     );
-    assert_eq!(requests.borrow().len(), 6);
+    assert_eq!(requests.borrow().len(), 15);
+}
+
+#[test]
+fn terminal_body_read_failure_counts_every_candidate_and_retains_diagnostics() {
+    let root = tempfile::tempdir().unwrap();
+    let requests = Rc::new(RefCell::new(Vec::new()));
+    let transport = FixtureTransport {
+        replies: VecDeque::from([
+            Err(TransportFailure::new(
+                tencent_transport::TransportFailureKind::Request,
+                "synthetic connection failure",
+            )),
+            Err(TransportFailure::new(
+                tencent_transport::TransportFailureKind::BodyRead,
+                "synthetic body read failure",
+            )),
+            Ok(valid_reply(
+                "sh600519",
+                "https://synthetic.invalid/retry-after-body-read",
+                &["2026-01-05"],
+            )
+            .0),
+        ]),
+        requests: Rc::clone(&requests),
+    };
+    let mut collector = collector(transport, root.path());
+
+    let run = collector
+        .collect(request("600519", Venue::Xshg, SecurityKind::Stock))
+        .unwrap();
+
+    assert_eq!(run.report.status, CollectionStatus::Complete);
+    assert_eq!(run.report.summary.candidate_http_attempts, 3);
+    assert_eq!(run.report.summary.candidate_failures, 2);
+    assert_eq!(run.report.chunks[0].candidate_attempts, 3);
+    assert_eq!(run.report.chunks[0].candidate_failures.len(), 2);
+    assert_eq!(run.report.chunks[0].candidate_failures[0].kind, "Request");
+    assert_eq!(run.report.chunks[0].candidate_failures[1].kind, "BodyRead");
+    assert_eq!(requests.borrow().len(), 3);
+}
+
+#[test]
+fn retries_use_bounded_exponential_backoff_and_preserve_candidate_counts() {
+    let root = tempfile::tempdir().unwrap();
+    let timing = FakeTiming::default();
+    let requests = Rc::new(RefCell::new(Vec::new()));
+    let failures = (0..3).map(|_| {
+        Err(TransportFailure::new(
+            tencent_transport::TransportFailureKind::BodyRead,
+            "synthetic body read failure",
+        ))
+    });
+    let (success, _) = valid_reply(
+        "sh600519",
+        "https://synthetic.invalid/success-after-retries",
+        &["2026-01-05"],
+    );
+    let transport = FixtureTransport {
+        replies: failures.chain([Ok(success)]).collect(),
+        requests: Rc::clone(&requests),
+    };
+    let mut collector =
+        DailyRawCollector::new_with_timing(transport, root.path(), Arc::new(timing.clone()))
+            .unwrap();
+
+    let run = collector
+        .collect(request("600519", Venue::Xshg, SecurityKind::Stock))
+        .unwrap();
+
+    assert_eq!(run.report.status, CollectionStatus::Complete);
+    assert_eq!(run.report.summary.candidate_http_attempts, 4);
+    assert_eq!(run.report.summary.candidate_failures, 3);
+    assert_eq!(run.report.chunks[0].candidate_attempts, 4);
+    assert_eq!(requests.borrow().len(), 4);
+    assert_eq!(
+        *timing.sleeps.lock().unwrap(),
+        vec![
+            Duration::from_secs(1),
+            Duration::from_secs(2),
+            Duration::from_secs(4)
+        ]
+    );
+}
+
+#[test]
+fn consecutive_same_domain_requests_are_spaced_by_at_least_one_second() {
+    let root = tempfile::tempdir().unwrap();
+    let timing = FakeTiming::default();
+    let requests = Rc::new(RefCell::new(Vec::new()));
+    let (first, _) = valid_reply(
+        "sh600519",
+        "https://synthetic.invalid/first",
+        &["2026-01-05"],
+    );
+    let (second, _) = valid_reply(
+        "sh600519",
+        "https://synthetic.invalid/second",
+        &["2026-01-05"],
+    );
+    let transport = FixtureTransport {
+        replies: VecDeque::from([Ok(first), Ok(second)]),
+        requests: Rc::clone(&requests),
+    };
+    let mut collector =
+        DailyRawCollector::new_with_timing(transport, root.path(), Arc::new(timing.clone()))
+            .unwrap();
+
+    for _ in 0..2 {
+        collector
+            .collect(request("600519", Venue::Xshg, SecurityKind::Stock))
+            .unwrap();
+    }
+
+    assert_eq!(requests.borrow().len(), 2);
+    assert_eq!(*timing.sleeps.lock().unwrap(), vec![Duration::from_secs(1)]);
+    assert_eq!(*timing.now.lock().unwrap(), Duration::from_secs(1));
 }
 
 #[test]
@@ -295,7 +435,7 @@ fn requests_are_split_at_the_transport_limit_without_overlap() {
         replies: VecDeque::from([Ok(first_reply), Ok(second_reply)]),
         requests: Rc::clone(&requests),
     };
-    let mut collector = DailyRawCollector::new(transport, root.path()).unwrap();
+    let mut collector = collector(transport, root.path());
     let run = collector
         .collect(DailyRawRequest {
             symbol: "600519".into(),
@@ -359,7 +499,7 @@ fn repeated_access_restrictions_stop_before_the_next_candidate_or_range() {
         replies: VecDeque::from([Err(blocked_one), Err(blocked_two), Ok(never_requested)]),
         requests: Rc::clone(&requests),
     };
-    let mut collector = DailyRawCollector::new(transport, root.path()).unwrap();
+    let mut collector = collector(transport, root.path());
     let start = date("2024-01-01");
     let end = start + chrono::Duration::days(800);
 

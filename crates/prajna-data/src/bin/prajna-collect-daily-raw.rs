@@ -1,10 +1,19 @@
-use std::{error::Error, path::PathBuf, process::ExitCode};
+use std::{
+    error::Error,
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+    process::ExitCode,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use prajna_data::daily_raw::{
     CollectionStatus, DailyRawCollector, DailyRawRequest, SecurityKind, Venue,
 };
 use tencent_transport::{HttpTransport, ReqwestTransport};
+
+static NEXT_DIAGNOSTIC_ID: AtomicU64 = AtomicU64::new(0);
 
 fn main() -> ExitCode {
     match run() {
@@ -36,7 +45,15 @@ fn run_with_transport<T: HttpTransport>(
         end: args.end,
     };
     let mut collector = DailyRawCollector::new(transport, &args.raw_root)?;
-    let run = collector.collect(request)?;
+    let run = match collector.collect(request.clone()) {
+        Ok(run) => run,
+        Err(error) => {
+            if write_local_failure_diagnostic(&args.raw_root, &request, &error).is_err() {
+                return Err(CliCollectionFailure::DiagnosticUnavailable.into());
+            }
+            return Err(CliCollectionFailure::DiagnosticSaved.into());
+        }
+    };
     let summary = &run.report.summary;
     println!(
         "report={} status={:?} chunks={}/{} data={} accepted={} empty={} failed={} not_attempted={}",
@@ -55,6 +72,57 @@ fn run_with_transport<T: HttpTransport>(
     } else {
         ExitCode::from(2)
     })
+}
+
+#[derive(Debug)]
+enum CliCollectionFailure {
+    DiagnosticSaved,
+    DiagnosticUnavailable,
+}
+
+impl std::fmt::Display for CliCollectionFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::DiagnosticSaved => {
+                "daily Raw collection failed; detailed diagnostics were saved under the local raw root"
+            }
+            Self::DiagnosticUnavailable => {
+                "daily Raw collection failed; local diagnostics could not be saved"
+            }
+        })
+    }
+}
+
+impl Error for CliCollectionFailure {}
+
+fn write_local_failure_diagnostic(
+    raw_root: &Path,
+    request: &DailyRawRequest,
+    error: &dyn Error,
+) -> Result<(), Box<dyn Error>> {
+    let root = fs::canonicalize(raw_root)?;
+    let diagnostic_dir = root.join("reports/daily-raw/diagnostics");
+    fs::create_dir_all(&diagnostic_dir)?;
+    let observed_at = Utc::now().to_rfc3339();
+    let diagnostic = serde_json::json!({
+        "schema_version": 1,
+        "method_version": prajna_data::daily_raw::METHOD_VERSION,
+        "observed_at": observed_at,
+        "request": request,
+        "error": error.to_string(),
+    });
+    let timestamp = Utc::now().timestamp_millis();
+    let id = NEXT_DIAGNOSTIC_ID.fetch_add(1, Ordering::Relaxed);
+    let target = diagnostic_dir.join(format!(
+        "failure-{timestamp}-{}-{id}.json",
+        std::process::id()
+    ));
+    let mut temporary = tempfile::NamedTempFile::new_in(&diagnostic_dir)?;
+    serde_json::to_writer(&mut temporary, &diagnostic)?;
+    temporary.as_file_mut().write_all(b"\n")?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(target)?;
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -217,6 +285,78 @@ mod tests {
         let raw = prajna_data::RawStore::open(root.path()).unwrap();
         assert_eq!(raw.get(&reference.raw_sha256).unwrap(), bytes);
         assert_eq!(reference.source, "https://synthetic.invalid/cli");
+    }
+
+    #[test]
+    fn cli_sanitizes_corrupt_raw_errors_and_saves_diagnostics_locally() {
+        let root = tempfile::tempdir().unwrap();
+        let bytes =
+            br#"{"code":0,"data":{"sz159952":{"day":[["2026-02-02","10","11","12","9","100"]]}}}"#
+                .to_vec();
+        let args = [
+            "--raw-root",
+            root.path().to_str().unwrap(),
+            "--symbol",
+            "159952",
+            "--venue",
+            "XSHE",
+            "--kind",
+            "etf",
+            "--start",
+            "2026-02-02",
+            "--end",
+            "2026-02-02",
+        ];
+        let first_transport = FixtureTransport {
+            reply: Some(tencent_transport::HttpReply {
+                source: "https://synthetic.invalid/first".into(),
+                bytes: bytes.clone(),
+            }),
+            requests: Vec::new(),
+        };
+        run_with_transport(args.into_iter().map(str::to_owned), first_transport).unwrap();
+
+        let report_path = std::fs::read_dir(root.path().join("reports/daily-raw"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "json")
+            })
+            .unwrap();
+        let report: prajna_data::daily_raw::DailyRawReport =
+            serde_json::from_slice(&std::fs::read(report_path).unwrap()).unwrap();
+        let raw_hash = report.chunks[0].raw_objects[0].raw_sha256.clone();
+        let raw_hex = raw_hash.strip_prefix("sha256:").unwrap();
+        let object_path = root
+            .path()
+            .join("raw/sha256")
+            .join(&raw_hex[..2])
+            .join(raw_hex);
+        std::fs::write(object_path, b"corrupted local object").unwrap();
+
+        let second_transport = FixtureTransport {
+            reply: Some(tencent_transport::HttpReply {
+                source: "https://synthetic.invalid/retry".into(),
+                bytes,
+            }),
+            requests: Vec::new(),
+        };
+        let error =
+            run_with_transport(args.into_iter().map(str::to_owned), second_transport).unwrap_err();
+        assert!(error.to_string().contains("detailed diagnostics"));
+        assert!(!error.to_string().contains(&raw_hash));
+
+        let diagnostics_dir = root.path().join("reports/daily-raw/diagnostics");
+        let diagnostic = std::fs::read_dir(diagnostics_dir)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let diagnostic_text = std::fs::read_to_string(diagnostic).unwrap();
+        assert!(diagnostic_text.contains("raw object is corrupt"));
+        assert!(diagnostic_text.contains(&raw_hash));
     }
 
     #[test]
