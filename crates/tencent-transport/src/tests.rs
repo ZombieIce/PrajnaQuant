@@ -246,6 +246,39 @@ fn exhausted_candidates_report_each_existing_candidate_error() {
 }
 
 #[test]
+fn terminal_body_read_failure_preserves_prior_candidate_failures() {
+    let mut transport = QueueTransport::new([
+        Err(TransportFailure::new(
+            TransportFailureKind::Request,
+            "connection failed",
+        )),
+        Err(TransportFailure::new(
+            TransportFailureKind::BodyRead,
+            "response body read failed",
+        )),
+    ]);
+
+    let error = fetch_unadjusted_daily(
+        &day_request("sh600519", "2026-09-14", "2026-09-18"),
+        &mut transport,
+        |_| true,
+    )
+    .unwrap_err();
+
+    assert_eq!(error.kind, FetchErrorKind::BodyRead);
+    assert_eq!(error.candidate_failures.len(), 2);
+    assert_eq!(
+        error.candidate_failures[0].kind,
+        crate::CandidateFailureKind::Request
+    );
+    assert_eq!(
+        error.candidate_failures[1].kind,
+        crate::CandidateFailureKind::BodyRead
+    );
+    assert_eq!(transport.requests.len(), 2);
+}
+
+#[test]
 fn body_read_failure_stops_candidate_fallback() {
     let mut transport = QueueTransport::new([Err(TransportFailure::new(
         TransportFailureKind::BodyRead,

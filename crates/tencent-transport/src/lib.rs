@@ -111,6 +111,7 @@ pub struct RawDailyResponse {
 pub enum CandidateFailureKind {
     Request,
     HttpStatus,
+    BodyRead,
     EmptyResponse,
     InvalidResponse,
 }
@@ -155,6 +156,18 @@ impl FetchError {
             kind,
             message: message.into(),
             candidate_failures: Vec::new(),
+        }
+    }
+
+    fn with_candidate_failures(
+        kind: FetchErrorKind,
+        message: impl Into<String>,
+        candidate_failures: Vec<CandidateFailure>,
+    ) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            candidate_failures,
         }
     }
 }
@@ -248,20 +261,34 @@ where
                     return Err(policy_stopped_error(failures));
                 }
             }
-            Err(failure)
-                if matches!(
-                    failure.kind,
-                    TransportFailureKind::BodyRead | TransportFailureKind::ClientBuild
-                ) =>
-            {
-                let kind = match failure.kind {
-                    TransportFailureKind::BodyRead => FetchErrorKind::BodyRead,
-                    TransportFailureKind::ClientBuild => FetchErrorKind::ClientBuild,
-                    TransportFailureKind::Request | TransportFailureKind::HttpStatus => {
-                        unreachable!("only immediate failure kinds reach this arm")
-                    }
+            Err(failure) if failure.kind == TransportFailureKind::BodyRead => {
+                let candidate_failure = CandidateFailure {
+                    host,
+                    kind: CandidateFailureKind::BodyRead,
+                    status_code: failure.status_code,
+                    message: failure.message.clone(),
                 };
-                return Err(FetchError::new(kind, failure.message));
+                if record_candidate_failure(
+                    &mut failures,
+                    candidate_failure,
+                    failure.response_body.as_deref(),
+                    &mut candidate_policy,
+                ) == CandidateAction::Stop
+                {
+                    return Err(policy_stopped_error(failures));
+                }
+                return Err(FetchError::with_candidate_failures(
+                    FetchErrorKind::BodyRead,
+                    failure.message,
+                    failures,
+                ));
+            }
+            Err(failure) if failure.kind == TransportFailureKind::ClientBuild => {
+                return Err(FetchError::with_candidate_failures(
+                    FetchErrorKind::ClientBuild,
+                    failure.message,
+                    failures,
+                ));
             }
             Err(failure) => {
                 let response_body = failure.response_body;

@@ -1,0 +1,24 @@
+# `prajna-data`
+
+## Local single-security daily Raw collection
+
+`prajna-collect-daily-raw` collects one explicitly configured Shanghai or Shenzhen stock/ETF from the shared Tencent unadjusted daily transport. It stores response bytes and append-only source provenance in an independent RawStore, then writes a per-invocation coverage/error report below `<raw-root>/reports/daily-raw/`. The binary requires an explicit local root; it resolves existing path components (including symlinks) before refusing the MVP-6 archive root and its descendants, then uses that validated root for Raw, report, and diagnostic writes. It rejects pre-existing symlinks along each Raw object/provenance, report, and diagnostic destination path. No report contains normalized bars and no mutable latest-success marker is written.
+
+Example invocation (use only when you have configured an appropriate local data root):
+
+```sh
+cargo run -p prajna-data --bin prajna-collect-daily-raw -- \
+  --raw-root /path/to/local/prajna-raw \
+  --symbol 510300 --venue XSHG --kind etf \
+  --start 2026-01-01 --end 2026-01-30
+```
+
+`--symbol` is a six-digit code without the source prefix. `--venue` must be `XSHG` or `XSHE`; `--kind` must be `stock` or `etf`. Both date bounds are inclusive. Ranges are split into non-overlapping windows of at most 800 calendar dates to satisfy the shared source request bound. Requests to the same Tencent registrable domain are spaced by at least one second, including across concurrent collector processes that share the local pacing directory. Separate OS temporary directories do not coordinate pacing. Transient `BodyRead` and exhausted-candidate failures receive at most three retries with 1, 2, and 4 second exponential backoff; the existing consecutive access-restriction stop rule is terminal. A non-`complete` result is persisted and the command exits with status 2; rerunning the same request remains an operator-controlled retry mechanism.
+
+Each report separates the configured range from dates actually present in each response, records calendar dates not returned, dates outside the requested chunk, duplicates, candidate attempts/failures, empty responses, accepted Raw references and local observation times. `complete` means every requested source-limited range returned at least one valid date in range. It does not mean exchange-session completeness or full-history completeness. Calendar gaps do not establish a missing trading session, a suspension, or whether an instrument was tradable. `observed_at` is the local time a response was observed, not a historical vendor publication time or historical `available_at`.
+
+The response is preserved byte-for-byte, including a changed response as a new content-addressed object; previous objects and provenance remain available. Repeated identical bytes reuse the same Raw identity and append another provenance record. Valid empty responses and failed requests are reported without deleting prior Raw data or advancing a success pointer. Read the exact Raw references from the local report. The CLI prints only a report path and aggregate counts, not response bytes or object hashes. Fatal local collection errors are summarized without hashes on stderr; full error details are written to a JSON diagnostic under `<raw-root>/reports/daily-raw/diagnostics/` and remain local.
+
+OHLCV, amount, currency, and timezone units are marked `unknown` unless a later contract establishes them. `established_date`, `listing_date`, `lot_size`, `price_increment`, and `size_increment` use the same field names as the existing `SecurityEvidenceRecord`, but remain `unknown; T02-meta evidence required` here so typed T02-meta evidence can supply them separately. This collector does not infer those values. Raw provenance records the method version, instrument identity, source, requested chunk, response outcome, observation time, and unknown availability/units so a later Dataset publisher can cite the original response and combine field-level T02-meta evidence.
+
+The production HTTP adapter is exercised only through the shared transport. The checked-in tests use synthetic transport replies and cover stocks/ETFs, repeat/revision, empty/error/retry, sequential/concurrent/cross-process request pacing, bounded exponential backoff, terminal BodyRead diagnostics, source-bounded chunking, stop-on-restriction, and hash-free CLI errors with local diagnostics. No live collection, source reachability, or real-market coverage is claimed by these tests. This command does not publish a normalized Dataset, perform adjustment, derive corporate actions, schedule collection, expose a task API, or serve a page.
