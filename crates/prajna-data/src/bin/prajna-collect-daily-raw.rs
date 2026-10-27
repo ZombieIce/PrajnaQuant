@@ -48,7 +48,7 @@ fn run_with_transport<T: HttpTransport>(
     let run = match collector.collect(request.clone()) {
         Ok(run) => run,
         Err(error) => {
-            if write_local_failure_diagnostic(&args.raw_root, &request, &error).is_err() {
+            if write_local_failure_diagnostic(&collector, &request, &error).is_err() {
                 return Err(CliCollectionFailure::DiagnosticUnavailable.into());
             }
             return Err(CliCollectionFailure::DiagnosticSaved.into());
@@ -95,13 +95,13 @@ impl std::fmt::Display for CliCollectionFailure {
 
 impl Error for CliCollectionFailure {}
 
-fn write_local_failure_diagnostic(
-    raw_root: &Path,
+fn write_local_failure_diagnostic<T: HttpTransport>(
+    collector: &DailyRawCollector<T>,
     request: &DailyRawRequest,
     error: &dyn Error,
 ) -> Result<(), Box<dyn Error>> {
-    let root = fs::canonicalize(raw_root)?;
-    let diagnostic_dir = root.join("reports/daily-raw/diagnostics");
+    let diagnostic_relative = Path::new("reports/daily-raw/diagnostics");
+    let diagnostic_dir = collector.local_output_path(diagnostic_relative)?;
     fs::create_dir_all(&diagnostic_dir)?;
     let observed_at = Utc::now().to_rfc3339();
     let diagnostic = serde_json::json!({
@@ -113,10 +113,11 @@ fn write_local_failure_diagnostic(
     });
     let timestamp = Utc::now().timestamp_millis();
     let id = NEXT_DIAGNOSTIC_ID.fetch_add(1, Ordering::Relaxed);
-    let target = diagnostic_dir.join(format!(
+    let target_relative = diagnostic_relative.join(format!(
         "failure-{timestamp}-{}-{id}.json",
         std::process::id()
     ));
+    let target = collector.local_output_path(target_relative)?;
     let mut temporary = tempfile::NamedTempFile::new_in(&diagnostic_dir)?;
     serde_json::to_writer(&mut temporary, &diagnostic)?;
     temporary.as_file_mut().write_all(b"\n")?;
@@ -357,6 +358,178 @@ mod tests {
         let diagnostic_text = std::fs::read_to_string(diagnostic).unwrap();
         assert!(diagnostic_text.contains("raw object is corrupt"));
         assert!(diagnostic_text.contains(&raw_hash));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_failure_diagnostic_uses_the_same_root_as_raw_store_for_symlink_parent_alias() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = tempfile::tempdir().unwrap();
+        let protected = temporary.path().join("protected");
+        let target = protected.join("child");
+        let expected_root = protected.join("mvp-6");
+        let lexical_root = temporary.path().join("mvp-6");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir_all(&expected_root).unwrap();
+        symlink(&target, temporary.path().join("link")).unwrap();
+        let aliased_root = temporary.path().join("link").join("..").join("mvp-6");
+
+        let args = [
+            "--raw-root",
+            aliased_root.to_str().unwrap(),
+            "--symbol",
+            "not-a-code",
+            "--venue",
+            "XSHG",
+            "--kind",
+            "stock",
+            "--start",
+            "2026-02-03",
+            "--end",
+            "2026-02-02",
+        ];
+        let transport = FixtureTransport {
+            reply: None,
+            requests: Vec::new(),
+        };
+
+        let error = run_with_transport(args.into_iter().map(str::to_owned), transport).unwrap_err();
+
+        assert!(error.to_string().contains("detailed diagnostics"));
+        assert!(expected_root.is_dir());
+        assert!(expected_root.join("reports/daily-raw/diagnostics").is_dir());
+        assert!(!lexical_root.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_refuses_raw_and_provenance_destinations_that_are_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        for destination in ["raw", "raw-sources"] {
+            let temporary = tempfile::tempdir().unwrap();
+            let raw_root = temporary.path().join("raw-root");
+            let protected = temporary.path().join("protected");
+            std::fs::create_dir_all(&raw_root).unwrap();
+            std::fs::create_dir_all(&protected).unwrap();
+            symlink(&protected, raw_root.join(destination)).unwrap();
+            let bytes = br#"{"code":0,"data":{"sz159952":{"day":[["2026-02-02","10","11","12","9","100"]]}}}"#.to_vec();
+            let args = [
+                "--raw-root",
+                raw_root.to_str().unwrap(),
+                "--symbol",
+                "159952",
+                "--venue",
+                "XSHE",
+                "--kind",
+                "etf",
+                "--start",
+                "2026-02-02",
+                "--end",
+                "2026-02-02",
+            ];
+            let transport = FixtureTransport {
+                reply: Some(tencent_transport::HttpReply {
+                    source: "https://synthetic.invalid/path-symlink".into(),
+                    bytes,
+                }),
+                requests: Vec::new(),
+            };
+
+            let error =
+                run_with_transport(args.into_iter().map(str::to_owned), transport).unwrap_err();
+
+            assert!(error.to_string().contains("detailed diagnostics"));
+            assert_eq!(std::fs::read_dir(&protected).unwrap().count(), 0);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_refuses_report_destination_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = tempfile::tempdir().unwrap();
+        let raw_root = temporary.path().join("raw-root");
+        let protected = temporary.path().join("protected");
+        std::fs::create_dir_all(&raw_root).unwrap();
+        std::fs::create_dir_all(&protected).unwrap();
+        symlink(&protected, raw_root.join("reports")).unwrap();
+        let bytes =
+            br#"{"code":0,"data":{"sz159952":{"day":[["2026-02-02","10","11","12","9","100"]]}}}"#
+                .to_vec();
+        let args = [
+            "--raw-root",
+            raw_root.to_str().unwrap(),
+            "--symbol",
+            "159952",
+            "--venue",
+            "XSHE",
+            "--kind",
+            "etf",
+            "--start",
+            "2026-02-02",
+            "--end",
+            "2026-02-02",
+        ];
+        let transport = FixtureTransport {
+            reply: Some(tencent_transport::HttpReply {
+                source: "https://synthetic.invalid/report-symlink".into(),
+                bytes,
+            }),
+            requests: Vec::new(),
+        };
+
+        let error = run_with_transport(args.into_iter().map(str::to_owned), transport).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("local diagnostics could not be saved")
+        );
+        assert_eq!(std::fs::read_dir(&protected).unwrap().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_refuses_diagnostic_destination_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = tempfile::tempdir().unwrap();
+        let raw_root = temporary.path().join("raw-root");
+        let protected = temporary.path().join("protected");
+        let diagnostic_parent = raw_root.join("reports/daily-raw");
+        std::fs::create_dir_all(&diagnostic_parent).unwrap();
+        std::fs::create_dir_all(&protected).unwrap();
+        symlink(&protected, diagnostic_parent.join("diagnostics")).unwrap();
+        let args = [
+            "--raw-root",
+            raw_root.to_str().unwrap(),
+            "--symbol",
+            "not-a-code",
+            "--venue",
+            "XSHG",
+            "--kind",
+            "stock",
+            "--start",
+            "2026-02-03",
+            "--end",
+            "2026-02-02",
+        ];
+        let transport = FixtureTransport {
+            reply: None,
+            requests: Vec::new(),
+        };
+
+        let error = run_with_transport(args.into_iter().map(str::to_owned), transport).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("local diagnostics could not be saved")
+        );
+        assert_eq!(std::fs::read_dir(&protected).unwrap().count(), 0);
     }
 
     #[test]

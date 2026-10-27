@@ -2,7 +2,7 @@
 
 ## Local single-security daily Raw collection
 
-`prajna-collect-daily-raw` collects one explicitly configured Shanghai or Shenzhen stock/ETF from the shared Tencent unadjusted daily transport. It stores response bytes and append-only source provenance in an independent RawStore, then writes a per-invocation coverage/error report below `<raw-root>/reports/daily-raw/`. The binary requires an explicit local root; it refuses the MVP-6 archive root and its descendants. No report contains normalized bars and no mutable latest-success marker is written.
+`prajna-collect-daily-raw` collects one explicitly configured Shanghai or Shenzhen stock/ETF from the shared Tencent unadjusted daily transport. It stores response bytes and append-only source provenance in an independent RawStore, then writes a per-invocation coverage/error report below `<raw-root>/reports/daily-raw/`. The binary requires an explicit local root; it resolves existing path components (including symlinks) before refusing the MVP-6 archive root and its descendants, then uses that validated root for Raw, report, and diagnostic writes. It rejects pre-existing symlinks along each Raw object/provenance, report, and diagnostic destination path. No report contains normalized bars and no mutable latest-success marker is written.
 
 Example invocation (use only when you have configured an appropriate local data root):
 

@@ -22,6 +22,7 @@ use fs2::FileExt;
 use prajna_domain::{InstrumentId, VenueId};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::{RawStore, SourceKind, SourceRecordInput, default_mvp6_root};
 
@@ -465,13 +466,7 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
         timing: Arc<dyn DailyRawTiming>,
         configured_rate_limit_root: PathBuf,
     ) -> Result<Self, DailyRawError> {
-        let root = canonicalize_candidate(raw_root.as_ref())?;
-        let legacy_root = canonicalize_candidate(&default_mvp6_root())?;
-        if root == legacy_root || root.starts_with(&legacy_root) {
-            return Err(DailyRawError::invalid(
-                "daily Raw root must be independent of the fixed MVP-6 local archive",
-            ));
-        }
+        let root = validate_raw_root(raw_root.as_ref(), &default_mvp6_root())?;
         let raw = RawStore::open(&root).map_err(|error| DailyRawError(error.to_string()))?;
         let rate_limit_root = if configured_rate_limit_root.as_os_str().is_empty() {
             root.join(".daily-raw-rate-limit")
@@ -487,6 +482,14 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
             consecutive_restrictions: 0,
             source_stopped: false,
         })
+    }
+
+    /// Resolves a Raw-root-relative output path after rejecting traversal and existing symlinks.
+    pub fn local_output_path(
+        &self,
+        relative_path: impl AsRef<Path>,
+    ) -> Result<PathBuf, DailyRawError> {
+        checked_output_path(&self.root, relative_path.as_ref())
     }
 
     /// Collects all source-limited request ranges and persists a unique report file.
@@ -532,6 +535,7 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
             let mut candidate_failures = Vec::new();
             let mut raw_objects = Vec::new();
             let mut storage_error = None;
+            let root = &self.root;
             let raw = &self.raw;
             let instrument_id_for_records = &instrument_id;
             let native_symbol_for_records = &native_symbol;
@@ -560,6 +564,7 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
                                 });
                                 if let Some(bytes) = response_body {
                                     match store_raw(
+                                        root,
                                         raw,
                                         RawStoreRequest {
                                             bytes,
@@ -640,6 +645,7 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
                     let response_dates = parse_response_dates(&response.bytes, &native_symbol)
                         .map_err(DailyRawError::invalid)?;
                     let reference = store_raw(
+                        root,
                         &self.raw,
                         RawStoreRequest {
                             bytes: &response.bytes,
@@ -755,9 +761,19 @@ struct RawStoreRequest<'a> {
 }
 
 fn store_raw(
+    root: &Path,
     raw: &RawStore,
     request: RawStoreRequest<'_>,
 ) -> Result<RawObjectReference, DailyRawError> {
+    let hash = format!("{:x}", Sha256::digest(request.bytes));
+    let object_relative = Path::new("raw").join("sha256").join(&hash[..2]).join(&hash);
+    let source_relative = Path::new("raw-sources")
+        .join("sha256")
+        .join(&hash[..2])
+        .join(format!("{hash}.jsonl"));
+    checked_output_path(root, &object_relative)?;
+    checked_output_path(root, &source_relative)?;
+
     let observed_at = now();
     let hash = raw
         .put(
@@ -932,9 +948,10 @@ fn instrument_metadata() -> BTreeMap<String, String> {
 }
 
 fn persist_report(root: &Path, report: &DailyRawReport) -> Result<PathBuf, DailyRawError> {
-    let directory = root.join("reports/daily-raw");
+    let directory = checked_output_path(root, Path::new("reports/daily-raw"))?;
     fs::create_dir_all(&directory).map_err(|error| DailyRawError(error.to_string()))?;
-    let path = directory.join(format!("{}.json", report.report_id));
+    let relative_path = Path::new("reports/daily-raw").join(format!("{}.json", report.report_id));
+    let path = checked_output_path(root, &relative_path)?;
     let mut temporary = tempfile::NamedTempFile::new_in(&directory)
         .map_err(|error| DailyRawError(error.to_string()))?;
     serde_json::to_writer_pretty(&mut temporary, report)
@@ -968,36 +985,102 @@ fn canonicalize_candidate(path: &Path) -> Result<PathBuf, DailyRawError> {
             .map_err(|error| DailyRawError(error.to_string()))?
             .join(path)
     };
-    let mut normalized = PathBuf::new();
+    let mut canonical = PathBuf::new();
+    let mut unresolved: Vec<OsString> = Vec::new();
+    // Resolve existing components before processing `..`; lexical normalization
+    // first can change the destination of a path that traverses a symlink.
     for component in absolute.components() {
         match component {
-            Component::RootDir | Component::Prefix(_) => normalized.push(component.as_os_str()),
+            Component::RootDir | Component::Prefix(_) => canonical.push(component.as_os_str()),
             Component::CurDir => {}
             Component::ParentDir => {
-                normalized.pop();
+                if unresolved.pop().is_none() && canonical.pop() {
+                    canonical = fs::canonicalize(&canonical)
+                        .map_err(|error| DailyRawError(error.to_string()))?;
+                }
             }
-            Component::Normal(value) => normalized.push(value),
+            Component::Normal(value) => {
+                if unresolved.is_empty() {
+                    let candidate = canonical.join(value);
+                    match fs::canonicalize(&candidate) {
+                        Ok(resolved) => canonical = resolved,
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                            match fs::symlink_metadata(&candidate) {
+                                Ok(_) => {
+                                    return Err(DailyRawError(format!(
+                                        "cannot resolve dangling Raw root symlink: {error}"
+                                    )));
+                                }
+                                Err(metadata_error)
+                                    if metadata_error.kind() == std::io::ErrorKind::NotFound =>
+                                {
+                                    unresolved.push(value.to_os_string());
+                                }
+                                Err(metadata_error) => {
+                                    return Err(DailyRawError(metadata_error.to_string()));
+                                }
+                            }
+                        }
+                        Err(error) => return Err(DailyRawError(error.to_string())),
+                    }
+                } else {
+                    unresolved.push(value.to_os_string());
+                }
+            }
         }
     }
 
-    let mut existing = normalized.clone();
-    let mut suffix: Vec<OsString> = Vec::new();
-    while !existing.exists() {
-        let name = existing
-            .file_name()
-            .ok_or_else(|| DailyRawError::invalid("Raw root has no existing parent"))?;
-        suffix.push(name.to_os_string());
-        existing = existing
-            .parent()
-            .ok_or_else(|| DailyRawError::invalid("Raw root has no existing parent"))?
-            .to_path_buf();
-    }
-    let mut canonical =
-        fs::canonicalize(&existing).map_err(|error| DailyRawError(error.to_string()))?;
-    for component in suffix.into_iter().rev() {
+    for component in unresolved {
         canonical.push(component);
     }
     Ok(canonical)
+}
+
+fn validate_raw_root(raw_root: &Path, protected_root: &Path) -> Result<PathBuf, DailyRawError> {
+    let root = canonicalize_candidate(raw_root)?;
+    let protected = canonicalize_candidate(protected_root)?;
+    if root == protected || root.starts_with(&protected) {
+        return Err(DailyRawError::invalid(
+            "daily Raw root must be independent of the fixed MVP-6 local archive",
+        ));
+    }
+    Ok(root)
+}
+
+fn checked_output_path(root: &Path, relative_path: &Path) -> Result<PathBuf, DailyRawError> {
+    let components = relative_path.components().collect::<Vec<_>>();
+    if components.is_empty() {
+        return Err(DailyRawError::invalid(
+            "local Raw output path must be non-empty and relative",
+        ));
+    }
+
+    let mut path = root.to_path_buf();
+    for (index, component) in components.iter().enumerate() {
+        let Component::Normal(value) = component else {
+            return Err(DailyRawError::invalid(
+                "local Raw output path must not contain traversal components",
+            ));
+        };
+        path.push(value);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() {
+                    return Err(DailyRawError::invalid(
+                        "local Raw output path must not traverse a symbolic link",
+                    ));
+                }
+                if index + 1 < components.len() && !metadata.is_dir() {
+                    return Err(DailyRawError::invalid(
+                        "local Raw output parent must be a directory",
+                    ));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(DailyRawError(error.to_string())),
+        }
+    }
+    Ok(path)
 }
 
 fn now() -> String {
@@ -1015,7 +1098,29 @@ fn next_report_id() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::rate_limit_domain;
+    use super::{canonicalize_candidate, rate_limit_domain, validate_raw_root};
+
+    #[cfg(unix)]
+    #[test]
+    fn raw_root_guard_resolves_symlink_before_parent_traversal() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = tempfile::tempdir().unwrap();
+        let protected = temporary.path().join("protected/mvp-6");
+        let symlink_target = temporary.path().join("protected/child");
+        std::fs::create_dir_all(&protected).unwrap();
+        std::fs::create_dir_all(&symlink_target).unwrap();
+        symlink(&symlink_target, temporary.path().join("link")).unwrap();
+        let aliased_root = temporary.path().join("link").join("..").join("mvp-6");
+
+        let canonical_protected = std::fs::canonicalize(&protected).unwrap();
+        assert_eq!(
+            canonicalize_candidate(&aliased_root).unwrap(),
+            canonical_protected
+        );
+        let error = validate_raw_root(&aliased_root, &protected).unwrap_err();
+        assert!(error.to_string().contains("independent of the fixed MVP-6"));
+    }
 
     #[test]
     fn candidate_urls_are_grouped_by_tencent_registrable_domain() {
