@@ -1,59 +1,48 @@
 ---
 name: ticket-loop
-description: "Coordinate one eligible GitHub ticket from implementation through independent review to a merge-ready PR."
+description: "Coordinate one eligible ticket through implementation and independent review for owner merge."
 disable-model-invocation: true
 argument-hint: "<Issue number or request> [implementer-model=<id>] [reviewer-model=<id>]"
 ---
 
-# Ticket loop
+Coordinate one ticket through implementation, verification, independent review and fixes. The owner merges. Invocation authorizes delegation to an implementer and fresh independent reviewers; the coordinator does not implement, review or reinterpret findings. Read [implement-ticket](../implement-ticket/SKILL.md), [review-pr](../review-pr/SKILL.md), [AGENTS](../../../AGENTS.md), [tracker](../../../docs/agents/issue-tracker.md) and [triage labels](../../../docs/agents/triage-labels.md) before dispatch.
 
-Run one repository ticket through implementation, verification, independent review, any required fixes and re-review, then stop with a merge-ready PR for the owner. The owner merges. This skill coordinates agents; it does not implement or review the change itself.
+## Start conditions and models
 
-Use `.agents/skills/implement-ticket/SKILL.md` as the implementation workflow and `.agents/skills/review-pr/SKILL.md` as the independent review workflow. Read both, plus `AGENTS.md`, `docs/agents/issue-tracker.md`, and `docs/agents/triage-labels.md`, before dispatching work. Those files define ticket claiming, scope limits, validation, comments, review evidence and worktree cleanup.
+1. Resolve exactly one open ticket from its number/URL or a unique matching GitHub search result. Confirm exactly one triage label `ready-for-agent`, no assignee and every referenced blocker closed as completed. If no unique eligible match, report candidates/states and stop; do not create/retitle Issues, change triage or guess.
+2. Resolve each role's model selection: explicit invocation parameter first; otherwise reuse a choice already confirmed in this conversation and still supported; otherwise use the current tool's inheritance/default behavior. Inspect available tool schema/options rather than hardcoding model IDs. Ask only when an explicit choice is unavailable or configuration is genuinely ambiguous. Do not ask every ticket for an already-confirmed preference or silently downgrade a high-risk ticket. Preserve selections for fixes/reviews; if support changes, resolve it explicitly rather than substituting a weaker model.
+3. Confirm delegation tools (`collaboration.spawn_agent`, `wait_agent`, `followup_task`) support the isolation below. If unavailable, stop before claiming/launching. Record model arguments as explicit, confirmed reuse, or inheritance/default; when actual resolved model is unreadable, report that honestly.
 
-## Start conditions
-
-1. Resolve exactly one ticket. An Issue number or URL identifies the ticket directly. For natural-language input, search the repository's GitHub Issues and require exactly one matching open ticket with exactly one triage label, `ready-for-agent`, and no unresolved blocker. If there is no unique eligible match, show the candidate Issue numbers, titles and relevant states, then stop. Do not create or retitle an Issue, change its triage state, or select a ticket by guesswork.
-2. Resolve both agent models before any Issue claim or agent launch. Parse optional `implementer-model=<id>` and `reviewer-model=<id>` values from the invocation. Read the current model choices in the `collaboration.spawn_agent` tool schema and validate each supplied ID against that list. Ask the user separately for any missing or unsupported choice before continuing. The two choices may be the same or different. Reuse the selected reviewer model for each review pass.
-3. Confirm the exact Issue is open, has exactly one triage label and that label is `ready-for-agent`, and is unblocked. For dependency tickets, inspect the referenced blockers rather than inferring their state from the ticket text. If a precondition fails, report the Issue state and stop.
-
-The loop requires `collaboration.spawn_agent`, `collaboration.wait_agent`, and `collaboration.followup_task`. If any are unavailable, report that the loop cannot preserve its delegation and isolation requirements; stop before claiming the Issue.
-
-Completion criterion: one eligible Issue and two valid model choices are recorded; no ticket has been claimed and no agent has been launched before model selection is complete.
+Done: one current eligible Issue, supported model configuration/default path and delegation/isolation capability are established before implementer claim/launch.
 
 ## Implementation handoff
 
-Start one implementer with `collaboration.spawn_agent`, using a unique task name such as `ticket_<N>_implementer`, `fork_turns: "none"`, and `model` set to the selected implementer model. Give it only the Issue URL/number and the instruction to read and follow `implement-ticket` through its PR-ready handoff. It must use a dedicated worktree from the latest `main`, claim and implement only this ticket, run the applicable verification, complete its self-check, push its ticket branch, create one PR containing `Closes #<N>`, and post its ready-for-review head SHA. It must stop there without starting review.
+Spawn one implementer, uniquely named, with `fork_turns: "none"`. Pass a `model` override only for a supported selected model; otherwise omit it and use the tool default (do not sacrifice context isolation to force inheritance). Give it the Issue pointer and instruction to follow implement-ticket through ready-for-review handoff in **loop mode**, retaining its exclusive worktree/cache until loop completion/stop. It claims only this ticket, starts from latest main, verifies/self-checks, opens one PR with `Closes #<N>`, posts current ready SHA and stops without review.
 
-Wait for the implementer to finish or ask for help. Continue only when the PR URL, Issue link and ready-for-review SHA are available in GitHub. If a required PR check fails, send the failure link to the implementer to diagnose and fix when it is caused by the branch; stop with evidence when the cause is external or needs owner judgment. If the implementer stops for triage, an unresolved requirement, the size/interface gate, or another blocker, report the evidence and stop without starting review.
+Wait for completion/help. Confirm PR URL, Issue link and ready SHA against GitHub. Route branch-caused required-check failures to the same implementer; external causes/owner decisions stop with evidence. Stop for triage, unresolved requirements, size/independent-contract gates or other blockers. Do not start review from self-check alone.
 
-Completion criterion: the Issue has one implementation branch and PR, and the PR has an implementer handoff comment for its current head.
+Done: one branch/PR and implementer handoff for current head, with retained worktree path/disposition recorded.
 
 ## Independent review
 
-For the initial review and every re-review, start a new reviewer with `collaboration.spawn_agent`, using unique task names such as `ticket_<N>_review_initial` or `ticket_<N>_rereview_1`, `fork_turns: "none"`, and the selected reviewer model. Give it only these source pointers and state:
+For initial review and every re-review spawn a **new** uniquely named reviewer with `fork_turns: "none"`, selected model override or omitted/default as above. Pass only repository/Issue/spec pointers, PR URL/current head, and for re-review prior review comment links and previous/current head SHAs. Instruct it to follow review-pr in its own isolated worktree, derive original acceptance itself, publish its own comment, never push to implementation branch, then clean its workspace. Do not pass implementation notes/reasoning or coordinator interpretation; never reuse a reviewer agent.
 
-- repository and Issue URL/number;
-- the Issue's spec pointer;
-- PR URL and current head SHA;
-- for re-review, links to prior reviewer comments and the new head SHA.
+Wait for its PR comment and reviewed SHA. Treat that comment and the reviewer's conclusion as the record; relay links/SHAs/state without adding, removing or reinterpreting findings. Ordinary tickets use one reviewer for both axes; review-pr requires parallel Spec/Standards for high risk and can upgrade discovered risk.
 
-Tell it to read and follow `review-pr` in its own worktree, derive acceptance coverage from GitHub and the repository, publish its own PR comment, and never push to the implementation branch. Do not give it implementation-agent notes, summaries, reasoning, or the coordinator's interpretation. It must determine every finding from the Issue, spec, repository and PR. Never reuse a reviewer agent for a later pass.
+Done: an independent comment records both axes, acceptance coverage, limits and conclusion for the named head.
 
-Wait for the reviewer to publish its comment. Treat the GitHub comment and its reviewed SHA as the review record. Use the reviewer's stated conclusion to choose the next handoff. The coordinator relays comment links, head SHAs and workflow state; it does not add, remove, reinterpret or publish reviewer findings.
+## Fix and re-review
 
-Completion criterion: an independent reviewer comment covers the PR head under review, and the reviewer's own conclusion and findings are recorded on the PR.
+Send all findings' comment links and reviewed/current SHAs to the **same implementer** via `followup_task`, keeping its model and worktree/cache. It responds to each finding under implement-ticket; any pushed fix (including docs) needs a new reviewer session. No-push responses may retain the reviewed head only when every finding has a reasoned disposition and review still covers current head. The coordinator cannot waive blockers or convert unverified requirements to passes.
 
-## Fix and re-review loop
+Count post-initial fix/re-review cycles, at most three. Each new pushed head gets a fresh reviewer; head changes during review require a fresh pass on current head and count toward the limit. Preserve incremental re-review from review-pr. After the third cycle, stop for owner decision if blockers remain or any finding lacks a response. Also stop for external blockers, unresolved scope/acceptance ambiguity, exceeded size/independent-contract gates or requests expanding the Issue; do not change acceptance to keep looping.
 
-If the review comment identifies findings, send the implementer the PR/comment links and the relevant reviewed and current head SHAs using `collaboration.followup_task`. Keep the same implementer agent and model for fixes. Ask it to follow the review-response steps in `implement-ticket`, respond to every finding, and push any required code fix. A new pushed head always requires a fresh reviewer session. If no code change is needed, accept the implementer's response only when every finding has a reasoned disposition and the existing review still covers the latest head; an unresolved blocking finding cannot be waived by the coordinator.
+For success confirm from current GitHub that final head has independent review with no unresolved blockers, every finding has an implementer reply, required ticket verification is complete and repository-required checks are green. Wait for pending checks; route branch-caused failures back through fixes/re-review within the limit, and stop for external causes. Do not merge/close PR or Issue.
 
-Count post-initial fix-and-review cycles. Allow at most three. Each cycle that pushes code gets one new reviewer with the selected reviewer model and a fresh context/worktree. If the latest head changed during review, have a new reviewer inspect the current head and count that pass toward the limit. After the third cycle, if the latest reviewer reports an unresolved finding or any finding lacks an implementer response, stop and give the user the PR comment links and head SHAs for a decision. Also stop for external blockers, unresolved scope/acceptance ambiguity, a ticket that exceeds the repository's size or one-interface gate, or a requested change that would expand the Issue.
+Done: open PR ready for owner merge at independently reviewed final head with required evidence/checks complete, or concrete stop report with no readiness claim.
 
-Never mark the PR ready based on the implementer's self-check. For success, verify from GitHub that the latest pushed head has an independent review with no unresolved blockers, every review finding has an implementer reply, the ticket's required verification is complete, and any repository-required PR checks are green. If a check is pending, wait for its result; route branch-caused failures to the implementer and send every pushed fix through a fresh review. Stop when the cause is external or needs owner judgment. Do not merge, close the PR, or close the Issue.
+## Workspace and final handoff
 
-Completion criterion: the PR is open and ready for the owner to merge, with the latest head independently reviewed, every finding answered, and all applicable verification and required checks complete; otherwise the workflow stops with a concrete blocker report.
+On success or any stop, coordinate disposition of **this loop's** worktrees under the [tracker lifecycle](../../../docs/agents/issue-tracker.md). The implementer may retain its worktree/cache during review and fixes; reviewers always use separate workspaces. Clean safe owned worktrees at loop end; preserve uncommitted/unpushed work and required ignored files, report path/reason/next action. If the implementer is unavailable, inspect ownership and preservation conditions before any coordinator cleanup. Never sweep other tasks.
 
-## Return to the user
-
-At a blocker, return the exact Issue/PR links, current head SHA, relevant comments or failed checks, what is waiting on the owner, and the next action needed. At completion, return the Issue and PR links, current head SHA, independent reviewer comment link, the selected implementer/reviewer models, verification and required-check status, and state that the PR is waiting for the owner to merge. The coordinator reports status and links only; reviewer conclusions remain the reviewer's own.
+Return Issue/PR links, current head, reviewer comment or blocker/check links, required-verification/check status, model selections or inheritance/default (actual model unknown if unreadable), worktree disposition and one next action. At success state that owner merge is pending; at stop say what requires owner action. Reviewer conclusions remain the reviewer's own.
