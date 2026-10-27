@@ -1036,7 +1036,10 @@ fn canonicalize_candidate(path: &Path) -> Result<PathBuf, DailyRawError> {
     Ok(canonical)
 }
 
-fn validate_raw_root(raw_root: &Path, protected_root: &Path) -> Result<PathBuf, DailyRawError> {
+pub(crate) fn validate_raw_root(
+    raw_root: &Path,
+    protected_root: &Path,
+) -> Result<PathBuf, DailyRawError> {
     let root = canonicalize_candidate(raw_root)?;
     let protected = canonicalize_candidate(protected_root)?;
     if root == protected || root.starts_with(&protected) {
@@ -1047,7 +1050,10 @@ fn validate_raw_root(raw_root: &Path, protected_root: &Path) -> Result<PathBuf, 
     Ok(root)
 }
 
-fn checked_output_path(root: &Path, relative_path: &Path) -> Result<PathBuf, DailyRawError> {
+pub(crate) fn checked_output_path(
+    root: &Path,
+    relative_path: &Path,
+) -> Result<PathBuf, DailyRawError> {
     let components = relative_path.components().collect::<Vec<_>>();
     if components.is_empty() {
         return Err(DailyRawError::invalid(
