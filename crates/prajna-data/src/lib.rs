@@ -3,6 +3,7 @@
 pub mod cninfo;
 pub mod daily_publish;
 pub mod daily_raw;
+pub mod dataset_preview;
 mod frozen;
 mod manifest;
 mod mvp6_actions;
