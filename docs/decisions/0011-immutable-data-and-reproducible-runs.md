@@ -18,4 +18,4 @@ MVP-0 的物理布局与 hash 编码见 [ADR 0015](0015-mvp-0-data-contracts.md)
 
 `cn-stock-etf-daily` v1 的 Dataset 身份由 Normalizer id/version/config、显式固定的 #328 日历版本、#329 证券证据快照 id 和实际消费的全部 Raw hash 共同决定。Normalizer 只解析这些字节级输入，不在规范化或重建时读取可变的日历/证据存储，也不接受后续追加来源记录或“最新”版本改变既有 Dataset Version；规则修订产生新的 Normalizer 版本。契约见 [日频 Normalizer](../contracts/shanghai-shenzhen-daily-normalizer.md)。
 
-来源版本为 `tencent-fqkline-day/1` 时，六字段日线行的价格按精确十进制保存，股票/ETF 成交量分别声明为手 × 100；该来源不提供成交额，因此 `amount` 保持 null。历史 `available_at` 无依据时保持 Unknown，不用 `observed_at` 或 Session 收盘填充；日历内的缺失行情保持缺失，不补零、不删除 Session，也不据此推导停牌或可交易性。生命周期证据只作为固定快照输入保存，不转换为既有 Instrument 的交易窗口；真实日历/证据/行情接入及生产输入装配仍由 #289 负责，接入前需按本条固定选择并复核来源实际单位。
+来源版本为 `tencent-fqkline-day/1` 时，六字段日线行的价格按精确十进制保存，股票/ETF 成交量分别声明为手 × 100；该来源不提供成交额，因此 `amount` 保持 null。历史 `available_at` 无依据时保持 Unknown，不用 `observed_at` 或 Session 收盘填充；日历内的缺失行情保持缺失，不补零、不删除 Session，也不据此推导停牌或可交易性。生命周期证据只作为固定快照输入保存，不转换为既有 Instrument 的交易窗口。覆盖与 Session 只来自所选 #328 日历版本的声明覆盖，不从行情日期推断。真实日历/证据/行情接入及生产输入装配仍由 #289 负责，接入前需按本条固定选择并复核来源实际单位。

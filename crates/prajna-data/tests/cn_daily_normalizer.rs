@@ -460,6 +460,19 @@ fn four_venue_kind_combinations_publish_read_and_rebuild() {
     assert_eq!(other_venue.low(), Price::parse("9.90").unwrap());
     assert_eq!(other_venue.volume(), Quantity::parse("10000").unwrap());
     assert_eq!(other_venue.ts_open(), sz.ts_open());
+    let xshe_stock = bars
+        .iter()
+        .find(|bar| {
+            bar.instrument_id().to_string() == "000001.XSHE"
+                && bar.session_date() == date("2026-01-05")
+        })
+        .unwrap();
+    assert_eq!(xshe_stock.open(), Price::parse("10.00").unwrap());
+    assert_eq!(xshe_stock.close(), Price::parse("10.10").unwrap());
+    assert_eq!(xshe_stock.high(), Price::parse("10.20").unwrap());
+    assert_eq!(xshe_stock.low(), Price::parse("9.90").unwrap());
+    assert_eq!(xshe_stock.volume(), Quantity::parse("10000").unwrap());
+    assert_eq!(xshe_stock.ts_open(), sz.ts_open());
 
     let sources = read_dataset_table(&scenario.root, &manifest, "bar_sources")
         .unwrap()
@@ -502,6 +515,12 @@ fn missing_quotes_stay_absent_and_identical_duplicates_are_deduplicated() {
     let mut hashes = scenario.all_four();
     hashes[0] = h1;
     hashes.push(scenario.daily("600519", "XSHG", &[]));
+    let empty_data = serde_json::to_vec(&json!({"code": 0, "data": {}})).unwrap();
+    hashes.push(put_daily(
+        &scenario.store,
+        &empty_data,
+        &InstrumentId::new("600519", VenueId::new("XSHG").unwrap()).unwrap(),
+    ));
 
     let manifest = scenario.publish(&hashes).unwrap();
     let bars = read_bars(&scenario.root, &manifest);
@@ -621,6 +640,25 @@ fn invalid_values_and_conflicting_duplicates_are_rejected_without_publishing() {
         ],
         "conflicting_duplicate_bar",
     );
+
+    let scenario = Scenario::new();
+    let non_zero_code = serde_json::to_vec(&json!({
+        "code": 1,
+        "data": {"sh600519": {"day": [good_row("2026-01-05")]}}
+    }))
+    .unwrap();
+    let hash = put_daily(
+        &scenario.store,
+        &non_zero_code,
+        &InstrumentId::new("600519", VenueId::new("XSHG").unwrap()).unwrap(),
+    );
+    let error = scenario.publish(&[hash]).unwrap_err();
+    assert!(matches!(
+        error,
+        PublishError::Validation(issues)
+            if issues.iter().any(|issue| issue.code == "invalid_daily_response")
+    ));
+    scenario.assert_no_dataset();
 }
 
 #[test]
