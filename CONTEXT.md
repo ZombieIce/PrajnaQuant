@@ -10,6 +10,10 @@
 **Session**:
 一个 Venue 在本地交易日内的开闭市区间，使用 UTC 纳秒时间戳表示边界，且 `ts_open < ts_close`。
 
+**Shared Session Axis**:
+多 Venue 研究面板共用的交易日序列；参与 Venue 的 Session 日期集合与每个日期的开收盘时刻必须完全一致，不一致是结构性错误，不自动补齐，也不把缺一侧日历当作停牌。
+_Avoid_: 把各 Venue 日历取并集、按行情日期推断休市，或用伪造 Venue 伪装成单一 Session 轴。
+
 **TimestampNs**:
 带显式时区的 RFC 3339 时间规范化成的 UTC Unix 纳秒时间戳；没有时区的时间不能构造。
 
