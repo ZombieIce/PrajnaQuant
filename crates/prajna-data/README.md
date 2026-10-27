@@ -47,8 +47,9 @@ security-evidence lifecycle fields, actual Session/Bar coverage, gaps and Bar
 sources. It never normalizes, publishes, collects, downloads or writes a Dataset,
 Raw object, receipt or the MVP-6 archive; a missing root is an error rather than a
 new directory. Catalog entries are discovered from verified manifests with no
-mutable "latest" pointer, and invalid manifests or unreadable tables are reported
-separately so they cannot masquerade as coverage.
+mutable "latest" pointer; the required instruments, sessions and bars tables are
+read and row-count checked before listing, and invalid manifests or unreadable
+tables are reported separately so they cannot masquerade as coverage.
 
 ```sh
 prajna-preview-dataset catalog --root <LOCAL>

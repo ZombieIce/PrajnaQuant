@@ -155,20 +155,11 @@ pub fn catalog(root: &Path) -> Result<Value, PreviewError> {
 }
 
 fn summarize(root: &Path, manifest: &Manifest) -> Result<(String, Value), PreviewError> {
-    for table in ["instruments", "sessions", "bars"] {
-        if !manifest
-            .core
-            .tables
-            .iter()
-            .any(|candidate| candidate.table == table)
-        {
-            return Err(PreviewError::Table {
-                table: table.into(),
-                message: "manifest does not contain this required table".into(),
-            });
-        }
-    }
-    let sessions = read_sessions(root, manifest)?;
+    let RequiredTables {
+        instruments,
+        sessions,
+        bars,
+    } = read_required_tables(root, manifest)?;
     let first = sessions.iter().map(Session::session_date).min();
     let last = sessions.iter().map(Session::session_date).max();
     let venues = sessions
@@ -185,9 +176,9 @@ fn summarize(root: &Path, manifest: &Manifest) -> Result<(String, Value), Previe
             "created_at": created_at,
             "normalizer_id": manifest.core.normalizer.id,
             "normalizer_version": manifest.core.normalizer.version,
-            "instruments": table_rows(manifest, "instruments"),
-            "sessions": table_rows(manifest, "sessions"),
-            "bars": table_rows(manifest, "bars"),
+            "instruments": instruments.len(),
+            "sessions": sessions.len(),
+            "bars": bars.len(),
             "first_session": first.map(|date| date.to_string()),
             "last_session": last.map(|date| date.to_string()),
             "venues": venues,
@@ -379,19 +370,56 @@ fn read_core(root: &Path, dsv: &str) -> Result<Core, PreviewError> {
             });
         }
     };
-    let instruments = read_table(root, &manifest, "instruments", &|batch| {
+    let RequiredTables {
+        instruments,
+        sessions,
+        bars,
+    } = read_required_tables(root, &manifest)?;
+    Ok(Core {
+        manifest,
+        instruments,
+        sessions,
+        bars,
+    })
+}
+
+struct RequiredTables {
+    instruments: Vec<InstrumentSpec>,
+    sessions: Vec<Session>,
+    bars: Vec<Bar>,
+}
+
+/// Reads every required table and rejects a Dataset whose committed row counts
+/// differ from the rows actually readable. A missing/corrupt table therefore
+/// cannot be listed as a usable Dataset.
+fn read_required_tables(root: &Path, manifest: &Manifest) -> Result<RequiredTables, PreviewError> {
+    let instruments = read_table(root, manifest, "instruments", &|batch| {
         instruments_from_record_batch(batch).map_err(|error| error.to_string())
     })?;
-    let sessions = read_sessions(root, &manifest)?;
-    let mut bars = read_table(root, &manifest, "bars", &|batch| {
+    let sessions = read_sessions(root, manifest)?;
+    let mut bars = read_table(root, manifest, "bars", &|batch| {
         bars_from_record_batch(batch, &sessions).map_err(|error| error.to_string())
     })?;
+    for (table, actual) in [
+        ("instruments", instruments.len()),
+        ("sessions", sessions.len()),
+        ("bars", bars.len()),
+    ] {
+        let expected = table_rows(manifest, table);
+        if expected != actual as u64 {
+            return Err(PreviewError::Table {
+                table: table.into(),
+                message: format!(
+                    "manifest row_count {expected} differs from {actual} readable rows"
+                ),
+            });
+        }
+    }
     bars.sort_by(|left, right| {
         (left.instrument_id().to_string(), left.session_date())
             .cmp(&(right.instrument_id().to_string(), right.session_date()))
     });
-    Ok(Core {
-        manifest,
+    Ok(RequiredTables {
         instruments,
         sessions,
         bars,

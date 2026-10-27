@@ -226,8 +226,12 @@ fn preview_json(root: &Path, args: &[&str]) -> Value {
 }
 
 fn preview_error(root: &Path, args: &[&str]) -> (i32, Value) {
+    preview_failure(root, args, 2)
+}
+
+fn preview_failure(root: &Path, args: &[&str], expected: i32) -> (i32, Value) {
     let output = preview(root, args);
-    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert_eq!(output.status.code(), Some(expected), "{output:?}");
     let value: Value = serde_json::from_slice(&output.stdout)
         .unwrap_or_else(|error| panic!("{error}: {output:?}"));
     (output.status.code().unwrap(), value)
@@ -447,16 +451,34 @@ fn synthetic_stock_and_etf_preview_exposes_coverage_gaps_and_unknown_fields() {
         "preview must not write to the lake"
     );
 
-    // A corrupt Dataset table is isolated: the other Dataset still lists.
-    fs::remove_dir_all(lake.join("normalized/sessions").join(dsv_hex(&stock))).unwrap();
+    // Each required table is read before a Dataset is offered. A missing table
+    // is isolated in invalid_manifests and cannot keep a normal catalog entry.
+    for table in ["instruments", "sessions", "bars"] {
+        let source = lake.join("normalized").join(table).join(dsv_hex(&stock));
+        let backup = lake.join("normalized").join(format!("{table}-missing"));
+        fs::rename(&source, &backup).unwrap();
+
+        let catalog = preview_json(&lake, &["catalog"]);
+        assert_eq!(catalog["datasets"].as_array().unwrap().len(), 1, "{table}");
+        assert_eq!(
+            catalog["invalid_manifests"].as_array().unwrap().len(),
+            1,
+            "{table}"
+        );
+        assert_eq!(
+            catalog["invalid_manifests"][0]["manifest"],
+            format!("{}.json", dsv_hex(&stock)),
+            "{table}"
+        );
+        assert_eq!(catalog["datasets"][0]["dsv"], etf, "{table}");
+        let (_, error) = preview_failure(&lake, &["show", "--dsv", &stock], 1);
+        assert_eq!(error["error"]["code"], "invalid_dataset_table", "{table}");
+
+        fs::rename(&backup, &source).unwrap();
+    }
     let catalog = preview_json(&lake, &["catalog"]);
-    assert_eq!(catalog["datasets"].as_array().unwrap().len(), 1);
-    assert_eq!(catalog["invalid_manifests"].as_array().unwrap().len(), 1);
-    assert_eq!(
-        catalog["invalid_manifests"][0]["manifest"],
-        format!("{}.json", dsv_hex(&stock))
-    );
-    assert_eq!(catalog["datasets"][0]["dsv"], etf);
+    assert_eq!(catalog["datasets"].as_array().unwrap().len(), 2);
+    assert!(catalog["invalid_manifests"].as_array().unwrap().is_empty());
 }
 
 #[test]
@@ -561,14 +583,11 @@ fn a_revision_adds_a_version_and_keeps_the_old_one_readable() {
     assert_eq!(second["dsv"], second_dsv);
 }
 
-#[test]
-fn empty_committed_dataset_is_readable_with_explicit_empty_coverage() {
-    let temp = tempfile::tempdir().unwrap();
-    let root = temp.path().join("lake");
+fn write_empty_dataset(root: &Path, bars_row_count: u64) -> String {
     let instruments = instruments_to_record_batch(&[]).unwrap();
     let sessions = sessions_to_record_batch(&[]).unwrap();
     let bars = bars_to_record_batch(&[]).unwrap();
-    let table = |name: &str, batch: &RecordBatch, keys: &[&str]| ManifestTable {
+    let table = |name: &str, batch: &RecordBatch, keys: &[&str], row_count: u64| ManifestTable {
         table: name.into(),
         schema_version: 1,
         schema_fingerprint: schema_fingerprint(batch.schema().as_ref()).unwrap(),
@@ -579,7 +598,7 @@ fn empty_committed_dataset_is_readable_with_explicit_empty_coverage() {
             keys,
         )
         .unwrap(),
-        row_count: 0,
+        row_count,
     };
     let manifest = Manifest::new(
         ManifestCore {
@@ -591,9 +610,14 @@ fn empty_committed_dataset_is_readable_with_explicit_empty_coverage() {
             },
             inputs: Vec::new(),
             tables: vec![
-                table("instruments", &instruments, &["instrument_id"]),
-                table("sessions", &sessions, &["venue_id", "session_date"]),
-                table("bars", &bars, &["instrument_id", "session_date"]),
+                table("instruments", &instruments, &["instrument_id"], 0),
+                table("sessions", &sessions, &["venue_id", "session_date"], 0),
+                table(
+                    "bars",
+                    &bars,
+                    &["instrument_id", "session_date"],
+                    bars_row_count,
+                ),
             ],
         },
         ManifestProvenance {
@@ -619,7 +643,15 @@ fn empty_committed_dataset_is_readable_with_explicit_empty_coverage() {
         fs::create_dir_all(&directory).unwrap();
         write_parquet(directory.join("part-00000.parquet"), batch, &manifest.dsv).unwrap();
     }
-    write_manifest(&root, &manifest).unwrap();
+    write_manifest(root, &manifest).unwrap();
+    manifest.dsv
+}
+
+#[test]
+fn empty_committed_dataset_is_readable_with_explicit_empty_coverage() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("lake");
+    let dsv = write_empty_dataset(&root, 0);
 
     let catalog = preview_json(&root, &["catalog"]);
     assert_eq!(catalog["datasets"].as_array().unwrap().len(), 1);
@@ -629,19 +661,30 @@ fn empty_committed_dataset_is_readable_with_explicit_empty_coverage() {
     assert!(catalog["datasets"][0]["first_session"].is_null());
     assert!(catalog["invalid_manifests"].as_array().unwrap().is_empty());
 
-    let show = preview_json(&root, &["show", "--dsv", &manifest.dsv]);
+    let show = preview_json(&root, &["show", "--dsv", &dsv]);
     assert!(show["instruments"].as_array().unwrap().is_empty());
     assert!(show["venues"].as_array().unwrap().is_empty());
     assert_eq!(show["coverage"], json!({}));
     let (_, error) = preview_error(
         &root,
-        &[
-            "bars",
-            "--dsv",
-            &manifest.dsv,
-            "--instrument",
-            "510300.XSHG",
-        ],
+        &["bars", "--dsv", &dsv, "--instrument", "510300.XSHG"],
     );
     assert_eq!(error["error"]["code"], "dataset_not_found");
+}
+
+#[test]
+fn committed_row_count_mismatch_is_not_listed_as_usable() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("lake");
+    let dsv = write_empty_dataset(&root, 1);
+
+    let catalog = preview_json(&root, &["catalog"]);
+    assert!(catalog["datasets"].as_array().unwrap().is_empty());
+    assert_eq!(catalog["invalid_manifests"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        catalog["invalid_manifests"][0]["manifest"],
+        format!("{}.json", dsv_hex(&dsv))
+    );
+    let (_, error) = preview_failure(&root, &["show", "--dsv", &dsv], 1);
+    assert_eq!(error["error"]["code"], "invalid_dataset_table");
 }

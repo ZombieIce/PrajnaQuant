@@ -14,12 +14,13 @@ root must already exist; the command does not create it. Tests use an explicit
 protected root to exercise the same rejection without touching a real archive.
 
 `catalog` reads `<root>/manifests/*.json`, validates each manifest through
-`read_manifest` (recomputed DSV, core integrity), and lists them without a
-"latest" pointer. A missing or unreadable manifest, a manifest missing a required
-table, or a manifest whose `sessions` table cannot be read is returned in
-`invalid_manifests` with its file identity and error; valid Datasets in the same
-root remain readable. An empty root or an empty `manifests/` directory returns
-an empty catalog, not an error.
+`read_manifest` (recomputed DSV, core integrity), then reads the required
+`instruments`, `sessions` and `bars` tables and checks their readable row counts
+against the manifest before listing the Dataset. It never chooses a "latest"
+version. A missing or unreadable manifest, a missing table, a corrupt table, or a
+row-count mismatch is returned in `invalid_manifests` with its file identity and
+error; valid Datasets in the same root remain readable. An empty root or an empty
+`manifests/` directory returns an empty catalog, not an error.
 
 ## Commands
 
@@ -40,8 +41,8 @@ invalid input/not found, or `1` for an I/O, manifest, table or root failure.
 ## Catalog
 
 Each dataset summary carries the full DSV, creation time, Normalizer id/version,
-table row counts, instrument/session/bar counts, the first and last Session,
-venues, and the descriptive coverage fields `source`, `calendar_version`,
+readable instrument/session/bar counts, the first and last Session, venues, and
+the descriptive coverage fields `source`, `calendar_version`,
 `security_snapshot` and `completeness_claim` when present. Descriptive
 provenance is not part of the DSV identity; the manifest is the commit marker.
 
@@ -89,7 +90,8 @@ range, first/last Bar, unit labels and warnings (for example a missing source).
 ## Limits and compatibility
 
 - Reads whole Parquet tables into memory per request; no pushdown or cache is
-  claimed. Bars are paged after the Dataset is read.
+  claimed. `catalog` reads and validates all required tables for every DSV, so
+  its cost grows with the lake size. Bars are paged after the Dataset is read.
 - Only raw unadjusted daily Bars and the frozen evidence fields above are
   exposed. Adjustments, corporate actions, execution status, research values,
   factor/label/ledger results and HTTP endpoints are out of scope for this entry.
