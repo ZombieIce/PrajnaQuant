@@ -2,10 +2,22 @@ use std::{path::PathBuf, process::ExitCode};
 
 use prajna_data::session_calendar::{CalendarError, CalendarStore};
 
+const USAGE: &str = "Usage:\n  prajna-session-calendar import --root <LOCAL_PATH> \
+                     --input <LOCAL_JSON> --receipt <NAME>";
+
+enum Outcome {
+    Imported,
+    Help,
+}
+
 fn main() -> ExitCode {
     match run(std::env::args().skip(1)) {
-        Ok(()) => {
+        Ok(Outcome::Imported) => {
             println!("Calendar version imported; receipt saved locally.");
+            ExitCode::SUCCESS
+        }
+        Ok(Outcome::Help) => {
+            println!("{USAGE}");
             ExitCode::SUCCESS
         }
         Err(error) => {
@@ -21,14 +33,17 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(mut args: impl Iterator<Item = String>) -> Result<(), CalendarError> {
+fn run(mut args: impl Iterator<Item = String>) -> Result<Outcome, CalendarError> {
     let (mut root, mut input, mut receipt) = (None, None, None);
-    if args.next().as_deref() != Some("import") {
-        return Err(CalendarError::Invalid(
-            "usage: import --root PATH --input FILE --receipt NAME",
-        ));
+    match args.next().as_deref() {
+        Some("import") => {}
+        Some("-h" | "--help") => return Ok(Outcome::Help),
+        _ => return Err(CalendarError::Invalid("expected the import command")),
     }
     while let Some(flag) = args.next() {
+        if flag == "-h" || flag == "--help" {
+            return Ok(Outcome::Help);
+        }
         let value = args
             .next()
             .ok_or(CalendarError::Invalid("missing option value"))?;
@@ -46,6 +61,9 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<(), CalendarError> {
     let input = input.ok_or(CalendarError::Invalid("input file is required"))?;
     let receipt = receipt.ok_or(CalendarError::Invalid("receipt name is required"))?;
     let store = CalendarStore::open(root)?;
+    // Reject an unusable receipt name before a version can be persisted.
+    store.validate_receipt_name(&receipt)?;
     let version = store.import_file(input)?;
-    store.write_receipt(&receipt, &version)
+    store.write_receipt(&receipt, &version)?;
+    Ok(Outcome::Imported)
 }

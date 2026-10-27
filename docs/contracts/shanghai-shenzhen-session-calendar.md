@@ -16,7 +16,7 @@ holiday or suspension from prices, another venue, or weekdays.
     {
       "venue_id": "XSHG",
       "source": {"source_id": "synthetic-sh", "source_version": "1", "source_ref": "fixture-sh"},
-      "coverage_start": "2026-01-01",
+      "coverage_start": "2026-01-02",
       "coverage_end": "2026-01-03",
       "sessions": [{"session_date": "2026-01-02", "ts_open": "2026-01-02T09:30:00+08:00", "ts_close": "2026-01-02T15:00:00+08:00"}]
     },
@@ -41,8 +41,12 @@ invalid dates or times, unknown fields and conflicting dates are rejected.
 Separate venues may legitimately list different sessions or bounds.
 
 Import from a local file into an explicitly chosen local root outside the
-MVP-6 archive. The receipt name contains only ASCII letters, digits, `_`, `-`;
-it cannot overwrite an existing receipt. The command prints no version hash.
+MVP-6 archive. The receipt name contains only ASCII letters, digits, `_`, `-`
+and is validated before the import persists a version. A receipt cannot be
+overwritten: repeating the same content with the same receipt succeeds without
+rewriting it, while pinning another version under an existing receipt is a
+specific error that leaves the pin unchanged. The command prints no version
+hash, and `--help` prints usage without touching the store.
 
 ```sh
 cargo run -p prajna-data --bin prajna-session-calendar -- \
@@ -60,11 +64,13 @@ selected calendar version and use that same identity on rebuild.
 
 The version covers schema, each venue's source, declared coverage and sessions.
 Venue/session order and equivalent timestamp offsets normalize before hashing;
-reimporting equivalent content is idempotent, while a revision produces a new
-version and leaves the old one readable. Versions live under the configured
-root with integrity checked on every read; reimporting the same input into a
-fresh root reproduces the same version. The receipt is a local selector, not a
-mutable latest pointer. Keep real input, source details and version identities
-in the configured local area; do not copy them into public artifacts or tool
-output. No real source or full history was validated by this contract. Daily
-Normalizer and Dataset publication remain later work.
+reimporting equivalent content is idempotent at the version store and, when the
+receipt already pins that version, at the import command. A revision produces a
+new version and leaves the old one readable; pinning it requires a new receipt
+name. Versions live under the configured root with integrity checked on every
+read; reimporting the same input into a fresh root reproduces the same version.
+The receipt is a local selector, not a mutable latest pointer. Keep real input,
+source details and version identities in the configured local area; do not copy
+them into public artifacts or tool output. No real source or full history was
+validated by this contract. Daily Normalizer and Dataset publication remain
+later work.

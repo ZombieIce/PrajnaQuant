@@ -156,6 +156,7 @@ pub enum CalendarError {
     MissingVenue,
     OutsideCoverage,
     InvalidReceipt,
+    ReceiptConflict,
     Path(String),
 }
 
@@ -172,6 +173,9 @@ impl std::fmt::Display for CalendarError {
                 f.write_str("requested date range is outside venue calendar coverage")
             }
             Self::InvalidReceipt => f.write_str("invalid calendar receipt name"),
+            Self::ReceiptConflict => {
+                f.write_str("calendar receipt already pins a different version")
+            }
             Self::Path(reason) => write!(f, "invalid calendar local path: {reason}"),
         }
     }
@@ -276,6 +280,9 @@ impl CalendarStore {
     }
 
     /// Writes a local, non-overwriting receipt so CLI users can pin the version.
+    ///
+    /// Repeating a pin for the version already recorded is a no-op; a receipt
+    /// that names another version (or is unreadable) is never replaced.
     pub fn write_receipt(
         &self,
         name: &str,
@@ -283,14 +290,37 @@ impl CalendarStore {
     ) -> Result<(), CalendarError> {
         self.get(version)?;
         let path = self.receipt_path(name)?;
+        match self.read_receipt(name) {
+            Ok(existing) if &existing == version => return Ok(()),
+            Ok(_) => return Err(CalendarError::ReceiptConflict),
+            Err(CalendarError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
         let parent = path.parent().expect("receipt path has a parent");
         fs::create_dir_all(parent)?;
         let path = self.receipt_path(name)?;
         let mut temp = tempfile::NamedTempFile::new_in(parent)?;
         writeln!(temp, "{}", version.as_str())?;
         temp.as_file().sync_all()?;
-        temp.persist_noclobber(path).map_err(|error| error.error)?;
+        match temp.persist_noclobber(&path) {
+            Ok(_) => {}
+            // A concurrent import may have created the receipt after the read.
+            Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => {
+                return match self.read_receipt(name) {
+                    Ok(existing) if &existing == version => Ok(()),
+                    Ok(_) => Err(CalendarError::ReceiptConflict),
+                    Err(error) => Err(error),
+                };
+            }
+            Err(error) => return Err(error.error.into()),
+        }
+        fs::File::open(parent)?.sync_all()?;
         Ok(())
+    }
+
+    /// Validates a receipt name without writing a version or a receipt.
+    pub fn validate_receipt_name(&self, name: &str) -> Result<(), CalendarError> {
+        self.receipt_path(name).map(|_| ())
     }
 
     pub fn read_receipt(&self, name: &str) -> Result<CalendarVersionId, CalendarError> {
