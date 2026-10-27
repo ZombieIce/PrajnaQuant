@@ -20,7 +20,7 @@ pub mod vector;
 
 pub use panel::{
     ExecutionStatusMap, Panel, PanelError, PanelSession, executable, load_execution_status,
-    load_panel,
+    load_panel, load_panel_for_venues,
 };
 pub use universe::{StaticUniverse, UniverseError};
 

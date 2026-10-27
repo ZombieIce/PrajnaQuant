@@ -1,10 +1,39 @@
 mod common;
 
+#[path = "common/cn_daily.rs"]
+mod cn_daily;
+
 use std::fs;
 
 use polars::prelude::{DataType, TimeUnit, TimeZone};
-use prajna_domain::VenueId;
-use prajna_research::{PanelError, load_panel};
+use prajna_domain::{TimestampNs, VenueId};
+use prajna_research::{Panel, PanelError, load_panel, load_panel_for_venues};
+
+fn venue(name: &str) -> VenueId {
+    VenueId::new(name).unwrap()
+}
+
+fn instrument_ids(panel: &Panel) -> Vec<String> {
+    panel
+        .instruments
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+}
+
+fn panel_error(calendar: Vec<cn_daily::CalendarVenue>) -> PanelError {
+    let dataset = cn_daily::SyntheticDailyDataset::publish(
+        &calendar,
+        cn_daily::shanghai_shenzhen_records(),
+        &[],
+    );
+    load_panel_for_venues(
+        dataset.root(),
+        &dataset.dsv,
+        &[venue("XSHG"), venue("XSHE")],
+    )
+    .unwrap_err()
+}
 
 #[test]
 fn loads_v1_as_a_complete_venue_session_grid_with_missing_bars_preserved() {
@@ -153,4 +182,218 @@ fn rejects_a_manifest_whose_core_no_longer_matches_the_dsv() {
         load_panel(lake.path(), &dsv, &VenueId::new("SYNTH").unwrap()),
         Err(PanelError::Manifest(_))
     ));
+}
+
+const SHARED_DATES: [&str; 3] = ["2026-01-05", "2026-01-06", "2026-01-07"];
+
+#[test]
+fn loads_a_shared_shanghai_shenzhen_session_axis_and_preserves_missing_bars() {
+    let dataset = cn_daily::SyntheticDailyDataset::publish(
+        &cn_daily::matched_calendar(&SHARED_DATES),
+        cn_daily::shanghai_shenzhen_records(),
+        &[("510300", "2026-01-06")],
+    );
+    let panel = load_panel_for_venues(
+        dataset.root(),
+        &dataset.dsv,
+        &[venue("XSHG"), venue("XSHE")],
+    )
+    .unwrap();
+
+    assert_eq!(panel.sessions.len(), 3);
+    assert_eq!(panel.sessions[0].session_date, cn_daily::date("2026-01-05"));
+    assert_eq!(panel.sessions[2].session_date, cn_daily::date("2026-01-07"));
+    assert_eq!(
+        panel.sessions[0].ts_open,
+        TimestampNs::parse("2026-01-05T09:30:00+08:00").unwrap()
+    );
+    assert_eq!(
+        panel.sessions[0].ts_close,
+        TimestampNs::parse("2026-01-05T15:00:00+08:00").unwrap()
+    );
+    assert_eq!(
+        instrument_ids(&panel),
+        ["000001.XSHE", "159952.XSHE", "510300.XSHG", "600519.XSHG"]
+    );
+    assert!(
+        panel
+            .instruments
+            .iter()
+            .all(|instrument| matches!(instrument.venue().as_str(), "XSHG" | "XSHE"))
+    );
+    assert_eq!(panel.grid.height(), 12);
+
+    let ids = panel.grid.column("instrument_id").unwrap().str().unwrap();
+    let indices = panel.grid.column("session_index").unwrap().u32().unwrap();
+    let has_bar = panel.grid.column("has_bar").unwrap().bool().unwrap();
+    let opens = panel.grid.column("open").unwrap().f64().unwrap();
+    let closes = panel.grid.column("close").unwrap().f64().unwrap();
+    let missing = (0..panel.grid.height())
+        .find(|&row| ids.get(row) == Some("510300.XSHG") && indices.get(row) == Some(1))
+        .unwrap();
+    assert_eq!(has_bar.get(missing), Some(false));
+    assert_eq!(opens.get(missing), None);
+    assert_eq!(closes.get(missing), None);
+    assert_eq!(
+        panel
+            .grid
+            .column("close_available_at")
+            .unwrap()
+            .is_null()
+            .get(missing),
+        Some(true)
+    );
+
+    let present = (0..panel.grid.height())
+        .find(|&row| ids.get(row) == Some("600519.XSHG") && indices.get(row) == Some(0))
+        .unwrap();
+    let open_decimal = panel.grid.column("open_decimal").unwrap().str().unwrap();
+    let close_decimal = panel.grid.column("close_decimal").unwrap().str().unwrap();
+    assert_eq!(has_bar.get(present), Some(true));
+    assert_eq!(open_decimal.get(present), Some("10"));
+    assert_eq!(close_decimal.get(present), Some("10.1"));
+    assert_eq!(
+        panel
+            .grid
+            .column("close_available_at")
+            .unwrap()
+            .is_null()
+            .get(present),
+        Some(true)
+    );
+}
+
+#[test]
+fn explicit_single_venue_loading_matches_the_legacy_panel_entry() {
+    let lake = tempfile::tempdir().unwrap();
+    let dsv = common::publish_v1(lake.path());
+    let synth = venue("SYNTH");
+    let legacy = load_panel(lake.path(), &dsv, &synth).unwrap();
+    let explicit = load_panel_for_venues(lake.path(), &dsv, std::slice::from_ref(&synth)).unwrap();
+    assert_eq!(explicit.sessions, legacy.sessions);
+    assert_eq!(explicit.instruments, legacy.instruments);
+    assert!(explicit.grid.equals_missing(&legacy.grid));
+
+    let dataset = cn_daily::SyntheticDailyDataset::publish(
+        &cn_daily::matched_calendar(&SHARED_DATES),
+        cn_daily::shanghai_shenzhen_records(),
+        &[],
+    );
+    let xshg = venue("XSHG");
+    let legacy = load_panel(dataset.root(), &dataset.dsv, &xshg).unwrap();
+    let explicit = load_panel_for_venues(dataset.root(), &dataset.dsv, &[xshg]).unwrap();
+    assert_eq!(explicit.sessions, legacy.sessions);
+    assert_eq!(explicit.instruments, legacy.instruments);
+    assert_eq!(explicit.instruments.len(), 2);
+    assert!(explicit.grid.equals_missing(&legacy.grid));
+}
+
+#[test]
+fn rejects_venues_whose_session_dates_differ_without_filling_the_gap() {
+    let mut calendars = cn_daily::matched_calendar(&SHARED_DATES);
+    calendars[1].dates = vec!["2026-01-05", "2026-01-07"];
+    let dataset = cn_daily::SyntheticDailyDataset::publish(
+        &calendars,
+        cn_daily::shanghai_shenzhen_records(),
+        &[],
+    );
+
+    let error = load_panel_for_venues(
+        dataset.root(),
+        &dataset.dsv,
+        &[venue("XSHG"), venue("XSHE")],
+    )
+    .unwrap_err();
+    match error {
+        PanelError::InconsistentSessionAxis(message) => {
+            assert!(message.contains("2026-01-06"), "{message}");
+            assert!(message.contains("XSHG"), "{message}");
+            assert!(message.contains("XSHE"), "{message}");
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+
+    // Each Venue alone still exposes only its own published Sessions: the
+    // loader neither unions nor deletes either calendar.
+    let xshg = load_panel_for_venues(dataset.root(), &dataset.dsv, &[venue("XSHG")]).unwrap();
+    assert_eq!(xshg.sessions.len(), 3);
+    let xshe = load_panel_for_venues(dataset.root(), &dataset.dsv, &[venue("XSHE")]).unwrap();
+    assert_eq!(xshe.sessions.len(), 2);
+}
+
+#[test]
+fn rejects_venues_whose_open_or_close_times_differ() {
+    let mut calendars = cn_daily::matched_calendar(&SHARED_DATES);
+    calendars[1].open = "09:31:00";
+    match panel_error(calendars) {
+        PanelError::InconsistentSessionAxis(message) => {
+            assert!(
+                message.contains("disagree on Session 2026-01-05"),
+                "{message}"
+            );
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+
+    let mut calendars = cn_daily::matched_calendar(&SHARED_DATES);
+    calendars[1].close = "15:01:00";
+    match panel_error(calendars) {
+        PanelError::InconsistentSessionAxis(message) => {
+            assert!(
+                message.contains("disagree on Session 2026-01-05"),
+                "{message}"
+            );
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_empty_duplicate_or_absent_venue_selections() {
+    let dataset = cn_daily::SyntheticDailyDataset::publish(
+        &cn_daily::matched_calendar(&SHARED_DATES),
+        cn_daily::shanghai_shenzhen_records(),
+        &[],
+    );
+    let root = dataset.root();
+    let dsv = &dataset.dsv;
+
+    assert!(matches!(
+        load_panel_for_venues(root, dsv, &[]),
+        Err(PanelError::InvalidVenueSelection(message)) if message.contains("at least one")
+    ));
+    assert!(matches!(
+        load_panel_for_venues(root, dsv, &[venue("XSHG"), venue("XSHG")]),
+        Err(PanelError::InvalidVenueSelection(message)) if message.contains("duplicate")
+    ));
+
+    let error = load_panel_for_venues(root, dsv, &[venue("XSHG"), venue("SYNTH")]).unwrap_err();
+    match error {
+        PanelError::InvalidVenueSelection(message) => {
+            assert!(message.contains("SYNTH"), "{message}");
+            assert!(message.contains("Instruments"), "{message}");
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+
+    let mut records = cn_daily::shanghai_shenzhen_records();
+    records.retain(|record| record.instrument_id.venue().as_str() == "XSHG");
+    let dataset = cn_daily::SyntheticDailyDataset::publish(
+        &cn_daily::matched_calendar(&SHARED_DATES),
+        records,
+        &[],
+    );
+    let error = load_panel_for_venues(
+        dataset.root(),
+        &dataset.dsv,
+        &[venue("XSHG"), venue("XSHE")],
+    )
+    .unwrap_err();
+    match error {
+        PanelError::InvalidVenueSelection(message) => {
+            assert!(message.contains("XSHE"), "{message}");
+            assert!(message.contains("Instruments"), "{message}");
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
 }
