@@ -50,6 +50,28 @@ jobs:
               exit 1
             fi
           done
+          if ! grep -q '^tencent-transport ' <<<"$(cargo tree -p prajna-data -e normal,build,dev --prefix none --locked)"; then
+            echo "::error::prajna-data must consume the shared Tencent transport"
+            exit 1
+          fi
+
+      - name: Guard - shared Tencent transport must stay independent of legacy and JSON identities
+        run: |
+          set -euo pipefail
+          tree=$(cargo tree -p tencent-transport -e normal,build,dev --prefix none --locked)
+          if grep -E '^(ashare-warehouse|quant-research|prajna-data|serde_json) ' <<<"$tree"; then
+            echo "::error::tencent-transport pulls in a legacy crate, prajna-data, or serde_json"
+            exit 1
+          fi
+          if ! grep -q '^tencent-transport ' <<<"$(cargo tree -p ashare-warehouse -e normal,build,dev --prefix none --locked)"; then
+            echo "::error::ashare-warehouse must use the shared Tencent transport"
+            exit 1
+          fi
+          serde_tree=$(cargo tree -p ashare-warehouse -e features -i serde_json --locked)
+          if grep -q 'serde_json feature "arbitrary_precision"' <<<"$serde_tree"; then
+            echo "::error::shared transport changed the legacy serde_json feature set"
+            exit 1
+          fi
 
       - name: Guard - prajna-experiment must not depend on legacy execution stacks
         run: |

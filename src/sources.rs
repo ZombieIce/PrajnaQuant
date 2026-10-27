@@ -12,14 +12,8 @@ use serde::Deserialize;
 use serde_json::Value;
 use zip::ZipArchive;
 
-const USER_AGENT_VALUE: &str =
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36";
+const USER_AGENT_VALUE: &str = tencent_transport::DEFAULT_USER_AGENT;
 const TDX_BJ_FIRST_DAY: &str = "2022-05-06";
-const TENCENT_KLINE_HOSTS: [&str; 3] = [
-    "https://web.ifzq.gtimg.cn",
-    "https://proxy.finance.qq.com/ifzqgtimg",
-    "https://ifzq.gtimg.cn",
-];
 
 #[derive(Debug, Clone)]
 pub struct CalendarDay {
@@ -53,39 +47,31 @@ pub fn fetch_tencent_raw_daily(
     start: NaiveDate,
     end: NaiveDate,
 ) -> Result<(String, Vec<u8>)> {
-    validate_explicit_symbol(symbol, false)?;
-    if symbol.starts_with("bj") {
-        bail!("Tencent historical K-lines do not support Beijing exchange symbols")
-    }
-    if start > end || (end - start).num_days() >= 800 {
-        bail!("Tencent daily window must be between 1 and 800 calendar days")
-    }
-    let parameter = format!("{symbol},day,{start},{end},640,");
-    let client = http_client()?;
-    let mut errors = Vec::new();
-    for host in TENCENT_KLINE_HOSTS {
-        let url = format!("{host}/appstock/app/fqkline/get");
-        let response = client
-            .get(&url)
-            .query(&[("param", parameter.as_str())])
-            .header(REFERER, "https://gu.qq.com/")
-            .send();
-        match response.and_then(|response| response.error_for_status()) {
-            Ok(response) => {
-                let final_url = response.url().to_string();
-                let bytes = response.bytes()?.to_vec();
-                if !bytes.is_empty() && tencent_response_has_data_object(&bytes) {
-                    return Ok((final_url, bytes));
-                }
-                errors.push(format!("{host}: empty or invalid data object"));
-            }
-            Err(error) => errors.push(format!("{host}: {error}")),
-        }
-    }
-    bail!(
-        "Tencent K-line endpoints are unavailable: {}",
-        errors.join("; ")
+    fetch_tencent_raw_daily_with(
+        &mut tencent_transport::ReqwestTransport::new(),
+        symbol,
+        start,
+        end,
     )
+}
+
+fn fetch_tencent_raw_daily_with<T: tencent_transport::HttpTransport>(
+    transport: &mut T,
+    symbol: &str,
+    start: NaiveDate,
+    end: NaiveDate,
+) -> Result<(String, Vec<u8>)> {
+    let response = tencent_transport::fetch_unadjusted_daily(
+        &tencent_transport::DailyRequest {
+            symbol: symbol.to_owned(),
+            start,
+            end,
+        },
+        transport,
+        tencent_response_has_data_object,
+    )
+    .map_err(anyhow::Error::new)?;
+    Ok((response.source, response.bytes))
 }
 
 pub fn tencent_raw_daily_is_empty(bytes: &[u8], symbol: &str) -> Result<bool> {
@@ -453,4 +439,96 @@ fn format_number(value: f64) -> Result<String> {
         bail!("numeric value is not finite")
     }
     Ok(format!("{value:.10}"))
+}
+
+#[cfg(test)]
+mod tencent_transport_compat_tests {
+    use std::collections::VecDeque;
+
+    use super::{fetch_tencent_raw_daily_with, tencent_raw_daily_is_empty};
+    use chrono::NaiveDate;
+    use tencent_transport::{
+        CANDIDATE_HOSTS, HttpReply, HttpRequest, HttpTransport, TransportFailure,
+    };
+
+    struct SyntheticTransport {
+        replies: VecDeque<Result<HttpReply, TransportFailure>>,
+        requests: Vec<HttpRequest>,
+    }
+
+    impl SyntheticTransport {
+        fn new(replies: impl IntoIterator<Item = Result<HttpReply, TransportFailure>>) -> Self {
+            Self {
+                replies: replies.into_iter().collect(),
+                requests: Vec::new(),
+            }
+        }
+    }
+
+    impl HttpTransport for SyntheticTransport {
+        fn get(&mut self, request: &HttpRequest) -> Result<HttpReply, TransportFailure> {
+            self.requests.push(request.clone());
+            self.replies
+                .pop_front()
+                .expect("one synthetic response per request")
+        }
+    }
+
+    fn fixture(symbol: &str) -> Vec<u8> {
+        format!(r#"{{"code":0,"data":{{"{symbol}":{{"day":[]}}}}}}"#).into_bytes()
+    }
+
+    #[test]
+    fn legacy_fetch_keeps_stock_and_etf_source_and_exact_raw_bytes() {
+        let start = NaiveDate::from_ymd_opt(2026, 9, 14).unwrap();
+        let end = NaiveDate::from_ymd_opt(2026, 9, 18).unwrap();
+        for symbol in ["sh600519", "sz159901"] {
+            let bytes = fixture(symbol);
+            let source =
+                format!("https://synthetic.invalid/appstock/app/fqkline/get?symbol={symbol}");
+            let mut transport = SyntheticTransport::new([Ok(HttpReply {
+                source: source.clone(),
+                bytes: bytes.clone(),
+            })]);
+
+            let (returned_source, returned_bytes) =
+                fetch_tencent_raw_daily_with(&mut transport, symbol, start, end).unwrap();
+
+            assert_eq!(returned_source, source);
+            assert_eq!(returned_bytes, bytes);
+            assert!(tencent_raw_daily_is_empty(&returned_bytes, symbol).unwrap());
+            assert_eq!(transport.requests[0].host, CANDIDATE_HOSTS[0]);
+        }
+    }
+
+    #[test]
+    fn legacy_payload_gate_rejects_non_data_objects_before_accepting_a_later_candidate() {
+        let start = NaiveDate::from_ymd_opt(2026, 9, 14).unwrap();
+        let end = NaiveDate::from_ymd_opt(2026, 9, 18).unwrap();
+        let bytes = fixture("sz159901");
+        let mut transport = SyntheticTransport::new([
+            Ok(HttpReply {
+                source: "https://synthetic.invalid/invalid".into(),
+                bytes: br#"{"code":0,"not_data":{}}"#.to_vec(),
+            }),
+            Ok(HttpReply {
+                source: "https://synthetic.invalid/accepted".into(),
+                bytes: bytes.clone(),
+            }),
+        ]);
+
+        let (source, returned_bytes) =
+            fetch_tencent_raw_daily_with(&mut transport, "sz159901", start, end).unwrap();
+
+        assert_eq!(source, "https://synthetic.invalid/accepted");
+        assert_eq!(returned_bytes, bytes);
+        assert_eq!(
+            transport
+                .requests
+                .iter()
+                .map(|request| request.host)
+                .collect::<Vec<_>>(),
+            CANDIDATE_HOSTS[..2]
+        );
+    }
 }
