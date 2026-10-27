@@ -9,6 +9,7 @@ mod normalized;
 mod normalizer;
 mod publish;
 mod raw;
+mod security_evidence;
 pub mod sina_adjust_factor;
 
 pub use frozen::{FrozenSourceMeta, freeze_raw};
@@ -42,6 +43,10 @@ pub use normalized::{
     tdx_code_table_schema, tdx_code_table_to_record_batch, write_parquet,
 };
 pub use raw::{RawStore, RawStoreError, SourceKind, SourceRecord, SourceRecordInput};
+pub use security_evidence::{
+    EvidenceClaim, EvidenceSource, FieldEvidence, SecurityEvidenceError, SecurityEvidenceRecord,
+    SecurityEvidenceStore, SecurityEvidenceVersionId,
+};
 
 use std::{cmp::Ordering, fmt};
 

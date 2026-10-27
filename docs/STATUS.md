@@ -68,14 +68,13 @@ POC-0 已按获确认的拆分发布为 [13 张本地执行票据](../.scratch/p
 
 ## Current Phase
 
-
 ### MVP 收口现状（2026-10-26）
 
 **MVP-6 有保留签收，milestone 已关闭。** [#235 第二轮](https://github.com/ZombieIce/PrajnaQuant/issues/235#issuecomment-6400855766)六项工程复核全部 pass；[#182 最终裁决](https://github.com/ZombieIce/PrajnaQuant/issues/182#issuecomment-6406038887)接受工程边界并保留证据处理流程 fail、第一轮 fail 和事件记录，不能表述为无保留整体通过。这里只校准已发生的验证状态，本次文档修改没有重跑引擎或补充真实数据证明。
 
 | 范围 | 当前能力及证据 |
 | --- | --- |
-| Domain / Data | scale-18 定点、证券/时间契约、不可变 Raw、版本化 Dataset、Arrow/Parquet 和重建校验；真实输入及详细证据仅存本机 |
+| Domain / Data | scale-18 定点、证券/时间契约、不可变 Raw、版本化 Dataset、Arrow/Parquet 和重建校验；SecurityEvidenceStore 记录 XSHG/XSHE 股票/ETF 的独立生命周期和交易条款证据、来源与 Unknown/Conflict 状态，按 SHA-256 保留修订（合成验证）；真实输入及详细证据仅存本机 |
 | Factor / Cache / Experiment | 封闭因子定义、依赖图、持久 Cache、Grid/List、Run 身份与 Execution 来源、Summary/Standard/Full、重放/提升/diff 和 Run 级并行；定义与入口见 [Experiment](../crates/prajna-experiment/README.md) |
 | Vector / Fast Event | 已实现共同语义子集及精确 Fast 账户/VP 账本；固定名单验收核对逐日账本、费用、两存储重放、Python/CLI 与 Vector/Fast 对拍 |
 | Accurate | 已接真实 Nautilus worker、独立合成金标准及差异分类；单 Venue/币种、long-only、lot 等受限映射；PIT ETF 不接 Accurate，成本/规模缺口见 [A16](../poc/mvp4-cost/adr0013/README.md) |
