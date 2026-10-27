@@ -346,6 +346,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
+ "tencent-transport",
  "uuid",
  "zip",
 ]
@@ -2954,6 +2955,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
+ "tencent-transport",
  "zip",
 ]
 
@@ -3941,6 +3943,14 @@ dependencies = [
  "once_cell",
  "rustix 1.1.5",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "tencent-transport"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "reqwest",
 ]
 
 [[package]]

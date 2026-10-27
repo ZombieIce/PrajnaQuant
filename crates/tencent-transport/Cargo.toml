@@ -1,0 +1,18 @@
+[package]
+name = "tencent-transport"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.1"
+description = "Shared Tencent unadjusted daily-bar HTTP transport"
+license = "MIT"
+publish = false
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

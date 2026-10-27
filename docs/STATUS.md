@@ -80,6 +80,7 @@ POC-0 已按获确认的拆分发布为 [13 张本地执行票据](../.scratch/p
 | Accurate | 已接真实 Nautilus worker、独立合成金标准及差异分类；单 Venue/币种、long-only、lot 等受限映射；PIT ETF 不接 Accurate，成本/规模缺口见 [A16](../poc/mvp4-cost/adr0013/README.md) |
 | Python | 本地 `prajna` 已提供类型化实验、Arrow 读取、As-of Decision 和两阶段共用 Rust 执行；逐 bar 推迟，Notebook/依赖闭包和性能边界见 [绑定文档](../crates/prajna-py/README.md) |
 | 真实 ETF 工程验证 | 固定名单、规定决策窗口加独立预热；覆盖门禁排除预热，禁止成交核对原生 Fill；Raw 完整性、重算、账本、事件抽查、覆盖/证据等级及仓库/PR/Issue 公开范围复核通过 |
+| MVP-7 Tencent 请求入口 | `tencent-transport` 提取旧未复权日线请求，旧仓库继续使用原始字节/来源接口；`prajna-data` 可直接依赖该 crate，且共享 crate 不引入旧仓库或 `serde_json`。策略入口可将可读的 HTTP 错误体交给调用方，在候选回退前执行停源规则。新 crate 合成请求与旧调用兼容回归测试通过（`ashare-warehouse` 18/18）；真实源可达性、Raw 采集和覆盖仍未验证。契约见 [transport README](../crates/tencent-transport/README.md) |
 | 旧 A 股 / Web | 旧仓库、ETF 研究和本地 Axum/React 保留；生产日更、股票回测、远程认证及新平台统一 Web 作业未由本轮验收 |
 
 适用限制：固定名单为 `retrospective_static`，有幸存者偏差；UNKNOWN 定义已收窄，不能据低占比推断所有历史事实可靠。成交采用首笔成交价，有同 Session 卖买资金先后和复牌订单参与假设；终止按最后行情收盘估值，并非实际清算款或到账日。真实场景未触发非整手/非零取整余数及实际终止持仓退出/结算，继续依既有合成覆盖，不从零事件推断真实走通。该结论仅为工程验收，不作为策略历史业绩、完整历史 Universe 或实盘正确性证明。
