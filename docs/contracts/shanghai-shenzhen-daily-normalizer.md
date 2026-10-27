@@ -1,9 +1,8 @@
 # Versioned Shanghai/Shenzhen stock and ETF daily normalizer
 
 `cn-stock-etf-daily` v1 is a public Rust Normalizer for raw, unadjusted daily
-bars of XSHG/XSHE stocks and ETFs (MVP-7 T02b-C). It is not a production input
-assembler: selecting a collection report, calendar version and evidence version
-from a local lake remains #289 work. The tests use only synthetic inputs.
+bars of XSHG/XSHE stocks and ETFs (MVP-7 T02b-C). The production assembler below
+selects collection reports and fixed versions (#289). Tests use synthetic inputs.
 
 ## Fixed inputs and identity
 
@@ -17,7 +16,7 @@ unadjusted `fqkline` daily responses:
 | --- | --- |
 | Calendar version | Raw `sha256` equals the configured calendar version; both XSHG and XSHE are required, with their own source, coverage and sessions |
 | Security snapshot | Raw `sha256` equals the configured snapshot id; every instrument in the snapshot must be `publishable` with Known positive `lot_size`, `price_increment` and `size_increment` |
-| Daily responses | JSON `{code: 0, data: {<sh\|sz><six digits>: {day: [...]}}}` with a `tencent_fqkline_daily` source record whose `method_version` is `tencent-fqkline-day/1` and whose `instrument_id` matches the response key |
+| Daily responses | JSON `{code: 0, data: {<sh\|sz><six digits>: {day: [...]}}}` (also exact string `code: "0"`) with a `tencent_fqkline_daily` source record whose `method_version` is `tencent-fqkline-day/1` and whose `instrument_id` matches the response key; collector, production assembly and Normalizer share the same success-code check |
 | Unit/source rules | Fixed in `config_sha256`; a rule change requires a new Normalizer version and identity |
 
 No calendar or evidence store is read during `normalize` or rebuild. Later
@@ -90,7 +89,7 @@ Publication fails before any normalized file or manifest is written when:
 ## Limits and compatibility
 
 This contract is synthetic-verified only; no real calendar, evidence or market
-coverage is asserted. It does not publish a collection report, choose a source,
+coverage is asserted. The Normalizer does not choose a source,
 derive adjusted series or corporate actions, or open stock research/backtests.
 The existing MVP-6 `szse-etf-frozen` rules, versions, identities and archives are
 unchanged; this Normalizer has a separate id and version. Its immutable-input
@@ -103,3 +102,23 @@ code, and must exclude blocked-evidence instruments from the pinned snapshot
 when unrelated securities must publish. v1 intentionally fails the whole
 publication for any blocked selected instrument and does not derive a
 lifecycle/tradability gate.
+
+## Local production publication and rebuild
+
+`prajna-publish-daily publish --root <LOCAL_OUTPUT> --selection <LOCAL_JSON> --receipt <RELATIVE_JSON> --diagnostics <LOCAL_DIAGNOSTICS>` accepts this explicit selection (paths are local; replace version placeholders with chosen immutable ids):
+
+```json
+{
+  "raw_root": "/local/raw", "calendar_root": "/local/calendar", "evidence_root": "/local/evidence",
+  "report": "/local/raw/reports/daily-raw/selected.json",
+  "normalizer_id": "cn-stock-etf-daily", "normalizer_version": "1",
+  "calendar_version": "sha256:<chosen calendar>", "security_snapshot": "sha256:<chosen snapshot>",
+  "raw_sha256s": ["sha256:<chosen accepted response>"]
+}
+```
+
+Each publication selects exactly one security in the snapshot and one report; publish unrelated securities independently. Every selected response must be a nonempty accepted complete chunk with exact source/method, security/kind, request range, chunk index, source and outcome provenance. Raw dates must match the report, lie within that chunk and not precede a Known listing date. Unknown listing history stays Unknown; no predecessor history is inferred. Calendar coverage must contain the report request; all Sessions of that explicit calendar version are retained, including dates without Bars. Partial reports may supply explicitly selected good chunks; missing/failed/empty chunks never become Bars or a claim of complete coverage. Blocked constraints, unsupported source/unit rule versions, mismatches and rejected candidates fail before Dataset publication.
+
+The output lake freezes exact report bytes, selected responses/provenance, canonical calendar/snapshot and a content-addressed recipe. Selected response provenance is copied only when the complete source record is absent at the target; retries within the same lake, through aliases, or between different lakes do not reappend identical records, while newly observed source records are preserved. The root-relative receipt binds that recipe to the committed DSV. Repeat the same selection/receipt idempotently; a different selection needs a new receipt. Revised Raw/calendar/evidence produces a new DSV, preserving old versions; rule revisions require a separately implemented Normalizer identity (only v1 is supported). `prajna-publish-daily rebuild --root <LOCAL_OUTPUT> --receipt <RELATIVE_JSON> --diagnostics <LOCAL_DIAGNOSTICS>` verifies the frozen recipe and rebuilds against the committed manifest without the original report/stores or a latest lookup.
+
+The Dataset manifest remains the atomic commit marker. Interrupted pre-commit publication leaves no committed partial Dataset and is retryable; frozen Raw may remain. A receipt-write failure after the Dataset commit can leave a complete Dataset without a receipt: rerun the unchanged selection to recover it. Receipts cannot overwrite another selection. Output roots exclude the fixed MVP-6 archive; existing symlink destinations are rejected. CLI output hides detailed identities and coverage; errors go to the configurable local diagnostics directory. A diagnostic persistence failure may leave only the generic CLI failure. No real-data validation is asserted.

@@ -407,7 +407,7 @@ fn decode_daily(
     acc: &mut Acc,
 ) {
     let object = json_object(&raw.bytes).expect("classified daily response");
-    if object.get("code").and_then(cell_text).as_deref() != Some("0") {
+    if !crate::daily_raw::successful_response_code(object.get("code")) {
         acc.issues.push(issue(
             "invalid_daily_response",
             raw.raw_sha256.clone(),
@@ -701,14 +701,6 @@ fn native_key(key: &str) -> Option<(VenueId, String)> {
         return None;
     }
     Some((VenueId::new(venue).ok()?, symbol.to_owned()))
-}
-
-fn cell_text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(value) => Some(value.clone()),
-        Value::Number(value) => Some(value.to_string()),
-        _ => None,
-    }
 }
 
 fn build_output(

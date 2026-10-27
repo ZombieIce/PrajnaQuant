@@ -806,15 +806,18 @@ fn store_raw(
     })
 }
 
+pub(crate) fn successful_response_code(code: Option<&Value>) -> bool {
+    match code {
+        Some(Value::String(code)) => code == "0",
+        Some(Value::Number(code)) => code.to_string() == "0",
+        _ => false,
+    }
+}
+
 fn parse_response_dates(bytes: &[u8], native_symbol: &str) -> Result<Vec<NaiveDate>, String> {
     let payload: Value = serde_json::from_slice(bytes)
         .map_err(|_| "Tencent response is not valid JSON".to_owned())?;
-    let code = payload.get("code").map(|value| match value {
-        Value::String(code) => code.clone(),
-        Value::Number(code) => code.to_string(),
-        _ => String::new(),
-    });
-    if code.as_deref() != Some("0") {
+    if !successful_response_code(payload.get("code")) {
         return Err("Tencent response code is not zero".into());
     }
     let data = payload
@@ -1105,6 +1108,26 @@ fn next_report_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::{canonicalize_candidate, rate_limit_domain, validate_raw_root};
+
+    #[test]
+    fn success_code_preserves_exact_numeric_and_string_zero_contract() {
+        use serde_json::json;
+        for value in [json!(0), json!("0")] {
+            assert!(super::successful_response_code(Some(&value)));
+        }
+        for value in [
+            json!(1),
+            json!("1"),
+            json!(0.0),
+            json!("00"),
+            json!(" 0"),
+            json!(false),
+            json!(null),
+        ] {
+            assert!(!super::successful_response_code(Some(&value)));
+        }
+        assert!(!super::successful_response_code(None));
+    }
 
     #[cfg(unix)]
     #[test]
