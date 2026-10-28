@@ -32,7 +32,7 @@ Rust 是数据、因子、执行、账户、成本和绩效权威，避免新增
 
 一票一 Issue、一条从最新 `main` 拉出的 `<issue>-<slug>` 分支、一个含 `Closes #<issue>` 的 PR。只认领无 blocker 且 `ready-for-agent` 的票；口径未定先 `needs-triage`，等负责人定稿。只提交/推送自己的分支，不直推 main、不 force push 共享分支、不自行合并。一个工作区同一时间只承载一个分支，并行任务使用独立 worktree。
 
-一票是一项可独立验收的行为或契约；同一薄纵向切片可涉及页面/API/持久化层，不合并多个独立行为。Prepare 估算包含测试；预计超过约 800 changed lines 或涉及多个独立契约，先在 Issue 提拆分并等负责人确认。此澄清不放宽现有票的验收。不得改写验收迎合实现或修改其他票状态/结论，调整在对应 Issue 提议。
+拆票、Prepare 与范围复核按 [票据范围规则](docs/agents/ticket-scope.md)：先判独立契约，约 800 changed lines 触发复核；近期票先做范围检查，Prepare 只做六项增量复核，超规模单票须在开工前明确授权预算。同一行为的薄页面/API/持久化切片可一票交付。不得改写验收迎合实现或修改其他票状态/结论，调整在对应 Issue 提议。
 
 负责人可直接启动 [implement-ticket](.agents/skills/implement-ticket/SKILL.md) / [review-pr](.agents/skills/review-pr/SKILL.md)，或授权 [ticket-loop](.agents/skills/ticket-loop/SKILL.md) 协调启动。实现者完成验收映射、定向验证和 `Self-check (implementer)`，不充当独立 reviewer、不自行启动 reviewer；每次独立 review/re-review 使用未参与实现且不继承实现上下文的新会话。普通票可由一名 reviewer 检查 Spec 与 Standards；高风险展开双轴并行，风险判定见 review-pr。显式 [code-review](.agents/skills/code-review/SKILL.md) 保留，不是普通票强制自查。票据不使用 implement-spec 的一 spec 一 PR 流程。
 

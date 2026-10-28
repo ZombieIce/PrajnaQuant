@@ -8,6 +8,7 @@ Issues, specs and PRs for this repo live on GitHub at `ZombieIce/PrajnaQuant`. R
 
 - **Spec:** one issue labelled `spec`, titled with the feature name. Its body uses the spec template and includes `Notes`, `Decisions-so-far`, and `Fog` sections when created; any of these sections may be empty.
 - **Ticket:** one issue per ticket, never a combined checklist issue. The body starts with `Parent: #<spec>` when there is a spec, then `What to build`, acceptance criteria as task-list checkboxes, and `Blocked by: #N, #N` (or `None`).
+- **Scope:** drafting near-term tickets, Prepare, budget exceptions and splits follow [ticket scope](ticket-scope.md). Keep the six-item scope check and owner budget authorization in the Issue; Prepare refreshes only changed inputs.
 - **Triage state:** exactly one triage label from `triage-labels.md`. A ticket that has been claimed has an assignee.
 - **Milestone:** the roadmap stage the work belongs to (`POC-0`, `MVP-0` …; current product stage: `MVP-7`). Repo infrastructure that isn't tied to a stage has no milestone.
 - **Conclusion:** verdicts (`adopt / defer / reject / unresolved`), acceptance notes and caveats go on a `**Conclusion:**` line in the issue body or in the closing comment, never in the title or labels.

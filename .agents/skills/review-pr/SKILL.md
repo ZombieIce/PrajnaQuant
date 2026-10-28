@@ -30,3 +30,5 @@ Trace actual entry point to observable output, including input loading/invocatio
 - **Non-blocking:** optional design/style suggestions or follow-up outside acceptance. Label judgment calls; justified deferral does not prevent completion. Do not require unrelated refactors.
 
 Propose scope/acceptance changes for owner clarification; retain valid blockers without enlarging or weakening requirements. Reviewer conclusions remain PR comments; the coordinator relays them without rewriting them.
+
+Assess ticket size and contract boundaries using the shared [scope rule](../../../docs/agents/ticket-scope.md), including the Issue's authorized budget. A line count or a thin slice spanning layers alone is not a split finding; cite an independent contract, an unapproved budget overrun or an acceptance gap.

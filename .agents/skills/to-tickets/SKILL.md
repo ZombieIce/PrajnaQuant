@@ -1,14 +1,14 @@
 ---
 name: to-tickets
-description: Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker (edges as text in one file per ticket locally, or native blocking links on a real tracker).
+description: Break a plan or spec into contract-bounded GitHub tickets with blocking edges and near-term scope checks.
 disable-model-invocation: true
 ---
 
 # To Tickets
 
-Break a plan, spec, or conversation into a set of **tickets**: tracer-bullet vertical slices, each declaring the tickets that **block** it.
+Break a plan, spec, or conversation into independently verifiable **tickets**, each declaring the tickets that **block** it.
 
-The issue tracker and triage label vocabulary should have been provided to you. If not, tell the user to run `/setup-matt-pocock-skills`.
+Follow [AGENTS](../../../AGENTS.md), the [GitHub tracker contract](../../../docs/agents/issue-tracker.md) and the shared [ticket scope rule](../../../docs/agents/ticket-scope.md). `.scratch/` is a read-only archive.
 
 ## Process
 
@@ -16,26 +16,28 @@ The issue tracker and triage label vocabulary should have been provided to you. 
 
 Work from whatever is already in the conversation context. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments.
 
-### 2. Explore the codebase (optional)
+### 2. Check current capabilities
 
-If you have not already explored the codebase, do so to understand the current state of the code. Ticket titles and descriptions should use the project's domain glossary vocabulary, and respect ADRs in the area you're touching.
+For near-term tickets, inspect relevant production entry points, source and tests, reusing evidence already in context. Identify existing capabilities and missing contracts; record the baseline. Use the project's domain glossary and applicable ADRs. Keep distant tickets at behavior/boundary/dependency level until they approach implementation.
 
-Look for opportunities to prefactor the code to make the implementation easier. "Make the change easy, then make the easy change."
+Done: near-term gaps have code/test evidence; distant tickets explicitly defer their scope check.
 
 ### 3. Draft vertical slices
 
-Break the work into **tracer bullet** tickets.
+Break the work at independent behavior/contract boundaries under the shared scope rule.
 
 <vertical-slice-rules>
 
-- Each slice cuts a narrow but COMPLETE path through every layer (schema, API, UI, tests): vertical, NOT a horizontal slice of one layer
-- A completed slice is demoable or verifiable on its own
-- Each slice is sized to fit in a single fresh context window
-- Any prefactoring should be done first
+- A thin slice covers the layers required for its promised behavior; page/API/storage changes may belong to one ticket.
+- Shared infrastructure, such as a browser framework, may be independently ticketed with named consumers and a runnable acceptance path.
+- Every ticket is independently demoable or verifiable; required tests and contract documentation belong in its estimate.
+- Separate prefactoring only when it has an independently verifiable result and genuinely blocks the behavior.
 
 </vertical-slice-rules>
 
 Give each ticket its **blocking edges**: the other tickets that must complete before it can start. A ticket with no blockers can start immediately.
+
+For every near-term ticket, include the six-item template from the shared scope rule. Resolve a triggered size review through explicit owner budget authorization or an approved contract-boundary split before publication as `ready-for-agent`. Owner approval of a breakdown alone is not an explicit budget exception. Done: each near-term ticket has an evidenced scope check and a continuation/authorization/split decision; deferred checks on distant tickets remain visible.
 
 **Wide refactors are the exception to vertical slicing.** A **wide refactor** is one mechanical change (rename a column, retype a shared symbol) whose **blast radius** fans across the whole codebase, so a single edit breaks thousands of call sites at once and no vertical slice can land green. Don't force it into a tracer bullet; sequence it as **expand–contract**. First expand: add the new form beside the old so nothing breaks. Then migrate the call sites over in batches sized by blast radius (per package, per directory), each batch its own ticket blocked by the expand, keeping CI green batch to batch because the old form still exists. Finally contract: delete the old form once no caller remains, in a ticket blocked by every migrate batch. When even the batches can't stay green alone, keep the sequence but let them share an integration branch that all block a final integrate-and-verify ticket; green is promised only there.
 
@@ -46,6 +48,7 @@ Present the proposed breakdown as a numbered list. For each ticket, show:
 - **Title**: short descriptive name
 - **Blocked by**: which other tickets (if any) must complete first
 - **What it delivers**: the end-to-end behaviour this ticket makes work
+- **Scope check**: the six-item result for near-term tickets; flag requested budget exceptions with scope and total upper bound, or deferred checks for distant tickets
 
 Ask the user:
 
@@ -57,35 +60,15 @@ Iterate until the user approves the breakdown.
 
 ### 5. Publish the tickets to the configured tracker
 
-Publish the approved tickets. **How** depends on the tracker `/setup-matt-pocock-skills` configured; the tickets are the same either way, only the shape of the blocking edges changes:
-
-- **Local files** → write one file per ticket under `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` in dependency order (blockers first). Each file's "Blocked by" lists the numbers/titles it depends on. Use the per-ticket file template below: one ticket per file, never a single combined file.
-- **A real issue tracker (GitHub, Linear, …)** → publish one issue per ticket in dependency order (blockers first) so each ticket's blocking edges can reference real identifiers. Use the platform's native blocking / sub-issue relationship where it has one; otherwise set each ticket's "Blocked by" to the blocking issues. Apply the `ready-for-agent` triage label unless instructed otherwise; the tickets are agent-grabbable by construction.
+Publish the approved tickets to `ZombieIce/PrajnaQuant`, one Issue per ticket in dependency order (blockers first), using actual Issue numbers in `Blocked by`. Apply exactly one triage label: `ready-for-agent` when the scope check is complete and requirements/budget settled; `needs-triage` for deferred checks or pending decisions. Record explicit owner budget authorization in the corresponding Issue. Blocking edges still control when a ready ticket can be claimed.
 
 Work the **frontier**: any ticket whose blockers are all done. For a purely linear chain that means top to bottom.
 
 Do NOT close or modify any parent issue.
 
-<local-ticket-template>
-
-# <NN>: <Ticket title>
-
-**What to build:** the end-to-end behaviour this ticket makes work, from the user's perspective, not a layer-by-layer implementation list.
-
-**Blocked by:** the numbers/titles of the tickets that gate this one, or "None (can start immediately)".
-
-**Status:** ready-for-agent
-
-- [ ] Acceptance criterion 1
-- [ ] Acceptance criterion 2
-
-</local-ticket-template>
-
 <issue-template>
 
-## Parent
-
-A reference to the parent issue on the tracker (if the source was an existing issue, otherwise omit this section).
+Parent: #<spec> (omit when there is no parent)
 
 ## What to build
 
@@ -100,6 +83,10 @@ The end-to-end behaviour this ticket makes work, from the user's perspective, no
 
 - A reference to each blocking ticket, or "None (can start immediately)".
 
+## Scope check
+
+Use the six-item template in the shared scope rule, with baseline/evidence and any explicit owner budget authorization; for distant tickets, state that the check is deferred until near-term planning.
+
 </issue-template>
 
-In either form, avoid specific file paths or code snippets: they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it and note briefly that it came from a prototype. Trim to the decision-rich parts, not a working demo, just the important bits.
+Keep acceptance behavioral. Scope evidence may name entry points/source/tests at the recorded baseline as navigation; it does not prescribe the future file layout. If a prototype snippet captures a decision more precisely than prose (state machine, schema or type shape), include only the decision-rich part and identify its origin.
