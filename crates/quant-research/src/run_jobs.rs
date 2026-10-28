@@ -986,9 +986,7 @@ impl RunJobApi {
                 Ok(result) => Ok(result),
                 Err(error) => {
                     let _ = fs::remove_file(directory.join("cli-promote.stdout"));
-                    if error.code == "experiment_cli_failed"
-                        && error.details.get("exit_code").and_then(Value::as_i64) == Some(6)
-                    {
+                    if promote_missing_execution(&error) {
                         self.execute_experiment_cli(task, &directory, run_args, "cli.stdout")
                     } else {
                         Err(error)
@@ -1539,6 +1537,11 @@ fn canonical_experiment_task_hash(request: &SubmitExperimentTask) -> Result<Stri
         .map(|bytes| format!("{:x}", Sha256::digest(bytes)))
         .map_err(ApiFailure::from_error)
 }
+fn promote_missing_execution(error: &RunError) -> bool {
+    error.code == "experiment_cli_failed"
+        && error.details.get("exit_code").and_then(Value::as_i64) == Some(6)
+}
+
 fn blocker(code: &str, message: &str) -> RunError {
     RunError {
         code: code.into(),
@@ -3920,7 +3923,7 @@ mod tests {
         let args_path = dir.path().join("cli-args.txt");
         let cli = dir.path().join("prajna-experiment");
         let script = format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" >> {}\nif [ \"$1\" = promote ]; then\n  printf 'Run run:sha256:synthetic failed during promotion: synthetic replay failure\\n' >&2\n  exit 3\nfi\nif [ \"$1\" = run ]; then\n  printf '{{\"exp\":\"exp:sha256:synthetic\",\"exe\":\"exe:sha256:synthetic\"}}\\n'\n  exit 0\nfi\nexit 91\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" >> {}\nif [ \"$1\" = promote ]; then\n  printf 'Run run:sha256:synthetic failed during promotion: synthetic replay failure\\n' >&2\n  exit 1\nfi\nif [ \"$1\" = run ]; then\n  printf '{{\"exp\":\"exp:sha256:synthetic\",\"exe\":\"exe:sha256:synthetic\"}}\\n'\n  exit 0\nfi\nexit 91\n",
             shell_quote(&args_path)
         );
         fs::write(&cli, script).unwrap();
@@ -3961,7 +3964,7 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(detail["status"], "failed", "{detail}");
         assert_eq!(detail["error"]["code"], "experiment_cli_failed");
-        assert_eq!(detail["error"]["details"]["exit_code"], 3);
+        assert_eq!(detail["error"]["details"]["exit_code"], 1);
         assert!(
             detail["error"]["details"]["stderr"]
                 .as_str()
@@ -3979,5 +3982,28 @@ mod tests {
                 .join("cli-promote.stdout")
                 .exists()
         );
+    }
+    #[test]
+    fn only_a_missing_execution_promote_error_falls_back_to_run() {
+        for (exit_code, expected) in [
+            (Some(1), false),
+            (Some(2), false),
+            (Some(3), false),
+            (Some(6), true),
+            (None, false),
+        ] {
+            let error = RunError {
+                code: "experiment_cli_failed".into(),
+                message: "synthetic".into(),
+                details: json!({"exit_code": exit_code}),
+            };
+            assert_eq!(promote_missing_execution(&error), expected, "{exit_code:?}");
+        }
+        let other = RunError {
+            code: "process_group_cleanup_failed".into(),
+            message: "synthetic".into(),
+            details: json!({"exit_code": 6}),
+        };
+        assert!(!promote_missing_execution(&other));
     }
 }

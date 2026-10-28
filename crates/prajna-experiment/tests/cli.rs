@@ -758,21 +758,46 @@ fn result_reads_fast_event_account_valuations() {
         "account_valuations",
     )
     .unwrap();
-    let payloads = batches[0]
-        .column_by_name("payload")
+    let mut stored_rows = Vec::new();
+    for batch in &batches {
+        let payloads = batch
+            .column_by_name("payload")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            stored_rows.push(serde_json::from_str::<Value>(payloads.value(row)).unwrap());
+        }
+    }
+    let served_rows = run["series"]["account_valuations"].as_array().unwrap();
+    assert_eq!(stored_rows.len(), 504);
+    assert_eq!(served_rows.len(), stored_rows.len());
+    for (served, stored) in served_rows.iter().zip(&stored_rows) {
+        assert_eq!(served["cash"], stored["cash"]);
+        assert_eq!(served["equity"], stored["equity"]);
+    }
+    let (_, summary_batches) = prajna_experiment::read_run_table(
+        &example.lake,
+        first["exp"].as_str().unwrap(),
+        first["exe"].as_str().unwrap(),
+        run_id,
+        prajna_experiment::ResultLevel::Summary,
+        "summary",
+    )
+    .unwrap();
+    let summary_batch = summary_batches
+        .iter()
+        .find(|batch| batch.num_rows() > 0)
+        .unwrap();
+    let summary_json = summary_batch
+        .column_by_name("summary_json")
         .unwrap()
         .as_any()
         .downcast_ref::<StringArray>()
         .unwrap();
-    let stored: Value = serde_json::from_str(payloads.value(0)).unwrap();
-    assert_eq!(
-        run["series"]["account_valuations"][0]["cash"],
-        stored["cash"]
-    );
-    assert_eq!(
-        run["series"]["account_valuations"][0]["equity"],
-        stored["equity"]
-    );
+    let stored_summary: Value = serde_json::from_str(summary_json.value(0)).unwrap();
+    assert_eq!(run["summary"], stored_summary);
 }
 
 #[test]
@@ -977,4 +1002,74 @@ fn promote_no_op_fails_closed_on_corrupted_saved_tables() {
     status(&output, 3);
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("sessions"));
+}
+
+#[test]
+fn promote_mixed_completed_and_failed_runs_persists_completed_only() {
+    let example = Example::new();
+    example.write_definition(|definition| {
+        definition["costs"]["commission_rate"] = json!(0.5);
+        definition["parameter_space"]["grid"]["top_k"] = json!([3, 64]);
+    });
+    let summary = json_output(example.run(&[]), 0);
+    assert_eq!(summary["run_count"], 2);
+    assert_eq!(summary["failed_count"], 1);
+
+    let promoted = json_output(example.promote("standard", &[]), 0);
+    assert_eq!(promoted["action"], "promoted");
+    assert_eq!(promoted["failed_count"], 1);
+
+    let result = json_output(
+        example.result(
+            summary["exp"].as_str().unwrap(),
+            summary["exe"].as_str().unwrap(),
+            &[],
+        ),
+        0,
+    );
+    assert_eq!(result["data"]["default_result_level"], "summary");
+    let runs = result["data"]["runs"].as_array().unwrap();
+    assert_eq!(runs.len(), 2);
+    let completed = runs
+        .iter()
+        .find(|run| run["status"] == "completed")
+        .unwrap();
+    assert_eq!(completed["result_level"], "standard");
+    assert!(completed["summary"].is_object());
+    assert_eq!(
+        completed["series"]["sessions"].as_array().unwrap().len(),
+        252
+    );
+    let failed = runs.iter().find(|run| run["status"] == "failed").unwrap();
+    assert_eq!(failed["result_level"], "summary");
+    assert_eq!(failed["summary"], Value::Null);
+    assert!(failed["series"].as_object().unwrap().is_empty());
+    for table in ["sessions", "executions", "corporate_actions"] {
+        assert!(
+            failed["tables"]["not_saved"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|saved| saved == table),
+            "{failed}"
+        );
+    }
+
+    let replay = json_output(example.promote("standard", &[]), 0);
+    assert_eq!(replay["action"], "replayed");
+    assert_eq!(replay["failed_count"], 1);
+    assert_eq!(replay["written_files"], 0);
+}
+
+#[test]
+fn promote_existing_directory_without_manifest_is_not_no_execution() {
+    let example = Example::new();
+    let first = json_output(example.run(&[]), 0);
+    let directory = example.directory(&first);
+    fs::remove_file(directory.join("execution.json")).unwrap();
+
+    let output = example.promote("standard", &[]);
+    status(&output, 3);
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("execution.json"));
 }

@@ -56,7 +56,7 @@ prajna-experiment result <exp> <exe> --lake <lake> [--run <run-id>]
 `POST /api/v1/tasks/experiments` 增加可选 `result_level`：
 
 - 省略或 `"summary"`：保持 T01 行为；不写该字段，旧请求 hash、旧 task.json 与旧 Summary 结果不变。
-- `"standard"`：服务先调用 `prajna-experiment promote <experiment.json> --lake ... --level standard`。已有 Summary Execution 时只提升仍低于 Standard 的 **Completed** Run（failed Run 保持原级别，不阻塞）；没有可提升的 Completed Run 时返回 `action: replayed`（含全 failed，Standard 任务仍 succeeded 并保留 `failed_count`）；混合结果由 completed Run 提升、failed Run 保持原级别。选中 Completed Run 若在提升重放中失败，promote 整体失败、不发布 partial 表，任务 failed 并保留 Run id/原因；没有当前 Execution 时（promote exit 6）才回退到 `prajna-experiment run ... --level standard`，已有 Execution 的 promote 失败不回退，避免掩盖真实错误。`default_result_level` 保持 Execution 创建时的级别，`promote` 只提高 Run 级别；重复的 Standard 任务仍走 promote 的 no-op/replay。该级别进入规范请求 hash 和任务记录；同一 `idempotency_key` 以不同级别或定义重提交返回 `409 idempotency_conflict`。
+- `"standard"`：服务先调用 `prajna-experiment promote <experiment.json> --lake ... --level standard`。已有 Summary Execution 时只提升仍低于 Standard 的 **Completed** Run（failed Run 保持原级别，不阻塞）；没有可提升的 Completed Run 时返回 `action: replayed`（含全 failed，Standard 任务仍 succeeded 并保留 `failed_count`）；该 no-op 仍校验 Summary/已保存表，损坏则失败。混合结果由 completed Run 提升、failed Run 保持原级别。选中 Completed Run 若在提升重放中失败，promote 整体失败、不发布 partial 表，任务 failed 并保留 Run id/原因；没有当前 Execution（目录不存在，promote exit 6）时才回退到 `prajna-experiment run ... --level standard`；目录存在但 manifest 缺失/损坏或其他 promote 失败不回退，避免掩盖真实错误。`default_result_level` 保持 Execution 创建时的级别，`promote` 只提高 Run 级别；重复的 Standard 任务仍走 promote 的 no-op/replay。该级别进入规范请求 hash 和任务记录；同一 `idempotency_key` 以不同级别或定义重提交返回 `409 idempotency_conflict`。
 - 其他值返回 `400 invalid_request`。
 
 ## HTTP

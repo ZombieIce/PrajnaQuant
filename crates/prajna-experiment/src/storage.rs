@@ -601,6 +601,16 @@ pub(super) fn promote(
         .iter()
         .map(|run| (run.run_id.as_str(), run))
         .collect::<BTreeMap<_, _>>();
+    // A Run that was Completed in the manifest must still be Completed before
+    // summary hashing/staging, so the failure names the Run and leaves nothing
+    // partially published. Membership checks keep the existing `run --promote`
+    // invalid-request classification.
+    let manifest_run_ids = manifest
+        .runs
+        .iter()
+        .map(|run| run.run_id.as_str())
+        .collect::<BTreeSet<_>>();
+    ensure_promotable_runs(run_ids, &manifest_run_ids, &executions)?;
     // Validate and stage every requested table before touching final paths.
     let staging = create_staging_dir(&destination)?;
     let result = (|| {
@@ -727,6 +737,30 @@ fn runs_below_level(runs: &[StoredRun], level: ResultLevel) -> Vec<String> {
         .collect()
 }
 
+fn ensure_promotable_runs(
+    run_ids: &[String],
+    manifest_run_ids: &BTreeSet<&str>,
+    executions: &BTreeMap<&str, &RunExecution>,
+) -> Result<(), ExperimentError> {
+    for run_id in run_ids {
+        if !manifest_run_ids.contains(run_id.as_str()) {
+            return Err(ExperimentError::InvalidDefinition(format!(
+                "Run {run_id} is not part of this Execution"
+            )));
+        }
+        let run = executions
+            .get(run_id.as_str())
+            .ok_or_else(|| err(format!("current Experiment did not produce Run {run_id}")))?;
+        if run.status != RunStatus::Completed {
+            return Err(ExperimentError::Execution(format!(
+                "Run {run_id} failed during promotion: {}",
+                run.error.as_deref().unwrap_or("unknown error")
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Promote every completed Run of the current Execution that is below `level`.
 ///
 /// The Experiment/Execution identity is captured from the current working
@@ -750,9 +784,15 @@ pub fn promote_below_level(
     let experiment_id = experiment.id()?;
     let identity = ExecutionIdentity::capture(&experiment_id, repository)?;
     let destination = execution_path(lake_root, &experiment_id, &identity.id)?;
-    if !destination.join("execution.json").is_file() {
+    if !destination.is_dir() {
         return Err(ExperimentError::ExecutionNotFound(format!(
             "Execution {} does not exist",
+            identity.id
+        )));
+    }
+    if !destination.join("execution.json").is_file() {
+        return Err(ExperimentError::ReplayMismatch(format!(
+            "Execution {} is missing execution.json",
             identity.id
         )));
     }
@@ -2633,5 +2673,45 @@ mod promotion_tests {
         );
         assert!(runs_below_level(&runs[1..2], ResultLevel::Full).is_empty());
         assert!(runs_below_level(&runs, ResultLevel::Summary).is_empty());
+    }
+    fn run_execution(id: &str, status: RunStatus, error: Option<&str>) -> RunExecution {
+        RunExecution {
+            run_spec: serde_json::json!({"engine": {"kind": "vector"}}),
+            run_id: id.into(),
+            status,
+            result: None,
+            fast_event_result: None,
+            backend_diagnostics: None,
+            adapter_events: vec![],
+            backend_events: vec![],
+            summary: None,
+            error: error.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn promotion_preflight_names_a_previously_completed_run_that_now_fails() {
+        let completed = run_execution("run:completed", RunStatus::Completed, None);
+        let failed = run_execution(
+            "run:previously-completed",
+            RunStatus::Failed,
+            Some("synthetic replay cause"),
+        );
+        let executions = BTreeMap::from([
+            (completed.run_id.as_str(), &completed),
+            (failed.run_id.as_str(), &failed),
+        ]);
+        let manifest_ids = BTreeSet::from(["run:completed", "run:previously-completed"]);
+        ensure_promotable_runs(&["run:completed".into()], &manifest_ids, &executions).unwrap();
+        let error = ensure_promotable_runs(
+            &["run:previously-completed".into()],
+            &manifest_ids,
+            &executions,
+        )
+        .unwrap_err();
+        assert!(matches!(error, ExperimentError::Execution(_)));
+        let message = error.to_string();
+        assert!(message.contains("run:previously-completed"), "{message}");
+        assert!(message.contains("synthetic replay cause"), "{message}");
     }
 }
