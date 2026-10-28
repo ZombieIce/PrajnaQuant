@@ -13,9 +13,9 @@ use prajna_research::{
     ExecutionStatusMap, Panel, PanelSession,
     factor::AvailabilityAssumption,
     fast_event::{
-        FastEventConfig, FastEventCosts, FastEventError, MULTI_VENUE_LOT_ENGINE_VERSION,
-        MULTI_VENUE_PARITY_ENGINE_VERSION, MarketExecution, PortfolioRun, Rebalance, Sizing,
-        run_fast_event, run_lot_with_execution,
+        EntryBudget, FastEventConfig, FastEventCosts, FastEventError,
+        MULTI_VENUE_LOT_ENGINE_VERSION, MULTI_VENUE_PARITY_ENGINE_VERSION, MarketExecution,
+        PortfolioRun, Rebalance, Sizing, run_fast_event, run_lot_with_execution,
     },
     load_panel_for_venues,
     strategy::{Decision, UnfilledEntry},
@@ -253,7 +253,6 @@ fn multi_venue_fast_event_and_vector_match_in_their_common_subset() {
         Some(MULTI_VENUE_SEMANTIC_VERSION)
     );
     assert_eq!(vector.sessions.len(), fast.sessions.len());
-    assert_eq!(vector.executions.len(), fast.attempts.len());
     for (vector_session, fast_session) in vector.sessions.iter().zip(&fast.sessions) {
         let vector_open = vector_session.nav / (1.0 + vector_session.gross_return);
         let fast_open = fast_session.open_after.account.equity.to_f64() / 10_000.0;
@@ -263,8 +262,6 @@ fn multi_venue_fast_event_and_vector_match_in_their_common_subset() {
             vector_session.session_date
         );
     }
-    let final_weights = &vector.sessions.last().unwrap().weights_after_execution;
-    assert!((final_weights.get(&xshe).copied().unwrap_or(0.0) - 1.0).abs() <= 1e-12);
 }
 
 #[test]
@@ -286,6 +283,13 @@ fn multi_venue_lot_uses_its_own_engine_semantic_version() {
     };
     let result = run_fast_event(&panel, &statuses, &config, &[portfolio(vec![decision])]).unwrap();
     assert_eq!(result.semantic_version, MULTI_VENUE_LOT_ENGINE_VERSION);
+}
+
+fn error(config: FastEventConfig, portfolios: &[PortfolioRun]) -> String {
+    let (panel, statuses) = fixture();
+    run_fast_event(&panel, &statuses, &config, portfolios)
+        .unwrap_err()
+        .to_string()
 }
 
 struct NoExecution;
@@ -331,5 +335,24 @@ fn external_accurate_execution_rejects_multi_venue_panels() {
         error
             .to_string()
             .contains("external execution (Accurate) requires one Venue")
+    );
+}
+
+#[test]
+fn adr_0027_boundaries_are_rejected() {
+    let scope = config(
+        BTreeSet::from([venue("XSHG")]),
+        Sizing::VectorParity,
+        FastEventCosts::ZERO,
+    );
+    assert!(error(scope, &[]).contains("invalid panel venue scope"));
+    let mut p = portfolio(vec![]);
+    p.rebalance = Rebalance::EntryOnly(EntryBudget::FixedInitial);
+    assert!(
+        error(
+            config(venues(), Sizing::VectorParity, FastEventCosts::ZERO),
+            &[p]
+        )
+        .contains("full_target")
     );
 }

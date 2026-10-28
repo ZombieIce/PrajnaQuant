@@ -9,8 +9,7 @@ PIT 公司行动事件由 Research Engine 排程，并随 ResultLevel 账本输�
 ## 使用契约
 
 ```text
-TradingAccount::new(currency, venue, initial_cash, VP allocations)
-TradingAccount::new_for_venues(currency, venues, initial_cash, VP allocations)
+TradingAccount::new(currency, venue, initial_cash, VP allocations) | new_for_venues(currency, venues, ...)
   submit_order(Order::new(id, VP, instrument, side, quantity, submitted_at))
   apply_fill(Fill::new(order, executed_at, raw_price, pricing, costs))
   apply_fee_settlement(ParityFeeSettlement::new(...))  # fee-only F8 leg, no trade
