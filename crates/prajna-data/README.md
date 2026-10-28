@@ -68,3 +68,6 @@ production publisher and cover revisions, invalid manifests, missing tables,
 an empty committed Dataset, pagination and read-only behavior; no real data is
 validated. Full fields,
 limits and compatibility: [Dataset preview contract](../../docs/contracts/dataset-preview-read.md).
+The local service exposes this reader at `/api/v1/datasets` and `/datasets`
+with an explicit `serve --dataset-root`; configuration and synthetic checks are
+in [the API guide](../../docs/api.md#已发布研究-dataset-预览).

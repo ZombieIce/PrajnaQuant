@@ -32,6 +32,8 @@ use tower_http::{
 };
 use uuid::Uuid;
 
+#[path = "dataset_api.rs"]
+mod dataset_api;
 #[path = "market_api.rs"]
 mod market_api;
 #[path = "run_jobs.rs"]
@@ -65,6 +67,16 @@ pub async fn serve(
     market_data_dir: PathBuf,
     web_dist: PathBuf,
 ) -> Result<()> {
+    serve_with_dataset_root(address, output, market_data_dir, web_dist, None).await
+}
+
+pub async fn serve_with_dataset_root(
+    address: &str,
+    output: PathBuf,
+    market_data_dir: PathBuf,
+    web_dist: PathBuf,
+    dataset_root: Option<PathBuf>,
+) -> Result<()> {
     let socket = validate_loopback_address(address)?;
     let output = Arc::new(output);
     let state = AppState {
@@ -96,6 +108,7 @@ pub async fn serve(
         .with_state(state)
         .merge(run_jobs.router())
         .merge(market_api::router(Arc::new(market_data_dir)))
+        .merge(dataset_api::router(dataset_root))
         .layer(CorsLayer::permissive());
     let app = api.fallback_service(
         ServeDir::new(&web_dist)

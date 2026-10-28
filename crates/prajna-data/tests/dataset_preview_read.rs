@@ -688,3 +688,55 @@ fn committed_row_count_mismatch_is_not_listed_as_usable() {
     let (_, error) = preview_failure(&root, &["show", "--dsv", &dsv], 1);
     assert_eq!(error["error"]["code"], "invalid_dataset_table");
 }
+
+/// Explicit opt-in exporter for production HTTP/browser checks; synthetic only.
+#[test]
+#[ignore = "writes synthetic fixture to an explicitly selected empty local root"]
+fn export_synthetic_preview_fixture() {
+    let root = std::path::PathBuf::from(
+        std::env::var_os("PRAJNA_PREVIEW_FIXTURE_ROOT").expect("explicit fixture root"),
+    );
+    assert!(!root.exists(), "fixture root must not already exist");
+    let input = root.join("input");
+    let lake = root.join("lake");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("synthetic-preview-fixture"), "synthetic only\n").unwrap();
+    for (receipt, symbol, venue, kind, close, lifecycle) in [
+        (
+            "etf.json",
+            "510300",
+            "XSHG",
+            InstrumentKind::Etf,
+            "11.123",
+            Lifecycle::Known,
+        ),
+        (
+            "stock.json",
+            "000001",
+            "XSHE",
+            InstrumentKind::Equity,
+            "9.875",
+            Lifecycle::Unknown,
+        ),
+    ] {
+        publish(
+            &input,
+            &lake,
+            &Publication {
+                receipt,
+                symbol,
+                venue,
+                kind,
+                close,
+                lifecycle,
+            },
+        );
+    }
+    assert_eq!(
+        preview_json(&lake, &["catalog"])["datasets"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
