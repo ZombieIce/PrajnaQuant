@@ -10,10 +10,12 @@ const StrategyDetail = lazy(() => import('./pages/StrategyDetail'));
 const UniverseDirectory = lazy(() => import('./pages/UniverseDirectory'));
 const DatasetPage = lazy(() => import('./pages/DatasetPage'));
 const MarketPage = lazy(() => import('./pages/MarketPage'));
+const BacktestsPage = lazy(() => import('./pages/BacktestsPage'));
 
 function Page() {
   const path = location.pathname;
-  const route = path === '/datasets' ? <DatasetPage />
+  const route = path === '/backtests' ? <BacktestsPage />
+    : path === '/datasets' ? <DatasetPage />
     : path === '/market' ? <MarketPage />
     : path === '/factors' ? <FactorDirectory />
     : path.startsWith('/factors/') ? <FactorDetail />

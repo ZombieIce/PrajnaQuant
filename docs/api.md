@@ -29,7 +29,7 @@
 | Universe | GET /api/v1/universes/{id}/members?version_id=&as_of= | Implemented；指定版本/日期，决策截止上海时间 15:00；无历史 provider 时返回空成员、unknown/gaps 和警告 |
 | Universe | GET /api/v1/universes/{id}/coverage?version_id=&start=&end= | Implemented；分别返回成员覆盖与行情覆盖。行情从最新且 manifest SHA-256 校验通过的 ETF Parquet 快照逐证券审计，包含行数、日期范围、缺失日、重复日与 OHLC 异常；快照 ID/hash 一并返回。若快照含 hash 校验通过的 `trading_calendar.parquet`，按完整自然月深交所官方开市日识别成员共同缺日，并返回 `calendar_snapshot` 与 `calendar_status`。无旁车/请求范围日历不全时不推断闭市，日历状态为 `unverified`/`gaps`；该来源尚未与上交所官方日历独立对拍。手工成员仍标 `retrospective_static`，并附能力阻断原因 |
 
-未实现：上交所日历独立交叉核验、可信历史指数成员 provider、POST /api/v1/runs、运行状态/异步队列、网页发起新运行、股票因子/策略运行、batch 查询路由、实验/Universe 完整 cursor 分页、独立成交/仓位/时序查询、计算基准/超额指标 API。前端“新运行”面板仍禁用并标记 API/能力未就绪；Universe 管理和已保存结果筛选已连接上述 CRUD/结果 API，不生成模拟 Universe 或假报告。Universe API 配置存放在输出目录 universes/<id>.json，由服务进程写锁和原子替换保护，不写 DuckDB。同目录的 `<sha256>.json` 内容寻址 StaticUniverse 属于另一命名空间：注册表只解析 `<uuid>.json`，坏 `<uuid>.json` 仍按存储错误返回 500。
+未实现：上交所日历独立交叉核验、可信历史指数成员 provider、POST /api/v1/runs、股票因子/策略运行、batch 查询路由、实验/Universe 完整 cursor 分页、独立成交/仓位/时序查询、计算基准/超额指标 API。旧 `RunJobsPanel` 的可信历史运行提交仍禁用；T01 异步任务状态/队列已实现，`/backtests` 已接通单 ETF 买入持有提交与结果读取（见下节），其余网页发起研究运行仍无生产入口。Universe 管理和已保存结果筛选已连接上述 CRUD/结果 API，不生成模拟 Universe 或假报告。Universe API 配置存放在输出目录 universes/<id>.json，由服务进程写锁和原子替换保护，不写 DuckDB。同目录的 `<sha256>.json` 内容寻址 StaticUniverse 属于另一命名空间：注册表只解析 `<uuid>.json`，坏 `<uuid>.json` 仍按存储错误返回 500。
 
 Universe 管理页默认用普通序号显示版本并隐藏 ID/哈希；折叠的技术信息仍可用于排查。归档保留 Universe、已发布版本和历史结果关联，禁止继续编辑/发布；未发布的空草稿才会物理删除。
 
@@ -82,3 +82,9 @@ PRAJNA_PREVIEW_FIXTURE_ROOT=/tmp/preview-synthetic \
 ```
 
 该脚本只复用已安装工具并要求合成 fixture 标记；可选 `PRAJNA_PREVIEW_SCREENSHOT_PREFIX` 将截图留本机。它核对两个版本的证券/生命周期、缺口、原始 Bars、空范围与刷新，并验证外部合成页面即使拥有临时本地网络权限仍不能读取 Dataset API；T04 仍负责浏览器测试框架及完整任务闭环。
+
+## 单 ETF 回测页（T04d）
+
+`/backtests` 复用已实现接口形成产品闭环：`GET /api/v1/datasets` 选择已发布 DSV，`GET /api/v1/datasets/{dsv}` 列出该版本 ETF，`POST /api/v1/tasks/selections` 以 `strategy: buy_and_hold`、`result_level: standard` 经 `prajna-freeze-selection` 冻结定义并进入 T01 串行任务；页面轮询 `GET /api/v1/tasks/experiments/{id}` 显示持久 `queued/running/succeeded/failed/interrupted` 与 stage，成功后用 `GET /api/v1/tasks/experiments/{id}/result` 读取 T04a envelope 的 Summary 与已保存 NAV/权益表。任务 id 保留在 URL `?task=`，刷新或从“最近任务”重开会重新读取任务与结果，不依赖内存成功态。失败/中断显示持久 `error.code/message`；结果 hash 校验失败显示 `experiment_result_failed`；缺表、未完成或未知状态不显示为成功、零交易或零值。页面只提交单 ETF，不继承旧三只/61 Session/成交额门槛；数值来自 Rust Summary/Series，浏览器不重算绩效，也不把 Summary 的累计成本率称现金费用。旧 `/api/v1/runs` 诊断面板与结果身份不变；本页不新增 HTTP 端点或 schema，也不引入新量化核心。
+
+本票只在合成 fixture 上验证（v2 固定状态买持、v1 缺状态失败、损坏已保存表、刷新/重开与旧 `/runs` 兼容），真实行情、真实服务重启中断、浏览器性能和参数扫描不在范围；运行方式见 [E2E 说明](../apps/web/e2e/README.md)。
