@@ -8,6 +8,7 @@ use prajna_experiment::{
     ExecutionIdentity, Experiment, ExperimentError, ResultLevel, RunStatus, WorkerCommand,
     diff_executions, opening_evidence,
     pit::{PitContext, PitInput},
+    read_persisted_result,
 };
 use prajna_research::{
     mvp6_coverage::format_percent,
@@ -15,7 +16,7 @@ use prajna_research::{
 };
 use serde_json::json;
 
-const EXIT_CODES: &str = "Exit codes: 0 success; 1 I/O, provenance or execution failure; \
+const EXIT_CODES: &str = "Exit codes: 0 success; 1 I/O, provenance, execution or result read failure; \
 2 CLI, definition, expansion or invalid promotion request; 3 replay inconsistency; \
 4 diff contains differences; 5 diff across Experiments. Failed individual Runs are \
 recorded in the report and do not change exit code 0.";
@@ -59,6 +60,17 @@ enum Commands {
         #[arg(long)]
         lake: PathBuf,
     },
+    /// Read a persisted Execution result without executing or promoting it.
+    #[command(after_help = EXIT_CODES)]
+    Result {
+        exp: String,
+        exe: String,
+        #[arg(long)]
+        lake: PathBuf,
+        /// Restrict the envelope to one Run ID.
+        #[arg(long)]
+        run: Option<String>,
+    },
     /// Generate local @3 opening evidence from a frozen Dataset and Catalog,
     /// then validate it through the canonical PitContext path.
     Mvp6OpeningEvidence {
@@ -77,6 +89,12 @@ fn parse_level(value: &str) -> Result<ResultLevel, String> {
         "full" => Ok(ResultLevel::Full),
         _ => Err("level must be summary, standard or full".into()),
     }
+}
+
+fn is_identity(value: &str, prefix: &str) -> bool {
+    value
+        .strip_prefix(prefix)
+        .is_some_and(|hex| hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()))
 }
 
 fn error_code(error: &ExperimentError) -> u8 {
@@ -180,6 +198,30 @@ fn run(cli: Cli) -> Result<u8, (u8, String)> {
                 serde_json::to_string(&diff).map_err(|error| (1, error.to_string()))?
             );
             Ok(if changed { 4 } else { 0 })
+        }
+        Commands::Result {
+            exp,
+            exe,
+            lake,
+            run,
+        } => {
+            for (identity, prefix) in [(&exp, "exp:sha256:"), (&exe, "exe:sha256:")] {
+                if !is_identity(identity, prefix) {
+                    return Err((2, format!("expected {prefix} identity, got {identity}")));
+                }
+            }
+            if let Some(run_id) = &run {
+                if !is_identity(run_id, "run:sha256:") {
+                    return Err((2, format!("expected run:sha256: identity, got {run_id}")));
+                }
+            }
+            let result = read_persisted_result(&lake, &exp, &exe, run.as_deref())
+                .map_err(|error| (1, error.to_string()))?;
+            println!(
+                "{}",
+                serde_json::to_string(&result).map_err(|error| (1, error.to_string()))?
+            );
+            Ok(0)
         }
         Commands::Mvp6OpeningEvidence { input, lake, dsv } => {
             let mut definition: serde_json::Value =

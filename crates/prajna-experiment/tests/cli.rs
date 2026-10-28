@@ -106,6 +106,23 @@ impl Example {
         .unwrap()
     }
 
+    fn result(&self, exp: &str, exe: &str, args: &[&str]) -> Output {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_prajna-experiment"));
+        isolated(
+            command
+                .arg("result")
+                .arg(exp)
+                .arg(exe)
+                .arg("--lake")
+                .arg(&self.lake)
+                .args(args)
+                .current_dir(&self.repo),
+        )
+        .env("RAYON_NUM_THREADS", "2")
+        .output()
+        .unwrap()
+    }
+
     fn directory(&self, output: &Value) -> PathBuf {
         let hex = |key: &str| output[key].as_str().unwrap().rsplit(':').next().unwrap();
         self.lake
@@ -530,4 +547,181 @@ fn fast_event_cli_summary_promotes_and_verifies_saved_details_on_replay() {
     assert_eq!(fs::read(&fill_path).unwrap(), b"corrupt saved fills");
     fs::write(fill_path, original).unwrap();
     json_output(example.run(&[]), 0);
+}
+
+fn tree(root: &Path) -> Vec<(PathBuf, u64)> {
+    fn walk(path: &Path, items: &mut Vec<(PathBuf, u64)>) {
+        for entry in fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if entry.file_type().unwrap().is_dir() {
+                walk(&path, items);
+            } else {
+                items.push((path.clone(), fs::metadata(&path).unwrap().len()));
+            }
+        }
+    }
+    let mut items = Vec::new();
+    walk(root, &mut items);
+    items.sort();
+    items
+}
+
+#[test]
+fn result_reads_saved_standard_series_without_writing() {
+    let example = Example::new();
+    let first = json_output(example.run(&["--level", "standard", "--threads", "1"]), 0);
+    let exp = first["exp"].as_str().unwrap();
+    let exe = first["exe"].as_str().unwrap();
+    let directory = example.directory(&first);
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(directory.join("execution.json")).unwrap()).unwrap();
+    let run_ids = manifest["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|run| run["run_id"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(run_ids.len(), 2);
+    let before = tree(&example.lake);
+
+    let result = json_output(example.result(exp, exe, &[]), 0);
+    assert_eq!(result["schema_version"], 1);
+    assert_eq!(result["data"]["exp"], exp);
+    assert_eq!(result["data"]["exe"], exe);
+    assert_eq!(result["data"]["default_result_level"], "standard");
+    let runs = result["data"]["runs"].as_array().unwrap();
+    assert_eq!(runs.len(), 2);
+    for (run, run_id) in runs.iter().zip(&run_ids) {
+        assert_eq!(run["run_id"], *run_id);
+        assert_eq!(run["status"], "completed");
+        assert!(run["summary"].is_object());
+        assert_eq!(run["series"]["sessions"].as_array().unwrap().len(), 252);
+        assert!(
+            run["tables"]["saved"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|table| table == "sessions")
+        );
+        assert!(
+            run["tables"]["not_produced_by_engine"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|table| table == "orders")
+        );
+    }
+
+    let (_, batches) = prajna_experiment::read_run_table(
+        &example.lake,
+        exp,
+        exe,
+        &run_ids[0],
+        prajna_experiment::ResultLevel::Standard,
+        "sessions",
+    )
+    .unwrap();
+    let payloads = batches[0]
+        .column_by_name("payload")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    let stored: Value = serde_json::from_str(payloads.value(0)).unwrap();
+    assert_eq!(
+        runs[0]["series"]["sessions"][0]["session_date"],
+        stored["session_date"]
+    );
+    assert_eq!(runs[0]["series"]["sessions"][0]["nav"], stored["nav"]);
+
+    let filtered = json_output(example.result(exp, exe, &["--run", run_ids[0].as_str()]), 0);
+    assert_eq!(filtered["data"]["runs"].as_array().unwrap().len(), 1);
+    assert_eq!(filtered["data"]["runs"][0]["run_id"], run_ids[0]);
+    assert_eq!(before, tree(&example.lake));
+}
+
+#[test]
+fn result_reports_summary_series_as_not_saved() {
+    let example = Example::new();
+    let first = json_output(example.run(&[]), 0);
+    let result = json_output(
+        example.result(
+            first["exp"].as_str().unwrap(),
+            first["exe"].as_str().unwrap(),
+            &[],
+        ),
+        0,
+    );
+    let run = &result["data"]["runs"][0];
+    assert_eq!(run["result_level"], "summary");
+    assert!(run["series"].as_object().unwrap().is_empty());
+    assert!(run["summary"].is_object());
+    assert!(
+        run["tables"]["not_saved"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|table| table == "sessions")
+    );
+}
+
+#[test]
+fn result_rejects_corrupted_saved_series() {
+    let example = Example::new();
+    let first = json_output(example.run(&["--level", "standard"]), 0);
+    let directory = example.directory(&first);
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(directory.join("execution.json")).unwrap()).unwrap();
+    let run_id = manifest["runs"][0]["run_id"].as_str().unwrap();
+    let path = directory
+        .join("runs")
+        .join(run_id.rsplit(':').next().unwrap())
+        .join("sessions.parquet");
+    fs::write(&path, b"not a parquet file").unwrap();
+
+    let output = example.result(
+        first["exp"].as_str().unwrap(),
+        first["exe"].as_str().unwrap(),
+        &[],
+    );
+    status(&output, 1);
+    assert!(output.stdout.is_empty());
+    assert!(!output.stderr.is_empty());
+}
+
+#[test]
+fn result_reads_fast_event_account_valuations() {
+    let example = Example::new();
+    example.write_definition(|value| {
+        value["engine"] = json!("fast_event");
+        value["fast_event"] = json!({"currency":"CNY","initial_cash":"100000","sizing":"lot","rebalance":"full_target","minimum_commission":"100","portfolios":[{"id":1,"capital":"100000"}],"lot_size_source":{"kind":"instrument"}});
+    });
+    let first = json_output(example.run(&["--level", "standard", "--threads", "1"]), 0);
+    let result = json_output(
+        example.result(
+            first["exp"].as_str().unwrap(),
+            first["exe"].as_str().unwrap(),
+            &[],
+        ),
+        0,
+    );
+    let run = &result["data"]["runs"][0];
+    assert_eq!(run["status"], "completed");
+    assert_eq!(run["result_level"], "standard");
+    assert_eq!(
+        run["series"]["account_valuations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        504
+    );
+    assert!(run["series"].as_object().unwrap().get("sessions").is_none());
+    assert!(
+        !run["tables"]["not_saved"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|table| table == "account_valuations")
+    );
 }

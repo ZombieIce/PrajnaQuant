@@ -258,6 +258,29 @@ pub fn read_run_table(
     Ok((schema, batches))
 }
 
+/// Read and identity-check a persisted Execution without executing or promoting.
+pub fn read_execution_manifest(
+    lake_root: impl AsRef<Path>,
+    experiment_id: &str,
+    execution_id: &str,
+) -> Result<ExecutionManifest, ResultReadError> {
+    for (identity, prefix) in [
+        (experiment_id, "exp:sha256:"),
+        (execution_id, "exe:sha256:"),
+    ] {
+        if !identity.starts_with(prefix) {
+            return Err(err(format!("expected {prefix} identity, got {identity}")).into());
+        }
+        identity_hex(identity)?;
+    }
+    let directory = execution_path(lake_root.as_ref(), experiment_id, execution_id)?;
+    let manifest = read_manifest_file(&directory.join("execution.json"))?;
+    if manifest.experiment_id != experiment_id || manifest.execution.id != execution_id {
+        return Err(err("stored Execution identity does not match the request").into());
+    }
+    Ok(manifest)
+}
+
 impl ResultLevel {
     fn tables(self) -> &'static [&'static str] {
         match self {
@@ -1740,7 +1763,7 @@ fn read_rows(path: &Path, table: &str) -> Result<Vec<(String, String)>, Experime
     Ok(rows)
 }
 
-fn cell_json(array: &dyn Array, row: usize, field: &Field) -> Option<Value> {
+pub(crate) fn cell_json(array: &dyn Array, row: usize, field: &Field) -> Option<Value> {
     if array.is_null(row) {
         return None;
     }

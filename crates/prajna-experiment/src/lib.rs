@@ -39,11 +39,13 @@ pub mod opening_evidence;
 pub mod pit;
 mod python;
 pub use python::{PreparedDecisions, PythonProvenance};
+mod result;
 mod storage;
 mod summary;
 mod worker;
 pub use accurate::{BackendDiagnostics, BackendFactory, ExperimentBackend};
 pub use engine::{ACCURATE_SEMANTIC_VERSION, BackendIdentity};
+pub use result::{RESULT_SCHEMA_VERSION, read_persisted_result};
 pub use storage::{
     ExecutionDiff, InvocationStatistics, ResultLevel, ResultReadError, StoreAction,
     StoredExecution, diff_executions, read_run_table,

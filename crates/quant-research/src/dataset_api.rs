@@ -25,29 +25,45 @@ pub fn router(root: Option<PathBuf>, authority: String) -> Router {
             .map(PathBuf::from)
             .unwrap_or_else(|| "prajna-preview-dataset".into()),
     })
-    .layer(middleware::from_fn_with_state(authority, local_page))
+    .layer(middleware::from_fn_with_state(
+        LocalPage::new(authority, "dataset_origin_forbidden"),
+        local_page,
+    ))
 }
 
-async fn local_page(
-    State(authority): State<String>,
+#[derive(Clone)]
+pub(super) struct LocalPage {
+    authority: String,
+    code: &'static str,
+}
+
+impl LocalPage {
+    pub(super) fn new(authority: String, code: &'static str) -> Self {
+        Self { authority, code }
+    }
+}
+
+pub(super) async fn local_page(
+    State(state): State<LocalPage>,
     request: Request<Body>,
     next: Next,
 ) -> Response {
+    let authority = &state.authority;
     let headers = request.headers();
-    let default_authority = authority.strip_suffix(":80").unwrap_or(&authority);
+    let default_authority = authority.strip_suffix(":80").unwrap_or(authority);
     let origin = format!("http://{default_authority}");
     let host = headers
         .get(header::HOST)
         .and_then(|value| value.to_str().ok());
-    if !matches!(host, Some(value) if value == authority || value == default_authority)
+    if !matches!(host, Some(value) if value == authority.as_str() || value == default_authority)
         || headers
             .get(header::ORIGIN)
             .is_some_and(|value| value != origin.as_str())
     {
         return failure(
             StatusCode::FORBIDDEN,
-            "dataset_origin_forbidden",
-            "Dataset preview is restricted to the configured local workbench origin.",
+            state.code,
+            "This local route is restricted to the configured workbench origin.",
         );
     }
     let mut response = next.run(request).await;

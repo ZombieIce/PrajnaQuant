@@ -88,6 +88,7 @@ pub async fn serve_with_dataset_root(
         output: output.clone(),
     };
     let run_jobs = run_jobs::RunJobApi::start(output.as_ref().clone(), state.universes.clone());
+    let experiment_results = run_jobs.clone().result_router(socket.to_string());
     let api = Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/signals", get(signals))
@@ -113,7 +114,8 @@ pub async fn serve_with_dataset_root(
         .merge(run_jobs.router())
         .merge(market_api::router(Arc::new(market_data_dir)))
         .layer(CorsLayer::permissive())
-        .merge(dataset_api::router(dataset_root, socket.to_string()));
+        .merge(dataset_api::router(dataset_root, socket.to_string()))
+        .merge(experiment_results);
     let app = api.fallback_service(
         ServeDir::new(&web_dist)
             .append_index_html_on_directories(true)

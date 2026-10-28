@@ -7,7 +7,10 @@ prajna-experiment run <experiment.json> --lake <dir> [--level summary|standard|f
                       [--promote <run-id>...] [--threads N]
                       [--backend-python <python> --backend-worker <worker.py>]
 prajna-experiment diff <exe-a> <exe-b> --lake <dir>
+prajna-experiment result <exp> <exe> --lake <dir> [--run <run-id>]
 ```
+
+`result` 只读已保存的 Execution：校验实验/执行身份与结果表 hash，输出 `schema_version: 1` 的 Summary/NAV envelope；缺表保持 `not_saved` / `not_produced_by_engine`，不执行、不提升、不重算。字段、错误映射和 HTTP 适配见 [结果读取契约](../../docs/contracts/experiment-result-read.md)。
 
 `--level` 默认 `summary`；省略 `--threads` 时使用 Rayon 默认线程数（包括 `RAYON_NUM_THREADS`），显式值必须大于零。Accurate 中该数值表示 worker 进程池槽位；Backend 不在 Rayon 线程上执行。线程数、ResultLevel 和 worker 路径不进入身份。CLI 从当前 Git 工作树捕获代码来源；lake 和定义可以用任意绝对路径。脏工作树照常运行，`reproducible=false`。
 
@@ -153,8 +156,8 @@ Vector/Fast 日对拍见 [`prajna-research/tests/pit_s2.rs`](../prajna-research/
 | 退出码 | 含义 |
 | --- | --- |
 | 0 | 成功；个别 Run failed 仍完成 Execution，在报告中计数 |
-| 1 | I/O、来源捕获、执行/存储错误、Execution 不存在或身份格式错误 |
-| 2 | CLI 参数、定义/展开错误、非法提升请求 |
+| 1 | I/O、来源捕获、执行/存储错误、Execution 不存在、`result` 读取或 hash 错误 |
+| 2 | CLI 参数、定义/展开错误、非法身份格式或非法提升请求 |
 | 3 | 重放不一致或已保存结果损坏 |
 | 4 | 同 Experiment diff 有差异（stdout 保留差异 JSON） |
 | 5 | 跨 Experiment diff |
