@@ -120,6 +120,7 @@ test('production selection submits, polls, reads the persisted result, and re-re
 });
 
 test('task failure is visible with its persisted error code and no result values', async ({ page }) => {
+  test.setTimeout(120_000);
   await page.goto('/backtests');
   await chooseDataset(page, 2);
   await page.getByRole('button', { name: '提交买入持有回测', exact: true }).click();

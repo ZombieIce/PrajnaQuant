@@ -69,9 +69,11 @@ containing only the preview fixtures.
 `backtests.spec.ts` operates the production `/backtests` page: choose the v2 XSHG
 ETF, submit through `POST /api/v1/tasks/selections`, observe the persisted task
 become `succeeded`, read `GET /api/v1/tasks/experiments/{id}/result`, and assert
-the rendered valuation rows and summary values equal the persisted API values
-(including the hand-calculated 99,900 units, cash 500.44006 and close equity
-1,009,490.44006). It then reloads and reopens the task from the recent list,
+the rendered valuation rows equal the persisted result rows and the rendered
+total-return metric equals the persisted Summary `total_return` (including the
+hand-calculated 99,900 units, cash 500.44006, close equity 1,009,490.44006 and
+0.95% total return); the other rendered Summary metrics are not cross-checked by
+the spec. It then reloads and reopens the task from the recent list,
 corrupts the saved `account_valuations.parquet` to prove a failed result read is
 visible and restores it, and submits the v1 XSHG ETF to prove a real missing
 `execution_status` task failure is shown with its persisted error code and no
