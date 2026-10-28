@@ -102,3 +102,12 @@ range, first/last Bar, unit labels and warnings (for example a missing source).
   lifecycle, revisions, invalid manifests, missing tables, a committed Dataset
   with empty tables, pagination and read-only behavior. No real calendar, evidence, market coverage or Hash is
   validated or published by these tests.
+
+## Local HTTP/page adapter
+
+The local Axum service exposes catalog/detail/bars under `/api/v1/datasets`
+and a read-only `/datasets` page, restricted to its bound Host/HTTP Origin; external and opaque origins (including preflights) are rejected. It invokes this CLI over an argv subprocess
+boundary and preserves its versioned JSON envelope, decimal strings, Unknown
+states and missing quotes. `serve --dataset-root` is optional for compatibility;
+when absent the Dataset APIs explicitly return unavailable. It never falls back
+to old snapshot/output/archive roots. See [API configuration and synthetic checks](../api.md#已发布研究-dataset-预览).

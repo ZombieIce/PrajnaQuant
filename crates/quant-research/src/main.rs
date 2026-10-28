@@ -176,6 +176,9 @@ enum Command {
     Serve {
         #[arg(long, default_value = "research-output")]
         output: PathBuf,
+        /// Explicit independent research lake root; Dataset preview is unavailable when omitted.
+        #[arg(long)]
+        dataset_root: Option<PathBuf>,
         /// Directory containing the warehouse's immutable published daily snapshots.
         #[arg(long, default_value = "data-core")]
         market_data_dir: PathBuf,
@@ -498,7 +501,17 @@ async fn main() -> Result<()> {
             market_data_dir,
             address,
             web_dist,
-        } => server::serve(&address, output, market_data_dir, web_dist).await?,
+            dataset_root,
+        } => {
+            server::serve_with_dataset_root(
+                &address,
+                output,
+                market_data_dir,
+                web_dist,
+                dataset_root,
+            )
+            .await?
+        }
     }
     Ok(())
 }

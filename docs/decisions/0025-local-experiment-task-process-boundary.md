@@ -16,6 +16,10 @@ MVP-7 的本机研究任务需要复用既有数据、因子与 Experiment 能�
 - CLI 非零退出的本地失败详情保留退出码（或 Unix signal）及至多 16 KiB 的 UTF-8 替代解码 stderr，并以 `stderr_truncated` 标记超过字节上限。stderr 使用非阻塞读取；CLI 退出且进程组清理检查返回后，若后代仍持有 stderr，最多再读取 200 ms，超时以 `stderr_capture_incomplete` 明示，避免卡住共用串行队列。完整结构化 `RunError` 写入 `task.json`，经任务 GET 和进程重启后仍保留。若进程组所有权检查同时失败，外层错误报告清理失败，`details.cli_error` 保留完整 CLI 错误；重启再次清理时继续保留该嵌套错误，不重复累积。成功结果不包含 stderr；诊断只属于本机任务状态，不进入公开日志或仓库证据。
 - 服务恢复时，新任务的 `queued`、`running` 状态变为 `interrupted`，不自动重新排队；其幂等身份仍保留。终态任务保留其状态与结果。旧诊断 Run 的已排队恢复方式保持原样；旧 `running` Run 仍恢复为 `failed`，不复用新任务状态或身份。
 
+## 只读 Dataset 适配（#290）
+
+本机 Dataset API/页面复用同一进程边界原则：服务调用 `prajna-preview-dataset`，不直接依赖新平台 crate。显式 `--dataset-root` 与原有输出/行情根分开，未配置时不可用；只读 CLI 负责正式 Dataset 校验和数据口径，HTTP 保留其版本化 envelope，不发布或采集。具体配置、响应和错误映射见 [API](../api.md#已发布研究-dataset-预览) 与 [读取契约](../contracts/dataset-preview-read.md)。Dataset 路由不继承旧 permissive CORS，按实际绑定 Host/HTTP Origin 限定本机工作台，外部/opaque Origin（含预检）拒绝。旧 Experiment/诊断路由和结果身份保持既有契约。
+
 ## 后果与限制
 
 此边界只执行并读取 Summary 结果，不把新平台核心编译进旧服务，也不修改已有 Run/Experiment 结果。T01 尚不提供 HTTP 取消或重试端点；持久过程组身份与清理原语为后续取消路径提供服务端能力。进程检查与 CLI 诊断验证使用合成输入，不证明真实行情、策略收益或完整 MVP-7 产品流程；受限沙箱可能无法检查或终止子进程组，此时实现拒绝清理并明确报告未验证的所有权。
