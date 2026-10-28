@@ -45,10 +45,10 @@ mod summary;
 mod worker;
 pub use accurate::{BackendDiagnostics, BackendFactory, ExperimentBackend};
 pub use engine::{ACCURATE_SEMANTIC_VERSION, BackendIdentity};
-pub use result::{RESULT_SCHEMA_VERSION, read_persisted_result};
+pub use result::read_persisted_result;
 pub use storage::{
     ExecutionDiff, InvocationStatistics, ResultLevel, ResultReadError, StoreAction,
-    StoredExecution, diff_executions, read_run_table,
+    StoredExecution, diff_executions, promote_below_level, read_run_table,
 };
 pub use summary::{RunSummary, summarize};
 pub use worker::WorkerCommand;

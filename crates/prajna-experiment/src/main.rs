@@ -5,10 +5,10 @@ use std::{fs, num::NonZeroUsize, path::PathBuf, process::ExitCode, sync::Arc, ti
 use clap::{Parser, Subcommand};
 use prajna_data::RawStore;
 use prajna_experiment::{
-    ExecutionIdentity, Experiment, ExperimentError, ResultLevel, RunStatus, WorkerCommand,
-    diff_executions, opening_evidence,
+    ExecutionIdentity, Experiment, ExperimentError, ResultLevel, RunStatus, StoredExecution,
+    WorkerCommand, diff_executions, opening_evidence,
     pit::{PitContext, PitInput},
-    read_persisted_result,
+    promote_below_level, read_persisted_result,
 };
 use prajna_research::{
     mvp6_coverage::format_percent,
@@ -16,8 +16,8 @@ use prajna_research::{
 };
 use serde_json::json;
 
-const EXIT_CODES: &str = "Exit codes: 0 success; 1 I/O, provenance, execution or result read failure; \
-2 CLI, definition, expansion or invalid promotion request; 3 replay inconsistency; \
+const EXIT_CODES: &str = "Exit codes: 0 success; 1 I/O, provenance, execution, result read or diff identity failure; \
+2 CLI, definition, expansion, result identity or invalid promotion request; 3 replay inconsistency; \
 4 diff contains differences; 5 diff across Experiments. Failed individual Runs are \
 recorded in the report and do not change exit code 0.";
 
@@ -51,6 +51,18 @@ enum Commands {
         /// #139 stdio worker script; runtime path is excluded from Run identity.
         #[arg(long, requires = "backend_python")]
         backend_worker: Option<PathBuf>,
+    },
+    /// Promote every Run of the current Execution below --level to that level.
+    #[command(after_help = EXIT_CODES)]
+    Promote {
+        experiment: PathBuf,
+        #[arg(long)]
+        lake: PathBuf,
+        #[arg(long, value_parser = parse_level)]
+        level: ResultLevel,
+        /// Rayon threads, or Accurate worker-process slots; excluded from identity.
+        #[arg(long)]
+        threads: Option<NonZeroUsize>,
     },
     /// Compare two Executions from the same Experiment, aligned by Run Spec.
     #[command(after_help = EXIT_CODES)]
@@ -110,6 +122,33 @@ fn error_code(error: &ExperimentError) -> u8 {
     }
 }
 
+fn stored_output(
+    stored: StoredExecution,
+    threads: usize,
+    started: Instant,
+    definition_time_ms: u128,
+) -> serde_json::Value {
+    let statistics = stored.statistics;
+    json!({
+        "exp": stored.manifest.experiment_id,
+        "exe": stored.manifest.execution.id,
+        "reproducible": stored.manifest.execution.reproducible,
+        "run_count": stored.manifest.runs.len(),
+        "failed_count": stored.manifest.runs.iter().filter(|run| run.status == RunStatus::Failed).count(),
+        "action": stored.action,
+        "threads": threads,
+        "timings_ms": {
+            "definition": definition_time_ms,
+            "factors": statistics.factor_time_ms,
+            "runs": statistics.run_time_ms,
+            "total": started.elapsed().as_millis(),
+        },
+        "cache": {"compute_count": statistics.compute_count, "hit_count": statistics.cache_hit_count},
+        "written_bytes": statistics.written_bytes,
+        "written_files": statistics.written_files,
+    })
+}
+
 fn run(cli: Cli) -> Result<u8, (u8, String)> {
     match cli.command {
         Commands::Run {
@@ -156,26 +195,40 @@ fn run(cli: Cli) -> Result<u8, (u8, String)> {
                 experiment.promote(&lake, &repository, &identity.id, &promote, level, threads)
             }
             .map_err(|error| (error_code(&error), error.to_string()))?;
-            let statistics = stored.statistics;
-            let output = json!({
-                "exp": stored.manifest.experiment_id,
-                "exe": stored.manifest.execution.id,
-                "reproducible": stored.manifest.execution.reproducible,
-                "run_count": stored.manifest.runs.len(),
-                "failed_count": stored.manifest.runs.iter().filter(|run| run.status == RunStatus::Failed).count(),
-                "action": stored.action,
-                "threads": threads,
-                "timings_ms": {
-                    "definition": definition_time_ms,
-                    "factors": statistics.factor_time_ms,
-                    "runs": statistics.run_time_ms,
-                    "total": started.elapsed().as_millis(),
-                },
-                "cache": {"compute_count": statistics.compute_count, "hit_count": statistics.cache_hit_count},
-                "written_bytes": statistics.written_bytes,
-                "written_files": statistics.written_files,
-            });
-            println!("{output}");
+            println!(
+                "{}",
+                stored_output(stored, threads, started, definition_time_ms)
+            );
+            Ok(0)
+        }
+        Commands::Promote {
+            experiment,
+            lake,
+            level,
+            threads,
+        } => {
+            if level == ResultLevel::Summary {
+                return Err((2, "promotion requires --level standard or full".into()));
+            }
+            let started = Instant::now();
+            let definition =
+                fs::read_to_string(experiment).map_err(|error| (1, error.to_string()))?;
+            let experiment = Experiment::parse(&definition, &lake)
+                .map_err(|error| (error_code(&error), error.to_string()))?;
+            experiment
+                .expand(&lake)
+                .map_err(|error| (error_code(&error), error.to_string()))?;
+            let definition_time_ms = started.elapsed().as_millis();
+            let repository = std::env::current_dir().map_err(|error| (1, error.to_string()))?;
+            let threads = threads
+                .map(NonZeroUsize::get)
+                .unwrap_or_else(rayon::current_num_threads);
+            let stored = promote_below_level(&experiment, &lake, &repository, level, threads)
+                .map_err(|error| (error_code(&error), error.to_string()))?;
+            println!(
+                "{}",
+                stored_output(stored, threads, started, definition_time_ms)
+            );
             Ok(0)
         }
         Commands::Diff { exe_a, exe_b, lake } => {

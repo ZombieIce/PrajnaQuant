@@ -259,7 +259,7 @@ pub fn read_run_table(
 }
 
 /// Read and identity-check a persisted Execution without executing or promoting.
-pub fn read_execution_manifest(
+pub(crate) fn read_execution_manifest(
     lake_root: impl AsRef<Path>,
     experiment_id: &str,
     execution_id: &str,
@@ -718,6 +718,58 @@ pub(super) fn promote(
         statistics,
         action: StoreAction::Promoted,
     })
+}
+
+/// Promote every Run of the current Execution that is below `level`.
+///
+/// The Experiment/Execution identity is captured from the current working
+/// directory exactly like `run`; the stored Execution is never recreated. A
+/// missing Execution is reported as an I/O/not-found error so callers can fall
+/// back to executing a new one.
+pub fn promote_below_level(
+    experiment: &Experiment,
+    lake_root: &Path,
+    repository: &Path,
+    level: ResultLevel,
+    threads: usize,
+) -> Result<StoredExecution, ExperimentError> {
+    if level == ResultLevel::Summary {
+        return Err(ExperimentError::InvalidDefinition(
+            "promotion requires standard or full".into(),
+        ));
+    }
+    let experiment_id = experiment.id()?;
+    let identity = ExecutionIdentity::capture(&experiment_id, repository)?;
+    let manifest =
+        read_execution_manifest(lake_root, &experiment_id, &identity.id).map_err(|error| {
+            ExperimentError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                error.to_string(),
+            ))
+        })?;
+    let run_ids = manifest
+        .runs
+        .iter()
+        .filter(|run| run.result_level < level)
+        .map(|run| run.run_id.clone())
+        .collect::<Vec<_>>();
+    let destination = execution_path(lake_root, &experiment_id, &identity.id)?;
+    if run_ids.is_empty() {
+        return Ok(StoredExecution {
+            manifest,
+            path: destination,
+            statistics: InvocationStatistics::default(),
+            action: StoreAction::Replayed,
+        });
+    }
+    experiment.promote(
+        lake_root,
+        repository,
+        &identity.id,
+        &run_ids,
+        level,
+        threads,
+    )
 }
 
 pub fn diff_executions(

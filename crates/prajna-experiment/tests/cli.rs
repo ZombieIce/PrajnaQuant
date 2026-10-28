@@ -123,6 +123,24 @@ impl Example {
         .unwrap()
     }
 
+    fn promote(&self, level: &str, args: &[&str]) -> Output {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_prajna-experiment"));
+        isolated(
+            command
+                .arg("promote")
+                .arg(&self.definition)
+                .arg("--lake")
+                .arg(&self.lake)
+                .arg("--level")
+                .arg(level)
+                .args(args)
+                .current_dir(&self.repo),
+        )
+        .env("RAYON_NUM_THREADS", "2")
+        .output()
+        .unwrap()
+    }
+
     fn directory(&self, output: &Value) -> PathBuf {
         let hex = |key: &str| output[key].as_str().unwrap().rsplit(':').next().unwrap();
         self.lake
@@ -724,4 +742,91 @@ fn result_reads_fast_event_account_valuations() {
             .iter()
             .any(|table| table == "account_valuations")
     );
+}
+
+#[test]
+fn promote_command_upgrades_an_existing_summary_execution() {
+    let example = Example::new();
+    let summary = json_output(example.run(&[]), 0);
+    let promoted = json_output(example.promote("standard", &[]), 0);
+    assert_eq!(promoted["exp"], summary["exp"]);
+    assert_eq!(promoted["exe"], summary["exe"]);
+    assert_eq!(promoted["action"], "promoted");
+
+    let result = json_output(
+        example.result(
+            summary["exp"].as_str().unwrap(),
+            summary["exe"].as_str().unwrap(),
+            &[],
+        ),
+        0,
+    );
+    assert_eq!(result["data"]["default_result_level"], "summary");
+    assert_eq!(result["data"]["runs"][0]["result_level"], "standard");
+    assert!(
+        result["data"]["runs"][0]["series"]["sessions"]
+            .as_array()
+            .is_some_and(|rows| !rows.is_empty())
+    );
+    let replay = json_output(example.promote("standard", &[]), 0);
+    assert_eq!(replay["exp"], summary["exp"]);
+    assert_eq!(replay["exe"], summary["exe"]);
+    assert_eq!(replay["action"], "replayed");
+}
+
+#[test]
+fn promote_requires_an_existing_execution_and_a_higher_level() {
+    let example = Example::new();
+    status(&example.promote("standard", &[]), 1);
+    json_output(example.run(&[]), 0);
+    status(&example.promote("summary", &[]), 2);
+}
+
+#[test]
+fn result_rejects_a_corrupted_non_nav_saved_table() {
+    let example = Example::new();
+    let first = json_output(example.run(&["--level", "standard"]), 0);
+    let directory = example.directory(&first);
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(directory.join("execution.json")).unwrap()).unwrap();
+    let run_id = manifest["runs"][0]["run_id"].as_str().unwrap();
+    let run_dir = directory
+        .join("runs")
+        .join(run_id.rsplit(':').next().unwrap());
+    fs::copy(
+        run_dir.join("sessions.parquet"),
+        run_dir.join("executions.parquet"),
+    )
+    .unwrap();
+
+    let output = example.result(
+        first["exp"].as_str().unwrap(),
+        first["exe"].as_str().unwrap(),
+        &[],
+    );
+    status(&output, 1);
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("executions"));
+}
+
+#[test]
+fn result_reports_missing_and_malformed_identities() {
+    let example = Example::new();
+    status(&example.result("exp:sha256:xyz", "exe:sha256:abc", &[]), 2);
+
+    let exp = format!("exp:sha256:{}", "a".repeat(64));
+    let exe = format!("exe:sha256:{}", "b".repeat(64));
+    let output = example.result(&exp, &exe, &[]);
+    status(&output, 1);
+    assert!(output.stdout.is_empty());
+
+    let first = json_output(example.run(&[]), 0);
+    let missing_run = format!("run:sha256:{}", "c".repeat(64));
+    let output = example.result(
+        first["exp"].as_str().unwrap(),
+        first["exe"].as_str().unwrap(),
+        &["--run", &missing_run],
+    );
+    status(&output, 1);
+    assert!(output.stdout.is_empty());
 }

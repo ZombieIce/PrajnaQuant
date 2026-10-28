@@ -13,17 +13,18 @@ use crate::{
 
 /// Version of the persisted-result JSON envelope. Additive fields may be added
 /// without changing this value; incompatible changes require a new version.
-pub const RESULT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const RESULT_SCHEMA_VERSION: u32 = 1;
 
-/// Tables that carry the saved NAV/equity series for Vector and Fast Event.
+/// Tables that carry the saved NAV/equity series for Vector and Fast/Accurate Event.
 const NAV_TABLES: [&str; 2] = ["sessions", "account_valuations"];
 
 /// Read a persisted Execution without executing, promoting or rewriting it.
 ///
-/// The returned envelope is `{schema_version, data}`. Every table is read
-/// through the storage hash-checked read path; unavailable tables stay explicit
-/// in `tables.not_saved` / `tables.not_produced_by_engine` instead of becoming
-/// empty or zero-valued series.
+/// The returned envelope is `{schema_version, data}`. Every table in the Run's
+/// saved `table_hashes` is opened and hash-verified through the storage read
+/// path; only Summary and NAV/equity payloads are returned. Unavailable tables
+/// stay explicit in `tables.not_saved` / `tables.not_produced_by_engine` instead
+/// of becoming empty or zero-valued series.
 pub fn read_persisted_result(
     lake_root: impl AsRef<Path>,
     experiment_id: &str,
@@ -64,22 +65,19 @@ fn run_view(
 ) -> Result<Value, ResultReadError> {
     let (summary, error) = summary_view(lake, experiment_id, execution_id, &run.run_id)?;
     let mut series = Map::new();
-    for table in NAV_TABLES {
-        if !run.table_hashes.contains_key(table) {
-            continue;
-        }
+    // Verify every saved table, including tables this envelope does not return.
+    for table in run.table_hashes.keys() {
         let (schema, batches) = read_run_table(
             lake,
             experiment_id,
             execution_id,
             &run.run_id,
-            ResultLevel::Standard,
+            run.result_level,
             table,
         )?;
-        series.insert(
-            table.to_owned(),
-            Value::Array(rows_json(&schema, &batches)?),
-        );
+        if NAV_TABLES.iter().any(|name| *name == table) {
+            series.insert(table.clone(), Value::Array(rows_json(&schema, &batches)?));
+        }
     }
     Ok(json!({
         "run_id": run.run_id,

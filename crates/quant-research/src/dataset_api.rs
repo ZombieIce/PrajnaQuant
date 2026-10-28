@@ -26,7 +26,11 @@ pub fn router(root: Option<PathBuf>, authority: String) -> Router {
             .unwrap_or_else(|| "prajna-preview-dataset".into()),
     })
     .layer(middleware::from_fn_with_state(
-        LocalPage::new(authority, "dataset_origin_forbidden"),
+        LocalPage::new(
+            authority,
+            "dataset_origin_forbidden",
+            "Dataset preview is restricted to the configured local workbench origin.",
+        ),
         local_page,
     ))
 }
@@ -35,11 +39,16 @@ pub fn router(root: Option<PathBuf>, authority: String) -> Router {
 pub(super) struct LocalPage {
     authority: String,
     code: &'static str,
+    message: &'static str,
 }
 
 impl LocalPage {
-    pub(super) fn new(authority: String, code: &'static str) -> Self {
-        Self { authority, code }
+    pub(super) fn new(authority: String, code: &'static str, message: &'static str) -> Self {
+        Self {
+            authority,
+            code,
+            message,
+        }
     }
 }
 
@@ -60,11 +69,7 @@ pub(super) async fn local_page(
             .get(header::ORIGIN)
             .is_some_and(|value| value != origin.as_str())
     {
-        return failure(
-            StatusCode::FORBIDDEN,
-            state.code,
-            "This local route is restricted to the configured workbench origin.",
-        );
+        return failure(StatusCode::FORBIDDEN, state.code, state.message);
     }
     let mut response = next.run(request).await;
     response.headers_mut().insert(

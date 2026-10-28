@@ -22,8 +22,10 @@ MVP-7 的本机研究任务需要复用既有数据、因子与 Experiment 能�
 
 ## 结果读取适配（#339）
 
-`succeeded` 新任务可通过 `GET /api/v1/tasks/experiments/{id}/result` 读取持久结果。服务从 `task.json` 的 `result.exp/exe` 调用 `prajna-experiment result <exp> <exe> --lake <output-root>`，只读 CLI 校验实验/执行身份和结果表 hash，返回 Summary 与已保存 NAV/权益序列的 `schema_version: 1` envelope。服务逐字节保留 envelope、不重算、不补零，并将该路由放在旧 permissive CORS 之外，按实际绑定 Host/HTTP Origin 限定本机工作台；任务不存在/未成功/结果损坏/CLI 不可用分别映射 404/409/500/503，协议异常 502。Success 响应 `no-store`。字段和限制见[结果读取契约](../contracts/experiment-result-read.md)。旧诊断 Run、旧任务 JSON 和旧 Summary 结果不变。
+`succeeded` 新任务可通过 `GET /api/v1/tasks/experiments/{id}/result` 读取持久结果。服务从 `task.json` 的 `result.exp/exe` 调用 `prajna-experiment result <exp> <exe> --lake <output-root>`，只读 CLI 校验实验/执行身份以及 manifest 中每一张已保存表的 hash，返回 Summary 与已保存 NAV/权益序列的 `schema_version: 1` envelope；不在返回 envelope 中的已保存表也验证，任一 hash 不符即失败。服务逐字节保留 envelope、不重算、不补零，并将该路由放在旧 permissive CORS 之外，按实际绑定 Host/HTTP Origin 限定本机工作台；任务不存在/未成功/结果损坏/CLI 不可用分别映射 404/409/500/503，协议异常 502。成功与错误响应均为 `no-store`。字段和限制见[结果读取契约](../contracts/experiment-result-read.md)。旧诊断 Run、旧任务 JSON 和旧 Summary 结果不变。
+
+`result_level: standard` 任务先调用 `prajna-experiment promote <experiment.json> --lake <output-root> --level standard`：已有 Summary Execution 时提升仍低于 Standard 的 Run，已达标时以 `action: replayed` 成功返回；没有当前 Execution 时回退到 `run ... --level standard`。`default_result_level` 保持 Execution 创建时的级别，重复 Standard 任务仍由 promote 的 no-op 路径处理。服务仍不直接依赖新平台 crate。
 
 ## 后果与限制
 
-此边界默认执行并读取 Summary 结果，显式请求时可执行 Standard 并读取已保存 NAV/权益表；不把新平台核心编译进旧服务，也不修改已有 Run/Experiment 结果。结果读取只覆盖 Summary 与 NAV 表，不提供 orders/fills/权重明细、分页或按需提升；T01 尚不提供 HTTP 取消或重试端点。T01 尚不提供 HTTP 取消或重试端点；持久过程组身份与清理原语为后续取消路径提供服务端能力。进程检查与 CLI 诊断验证使用合成输入，不证明真实行情、策略收益或完整 MVP-7 产品流程；受限沙箱可能无法检查或终止子进程组，此时实现拒绝清理并明确报告未验证的所有权。
+此边界默认执行并读取 Summary 结果，显式请求 Standard 时会提升已有 Summary Execution；不把新平台核心编译进旧服务，也不修改已有 Experiment 身份或结果表内容（提升会按已有的显式能力补写明细；manifest 的默认级别不改变）。结果读取验证所有已保存表 hash，但只返回 Summary 与 NAV/权益表，不提供 orders/fills/权重明细、分页或按需提升；T01 尚不提供 HTTP 取消或重试端点。持久过程组身份与清理原语为后续取消路径提供服务端能力。进程检查与 CLI 诊断验证使用合成输入，不证明真实行情、策略收益或完整 MVP-7 产品流程；受限沙箱可能无法检查或终止子进程组，此时实现拒绝清理并明确报告未验证的所有权。
