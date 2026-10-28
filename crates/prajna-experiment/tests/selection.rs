@@ -81,18 +81,17 @@ fn domestic_etf_stock_cli_freezes_real_parseable_defaults_and_reuses_universe() 
             json!({"initial_cash":"2000000","minimum_commission":"8","buy_slippage_bps":4.0});
         let (ok, changed) = cli(temp.path(), &edited);
         assert!(ok, "{changed}");
+        let changed_definition = &changed["data"]["definition"];
+        assert_eq!(changed_definition["universe"], definition["universe"]);
+        assert_eq!(changed_definition["fast_event"]["initial_cash"], "2000000");
         assert_eq!(
-            changed["data"]["definition"]["universe"],
-            definition["universe"]
-        );
-        assert_eq!(
-            changed["data"]["definition"]["fast_event"]["initial_cash"],
+            changed_definition["fast_event"]["portfolios"][0]["capital"],
             "2000000"
         );
-        assert_eq!(
-            changed["data"]["definition"]["costs"]["commission_rate"],
-            0.0003
-        );
+        assert_eq!(changed_definition["fast_event"]["minimum_commission"], "8");
+        assert_eq!(changed_definition["costs"]["buy_slippage_bps"], 4.0);
+        assert_eq!(changed_definition["costs"]["sell_slippage_bps"], 2.0);
+        assert_eq!(changed_definition["costs"]["commission_rate"], 0.0003);
     }
 }
 

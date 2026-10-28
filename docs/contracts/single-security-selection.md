@@ -49,9 +49,11 @@ Experiment 身份。同一 Universe 重复调用不重写其文件。后续 T05 
 改池时生成新的 Universe，不改写此处已保存文件。
 
 CLI 只新增 `universes/` 中的内容寻址文件及锁，不写行情、Raw、Dataset、结果或旧
-MVP-6 存档。通过证券证据后、定义解析前可能已保存一个可复用 Universe；定义失败
-不会产生任务或伪成功结果。默认版本/来源在本契约及成功 envelope 中说明；持久任务
-保存完整有效定义，不依赖未来默认值重建。
+MVP-6 存档。内容寻址文件名为 `<sha256>.json`，与旧用户 Universe 注册表共用目录；
+旧 `UniverseStore` 只读取/列出 `<uuid>.json`，因此 `GET /api/v1/universes` 不列这些
+文件，也不会因它们返回 500。通过证券证据后、定义解析前可能已保存一个可复用
+Universe；定义失败不会产生任务或伪成功结果。默认版本/来源在本契约及成功 envelope
+中说明；持久任务保存完整有效定义，不依赖未来默认值重建。
 
 ## HTTP
 
@@ -69,8 +71,10 @@ HTTP 成功为 `{task,created,selection}`，新任务 202，幂等复用 200；�
 级别、状态与结果继续保存在 `output/tasks/<id>/`，之后使用既有任务 GET/结果入口。
 同键不同冻结定义/级别返回 T01 的 409；队列满/非法键/非法级别沿用 T01 错误。
 CLI 输入/定义/venue 无效 400，Dataset/成员不存在 404，必要证据不足 422，
-根/可执行文件不可用 503，数据损坏或保存失败 500，CLI 协议不一致 502。
-本机 Host/Origin 边界复用 Dataset/结果路由，位于旧 permissive CORS 之外。
+根/可执行文件不可用 503，manifest/表损坏、读取或保存失败 500，CLI 协议不一致 502。
+错误按 `UniverseError`/`ExperimentError` 变体分类，不把 manifest、表、读取失败
+统一折叠为调用方 400；`MissingMembers` 按成员不存在处理。本机 Host/Origin 边界复用
+Dataset/结果路由，位于旧 permissive CORS 之外。
 
 ## 时间、手算与限制
 
@@ -100,7 +104,10 @@ python3.12 scripts/test-selection-http.py target/debug
 ```
 
 选择/错误测试用合成沪深 ETF/股票；成功 E2E 复用 #350 的沪深 ETF 状态 fixture
-并通过实际生产发布 CLI，不访问外部源。最后一个脚本真实启动生产
-HTTP 服务、冻结/执行 CLI、读取持久结果；身份与明细仅存在临时本机目录，终端只
-报告通过/失败；不提供把缺表失败当成功的验收模式。
+并通过实际生产发布 CLI，不访问外部源。单元测试覆盖逐项证券证据门禁分支和
+`UniverseError`/`ExperimentError` 的 400/500 分类；E2E 在真实选择后检查
+`GET /api/v1/universes` 仍为 200 且不列内容寻址文件，并逐一启动缺少/不匹配
+`--dataset-root` 的生产服务验证 503/409。最后一个脚本真实启动生产 HTTP 服务、
+冻结/执行 CLI、读取持久结果；身份与明细仅存在每次运行的临时本机目录，成功时删除，
+失败时保留并只在终端报告该临时路径；不提供把缺表失败当成功的验收模式。
 HTTP 单元测试的模拟 CLI 仅验证适配错误/持久化，不替代此 E2E。
