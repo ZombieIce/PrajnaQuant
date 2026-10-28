@@ -66,10 +66,9 @@ cd "$repo"
 定义用旧 `venue`（单 Venue，身份不变）或显式 `venues`（非空、无重复、合法 `VenueId`）之一；单元素归一化为
 `venue`，多 Venue 归一化为排序后的 `venues`。Run 只经 `load_panel_for_venues` 加载所选集合，要求每个 Venue
 有 Instrument/Session 且共享 Session 轴一致；缺 Venue/Instrument、日历不一致、Universe 成员不在所选
-Venue 或显式 lot 越界时整体失败，不静默选第一个 Venue。Run Spec 使用 T06b1 版本 `fast_event@13`
-（vector_parity）/`@14`（lot）与 `vector@10`，单 Venue 版本与旧身份/已保存结果不变。Accurate Event、
-adapter、PIT 与 Python 策略仍限单 Venue（多 Venue 仅非 PIT、价格收益、`full_target`）。契约见
-[ADR 0028](../../docs/decisions/0028-multi-venue-experiment-run.md)。
+Venue 或显式 lot 越界时整体失败，不静默选第一个 Venue。Run Spec 使用 `fast_event@13`（vector_parity）/
+`@14`（lot）与 `vector@10`；单 Venue 版本、旧身份与已保存结果不变。Accurate、adapter、PIT 与 Python
+策略仍限单 Venue（多 Venue 仅非 PIT、价格收益、`full_target`）。契约见 [ADR 0028](../../docs/decisions/0028-multi-venue-experiment-run.md)。
 
 ## MVP-6 离线 PIT S2（#177）
 

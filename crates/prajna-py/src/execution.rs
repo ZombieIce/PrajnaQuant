@@ -66,6 +66,12 @@ fn _run_python_experiment(
     };
     let definition: serde_json::Value = serde_json::from_str(&definition)
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    // Python strategies are single-Venue; Experiment::parse rejects a multi-Venue set.
+    let venue = experiment
+        .single_venue()
+        .ok_or_else(|| PyValueError::new_err("Python strategies require exactly one Venue"))?
+        .as_str()
+        .to_owned();
     let mut prepared = BTreeMap::new();
     let mut asof_view_ms = Vec::new();
     // Stage 1: no Rayon callbacks, each canonical/deduplicated Run serially under GIL.
@@ -81,7 +87,7 @@ fn _run_python_experiment(
             lake.to_str()
                 .ok_or_else(|| PyValueError::new_err("lake path must be UTF-8"))?,
             experiment.dsv(),
-            experiment.venue(),
+            &venue,
             members.clone(),
             strategy_json,
             decide.clone_ref(py),

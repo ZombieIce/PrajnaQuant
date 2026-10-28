@@ -1252,3 +1252,31 @@ fn multi_venue_accurate_event_and_adapter_reject_a_run() {
             .unwrap_err();
     assert!(error.to_string().contains("requires one Venue"), "{error}");
 }
+
+#[test]
+fn multi_venue_definition_boundaries_reject_mismatched_scope_and_python_strategy() {
+    let example = Example::multi_venue(None);
+    // The fixture Universe has an XSHE member, so selecting only XSHG must fail.
+    example.write_definition(|value| value["venues"] = json!(["XSHG"]));
+    let output = example.run(&[]);
+    status(&output, 2);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("does not belong to selected Venue(s) XSHG"),
+        "{stderr}"
+    );
+
+    // Python strategies stay single-Venue; the boundary rejects before host work.
+    example.write_definition(|value| {
+        value["venues"] = json!(["XSHG", "XSHE"]);
+        value["strategy"] = json!("research.rotation@1");
+    });
+    let output = example.run(&[]);
+    status(&output, 2);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Python strategies require exactly one Venue"),
+        "{stderr}"
+    );
+    assert!(!example.lake.join("experiments").exists());
+}

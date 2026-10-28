@@ -462,12 +462,6 @@ impl Experiment {
         }
     }
 
-    /// Historical single-Venue accessor used by the PIT/Python entries. A
-    /// multi-Venue definition has no single Venue, so this is empty there; such
-    /// definitions are rejected before those entries and callers use [`Self::venues`].
-    pub fn venue(&self) -> &str {
-        self.single_venue().map(VenueId::as_str).unwrap_or_default()
-    }
     pub fn pit_context(&self) -> Option<&pit::PitContext> {
         self.pit.as_deref()
     }
@@ -526,8 +520,7 @@ impl Experiment {
         spec
     }
 
-    /// Identity-bearing Run Spec base: single-Venue keeps the historical `venue`
-    /// field, multi-Venue carries the complete sorted `venues` set.
+    /// Identity-bearing Run Spec base; Venue scope uses the canonical spelling.
     pub(crate) fn run_spec_base(&self, strategy: Value) -> Value {
         let mut spec = serde_json::json!({
             "dsv": self.dsv,
@@ -682,8 +675,7 @@ impl Experiment {
                 .validate_against(lake_root, &self.dsv)
                 .map_err(|error| execution_error("validate Universe", error))?;
         }
-        // A missing Venue/Instrument or shared-axis disagreement is structural: it
-        // fails the whole invocation instead of silently choosing one Venue.
+        // Missing Venue/Instrument or a shared-axis disagreement is structural.
         let venues = self.venues.iter().cloned().collect::<Vec<_>>();
         let native_panel = load_panel_for_venues(lake_root, &self.dsv, &venues)
             .map_err(|error| execution_error("load shared Venue panel", error))?;
@@ -1171,8 +1163,7 @@ fn normalize_definition(
     normalized
 }
 
-/// Resolves the explicit Venue set: exactly one of the legacy `venue` spelling or
-/// the `venues` array, non-empty, duplicate-free and every element a valid VenueId.
+/// Resolves exactly one of the legacy `venue` spelling or the explicit `venues` set.
 fn parse_venues(input: &DefinitionInput) -> Result<BTreeSet<VenueId>, ExperimentError> {
     let declared = match (&input.venue, &input.venues) {
         (Some(_), Some(_)) => {
@@ -1201,8 +1192,7 @@ fn parse_venues(input: &DefinitionInput) -> Result<BTreeSet<VenueId>, Experiment
     Ok(set)
 }
 
-/// Writes the canonical identity-bearing Venue scope of a Definition or Run Spec:
-/// one Venue keeps the historical `venue` field, several use the sorted set.
+/// Writes the canonical Venue scope: one Venue keeps `venue`, several use the sorted set.
 fn write_venue_scope(value: &mut Value, venues: &BTreeSet<VenueId>) {
     if venues.len() == 1 {
         if let Some(venue) = venues.first() {
@@ -1515,25 +1505,6 @@ mod tests {
             manifest.dsv,
             universe.id().unwrap(),
         )
-    }
-
-    #[test]
-    fn universe_members_must_match_experiment_venue() {
-        let universe = StaticUniverse::new(
-            "mixed",
-            vec![
-                InstrumentId::new("AAA", VenueId::new("SYNTH").unwrap()).unwrap(),
-                InstrumentId::new("BBB", VenueId::new("OTHER").unwrap()).unwrap(),
-            ],
-        )
-        .unwrap();
-
-        assert!(
-            validate_universe_venue(&universe, &BTreeSet::from([VenueId::new("SYNTH").unwrap()]))
-                .unwrap_err()
-                .to_string()
-                .contains("does not belong to selected Venue")
-        );
     }
 
     #[test]

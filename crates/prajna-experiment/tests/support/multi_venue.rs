@@ -1,7 +1,5 @@
-//! Test-only synthetic multi-Venue Dataset and definitions for the production
-//! Experiment CLI/storage regression. It publishes through the real
-//! `publish_dataset` path with the production table builders; all values are
-//! synthetic.
+//! Test-only synthetic multi-Venue Dataset/definition for the production Experiment
+//! CLI regression; publishes through the real `publish_dataset` path. All synthetic.
 use std::{fmt::Display, path::Path};
 
 use chrono::NaiveDate;
@@ -23,11 +21,6 @@ const NORMALIZER_VERSION: &str = "1";
 const DATES: [&str; 3] = ["2026-01-05", "2026-01-06", "2026-01-07"];
 /// One synthetic ETF per Venue; both share the same synthetic open/close path.
 const INSTRUMENTS: [(&str, &str); 2] = [("600519", "XSHG"), ("000001", "XSHE")];
-
-pub struct Fixture {
-    pub dsv: String,
-    pub universe: String,
-}
 
 struct MultiVenueNormalizer;
 
@@ -163,10 +156,10 @@ impl Normalizer for MultiVenueNormalizer {
     }
 }
 
-/// Publishes the synthetic Dataset and stores a Static Universe over both Venues.
-/// `missing_xshe_session` drops one XSHE day to exercise the structural shared
-/// Session-axis failure.
-pub fn publish(lake: &Path, missing_xshe_session: Option<&str>) -> Fixture {
+/// Publishes the synthetic Dataset, stores a Static Universe over both Venues and
+/// writes the Fast Event definition used by the CLI/storage regression.
+/// `missing_xshe_session` drops one XSHE day to exercise the structural failure.
+pub fn prepare(lake: &Path, definition: &Path, missing_xshe_session: Option<&str>) {
     let store = RawStore::open(lake).expect("open synthetic lake");
     let raw = store
         .put(
@@ -204,19 +197,10 @@ pub fn publish(lake: &Path, missing_xshe_session: Option<&str>) -> Fixture {
         .to_vec();
     let universe = StaticUniverse::new("all", members).expect("synthetic Universe");
     universe.store(lake).expect("store synthetic Universe");
-    Fixture {
-        dsv: manifest.dsv,
-        universe: universe.id().expect("Universe identity"),
-    }
-}
-
-/// Fast Event `buy_and_hold` on both Venues: one equal-weight Decision at the
-/// first Session, executed at the next open with 1% commission.
-pub fn fast_event_definition(fixture: &Fixture) -> Value {
-    json!({
+    let value = json!({
         "experiment_version": 1,
-        "dsv": fixture.dsv,
-        "universe": fixture.universe,
+        "dsv": manifest.dsv,
+        "universe": universe.id().expect("Universe identity"),
         "venues": ["XSHG", "XSHE"],
         "strategy": "buy_and_hold",
         "engine": "fast_event",
@@ -231,15 +215,10 @@ pub fn fast_event_definition(fixture: &Fixture) -> Value {
             "minimum_commission": "0",
             "portfolios": [{"id": 1, "capital": "10000"}],
             "lot_size_source": {"kind": "instrument"}},
-    })
-}
-
-/// Writes the Fast Event definition used by the CLI/storage regression.
-pub fn prepare(lake: &Path, definition: &Path, missing_xshe_session: Option<&str>) {
-    let fixture = publish(lake, missing_xshe_session);
+    });
     std::fs::write(
         definition,
-        serde_json::to_vec_pretty(&fast_event_definition(&fixture)).expect("encode definition"),
+        serde_json::to_vec_pretty(&value).expect("encode"),
     )
     .expect("write definition");
 }

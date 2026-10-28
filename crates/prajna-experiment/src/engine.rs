@@ -448,7 +448,6 @@ impl EngineSettings {
             value["strategy"]["unfilled_entry"] = self.policy_name().into();
         }
         if self.venues.len() > 1 && self.fast.is_none() && self.backend.is_none() {
-            // Static multi-Venue Vector is the T06b1 weight summary, not a ledger.
             value["engine"] = serde_json::json!({
                 "kind": "vector",
                 "semantic_version": prajna_research::vector::MULTI_VENUE_SEMANTIC_VERSION,
