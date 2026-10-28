@@ -38,6 +38,7 @@ mod engine;
 pub mod opening_evidence;
 pub mod pit;
 mod python;
+pub mod selection;
 pub use python::{PreparedDecisions, PythonProvenance};
 mod result;
 mod storage;

@@ -355,3 +355,11 @@ fake 的原生账户显式为 unavailable，不伪造原生快照。
 
 
 正常 Fast Event `lot + full_target` 自 #275 使用 `fast_event@10`（行动 `@11`，terminal `@12`），目标基数为 pre-trade 现金＋证券估值，排除未支付应收，目标总和不足 1 不重新归一化。仍按整手、现金限量、最低佣金及实际成交费用执行；实际权重/成本率/换手率分母为总 NAV，lot 换手分子为实际成交本金。发放只转桶，后续正常调仓再投资。独立 retry、entry_only 与 Accurate 契约不扩展；历史结果不覆盖，旧 revision 重现旧行为。
+
+## 单证券冻结选择
+
+`prajna-freeze-selection --lake <LOCAL>` 从 stdin 读取固定 DSV/完整证券身份和
+`buy_and_hold` 选择，生成/复用单成员 StaticUniverse、显式 D7 成本与 Fast Event
+定义，并在返回前用 `Experiment::parse` 校验。默认配置 `mvp7-d7-simulation@1`；
+不是完整分红总回报或历史 PIT 声明。生产 HTTP 经此 CLI 提交既有 T01 任务，
+配置、响应、合成验证与限制见[冻结选择契约](../../docs/contracts/single-security-selection.md)。

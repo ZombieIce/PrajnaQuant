@@ -26,6 +26,10 @@ MVP-7 的本机研究任务需要复用既有数据、因子与 Experiment 能�
 
 `result_level: standard` 任务先调用 `prajna-experiment promote <experiment.json> --lake <output-root> --level standard`：已有 Summary Execution 时只提升仍低于 Standard 的 Completed Run（failed Run 保持原级别，不阻塞），没有可提升的 Completed Run 时以 `action: replayed` 成功返回（含全 failed，任务 succeeded 并保留 failed_count；返回前仍校验 Summary/已保存表，损坏则失败）；选中 Completed Run 在重放中失败则整批中止、不发布 partial 表。没有当前 Execution（目录不存在，promote exit 6）时才回退到 `run ... --level standard`；Execution 目录存在但 manifest 缺失/损坏、no-op 校验失败或其他 promote 失败都不回退。`default_result_level` 保持 Execution 创建时的级别，重复 Standard 任务仍由 promote 的 no-op 路径处理。服务仍不直接依赖新平台 crate。
 
+## 冻结选择适配（#340）
+
+`POST /api/v1/tasks/selections` 调用独立 `prajna-freeze-selection` CLI，从固定 DSV/证券冻结显式 buy-and-hold 定义后复用原 T01 提交，服务仍不编译新平台 crate。提交要求 dataset-root 与 output canonicalize 相同，避免 T01 的 `--lake <output>` 读取另一数据根；不复制/迁移 Dataset。默认版本、选择证据与拒绝条件、响应及原始价格研究限制见[契约](../contracts/single-security-selection.md)。新路由按本机 Host/Origin 限定，位于旧 permissive CORS 外；原任务接口/身份和旧诊断保持不变。
+
 ## 后果与限制
 
 此边界默认执行并读取 Summary 结果，显式请求 Standard 时会提升已有 Summary Execution；不把新平台核心编译进旧服务，也不修改已有 Experiment 身份或结果表内容（提升会按已有的显式能力补写明细；manifest 的默认级别不改变）。结果读取验证所有已保存表 hash，但只返回 Summary 与 NAV/权益表，不提供 orders/fills/权重明细、分页或按需提升；T01 尚不提供 HTTP 取消或重试端点。持久过程组身份与清理原语为后续取消路径提供服务端能力。进程检查与 CLI 诊断验证使用合成输入，不证明真实行情、策略收益或完整 MVP-7 产品流程；受限沙箱可能无法检查或终止子进程组，此时实现拒绝清理并明确报告未验证的所有权。
