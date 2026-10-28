@@ -28,6 +28,18 @@ const RETURN_TOLERANCE: f64 = 1e-12;
 pub const PIT_SIZING_SEMANTIC_VERSION: &str = "vector@7";
 pub const CORPORATE_ACTION_PIT_SIZING_SEMANTIC_VERSION: &str = "vector@8";
 pub const TERMINAL_SETTLEMENT_PIT_SIZING_ENGINE_VERSION: &str = "vector@9";
+/// Static multi-Venue Vector consumes the shared XSHG/XSHE Session axis.
+pub const MULTI_VENUE_SEMANTIC_VERSION: &str = "vector@10";
+
+fn is_multi_venue(panel: &Panel) -> bool {
+    panel
+        .instruments
+        .iter()
+        .map(|instrument| instrument.venue())
+        .collect::<BTreeSet<_>>()
+        .len()
+        > 1
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct VectorCosts {
@@ -270,6 +282,9 @@ pub fn run_vector_pit(
     if initial_capital <= Notional::ZERO {
         return Err(invalid_input("PIT initial_capital must be positive"));
     }
+    if is_multi_venue(panel) {
+        return Err(invalid_input("PIT Vector requires one Venue"));
+    }
     crate::pit_strategy::validate_execution_panel(panel, market)
         .map_err(|e| invalid_input(e.to_string()))?;
     run_vector_inner(
@@ -297,6 +312,9 @@ pub fn run_vector_pit_with_actions(
     if initial_capital <= Notional::ZERO {
         return Err(invalid_input("PIT initial_capital must be positive"));
     }
+    if is_multi_venue(panel) {
+        return Err(invalid_input("PIT Vector requires one Venue"));
+    }
     crate::pit_strategy::validate_execution_panel(panel, market)
         .map_err(|e| invalid_input(e.to_string()))?;
     run_vector_inner(
@@ -323,6 +341,9 @@ pub fn run_vector_pit_with_terminal_settlement(
 ) -> Result<VectorResult, VectorError> {
     if initial_capital <= Notional::ZERO {
         return Err(invalid_input("PIT initial_capital must be positive"));
+    }
+    if is_multi_venue(panel) {
+        return Err(invalid_input("PIT Vector requires one Venue"));
     }
     crate::pit_strategy::validate_execution_panel(panel, market)
         .map_err(|e| invalid_input(e.to_string()))?;
@@ -1224,6 +1245,12 @@ fn run_vector_inner(
                 .into(),
         );
     }
+    if pit.is_none() && is_multi_venue(panel) {
+        assumptions.push(
+            "Cross-Venue shared Session axis; Vector is a weight summary, not a cash ledger."
+                .into(),
+        );
+    }
     if terminal_settlement.is_some() {
         assumptions.push(
             "Normal execution at the final in-lifecycle Bar open remains allowed; remaining Catalog-terminal positions settle at that session's raw Bar close without using actual liquidation cash or date."
@@ -1232,16 +1259,22 @@ fn run_vector_inner(
     }
     Ok(VectorResult {
         pit_initial_capital: pit.map(|(_, _, capital)| capital),
-        semantic_version: pit.map(|_| {
-            if terminal_settlement.is_some() {
-                TERMINAL_SETTLEMENT_PIT_SIZING_ENGINE_VERSION
-            } else if actions.is_some() {
-                CORPORATE_ACTION_PIT_SIZING_SEMANTIC_VERSION
-            } else {
-                PIT_SIZING_SEMANTIC_VERSION
-            }
-            .to_owned()
-        }),
+        semantic_version: if pit.is_some() {
+            Some(
+                if terminal_settlement.is_some() {
+                    TERMINAL_SETTLEMENT_PIT_SIZING_ENGINE_VERSION
+                } else if actions.is_some() {
+                    CORPORATE_ACTION_PIT_SIZING_SEMANTIC_VERSION
+                } else {
+                    PIT_SIZING_SEMANTIC_VERSION
+                }
+                .to_owned(),
+            )
+        } else if is_multi_venue(panel) {
+            Some(MULTI_VENUE_SEMANTIC_VERSION.to_owned())
+        } else {
+            None
+        },
         sessions: result_sessions,
         decisions: result_decisions,
         executions: result_executions,

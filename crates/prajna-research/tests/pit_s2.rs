@@ -12,7 +12,7 @@ use prajna_research::{
     strategy::{ExecutionEvent, UnfilledEntry},
     vector::{VectorCosts, run_vector_pit},
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[test]
 fn three_etf_ten_session_hand_golden_and_daily_parity() {
@@ -61,7 +61,7 @@ fn three_etf_ten_session_hand_golden_and_daily_parity() {
     }];
     let mut config = FastEventConfig {
         currency: "CNY".parse().unwrap(),
-        venue: "SZSE".parse().unwrap(),
+        venues: BTreeSet::from(["SZSE".parse().unwrap()]),
         initial_cash: "10000".parse().unwrap(),
         sizing: Sizing::Lot,
         costs: FastEventCosts {
@@ -322,7 +322,7 @@ fn risk_exit_is_independent_of_cadence_preserves_other_quantity_and_never_reente
     ];
     let config = FastEventConfig {
         currency: "CNY".parse().unwrap(),
-        venue: "SZSE".parse().unwrap(),
+        venues: BTreeSet::from(["SZSE".parse().unwrap()]),
         initial_cash: "10000".parse().unwrap(),
         sizing: Sizing::VectorParity,
         costs: FastEventCosts {
@@ -436,7 +436,7 @@ fn upper_limit_skips_only_buys_and_lower_limit_defers_required_sells() {
     }];
     let config = FastEventConfig {
         currency: "CNY".parse().unwrap(),
-        venue: "SZSE".parse().unwrap(),
+        venues: BTreeSet::from(["SZSE".parse().unwrap()]),
         initial_cash: "10000".parse().unwrap(),
         sizing: Sizing::VectorParity,
         costs: FastEventCosts::ZERO,
@@ -507,7 +507,7 @@ fn last_close_risk_notice_remains_pending_without_fabricated_fill() {
     }];
     let config = FastEventConfig {
         currency: "CNY".parse().unwrap(),
-        venue: "SZSE".parse().unwrap(),
+        venues: BTreeSet::from(["SZSE".parse().unwrap()]),
         initial_cash: "10000".parse().unwrap(),
         sizing: Sizing::VectorParity,
         costs: FastEventCosts::ZERO,

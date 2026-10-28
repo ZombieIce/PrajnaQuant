@@ -1,6 +1,6 @@
 mod common;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{Datelike, Duration, NaiveDate};
 use prajna_account::{Side, VirtualPortfolioId};
@@ -687,7 +687,7 @@ fn compare_fills(
 fn config(panel: &Panel, sizing: Sizing) -> FastEventConfig {
     FastEventConfig {
         currency: Currency::new("CNY").unwrap(),
-        venue: VenueId::new("SYNTH").unwrap(),
+        venues: BTreeSet::from([VenueId::new("SYNTH").unwrap()]),
         initial_cash: "100000".parse().unwrap(),
         sizing,
         costs: FastEventCosts {

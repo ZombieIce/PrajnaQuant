@@ -295,10 +295,10 @@ impl EngineSettings {
                 .currency
                 .parse::<Currency>()
                 .map_err(|e| invalid(e.to_string()))?,
-            venue: input
+            venues: BTreeSet::from([input
                 .venue
                 .parse()
-                .map_err(|e| invalid(format!("invalid Venue: {e}")))?,
+                .map_err(|e| invalid(format!("invalid Venue: {e}")))?]),
             initial_cash,
             sizing,
             costs: FastEventCosts {
