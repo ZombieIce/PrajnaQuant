@@ -61,6 +61,15 @@ cd "$repo"
 
 新 Execution 保存于 `<lake>/experiments/<exp-hex>/executions/<exe-hex>/`。Summary 不创建 `runs/`。Vector Standard 添加 `sessions`、`executions`、`corporate_actions`；启用终止结算语义时另保存 `terminal_settlements`；Full 再添加权重、排名及 pending 表。没有公司行动的运行仍保存空的 `corporate_actions` 表。每 Run 的 manifest 区分未保存与 Engine 不产生的表；不把缺表解释为零。
 
+## 多 Venue（沪深同池）Experiment（#347）
+
+定义用旧 `venue`（单 Venue，身份不变）或显式 `venues`（非空、无重复、合法 `VenueId`）之一；单元素归一化为
+`venue`，多 Venue 归一化为排序后的 `venues`。Run 只经 `load_panel_for_venues` 加载所选集合，要求每个 Venue
+有 Instrument/Session 且共享 Session 轴一致；缺 Venue/Instrument、日历不一致、Universe 成员不在所选
+Venue 或显式 lot 越界时整体失败，不静默选第一个 Venue。Run Spec 使用 `fast_event@13`（vector_parity）/
+`@14`（lot）与 `vector@10`；单 Venue 版本、旧身份与已保存结果不变。Accurate、adapter、PIT 与 Python
+策略仍限单 Venue（多 Venue 仅非 PIT、价格收益、`full_target`）。契约见 [ADR 0028](../../docs/decisions/0028-multi-venue-experiment-run.md)。
+
 ## MVP-6 离线 PIT S2（#177）
 
 新增、显式选择 `strategy: "s2_pit_rotation"`；旧 `s2_rotation`、Static Universe、

@@ -253,6 +253,10 @@ impl PitContext {
         combinations: &[Value],
         panel: &Panel,
     ) -> Result<Vec<ExpandedRun>, ExperimentError> {
+        // Experiment parsing rejects a PIT Venue set other than exactly {SZSE}.
+        let venue = experiment
+            .single_venue()
+            .ok_or_else(|| invalid("PIT requires one Venue"))?;
         let mut runs = BTreeMap::new();
         for value in combinations {
             let params: PitS2Params = serde_json::from_value(value.clone())?;
@@ -278,7 +282,7 @@ impl PitContext {
                 .map_err(invalid)?;
             }
             let mut spec = serde_json::json!({
-                "dsv": experiment.dsv, "universe": experiment.universe, "venue": experiment.venue,
+                "dsv": experiment.dsv, "universe": experiment.universe, "venue": venue.as_str(),
                 "strategy": {"kind": experiment.strategy_kind, "parameters": params},
                 "pit": self.identity, "pit_plan_version": plan.version,
                 "session_inputs": plan.inputs,

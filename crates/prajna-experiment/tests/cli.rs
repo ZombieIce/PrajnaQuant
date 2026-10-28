@@ -13,6 +13,9 @@ use tempfile::TempDir;
 #[path = "../examples/support/fixture.rs"]
 mod fixture;
 
+#[path = "support/multi_venue.rs"]
+mod multi_venue;
+
 struct Example {
     _temp: TempDir,
     lake: PathBuf,
@@ -32,12 +35,25 @@ fn isolated(command: &mut Command) -> &mut Command {
 
 impl Example {
     fn new() -> Self {
+        Self::build(|lake, definition| {
+            fixture::prepare(lake, definition).unwrap();
+        })
+    }
+
+    /// Synthetic XSHG+XSHE pool; `missing_xshe_session` breaks the shared axis.
+    fn multi_venue(missing_xshe_session: Option<&str>) -> Self {
+        Self::build(|lake, definition| {
+            multi_venue::prepare(lake, definition, missing_xshe_session);
+        })
+    }
+
+    fn build(prepare: impl FnOnce(&Path, &Path)) -> Self {
         let temp = TempDir::new().unwrap();
         let lake = temp.path().join("lake");
         let definition = temp.path().join("experiment.json");
         let repo = temp.path().join("repository");
         fs::create_dir(&repo).unwrap();
-        fixture::prepare(&lake, &definition).unwrap();
+        prepare(&lake, &definition);
         let example = Self {
             _temp: temp,
             lake,
@@ -1072,4 +1088,195 @@ fn promote_existing_directory_without_manifest_is_not_no_execution() {
     status(&output, 3);
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("execution.json"));
+}
+
+fn execution_manifest(example: &Example, output: &Value) -> Value {
+    serde_json::from_slice(&fs::read(example.directory(output).join("execution.json")).unwrap())
+        .unwrap()
+}
+
+#[test]
+fn multi_venue_fast_event_cli_matches_independent_hand_calculated_golden() {
+    let example = Example::multi_venue(None);
+    let first = json_output(example.run(&["--level", "standard", "--threads", "1"]), 0);
+    assert_eq!(first["action"], "created");
+    assert_eq!(first["run_count"], 1);
+    assert_eq!(first["failed_count"], 0);
+
+    let manifest = execution_manifest(&example, &first);
+    assert_eq!(manifest["runs"][0]["status"], "completed");
+    let definition: Value =
+        serde_json::from_slice(&fs::read(&example.definition).unwrap()).unwrap();
+    let experiment =
+        prajna_experiment::Experiment::parse(&definition.to_string(), &example.lake).unwrap();
+    let runs = experiment.run_definitions(&example.lake).unwrap();
+    assert_eq!(runs[0].run_spec["venues"], json!(["XSHE", "XSHG"]));
+    assert!(runs[0].run_spec.get("venue").is_none());
+    assert_eq!(
+        runs[0].run_spec["engine"],
+        json!({"kind": "fast_event", "semantic_version": "fast_event@13"})
+    );
+    assert_eq!(manifest["runs"][0]["run_id"], json!(runs[0].run_id));
+
+    let replay = json_output(example.run(&["--threads", "2"]), 0);
+    assert_eq!(replay["action"], "replayed");
+    assert_eq!(replay["exp"], first["exp"]);
+    assert_eq!(replay["exe"], first["exe"]);
+
+    let result = json_output(
+        example.result(
+            first["exp"].as_str().unwrap(),
+            first["exe"].as_str().unwrap(),
+            &[],
+        ),
+        0,
+    );
+    let valuations = result["data"]["runs"][0]["series"]["account_valuations"]
+        .as_array()
+        .unwrap();
+    // Independent hand calculation for the two-Venue pool: 10,000 initial cash;
+    // the first-session equal-weight Decision executes at the next open (10.00).
+    // 1% commission on each 5,000 target is 50, so each Venue buys 4,950 / 10.00
+    // = 495 shares at zero cash; marks are 10.00 at open and 10.10 at close.
+    // Rows are ordered by Session and then by valuation point ("close" first).
+    let golden = [
+        ("2026-01-05", "close", "10000", "10000", false),
+        ("2026-01-05", "open_after", "10000", "10000", false),
+        ("2026-01-06", "close", "0", "9999", true),
+        ("2026-01-06", "open_after", "0", "9900", true),
+        ("2026-01-07", "close", "0", "9999", true),
+        ("2026-01-07", "open_after", "0", "9900", true),
+    ];
+    assert_eq!(valuations.len(), golden.len());
+    for (row, (date, point, cash, equity, holds)) in valuations.iter().zip(golden) {
+        assert_eq!(row["session_date"], date);
+        assert_eq!(row["valuation_point"], point);
+        assert_eq!(row["cash"], cash);
+        assert_eq!(row["equity"], equity);
+        let positions = row["positions"].as_object().unwrap();
+        assert_eq!(positions.len(), if holds { 2 } else { 0 }, "{row}");
+        for (instrument, quantity) in [("600519.XSHG", "495"), ("000001.XSHE", "495")] {
+            match positions.get(instrument) {
+                Some(position) => assert_eq!(position["quantity"], quantity),
+                None => assert!(!holds),
+            }
+        }
+    }
+}
+
+#[test]
+fn multi_venue_run_specs_use_the_t06b1_engine_semantics_versions() {
+    let example = Example::multi_venue(None);
+    example.write_definition(|value| {
+        let object = value.as_object_mut().unwrap();
+        object.remove("fast_event");
+        object.insert("engine".into(), json!("vector"));
+    });
+    let output = json_output(example.run(&["--threads", "1"]), 0);
+    assert_eq!(output["failed_count"], 0);
+    let manifest = execution_manifest(&example, &output);
+    let vector: Value = serde_json::from_slice(&fs::read(&example.definition).unwrap()).unwrap();
+    let experiment =
+        prajna_experiment::Experiment::parse(&vector.to_string(), &example.lake).unwrap();
+    let runs = experiment.run_definitions(&example.lake).unwrap();
+    assert_eq!(
+        runs[0].run_spec["engine"],
+        json!({"kind": "vector", "semantic_version": "vector@10"})
+    );
+    assert_eq!(runs[0].run_spec["venues"], json!(["XSHE", "XSHG"]));
+    assert_eq!(manifest["runs"][0]["run_id"], json!(runs[0].run_id));
+
+    // The Lot variant of the same multi-Venue Fast Event Run Spec.
+    let mut lot = vector;
+    lot["engine"] = json!("fast_event");
+    lot["fast_event"] = json!({"currency": "CNY", "initial_cash": "10000", "sizing": "lot",
+        "rebalance": "full_target", "minimum_commission": "0",
+        "portfolios": [{"id": 1, "capital": "10000"}],
+        "lot_size_source": {"kind": "instrument"}});
+    let experiment = prajna_experiment::Experiment::parse(&lot.to_string(), &example.lake).unwrap();
+    let runs = experiment.run_definitions(&example.lake).unwrap();
+    assert_eq!(
+        runs[0].run_spec["engine"],
+        json!({"kind": "fast_event", "semantic_version": "fast_event@14"})
+    );
+}
+
+#[test]
+fn multi_venue_calendar_mismatch_is_a_structural_failure() {
+    let example = Example::multi_venue(Some("2026-01-06"));
+    let output = example.run(&[]);
+    status(&output, 1);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("inconsistent shared Session axis"),
+        "{stderr}"
+    );
+    assert!(!example.lake.join("experiments").exists());
+}
+
+#[test]
+fn multi_venue_dataset_missing_a_selected_venue_fails_explicitly() {
+    let example = Example::multi_venue(None);
+    example.write_definition(|value| value["venues"] = json!(["XSHG", "XSHE", "SYNTH"]));
+    let output = example.run(&[]);
+    status(&output, 1);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("no Instruments for Venue SYNTH"),
+        "{stderr}"
+    );
+    assert!(!example.lake.join("experiments").exists());
+}
+
+#[test]
+fn multi_venue_accurate_event_and_adapter_reject_a_run() {
+    let example = Example::multi_venue(None);
+    example.write_definition(|value| {
+        value["engine"] = json!("accurate_event");
+        value["backend"] = json!({"name": "synthetic-backend", "version": "1"});
+        value["fast_event"]["sizing"] = json!("lot");
+    });
+    let output = example.run(&[]);
+    status(&output, 2);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Accurate Event requires exactly one Venue"),
+        "{stderr}"
+    );
+
+    // The adapter packet boundary rejects the same multi-Venue Dataset.
+    let definition: Value =
+        serde_json::from_slice(&fs::read(&example.definition).unwrap()).unwrap();
+    let error =
+        prajna_adapter::RunPacket::from_dataset(&example.lake, definition["dsv"].as_str().unwrap())
+            .unwrap_err();
+    assert!(error.to_string().contains("requires one Venue"), "{error}");
+}
+
+#[test]
+fn multi_venue_definition_boundaries_reject_mismatched_scope_and_python_strategy() {
+    let example = Example::multi_venue(None);
+    // The fixture Universe has an XSHE member, so selecting only XSHG must fail.
+    example.write_definition(|value| value["venues"] = json!(["XSHG"]));
+    let output = example.run(&[]);
+    status(&output, 2);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("does not belong to selected Venue(s) XSHG"),
+        "{stderr}"
+    );
+
+    // Python strategies stay single-Venue; the boundary rejects before host work.
+    example.write_definition(|value| {
+        value["venues"] = json!(["XSHG", "XSHE"]);
+        value["strategy"] = json!("research.rotation@1");
+    });
+    let output = example.run(&[]);
+    status(&output, 2);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Python strategies require exactly one Venue"),
+        "{stderr}"
+    );
+    assert!(!example.lake.join("experiments").exists());
 }

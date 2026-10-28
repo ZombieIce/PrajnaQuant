@@ -21,7 +21,7 @@ use prajna_research::{
         AvailabilityAssumption, Factor, FactorGraph, FactorKind, RotationScoreParams,
         canonical_float_bits,
     },
-    load_execution_status, load_panel,
+    load_execution_status, load_panel_for_venues,
     strategy::{
         RankDirection, StrategyCapability, TopKRank, VectorEngine, VectorStrategy, Weighting,
     },
@@ -298,7 +298,7 @@ impl Costs {
 pub struct Experiment {
     dsv: String,
     universe: String,
-    venue: String,
+    venues: BTreeSet<VenueId>,
     availability_assumption: String,
     costs: Costs,
     sessions_per_year: u64,
@@ -316,7 +316,12 @@ struct DefinitionInput {
     experiment_version: u32,
     dsv: String,
     universe: String,
-    venue: String,
+    /// Legacy single-Venue spelling. Exactly one of `venue` or `venues` is required.
+    #[serde(default)]
+    venue: Option<String>,
+    /// Explicit Venue set. A single-element set normalizes to the `venue` spelling.
+    #[serde(default)]
+    venues: Option<Vec<String>>,
     strategy: String,
     engine: String,
     availability_assumption: String,
@@ -349,14 +354,19 @@ impl Experiment {
                 "sessions_per_year must be a positive integer no greater than 2^53 - 1",
             ));
         }
-        let mut engine = engine::EngineSettings::parse(&input, lake_root.as_ref())?;
+        let venues = parse_venues(&input)?;
+        if input.pit.is_some() && !is_szse_only(&venues) {
+            return Err(invalid("PIT requires SZSE as the only Venue"));
+        }
+        if engine::is_python_strategy(&input.strategy) && venues.len() > 1 {
+            return Err(invalid(
+                "Python strategies require exactly one Venue; multi-Venue Runs are not supported",
+            ));
+        }
+        let mut engine = engine::EngineSettings::parse(&input, lake_root.as_ref(), &venues)?;
         if input.seed.as_ref().is_some_and(|seed| !seed.is_null()) {
             return Err(invalid("deterministic engine seed must be omitted or null"));
         }
-        input
-            .venue
-            .parse::<VenueId>()
-            .map_err(|_| invalid("venue is not a valid VenueId"))?;
         match input.availability_assumption.as_str() {
             "none" | "treat_unknown_as_ts_close" => {}
             _ => {
@@ -368,7 +378,6 @@ impl Experiment {
         read_manifest(lake_root.as_ref(), &input.dsv)?;
         let pit = if let Some(pit_input) = &input.pit {
             if (input.strategy != "s2_pit_rotation" && !engine::is_python_strategy(&input.strategy))
-                || input.venue != "SZSE"
                 || input.availability_assumption != "none"
                 || input.engine == "accurate_event"
             {
@@ -395,12 +404,12 @@ impl Experiment {
             }
             let universe = StaticUniverse::load(lake_root.as_ref(), &input.universe)?;
             universe.validate_against(lake_root.as_ref(), &input.dsv)?;
-            validate_universe_venue(&universe, &input.venue)?;
+            validate_universe_venue(&universe, &venues)?;
             None
         };
         let costs = Costs::parse(&input.costs)?;
         let parameter_space = engine::parse_space(&input.strategy, &input.parameter_space)?;
-        let mut normalized = normalize_definition(&input, costs, &parameter_space);
+        let mut normalized = normalize_definition(&input, &venues, costs, &parameter_space);
         engine.normalize_definition(&mut normalized, &input.strategy);
         if let Some(context) = &pit {
             normalized["pit"] = context.identity.clone();
@@ -408,7 +417,7 @@ impl Experiment {
         Ok(Self {
             dsv: input.dsv,
             universe: input.universe,
-            venue: input.venue,
+            venues,
             availability_assumption: input.availability_assumption,
             costs,
             sessions_per_year: input.sessions_per_year,
@@ -439,9 +448,20 @@ impl Experiment {
     pub fn universe(&self) -> &str {
         &self.universe
     }
-    pub fn venue(&self) -> &str {
-        &self.venue
+    /// The explicit, non-empty, duplicate-free Venue set of this definition.
+    pub fn venues(&self) -> &BTreeSet<VenueId> {
+        &self.venues
     }
+
+    /// The sole Venue of a single-Venue definition; `None` for multi-Venue Runs.
+    pub fn single_venue(&self) -> Option<&VenueId> {
+        if self.venues.len() == 1 {
+            self.venues.first()
+        } else {
+            None
+        }
+    }
+
     pub fn pit_context(&self) -> Option<&pit::PitContext> {
         self.pit.as_deref()
     }
@@ -493,28 +513,33 @@ impl Experiment {
 
     /// Canonical Run Spec JSON, including its identity-bearing semantics.
     pub fn run_spec(&self, parameters: &StrategyParameters) -> Value {
+        let mut spec = self.run_spec_base(serde_json::json!({
+            "kind": "s2_rotation", "parameters": parameters.normalized(),
+        }));
+        self.engine.normalize_spec(&mut spec);
+        spec
+    }
+
+    /// Identity-bearing Run Spec base; Venue scope uses the canonical spelling.
+    pub(crate) fn run_spec_base(&self, strategy: Value) -> Value {
         let mut spec = serde_json::json!({
             "dsv": self.dsv,
             "universe": self.universe,
-            "venue": self.venue,
-            "strategy": { "kind": "s2_rotation", "parameters": parameters.normalized() },
+            "strategy": strategy,
             "costs": self.costs.normalized(),
             "availability_assumption": self.availability_assumption,
             "engine": { "kind": "vector", "semantic_version": "vector@1" },
             "seed": Value::Null,
         });
-        self.engine.normalize_spec(&mut spec);
+        write_venue_scope(&mut spec, &self.venues);
         spec
     }
 
     /// Expands and validates every parameter combination before returning any Runs.
     pub fn expand(&self, lake_root: impl AsRef<Path>) -> Result<Vec<ExpandedRun>, ExperimentError> {
         if let Some(pit) = &self.pit {
-            let venue = self
-                .venue
-                .parse::<VenueId>()
-                .map_err(|e| invalid(e.to_string()))?;
-            let native = load_panel(lake_root.as_ref(), &self.dsv, &venue)
+            let venues = self.venues.iter().cloned().collect::<Vec<_>>();
+            let native = load_panel_for_venues(lake_root.as_ref(), &self.dsv, &venues)
                 .map_err(|e| invalid(e.to_string()))?;
             let panel = prajna_research::pit_strategy::lifecycle_panel(&native, &pit.catalog)
                 .map_err(|e| invalid(e.to_string()))?;
@@ -644,18 +669,16 @@ impl Experiment {
             None => self.expand(lake_root)?,
         };
         if let Some(universe) = &universe {
-            validate_universe_venue(universe, &self.venue)
+            validate_universe_venue(universe, &self.venues)
                 .map_err(|error| execution_error("validate Universe venue", error))?;
             universe
                 .validate_against(lake_root, &self.dsv)
                 .map_err(|error| execution_error("validate Universe", error))?;
         }
-        let venue = self
-            .venue
-            .parse::<VenueId>()
-            .map_err(|_| invalid("venue is not a valid VenueId"))?;
-        let native_panel = load_panel(lake_root, &self.dsv, &venue)
-            .map_err(|error| execution_error("load panel", error))?;
+        // Missing Venue/Instrument or a shared-axis disagreement is structural.
+        let venues = self.venues.iter().cloned().collect::<Vec<_>>();
+        let native_panel = load_panel_for_venues(lake_root, &self.dsv, &venues)
+            .map_err(|error| execution_error("load shared Venue panel", error))?;
         let panel = if let Some(pit) = &self.pit {
             prajna_research::pit_strategy::lifecycle_panel(&native_panel, &pit.catalog)
                 .map_err(|e| invalid(e.to_string()))?
@@ -1099,7 +1122,12 @@ fn validate_parameter_value(name: &str, value: &Value) -> Result<(), ExperimentE
     Ok(())
 }
 
-fn normalize_definition(input: &DefinitionInput, costs: Costs, space: &ParameterSpace) -> Value {
+fn normalize_definition(
+    input: &DefinitionInput,
+    venues: &BTreeSet<VenueId>,
+    costs: Costs,
+    space: &ParameterSpace,
+) -> Value {
     let parameter_space = match space {
         ParameterSpace::Grid(axes) => {
             let normalized = axes
@@ -1119,11 +1147,10 @@ fn normalize_definition(input: &DefinitionInput, costs: Costs, space: &Parameter
             serde_json::json!({ "list": values.iter().map(StrategyParameters::normalized).collect::<Vec<_>>() })
         }
     };
-    serde_json::json!({
+    let mut normalized = serde_json::json!({
         "experiment_version": input.experiment_version,
         "dsv": input.dsv,
         "universe": input.universe,
-        "venue": input.venue,
         "strategy": input.strategy,
         "engine": input.engine,
         "availability_assumption": input.availability_assumption,
@@ -1131,7 +1158,53 @@ fn normalize_definition(input: &DefinitionInput, costs: Costs, space: &Parameter
         "sessions_per_year": input.sessions_per_year,
         "seed": Value::Null,
         "parameter_space": parameter_space,
-    })
+    });
+    write_venue_scope(&mut normalized, venues);
+    normalized
+}
+
+/// Resolves exactly one of the legacy `venue` spelling or the explicit `venues` set.
+fn parse_venues(input: &DefinitionInput) -> Result<BTreeSet<VenueId>, ExperimentError> {
+    let declared = match (&input.venue, &input.venues) {
+        (Some(_), Some(_)) => {
+            return Err(invalid(
+                "definition must declare exactly one of venue or venues",
+            ));
+        }
+        (None, None) => return Err(invalid("definition must declare venue or venues")),
+        (Some(venue), None) => vec![venue.as_str()],
+        (None, Some(venues)) => {
+            if venues.is_empty() {
+                return Err(invalid("venues must not be empty"));
+            }
+            venues.iter().map(String::as_str).collect()
+        }
+    };
+    let mut set = BTreeSet::new();
+    for value in declared {
+        let venue = value
+            .parse::<VenueId>()
+            .map_err(|_| invalid("venue is not a valid VenueId"))?;
+        if !set.insert(venue.clone()) {
+            return Err(invalid(format!("duplicate venue {venue}")));
+        }
+    }
+    Ok(set)
+}
+
+/// Writes the canonical Venue scope: one Venue keeps `venue`, several use the sorted set.
+fn write_venue_scope(value: &mut Value, venues: &BTreeSet<VenueId>) {
+    if venues.len() == 1 {
+        if let Some(venue) = venues.first() {
+            value["venue"] = Value::String(venue.as_str().to_owned());
+        }
+    } else {
+        value["venues"] = serde_json::json!(venues.iter().map(VenueId::as_str).collect::<Vec<_>>());
+    }
+}
+
+fn is_szse_only(venues: &BTreeSet<VenueId>) -> bool {
+    venues.len() == 1 && venues.first().is_some_and(|venue| venue.as_str() == "SZSE")
 }
 
 fn normalize_parameter_axis(name: &str, value: &Value) -> Value {
@@ -1312,17 +1385,22 @@ fn invalid(message: impl Into<String>) -> ExperimentError {
     ExperimentError::InvalidDefinition(message.into())
 }
 
-fn validate_universe_venue(universe: &StaticUniverse, venue: &str) -> Result<(), ExperimentError> {
-    let venue = venue
-        .parse::<VenueId>()
-        .map_err(|_| invalid("venue is not a valid VenueId"))?;
+fn validate_universe_venue(
+    universe: &StaticUniverse,
+    venues: &BTreeSet<VenueId>,
+) -> Result<(), ExperimentError> {
     if let Some(instrument) = universe
         .members()
         .iter()
-        .find(|instrument| instrument.venue() != &venue)
+        .find(|instrument| !venues.contains(instrument.venue()))
     {
         return Err(invalid(format!(
-            "Universe member {instrument} does not belong to experiment venue {venue}"
+            "Universe member {instrument} does not belong to selected Venue(s) {}",
+            venues
+                .iter()
+                .map(VenueId::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
         )));
     }
     Ok(())
@@ -1342,6 +1420,7 @@ mod tests {
     };
     use prajna_domain::InstrumentId;
     use prajna_research::StaticUniverse;
+    use prajna_research::load_panel;
     use serde_json::json;
     use std::{fs, path::Path, process::Command};
     use tempfile::TempDir;
@@ -1429,22 +1508,83 @@ mod tests {
     }
 
     #[test]
-    fn universe_members_must_match_experiment_venue() {
-        let universe = StaticUniverse::new(
-            "mixed",
-            vec![
-                InstrumentId::new("AAA", VenueId::new("SYNTH").unwrap()).unwrap(),
-                InstrumentId::new("BBB", VenueId::new("OTHER").unwrap()).unwrap(),
-            ],
-        )
-        .unwrap();
-
-        assert!(
-            validate_universe_venue(&universe, "SYNTH")
+    fn venue_set_must_be_explicit_nonempty_and_duplicate_free() {
+        let temp = TempDir::new().unwrap();
+        let (lake, dsv, universe) = fixture(temp.path());
+        let base = definition(&dsv, &universe);
+        let only_venues = |venues: Value| {
+            let mut value = base.clone();
+            value.as_object_mut().unwrap().remove("venue");
+            value["venues"] = venues;
+            value
+        };
+        let mut both = base.clone();
+        both["venues"] = json!(["SYNTH"]);
+        let mut invalid = base.clone();
+        invalid["venue"] = json!("not a venue");
+        let mut missing = base.clone();
+        missing.as_object_mut().unwrap().remove("venue");
+        for (value, expected) in [
+            (missing, "definition must declare venue or venues"),
+            (only_venues(json!([])), "venues must not be empty"),
+            (
+                only_venues(json!(["SYNTH", "SYNTH"])),
+                "duplicate venue SYNTH",
+            ),
+            (
+                both,
+                "definition must declare exactly one of venue or venues",
+            ),
+            (invalid, "venue is not a valid VenueId"),
+        ] {
+            let error = Experiment::parse(&value.to_string(), &lake)
                 .unwrap_err()
-                .to_string()
-                .contains("does not belong to experiment venue")
+                .to_string();
+            assert!(error.contains(expected), "{error}");
+        }
+        let multi = BTreeSet::from([VenueId::new("XSHG").unwrap(), VenueId::new("XSHE").unwrap()]);
+        let mut scope = json!({});
+        write_venue_scope(&mut scope, &multi);
+        assert_eq!(scope["venues"], json!(["XSHE", "XSHG"]));
+        assert!(scope.get("venue").is_none());
+    }
+
+    #[test]
+    fn single_venue_spellings_share_experiment_and_run_identity() {
+        let temp = TempDir::new().unwrap();
+        let (lake, dsv, universe) = fixture(temp.path());
+        let legacy = definition(&dsv, &universe);
+        let mut explicit = legacy.clone();
+        explicit.as_object_mut().unwrap().remove("venue");
+        explicit["venues"] = json!(["SYNTH"]);
+        let legacy = Experiment::parse(&legacy.to_string(), &lake).unwrap();
+        let explicit = Experiment::parse(&explicit.to_string(), &lake).unwrap();
+
+        assert_eq!(legacy.id().unwrap(), explicit.id().unwrap());
+        assert_eq!(
+            legacy.run_id(run_parameters(&legacy)).unwrap(),
+            explicit.run_id(run_parameters(&explicit)).unwrap()
         );
+        let canonical: Value = serde_json::from_slice(&legacy.canonical_json().unwrap()).unwrap();
+        assert_eq!(canonical["venue"], json!("SYNTH"));
+        assert!(canonical.get("venues").is_none());
+        assert!(legacy.single_venue().is_some());
+        assert_eq!(
+            legacy.venues(),
+            &BTreeSet::from([VenueId::new("SYNTH").unwrap()])
+        );
+    }
+
+    #[test]
+    fn pit_requires_szse_as_the_only_venue() {
+        let venue = |name: &str| VenueId::new(name).unwrap();
+        assert!(is_szse_only(&BTreeSet::from([venue("SZSE")])));
+        assert!(!is_szse_only(&BTreeSet::from([venue("XSHG")])));
+        assert!(!is_szse_only(&BTreeSet::from([
+            venue("SZSE"),
+            venue("XSHG")
+        ])));
+        assert!(!is_szse_only(&BTreeSet::new()));
     }
 
     fn scale_definition(dsv: &str, universe: &str, space: Value) -> Value {
@@ -2443,6 +2583,7 @@ mod tests {
 
         use super::super::*;
         use super::{definition, scale_fixture};
+        use prajna_research::load_panel;
         use prajna_research::strategy::Decision;
         use tempfile::TempDir;
 
