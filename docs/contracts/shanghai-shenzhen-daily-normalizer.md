@@ -119,6 +119,78 @@ lifecycle/tradability gate.
 
 Each publication selects exactly one security in the snapshot and one report; publish unrelated securities independently. Every selected response must be a nonempty accepted complete chunk with exact source/method, security/kind, request range, chunk index, source and outcome provenance. Raw dates must match the report, lie within that chunk and not precede a Known listing date. Unknown listing history stays Unknown; no predecessor history is inferred. Calendar coverage must contain the report request; all Sessions of that explicit calendar version are retained, including dates without Bars. Partial reports may supply explicitly selected good chunks; missing/failed/empty chunks never become Bars or a claim of complete coverage. Blocked constraints, unsupported source/unit rule versions, mismatches and rejected candidates fail before Dataset publication.
 
-The output lake freezes exact report bytes, selected responses/provenance, canonical calendar/snapshot and a content-addressed recipe. Selected response provenance is copied only when the complete source record is absent at the target; retries within the same lake, through aliases, or between different lakes do not reappend identical records, while newly observed source records are preserved. The root-relative receipt binds that recipe to the committed DSV. Repeat the same selection/receipt idempotently; a different selection needs a new receipt. Revised Raw/calendar/evidence produces a new DSV, preserving old versions; rule revisions require a separately implemented Normalizer identity (only v1 is supported). `prajna-publish-daily rebuild --root <LOCAL_OUTPUT> --receipt <RELATIVE_JSON> --diagnostics <LOCAL_DIAGNOSTICS>` verifies the frozen recipe and rebuilds against the committed manifest without the original report/stores or a latest lookup.
+The output lake freezes exact report bytes, selected responses/provenance, canonical calendar/snapshot and a content-addressed recipe. Selected response provenance is copied only when the complete source record is absent at the target; retries within the same lake, through aliases, or between different lakes do not reappend identical records, while newly observed source records are preserved. The root-relative receipt binds that recipe to the committed DSV. Repeat the same selection/receipt idempotently; a different selection needs a new receipt. Revised Raw/calendar/evidence produces a new DSV, preserving old versions; rule revisions require a separately implemented Normalizer identity (v1 remains frozen; opt-in v2 is specified below). `prajna-publish-daily rebuild --root <LOCAL_OUTPUT> --receipt <RELATIVE_JSON> --diagnostics <LOCAL_DIAGNOSTICS>` verifies the frozen recipe and rebuilds against the committed manifest without the original report/stores or a latest lookup.
 
 The Dataset manifest remains the atomic commit marker. Interrupted pre-commit publication leaves no committed partial Dataset and is retryable; frozen Raw may remain. A receipt-write failure after the Dataset commit can leave a complete Dataset without a receipt: rerun the unchanged selection to recover it. Receipts cannot overwrite another selection. Output roots exclude the fixed MVP-6 archive; existing symlink destinations are rejected. CLI output hides detailed identities and coverage; errors go to the configurable local diagnostics directory. A diagnostic persistence failure may leave only the generic CLI failure. No real-data validation is asserted.
+
+
+## Opt-in v2 opening-state evidence
+
+Issue #350 / [ADR 0029](../decisions/0029-cn-daily-opening-evidence.md) adds
+`normalizer_version: "2"` and required selection `status_snapshot:
+"sha256:<chosen Raw JSON>"`. Import the snapshot and each referenced original
+into the explicitly selected `raw_root` using `RawStore::put` with FileImport
+provenance. This is fixed evidence import, not a collector or a vendor-status
+parser. `OpeningEvidenceSnapshot::parse` exposes the structural contract.
+
+A snapshot uses these fields (all are required unless explicitly nullable):
+
+| Field | Contract |
+| --- | --- |
+| `schema_version`, `method_version` | `1`, `cn-opening-evidence/1` |
+| `evidence_kind` | `synthetic` or `real_source`; labels provenance, not verification |
+| `source_id`, `source_version`, `extraction_version` | Nonempty fixed source/extraction identifiers |
+| `calendar_version`, `security_snapshot` | Exact selected calendar/security content ids |
+| `market_raw_sha256s` | Exact nonempty accepted daily Raw selection, unique |
+| `instrument_id`, `venue_id`, `start`, `end` | Exact single-security/report scope, inclusive dates, matching Venue |
+| `observed_at` | RFC3339 local collection timestamp; never used as historical availability |
+| `evidence` | Array of `{raw_sha256, locator, available_at}`; locator is nonempty, availability nullable RFC3339; original bytes must exist and pass content hash verification |
+| `facts` | Array of the fact structure below; an explicit empty array publishes all Unknown |
+
+```json
+{
+  "session_date": "2026-01-06",
+  "open_from": "2026-01-06T09:30:00+08:00",
+  "open_to_exclusive": "2026-01-06T09:31:00+08:00",
+  "state": "TRADABLE",
+  "available_at": "2026-01-06T09:30:00+08:00",
+  "evidence_indices": [0],
+  "reason": "explicit synthetic opening fact"
+}
+```
+
+Each fact must cover the pinned Session open with its half-open interval, refer
+to at least one valid unique zero-based evidence index, and carry a nonempty
+reason. Historical availability must be at least the latest of all necessary
+references; any null necessary time or null fact time yields Unknown. A late
+precise time stays late. `HALTED`/`UNKNOWN` never permit execution; explicit
+`CONFLICT` normalizes to D7 `UNKNOWN` while the frozen snapshot retains its reason.
+Exact duplicate facts deduplicate; differing facts at one Session fail, including
+different reasons, times or references. Unknown enums/fields, mismatched scope,
+non-Session/out-of-range dates, missing/corrupt originals or missing snapshot
+fail the whole publication. A locator identifies the provider's claimed evidence;
+the importer does not certify that the original text proves that claim.
+
+v2 always publishes `execution_status` for every selected Instrument/Session
+within the report range, including dates without Bars. Missing facts produce
+`UNKNOWN/false/null` with a missing-source marker. Outside this declared scope,
+legacy row-missing behavior remains rejection. D7 reader still errors for an
+entire missing table; a missing row is never implicitly tradable. Execution
+continues to require `has_bar && is_tradable && available_at <= ts_open`.
+No bar, volume, calendar, listing history or absence of halt notices proves
+TRADABLE. v1 market `available_at` remains null; experiments must explicitly
+choose their existing market-availability assumption independently of status.
+
+Recipe schema 2 freezes the snapshot id, original Raw, market Raw and existing
+calendar/security versions; all state bytes enter manifest inputs/content identity
+and coverage provenance. Rebuild uses these frozen bytes after source stores are
+removed. Revisions require a new snapshot/receipt/DSV; no table is appended to an
+old DSV. Schema 1 recipes and v1 normalization/config bytes remain compatible.
+
+Synthetic tests exercise the real publisher CLI, D7 reader, Experiment CLI and
+Standard persisted-result read for each Venue. With 10,000 cash and 1% commission,
+S1 close decides, S2 open at 10 buys 990 units for 9,900 plus 100 fee; cash is zero,
+open equity is 9,900 and close at 10.1 values equity at 9,999. Null/late/halted/
+unknown/conflict/missing status and missing-Bar counterexamples cannot trade.
+Real source availability, historical coverage and correctness remain unverified;
+this does not certify a real research loop. #340 owns subsequent HTTP/T01 replay.
