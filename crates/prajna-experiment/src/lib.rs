@@ -39,14 +39,16 @@ pub mod opening_evidence;
 pub mod pit;
 mod python;
 pub use python::{PreparedDecisions, PythonProvenance};
+mod result;
 mod storage;
 mod summary;
 mod worker;
 pub use accurate::{BackendDiagnostics, BackendFactory, ExperimentBackend};
 pub use engine::{ACCURATE_SEMANTIC_VERSION, BackendIdentity};
+pub use result::read_persisted_result;
 pub use storage::{
     ExecutionDiff, InvocationStatistics, ResultLevel, ResultReadError, StoreAction,
-    StoredExecution, diff_executions, read_run_table,
+    StoredExecution, diff_executions, promote_below_level, read_run_table,
 };
 pub use summary::{RunSummary, summarize};
 pub use worker::WorkerCommand;
@@ -73,6 +75,7 @@ pub enum ExperimentError {
     Io(std::io::Error),
     Git(String),
     Execution(String),
+    ExecutionNotFound(String),
     ReplayMismatch(String),
     DifferentExperiments(String),
 }
@@ -90,6 +93,7 @@ impl fmt::Display for ExperimentError {
             Self::Io(error) => write!(formatter, "experiment provenance I/O error: {error}"),
             Self::Git(message) => write!(formatter, "cannot capture git provenance: {message}"),
             Self::Execution(message)
+            | Self::ExecutionNotFound(message)
             | Self::ReplayMismatch(message)
             | Self::DifferentExperiments(message) => formatter.write_str(message),
         }
@@ -107,6 +111,7 @@ impl Error for ExperimentError {
             | Self::Canonical(_)
             | Self::Git(_)
             | Self::Execution(_)
+            | Self::ExecutionNotFound(_)
             | Self::ReplayMismatch(_)
             | Self::DifferentExperiments(_) => None,
         }

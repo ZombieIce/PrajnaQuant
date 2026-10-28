@@ -258,6 +258,29 @@ pub fn read_run_table(
     Ok((schema, batches))
 }
 
+/// Read and identity-check a persisted Execution without executing or promoting.
+pub(crate) fn read_execution_manifest(
+    lake_root: impl AsRef<Path>,
+    experiment_id: &str,
+    execution_id: &str,
+) -> Result<ExecutionManifest, ResultReadError> {
+    for (identity, prefix) in [
+        (experiment_id, "exp:sha256:"),
+        (execution_id, "exe:sha256:"),
+    ] {
+        if !identity.starts_with(prefix) {
+            return Err(err(format!("expected {prefix} identity, got {identity}")).into());
+        }
+        identity_hex(identity)?;
+    }
+    let directory = execution_path(lake_root.as_ref(), experiment_id, execution_id)?;
+    let manifest = read_manifest_file(&directory.join("execution.json"))?;
+    if manifest.experiment_id != experiment_id || manifest.execution.id != execution_id {
+        return Err(err("stored Execution identity does not match the request").into());
+    }
+    Ok(manifest)
+}
+
 impl ResultLevel {
     fn tables(self) -> &'static [&'static str] {
         match self {
@@ -578,6 +601,16 @@ pub(super) fn promote(
         .iter()
         .map(|run| (run.run_id.as_str(), run))
         .collect::<BTreeMap<_, _>>();
+    // A Run that was Completed in the manifest must still be Completed before
+    // summary hashing/staging, so the failure names the Run and leaves nothing
+    // partially published. Membership checks keep the existing `run --promote`
+    // invalid-request classification.
+    let manifest_run_ids = manifest
+        .runs
+        .iter()
+        .map(|run| run.run_id.as_str())
+        .collect::<BTreeSet<_>>();
+    ensure_promotable_runs(run_ids, &manifest_run_ids, &executions)?;
     // Validate and stage every requested table before touching final paths.
     let staging = create_staging_dir(&destination)?;
     let result = (|| {
@@ -695,6 +728,97 @@ pub(super) fn promote(
         statistics,
         action: StoreAction::Promoted,
     })
+}
+
+fn runs_below_level(runs: &[StoredRun], level: ResultLevel) -> Vec<String> {
+    runs.iter()
+        .filter(|run| run.status == RunStatus::Completed && run.result_level < level)
+        .map(|run| run.run_id.clone())
+        .collect()
+}
+
+fn ensure_promotable_runs(
+    run_ids: &[String],
+    manifest_run_ids: &BTreeSet<&str>,
+    executions: &BTreeMap<&str, &RunExecution>,
+) -> Result<(), ExperimentError> {
+    for run_id in run_ids {
+        if !manifest_run_ids.contains(run_id.as_str()) {
+            return Err(ExperimentError::InvalidDefinition(format!(
+                "Run {run_id} is not part of this Execution"
+            )));
+        }
+        let run = executions
+            .get(run_id.as_str())
+            .ok_or_else(|| err(format!("current Experiment did not produce Run {run_id}")))?;
+        if run.status != RunStatus::Completed {
+            return Err(ExperimentError::Execution(format!(
+                "Run {run_id} failed during promotion: {}",
+                run.error.as_deref().unwrap_or("unknown error")
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Promote every completed Run of the current Execution that is below `level`.
+///
+/// The Experiment/Execution identity is captured from the current working
+/// directory exactly like `run`; the stored Execution is never recreated. Failed
+/// Runs keep their original level and never block promotion of completed Runs.
+/// A missing Execution is reported as `ExecutionNotFound` (CLI exit 6) so the
+/// service can fall back to executing a new one; an existing but unreadable
+/// Execution is a replay failure and must not fall back.
+pub fn promote_below_level(
+    experiment: &Experiment,
+    lake_root: &Path,
+    repository: &Path,
+    level: ResultLevel,
+    threads: usize,
+) -> Result<StoredExecution, ExperimentError> {
+    if level == ResultLevel::Summary {
+        return Err(ExperimentError::InvalidDefinition(
+            "promotion requires standard or full".into(),
+        ));
+    }
+    let experiment_id = experiment.id()?;
+    let identity = ExecutionIdentity::capture(&experiment_id, repository)?;
+    let destination = execution_path(lake_root, &experiment_id, &identity.id)?;
+    if !destination.is_dir() {
+        return Err(ExperimentError::ExecutionNotFound(format!(
+            "Execution {} does not exist",
+            identity.id
+        )));
+    }
+    if !destination.join("execution.json").is_file() {
+        return Err(ExperimentError::ReplayMismatch(format!(
+            "Execution {} is missing execution.json",
+            identity.id
+        )));
+    }
+    let manifest = read_execution_manifest(lake_root, &experiment_id, &identity.id)
+        .map_err(|error| ExperimentError::ReplayMismatch(error.to_string()))?;
+    let run_ids = runs_below_level(&manifest.runs, level);
+    if run_ids.is_empty() {
+        // No-op promotion must still fail closed on corrupted Summary/tables;
+        // task success must imply a readable persisted result.
+        crate::read_persisted_result(lake_root, &experiment_id, &identity.id, None)
+            .map_err(|error| ExperimentError::ReplayMismatch(error.to_string()))?;
+        return Ok(StoredExecution {
+            manifest,
+            path: destination,
+            statistics: InvocationStatistics::default(),
+            action: StoreAction::Replayed,
+        });
+    }
+    experiment.promote(
+        lake_root,
+        repository,
+        &identity.id,
+        &run_ids,
+        level,
+        threads,
+    )
 }
 
 pub fn diff_executions(
@@ -1740,7 +1864,7 @@ fn read_rows(path: &Path, table: &str) -> Result<Vec<(String, String)>, Experime
     Ok(rows)
 }
 
-fn cell_json(array: &dyn Array, row: usize, field: &Field) -> Option<Value> {
+pub(crate) fn cell_json(array: &dyn Array, row: usize, field: &Field) -> Option<Value> {
     if array.is_null(row) {
         return None;
     }
@@ -2496,5 +2620,98 @@ mod promotion_tests {
         .unwrap_err();
         assert!(!temp.path().join("runs").exists());
         publish_promotion(&pending, || Ok(())).unwrap();
+    }
+    fn stored_run(id: &str, status: RunStatus, level: ResultLevel) -> StoredRun {
+        StoredRun {
+            run_id: id.into(),
+            status,
+            result_level: level,
+            table_hashes: BTreeMap::new(),
+            not_saved: vec![],
+            not_produced_by_engine: vec![],
+            accounting_verified: None,
+            run_spec: None,
+        }
+    }
+
+    #[test]
+    fn promotion_selects_only_completed_runs_below_the_target_level() {
+        let runs = vec![
+            stored_run(
+                "run:completed-summary",
+                RunStatus::Completed,
+                ResultLevel::Summary,
+            ),
+            stored_run(
+                "run:failed-summary",
+                RunStatus::Failed,
+                ResultLevel::Summary,
+            ),
+            stored_run(
+                "run:completed-standard",
+                RunStatus::Completed,
+                ResultLevel::Standard,
+            ),
+            stored_run(
+                "run:failed-standard",
+                RunStatus::Failed,
+                ResultLevel::Standard,
+            ),
+            stored_run(
+                "run:completed-full",
+                RunStatus::Completed,
+                ResultLevel::Full,
+            ),
+        ];
+        assert_eq!(
+            runs_below_level(&runs, ResultLevel::Standard),
+            vec!["run:completed-summary"]
+        );
+        assert_eq!(
+            runs_below_level(&runs, ResultLevel::Full),
+            vec!["run:completed-summary", "run:completed-standard"]
+        );
+        assert!(runs_below_level(&runs[1..2], ResultLevel::Full).is_empty());
+        assert!(runs_below_level(&runs, ResultLevel::Summary).is_empty());
+    }
+    fn run_execution(id: &str, status: RunStatus, error: Option<&str>) -> RunExecution {
+        RunExecution {
+            run_spec: serde_json::json!({"engine": {"kind": "vector"}}),
+            run_id: id.into(),
+            status,
+            result: None,
+            fast_event_result: None,
+            backend_diagnostics: None,
+            adapter_events: vec![],
+            backend_events: vec![],
+            summary: None,
+            error: error.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn promotion_preflight_names_a_previously_completed_run_that_now_fails() {
+        let completed = run_execution("run:completed", RunStatus::Completed, None);
+        let failed = run_execution(
+            "run:previously-completed",
+            RunStatus::Failed,
+            Some("synthetic replay cause"),
+        );
+        let executions = BTreeMap::from([
+            (completed.run_id.as_str(), &completed),
+            (failed.run_id.as_str(), &failed),
+        ]);
+        let manifest_ids = BTreeSet::from(["run:completed", "run:previously-completed"]);
+        ensure_promotable_runs(&["run:completed".into()], &manifest_ids, &executions).unwrap();
+        let error = ensure_promotable_runs(
+            &["run:previously-completed".into()],
+            &manifest_ids,
+            &executions,
+        )
+        .unwrap_err();
+        assert!(matches!(error, ExperimentError::Execution(_)));
+        let message = error.to_string();
+        assert!(message.contains("run:previously-completed"), "{message}");
+        assert!(message.contains("synthetic replay cause"), "{message}");
     }
 }

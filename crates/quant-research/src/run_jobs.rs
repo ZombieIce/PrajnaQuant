@@ -9,8 +9,9 @@ use crate::{
 };
 use axum::{
     Json, Router,
+    body::Body,
     extract::{Path, State},
-    http::StatusCode,
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -20,6 +21,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, VecDeque},
+    ffi::OsString,
     fs,
     io::{Read, Write},
     path::{Path as FsPath, PathBuf},
@@ -46,6 +48,28 @@ const MAX_SNAPSHOT_ROWS: i64 = 2_000_000;
 const MAX_UNIVERSE_INSTRUMENTS: usize = 100;
 const EXPERIMENT_TASK_TYPE: &str = "prajna_experiment";
 const EXPERIMENT_TASK_VERSION: u32 = 1;
+const DEFAULT_RESULT_LEVEL: &str = "summary";
+
+fn default_result_level() -> String {
+    DEFAULT_RESULT_LEVEL.into()
+}
+
+fn is_summary_level(level: &str) -> bool {
+    level == DEFAULT_RESULT_LEVEL
+}
+
+fn normalized_result_level(level: Option<&str>) -> Result<Option<String>, ApiFailure> {
+    match level {
+        None | Some(DEFAULT_RESULT_LEVEL) => Ok(None),
+        Some("standard") => Ok(Some("standard".into())),
+        Some(other) => Err(ApiFailure::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "result_level must be summary or standard",
+            json!({"result_level": other}),
+        )),
+    }
+}
 const MAX_CLI_STDERR_BYTES: usize = 16 * 1024;
 const STDERR_CAPTURE_STOP_TIMEOUT: Duration = Duration::from_millis(200);
 const STDERR_CAPTURE_POLL_INTERVAL: Duration = Duration::from_millis(5);
@@ -109,6 +133,11 @@ pub struct ExperimentTask {
     pub updated_at: String,
     pub request_sha256: String,
     pub idempotency_key: String,
+    #[serde(
+        default = "default_result_level",
+        skip_serializing_if = "is_summary_level"
+    )]
+    pub result_level: String,
     pub process_group_id: Option<u32>,
     #[serde(default)]
     pub process_group_generation: Option<Uuid>,
@@ -120,6 +149,8 @@ pub struct ExperimentTask {
 pub struct SubmitExperimentTask {
     pub idempotency_key: String,
     pub definition: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_level: Option<String>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SubmitRun {
@@ -240,6 +271,22 @@ impl RunJobApi {
                 get(list_experiment_tasks).post(submit_experiment_task),
             )
             .route("/api/v1/tasks/experiments/{id}", get(get_experiment_task))
+            .with_state(self)
+    }
+    pub fn result_router(self, authority: String) -> Router {
+        Router::new()
+            .route(
+                "/api/v1/tasks/experiments/{id}/result",
+                get(get_experiment_result),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                super::dataset_api::LocalPage::new(
+                    authority,
+                    "result_origin_forbidden",
+                    "Experiment result is restricted to the configured local workbench origin.",
+                ),
+                super::dataset_api::local_page,
+            ))
             .with_state(self)
     }
     fn recover(&self) {
@@ -450,10 +497,13 @@ impl RunJobApi {
     }
     fn submit_experiment_task(
         &self,
-        request: SubmitExperimentTask,
+        mut request: SubmitExperimentTask,
     ) -> Result<(ExperimentTask, bool), ApiFailure> {
+        let result_level = normalized_result_level(request.result_level.as_deref())?;
+        request.result_level = result_level.clone();
         validate_experiment_task_request(&request)?;
         let request_hash = canonical_experiment_task_hash(&request)?;
+        let task_result_level = result_level.unwrap_or_else(default_result_level);
         let mut store = self
             .0
             .gate
@@ -493,6 +543,7 @@ impl RunJobApi {
             updated_at: now,
             request_sha256: request_hash.clone(),
             idempotency_key: request.idempotency_key.clone(),
+            result_level: task_result_level,
             process_group_id: None,
             process_group_generation: None,
             result: None,
@@ -900,18 +951,66 @@ impl RunJobApi {
             ));
         }
 
-        let stdout_path = directory.join("cli.stdout");
+        let result_level = request
+            .result_level
+            .as_deref()
+            .unwrap_or(DEFAULT_RESULT_LEVEL);
+        let run_args = vec![
+            OsString::from("run"),
+            definition_path.as_os_str().to_owned(),
+            OsString::from("--lake"),
+            self.0.output.as_os_str().to_owned(),
+            OsString::from("--level"),
+            OsString::from(result_level),
+        ];
+        if result_level == "standard" {
+            // Prefer promoting the current Execution: this both upgrades an
+            // existing Summary result and makes an already-Standard result a
+            // no-op. Only fall back to executing when promote reports that no
+            // current Execution exists (exit 6); an existing but unreadable or
+            // partially replayable Execution must not be retried as `run`.
+            let promoted = self.execute_experiment_cli(
+                task,
+                &directory,
+                vec![
+                    OsString::from("promote"),
+                    definition_path.into_os_string(),
+                    OsString::from("--lake"),
+                    self.0.output.as_os_str().to_owned(),
+                    OsString::from("--level"),
+                    OsString::from("standard"),
+                ],
+                "cli-promote.stdout",
+            );
+            match promoted {
+                Ok(result) => Ok(result),
+                Err(error) => {
+                    let _ = fs::remove_file(directory.join("cli-promote.stdout"));
+                    if promote_missing_execution(&error) {
+                        self.execute_experiment_cli(task, &directory, run_args, "cli.stdout")
+                    } else {
+                        Err(error)
+                    }
+                }
+            }
+        } else {
+            self.execute_experiment_cli(task, &directory, run_args, "cli.stdout")
+        }
+    }
+    fn execute_experiment_cli(
+        &self,
+        task: &ExperimentTask,
+        directory: &FsPath,
+        args: Vec<OsString>,
+        stdout_name: &str,
+    ) -> Result<Value, RunError> {
+        let stdout_path = directory.join(stdout_name);
         let stdout = fs::File::create(&stdout_path)
             .map_err(|error| run_error("task_output_create_failed", &error.to_string()))?;
         let process_generation = Uuid::new_v4();
         let mut command = Command::new(&self.0.experiment_cli);
         command
-            .arg("run")
-            .arg(&definition_path)
-            .arg("--lake")
-            .arg(&self.0.output)
-            .arg("--level")
-            .arg("summary")
+            .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::piped());
@@ -1103,7 +1202,12 @@ impl ApiFailure {
 }
 impl IntoResponse for ApiFailure {
     fn into_response(self) -> Response {
-        (self.1, Json(json!({"error":self.0}))).into_response()
+        let mut response = (self.1, Json(json!({"error":self.0}))).into_response();
+        response.headers_mut().insert(
+            header::CACHE_CONTROL,
+            "no-store".parse().expect("fixed header"),
+        );
+        response
     }
 }
 async fn preflight(State(api): State<RunJobApi>, Json(request): Json<SubmitRun>) -> Response {
@@ -1155,6 +1259,133 @@ async fn get_experiment_task(State(api): State<RunJobApi>, Path(id): Path<String
         )
         .into_response(),
     }
+}
+async fn get_experiment_result(State(api): State<RunJobApi>, Path(id): Path<String>) -> Response {
+    let Ok(id) = Uuid::parse_str(&id) else {
+        return ApiFailure::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "invalid experiment task id",
+            Value::Null,
+        )
+        .into_response();
+    };
+    let Some(task) = api.get_experiment_task(id) else {
+        return ApiFailure::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "experiment task not found",
+            Value::Null,
+        )
+        .into_response();
+    };
+    if !matches!(task.status, ExperimentTaskStatus::Succeeded) {
+        return ApiFailure::new(
+            StatusCode::CONFLICT,
+            "task_not_completed",
+            "experiment task has not succeeded",
+            json!({"status": task.status}),
+        )
+        .into_response();
+    }
+    let Some(result) = task.result.as_ref() else {
+        return ApiFailure::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "task_result_missing",
+            "succeeded experiment task has no persisted result identity",
+            Value::Null,
+        )
+        .into_response();
+    };
+    let (Some(exp), Some(exe)) = (
+        result.get("exp").and_then(Value::as_str),
+        result.get("exe").and_then(Value::as_str),
+    ) else {
+        return ApiFailure::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "task_result_invalid",
+            "persisted experiment result has no string exp and exe identity",
+            Value::Null,
+        )
+        .into_response();
+    };
+    let (exp, exe) = (exp.to_owned(), exe.to_owned());
+    let cli = api.0.experiment_cli.clone();
+    let lake = api.0.output.clone();
+    let output = tokio::task::spawn_blocking(move || {
+        Command::new(cli)
+            .arg("result")
+            .arg(exp)
+            .arg(exe)
+            .arg("--lake")
+            .arg(lake)
+            .output()
+    })
+    .await;
+    let output = match output {
+        Ok(Ok(output)) => output,
+        Ok(Err(error)) => {
+            return ApiFailure::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "experiment_result_unavailable",
+                "prajna-experiment result reader could not be executed",
+                json!({"cause": error.to_string()}),
+            )
+            .into_response();
+        }
+        Err(error) => {
+            return ApiFailure::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "experiment_result_join_failed",
+                "prajna-experiment result reader stopped unexpectedly",
+                json!({"cause": error.to_string()}),
+            )
+            .into_response();
+        }
+    };
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr_truncated = stderr.chars().count() > 4096;
+        let stderr = stderr.chars().take(4096).collect::<String>();
+        return ApiFailure::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "experiment_result_failed",
+            "prajna-experiment could not read the persisted result",
+            json!({
+                "exit_code": output.status.code(),
+                "stderr": stderr,
+                "stderr_truncated": stderr_truncated,
+            }),
+        )
+        .into_response();
+    }
+    let Ok(value) = serde_json::from_slice::<Value>(&output.stdout) else {
+        return ApiFailure::new(
+            StatusCode::BAD_GATEWAY,
+            "invalid_result_response",
+            "prajna-experiment result returned invalid JSON",
+            Value::Null,
+        )
+        .into_response();
+    };
+    if value.get("schema_version").and_then(Value::as_u64) != Some(1)
+        || !value.get("data").is_some_and(Value::is_object)
+    {
+        return ApiFailure::new(
+            StatusCode::BAD_GATEWAY,
+            "invalid_result_response",
+            "prajna-experiment result returned an unsupported envelope",
+            Value::Null,
+        )
+        .into_response();
+    }
+    // Preserve the CLI envelope and stored decimal strings byte-for-byte.
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(Body::from(output.stdout))
+        .expect("fixed response headers")
 }
 async fn list_snapshots(State(api): State<RunJobApi>) -> Response {
     let directory = api.0.output.join("snapshots");
@@ -1272,6 +1503,7 @@ fn canonical_hash(request: &SubmitRun) -> Result<String, ApiFailure> {
         .map_err(ApiFailure::from_error)
 }
 fn validate_experiment_task_request(request: &SubmitExperimentTask) -> Result<(), ApiFailure> {
+    normalized_result_level(request.result_level.as_deref())?;
     if request.idempotency_key.trim().is_empty() || request.idempotency_key.len() > 128 {
         return Err(ApiFailure::new(
             StatusCode::BAD_REQUEST,
@@ -1291,15 +1523,25 @@ fn validate_experiment_task_request(request: &SubmitExperimentTask) -> Result<()
     Ok(())
 }
 fn canonical_experiment_task_hash(request: &SubmitExperimentTask) -> Result<String, ApiFailure> {
-    let value = json!({
+    let mut value = json!({
         "task_type": EXPERIMENT_TASK_TYPE,
         "task_version": EXPERIMENT_TASK_VERSION,
         "definition": &request.definition,
     });
+    if let Some(level) = &request.result_level {
+        if !is_summary_level(level) {
+            value["result_level"] = json!(level);
+        }
+    }
     serde_json::to_vec(&value)
         .map(|bytes| format!("{:x}", Sha256::digest(bytes)))
         .map_err(ApiFailure::from_error)
 }
+fn promote_missing_execution(error: &RunError) -> bool {
+    error.code == "experiment_cli_failed"
+        && error.details.get("exit_code").and_then(Value::as_i64) == Some(6)
+}
+
 fn blocker(code: &str, message: &str) -> RunError {
     RunError {
         code: code.into(),
@@ -2196,6 +2438,7 @@ mod tests {
             let request = SubmitExperimentTask {
                 idempotency_key: format!("task-{}", task_id.as_u128()),
                 definition: json!({"name":"synthetic restart fixture"}),
+                result_level: None,
             };
             persist_experiment_request(dir.path(), task_id, &request).unwrap();
             let mut task = sample_experiment_task(task_id, status);
@@ -2285,6 +2528,7 @@ mod tests {
         let request = SubmitExperimentTask {
             idempotency_key: "running-after-restart".into(),
             definition: json!({"name":"synthetic restart fixture"}),
+            result_level: None,
         };
         let mut task = sample_experiment_task(task_id, ExperimentTaskStatus::Running);
         task.process_group_id = Some(process.process_group_id());
@@ -2370,6 +2614,7 @@ mod tests {
             let request = SubmitExperimentTask {
                 idempotency_key: format!("stale-owner-{task_id}"),
                 definition: json!({"name":"synthetic stale process group"}),
+                result_level: None,
             };
             let mut task = sample_experiment_task(task_id, ExperimentTaskStatus::Running);
             task.process_group_id = Some(process.process_group_id());
@@ -3057,6 +3302,7 @@ mod tests {
             updated_at: "2026-01-01T00:00:00Z".into(),
             request_sha256: "request-hash".into(),
             idempotency_key: "experiment-task-key".into(),
+            result_level: "summary".into(),
             process_group_id: None,
             process_group_generation: None,
             result: None,
@@ -3226,5 +3472,538 @@ mod tests {
             process_inspector,
         );
         (api, request, dir)
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    async fn get_result(
+        api: &RunJobApi,
+        authority: &str,
+        id: Uuid,
+        host: &str,
+        origin: Option<&str>,
+    ) -> (StatusCode, Value, axum::http::HeaderMap) {
+        let mut request = axum::http::Request::builder()
+            .method("GET")
+            .uri(format!("/api/v1/tasks/experiments/{id}/result"))
+            .header("host", host);
+        if let Some(origin) = origin {
+            request = request.header("origin", origin);
+        }
+        let response = api
+            .clone()
+            .result_router(authority.into())
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        let headers = response.headers().clone();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+            headers,
+        )
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn experiment_result_route_serves_saved_identity_and_enforces_local_origin() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = dir.path().join("result-reader");
+        fs::write(
+            &cli,
+            "#!/bin/sh\n[ \"$1\" = result ] || exit 91\nprintf '{\"schema_version\":1,\"data\":{\"exp\":\"%s\",\"exe\":\"%s\"}}\\n' \"$2\" \"$3\"\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let api = RunJobApi::without_worker(
+            dir.path().into(),
+            Arc::new(UniverseStore::new(dir.path())),
+            cli,
+        );
+        let succeeded = Uuid::from_u128(41);
+        let mut task = sample_experiment_task(succeeded, ExperimentTaskStatus::Succeeded);
+        task.result = Some(json!({
+            "exp": "exp:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "exe": "exe:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }));
+        api.0.gate.lock().unwrap().tasks.insert(succeeded, task);
+
+        let (status, body, headers) =
+            get_result(&api, "127.0.0.1:7878", succeeded, "127.0.0.1:7878", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["schema_version"], 1);
+        assert_eq!(
+            body["data"]["exp"],
+            "exp:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+        assert_eq!(headers["content-type"], "application/json");
+        assert_eq!(headers["cache-control"], "no-store");
+
+        let (status, body, _) = get_result(
+            &api,
+            "127.0.0.1:7878",
+            succeeded,
+            "synthetic-review.invalid",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["error"]["code"], "result_origin_forbidden");
+        let (status, body, _) = get_result(
+            &api,
+            "127.0.0.1:7878",
+            succeeded,
+            "127.0.0.1:7878",
+            Some("https://synthetic-review.invalid"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["error"]["code"], "result_origin_forbidden");
+
+        let queued = Uuid::from_u128(42);
+        api.0.gate.lock().unwrap().tasks.insert(
+            queued,
+            sample_experiment_task(queued, ExperimentTaskStatus::Queued),
+        );
+        let (status, body, headers) =
+            get_result(&api, "127.0.0.1:7878", queued, "127.0.0.1:7878", None).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body["error"]["code"], "task_not_completed");
+        assert_eq!(headers["cache-control"], "no-store");
+
+        let (status, _, headers) = get_result(
+            &api,
+            "127.0.0.1:7878",
+            Uuid::from_u128(43),
+            "127.0.0.1:7878",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(headers["cache-control"], "no-store");
+
+        let invalid = Uuid::from_u128(44);
+        let mut invalid_task = sample_experiment_task(invalid, ExperimentTaskStatus::Succeeded);
+        invalid_task.result = Some(json!({"exp": 1}));
+        api.0
+            .gate
+            .lock()
+            .unwrap()
+            .tasks
+            .insert(invalid, invalid_task);
+        let (status, body, _) =
+            get_result(&api, "127.0.0.1:7878", invalid, "127.0.0.1:7878", None).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["error"]["code"], "task_result_invalid");
+
+        let missing = dir.path().join("missing-result-reader");
+        let unavailable = RunJobApi::without_worker(
+            dir.path().into(),
+            Arc::new(UniverseStore::new(dir.path())),
+            missing,
+        );
+        let unavailable_id = Uuid::from_u128(45);
+        let mut unavailable_task =
+            sample_experiment_task(unavailable_id, ExperimentTaskStatus::Succeeded);
+        unavailable_task.result = Some(json!({
+            "exp": "exp:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "exe": "exe:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }));
+        unavailable
+            .0
+            .gate
+            .lock()
+            .unwrap()
+            .tasks
+            .insert(unavailable_id, unavailable_task);
+        let (status, body, _) = get_result(
+            &unavailable,
+            "127.0.0.1:7878",
+            unavailable_id,
+            "127.0.0.1:7878",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"]["code"], "experiment_result_unavailable");
+
+        let failing_reader = dir.path().join("failing-result-reader");
+        fs::write(
+            &failing_reader,
+            "#!/bin/sh\nprintf 'synthetic read failure\\n' >&2\nexit 2\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&failing_reader, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let failing = RunJobApi::without_worker(
+            dir.path().into(),
+            Arc::new(UniverseStore::new(dir.path())),
+            failing_reader,
+        );
+        let failing_id = Uuid::from_u128(47);
+        let mut failing_task = sample_experiment_task(failing_id, ExperimentTaskStatus::Succeeded);
+        failing_task.result = Some(json!({
+            "exp": "exp:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "exe": "exe:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }));
+        failing
+            .0
+            .gate
+            .lock()
+            .unwrap()
+            .tasks
+            .insert(failing_id, failing_task);
+        let (status, body, headers) = get_result(
+            &failing,
+            "127.0.0.1:7878",
+            failing_id,
+            "127.0.0.1:7878",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["error"]["code"], "experiment_result_failed");
+        assert_eq!(body["error"]["details"]["exit_code"], 2);
+        assert!(body["error"]["details"]["stderr"].is_string());
+        assert_eq!(body["error"]["details"]["stderr_truncated"], false);
+        assert_eq!(headers["cache-control"], "no-store");
+
+        let malformed_reader = dir.path().join("malformed-result-reader");
+        fs::write(&malformed_reader, "#!/bin/sh\nprintf 'not-json\\n'\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&malformed_reader, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let malformed = RunJobApi::without_worker(
+            dir.path().into(),
+            Arc::new(UniverseStore::new(dir.path())),
+            malformed_reader,
+        );
+        let malformed_id = Uuid::from_u128(48);
+        let mut malformed_task =
+            sample_experiment_task(malformed_id, ExperimentTaskStatus::Succeeded);
+        malformed_task.result = Some(json!({
+            "exp": "exp:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "exe": "exe:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }));
+        malformed
+            .0
+            .gate
+            .lock()
+            .unwrap()
+            .tasks
+            .insert(malformed_id, malformed_task);
+        let (status, body, headers) = get_result(
+            &malformed,
+            "127.0.0.1:7878",
+            malformed_id,
+            "127.0.0.1:7878",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(body["error"]["code"], "invalid_result_response");
+        assert_eq!(headers["cache-control"], "no-store");
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn experiment_task_standard_level_is_frozen_and_drives_cli() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = dir.path().join("prajna-experiment");
+        fs::write(
+            &cli,
+            "#!/bin/sh\n[ \"$1\" = run ] || exit 6\nprintf '%s\\n' \"$@\" > \"$(dirname \"$2\")/cli-args.txt\"\nprintf '{\"exp\":\"exp:sha256:synthetic\",\"exe\":\"exe:sha256:synthetic\"}\\n'\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let inspector = dir.path().join("empty-ps");
+        fs::write(&inspector, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&inspector, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let (api, _legacy, _fixture_dir) = fixture_with_cli_and_process_inspector(cli, inspector);
+        let submitted = json!({
+            "idempotency_key": "standard-level-key",
+            "definition": {"name": "synthetic standard experiment"},
+            "result_level": "standard"
+        });
+        let (status, accepted) = api_json(
+            &api,
+            "POST",
+            "/api/v1/tasks/experiments",
+            Some(submitted.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        assert_eq!(accepted["task"]["result_level"], "standard");
+        let task_id = Uuid::parse_str(accepted["task"]["task_id"].as_str().unwrap()).unwrap();
+        assert!(api.process_next_queued());
+        let (status, detail) = api_json(
+            &api,
+            "GET",
+            &format!("/api/v1/tasks/experiments/{task_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(detail["status"], "succeeded", "{detail}");
+        assert_eq!(detail["result_level"], "standard");
+        let args = fs::read_to_string(
+            api.0
+                .output
+                .join("tasks")
+                .join(task_id.to_string())
+                .join("cli-args.txt"),
+        )
+        .unwrap();
+        let args = args.lines().collect::<Vec<_>>();
+        assert_eq!(&args[4..], &["--level", "standard"]);
+
+        let (status, conflict) = api_json(
+            &api,
+            "POST",
+            "/api/v1/tasks/experiments",
+            Some(json!({
+                "idempotency_key": "standard-level-key",
+                "definition": {"name": "synthetic standard experiment"}
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(conflict["error"]["code"], "idempotency_conflict");
+
+        let (status, invalid) = api_json(
+            &api,
+            "POST",
+            "/api/v1/tasks/experiments",
+            Some(json!({
+                "idempotency_key": "invalid-level-key",
+                "definition": {"name": "synthetic invalid level"},
+                "result_level": "full"
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(invalid["error"]["code"], "invalid_request");
+    }
+    #[test]
+    fn legacy_task_and_request_json_default_to_summary() {
+        let task_id = Uuid::from_u128(70);
+        let task: ExperimentTask = serde_json::from_value(json!({
+            "task_id": task_id,
+            "task_type": "prajna_experiment",
+            "task_version": 1,
+            "status": "succeeded",
+            "stage": "reading_experiment_result",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "request_sha256": "request-hash",
+            "idempotency_key": "legacy-key",
+            "process_group_id": null,
+            "process_group_generation": null,
+            "result": null,
+            "error": null
+        }))
+        .unwrap();
+        assert_eq!(task.result_level, "summary");
+        assert!(
+            serde_json::to_value(&task)
+                .unwrap()
+                .get("result_level")
+                .is_none()
+        );
+
+        let request: SubmitExperimentTask = serde_json::from_value(json!({
+            "idempotency_key": "legacy-key",
+            "definition": {"name": "legacy"}
+        }))
+        .unwrap();
+        assert_eq!(request.result_level, None);
+        let legacy_hash = format!(
+            "{:x}",
+            Sha256::digest(
+                serde_json::to_vec(&json!({
+                    "task_type": "prajna_experiment",
+                    "task_version": 1,
+                    "definition": {"name": "legacy"}
+                }))
+                .unwrap()
+            )
+        );
+        assert_eq!(
+            canonical_experiment_task_hash(&request).unwrap(),
+            legacy_hash
+        );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn standard_task_promotes_an_existing_execution_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let args_path = dir.path().join("cli-args.txt");
+        let cli = dir.path().join("prajna-experiment");
+        let script = format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" >> {}\nif [ \"$1\" = run ]; then\n  if [ \"$6\" = standard ]; then\n    printf 'Execution already exists at summary; use promote\\n' >&2\n    exit 3\n  fi\n  printf '{{\"exp\":\"exp:sha256:synthetic\",\"exe\":\"exe:sha256:synthetic\"}}\\n'\n  exit 0\nfi\nif [ \"$1\" = promote ]; then\n  printf '{{\"exp\":\"exp:sha256:synthetic\",\"exe\":\"exe:sha256:synthetic\",\"action\":\"promoted\"}}\\n'\n  exit 0\nfi\nexit 91\n",
+            shell_quote(&args_path)
+        );
+        fs::write(&cli, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let inspector = dir.path().join("empty-ps");
+        fs::write(&inspector, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&inspector, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let (api, _legacy, _fixture_dir) = fixture_with_cli_and_process_inspector(cli, inspector);
+
+        let (status, accepted) = api_json(
+            &api,
+            "POST",
+            "/api/v1/tasks/experiments",
+            Some(json!({
+                "idempotency_key": "standard-fallback",
+                "definition": {"name": "synthetic fallback"},
+                "result_level": "standard"
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let standard_id = Uuid::parse_str(accepted["task"]["task_id"].as_str().unwrap()).unwrap();
+        assert!(api.process_next_queued());
+        let (status, standard) = api_json(
+            &api,
+            "GET",
+            &format!("/api/v1/tasks/experiments/{standard_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(standard["status"], "succeeded", "{standard}");
+        assert_eq!(standard["result_level"], "standard");
+        assert_eq!(standard["result"]["action"], "promoted");
+
+        let args = fs::read_to_string(args_path).unwrap();
+        let args = args.lines().collect::<Vec<_>>();
+        assert!(args.contains(&"promote"));
+        assert!(!args.contains(&"run"));
+        assert_eq!(
+            args.iter()
+                .filter(|argument| **argument == "standard")
+                .count(),
+            1
+        );
+    }
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn standard_task_does_not_fallback_when_promotion_replay_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let args_path = dir.path().join("cli-args.txt");
+        let cli = dir.path().join("prajna-experiment");
+        let script = format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" >> {}\nif [ \"$1\" = promote ]; then\n  printf 'Run run:sha256:synthetic failed during promotion: synthetic replay failure\\n' >&2\n  exit 1\nfi\nif [ \"$1\" = run ]; then\n  printf '{{\"exp\":\"exp:sha256:synthetic\",\"exe\":\"exe:sha256:synthetic\"}}\\n'\n  exit 0\nfi\nexit 91\n",
+            shell_quote(&args_path)
+        );
+        fs::write(&cli, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let inspector = dir.path().join("empty-ps");
+        fs::write(&inspector, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&inspector, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let (api, _legacy, _fixture_dir) = fixture_with_cli_and_process_inspector(cli, inspector);
+        let (status, accepted) = api_json(
+            &api,
+            "POST",
+            "/api/v1/tasks/experiments",
+            Some(json!({
+                "idempotency_key": "promote-failure",
+                "definition": {"name": "synthetic promote failure"},
+                "result_level": "standard"
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let task_id = Uuid::parse_str(accepted["task"]["task_id"].as_str().unwrap()).unwrap();
+        assert!(api.process_next_queued());
+        let (status, detail) = api_json(
+            &api,
+            "GET",
+            &format!("/api/v1/tasks/experiments/{task_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(detail["status"], "failed", "{detail}");
+        assert_eq!(detail["error"]["code"], "experiment_cli_failed");
+        assert_eq!(detail["error"]["details"]["exit_code"], 1);
+        assert!(
+            detail["error"]["details"]["stderr"]
+                .as_str()
+                .is_some_and(|stderr| stderr.contains("failed during promotion"))
+        );
+        let args = fs::read_to_string(args_path).unwrap();
+        let args = args.lines().collect::<Vec<_>>();
+        assert!(args.contains(&"promote"));
+        assert!(!args.contains(&"run"));
+        assert!(
+            !api.0
+                .output
+                .join("tasks")
+                .join(task_id.to_string())
+                .join("cli-promote.stdout")
+                .exists()
+        );
+    }
+    #[test]
+    fn only_a_missing_execution_promote_error_falls_back_to_run() {
+        for (exit_code, expected) in [
+            (Some(1), false),
+            (Some(2), false),
+            (Some(3), false),
+            (Some(6), true),
+            (None, false),
+        ] {
+            let error = RunError {
+                code: "experiment_cli_failed".into(),
+                message: "synthetic".into(),
+                details: json!({"exit_code": exit_code}),
+            };
+            assert_eq!(promote_missing_execution(&error), expected, "{exit_code:?}");
+        }
+        let other = RunError {
+            code: "process_group_cleanup_failed".into(),
+            message: "synthetic".into(),
+            details: json!({"exit_code": 6}),
+        };
+        assert!(!promote_missing_execution(&other));
     }
 }

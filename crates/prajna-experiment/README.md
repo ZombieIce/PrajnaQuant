@@ -7,11 +7,18 @@ prajna-experiment run <experiment.json> --lake <dir> [--level summary|standard|f
                       [--promote <run-id>...] [--threads N]
                       [--backend-python <python> --backend-worker <worker.py>]
 prajna-experiment diff <exe-a> <exe-b> --lake <dir>
+prajna-experiment result <exp> <exe> --lake <dir> [--run <run-id>]
+prajna-experiment promote <experiment.json> --lake <dir> --level standard|full
+                         [--threads N]
 ```
+
+`result` 只读已保存的 Execution：校验实验/执行身份与 manifest 中每一张已保存表的 hash，输出 `schema_version: 1` 的 Summary/NAV envelope；缺表保持 `not_saved` / `not_produced_by_engine`，不执行、不提升、不重算。字段、错误映射和 HTTP 适配见 [结果读取契约](../../docs/contracts/experiment-result-read.md)。
 
 `--level` 默认 `summary`；省略 `--threads` 时使用 Rayon 默认线程数（包括 `RAYON_NUM_THREADS`），显式值必须大于零。Accurate 中该数值表示 worker 进程池槽位；Backend 不在 Rayon 线程上执行。线程数、ResultLevel 和 worker 路径不进入身份。CLI 从当前 Git 工作树捕获代码来源；lake 和定义可以用任意绝对路径。脏工作树照常运行，`reproducible=false`。
 
-不传 `--promote` 时，新建或重放当前 Execution。传入 `--promote` 时只提升已存在的当前 Execution，不先新建；须同时指定高于各选中 Run 现有等级的 `--level standard|full`。缺失 Execution、未知/重复 Run 或未提高等级均报错；未选中的 Run 不受影响。提升验证 Summary 和已有明细表，补写缺失表。
+不传 `--promote` 时，新建或重放当前 Execution。传入 `--promote` 时只提升已存在的当前 Execution，不先新建；须同时指定高于各选中 Run 现有等级的 `--level standard|full`。缺失 Execution、未知/重复 Run 或未提高等级均报错；未选中的 Run 不受影响。提升验证 Summary 和已有明细表，补写缺失表；`default_result_level` 保持创建级别。
+
+`promote <experiment.json> --level standard|full` 是同一提升能力的便捷入口：按当前工作树捕获身份，读取已存在的当前 Execution，提升所有仍低于目标级别的 Completed Run；failed Run 保持原级别，不新建 Execution。没有当前 Execution（目录不存在）时 exit 6，`--level summary` 时 exit 2；目录存在但缺少 `execution.json` 视为损坏（exit 3），不回退。没有任何 Completed Run 低于目标级别时以 `action: replayed` 成功返回（failed Run 保持原级别，不阻塞；全 failed 也不写表），但返回前仍校验 Summary/已保存表，损坏则失败。若选中的 Completed Run 在提升重放中失败，整批中止且不发布 partial 表。便于服务端先 promote、再回退到 run。
 
 ## 最小示例
 
@@ -153,13 +160,14 @@ Vector/Fast 日对拍见 [`prajna-research/tests/pit_s2.rs`](../prajna-research/
 | 退出码 | 含义 |
 | --- | --- |
 | 0 | 成功；个别 Run failed 仍完成 Execution，在报告中计数 |
-| 1 | I/O、来源捕获、执行/存储错误、Execution 不存在或身份格式错误 |
-| 2 | CLI 参数、定义/展开错误、非法提升请求 |
+| 1 | I/O、来源捕获、执行/存储错误、`run --promote` 的 Execution 不存在、`result` 读取或 hash 错误、`diff` 的非法身份 |
+| 2 | CLI 参数、定义/展开错误、`result` 的非法身份格式或非法提升请求 |
 | 3 | 重放不一致或已保存结果损坏 |
 | 4 | 同 Experiment diff 有差异（stdout 保留差异 JSON） |
 | 5 | 跨 Experiment diff |
+| 6 | `promote` 没有当前 Execution（服务端据此回退到 `run`） |
 
-运行 `--help`、`run --help` 或 `diff --help` 也可查看退出码。错误诊断写 stderr；错误路径不输出成功 JSON。
+运行 `--help`、`run --help`、`result --help`、`promote --help` 或 `diff --help` 也可查看退出码。错误诊断写 stderr；错误路径不输出成功 JSON。
 
 ## 验证
 
