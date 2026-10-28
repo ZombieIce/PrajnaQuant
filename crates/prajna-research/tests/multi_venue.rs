@@ -349,10 +349,7 @@ fn adr_0027_boundaries_are_rejected() {
     let mut p = portfolio(vec![]);
     p.rebalance = Rebalance::EntryOnly(EntryBudget::FixedInitial);
     assert!(
-        error(
-            config(venues(), Sizing::VectorParity, FastEventCosts::ZERO),
-            &[p]
-        )
-        .contains("full_target")
+        error(config(venues(), Sizing::Lot, FastEventCosts::ZERO), &[p])
+            .contains("multi-venue execution requires full_target")
     );
 }
