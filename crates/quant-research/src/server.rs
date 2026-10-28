@@ -78,6 +78,10 @@ pub async fn serve_with_dataset_root(
     dataset_root: Option<PathBuf>,
 ) -> Result<()> {
     let socket = validate_loopback_address(address)?;
+    let listener = tokio::net::TcpListener::bind(socket)
+        .await
+        .with_context(|| format!("bind {address}"))?;
+    let socket = listener.local_addr()?;
     let output = Arc::new(output);
     let state = AppState {
         universes: Arc::new(UniverseStore::new(&output)),
@@ -108,17 +112,14 @@ pub async fn serve_with_dataset_root(
         .with_state(state)
         .merge(run_jobs.router())
         .merge(market_api::router(Arc::new(market_data_dir)))
-        .merge(dataset_api::router(dataset_root))
-        .layer(CorsLayer::permissive());
+        .layer(CorsLayer::permissive())
+        .merge(dataset_api::router(dataset_root, socket.to_string()));
     let app = api.fallback_service(
         ServeDir::new(&web_dist)
             .append_index_html_on_directories(true)
             .not_found_service(ServeFile::new(web_dist.join("index.html"))),
     );
-    let listener = tokio::net::TcpListener::bind(socket)
-        .await
-        .with_context(|| format!("bind {address}"))?;
-    eprintln!("Prajna Quant: http://{address}");
+    eprintln!("Prajna Quant: http://{socket}");
     axum::serve(listener, app).await.context("run Axum server")
 }
 

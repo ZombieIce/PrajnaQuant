@@ -46,7 +46,7 @@ Universe 管理页默认用普通序号显示版本并隐藏 ID/哈希；折叠�
 
 ## 已发布研究 Dataset 预览
 
-`/datasets` 使用上述独立 Dataset 路由。`serve --dataset-root <LOCAL_LAKE>` 必须显式配置，省略时 API 返回 503 `dataset_root_unconfigured`；不回退 `--output`、旧行情快照或 MVP-6 存档。配置 root 的验证由生产读取入口执行（包括拒绝固定 MVP-6 存档及其后代），不会创建 root。服务仍只绑定 loopback。
+`/datasets` 使用上述独立 Dataset 路由。`serve --dataset-root <LOCAL_LAKE>` 必须显式配置，省略时 API 返回 503 `dataset_root_unconfigured`；不回退 `--output`、旧行情快照或 MVP-6 存档。配置 root 的验证由生产读取入口执行（包括拒绝固定 MVP-6 存档及其后代），不会创建 root。服务仍只绑定 loopback。Dataset 路由独立于旧 permissive CORS：Host 必须匹配实际绑定地址，Origin 缺省（本机 CLI/同源 GET）或与服务打印的 HTTP origin 完全一致才允许；外部/opaque Origin、其他端口和外部 Host 返回 403 JSON/no-store，包含预检，不向外部 origin 授权 CORS。请使用服务打印的地址打开页面；本机别名或独立开发端口不自动受信。该边界只约束新 Dataset 路由，旧路由契约不变。
 
 服务通过 `PRAJNA_DATASET_PREVIEW_CLI`（缺省在 PATH 查找 `prajna-preview-dataset`）调用只读 CLI；无新平台 crate 直接依赖。成功与读取错误保留 schema version 1 的 CLI JSON envelope，成功体为 `{schema_version:1,data:...}`，不会计算因子、填补缺失或触发发布/下载。参数通过 argv 传递，不经 shell；bars 只接受上表参数，未知参数拒绝。非法输入 400、版本/证券不存在 404、root 或 CLI 不可用 503、manifest/表/IO 失败 500、CLI 协议异常 502，响应不缓存。详细字段/限制见 [读取契约](contracts/dataset-preview-read.md)。
 
@@ -78,4 +78,4 @@ PRAJNA_PREVIEW_FIXTURE_ROOT=/tmp/preview-synthetic \
   node scripts/verify_dataset_preview_browser.mjs http://127.0.0.1:7878
 ```
 
-该脚本只复用已安装工具并要求合成 fixture 标记；可选 `PRAJNA_PREVIEW_SCREENSHOT_PREFIX` 将截图留本机。它核对两个版本的证券/生命周期、缺口、原始 Bars、空范围与刷新，T04 仍负责浏览器测试框架及完整任务闭环。
+该脚本只复用已安装工具并要求合成 fixture 标记；可选 `PRAJNA_PREVIEW_SCREENSHOT_PREFIX` 将截图留本机。它核对两个版本的证券/生命周期、缺口、原始 Bars、空范围与刷新，并验证外部合成页面即使拥有临时本地网络权限仍不能读取 Dataset API；T04 仍负责浏览器测试框架及完整任务闭环。

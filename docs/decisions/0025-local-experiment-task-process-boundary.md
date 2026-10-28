@@ -18,7 +18,7 @@ MVP-7 的本机研究任务需要复用既有数据、因子与 Experiment 能�
 
 ## 只读 Dataset 适配（#290）
 
-本机 Dataset API/页面复用同一进程边界原则：服务调用 `prajna-preview-dataset`，不直接依赖新平台 crate。显式 `--dataset-root` 与原有输出/行情根分开，未配置时不可用；只读 CLI 负责正式 Dataset 校验和数据口径，HTTP 保留其版本化 envelope，不发布或采集。具体配置、响应和错误映射见 [API](../api.md#已发布研究-dataset-预览) 与 [读取契约](../contracts/dataset-preview-read.md)。这不改变既有 Experiment/诊断任务或结果身份。
+本机 Dataset API/页面复用同一进程边界原则：服务调用 `prajna-preview-dataset`，不直接依赖新平台 crate。显式 `--dataset-root` 与原有输出/行情根分开，未配置时不可用；只读 CLI 负责正式 Dataset 校验和数据口径，HTTP 保留其版本化 envelope，不发布或采集。具体配置、响应和错误映射见 [API](../api.md#已发布研究-dataset-预览) 与 [读取契约](../contracts/dataset-preview-read.md)。Dataset 路由不继承旧 permissive CORS，按实际绑定 Host/HTTP Origin 限定本机工作台，外部/opaque Origin（含预检）拒绝。旧 Experiment/诊断路由和结果身份保持既有契约。
 
 ## 后果与限制
 

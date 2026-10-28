@@ -47,5 +47,11 @@ try {
   assert.deepEqual(errors, []);
   assert(requests.length >= 8 && requests.every(([method]) => method === 'GET'));
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
-  console.log('PASS: production browser Dataset selection, ETF Known and stock Unknown lifecycle, gaps, original Bars, empty range and refresh; only GET APIs, no page errors or horizontal overflow.');
+  const foreign = await browser.newContext({ permissions: ['local-network-access'] });
+  await foreign.route('https://synthetic-review.invalid/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Synthetic origin</title>' }));
+  const foreignPage = await foreign.newPage();
+  await foreignPage.goto('https://synthetic-review.invalid');
+  assert.equal(await foreignPage.evaluate(async target => { try { await fetch(target); return false; } catch { return true; } }, `${url}/api/v1/datasets`), true);
+  await foreign.close();
+  console.log('PASS: external synthetic origin cannot read Dataset API even with ephemeral local-network permission; production browser Dataset selection, ETF Known and stock Unknown lifecycle, gaps, original Bars, empty range and refresh; only GET APIs, no page errors or horizontal overflow.');
 } finally { await browser.close(); }

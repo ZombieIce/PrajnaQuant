@@ -23,15 +23,17 @@ def main():
         return {str(p.relative_to(lake)): hashlib.sha256(p.read_bytes()).digest()
                 for p in lake.rglob("*") if p.is_file()}
 
-    def http(path, status=200):
+    def http(path, status=200, headers=None, method="GET"):
+        request = urllib.request.Request(args.url.rstrip("/") + path, headers=headers or {}, method=method)
         try:
-            response = urllib.request.urlopen(args.url.rstrip("/") + path, timeout=60)
+            response = urllib.request.urlopen(request, timeout=60)
         except urllib.error.HTTPError as error:
             response = error
         assert response.status == status, (path, response.status, status)
         body = response.read()
-        if status == 200:
-            assert response.headers["Cache-Control"] == "no-store"
+        assert response.headers["Cache-Control"] == "no-store"
+        assert response.headers.get("Access-Control-Allow-Origin") is None
+        assert response.headers["Content-Type"].startswith("application/json")
         return body
 
     def parity(path, *command):
@@ -41,6 +43,12 @@ def main():
         return json.loads(actual)["data"]
 
     before = tree()
+    for origin in ("https://synthetic-review.invalid", "null", "http://127.0.0.1:1"):
+        for method in ("GET", "OPTIONS"):
+            for path in ("/api/v1/datasets", "/api/v1/datasets/synthetic", "/api/v1/datasets/synthetic/bars?instrument=x"):
+                http(path, 403, {"Origin": origin, "Access-Control-Request-Method": "GET"}, method)
+    http("/api/v1/datasets", headers={"Origin": args.url.rstrip("/")})
+    http("/api/v1/datasets", 403, {"Host": "synthetic-review.invalid"})
     catalog = parity("/api/v1/datasets", "catalog")
     assert len(catalog["datasets"]) == 2 and not catalog["invalid_manifests"]
     kinds = set()

@@ -2,8 +2,9 @@
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Path, Query, State},
-    http::{StatusCode, header},
+    extract::{Path, Query, State, rejection::QueryRejection},
+    http::{Request, StatusCode, header},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -17,13 +18,44 @@ struct DatasetState {
     cli: PathBuf,
 }
 
-pub fn router(root: Option<PathBuf>) -> Router {
+pub fn router(root: Option<PathBuf>, authority: String) -> Router {
     configured_router(DatasetState {
         root,
         cli: std::env::var_os("PRAJNA_DATASET_PREVIEW_CLI")
             .map(PathBuf::from)
             .unwrap_or_else(|| "prajna-preview-dataset".into()),
     })
+    .layer(middleware::from_fn_with_state(authority, local_page))
+}
+
+async fn local_page(
+    State(authority): State<String>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    let headers = request.headers();
+    let default_authority = authority.strip_suffix(":80").unwrap_or(&authority);
+    let origin = format!("http://{default_authority}");
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok());
+    if !matches!(host, Some(value) if value == authority || value == default_authority)
+        || headers
+            .get(header::ORIGIN)
+            .is_some_and(|value| value != origin.as_str())
+    {
+        return failure(
+            StatusCode::FORBIDDEN,
+            "dataset_origin_forbidden",
+            "Dataset preview is restricted to the configured local workbench origin.",
+        );
+    }
+    let mut response = next.run(request).await;
+    response.headers_mut().insert(
+        "cross-origin-resource-policy",
+        "same-origin".parse().expect("fixed header"),
+    );
+    response
 }
 
 fn configured_router(state: DatasetState) -> Router {
@@ -55,8 +87,18 @@ struct BarsQuery {
 async fn bars(
     State(state): State<Arc<DatasetState>>,
     Path(dsv): Path<String>,
-    Query(query): Query<BarsQuery>,
+    query: Result<Query<BarsQuery>, QueryRejection>,
 ) -> Response {
+    let query = match query {
+        Ok(Query(query)) => query,
+        Err(_) => {
+            return failure(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "Invalid or unknown Dataset bars query fields.",
+            );
+        }
+    };
     let mut args = vec![
         "bars".into(),
         "--dsv".into(),
@@ -184,6 +226,40 @@ mod tests {
                 .unwrap()
                 .to_vec(),
         )
+    }
+
+    #[tokio::test]
+    async fn origin_boundary_precedes_the_reader_and_has_no_permissive_cors() {
+        for (host, origin, status) in [
+            ("127.0.0.1:7878", None, 503),
+            ("127.0.0.1:7878", Some("http://127.0.0.1:7878"), 503),
+            (
+                "127.0.0.1:7878",
+                Some("https://synthetic-review.invalid"),
+                403,
+            ),
+            ("127.0.0.1:7878", Some("null"), 403),
+            ("synthetic-review.invalid", None, 403),
+        ] {
+            let mut request = Request::builder()
+                .uri("/api/v1/datasets")
+                .header("host", host);
+            if let Some(origin) = origin {
+                request = request.header("origin", origin);
+            }
+            let response = router(None, "127.0.0.1:7878".into())
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status().as_u16(), status);
+            assert!(
+                response
+                    .headers()
+                    .get("access-control-allow-origin")
+                    .is_none()
+            );
+            assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        }
     }
 
     #[tokio::test]
