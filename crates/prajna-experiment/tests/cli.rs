@@ -468,6 +468,8 @@ fn help_lists_the_exit_code_contract() {
         vec!["--help"],
         vec!["run", "--help"],
         vec!["diff", "--help"],
+        vec!["result", "--help"],
+        vec!["promote", "--help"],
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_prajna-experiment"))
             .args(args)
@@ -482,6 +484,7 @@ fn help_lists_the_exit_code_contract() {
             "3 replay",
             "4 diff",
             "5 diff",
+            "6 promote",
         ] {
             assert!(help.contains(code), "{help}");
         }
@@ -742,6 +745,34 @@ fn result_reads_fast_event_account_valuations() {
             .iter()
             .any(|table| table == "account_valuations")
     );
+    let directory = example.directory(&first);
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(directory.join("execution.json")).unwrap()).unwrap();
+    let run_id = manifest["runs"][0]["run_id"].as_str().unwrap();
+    let (_, batches) = prajna_experiment::read_run_table(
+        &example.lake,
+        first["exp"].as_str().unwrap(),
+        first["exe"].as_str().unwrap(),
+        run_id,
+        prajna_experiment::ResultLevel::Standard,
+        "account_valuations",
+    )
+    .unwrap();
+    let payloads = batches[0]
+        .column_by_name("payload")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    let stored: Value = serde_json::from_str(payloads.value(0)).unwrap();
+    assert_eq!(
+        run["series"]["account_valuations"][0]["cash"],
+        stored["cash"]
+    );
+    assert_eq!(
+        run["series"]["account_valuations"][0]["equity"],
+        stored["equity"]
+    );
 }
 
 #[test]
@@ -777,7 +808,7 @@ fn promote_command_upgrades_an_existing_summary_execution() {
 #[test]
 fn promote_requires_an_existing_execution_and_a_higher_level() {
     let example = Example::new();
-    status(&example.promote("standard", &[]), 1);
+    status(&example.promote("standard", &[]), 6);
     json_output(example.run(&[]), 0);
     status(&example.promote("summary", &[]), 2);
 }
@@ -829,4 +860,121 @@ fn result_reports_missing_and_malformed_identities() {
     );
     status(&output, 1);
     assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn result_filters_output_but_still_verifies_every_run() {
+    let example = Example::new();
+    let first = json_output(example.run(&["--level", "standard"]), 0);
+    let exp = first["exp"].as_str().unwrap();
+    let exe = first["exe"].as_str().unwrap();
+    let directory = example.directory(&first);
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(directory.join("execution.json")).unwrap()).unwrap();
+    let runs = manifest["runs"].as_array().unwrap();
+    assert!(runs.len() >= 2);
+    let returned = runs[0]["run_id"].as_str().unwrap();
+    let damaged = runs[1]["run_id"].as_str().unwrap();
+    let damaged_dir = directory
+        .join("runs")
+        .join(damaged.rsplit(':').next().unwrap());
+    fs::copy(
+        damaged_dir.join("executions.parquet"),
+        damaged_dir.join("sessions.parquet"),
+    )
+    .unwrap();
+
+    let output = example.result(exp, exe, &["--run", returned]);
+    status(&output, 1);
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("sessions"));
+}
+
+#[test]
+fn result_rejects_a_parsable_nav_table_hash_mismatch() {
+    let example = Example::new();
+    let first = json_output(example.run(&["--level", "standard"]), 0);
+    let directory = example.directory(&first);
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(directory.join("execution.json")).unwrap()).unwrap();
+    let run_id = manifest["runs"][0]["run_id"].as_str().unwrap();
+    let run_dir = directory
+        .join("runs")
+        .join(run_id.rsplit(':').next().unwrap());
+    fs::copy(
+        run_dir.join("executions.parquet"),
+        run_dir.join("sessions.parquet"),
+    )
+    .unwrap();
+
+    let output = example.result(
+        first["exp"].as_str().unwrap(),
+        first["exe"].as_str().unwrap(),
+        &[],
+    );
+    status(&output, 1);
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("sessions"));
+}
+
+#[test]
+fn promote_with_only_failed_runs_returns_replayed_without_writing_tables() {
+    let example = Example::new();
+    example.write_definition(|definition| definition["costs"]["commission_rate"] = json!(100.0));
+    let summary = json_output(example.run(&[]), 0);
+    assert_eq!(summary["run_count"], 2);
+    assert_eq!(summary["failed_count"], 2);
+
+    let promoted = json_output(example.promote("standard", &[]), 0);
+    assert_eq!(promoted["action"], "replayed");
+    assert_eq!(promoted["failed_count"], 2);
+    let directory = example.directory(&summary);
+    assert!(!directory.join("runs").exists());
+
+    let result = json_output(
+        example.result(
+            summary["exp"].as_str().unwrap(),
+            summary["exe"].as_str().unwrap(),
+            &[],
+        ),
+        0,
+    );
+    let runs = result["data"]["runs"].as_array().unwrap();
+    assert_eq!(runs.len(), 2);
+    for run in runs {
+        assert_eq!(run["status"], "failed");
+        assert_eq!(run["result_level"], "summary");
+        assert_eq!(run["summary"], Value::Null);
+        assert!(run["series"].as_object().unwrap().is_empty());
+        assert!(
+            run["tables"]["not_saved"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|table| table == "sessions")
+        );
+    }
+}
+
+#[test]
+fn promote_no_op_fails_closed_on_corrupted_saved_tables() {
+    let example = Example::new();
+    let first = json_output(example.run(&["--level", "standard"]), 0);
+    let directory = example.directory(&first);
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(directory.join("execution.json")).unwrap()).unwrap();
+    let run_id = manifest["runs"][0]["run_id"].as_str().unwrap();
+    let run_dir = directory
+        .join("runs")
+        .join(run_id.rsplit(':').next().unwrap());
+    fs::copy(
+        run_dir.join("executions.parquet"),
+        run_dir.join("sessions.parquet"),
+    )
+    .unwrap();
+
+    let output = example.promote("standard", &[]);
+    status(&output, 3);
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("sessions"));
 }

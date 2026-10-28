@@ -75,6 +75,7 @@ pub enum ExperimentError {
     Io(std::io::Error),
     Git(String),
     Execution(String),
+    ExecutionNotFound(String),
     ReplayMismatch(String),
     DifferentExperiments(String),
 }
@@ -92,6 +93,7 @@ impl fmt::Display for ExperimentError {
             Self::Io(error) => write!(formatter, "experiment provenance I/O error: {error}"),
             Self::Git(message) => write!(formatter, "cannot capture git provenance: {message}"),
             Self::Execution(message)
+            | Self::ExecutionNotFound(message)
             | Self::ReplayMismatch(message)
             | Self::DifferentExperiments(message) => formatter.write_str(message),
         }
@@ -109,6 +111,7 @@ impl Error for ExperimentError {
             | Self::Canonical(_)
             | Self::Git(_)
             | Self::Execution(_)
+            | Self::ExecutionNotFound(_)
             | Self::ReplayMismatch(_)
             | Self::DifferentExperiments(_) => None,
         }

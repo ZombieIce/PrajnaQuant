@@ -720,12 +720,21 @@ pub(super) fn promote(
     })
 }
 
-/// Promote every Run of the current Execution that is below `level`.
+fn runs_below_level(runs: &[StoredRun], level: ResultLevel) -> Vec<String> {
+    runs.iter()
+        .filter(|run| run.status == RunStatus::Completed && run.result_level < level)
+        .map(|run| run.run_id.clone())
+        .collect()
+}
+
+/// Promote every completed Run of the current Execution that is below `level`.
 ///
 /// The Experiment/Execution identity is captured from the current working
-/// directory exactly like `run`; the stored Execution is never recreated. A
-/// missing Execution is reported as an I/O/not-found error so callers can fall
-/// back to executing a new one.
+/// directory exactly like `run`; the stored Execution is never recreated. Failed
+/// Runs keep their original level and never block promotion of completed Runs.
+/// A missing Execution is reported as `ExecutionNotFound` (CLI exit 6) so the
+/// service can fall back to executing a new one; an existing but unreadable
+/// Execution is a replay failure and must not fall back.
 pub fn promote_below_level(
     experiment: &Experiment,
     lake_root: &Path,
@@ -740,21 +749,21 @@ pub fn promote_below_level(
     }
     let experiment_id = experiment.id()?;
     let identity = ExecutionIdentity::capture(&experiment_id, repository)?;
-    let manifest =
-        read_execution_manifest(lake_root, &experiment_id, &identity.id).map_err(|error| {
-            ExperimentError::Io(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                error.to_string(),
-            ))
-        })?;
-    let run_ids = manifest
-        .runs
-        .iter()
-        .filter(|run| run.result_level < level)
-        .map(|run| run.run_id.clone())
-        .collect::<Vec<_>>();
     let destination = execution_path(lake_root, &experiment_id, &identity.id)?;
+    if !destination.join("execution.json").is_file() {
+        return Err(ExperimentError::ExecutionNotFound(format!(
+            "Execution {} does not exist",
+            identity.id
+        )));
+    }
+    let manifest = read_execution_manifest(lake_root, &experiment_id, &identity.id)
+        .map_err(|error| ExperimentError::ReplayMismatch(error.to_string()))?;
+    let run_ids = runs_below_level(&manifest.runs, level);
     if run_ids.is_empty() {
+        // No-op promotion must still fail closed on corrupted Summary/tables;
+        // task success must imply a readable persisted result.
+        crate::read_persisted_result(lake_root, &experiment_id, &identity.id, None)
+            .map_err(|error| ExperimentError::ReplayMismatch(error.to_string()))?;
         return Ok(StoredExecution {
             manifest,
             path: destination,
@@ -2571,5 +2580,58 @@ mod promotion_tests {
         .unwrap_err();
         assert!(!temp.path().join("runs").exists());
         publish_promotion(&pending, || Ok(())).unwrap();
+    }
+    fn stored_run(id: &str, status: RunStatus, level: ResultLevel) -> StoredRun {
+        StoredRun {
+            run_id: id.into(),
+            status,
+            result_level: level,
+            table_hashes: BTreeMap::new(),
+            not_saved: vec![],
+            not_produced_by_engine: vec![],
+            accounting_verified: None,
+            run_spec: None,
+        }
+    }
+
+    #[test]
+    fn promotion_selects_only_completed_runs_below_the_target_level() {
+        let runs = vec![
+            stored_run(
+                "run:completed-summary",
+                RunStatus::Completed,
+                ResultLevel::Summary,
+            ),
+            stored_run(
+                "run:failed-summary",
+                RunStatus::Failed,
+                ResultLevel::Summary,
+            ),
+            stored_run(
+                "run:completed-standard",
+                RunStatus::Completed,
+                ResultLevel::Standard,
+            ),
+            stored_run(
+                "run:failed-standard",
+                RunStatus::Failed,
+                ResultLevel::Standard,
+            ),
+            stored_run(
+                "run:completed-full",
+                RunStatus::Completed,
+                ResultLevel::Full,
+            ),
+        ];
+        assert_eq!(
+            runs_below_level(&runs, ResultLevel::Standard),
+            vec!["run:completed-summary"]
+        );
+        assert_eq!(
+            runs_below_level(&runs, ResultLevel::Full),
+            vec!["run:completed-summary", "run:completed-standard"]
+        );
+        assert!(runs_below_level(&runs[1..2], ResultLevel::Full).is_empty());
+        assert!(runs_below_level(&runs, ResultLevel::Summary).is_empty());
     }
 }

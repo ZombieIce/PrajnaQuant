@@ -18,8 +18,8 @@ use serde_json::json;
 
 const EXIT_CODES: &str = "Exit codes: 0 success; 1 I/O, provenance, execution, result read or diff identity failure; \
 2 CLI, definition, expansion, result identity or invalid promotion request; 3 replay inconsistency; \
-4 diff contains differences; 5 diff across Experiments. Failed individual Runs are \
-recorded in the report and do not change exit code 0.";
+4 diff contains differences; 5 diff across Experiments; 6 promote found no current Execution. \
+Failed individual Runs are recorded in the report and do not change exit code 0.";
 
 #[derive(Parser)]
 #[command(about = "Run, replay, promote and compare synthetic Vector, Fast Event and Accurate Event experiments", after_help = EXIT_CODES)]
@@ -113,6 +113,7 @@ fn error_code(error: &ExperimentError) -> u8 {
     match error {
         ExperimentError::ReplayMismatch(_) => 3,
         ExperimentError::DifferentExperiments(_) => 5,
+        ExperimentError::ExecutionNotFound(_) => 6,
         ExperimentError::Json(_)
         | ExperimentError::Manifest(_)
         | ExperimentError::Universe(_)

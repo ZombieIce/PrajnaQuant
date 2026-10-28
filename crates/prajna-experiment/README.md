@@ -18,7 +18,7 @@ prajna-experiment promote <experiment.json> --lake <dir> --level standard|full
 
 不传 `--promote` 时，新建或重放当前 Execution。传入 `--promote` 时只提升已存在的当前 Execution，不先新建；须同时指定高于各选中 Run 现有等级的 `--level standard|full`。缺失 Execution、未知/重复 Run 或未提高等级均报错；未选中的 Run 不受影响。提升验证 Summary 和已有明细表，补写缺失表；`default_result_level` 保持创建级别。
 
-`promote <experiment.json> --level standard|full` 是同一提升能力的便捷入口：按当前工作树捕获身份，读取已存在的当前 Execution，提升所有仍低于目标级别的 Run；不新建 Execution。没有当前 Execution 时 exit 1，`--level summary` 时 exit 2；没有任何 Run 低于目标级别时以 `action: replayed` 成功返回，便于服务端先 promote、再回退到 run。
+`promote <experiment.json> --level standard|full` 是同一提升能力的便捷入口：按当前工作树捕获身份，读取已存在的当前 Execution，提升所有仍低于目标级别的 Completed Run；failed Run 保持原级别，不新建 Execution。没有当前 Execution 时 exit 6，`--level summary` 时 exit 2；没有任何 Completed Run 低于目标级别时以 `action: replayed` 成功返回（failed Run 保持原级别，不阻塞；全 failed 也不写表）。若选中的 Completed Run 在提升重放中失败，整批中止且不发布 partial 表。便于服务端先 promote、再回退到 run。
 
 ## 最小示例
 
@@ -165,6 +165,7 @@ Vector/Fast 日对拍见 [`prajna-research/tests/pit_s2.rs`](../prajna-research/
 | 3 | 重放不一致或已保存结果损坏 |
 | 4 | 同 Experiment diff 有差异（stdout 保留差异 JSON） |
 | 5 | 跨 Experiment diff |
+| 6 | `promote` 没有当前 Execution（服务端据此回退到 `run`） |
 
 运行 `--help`、`run --help`、`result --help`、`promote --help` 或 `diff --help` 也可查看退出码。错误诊断写 stderr；错误路径不输出成功 JSON。
 

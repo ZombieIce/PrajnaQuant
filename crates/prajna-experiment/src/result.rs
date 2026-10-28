@@ -35,10 +35,13 @@ pub fn read_persisted_result(
     let manifest = read_execution_manifest(lake, experiment_id, execution_id)?;
     let mut runs = Vec::new();
     for run in &manifest.runs {
-        if run_filter.is_some_and(|requested| requested != run.run_id) {
-            continue;
+        // `--run` filters the returned envelope, never the integrity scope:
+        // every Run's saved tables are read and hash-verified even when only
+        // one Run is returned.
+        let view = run_view(lake, experiment_id, execution_id, run)?;
+        if run_filter.is_none_or(|requested| requested == run.run_id) {
+            runs.push(view);
         }
-        runs.push(run_view(lake, experiment_id, execution_id, run)?);
     }
     if runs.is_empty() {
         return Err(invalid(format!(

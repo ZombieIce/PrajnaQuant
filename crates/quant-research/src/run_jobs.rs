@@ -966,8 +966,9 @@ impl RunJobApi {
         if result_level == "standard" {
             // Prefer promoting the current Execution: this both upgrades an
             // existing Summary result and makes an already-Standard result a
-            // no-op. Only fall back to executing when no current Execution (or
-            // an invalid definition) is reported.
+            // no-op. Only fall back to executing when promote reports that no
+            // current Execution exists (exit 6); an existing but unreadable or
+            // partially replayable Execution must not be retried as `run`.
             let promoted = self.execute_experiment_cli(
                 task,
                 &directory,
@@ -983,16 +984,16 @@ impl RunJobApi {
             );
             match promoted {
                 Ok(result) => Ok(result),
-                Err(error)
+                Err(error) => {
+                    let _ = fs::remove_file(directory.join("cli-promote.stdout"));
                     if error.code == "experiment_cli_failed"
-                        && matches!(
-                            error.details.get("exit_code").and_then(Value::as_i64),
-                            Some(1 | 2)
-                        ) =>
-                {
-                    self.execute_experiment_cli(task, &directory, run_args, "cli.stdout")
+                        && error.details.get("exit_code").and_then(Value::as_i64) == Some(6)
+                    {
+                        self.execute_experiment_cli(task, &directory, run_args, "cli.stdout")
+                    } else {
+                        Err(error)
+                    }
                 }
-                Err(error) => Err(error),
             }
         } else {
             self.execute_experiment_cli(task, &directory, run_args, "cli.stdout")
@@ -3720,7 +3721,7 @@ mod tests {
         let cli = dir.path().join("prajna-experiment");
         fs::write(
             &cli,
-            "#!/bin/sh\n[ \"$1\" = run ] || exit 1\nprintf '%s\\n' \"$@\" > \"$(dirname \"$2\")/cli-args.txt\"\nprintf '{\"exp\":\"exp:sha256:synthetic\",\"exe\":\"exe:sha256:synthetic\"}\\n'\n",
+            "#!/bin/sh\n[ \"$1\" = run ] || exit 6\nprintf '%s\\n' \"$@\" > \"$(dirname \"$2\")/cli-args.txt\"\nprintf '{\"exp\":\"exp:sha256:synthetic\",\"exe\":\"exe:sha256:synthetic\"}\\n'\n",
         )
         .unwrap();
         #[cfg(unix)]
@@ -3910,6 +3911,73 @@ mod tests {
                 .filter(|argument| **argument == "standard")
                 .count(),
             1
+        );
+    }
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn standard_task_does_not_fallback_when_promotion_replay_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let args_path = dir.path().join("cli-args.txt");
+        let cli = dir.path().join("prajna-experiment");
+        let script = format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" >> {}\nif [ \"$1\" = promote ]; then\n  printf 'Run run:sha256:synthetic failed during promotion: synthetic replay failure\\n' >&2\n  exit 3\nfi\nif [ \"$1\" = run ]; then\n  printf '{{\"exp\":\"exp:sha256:synthetic\",\"exe\":\"exe:sha256:synthetic\"}}\\n'\n  exit 0\nfi\nexit 91\n",
+            shell_quote(&args_path)
+        );
+        fs::write(&cli, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let inspector = dir.path().join("empty-ps");
+        fs::write(&inspector, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&inspector, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let (api, _legacy, _fixture_dir) = fixture_with_cli_and_process_inspector(cli, inspector);
+        let (status, accepted) = api_json(
+            &api,
+            "POST",
+            "/api/v1/tasks/experiments",
+            Some(json!({
+                "idempotency_key": "promote-failure",
+                "definition": {"name": "synthetic promote failure"},
+                "result_level": "standard"
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let task_id = Uuid::parse_str(accepted["task"]["task_id"].as_str().unwrap()).unwrap();
+        assert!(api.process_next_queued());
+        let (status, detail) = api_json(
+            &api,
+            "GET",
+            &format!("/api/v1/tasks/experiments/{task_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(detail["status"], "failed", "{detail}");
+        assert_eq!(detail["error"]["code"], "experiment_cli_failed");
+        assert_eq!(detail["error"]["details"]["exit_code"], 3);
+        assert!(
+            detail["error"]["details"]["stderr"]
+                .as_str()
+                .is_some_and(|stderr| stderr.contains("failed during promotion"))
+        );
+        let args = fs::read_to_string(args_path).unwrap();
+        let args = args.lines().collect::<Vec<_>>();
+        assert!(args.contains(&"promote"));
+        assert!(!args.contains(&"run"));
+        assert!(
+            !api.0
+                .output
+                .join("tasks")
+                .join(task_id.to_string())
+                .join("cli-promote.stdout")
+                .exists()
         );
     }
 }
