@@ -38,6 +38,10 @@ pub const TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION: &str = "f
 pub const INVESTABLE_EQUITY_LOT_ENGINE_VERSION: &str = "fast_event@10";
 pub const CORPORATE_ACTION_INVESTABLE_EQUITY_LOT_ENGINE_VERSION: &str = "fast_event@11";
 pub const TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_LOT_ENGINE_VERSION: &str = "fast_event@12";
+/// Multi-Venue Fast Event uses one shared Session axis and one venue-scoped
+/// account. Only cross-Venue, non-PIT price-return Runs select these versions.
+pub const MULTI_VENUE_PARITY_ENGINE_VERSION: &str = "fast_event@13";
+pub const MULTI_VENUE_LOT_ENGINE_VERSION: &str = "fast_event@14";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sizing {
@@ -101,7 +105,7 @@ impl FastEventCosts {
 #[derive(Debug, Clone)]
 pub struct FastEventConfig {
     pub currency: Currency,
-    pub venue: VenueId,
+    pub venues: BTreeSet<VenueId>,
     pub initial_cash: Notional,
     pub sizing: Sizing,
     pub costs: FastEventCosts,
@@ -480,6 +484,9 @@ pub fn run_lot_with_execution(
     if config.sizing != Sizing::Lot {
         return Err(invalid("external execution requires lot sizing"));
     }
+    if config.venues.len() > 1 {
+        return Err(invalid("external execution (Accurate) requires one Venue"));
+    }
     run_with_execution(
         panel,
         statuses,
@@ -507,6 +514,13 @@ fn run_with_execution(
     terminal_settlement: Option<&TerminalSettlementSchedule>,
 ) -> Result<FastEventResult, FastEventError> {
     validate(panel, config, portfolios)?;
+    if config.venues.len() > 1
+        && (pit.is_some() || actions.is_some() || terminal_settlement.is_some())
+    {
+        return Err(invalid(
+            "multi-venue Fast Event requires the non-PIT price-return entry",
+        ));
+    }
     if (actions.is_some() || terminal_settlement.is_some()) && pit.is_none() {
         return Err(invalid(
             "PIT ledger extensions require the PIT Engine entry point",
@@ -523,9 +537,9 @@ fn run_with_execution(
         })
         .transpose()?;
     let external_execution = execution.is_some();
-    let mut account = TradingAccount::new(
+    let mut account = TradingAccount::new_for_venues(
         config.currency.clone(),
-        config.venue.clone(),
+        config.venues.clone(),
         config.initial_cash,
         portfolios.iter().map(|p| (p.id, p.capital)),
     )?;
@@ -1019,9 +1033,14 @@ fn run_with_execution(
             Vec::new(),
         )
     };
+    let venue_assumption = if config.venues.len() > 1 {
+        "Cross-Venue XSHG/XSHE shared Session axis, single currency, long-only, unlevered; full market fills."
+    } else {
+        "Single Venue, single currency, long-only, unlevered; full market fills."
+    };
     let mut assumptions = if pit.is_some() {
         vec![
-            "Single Venue, single currency, long-only, unlevered; full market fills.",
+            venue_assumption,
             "Offline PIT Universe/Eligible/Derived Market evidence; not real-market PIT certification.",
             "Directional opening price limits and persistent Risk Exit; regular blocked sells defer the whole target.",
             if actions.is_some() {
@@ -1033,7 +1052,7 @@ fn run_with_execution(
         ]
     } else {
         vec![
-            "Single Venue, single currency, long-only, unlevered; full market fills.",
+            venue_assumption,
             "T+1, price limits, currency-unit rounding and corporate actions are not modeled.",
             "Static synthetic Universe evidence does not establish PIT or dividend total return.",
             "Valid raw bars mark even HALTED/UNKNOWN instruments; status gates execution only.",
@@ -1053,28 +1072,35 @@ fn run_with_execution(
             .iter()
             .any(|p| p.rebalance == Rebalance::FullTarget);
     Ok(FastEventResult {
-        semantic_version: match (
-            config.sizing,
-            actions.is_some(),
-            terminal_settlement.is_some(),
-        ) {
-            (Sizing::VectorParity, _, true) => {
-                TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION
+        semantic_version: if config.venues.len() > 1 {
+            match config.sizing {
+                Sizing::VectorParity => MULTI_VENUE_PARITY_ENGINE_VERSION,
+                Sizing::Lot => MULTI_VENUE_LOT_ENGINE_VERSION,
             }
-            (Sizing::VectorParity, true, false) => {
-                CORPORATE_ACTION_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION
+        } else {
+            match (
+                config.sizing,
+                actions.is_some(),
+                terminal_settlement.is_some(),
+            ) {
+                (Sizing::VectorParity, _, true) => {
+                    TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION
+                }
+                (Sizing::VectorParity, true, false) => {
+                    CORPORATE_ACTION_INVESTABLE_EQUITY_PARITY_ENGINE_VERSION
+                }
+                (Sizing::VectorParity, false, false) => INVESTABLE_EQUITY_PARITY_ENGINE_VERSION,
+                (Sizing::Lot, _, true) if normal_lot => {
+                    TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_LOT_ENGINE_VERSION
+                }
+                (Sizing::Lot, true, false) if normal_lot => {
+                    CORPORATE_ACTION_INVESTABLE_EQUITY_LOT_ENGINE_VERSION
+                }
+                (Sizing::Lot, false, false) if normal_lot => INVESTABLE_EQUITY_LOT_ENGINE_VERSION,
+                (Sizing::Lot, _, true) => TERMINAL_SETTLEMENT_ENGINE_VERSION,
+                (Sizing::Lot, true, false) => CORPORATE_ACTION_SEMANTIC_VERSION,
+                (Sizing::Lot, false, false) => SEMANTIC_VERSION,
             }
-            (Sizing::VectorParity, false, false) => INVESTABLE_EQUITY_PARITY_ENGINE_VERSION,
-            (Sizing::Lot, _, true) if normal_lot => {
-                TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_LOT_ENGINE_VERSION
-            }
-            (Sizing::Lot, true, false) if normal_lot => {
-                CORPORATE_ACTION_INVESTABLE_EQUITY_LOT_ENGINE_VERSION
-            }
-            (Sizing::Lot, false, false) if normal_lot => INVESTABLE_EQUITY_LOT_ENGINE_VERSION,
-            (Sizing::Lot, _, true) => TERMINAL_SETTLEMENT_ENGINE_VERSION,
-            (Sizing::Lot, true, false) => CORPORATE_ACTION_SEMANTIC_VERSION,
-            (Sizing::Lot, false, false) => SEMANTIC_VERSION,
         },
         config: config.clone(),
         sessions,
@@ -1100,6 +1126,11 @@ fn validate(
     config: &FastEventConfig,
     portfolios: &[PortfolioRun],
 ) -> Result<(), FastEventError> {
+    let panel_venues = panel
+        .instruments
+        .iter()
+        .map(|instrument| instrument.venue().clone())
+        .collect::<BTreeSet<_>>();
     if panel.sessions.is_empty()
         || panel.instruments.is_empty()
         || panel.instruments.windows(2).any(|p| p[0] >= p[1])
@@ -1108,10 +1139,7 @@ fn validate(
             .windows(2)
             .any(|p| p[0].session_date >= p[1].session_date || p[0].ts_close >= p[1].ts_open)
         || panel.sessions.iter().any(|s| s.ts_open >= s.ts_close)
-        || panel
-            .instruments
-            .iter()
-            .any(|id| id.venue() != &config.venue)
+        || panel_venues != config.venues
         || panel.grid.height()
             != panel
                 .instruments
@@ -1119,7 +1147,14 @@ fn validate(
                 .checked_mul(panel.sessions.len())
                 .ok_or(FixedPointError::Overflow)?
     {
-        return Err(invalid("invalid single-venue panel shape or ordering"));
+        return Err(invalid("invalid panel venue scope, shape or ordering"));
+    }
+    if config.venues.len() > 1
+        && portfolios
+            .iter()
+            .any(|portfolio| portfolio.rebalance != Rebalance::FullTarget)
+    {
+        return Err(invalid("multi-venue execution requires full_target"));
     }
     let costs = config.costs;
     let one: Notional = "1".parse()?;

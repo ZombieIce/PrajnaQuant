@@ -5,7 +5,7 @@ mod common;
 #[path = "common/pit.rs"]
 mod fixture;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use polars::prelude::{NamedFrom, Series};
 use prajna_account::VirtualPortfolioId;
@@ -39,7 +39,7 @@ fn set_open_decimals(panel: &mut prajna_research::Panel, replacements: &[(usize,
 fn config(venue: VenueId, costs: FastEventCosts) -> FastEventConfig {
     FastEventConfig {
         currency: Currency::new("CNY").unwrap(),
-        venue,
+        venues: BTreeSet::from([venue]),
         initial_cash: "1000".parse().unwrap(),
         sizing: Sizing::VectorParity,
         costs,

@@ -14,6 +14,10 @@
 多 Venue 研究面板共用的交易日序列；参与 Venue 的 Session 日期集合与每个日期的开收盘时刻必须完全一致，不一致是结构性错误，不自动补齐，也不把缺一侧日历当作停牌。
 _Avoid_: 把各 Venue 日历取并集、按行情日期推断休市，或用伪造 Venue 伪装成单一 Session 轴。
 
+**Venue Scope**:
+一次 Run 允许的 Venue 集合；多 Venue Run 共用一条 Shared Session Axis 和一套现金/持仓/应收账本，不按 Venue 拆账或净额化。
+_Avoid_: 静默选第一个 Venue，或为每个 Venue 建独立账户。
+
 **TimestampNs**:
 带显式时区的 RFC 3339 时间规范化成的 UTC Unix 纳秒时间戳；没有时区的时间不能构造。
 

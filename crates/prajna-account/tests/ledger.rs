@@ -1,9 +1,9 @@
 use prajna_account::{
-    Fill, FillCosts, FillPricing, LedgerError, Order, OrderId, ParityFeeSettlement, Side,
-    TradingAccount, VirtualPortfolioId,
+    Fill, FillCosts, FillPricing, LedgerError, Order, OrderId, ParityFeeSettlement, ReceivableKind,
+    Side, TradingAccount, VirtualPortfolioId,
 };
 use prajna_domain::{Notional, Price, Quantity, TimestampNs};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn n(s: &str) -> Notional {
     s.parse().unwrap()
@@ -639,4 +639,74 @@ fn aggregate_quantity_overflow_rejects_fill_atomically() {
     assert!(matches!(a.apply_fill(f), Err(LedgerError::Arithmetic(_))));
     assert_eq!(a, before);
     assert!(a.value(&prices("2")).is_err()); // valuation notional overflow.
+}
+
+#[test]
+fn multi_venue_account_preserves_cash_positions_and_receivables_across_venues() {
+    let xshg: prajna_domain::InstrumentId = "A.XSHG".parse().unwrap();
+    let xshe: prajna_domain::InstrumentId = "B.XSHE".parse().unwrap();
+    let mut a = TradingAccount::new_for_venues(
+        "CNY".parse().unwrap(),
+        BTreeSet::from(["XSHG".parse().unwrap(), "XSHE".parse().unwrap()]),
+        n("10000"),
+        [(VirtualPortfolioId(1), n("10000"))],
+    )
+    .unwrap();
+    assert_eq!(a.venues().len(), 2);
+
+    for (id, instrument, quantity, price, commission) in
+        [(1, &xshg, "100", "10", "1"), (2, &xshe, "100", "20", "2")]
+    {
+        let order = Order::new(
+            OrderId(id),
+            VirtualPortfolioId(1),
+            instrument.clone(),
+            Side::Buy,
+            q(quantity),
+            TimestampNs::from_unix_nanos(10),
+        )
+        .unwrap();
+        settle(
+            &mut a,
+            fill(
+                order,
+                price,
+                FillPricing::SeparateSlippage { slippage: n("0") },
+                FillCosts {
+                    commission: n(commission),
+                    ..FillCosts::ZERO
+                },
+            ),
+        );
+    }
+
+    // 10,000 - 100×10 - 1 - 100×20 - 2 = 6,997; securities = 3,000.
+    assert_eq!(a.cash(), n("6997"));
+    assert_eq!(a.positions()[&xshg], q("100"));
+    assert_eq!(a.positions()[&xshe], q("100"));
+    a.add_receivable(VirtualPortfolioId(1), ReceivableKind::Dividend, n("50"))
+        .unwrap();
+    let marks = BTreeMap::from([(xshg.clone(), p("10")), (xshe.clone(), p("20"))]);
+    let valued = a.value(&marks).unwrap();
+    assert_eq!(valued.account.cash, n("6997"));
+    assert_eq!(valued.account.dividend_receivable, n("50"));
+    assert_eq!(valued.account.equity, n("10047"));
+
+    a.settle_receivable(VirtualPortfolioId(1), ReceivableKind::Dividend, n("50"))
+        .unwrap();
+    assert_eq!(a.cash(), n("7047"));
+    let valued = a.value(&marks).unwrap();
+    assert_eq!(valued.account.dividend_receivable, Notional::ZERO);
+    assert_eq!(valued.account.equity, n("10047"));
+
+    let foreign = Order::new(
+        OrderId(3),
+        VirtualPortfolioId(1),
+        "C.SYNTH".parse().unwrap(),
+        Side::Buy,
+        q("1"),
+        TimestampNs::from_unix_nanos(30),
+    )
+    .unwrap();
+    assert_eq!(a.submit_order(foreign), Err(LedgerError::WrongVenue));
 }

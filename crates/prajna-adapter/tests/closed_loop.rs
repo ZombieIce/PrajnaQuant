@@ -14,7 +14,7 @@ use prajna_research::{
     load_execution_status, load_panel,
     strategy::{BuyAndHoldParams, UnfilledEntry, VectorStrategy},
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[test]
 fn a_packet_from_different_prices_cannot_drive_the_same_run() {
@@ -62,7 +62,7 @@ fn a_packet_from_different_prices_cannot_drive_the_same_run() {
 
 fn config(packet: &RunPacket, cash: &str) -> FastEventConfig {
     FastEventConfig {
-        venue: VenueId::new("SYNTH").unwrap(),
+        venues: BTreeSet::from([VenueId::new("SYNTH").unwrap()]),
         currency: Currency::new("CNY").unwrap(),
         initial_cash: cash.parse().unwrap(),
         sizing: Sizing::Lot,
@@ -387,7 +387,7 @@ fn two_portfolios_receive_independent_fills_and_exact_daily_fast_event_balances(
         .decide_panel(&panel, &panel.instruments, AvailabilityAssumption::None)
         .unwrap();
     let config = FastEventConfig {
-        venue,
+        venues: BTreeSet::from([venue]),
         currency: Currency::new("CNY").unwrap(),
         initial_cash: "2000000".parse().unwrap(),
         sizing: Sizing::Lot,

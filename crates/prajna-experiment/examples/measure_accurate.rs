@@ -351,7 +351,7 @@ fn load_workload(fixture: &Path, golden_path: &Path, lake: &Path) -> Workload {
     };
     let capital = decimal(&parameters["initial_cash"]);
     let config = FastEventConfig {
-        venue,
+        venues: BTreeSet::from([venue]),
         currency: Currency::new("CNY").unwrap(),
         initial_cash: capital,
         sizing: Sizing::Lot,

@@ -1,7 +1,7 @@
 mod common;
 
 use prajna_account::Side;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use polars::prelude::{NamedFrom, Series};
 use prajna_account::VirtualPortfolioId;
@@ -32,7 +32,7 @@ fn parity_open_equity_is_exactly_pre_open_equity_less_f8_cost() {
         &statuses,
         &FastEventConfig {
             currency: Currency::new("CNY").unwrap(),
-            venue,
+            venues: BTreeSet::from([venue]),
             initial_cash: "1000".parse().unwrap(),
             sizing: Sizing::VectorParity,
             costs: FastEventCosts {
@@ -94,7 +94,7 @@ fn retry_cash_cut_is_bounded_even_when_one_quantity_quantum_cannot_change_princi
         &statuses,
         &FastEventConfig {
             currency: Currency::new("CNY").unwrap(),
-            venue,
+            venues: BTreeSet::from([venue]),
             initial_cash: "0.000000000000000018".parse().unwrap(),
             sizing: Sizing::VectorParity,
             lot_sizes: BTreeMap::new(),
@@ -143,7 +143,7 @@ fn two_vps_have_independent_fills_without_double_counting_and_all_sells_precede_
         &statuses,
         &FastEventConfig {
             currency: Currency::new("CNY").unwrap(),
-            venue,
+            venues: BTreeSet::from([venue]),
             initial_cash: "120000".parse().unwrap(),
             sizing: Sizing::VectorParity,
             costs: FastEventCosts::ZERO,
@@ -223,7 +223,7 @@ fn lot_buys_reduce_one_lot_until_slippage_minimum_commission_and_tax_fit_cash() 
             &statuses,
             &FastEventConfig {
                 currency: Currency::new("CNY").unwrap(),
-                venue: venue.clone(),
+                venues: BTreeSet::from([venue.clone()]),
                 initial_cash: "1000".parse().unwrap(),
                 sizing: Sizing::Lot,
                 lot_sizes: panel
@@ -306,7 +306,7 @@ fn parity_retry_only_buys_the_missing_leg_and_cash_cuts_do_not_create_pending() 
             &statuses,
             &FastEventConfig {
                 currency: Currency::new("CNY").unwrap(),
-                venue: venue.clone(),
+                venues: BTreeSet::from([venue.clone()]),
                 initial_cash: "1000".parse().unwrap(),
                 sizing: Sizing::VectorParity,
                 costs: FastEventCosts {
@@ -394,7 +394,7 @@ fn poc_entry_only_keeps_continuing_quantities_and_retries_unentered_targets() {
                 &statuses,
                 &FastEventConfig {
                     currency: Currency::new("CNY").unwrap(),
-                    venue: venue.clone(),
+                    venues: BTreeSet::from([venue.clone()]),
                     initial_cash: capital.parse().unwrap(),
                     sizing: Sizing::Lot,
                     costs: FastEventCosts::ZERO,

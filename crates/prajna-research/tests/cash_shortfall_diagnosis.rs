@@ -7,7 +7,7 @@
 #[path = "common/pit.rs"]
 mod fixture;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use prajna_account::{PortfolioValuation, Side, VirtualPortfolioId};
 use prajna_data::{CorporateActionKind, CorporateActionRow};
@@ -188,7 +188,7 @@ fn run_allocated(
         .collect::<Vec<_>>();
     let config = FastEventConfig {
         currency: "CNY".parse().unwrap(),
-        venue: "SZSE".parse().unwrap(),
+        venues: BTreeSet::from(["SZSE".parse().unwrap()]),
         initial_cash: scenario.capital.parse().unwrap(),
         sizing,
         costs: FastEventCosts {

@@ -1,4 +1,4 @@
-//! Single-venue, long-only, single-currency ledger; no execution or sizing policy.
+//! Venue-scoped, long-only, single-currency ledger; no execution or sizing policy.
 //! Domain decimals are authoritative. Failed mutations leave the ledger unchanged.
 
 mod trade;
@@ -116,7 +116,7 @@ impl VirtualPortfolio {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TradingAccount {
     currency: Currency,
-    venue: VenueId,
+    venues: BTreeSet<VenueId>,
     initial_cash: Notional,
     unallocated: Notional,
     cash: Notional,
@@ -137,6 +137,21 @@ impl TradingAccount {
         initial_cash: Notional,
         allocations: impl IntoIterator<Item = (VirtualPortfolioId, Notional)>,
     ) -> Result<Self, LedgerError> {
+        Self::new_for_venues(currency, BTreeSet::from([venue]), initial_cash, allocations)
+    }
+
+    /// Like [`Self::new`] but accepts the explicit Venue scope of one Run.
+    /// Orders, Fills and corporate-action movements must use these Venues; any
+    /// other Instrument is still rejected with [`LedgerError::WrongVenue`].
+    pub fn new_for_venues(
+        currency: Currency,
+        venues: BTreeSet<VenueId>,
+        initial_cash: Notional,
+        allocations: impl IntoIterator<Item = (VirtualPortfolioId, Notional)>,
+    ) -> Result<Self, LedgerError> {
+        if venues.is_empty() {
+            return Err(LedgerError::Invariant("venue scope must not be empty"));
+        }
         if initial_cash < Notional::ZERO {
             return Err(LedgerError::NegativeCash);
         }
@@ -166,7 +181,7 @@ impl TradingAccount {
         }
         let account = Self {
             currency,
-            venue,
+            venues,
             initial_cash,
             unallocated: subtract(initial_cash, allocated)?,
             cash: initial_cash,
@@ -184,8 +199,8 @@ impl TradingAccount {
     pub fn currency(&self) -> &Currency {
         &self.currency
     }
-    pub fn venue(&self) -> &VenueId {
-        &self.venue
+    pub fn venues(&self) -> &BTreeSet<VenueId> {
+        &self.venues
     }
     pub fn initial_cash(&self) -> Notional {
         self.initial_cash
@@ -279,7 +294,7 @@ impl TradingAccount {
         instrument: &InstrumentId,
         quantity: Quantity,
     ) -> Result<Quantity, LedgerError> {
-        if instrument.venue() != &self.venue {
+        if !self.venues.contains(instrument.venue()) {
             return Err(LedgerError::WrongVenue);
         }
         if quantity < Quantity::ZERO {
@@ -330,7 +345,7 @@ impl TradingAccount {
         instrument: &InstrumentId,
         receivable: Notional,
     ) -> Result<Quantity, LedgerError> {
-        if instrument.venue() != &self.venue {
+        if !self.venues.contains(instrument.venue()) {
             return Err(LedgerError::WrongVenue);
         }
         if receivable < Notional::ZERO {
@@ -373,7 +388,7 @@ impl TradingAccount {
         instrument: &InstrumentId,
         price: prajna_domain::Price,
     ) -> Result<(Quantity, Notional), LedgerError> {
-        if instrument.venue() != &self.venue {
+        if !self.venues.contains(instrument.venue()) {
             return Err(LedgerError::WrongVenue);
         }
         if price <= prajna_domain::Price::ZERO {
@@ -423,7 +438,7 @@ impl TradingAccount {
             .get(&id)
             .ok_or(LedgerError::UnknownPortfolio(id))?
             .clone();
-        if settlement.instrument_id().venue() != &self.venue {
+        if !self.venues.contains(settlement.instrument_id().venue()) {
             return Err(LedgerError::WrongVenue);
         }
         let key = (
@@ -455,7 +470,7 @@ impl TradingAccount {
         if !self.portfolios.contains_key(&order.portfolio_id()) {
             return Err(LedgerError::UnknownPortfolio(order.portfolio_id()));
         }
-        if order.instrument_id().venue() != &self.venue {
+        if !self.venues.contains(order.instrument_id().venue()) {
             return Err(LedgerError::WrongVenue);
         }
         if self.orders.contains_key(&order.id()) {

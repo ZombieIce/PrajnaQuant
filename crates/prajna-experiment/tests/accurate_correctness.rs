@@ -6,7 +6,11 @@ mod common;
 mod exact_execution;
 use exact_execution::exact_projection;
 
-use std::{collections::BTreeMap, path::Path, process::Command};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+    process::Command,
+};
 
 use prajna_account::{Side, VirtualPortfolioId};
 use prajna_adapter::{AdapterResult, RunPacket, run_adapter};
@@ -144,7 +148,7 @@ fn real_nautilus_matches_independent_goldens_and_classifies_every_difference() {
         };
         let capital = decimal(&parameters["initial_cash"]);
         let config = FastEventConfig {
-            venue,
+            venues: BTreeSet::from([venue]),
             currency: Currency::new("CNY").unwrap(),
             initial_cash: if two_vp {
                 "2500".parse().unwrap()

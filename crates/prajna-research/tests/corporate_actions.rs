@@ -74,7 +74,7 @@ fn dividend_entitlement_becomes_receivable_then_cash_without_early_reinvestment(
     }];
     let config = FastEventConfig {
         currency: "CNY".parse().unwrap(),
-        venue: "SZSE".parse().unwrap(),
+        venues: BTreeSet::from(["SZSE".parse().unwrap()]),
         initial_cash: "10000".parse().unwrap(),
         sizing: Sizing::VectorParity,
         costs: FastEventCosts::ZERO,
@@ -208,7 +208,7 @@ fn terminal_settlement_ignores_liquidation_action_facts() {
     }];
     let config = FastEventConfig {
         currency: "CNY".parse().unwrap(),
-        venue: "SZSE".parse().unwrap(),
+        venues: BTreeSet::from(["SZSE".parse().unwrap()]),
         initial_cash: "10000".parse().unwrap(),
         sizing: Sizing::VectorParity,
         costs: FastEventCosts::ZERO,
@@ -401,7 +401,7 @@ fn terminal_settlement_carries_same_field_open_across_missing_bars_without_enabl
     ];
     let config = FastEventConfig {
         currency: "CNY".parse().unwrap(),
-        venue: "SZSE".parse().unwrap(),
+        venues: BTreeSet::from(["SZSE".parse().unwrap()]),
         initial_cash: "10000".parse().unwrap(),
         sizing: Sizing::VectorParity,
         costs: FastEventCosts::ZERO,
@@ -721,7 +721,7 @@ fn three_etf_ten_session_action_golden_reconciles_fast_event_and_vector() {
     ];
     let config = FastEventConfig {
         currency: "CNY".parse().unwrap(),
-        venue: "SZSE".parse().unwrap(),
+        venues: BTreeSet::from(["SZSE".parse().unwrap()]),
         initial_cash: "10000".parse().unwrap(),
         sizing: Sizing::VectorParity,
         costs: FastEventCosts::ZERO,
@@ -980,7 +980,7 @@ fn unknown_liquidation_and_unexplained_jump_are_reported_incomplete() {
     }];
     let config = FastEventConfig {
         currency: "CNY".parse().unwrap(),
-        venue: "SZSE".parse().unwrap(),
+        venues: BTreeSet::from(["SZSE".parse().unwrap()]),
         initial_cash: "10000".parse().unwrap(),
         sizing: Sizing::VectorParity,
         costs: FastEventCosts::ZERO,
@@ -1062,7 +1062,7 @@ fn complete_empty_action_schedule_preserves_price_return_results() {
     }];
     let config = FastEventConfig {
         currency: "CNY".parse().unwrap(),
-        venue: "SZSE".parse().unwrap(),
+        venues: BTreeSet::from(["SZSE".parse().unwrap()]),
         initial_cash: "10000".parse().unwrap(),
         sizing: Sizing::VectorParity,
         costs: FastEventCosts::ZERO,
@@ -1197,7 +1197,7 @@ fn fractional_share_conversion_rounds_down_and_records_equity_difference() {
     .unwrap();
     let config = FastEventConfig {
         currency: "CNY".parse().unwrap(),
-        venue: "SZSE".parse().unwrap(),
+        venues: BTreeSet::from(["SZSE".parse().unwrap()]),
         initial_cash: "101".parse().unwrap(),
         sizing: Sizing::Lot,
         costs: FastEventCosts::ZERO,
@@ -1320,7 +1320,7 @@ fn stale_conversion_mark_is_incomplete_and_does_not_claim_zero_rounding() {
     .unwrap();
     let config = FastEventConfig {
         currency: "CNY".parse().unwrap(),
-        venue: "SZSE".parse().unwrap(),
+        venues: BTreeSet::from(["SZSE".parse().unwrap()]),
         initial_cash: "101".parse().unwrap(),
         sizing: Sizing::Lot,
         costs: FastEventCosts::ZERO,
@@ -1411,7 +1411,7 @@ fn liquidation_reconciles_shared_positions_across_virtual_portfolios() {
     .unwrap();
     let config = FastEventConfig {
         currency: "CNY".parse().unwrap(),
-        venue: "SZSE".parse().unwrap(),
+        venues: BTreeSet::from(["SZSE".parse().unwrap()]),
         initial_cash: "10000".parse().unwrap(),
         sizing: Sizing::VectorParity,
         costs: FastEventCosts::ZERO,

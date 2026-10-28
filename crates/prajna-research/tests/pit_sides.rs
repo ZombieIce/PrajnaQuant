@@ -18,7 +18,7 @@ use prajna_research::{
     strategy::{Decision, UnfilledEntry},
     vector::{VectorCosts, run_vector_pit},
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn try_build_tri_with_actions(
     root: &std::path::Path,
@@ -636,7 +636,7 @@ fn case(
     for (i, sizing) in [Sizing::Lot, Sizing::VectorParity].into_iter().enumerate() {
         let config = FastEventConfig {
             currency: "CNY".parse().unwrap(),
-            venue: "SZSE".parse().unwrap(),
+            venues: BTreeSet::from(["SZSE".parse().unwrap()]),
             initial_cash: "10000".parse().unwrap(),
             sizing,
             costs: FastEventCosts {
@@ -1159,7 +1159,7 @@ fn money_and_quantity_boundaries_depend_on_capital_price_and_fee_components() {
         ];
         let config = FastEventConfig {
             currency: "CNY".parse().unwrap(),
-            venue: "SZSE".parse().unwrap(),
+            venues: BTreeSet::from(["SZSE".parse().unwrap()]),
             initial_cash: capital.parse().unwrap(),
             sizing: Sizing::VectorParity,
             lot_sizes: BTreeMap::new(),
@@ -1433,7 +1433,7 @@ fn retry_only_buys_the_missing_absolute_increment_and_keeps_other_holdings() {
     for sizing in [Sizing::Lot, Sizing::VectorParity] {
         let config = FastEventConfig {
             currency: "CNY".parse().unwrap(),
-            venue: "SZSE".parse().unwrap(),
+            venues: BTreeSet::from(["SZSE".parse().unwrap()]),
             initial_cash: "10000".parse().unwrap(),
             sizing,
             costs: FastEventCosts::ZERO,

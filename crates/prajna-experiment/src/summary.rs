@@ -419,7 +419,7 @@ mod tests {
             semantic_version: prajna_research::fast_event::INVESTABLE_EQUITY_PARITY_ENGINE_VERSION,
             config: FastEventConfig {
                 currency,
-                venue,
+                venues: BTreeSet::from([venue]),
                 initial_cash: n("1000"),
                 sizing: Sizing::VectorParity,
                 costs: FastEventCosts::ZERO,
