@@ -63,9 +63,14 @@ pub(super) struct EngineSettings {
     policy: UnfilledEntry,
     normalized: Option<Value>,
     vector_pit_capital: Option<Notional>,
+    venues: BTreeSet<VenueId>,
 }
 impl EngineSettings {
-    pub(super) fn parse(input: &DefinitionInput, lake: &Path) -> Result<Self, ExperimentError> {
+    pub(super) fn parse(
+        input: &DefinitionInput,
+        lake: &Path,
+        venues: &BTreeSet<VenueId>,
+    ) -> Result<Self, ExperimentError> {
         if !matches!(
             input.strategy.as_str(),
             "s2_rotation" | "s2_pit_rotation" | "buy_and_hold" | "ma_crossover"
@@ -92,7 +97,13 @@ impl EngineSettings {
             policy,
             normalized: None,
             vector_pit_capital: None,
+            venues: venues.clone(),
         };
+        if input.engine == "accurate_event" && venues.len() > 1 {
+            return Err(invalid(
+                "Accurate Event requires exactly one Venue; multi-Venue Runs are not supported",
+            ));
+        }
         if input.vector_pit.is_some() && (input.engine != "vector" || input.pit.is_none()) {
             return Err(invalid("vector_pit is only valid for Vector PIT S2"));
         }
@@ -175,6 +186,11 @@ impl EngineSettings {
             .selection_for(sizing)
             .validate_mode(&input.strategy)
             .map_err(|error| invalid(error.to_string()))?;
+        if venues.len() > 1 && result.rebalance != Rebalance::FullTarget {
+            return Err(invalid(
+                "multi-Venue Fast/Accurate Event requires full_target",
+            ));
+        }
         if result.rebalance != Rebalance::FullTarget && policy != UnfilledEntry::Retry {
             return Err(invalid(format!(
                 "{} × {} × sizing={}, rebalance=entry_only, unfilled_entry={}: entry_only requires unfilled_entry=retry",
@@ -237,7 +253,7 @@ impl EngineSettings {
             for instrument in prajna_data::instruments_from_record_batch(&batch)
                 .map_err(|e| invalid(e.to_string()))?
             {
-                if instrument.id().venue().as_str() == input.venue {
+                if venues.contains(instrument.id().venue()) {
                     if universe
                         .as_ref()
                         .is_none_or(|u| u.members().contains(instrument.id()))
@@ -259,7 +275,7 @@ impl EngineSettings {
                         .map_err(|e| invalid(format!("invalid lot size: {e}")))?;
                     if size <= Quantity::ZERO || !instruments.contains_key(id) {
                         return Err(invalid(
-                            "lot size must be positive and belong to dataset Venue",
+                            "lot size must be positive and belong to a selected Venue",
                         ));
                     }
                     lots.insert(id.clone(), size);
@@ -295,10 +311,7 @@ impl EngineSettings {
                 .currency
                 .parse::<Currency>()
                 .map_err(|e| invalid(e.to_string()))?,
-            venues: BTreeSet::from([input
-                .venue
-                .parse()
-                .map_err(|e| invalid(format!("invalid Venue: {e}")))?]),
+            venues: venues.clone(),
             initial_cash,
             sizing,
             costs: FastEventCosts {
@@ -434,18 +447,32 @@ impl EngineSettings {
         {
             value["strategy"]["unfilled_entry"] = self.policy_name().into();
         }
+        if self.venues.len() > 1 && self.fast.is_none() && self.backend.is_none() {
+            // Static multi-Venue Vector is the T06b1 weight summary, not a ledger.
+            value["engine"] = serde_json::json!({
+                "kind": "vector",
+                "semantic_version": prajna_research::vector::MULTI_VENUE_SEMANTIC_VERSION,
+            });
+        }
         if let Some(settings) = &self.normalized {
             value["engine"] = if self.backend.is_some() {
                 serde_json::json!({"kind":"accurate_event", "semantic_version":ACCURATE_SEMANTIC_VERSION})
             } else {
-                let semantic_version = match self.fast.as_ref().map(|config| config.sizing) {
-                    Some(Sizing::VectorParity) => {
-                        fast_event::INVESTABLE_EQUITY_PARITY_ENGINE_VERSION
+                let semantic_version = if self.venues.len() > 1 {
+                    match self.fast.as_ref().map(|config| config.sizing) {
+                        Some(Sizing::Lot) => fast_event::MULTI_VENUE_LOT_ENGINE_VERSION,
+                        _ => fast_event::MULTI_VENUE_PARITY_ENGINE_VERSION,
                     }
-                    Some(Sizing::Lot) if self.rebalance == Rebalance::FullTarget => {
-                        fast_event::INVESTABLE_EQUITY_LOT_ENGINE_VERSION
+                } else {
+                    match self.fast.as_ref().map(|config| config.sizing) {
+                        Some(Sizing::VectorParity) => {
+                            fast_event::INVESTABLE_EQUITY_PARITY_ENGINE_VERSION
+                        }
+                        Some(Sizing::Lot) if self.rebalance == Rebalance::FullTarget => {
+                            fast_event::INVESTABLE_EQUITY_LOT_ENGINE_VERSION
+                        }
+                        _ => fast_event::SEMANTIC_VERSION,
                     }
-                    _ => fast_event::SEMANTIC_VERSION,
                 };
                 serde_json::json!({"kind":"fast_event", "semantic_version": semantic_version})
             };
@@ -587,13 +614,10 @@ pub(super) fn python_run_specs(
 ) -> Result<Vec<RunDefinition>, ExperimentError> {
     let mut runs = BTreeMap::new();
     for parameters in combinations {
-        let mut spec = serde_json::json!({
-            "dsv": experiment.dsv, "universe": experiment.universe, "venue": experiment.venue,
-            "strategy": {"kind": experiment.strategy_kind, "parameters": normalize_python_parameters(parameters)?},
-            "costs": experiment.costs.normalized(),
-            "availability_assumption": experiment.availability_assumption,
-            "engine": {"kind": "vector", "semantic_version": "vector@1"}, "seed": null,
-        });
+        let mut spec = experiment.run_spec_base(serde_json::json!({
+            "kind": experiment.strategy_kind,
+            "parameters": normalize_python_parameters(parameters)?,
+        }));
         experiment.engine.normalize_spec(&mut spec);
         let run_id = identity(
             "run",
@@ -634,9 +658,9 @@ pub(super) fn expand_native(
             .selection()
             .validate(&strategy)
             .map_err(|error| invalid(error.to_string()))?;
-        let mut spec = serde_json::json!({"dsv":experiment.dsv,"universe":experiment.universe,"venue":experiment.venue,
-            "strategy":{"kind":experiment.strategy_kind,"parameters":params}, "costs":experiment.costs.normalized(),
-            "availability_assumption":experiment.availability_assumption,"engine":{"kind":"vector","semantic_version":"vector@1"},"seed":null});
+        let mut spec = experiment.run_spec_base(serde_json::json!({
+            "kind": experiment.strategy_kind, "parameters": params,
+        }));
         experiment.engine.normalize_spec(&mut spec);
         let run_id = identity(
             "run",
