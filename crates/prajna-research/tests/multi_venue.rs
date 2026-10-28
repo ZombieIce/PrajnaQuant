@@ -161,7 +161,7 @@ fn multi_venue_fast_event_ledger_is_hand_calculated_across_venues() {
         assert_ledger_identity(&session.close);
     }
 
-    // 10% commission on each 5,000 target basis: after-fee equity is 9,900,
+    // 1% commission on each 5,000 target basis: after-fee equity is 9,900,
     // each venue holds 495 shares at 10.00 and cash is exactly zero.
     let first = &result.sessions[1].open_after.account;
     assert_eq!(first.cash, Notional::ZERO);
@@ -221,10 +221,14 @@ fn multi_venue_fast_event_and_vector_match_in_their_common_subset() {
     let xshg = pick(&panel, "XSHG");
     let xshe = pick(&panel, "XSHE");
     let tape = decisions(&panel, &xshg, &xshe);
+    let fast_costs = FastEventCosts {
+        commission_rate: n("0.01"),
+        ..FastEventCosts::ZERO
+    };
     let fast = run_fast_event(
         &panel,
         &statuses,
-        &config(venues(), Sizing::VectorParity, FastEventCosts::ZERO),
+        &config(venues(), Sizing::VectorParity, fast_costs),
         &[portfolio(tape.clone())],
     )
     .unwrap();
@@ -233,7 +237,7 @@ fn multi_venue_fast_event_and_vector_match_in_their_common_subset() {
         &tape,
         UnfilledEntry::Skip,
         &VectorCosts {
-            commission_rate: 0.0,
+            commission_rate: 0.01,
             buy_slippage_bps: 0.0,
             sell_slippage_bps: 0.0,
             buy_tax_rate: 0.0,
@@ -248,6 +252,8 @@ fn multi_venue_fast_event_and_vector_match_in_their_common_subset() {
         vector.semantic_version.as_deref(),
         Some(MULTI_VENUE_SEMANTIC_VERSION)
     );
+    assert_eq!(vector.sessions.len(), fast.sessions.len());
+    assert_eq!(vector.executions.len(), fast.attempts.len());
     for (vector_session, fast_session) in vector.sessions.iter().zip(&fast.sessions) {
         let vector_open = vector_session.nav / (1.0 + vector_session.gross_return);
         let fast_open = fast_session.open_after.account.equity.to_f64() / 10_000.0;
@@ -257,6 +263,8 @@ fn multi_venue_fast_event_and_vector_match_in_their_common_subset() {
             vector_session.session_date
         );
     }
+    let final_weights = &vector.sessions.last().unwrap().weights_after_execution;
+    assert!((final_weights.get(&xshe).copied().unwrap_or(0.0) - 1.0).abs() <= 1e-12);
 }
 
 #[test]

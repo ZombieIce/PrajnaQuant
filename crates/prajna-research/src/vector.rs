@@ -1247,7 +1247,7 @@ fn run_vector_inner(
     }
     if pit.is_none() && is_multi_venue(panel) {
         assumptions.push(
-            "Cross-Venue XSHG/XSHE shared Session axis; Vector is a weight summary, not a cash ledger."
+            "Cross-Venue shared Session axis; Vector is a weight summary, not a cash ledger."
                 .into(),
         );
     }

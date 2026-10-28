@@ -1034,7 +1034,7 @@ fn run_with_execution(
         )
     };
     let venue_assumption = if config.venues.len() > 1 {
-        "Cross-Venue XSHG/XSHE shared Session axis, single currency, long-only, unlevered; full market fills."
+        "Cross-Venue shared Session axis, single currency, long-only, unlevered; full market fills."
     } else {
         "Single Venue, single currency, long-only, unlevered; full market fills."
     };

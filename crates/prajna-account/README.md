@@ -1,6 +1,6 @@
 # prajna-account
 
-MVP-3 的单 Venue、单记账币种、长仓、无杠杆、全额成交账本；#181 增加分红/清算应收
+MVP-3 的 Venue scope、单记账币种、长仓、无杠杆、全额成交账本；#181 增加分红/清算应收
 和公司行动数量变更原语。只依赖 `prajna-domain` 与 Serde，不读取行情、不生成信号、
 不决定可交易性、数量或费率。
 现由 [`fast_event::run_fast_event`](../prajna-research/src/fast_event.rs) 接入；
@@ -10,6 +10,7 @@ PIT 公司行动事件由 Research Engine 排程，并随 ResultLevel 账本输�
 
 ```text
 TradingAccount::new(currency, venue, initial_cash, VP allocations)
+TradingAccount::new_for_venues(currency, venues, initial_cash, VP allocations)
   submit_order(Order::new(id, VP, instrument, side, quantity, submitted_at))
   apply_fill(Fill::new(order, executed_at, raw_price, pricing, costs))
   apply_fee_settlement(ParityFeeSettlement::new(...))  # fee-only F8 leg, no trade
@@ -21,6 +22,7 @@ TradingAccount::new(currency, venue, initial_cash, VP allocations)
   AccountValuation::validate() -> exact reconciliation
 ```
 
+- Venue scope 为构造时的非空 `BTreeSet<VenueId>`；`new` 保持单 Venue，`new_for_venues` 接受多 Venue。Order/Fill/费用结算/公司行动数量变更的 Instrument 必须属于该 scope，否则 `WrongVenue`；空 scope 拒绝；一个账户仍只有一套现金/持仓/应收，不按 Venue 拆账。
 - 资本仅在构造时分配，允许零资本 VP；无 VP 时全为 Unallocated Capital。
   超额、负分配和重复 VP ID 均报错。VP ID 和 Order ID 在一个账户内唯一。
 - Order 数量严格为正，方向为 Buy/Sell；一个 Order 只能全额成交一次。
