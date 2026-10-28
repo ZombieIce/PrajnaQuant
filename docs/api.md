@@ -18,7 +18,8 @@
 | Result / Factor | GET /api/v1/factor-reports | Implemented；可按 signal_key 与显式 universe_id/version_id 筛选已保存 report；缺少 Universe 身份的旧报告只在未筛选列表中出现，前端标为未知 |
 | Experiment task | POST/GET /api/v1/tasks/experiments、GET /api/v1/tasks/experiments/{id} | Implemented；T01 新平台任务提交/列表/单项，共用串行队列与持久状态。提交可选 `result_level: summary|standard`，默认 summary；级别不同不能复用同一 idempotency key。Standard 任务先经 `prajna-experiment promote` 只提升已有 Execution 的 Completed Run（failed Run 保持原级别，全 failed 为 succeeded+replayed；重放失败整批中止）；仅 promote exit 6（Execution 目录不存在）时回退 run，manifest 缺失/损坏不回退 |
 | Result / Experiment task | GET /api/v1/tasks/experiments/{id}/result | Implemented（T04a）；仅 succeeded 任务，经 `prajna-experiment result` 校验全部已保存表 hash 并读取持久 Summary 与已保存 NAV/权益序列，保留 CLI envelope；404/409/403/500/502/503 可读，成功与错误均 no-store。字段与限制见[结果读取契约](contracts/experiment-result-read.md) |
-| Universe | GET /api/v1/universes | Implemented；支持 asset_scope/status/q/limit，小型本地注册表暂不支持 cursor |
+| Selection / Experiment task | POST /api/v1/tasks/selections | 固定 DSV 单证券 buy-and-hold 选择经 Rust 冻结 CLI，再提交既有 T01；要求 dataset-root/output 为同一 canonical root，本机 Host/Origin 限定。默认版本、字段、持久化、错误及限制见[冻结选择契约](contracts/single-security-selection.md) |
+| Universe | GET /api/v1/universes | Implemented；支持 asset_scope/status/q/limit，小型本地注册表暂不支持 cursor；只读/列 `<uuid>.json` 用户配置，跳过同目录的内容寻址 StaticUniverse 文件 |
 | Universe | POST /api/v1/universes | Implemented；创建草稿 |
 | Universe | GET /api/v1/universes/{id} | Implemented；元数据、版本摘要和草稿 |
 | Universe | PATCH /api/v1/universes/{id}/draft | Implemented；同一写锁内修改草稿，members 替换整个成员列表 |
@@ -28,7 +29,7 @@
 | Universe | GET /api/v1/universes/{id}/members?version_id=&as_of= | Implemented；指定版本/日期，决策截止上海时间 15:00；无历史 provider 时返回空成员、unknown/gaps 和警告 |
 | Universe | GET /api/v1/universes/{id}/coverage?version_id=&start=&end= | Implemented；分别返回成员覆盖与行情覆盖。行情从最新且 manifest SHA-256 校验通过的 ETF Parquet 快照逐证券审计，包含行数、日期范围、缺失日、重复日与 OHLC 异常；快照 ID/hash 一并返回。若快照含 hash 校验通过的 `trading_calendar.parquet`，按完整自然月深交所官方开市日识别成员共同缺日，并返回 `calendar_snapshot` 与 `calendar_status`。无旁车/请求范围日历不全时不推断闭市，日历状态为 `unverified`/`gaps`；该来源尚未与上交所官方日历独立对拍。手工成员仍标 `retrospective_static`，并附能力阻断原因 |
 
-未实现：上交所日历独立交叉核验、可信历史指数成员 provider、POST /api/v1/runs、运行状态/异步队列、网页发起新运行、股票因子/策略运行、batch 查询路由、实验/Universe 完整 cursor 分页、独立成交/仓位/时序查询、计算基准/超额指标 API。前端“新运行”面板仍禁用并标记 API/能力未就绪；Universe 管理和已保存结果筛选已连接上述 CRUD/结果 API，不生成模拟 Universe 或假报告。Universe API 配置存放在输出目录 universes/<id>.json，由服务进程写锁和原子替换保护，不写 DuckDB。
+未实现：上交所日历独立交叉核验、可信历史指数成员 provider、POST /api/v1/runs、运行状态/异步队列、网页发起新运行、股票因子/策略运行、batch 查询路由、实验/Universe 完整 cursor 分页、独立成交/仓位/时序查询、计算基准/超额指标 API。前端“新运行”面板仍禁用并标记 API/能力未就绪；Universe 管理和已保存结果筛选已连接上述 CRUD/结果 API，不生成模拟 Universe 或假报告。Universe API 配置存放在输出目录 universes/<id>.json，由服务进程写锁和原子替换保护，不写 DuckDB。同目录的 `<sha256>.json` 内容寻址 StaticUniverse 属于另一命名空间：注册表只解析 `<uuid>.json`，坏 `<uuid>.json` 仍按存储错误返回 500。
 
 Universe 管理页默认用普通序号显示版本并隐藏 ID/哈希；折叠的技术信息仍可用于排查。归档保留 Universe、已发布版本和历史结果关联，禁止继续编辑/发布；未发布的空草稿才会物理删除。
 

@@ -94,6 +94,16 @@ impl UniverseStore {
             if path.extension().and_then(|v| v.to_str()) != Some("json") {
                 continue;
             }
+            // The same directory also holds content-addressed StaticUniverse files
+            // (`<64 hex>.json`) written by the Experiment CLI. Only `<uuid>.json`
+            // belongs to this registry; anything else is a different namespace.
+            if path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .is_none_or(|stem| Uuid::parse_str(stem).is_err())
+            {
+                continue;
+            }
             let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
             let item: UniverseConfig = serde_json::from_slice(&bytes)
                 .with_context(|| format!("parse {}", path.display()))?;

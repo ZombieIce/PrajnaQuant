@@ -35,6 +35,9 @@ use std::{
 };
 use uuid::Uuid;
 
+#[path = "selection_api.rs"]
+mod selection_api;
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 #[cfg(any(target_os = "macos", target_os = "linux"))]

@@ -89,6 +89,9 @@ pub async fn serve_with_dataset_root(
     };
     let run_jobs = run_jobs::RunJobApi::start(output.as_ref().clone(), state.universes.clone());
     let experiment_results = run_jobs.clone().result_router(socket.to_string());
+    let selections = run_jobs
+        .clone()
+        .selection_router(dataset_root.clone(), socket.to_string());
     let api = Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/signals", get(signals))
@@ -115,6 +118,7 @@ pub async fn serve_with_dataset_root(
         .merge(market_api::router(Arc::new(market_data_dir)))
         .layer(CorsLayer::permissive())
         .merge(dataset_api::router(dataset_root, socket.to_string()))
+        .merge(selections)
         .merge(experiment_results);
     let app = api.fallback_service(
         ServeDir::new(&web_dist)
@@ -1459,6 +1463,49 @@ mod tests {
             body["market_data_coverage"]["symbols"][1]["missing_dates"][0],
             "2026-01-06"
         );
+    }
+
+    #[tokio::test]
+    async fn universe_list_ignores_content_addressed_static_universe_files() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(UniverseStore::new(dir.path()));
+        let created = store.create(draft()).unwrap();
+        let directory = dir.path().join("universes");
+        fs::create_dir_all(&directory).unwrap();
+        // The Experiment CLI writes `<sha256>.json` into the same directory.
+        fs::write(
+            directory.join(format!("{}.json", "a".repeat(64))),
+            serde_json::to_vec(&json!({
+                "universe_version": 1,
+                "label": "single-security@1:510300.XSHG",
+                "members": ["510300.XSHG"]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let state = AppState {
+            universes: store.clone(),
+            output: Arc::new(dir.path().to_path_buf()),
+        };
+        let response = universes(State(state), Query(UniverseListFilter::default())).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["items"].as_array().unwrap().len(), 1);
+        assert_eq!(body["items"][0]["universe_id"], json!(created.universe_id));
+        assert_eq!(store.list().unwrap().len(), 1);
+
+        // A malformed file in the legacy namespace still fails closed.
+        fs::write(
+            directory.join(format!("{}.json", Uuid::new_v4())),
+            b"not a universe config",
+        )
+        .unwrap();
+        assert!(UniverseStore::new(dir.path()).list().is_err());
     }
 
     #[tokio::test]
