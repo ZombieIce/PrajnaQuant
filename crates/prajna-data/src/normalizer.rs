@@ -5,6 +5,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 mod cn_daily;
+pub mod cn_status;
 mod synthetic_etf_daily;
 mod szse_etf_frozen;
 pub use crate::sina_adjust_factor::LifecycleRange;
@@ -130,6 +131,20 @@ impl NormalizerRegistry {
         if !registry.register(CnStockEtfDaily::v1(calendar_version, snapshot_id)) {
             return Err("cn-stock-etf-daily v1 is already registered".into());
         }
+        Ok(registry)
+    }
+
+    /// Opt-in v2: frozen opening snapshot and its referenced Raw are DSV inputs.
+    pub fn with_cn_stock_etf_daily_v2(
+        calendar: CalendarVersionId,
+        security: SecuritySnapshotId,
+        snapshot: String,
+    ) -> Result<Self, String> {
+        let mut registry = Self::with_builtins();
+        registry.register(
+            cn_status::CnDailyWithStatus::new(calendar, security, snapshot)
+                .map_err(|error| error.to_string())?,
+        );
         Ok(registry)
     }
 

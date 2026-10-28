@@ -32,6 +32,8 @@ pub struct DailyPublicationSelection {
     pub calendar_version: String,
     pub security_snapshot: String,
     pub raw_sha256s: Vec<String>,
+    #[serde(default)]
+    pub status_snapshot: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -44,6 +46,8 @@ struct Recipe {
     security_snapshot: String,
     report_sha256: String,
     raw_sha256s: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    status_snapshot: Option<String>,
 }
 
 /// Local receipt binds the frozen production inputs to the Dataset commit marker.
@@ -63,18 +67,27 @@ fn require(condition: bool, reason: &'static str) -> Result<()> {
 }
 
 fn registry(recipe: &Recipe) -> Result<NormalizerRegistry> {
+    let calendar = CalendarVersionId::parse(&recipe.calendar_version)?;
+    let security = SecuritySnapshotId::parse(&recipe.security_snapshot)?;
     require(
-        recipe.schema_version == 1,
-        "unsupported publication recipe schema",
+        recipe.normalizer_id == "cn-stock-etf-daily",
+        "unsupported daily Normalizer",
     )?;
-    require(
-        recipe.normalizer_id == "cn-stock-etf-daily" && recipe.normalizer_version == "1",
-        "unsupported daily Normalizer identity or unit rule",
-    )?;
-    Ok(NormalizerRegistry::with_cn_stock_etf_daily_v1(
-        CalendarVersionId::parse(&recipe.calendar_version)?,
-        SecuritySnapshotId::parse(&recipe.security_snapshot)?,
-    )?)
+    match (
+        recipe.schema_version,
+        recipe.normalizer_version.as_str(),
+        &recipe.status_snapshot,
+    ) {
+        (1, "1", None) => Ok(NormalizerRegistry::with_cn_stock_etf_daily_v1(
+            calendar, security,
+        )?),
+        (2, "2", Some(status)) => Ok(NormalizerRegistry::with_cn_stock_etf_daily_v2(
+            calendar,
+            security,
+            status.clone(),
+        )?),
+        _ => Err("unsupported recipe/Normalizer/status selection".into()),
+    }
 }
 
 fn put(store: &RawStore, bytes: &[u8], source_id: &str) -> Result<String> {
@@ -229,6 +242,30 @@ fn validate(
     Ok(())
 }
 
+fn status_inputs(recipe: &Recipe, report: &DailyRawReport, raw: &RawStore) -> Result<Vec<String>> {
+    let Some(hash) = &recipe.status_snapshot else {
+        return Ok(Vec::new());
+    };
+    let snapshot = crate::normalizer::cn_status::OpeningEvidenceSnapshot::parse(&raw.get(hash)?)?;
+    let mut market = snapshot.market_raw_sha256s.clone();
+    market.sort();
+    require(
+        snapshot.calendar_version == recipe.calendar_version
+            && snapshot.security_snapshot == recipe.security_snapshot
+            && snapshot.instrument_id.to_string() == report.instrument_id
+            && snapshot.start == report.requested_range.start
+            && snapshot.end == report.requested_range.end
+            && market == recipe.raw_sha256s,
+        "opening snapshot publication scope mismatch",
+    )?;
+    let mut inputs = BTreeSet::from([hash.clone()]);
+    for reference in snapshot.evidence {
+        raw.get(&reference.raw_sha256)?;
+        inputs.insert(reference.raw_sha256);
+    }
+    Ok(inputs.into_iter().collect())
+}
+
 /// Publish explicit #288/#328/#329 inputs, freezing report and recipe in the output lake.
 /// Receipt names are root-relative. Detailed errors must remain in local diagnostics.
 pub fn publish_daily(
@@ -256,23 +293,29 @@ pub fn publish_daily(
     let snapshot =
         SecurityEvidenceStore::open(selection.evidence_root)?.get_snapshot(&snapshot_id)?;
     let mut recipe = Recipe {
-        schema_version: 1,
+        schema_version: if selection.normalizer_version == "2" {
+            2
+        } else {
+            1
+        },
         normalizer_id: selection.normalizer_id,
         normalizer_version: selection.normalizer_version,
         calendar_version: selection.calendar_version,
         security_snapshot: selection.security_snapshot,
         report_sha256: String::new(),
         raw_sha256s: selection.raw_sha256s,
+        status_snapshot: selection.status_snapshot,
     };
     recipe.raw_sha256s.sort();
     let registry = registry(&recipe)?;
     validate(&report, &recipe, &calendar, &snapshot, &source)?;
+    let status_inputs = status_inputs(&recipe, &report, &source)?;
     // Reject symlink destinations before writing through the existing Raw/publisher APIs.
     for relative in ["raw", "raw-sources", "normalized", "manifests"] {
         check_tree(&checked_output_path(&root, Path::new(relative))?)?;
     }
     let target = RawStore::open(&root)?;
-    for hash in &recipe.raw_sha256s {
+    for hash in recipe.raw_sha256s.iter().chain(&status_inputs) {
         let mut existing = target.sources(hash)?;
         for record in source.sources(hash)? {
             if existing.contains(&record) {
@@ -322,6 +365,9 @@ pub fn publish_daily(
     }
     let mut inputs = recipe.raw_sha256s.clone();
     inputs.extend([recipe.calendar_version, recipe.security_snapshot]);
+    inputs.extend(status_inputs);
+    inputs.sort();
+    inputs.dedup();
     let manifest = publish_dataset(
         &root,
         &target,
@@ -390,7 +436,9 @@ pub fn rebuild_daily(root: &Path, receipt_name: &Path) -> Result<()> {
         recipe.calendar_version.clone(),
         recipe.security_snapshot.clone(),
     ]);
+    inputs.extend(status_inputs(&recipe, &report, &raw)?);
     inputs.sort();
+    inputs.dedup();
     let mut actual = manifest
         .core
         .inputs

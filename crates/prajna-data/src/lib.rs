@@ -17,6 +17,9 @@ pub mod session_calendar;
 pub mod sina_adjust_factor;
 
 pub use frozen::{FrozenSourceMeta, freeze_raw};
+pub use normalizer::cn_status::{
+    EvidenceKind, OpeningEvidenceReference, OpeningEvidenceSnapshot, OpeningFact, OpeningState,
+};
 pub use normalizer::{
     CnStockEtfDaily, LifecycleRange, NormalizationIssue, NormalizationOutput, NormalizedTables,
     Normalizer, NormalizerRegistry, RawInput, SzseEtfFrozen,
