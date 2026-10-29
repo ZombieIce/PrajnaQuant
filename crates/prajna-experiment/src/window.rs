@@ -354,10 +354,19 @@ pub fn parameter_warmup(kind: &str, parameters: &Value) -> Result<u64, String> {
             positive(parameters.get("long_window"), "long_window")?,
         ),
         "s2_rotation" => {
+            // Momentum(short) and Momentum(long) need `n + 1` closes and
+            // Volatility(vol) needs `vol + 1` closes, so their first evaluable
+            // Session index is `n`. A TrendFilter(trend) needs `trend` closes
+            // and is first evaluable at `trend - 1`. The composite score is
+            // ready when every component is ready.
+            let short = positive(parameters.get("short"), "short")?;
             let long = positive(parameters.get("long"), "long")?;
             let vol = positive(parameters.get("vol"), "vol")?;
-            let trend = parameters.get("trend").and_then(Value::as_u64).unwrap_or(0);
-            window("s2_rotation", long.max(vol).max(trend))
+            let mut first_evaluable = short.max(long).max(vol);
+            if let Some(trend) = parameters.get("trend").and_then(Value::as_u64) {
+                first_evaluable = first_evaluable.max(trend.saturating_sub(1));
+            }
+            Ok(first_evaluable)
         }
         _ => Err(format!(
             "strategy {kind} does not declare a native research warm-up window"
@@ -605,12 +614,27 @@ mod tests {
             Ok(59)
         );
         assert_eq!(
-            parameter_warmup("s2_rotation", &json!({"long":120,"vol":60,"trend":20})),
-            Ok(119)
+            parameter_warmup(
+                "s2_rotation",
+                &json!({"short":20,"long":120,"vol":60,"trend":20})
+            ),
+            Ok(120)
         );
         assert_eq!(
-            parameter_warmup("s2_rotation", &json!({"long":20,"vol":60,"trend":null})),
-            Ok(59)
+            parameter_warmup(
+                "s2_rotation",
+                &json!({"short":20,"long":20,"vol":60,"trend":null})
+            ),
+            Ok(60)
+        );
+        // A trend window needs `trend` closes and is first evaluable at
+        // `trend - 1`; when it dominates, the composite warm-up follows it.
+        assert_eq!(
+            parameter_warmup(
+                "s2_rotation",
+                &json!({"short":20,"long":60,"vol":20,"trend":200})
+            ),
+            Ok(199)
         );
         assert!(parameter_warmup("research.rotation@1", &json!({})).is_err());
         assert!(parameter_warmup("ma_crossover", &json!({"long_window":0})).is_err());
