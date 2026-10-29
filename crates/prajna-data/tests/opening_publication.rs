@@ -54,7 +54,7 @@ fn v2_fixed_inputs_repeat_revise_rebuild_and_preserve_v1_for_four_security_kinds
             let temp = tempfile::tempdir().unwrap();
             let input = temp.path().join("input");
             let lake = temp.path().join("lake");
-            let (mut selection, mut snapshot) = fixture::prepare(&input, venue, kind, false);
+            let (mut selection, mut snapshot) = fixture::prepare(&input, venue, kind, false, None);
             let mut legacy = selection.clone();
             legacy["normalizer_version"] = json!("1");
             legacy.as_object_mut().unwrap().remove("status_snapshot");
@@ -93,7 +93,7 @@ fn missing_unknown_null_late_conflict_and_identical_duplicate_are_explicit() {
     let temp = tempfile::tempdir().unwrap();
     let input = temp.path().join("input");
     let lake = temp.path().join("lake");
-    let (selection, snapshot) = fixture::prepare(&input, "XSHG", InstrumentKind::Etf, true);
+    let (selection, snapshot) = fixture::prepare(&input, "XSHG", InstrumentKind::Etf, true, None);
     for variant in [
         "empty",
         "missing",
@@ -155,7 +155,7 @@ fn invalid_evidence_fails_atomically_without_mutating_old_dataset() {
     let temp = tempfile::tempdir().unwrap();
     let input = temp.path().join("input");
     let lake = temp.path().join("lake");
-    let (selection, snapshot) = fixture::prepare(&input, "XSHE", InstrumentKind::Etf, false);
+    let (selection, snapshot) = fixture::prepare(&input, "XSHE", InstrumentKind::Etf, false, None);
     assert!(cli(&lake, Some(&selection), "old.json"));
     let dsv = receipt(&lake, "old.json").dsv;
     for variant in [
@@ -241,7 +241,7 @@ fn later_status_table_io_failure_rolls_back_and_retry_uses_frozen_input() {
     let temp = tempfile::tempdir().unwrap();
     let input = temp.path().join("input");
     let lake = temp.path().join("lake");
-    let (selection, _) = fixture::prepare(&input, "XSHG", InstrumentKind::Etf, false);
+    let (selection, _) = fixture::prepare(&input, "XSHG", InstrumentKind::Etf, false, None);
     let mut old = selection.clone();
     old["normalizer_version"] = json!("1");
     old.as_object_mut().unwrap().remove("status_snapshot");
@@ -264,7 +264,7 @@ fn corrupt_original_bytes_cannot_publish_under_claimed_hash() {
     let temp = tempfile::tempdir().unwrap();
     let input = temp.path().join("input");
     let lake = temp.path().join("lake");
-    let (selection, snapshot) = fixture::prepare(&input, "XSHE", InstrumentKind::Etf, false);
+    let (selection, snapshot) = fixture::prepare(&input, "XSHE", InstrumentKind::Etf, false, None);
     let hash = snapshot["evidence"][0]["raw_sha256"]
         .as_str()
         .unwrap()

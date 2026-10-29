@@ -15,6 +15,7 @@ use prajna_experiment::{
     pools::{Command as PoolCommand, command},
     selection::{Selection, freeze, plan},
 };
+use prajna_research::StaticUniverse;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -401,13 +402,27 @@ impl Golden {
     /// Synthetic v2 dataset with a frozen execution-status table (required by the
     /// real execution entry) plus one full-coverage adjusted research version.
     fn new() -> Self {
+        Self::with_series(
+            &["2026-01-05", "2026-01-06", "2026-01-07"],
+            &[("10", "10.1", "11", "9"); 3],
+        )
+    }
+
+    /// Synthetic v2 dataset with an explicit Session axis and close series.
+    fn with_series(dates: &[&str], bars: &[(&str, &str, &str, &str)]) -> Self {
         let temp = TempDir::new().unwrap();
         let lake = temp.path().join("lake");
         let repo = temp.path().join("repository");
         let definition = temp.path().join("experiment.json");
         fs::create_dir(&repo).unwrap();
         let input = lake.join("input").join("XSHG");
-        let (selection, _) = opening::prepare(&input, "XSHG", InstrumentKind::Etf, false);
+        let (selection, _) = opening::prepare(
+            &input,
+            "XSHG",
+            InstrumentKind::Etf,
+            false,
+            Some((dates, bars)),
+        );
         let selection: DailyPublicationSelection = serde_json::from_value(selection).unwrap();
         let manifest = publish_daily(&lake, selection, Path::new("receipt.json")).unwrap();
         let dsv = manifest.dsv;
@@ -415,9 +430,9 @@ impl Golden {
             &lake,
             &dsv,
             "510300.XSHG",
-            "2026-01-05",
-            "2026-01-07",
-            &["2026-01-05", "2026-01-06", "2026-01-07"],
+            dates[0],
+            dates[dates.len() - 1],
+            dates,
         );
         let golden = Self {
             _temp: temp,
@@ -698,4 +713,132 @@ fn legacy_single_security_selection_keeps_the_unwindowed_definition_and_identity
             .get("evaluation")
             .is_none()
     );
+}
+
+/// Single-security `ma_crossover` (MA 2/3) definition over the custom series.
+fn ma_window_definition(golden: &Golden, windowed: bool) -> Value {
+    let universe =
+        StaticUniverse::new("ma-window@1", vec!["510300.XSHG".parse().unwrap()]).unwrap();
+    universe.store(&golden.lake).unwrap();
+    let mut definition = json!({
+        "experiment_version": 1,
+        "dsv": golden.dsv,
+        "universe": universe.id().unwrap(),
+        "venue": "XSHG",
+        "strategy": "ma_crossover",
+        "engine": "fast_event",
+        "availability_assumption": "treat_unknown_as_ts_close",
+        "sessions_per_year": 252,
+        "unfilled_entry": "skip",
+        "parameter_space": {"list": [{"params_version": 1, "short_window": 2, "long_window": 3}]},
+        "costs": {"commission_rate": 0.0003, "buy_slippage_bps": 2.0,
+            "sell_slippage_bps": 2.0, "buy_tax_rate": 0.0, "sell_tax_rate": 0.0},
+        "fast_event": {"currency": "CNY", "initial_cash": "1000000", "sizing": "lot",
+            "rebalance": "full_target", "minimum_commission": "5",
+            "portfolios": [{"id": 1, "capital": "1000000"}],
+            "lot_size_source": {"kind": "instrument"}}
+    });
+    if windowed {
+        definition["adjusted_versions"] = json!({"510300.XSHG": golden.adjusted});
+        definition["evaluation"] = json!({
+            "semantic_version": "common-window@1",
+            "warmup_sessions": 2,
+            "common_start": "2026-01-05",
+            "common_end": "2026-01-15",
+            "start": "2026-01-12",
+            "end": "2026-01-14"
+        });
+    }
+    definition
+}
+
+#[test]
+fn production_cli_filters_non_entry_warmup_decisions_and_keeps_the_final_decision_pending() {
+    // MA(2,3) closes: gaps cross up at 01-08 (warm-up buy), down at 01-09,
+    // up at 01-12 (window start) and down at 01-14 (window end). A session
+    // after the window (01-15) exists, so the end Decision would execute in an
+    // unwindowed run but must stay pending inside the frozen window.
+    let dates = [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+    ];
+    let bars = [
+        ("10", "10", "11", "9"),
+        ("10", "10", "11", "9"),
+        ("9", "9", "10", "8"),
+        ("12", "12", "13", "11"),
+        ("5", "5", "6", "4"),
+        ("20", "20", "21", "19"),
+        ("10", "10", "11", "9"),
+        ("10", "10", "11", "9"),
+        ("10", "10", "11", "9"),
+    ];
+    let golden = Golden::with_series(&dates, &bars);
+    let windowed = ma_window_definition(&golden, true);
+    Experiment::parse(&windowed.to_string(), &golden.lake).unwrap();
+    golden.write(&windowed);
+
+    let result = golden.result(&golden.run());
+    let summary = &result["data"]["runs"][0]["summary"];
+    assert_eq!(summary["session_count"], 3);
+    assert_eq!(summary["n_returns"], 2);
+    assert_eq!(summary["executed_count"], 1);
+    assert_eq!(summary["pending_at_end"], true);
+    let total_return = summary["total_return"].as_f64().unwrap();
+    assert!(
+        (total_return + 0.000_499_559_94).abs() < 1e-9,
+        "{total_return}"
+    );
+    let rows = golden.close_rows(&result);
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0]["session_date"], "2026-01-12");
+    assert_eq!(rows[0]["cash"], "1000000");
+    assert_eq!(rows[0]["positions"], json!({}));
+    assert_eq!(rows[1]["session_date"], "2026-01-13");
+    assert_eq!(rows[1]["cash"], "500.44006");
+    assert_eq!(rows[1]["equity"], "999500.44006");
+    assert_eq!(rows[1]["positions"]["510300.XSHG"]["quantity"], "99900");
+    assert_eq!(rows[2]["session_date"], "2026-01-14");
+    assert_eq!(rows[2]["positions"]["510300.XSHG"]["quantity"], "99900");
+    assert!(rows.iter().all(|row| row["session_date"] != "2026-01-15"));
+
+    // Control: the same prices without a window execute the warm-up sell at the
+    // first window Session and the final sell on the Session after the window.
+    golden.write(&ma_window_definition(&golden, false));
+    let control = golden.result(&golden.run());
+    let control_rows = golden.close_rows(&control);
+    let first_window = control_rows
+        .iter()
+        .find(|row| row["session_date"] == "2026-01-12")
+        .unwrap();
+    assert_ne!(first_window["cash"], "1000000");
+    assert!(
+        control_rows
+            .iter()
+            .any(|row| row["session_date"] == "2026-01-15")
+    );
+
+    // Vector shares the same filtered Decisions and window.
+    let mut vector = windowed.clone();
+    vector["engine"] = json!("vector");
+    vector.as_object_mut().unwrap().remove("fast_event");
+    Experiment::parse(&vector.to_string(), &golden.lake).unwrap();
+    golden.write(&vector);
+    let vector = golden.result(&golden.run());
+    assert_eq!(vector["data"]["runs"][0]["summary"]["session_count"], 3);
+    assert_eq!(vector["data"]["runs"][0]["summary"]["pending_at_end"], true);
+    let sessions = vector["data"]["runs"][0]["series"]["sessions"]
+        .as_array()
+        .unwrap();
+    assert_eq!(sessions.len(), 3);
+    assert_eq!(sessions[0]["session_date"], "2026-01-12");
+    assert_eq!(sessions[0]["nav"].as_f64(), Some(1.0));
+    assert_eq!(sessions[2]["session_date"], "2026-01-14");
 }
