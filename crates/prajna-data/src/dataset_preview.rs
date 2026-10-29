@@ -240,7 +240,8 @@ pub fn show(root: &Path, dsv: &str) -> Result<Value, PreviewError> {
         "coverage": manifest.provenance.coverage,
         "venues": venues,
         "instruments": instruments,
-        "warnings": warnings
+        "warnings": warnings,
+        "adjusted_series": crate::adjusted_series::catalog(&root, &manifest.dsv)?
     }))
 }
 

@@ -73,3 +73,12 @@ limits and compatibility: [Dataset preview contract](../../docs/contracts/datase
 The local service exposes this reader at `/api/v1/datasets` and `/datasets`
 with an explicit `serve --dataset-root`; configuration and synthetic checks are
 in [the API guide](../../docs/api.md#已发布研究-dataset-预览).
+
+## Supplier-adjusted research prices
+
+`prajna-import-adjusted --root <LOCAL_LAKE> --input <SUPPLIER_JSON>` preserves an
+explicit supplier file as an immutable version linked to an exact raw DSV. Rust
+fixed-version reads and `/datasets` expose OHLC, method/source/assumptions and
+Session gaps; raw Bars remain execution/valuation prices. This is retrospective
+research input, not strict PIT, sequential TRI or dividend cash flow. Synthetic
+CLI/golden/browser evidence only. Schema, commands and limits: [contract](../../docs/contracts/adjusted-research-series.md).

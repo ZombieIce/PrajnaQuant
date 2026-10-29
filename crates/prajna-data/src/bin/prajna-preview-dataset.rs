@@ -11,7 +11,7 @@ use prajna_data::dataset_preview::{self, BarsRequest, PreviewError};
 
 const USAGE: &str = "Usage: prajna-preview-dataset <catalog|show|bars> --root <LOCAL> \
 [--dsv <DSV>] [--instrument <ID>] [--start YYYY-MM-DD] [--end YYYY-MM-DD] \
-[--limit <1..=1000>] [--offset <N>]";
+[--limit <1..=1000>] [--offset <N>] [--adjusted-version <ADJ_VERSION>]";
 
 fn main() -> ExitCode {
     if std::env::args()
@@ -56,6 +56,7 @@ fn run() -> Result<serde_json::Value, PreviewError> {
             "--end",
             "--limit",
             "--offset",
+            "--adjusted-version",
         ]
         .contains(&flag.as_str())
         {
@@ -113,7 +114,10 @@ fn run() -> Result<serde_json::Value, PreviewError> {
             if request.limit == 0 || request.limit > 1000 {
                 return Err(invalid("--limit must be in 1..=1000"));
             }
-            Ok(with_data(dataset_preview::bars(&root, &request)?))
+            Ok(with_data(match options.get("--adjusted-version") {
+                Some(version) => prajna_data::adjusted_series::bars(&root, &request, version)?,
+                None => dataset_preview::bars(&root, &request)?,
+            }))
         }
         _ => Err(invalid(USAGE)),
     }

@@ -92,9 +92,7 @@ range, first/last Bar, unit labels and warnings (for example a missing source).
 - Reads whole Parquet tables into memory per request; no pushdown or cache is
   claimed. `catalog` reads and validates all required tables for every DSV, so
   its cost grows with the lake size. Bars are paged after the Dataset is read.
-- Only raw unadjusted daily Bars and the frozen evidence fields above are
-  exposed. Adjustments, corporate actions, execution status, research values,
-  factor/label/ledger results and HTTP endpoints are out of scope for this entry.
+- Raw unadjusted Bars remain the default. The additive [adjusted research series](adjusted-research-series.md) contract exposes explicit imported supplier versions; corporate actions, execution status and factor/label/ledger results remain outside this preview entry.
 - The existing MVP-6 SZSE Normalizers, readers, results and archive identities
   are unchanged; this entry rejects the archive root rather than mixing them.
 - Checked-in tests publish synthetic XSHG/XSHE stock and ETF Datasets through
