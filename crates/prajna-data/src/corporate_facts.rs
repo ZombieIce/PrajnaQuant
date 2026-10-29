@@ -245,11 +245,10 @@ fn validate(input: &Input) -> Result<()> {
                     .record_date
                     .zip(fact.ex_date)
                     .is_some_and(|(r, e)| r > e)
-                || fact
-                    .ex_date
-                    .or(fact.effective_date)
-                    .zip(fact.pay_date)
-                    .is_some_and(|(e, p)| e > p)
+                || [fact.ex_date, fact.effective_date].into_iter().any(|date| {
+                    date.zip(fact.pay_date)
+                        .is_some_and(|(event, pay)| event > pay)
+                })
             {
                 return Err(invalid("event date order or coverage anchor is invalid"));
             }

@@ -282,3 +282,73 @@ fn publication_and_reads_reject_symlink_destinations() {
     );
     assert!(fs::read_dir(elsewhere.path()).unwrap().next().is_none());
 }
+
+#[test]
+fn production_cli_checks_both_dates_against_payment() {
+    for kind in ["liquidation", "share_conversion"] {
+        for (ex, effective, pay, valid) in [
+            (
+                Some("2026-01-06"),
+                Some("2026-01-20"),
+                Some("2026-01-10"),
+                false,
+            ),
+            (
+                Some("2026-01-20"),
+                Some("2026-01-06"),
+                Some("2026-01-10"),
+                false,
+            ),
+            (
+                Some("2026-01-10"),
+                Some("2026-01-10"),
+                Some("2026-01-10"),
+                true,
+            ),
+            (
+                Some("2026-01-06"),
+                Some("2026-01-07"),
+                Some("2026-01-10"),
+                true,
+            ),
+            (None, Some("2026-01-07"), Some("2026-01-10"), true),
+            (Some("2026-01-06"), None, Some("2026-01-10"), false),
+            (Some("2026-01-06"), Some("2026-01-07"), None, true),
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path();
+            let mut input = fixture();
+            input["coverage"].as_array_mut().unwrap().truncate(1);
+            let fact = &mut input["coverage"][0]["facts"][0];
+            fact["kind"] = json!(kind);
+            fact["ex_date"] = json!(ex);
+            fact["effective_date"] = json!(effective);
+            fact["pay_date"] = json!(pay);
+            if kind == "share_conversion" {
+                fact["cash_per_share"] = Value::Null;
+                fact["share_ratio"] = json!("1.5");
+            }
+            let valid = valid && !(kind == "liquidation" && pay.is_none());
+            let file = root.join("input.json");
+            fs::write(&file, serde_json::to_vec(&input).unwrap()).unwrap();
+            let result = cli(
+                &[
+                    "import",
+                    "--root",
+                    root.to_str().unwrap(),
+                    "--input",
+                    file.to_str().unwrap(),
+                ],
+                valid,
+            );
+            if valid {
+                let read = query(root, result["version"].as_str().unwrap(), "510300.XSHG");
+                assert_eq!(read["state"], "covered");
+                assert_eq!(read["missing"][0]["fields"], json!([]));
+            } else {
+                assert!(result["error"]["code"].is_string());
+                assert!(!root.join("corporate-facts").exists());
+            }
+        }
+    }
+}
