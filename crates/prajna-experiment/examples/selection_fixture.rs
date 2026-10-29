@@ -1,6 +1,9 @@
 //! Synthetic #350 inputs through the actual production publisher, for HTTP E2E.
 #[path = "../../prajna-data/tests/support/opening_fixture.rs"]
 mod fixture;
+#[allow(dead_code)]
+#[path = "../tests/support/selection_fixture.rs"]
+mod research_fixture;
 use prajna_domain::InstrumentKind;
 use serde_json::{Value, json};
 use std::{fs, path::PathBuf, process::Command};
@@ -43,6 +46,22 @@ fn main() {
         );
         let receipt: Value =
             serde_json::from_slice(&fs::read(root.join(receipt)).unwrap()).unwrap();
+        let dsv = receipt["dsv"].as_str().unwrap();
+        let instrument = snapshot["instrument_id"].as_str().unwrap();
+        for dates in [
+            vec!["2026-01-05", "2026-01-06", "2026-01-07"],
+            vec!["2026-01-05", "2026-01-06"],
+            vec!["2026-01-05", "2026-01-07"],
+        ] {
+            research_fixture::import_adjusted(
+                &root,
+                dsv,
+                instrument,
+                "2026-01-05",
+                "2026-01-07",
+                &dates,
+            );
+        }
         selections.insert(
             snapshot["instrument_id"].as_str().unwrap().into(),
             receipt["dsv"].clone(),

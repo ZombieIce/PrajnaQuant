@@ -301,6 +301,6 @@ fn pool_selection_freezes_old_members_and_dataset_without_changing_legacy_identi
 #[ignore = "exports only a synthetic production Dataset for browser tests"]
 fn export_synthetic_pool_fixture() {
     if let Some(root) = std::env::var_os("PRAJNA_POOL_FIXTURE_ROOT") {
-        fixture::prepare(Path::new(&root), true);
+        fixture::prepare_with_adjusted(Path::new(&root), true);
     }
 }

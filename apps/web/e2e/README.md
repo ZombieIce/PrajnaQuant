@@ -113,3 +113,11 @@ error. The exporter imports only synthetic supplier JSON. Rust integration tests
 separately check literal hand-calculated OHLC; browser checks are transport/display
 evidence. Existing Node must support the Playwright ESM config (18.19+); use a
 newer local runtime and `PRAJNA_CHROME_EXECUTABLE` when needed.
+
+`pools.spec.ts` also consumes T08b preflight through the production CLI/HTTP.
+It selects immutable adjusted versions per member, checks missing bindings/members,
+mixed Venue, insufficient warm-up, early research end and internal Session gaps,
+and compares the displayed plan with the persisted adjusted_versions/evaluation
+and actual result Sessions. Refresh preserves explicit choices but requires a new
+preflight; later pool edits cannot change the saved task. Only synthetic inputs
+are exported; no real-data, PIT or full total-return validation is implied.

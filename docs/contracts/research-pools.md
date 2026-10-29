@@ -59,8 +59,9 @@ pool_store_failed 500，协议异常 502。响应 no-store，按实际本机 Hos
 任务 experiment.json 的 Universe 指向不可变文件，其 label 可追溯池/版本；
 不会动态解析未来草稿。
 
-旧单证券字段、响应与 Universe label/身份不变。此提交仍使用已有 entry-only
-buy-and-hold，只接受单 Venue；沪深混合池可编辑/发布/读取，但该提交返回明确的
+旧单证券字段、响应与 Universe label/身份不变。默认提交仍使用已有 entry-only
+buy-and-hold；T08b 可显式传入既有 native 参数组合（见共同窗口契约）。只接受
+单 Venue；沪深混合池可编辑/发布/读取，但该提交返回明确的
 unsupported_venue（400）。本票不改多 Venue 引擎或把 entry-only 改为 full_target；
 跨资产池产品执行由 #295 收口。单 Venue 多成员使用既有期初等权买入持有。
 原始价格、默认成本、收盘 Decision/下 Session open、未知日线 available_at 的收盘

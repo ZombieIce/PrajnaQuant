@@ -384,3 +384,9 @@ fake 的原生账户显式为 unavailable，不伪造原生快照。
 配置、响应、合成验证与限制见[冻结选择契约](../../docs/contracts/single-security-selection.md)。
 
 研究池：`prajna-pools --lake <LOCAL>` 通过 JSON 命令管理三池草稿/不可变版本；`prajna-freeze-selection` 可引用显式池版本，见[契约](../../docs/contracts/research-pools.md)。旧单证券选择保持兼容；跨 Venue entry-only 提交仍拒绝。
+
+共同窗口预检：`prajna-freeze-selection --lake <LOCAL> --plan` 只读返回逐成员
+覆盖、参数组合最大预热、共同评价窗口及阻断原因；HTTP
+`POST /api/v1/tasks/selections/preflight` 与 `/pools` 使用同一 Rust 结果。
+显式 `parameter_space` 可沿用 native list/grid，提交冻结相同绑定和 evaluation；
+协议、支持范围及合成验证见[共同评价窗口契约](../../docs/contracts/evaluation-window.md)。

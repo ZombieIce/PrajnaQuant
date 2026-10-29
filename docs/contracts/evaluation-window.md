@@ -4,8 +4,8 @@
 不可变 adjusted version，按冻结复权序列的真实 Session 覆盖与全部比较参数的
 最大预热计算共同评价窗口，把它写入 Experiment 定义并进入 Experiment/Run
 身份；Rust 执行只评价窗口内 Session（预热无 Decision/Fill/绩效）。预检 CLI/
-HTTP 与 `/pools` 页面属于 [#356/T08b](https://github.com/ZombieIce/PrajnaQuant/issues/356)，
-不在本契约。
+HTTP 与 `/pools` 页面由 [#356/T08b](https://github.com/ZombieIce/PrajnaQuant/issues/356)
+按下述协议消费同一 Rust 规划结果。
 
 成交与账户估值继续使用原始 Bars（Spec D5、[ADR 0030](../decisions/0030-supplier-adjusted-research-series.md)）；
 复权序列只作研究价格输入与窗口覆盖依据，不进入成交价、估值、公司行动或分红现金。
@@ -125,3 +125,35 @@ Panel：
 真实 `prajna-experiment run` 的 Fast Event 与 Vector 合成 golden（复权覆盖
 截断到第二 Session、预热 Session 被排除、手算现金/数量/NAV/成本、窗口末不
 执行）。真实行情、复权来源、完整 PIT 与公司行动总回报未验证，仍只留本机。
+
+## T08b 生产预检与页面提交
+
+`prajna-freeze-selection --lake <LOCAL> --plan` 消费上述 Selection JSON，退出 0
+返回 `{schema_version:1,data:{selection_plan_version:1,dsv,strategy,venue,universe,
+adjusted,pool?,instruments,window,runnable,blocking}}`。预检不写 Universe/任务；
+`window` 是上述 WindowPlan，缺绑定时为 null，`blocking` 包含 code/message。
+窗口或绑定不可运行仍是成功读取的预检（runnable=false），不是命令错误。
+未知池、DSV 缺成员、混合 Venue、损坏底层数据等无法读取选择的失败保持原错误
+退出 2/envelope；不把错误伪装为空覆盖或零值。
+
+Selection 可选 `parameter_space` 沿用 Experiment 的 native `list` / `grid`，
+`strategy` 接受 buy_and_hold、ma_crossover、s2_rotation。只有 buy_and_hold
+省略时使用旧唯一 `{params_version:1}`；其它策略必须显式给出参数并绑定复权版本。
+参数由现有 native parser 验证，S2 沿用成员数/因子/策略校验；预热来自 Rust 声明，
+不接受客户端 warm-up 数。买入持有仍是 entry_only/retry，其它模板为既有
+full_target/skip，不改变执行实现。此处只提供统一选择输入，不交付策略模板产品页
+或参数比较报告。旧单证券省略新字段时定义、身份及响应保持兼容。
+
+`POST /api/v1/tasks/selections/preflight` 使用同一 Selection 字段（可省略
+idempotency_key），沿用同一 dataset/output 根、大小、Host/Origin、no-store
+和错误状态映射，经子进程调用 `--plan`，成功返回 CLI envelope，不排队。
+`POST /api/v1/tasks/selections` 可附 `expected_window`，若与 Rust 重新读取同一
+不可变输入得到的 WindowPlan 不一致，返回 409 selection_plan_changed，不创建任务。
+预检与冻结共享 plan_window；提交持久化 adjusted_versions/evaluation，无 latest。
+
+`/pools` 从所选 DSV 的复权目录按成员列出固定版本，不自动选择/替代。显示池
+id/version、Universe、DSV、逐成员版本、共同数据窗口、最大/实际预热、评价窗口、
+逐组合状态与阻断原因、缺口 warning。页面只渲染 Rust 结果；输入改变即使旧请求
+返回也无法启用提交，必须重新预检。提交携带显示结果的 expected_window；刷新
+保留显式选择但不复用旧预检，已保存任务仍消费固定定义，不跟随池草稿或目录更新。
+公开验证为合成 CLI/HTTP/浏览器路径；真实行情与完整 PIT/总回报未验证。
