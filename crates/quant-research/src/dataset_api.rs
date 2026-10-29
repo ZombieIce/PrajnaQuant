@@ -84,6 +84,8 @@ fn configured_router(state: DatasetState) -> Router {
         .route("/api/v1/datasets", get(catalog))
         .route("/api/v1/datasets/{dsv}", get(detail))
         .route("/api/v1/datasets/{dsv}/bars", get(bars))
+        .route("/api/v1/corporate-actions", get(actions_catalog))
+        .route("/api/v1/corporate-actions/{version}", get(actions))
         .with_state(Arc::new(state))
 }
 
@@ -140,6 +142,50 @@ async fn bars(
         }
     }
     read(state, args).await
+}
+
+async fn actions_catalog(State(state): State<Arc<DatasetState>>) -> Response {
+    read(state, vec!["actions-catalog".into()]).await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ActionsQuery {
+    instrument: String,
+    start: String,
+    end: String,
+}
+
+async fn actions(
+    State(state): State<Arc<DatasetState>>,
+    Path(version): Path<String>,
+    query: Result<Query<ActionsQuery>, QueryRejection>,
+) -> Response {
+    let query = match query {
+        Ok(Query(query)) => query,
+        Err(_) => {
+            return failure(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "Invalid or unknown corporate-action query fields.",
+            );
+        }
+    };
+    read(
+        state,
+        vec![
+            "actions".into(),
+            "--version".into(),
+            version,
+            "--instrument".into(),
+            query.instrument,
+            "--start".into(),
+            query.start,
+            "--end".into(),
+            query.end,
+        ],
+    )
+    .await
 }
 
 async fn read(state: Arc<DatasetState>, args: Vec<String>) -> Response {
@@ -346,6 +392,21 @@ mod tests {
                     "adj:sha256:synthetic",
                 ],
             ),
+            ("/api/v1/corporate-actions", vec!["actions-catalog"]),
+            (
+                "/api/v1/corporate-actions/caf%3Asha256%3Asynthetic?instrument=510300.XSHG&start=2026-01-01&end=2026-01-31",
+                vec![
+                    "actions",
+                    "--version",
+                    "caf:sha256:synthetic",
+                    "--instrument",
+                    "510300.XSHG",
+                    "--start",
+                    "2026-01-01",
+                    "--end",
+                    "2026-01-31",
+                ],
+            ),
         ] {
             let (status, bytes) = get(app.clone(), uri).await;
             assert_eq!(status, StatusCode::OK);
@@ -360,11 +421,23 @@ mod tests {
         let (status, _) = get(app.clone(), "/api/v1/datasets/synthetic/bars").await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         let (status, _) = get(
-            app,
+            app.clone(),
             "/api/v1/datasets/synthetic/bars?instrument=x&adjustment=qfq",
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+        for uri in [
+            "/api/v1/corporate-actions/caf%3Asha256%3Asynthetic",
+            "/api/v1/corporate-actions/caf%3Asha256%3Asynthetic?instrument=510300.XSHG&start=2026-01-01",
+            "/api/v1/corporate-actions/caf%3Asha256%3Asynthetic?instrument=510300.XSHG&start=2026-01-01&end=2026-01-31&adjustment=qfq",
+        ] {
+            let (status, bytes) = get(app.clone(), uri).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            assert_eq!(
+                serde_json::from_slice::<Value>(&bytes).unwrap()["error"]["code"],
+                "invalid_request"
+            );
+        }
     }
 
     #[tokio::test]

@@ -283,6 +283,72 @@ fn publication_and_reads_reject_symlink_destinations() {
     assert!(fs::read_dir(elsewhere.path()).unwrap().next().is_none());
 }
 
+/// Committed synthetic inputs for the production browser E2E. Only synthetic
+/// identities and values; the E2E publishes them through the real import CLI.
+fn page_scope(state: &str, instrument: &str, kind: &str) -> Value {
+    let mut scope = json!({"instrument_id":instrument,"kind":kind,
+        "start":"2026-01-01","end":"2026-01-31","state":state,
+        "reason":"synthetic scoped source assertion",
+        "source":{"source_id":"synthetic-facts","source_version":"1","source_ref":"fixture://corporate-actions"},
+        "available_at":"2025-12-31T12:00:00+08:00","facts":[]});
+    if state == "unknown" {
+        scope["source"] = Value::Null;
+        scope["available_at"] = Value::Null;
+    }
+    scope
+}
+fn page_fixture() -> Value {
+    let mut covered = page_scope("covered", "510300.XSHG", "etf");
+    covered["facts"] = json!([
+        {"event_id":"dividend-1","kind":"dividend","record_date":"2026-01-05",
+         "ex_date":"2026-01-06","pay_date":"2026-02-01","effective_date":null,
+         "cash_per_share":"0.123456789012345678","share_ratio":null,
+         "source":{"source_id":"synthetic-facts","source_version":"1","source_ref":"fixture://corporate-actions"},
+         "available_at":"2025-12-31T12:00:00+08:00"},
+        {"event_id":"split-1","kind":"share_conversion","record_date":null,
+         "ex_date":null,"pay_date":null,"effective_date":"2026-01-20",
+         "cash_per_share":null,"share_ratio":"1.5",
+         "source":{"source_id":"synthetic-facts","source_version":"1","source_ref":"fixture://corporate-actions"},
+         "available_at":"2025-12-31T12:00:00+08:00"}]);
+    let mut missing = page_scope("missing_facts", "159915.XSHE", "etf");
+    missing["facts"] = json!([
+        {"event_id":"dividend-2","kind":"dividend","record_date":"2026-01-05",
+         "ex_date":"2026-01-06","pay_date":"2026-01-30","effective_date":null,
+         "cash_per_share":null,"share_ratio":null,
+         "source":{"source_id":"synthetic-facts","source_version":"1","source_ref":"fixture://corporate-actions"},
+         "available_at":null}]);
+    json!({"schema_version":1,"observed_at":"2026-03-01T00:00:00Z","coverage":[
+        covered,
+        page_scope("no_events", "000001.XSHE", "stock"),
+        missing,
+        page_scope("unknown", "600000.XSHG", "stock")]})
+}
+
+#[test]
+#[ignore = "explicit synthetic fixture export for apps/web/e2e"]
+fn export_synthetic_corporate_facts_fixture() {
+    let root = std::path::PathBuf::from(
+        std::env::var_os("PRAJNA_CORPORATE_FACTS_FIXTURE_ROOT").expect("explicit fixture root"),
+    );
+    assert!(!root.exists(), "fixture root must not already exist");
+    fs::create_dir_all(&root).unwrap();
+    let first = page_fixture();
+    fs::write(
+        root.join("corporate-actions.json"),
+        serde_json::to_vec(&first).unwrap(),
+    )
+    .unwrap();
+    let mut revision = first.clone();
+    revision["observed_at"] = json!("2026-03-02T00:00:00Z");
+    revision["coverage"][0]["facts"][0]["cash_per_share"] = json!("0.2");
+    revision["coverage"][0]["reason"] = json!("synthetic scoped source assertion, revised");
+    fs::write(
+        root.join("corporate-actions-revision.json"),
+        serde_json::to_vec(&revision).unwrap(),
+    )
+    .unwrap();
+}
+
 #[test]
 fn production_cli_checks_both_dates_against_payment() {
     for kind in ["liquidation", "share_conversion"] {

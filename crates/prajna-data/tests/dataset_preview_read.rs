@@ -6,6 +6,7 @@ use chrono::NaiveDate;
 use prajna_data::{
     EvidenceSource, FieldEvidence, Manifest, ManifestCore, ManifestProvenance, ManifestTable,
     NormalizerIdentity, SecurityEvidenceRecord, SecurityEvidenceStore, bars_to_record_batch,
+    corporate_facts,
     daily_publish::DailyPublicationReceipt,
     daily_raw::{DailyRawCollector, DailyRawRequest, SecurityKind, Venue},
     instruments_to_record_batch, logical_hash, schema_fingerprint,
@@ -1178,4 +1179,203 @@ fn adjusted_import_and_read_reject_symlink_destination() {
                 .contains("adjusted series catalog unavailable"))
     );
     assert_eq!(fs::read_dir(other).unwrap().count(), 0);
+}
+
+fn facts_scope(state: &str, instrument: &str, kind: &str) -> Value {
+    let source =
+        json!({"source_id":"synthetic","source_version":"1","source_ref":"fixture://actions"});
+    let mut scope = json!({"instrument_id":instrument,"kind":kind,"start":"2026-01-01",
+        "end":"2026-01-31","state":state,"reason":"supplied events","source":source,
+        "available_at":"2025-12-31T12:00:00+08:00","facts":[]});
+    if state == "unknown" {
+        scope["source"] = Value::Null;
+        scope["available_at"] = Value::Null;
+    }
+    scope
+}
+
+/// Synthetic facts only: the preview CLI lists persisted versions and reads one
+/// explicit version/security/range without publishing, choosing a latest or
+/// merging partial coverage.
+#[test]
+fn actions_catalog_and_fixed_read_expose_four_states_without_writing() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("lake");
+    fs::create_dir_all(&root).unwrap();
+    let source =
+        json!({"source_id":"synthetic","source_version":"1","source_ref":"fixture://actions"});
+    let mut covered = facts_scope("covered", "510300.XSHG", "etf");
+    covered["facts"] = json!([{"event_id":"dividend-1","kind":"dividend",
+        "record_date":"2026-01-05","ex_date":"2026-01-06","pay_date":"2026-02-01",
+        "effective_date":null,"cash_per_share":"0.123456789012345678","share_ratio":null,
+        "source":source,"available_at":"2025-12-31T12:00:00+08:00"}]);
+    let mut missing = facts_scope("missing_facts", "159915.XSHE", "etf");
+    missing["facts"] = json!([{"event_id":"dividend-2","kind":"dividend",
+        "record_date":"2026-01-05","ex_date":"2026-01-06","pay_date":"2026-01-30",
+        "effective_date":null,"cash_per_share":null,"share_ratio":null,
+        "source":source,"available_at":null}]);
+    let input = json!({"schema_version":1,"observed_at":"2026-03-01T00:00:00Z","coverage":[
+        covered, facts_scope("no_events","000001.XSHE","stock"), missing,
+        facts_scope("unknown","600000.XSHG","stock")]});
+    let first = corporate_facts::import(&root, &serde_json::to_vec(&input).unwrap()).unwrap();
+
+    let empty = temp.path().join("empty");
+    fs::create_dir_all(&empty).unwrap();
+    let catalog = preview_json(&empty, &["actions-catalog"]);
+    assert_eq!(catalog["versions"], json!([]));
+    assert_eq!(catalog["invalid_versions"], json!([]));
+    let (code, error) = preview_failure(&root.join("missing"), &["actions-catalog"], 1);
+    assert_eq!(code, 1);
+    assert_eq!(error["error"]["code"], "invalid_dataset_root");
+
+    let catalog = preview_json(&root, &["actions-catalog"]);
+    assert_eq!(catalog["versions"].as_array().unwrap().len(), 1);
+    let scopes = catalog["versions"][0]["scopes"].as_array().unwrap();
+    assert_eq!(scopes.len(), 4);
+    assert_eq!(scopes[0]["state"], "covered");
+    assert_eq!(scopes[0]["facts"], 1);
+    assert_eq!(scopes[1]["state"], "no_events");
+    assert_eq!(scopes[2]["state"], "missing_facts");
+    assert_eq!(scopes[2]["incomplete_facts"], 1);
+    assert_eq!(scopes[3]["state"], "unknown");
+
+    let read = |id: &str, security: &str, start: &str, end: &str| {
+        preview_json(
+            &root,
+            &[
+                "actions",
+                "--version",
+                id,
+                "--instrument",
+                security,
+                "--start",
+                start,
+                "--end",
+                end,
+            ],
+        )
+    };
+    for (security, expected) in [
+        ("510300.XSHG", "covered"),
+        ("000001.XSHE", "no_events"),
+        ("159915.XSHE", "missing_facts"),
+        ("600000.XSHG", "unknown"),
+        ("510300.XSHE", "unknown"),
+    ] {
+        let value = read(&first, security, "2026-01-01", "2026-01-31");
+        assert_eq!(
+            (&value["state"], &value["version"], &value["instrument_id"]),
+            (&json!(expected), &json!(first), &json!(security))
+        );
+    }
+    assert_eq!(
+        read(&first, "159915.XSHE", "2026-01-01", "2026-01-31")["missing"][0]["fields"],
+        json!(["available_at", "cash_per_share"])
+    );
+    let outside = read(&first, "510300.XSHG", "2025-12-01", "2025-12-31");
+    assert_eq!(outside["state"], "unknown");
+    assert!(outside["coverage"].is_null());
+
+    let mut revision = input.clone();
+    revision["observed_at"] = json!("2026-03-02T00:00:00Z");
+    revision["coverage"][0]["facts"][0]["cash_per_share"] = json!("0.2");
+    let second = corporate_facts::import(&root, &serde_json::to_vec(&revision).unwrap()).unwrap();
+    let catalog = preview_json(&root, &["actions-catalog"]);
+    assert_eq!(
+        (
+            &catalog["versions"][0]["version"],
+            &catalog["versions"][1]["version"]
+        ),
+        (&json!(second), &json!(first))
+    );
+    assert_eq!(
+        read(&first, "510300.XSHG", "2026-01-01", "2026-01-31")["coverage"]["facts"][0]["cash_per_share"],
+        "0.123456789012345678"
+    );
+    assert_eq!(
+        read(&second, "510300.XSHG", "2026-01-01", "2026-01-31")["coverage"]["facts"][0]["cash_per_share"],
+        "0.2"
+    );
+
+    let before = tree_hash(&root);
+    for args in [
+        vec!["actions-catalog"],
+        vec![
+            "actions",
+            "--version",
+            first.as_str(),
+            "--instrument",
+            "510300.XSHG",
+            "--start",
+            "2026-01-01",
+            "--end",
+            "2026-01-31",
+        ],
+    ] {
+        let _ = preview_json(&root, &args);
+    }
+    assert_eq!(tree_hash(&root), before);
+
+    let object = root.join(format!(
+        "corporate-facts/{}.json",
+        first.strip_prefix("caf:sha256:").unwrap()
+    ));
+    let bytes = fs::read(&object).unwrap();
+    fs::write(&object, b"{}").unwrap();
+    let catalog = preview_json(&root, &["actions-catalog"]);
+    assert_eq!(
+        (
+            catalog["versions"].as_array().unwrap().len(),
+            catalog["invalid_versions"].as_array().unwrap().len()
+        ),
+        (1, 1)
+    );
+    let (code, error) = preview_failure(
+        &root,
+        &[
+            "actions",
+            "--version",
+            first.as_str(),
+            "--instrument",
+            "510300.XSHG",
+            "--start",
+            "2026-01-01",
+            "--end",
+            "2026-01-31",
+        ],
+        1,
+    );
+    assert_eq!(code, 1);
+    assert_eq!(error["error"]["code"], "invalid_dataset_table");
+    fs::write(&object, bytes).unwrap();
+    assert_eq!(
+        read(&first, "510300.XSHG", "2026-01-01", "2026-01-31")["state"],
+        "covered"
+    );
+
+    for args in [
+        vec![
+            "actions",
+            "--version",
+            first.as_str(),
+            "--instrument",
+            "510300.XSHG",
+        ],
+        vec![
+            "actions",
+            "--version",
+            first.as_str(),
+            "--instrument",
+            "510300.XSHG",
+            "--start",
+            "2026-01-01",
+            "--end",
+            "2026-01-31",
+            "--dsv",
+            "x",
+        ],
+        vec!["actions-catalog", "--dsv", "x"],
+    ] {
+        assert_eq!(preview(&root, &args).status.code(), Some(2));
+    }
 }

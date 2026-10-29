@@ -85,7 +85,8 @@ test('empty catalog and unavailable lake are visible without skipping', async ({
   await rename(root, `${root}-unavailable`);
   try {
     await page.reload();
-    await expect(page.getByRole('alert')).toBeVisible();
+    // The independent corporate-action panel also reports the missing root.
+    await expect(page.getByRole('alert').first()).toBeVisible();
     await expect(page.getByLabel('Dataset 版本', { exact: true })).toHaveCount(0);
   } finally { await rename(`${root}-unavailable`, root); }
 });

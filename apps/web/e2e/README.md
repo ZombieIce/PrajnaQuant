@@ -38,8 +38,9 @@ The Playwright webServer performs these steps, all from this checkout:
 
 1. `npm run build` produces the production `apps/web/dist`.
 2. Build `quant-research`, `prajna-experiment` (including
-   `prajna-freeze-selection` and the `selection_fixture` example) and
-   `prajna-publish-daily` with `--locked --offline`.
+   `prajna-freeze-selection` and the `selection_fixture` example),
+   `prajna-publish-daily` and `prajna-corporate-facts` with
+   `--locked --offline`.
 3. Run `prajna-data`'s opt-in `export_synthetic_preview_fixture` integration test.
    This invokes the real `prajna-publish-daily` CLI with synthetic source bytes,
    pinned calendars and security evidence, publishing an XSHG ETF and XSHE stock.
@@ -50,21 +51,40 @@ The Playwright webServer performs these steps, all from this checkout:
    lake now holds four Datasets: two v1 preview fixtures and two v2 selection
    fixtures. The v2 XSHG dataset executes; the v1 XSHG dataset stays as a real
    missing-`execution_status` failure case.
-5. Check the real `prajna-experiment --help`, bind it through
+5. Run `prajna-data`'s opt-in `export_synthetic_corporate_facts_fixture`
+   integration test and publish its two synthetic inputs (an original and a
+   revision) with the real `prajna-corporate-facts import`, so the same lake also
+   holds two fixed fact versions. The fixture covers XSHG/XSHE stock and ETF
+   securities and all four scoped states, including a dividend with an exact
+   amount, a split, and an event missing its amount and availability.
+6. Check the real `prajna-experiment --help`, bind it through
    `PRAJNA_EXPERIMENT_CLI`, bind `PRAJNA_DATASET_PREVIEW_CLI` and
    `PRAJNA_SELECTION_CLI`, and launch `quant-research serve` with explicit dist,
    market directory and one synthetic lake used as both `--dataset-root` and
    `--output` (T04b rejects different canonical roots).
-6. Wait for real `/api/v1/health`, then operate `/datasets` and `/backtests` in
-   Chromium. Requests go to production API → CLI → published Parquet/manifest and
-   persisted task/result files. No success responses or production endpoints are
-   mocked or added for testing.
+7. Wait for real `/api/v1/health`, then operate `/datasets` and `/backtests` in
+   Chromium. Requests go to production API → CLI → published Parquet/manifest,
+   persisted fact versions and task/result files. No success responses or
+   production endpoints are mocked or added for testing.
 
 `datasets.spec.ts` verifies selection, lifecycle, coverage gaps, exact raw prices,
 an empty Bar range, refresh, corrupted version isolation, empty catalog and missing
 lake. Its option-count assertions include the two extra v2 Datasets and its loops
 filter the v1 preview fixtures by `1 证券 / 2 Bars`; it does not rely on the lake
-containing only the preview fixtures.
+containing only the preview fixtures. When the whole lake is unavailable the
+independent corporate-action panel also reports an error, so that spec checks
+that at least one alert is visible rather than requiring a single alert.
+
+`actions.spec.ts` operates the read-only corporate-action coverage panel through
+the production `/api/v1/corporate-actions` routes and CLI. It selects a revision
+and the older version by their real catalog identities and checks the exact
+scale-18 dividend, split fields, explicit no-events, missing fields
+(`available_at`, `cash_per_share`), an explicit unknown scope and an out-of-scope
+unknown range. It corrupts one persisted version after the catalog load to prove
+the fixed read fails visibly, refreshes to isolate it, hides the facts directory
+to prove an explicit empty state, and keeps Dataset detail readable throughout.
+Rendered values are compared with real API payloads; no mock is used, and fault
+mutations restore the invocation-owned lake in `finally`.
 
 `backtests.spec.ts` operates the production `/backtests` page: choose the v2 XSHG
 ETF, submit through `POST /api/v1/tasks/selections`, observe the persisted task

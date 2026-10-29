@@ -10,6 +10,7 @@ const local = process.env.PRAJNA_E2E_ROOT;
 if (!local) throw new Error('Use npm run test:e2e (fresh owned root required)');
 const fixture = join(local, 'fixture');
 const lake = join(fixture, 'lake');
+const facts = join(fixture, 'corporate-actions');
 const target = process.env.CARGO_TARGET_DIR ?? join(root, 'target');
 const bin = (name) => join(target, 'debug', name + (process.platform === 'win32' ? '.exe' : ''));
 function run(command, args, cwd = root, extra = {}) {
@@ -25,7 +26,7 @@ function run(command, args, cwd = root, extra = {}) {
 run('npm', ['run', 'build'], web);
 run('cargo', ['build', '-p', 'quant-research', '--bin', 'quant-research', '--locked', '--offline']);
 run('cargo', ['build', '-p', 'prajna-experiment', '--bins', '--example', 'selection_fixture', '--locked', '--offline']);
-run('cargo', ['build', '-p', 'prajna-data', '--bin', 'prajna-publish-daily', '--locked', '--offline']);
+run('cargo', ['build', '-p', 'prajna-data', '--bin', 'prajna-publish-daily', '--bin', 'prajna-corporate-facts', '--locked', '--offline']);
 run('cargo', ['test', '-p', 'prajna-data', '--test', 'dataset_preview_read', '--locked', '--offline',
   'export_synthetic_preview_fixture', '--', '--ignored', '--exact'], root,
   { PRAJNA_PREVIEW_FIXTURE_ROOT: fixture });
@@ -40,6 +41,17 @@ run('cargo', ['test', '-p', 'prajna-experiment', '--test', 'pools', '--locked', 
   { PRAJNA_POOL_FIXTURE_ROOT: lake });
 run('cargo', ['test', '-p', 'prajna-experiment', '--test', 'momentum', '--locked', '--offline',
   'export_momentum_fixture', '--', '--ignored', '--exact'], root, { PRAJNA_MOMENTUM_FIXTURE_ROOT: lake });
+// Publish two synthetic fixed corporate-action fact versions (an original and a
+// revision) into the same lake through the real import CLI. No real facts and no
+// preview-time write occur afterwards.
+run('cargo', ['test', '-p', 'prajna-data', '--test', 'corporate_facts', '--locked', '--offline',
+  'export_synthetic_corporate_facts_fixture', '--', '--ignored', '--exact'], root,
+  { PRAJNA_CORPORATE_FACTS_FIXTURE_ROOT: facts });
+for (const name of ['corporate-actions.json', 'corporate-actions-revision.json']) {
+  run(bin('prajna-corporate-facts'), ['import', '--root', lake, '--input', join(facts, name)]);
+}
+const versions = readdirSync(join(lake, 'corporate-facts')).filter((name) => name.endsWith('.json'));
+if (versions.length !== 2) throw new Error(`Expected two fact versions, found ${versions.length}`);
 run(bin('prajna-experiment'), ['--help']);
 const log = createWriteStream(join(local, 'server.log'), { flags: 'a' });
 const child = spawn(bin('quant-research'), ['serve', '--address', `127.0.0.1:${process.env.PRAJNA_E2E_PORT}`,
