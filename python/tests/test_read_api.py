@@ -83,7 +83,8 @@ class ReadApiTests(unittest.TestCase):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 prajna.read_dataset(*args, **options)
         for kind, params in (("custom", {"n": 2}), ("momentum", {"n": 0}),
-                             ("volatility", {"n": 1}), ("momentum", {"n": True}),
+                             ("volatility", {"n": 1}), ("trend_filter_strict", {"n": 0}),
+                             ("momentum", {"n": True}),
                              ("momentum", {"n": 2, "extra": 1}),
                              ("momentum", {"n": 1.5})):
             with self.subTest(kind=kind, params=params), self.assertRaises(ValueError):
@@ -112,6 +113,7 @@ class ReadApiTests(unittest.TestCase):
             "momentum": {"n": 2},
             "volatility": {"n": 2},
             "trend_filter": {"n": 2},
+            "trend_filter_strict": {"n": 2},
             "rotation_score": {
                 "short": 2, "long": 3, "vol": 2,
                 "w_s": 1.0, "w_l": 1.0, "w_v": 1.0, "trend": None,

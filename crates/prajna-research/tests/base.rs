@@ -333,3 +333,210 @@ fn status_precedence_and_future_input_isolation() {
     .unwrap();
     assert_eq!(baseline.slice(0, 9), changed.slice(0, 9));
 }
+
+#[test]
+fn strict_trend_treats_ma_equality_as_not_above_and_keeps_v1_semantics() {
+    let panel = fixture();
+    let strict =
+        |n| Factor::new(FactorKind::TrendFilterStrict, TrendFilterStrictParams { n }).unwrap();
+    let non_strict = |n| Factor::new(FactorKind::TrendFilter, TrendFilterParams { n }).unwrap();
+
+    let frame = compute_base(
+        &panel,
+        &panel.instruments,
+        &strict(3),
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
+    // A closes 100,101,102,...: rows 0/1 need three closes; row 2 is above
+    // mean(100,101,102)=101, row 4 is below mean(102,103,99)=101.33.
+    check(&frame, 0, None, "insufficient_window");
+    check(&frame, 1, None, "insufficient_window");
+    check(&frame, 2, Some(1.0), "ok");
+    check(&frame, 4, Some(0.0), "ok");
+
+    // B n=1: close == its own mean, so strict trend is 0 while TrendFilter v1
+    // retains its documented `>=` result of 1. C rows 20/21 are both 100 with
+    // n=2, another exact-equality boundary.
+    let strict_one = compute_base(
+        &panel,
+        &panel.instruments,
+        &strict(1),
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
+    check(&strict_one, 10, Some(0.0), "ok");
+    let v1_one = compute_base(
+        &panel,
+        &panel.instruments,
+        &non_strict(1),
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
+    check(&v1_one, 10, Some(1.0), "ok");
+    let strict_two = compute_base(
+        &panel,
+        &panel.instruments,
+        &strict(2),
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
+    check(&strict_two, 21, Some(0.0), "ok");
+    let v1_two = compute_base(
+        &panel,
+        &panel.instruments,
+        &non_strict(2),
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
+    check(&v1_two, 21, Some(1.0), "ok");
+}
+
+#[test]
+fn strict_trend_missing_inputs_and_available_at_follow_window_sessions() {
+    let panel = fixture();
+    let mut has_bar = vec![true; 30];
+    has_bar[13] = false;
+    let mut grid = panel.grid.clone();
+    grid.with_column(Series::new("has_bar".into(), has_bar).into())
+        .unwrap();
+    let panel = Panel { grid, ..panel };
+    let strict = Factor::new(
+        FactorKind::TrendFilterStrict,
+        TrendFilterStrictParams { n: 3 },
+    )
+    .unwrap();
+    let frame = compute_base(
+        &panel,
+        &panel.instruments,
+        &strict,
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
+    check(&frame, 14, None, "missing_input");
+    check(&frame, 15, None, "missing_input");
+    // B rows 14/15/16 are 102/103/101: 101 is below their mean of 102.
+    check(&frame, 16, Some(0.0), "ok");
+    assert_eq!(
+        frame
+            .column("available_at")
+            .unwrap()
+            .datetime()
+            .unwrap()
+            .physical()
+            .get(16),
+        Some(panel.sessions[6].ts_close.as_unix_nanos())
+    );
+}
+
+/// Replaces the fixture closes with a test series and makes every Session's bar
+/// available, so equality tests are not affected by the fixture's deliberate gap.
+fn panel_with_closes(panel: Panel, closes: Vec<f64>) -> Panel {
+    let mut grid = panel.grid.clone();
+    let indices = grid
+        .column("session_index")
+        .unwrap()
+        .u32()
+        .unwrap()
+        .iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let times = indices
+        .iter()
+        .map(|index| Some(panel.sessions[*index as usize].ts_close.as_unix_nanos()))
+        .collect::<Vec<_>>();
+    let bars = vec![true; grid.height()];
+    grid.with_column(Series::new("has_bar".into(), bars).into())
+        .unwrap();
+    grid.with_column(
+        Series::new("close_available_at".into(), times)
+            .cast(&DataType::Datetime(
+                TimeUnit::Nanoseconds,
+                Some(TimeZone::UTC),
+            ))
+            .unwrap()
+            .into(),
+    )
+    .unwrap();
+    grid.with_column(Series::new("close".into(), closes).into())
+        .unwrap();
+    Panel { grid, ..panel }
+}
+
+#[test]
+fn strict_trend_constant_non_representable_mean_is_equal() {
+    let base = fixture();
+    let sessions = base.sessions.len();
+    // A constant non-exactly-representable decimal price is mathematically equal
+    // to its own moving average for every Session. Raw f64 mean rounding used to
+    // produce false "above" signals at some window sizes (Issue #299 review B2).
+    let closes = vec![3.826_f64; base.grid.height()];
+    let panel = panel_with_closes(base, closes);
+    for n in [1_u32, 2, 3] {
+        let strict =
+            Factor::new(FactorKind::TrendFilterStrict, TrendFilterStrictParams { n }).unwrap();
+        let frame = compute_base(
+            &panel,
+            &panel.instruments,
+            &strict,
+            AvailabilityAssumption::None,
+        )
+        .unwrap();
+        for row in 0..frame.height() {
+            if (row % sessions) + 1 < n as usize {
+                check(&frame, row, None, "insufficient_window");
+            } else {
+                check(&frame, row, Some(0.0), "ok");
+            }
+        }
+    }
+}
+
+#[test]
+fn strict_trend_varied_decimal_equality_and_genuine_above() {
+    let base = fixture();
+    let sessions = base.sessions.len();
+    // Varied decimal closes whose 3-Session decimal mean is exactly 3.826:
+    // [3.827, 3.825, 3.826] repeated. Session 2/5/8 close == mean (0);
+    // Session 3/6/9 close 3.827 > 3.826 remains a genuine above (1);
+    // Session 4/7 close 3.825 is below (0).
+    let indices = base
+        .grid
+        .column("session_index")
+        .unwrap()
+        .u32()
+        .unwrap()
+        .iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let closes = indices
+        .iter()
+        .map(|index| match index % 3 {
+            0 => 3.827_f64,
+            1 => 3.825,
+            _ => 3.826,
+        })
+        .collect::<Vec<_>>();
+    let panel = panel_with_closes(base, closes);
+    let strict = Factor::new(
+        FactorKind::TrendFilterStrict,
+        TrendFilterStrictParams { n: 3 },
+    )
+    .unwrap();
+    let frame = compute_base(
+        &panel,
+        &panel.instruments,
+        &strict,
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
+    for row in 0..frame.height() {
+        match row % sessions {
+            0 | 1 => check(&frame, row, None, "insufficient_window"),
+            2 | 5 | 8 => check(&frame, row, Some(0.0), "ok"),
+            3 | 6 | 9 => check(&frame, row, Some(1.0), "ok"),
+            4 | 7 => check(&frame, row, Some(0.0), "ok"),
+            _ => unreachable!(),
+        }
+    }
+}

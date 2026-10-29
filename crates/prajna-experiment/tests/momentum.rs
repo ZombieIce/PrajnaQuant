@@ -134,6 +134,10 @@ fn production_cli_persists_independent_golden_and_reads_identical_values() {
         data["report"]["sources"]["510300.XSHG"]["historical_publication_time"],
         "Unknown"
     );
+    // Legacy momentum requests keep their existing report semantics and direction.
+    assert_eq!(data["report"]["semantics"], "momentum-research@2");
+    assert_eq!(data["report"]["direction"], "higher_is_stronger");
+    assert!(data["report"]["request"].get("factor").is_none());
     assert_eq!(submit(root, request.clone()).unwrap(), value); // cache reuse and immutable report
     std::fs::write(root.join(format!("momentum-research/{id}.json")), b"{}").unwrap();
     assert_eq!(
@@ -347,5 +351,251 @@ fn mixed_sign_and_constant_histograms_count_every_valid_sample_once() {
             bins[9]["high"].as_f64().unwrap(),
             expected[0].max(expected[1])
         );
+    }
+}
+
+/// Independent hand calculation over the linear adjusted closes `p_i = 10 + i`.
+fn expected_return(prices: &[f64], i: usize) -> f64 {
+    prices[i] / prices[i - 1] - 1.0
+}
+
+fn expected_sample_volatility(prices: &[f64], i: usize, n: usize) -> f64 {
+    let returns = (i + 1 - n..=i)
+        .map(|k| expected_return(prices, k))
+        .collect::<Vec<_>>();
+    let mean = returns.iter().sum::<f64>() / n as f64;
+    let squares = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>();
+    (squares / (n - 1) as f64).sqrt()
+}
+
+#[test]
+fn volatility_research_reuses_v1_and_reports_lower_is_stronger() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let mut request = inputs(root);
+    let legacy = submit(root, request.clone()).unwrap();
+    assert_eq!(legacy["data"]["report"]["semantics"], "momentum-research@2");
+
+    request["factor"] = json!("volatility");
+    request["windows"] = json!([2, 20, 60]);
+    let value = submit(root, request.clone()).unwrap();
+    let report = &value["data"]["report"];
+    assert_eq!(report["semantics"], "factor-research@1");
+    assert_eq!(report["direction"], "lower_is_stronger");
+    assert_eq!(report["request"]["factor"], "volatility");
+    assert_eq!(report["request"]["windows"], json!([2, 20, 60]));
+    let prices = (0..130).map(|i| f64::from(10 + i)).collect::<Vec<_>>();
+    let factors = report["factors"].as_array().unwrap();
+    assert_eq!(factors.len(), 3);
+    for (factor, n) in factors.iter().zip([2_usize, 20, 60]) {
+        assert_eq!(
+            factor["definition"],
+            json!({"kind": "volatility", "version": "1", "params": {"n": n}})
+        );
+        let rows = factor["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 130);
+        for (i, row) in rows.iter().enumerate() {
+            if i < n {
+                assert_eq!(row["status"], "insufficient_window");
+                assert!(row["value"].is_null());
+            } else {
+                assert_eq!(row["status"], "ok");
+                let expected = expected_sample_volatility(&prices, i, n);
+                assert!(
+                    (row["value"].as_f64().unwrap() - expected).abs() < 1e-12,
+                    "window {n} row {i}"
+                );
+                assert!(
+                    row["available_at_ns"]
+                        .as_str()
+                        .is_some_and(|s| s.parse::<i64>().is_ok())
+                );
+            }
+        }
+    }
+
+    // Volatility v1 requires n >= 2; the request must fail rather than fall back.
+    request["windows"] = json!([1]);
+    assert!(submit(root, request.clone()).is_err());
+
+    let mut unknown = inputs(root);
+    unknown["factor"] = json!("not_a_factor");
+    assert!(serde_json::from_value::<Request>(unknown.clone()).is_err());
+    // Explicit momentum is not a second encoding of the legacy identity.
+    unknown["factor"] = json!("momentum");
+    assert!(serde_json::from_value::<Request>(unknown).is_err());
+}
+
+#[test]
+fn strict_trend_equality_warmup_missing_and_adjusted_binding_are_independent() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let mut request = inputs(root);
+    request["factor"] = json!("trend_filter_strict");
+    request["windows"] = json!([1, 20, 60, 120]);
+    let value = submit(root, request.clone()).unwrap();
+    let report = &value["data"]["report"];
+    assert_eq!(report["semantics"], "factor-research@1");
+    assert_eq!(report["direction"], "binary_close_above_ma");
+    assert_eq!(report["request"]["factor"], "trend_filter_strict");
+    let factors = report["factors"].as_array().unwrap();
+    assert_eq!(factors.len(), 4);
+    for (factor, n) in factors.iter().zip([1_usize, 20, 60, 120]) {
+        assert_eq!(
+            factor["definition"],
+            json!({"kind": "trend_filter_strict", "version": "1", "params": {"n": n}})
+        );
+        let rows = factor["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 130);
+        for (i, row) in rows.iter().enumerate() {
+            if i + 1 < n {
+                assert_eq!(row["status"], "insufficient_window");
+                assert!(row["value"].is_null());
+            } else {
+                assert_eq!(row["status"], "ok");
+                let expected = if n == 1 {
+                    // `close == mean(close)` for a one-session mean, and the Spec's
+                    // strict definition must not count equality as above.
+                    0.0
+                } else {
+                    // Linear increasing adjusted closes; equality never occurs here.
+                    1.0
+                };
+                assert_eq!(
+                    row["value"].as_f64().unwrap(),
+                    expected,
+                    "window {n} row {i}"
+                );
+            }
+        }
+        assert_eq!(
+            factor["distribution"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|b| b["count"].as_u64().unwrap())
+                .sum::<u64>(),
+            if n == 1 { 130 } else { 130 - (n as u64) + 1 }
+        );
+    }
+
+    // Revise the adjusted series: drop an interior Session and change the last
+    // close. The report must keep past values and mark only affected windows.
+    let version = request["adjusted"]["510300.XSHG"].as_str().unwrap();
+    let mut input =
+        serde_json::to_value(prajna_data::adjusted_series::read(root, version).unwrap()).unwrap();
+    for field in ["open", "high", "low", "close"] {
+        input["rows"][129][field] = json!("999");
+    }
+    input["rows"].as_array_mut().unwrap().remove(100);
+    let revised =
+        prajna_data::adjusted_series::import(root, &serde_json::to_vec(&input).unwrap()).unwrap();
+    request["adjusted"]["510300.XSHG"] = json!(revised);
+    let changed = submit(root, request).unwrap();
+    assert_ne!(changed["data"]["id"], value["data"]["id"]);
+    for (original, revised) in value["data"]["report"]["factors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(changed["data"]["report"]["factors"].as_array().unwrap())
+    {
+        let n = original["definition"]["params"]["n"].as_u64().unwrap() as usize;
+        let original_rows = original["rows"].as_array().unwrap();
+        let revised_rows = revised["rows"].as_array().unwrap();
+        assert_eq!(
+            &original_rows[..100],
+            &revised_rows[..100],
+            "revision must not rewrite the first 100 Sessions"
+        );
+        for (index, row) in revised_rows[100..100 + n.min(20)].iter().enumerate() {
+            // Insufficient history keeps precedence over a missing interior close.
+            let expected = if 100 + index < n - 1 {
+                "insufficient_window"
+            } else {
+                "missing_input"
+            };
+            assert_eq!(row["status"], expected, "window {n} row {}", 100 + index);
+            assert!(row["value"].is_null());
+        }
+        if n == 20 {
+            assert_eq!(revised_rows[120]["status"], "ok");
+            assert_eq!(revised_rows[120]["value"].as_f64().unwrap(), 1.0);
+        }
+    }
+}
+
+/// Submits through the production `prajna-momentum` binary (JSON stdin/stdout).
+fn run_production_cli(root: &Path, request: Value) -> Value {
+    use std::{
+        io::Write,
+        process::{Command as Process, Stdio},
+    };
+    let mut child = Process::new(env!("CARGO_BIN_EXE_prajna-momentum"))
+        .args(["--lake", root.to_str().unwrap()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            json!({"op":"submit","request":request})
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[test]
+fn strict_trend_non_representable_equal_means_are_zero_through_production_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let mut request = inputs(root);
+    let version = request["adjusted"]["510300.XSHG"].as_str().unwrap();
+    let mut input =
+        serde_json::to_value(prajna_data::adjusted_series::read(root, version).unwrap()).unwrap();
+    // 3.826 is not exactly representable in binary64; every Session's decimal
+    // close equals the decimal mean, so the strict kind must persist 0 at every
+    // window (Issue #299 review B2).
+    for row in input["rows"].as_array_mut().unwrap() {
+        for field in ["open", "high", "low", "close"] {
+            row[field] = json!("3.826");
+        }
+    }
+    let constant =
+        prajna_data::adjusted_series::import(root, &serde_json::to_vec(&input).unwrap()).unwrap();
+    request["adjusted"]["510300.XSHG"] = json!(constant);
+    request["factor"] = json!("trend_filter_strict");
+    request["windows"] = json!([1, 2, 3, 20, 60, 120]);
+    let value = run_production_cli(root, request);
+    let report = &value["data"]["report"];
+    assert_eq!(report["direction"], "binary_close_above_ma");
+    let factors = report["factors"].as_array().unwrap();
+    assert_eq!(factors.len(), 6);
+    for (factor, n) in factors.iter().zip([1_usize, 2, 3, 20, 60, 120]) {
+        let rows = factor["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 130);
+        for (i, row) in rows.iter().enumerate() {
+            if i + 1 < n {
+                assert_eq!(row["status"], "insufficient_window", "window {n} row {i}");
+                assert!(row["value"].is_null());
+            } else {
+                assert_eq!(row["status"], "ok", "window {n} row {i}");
+                assert_eq!(
+                    row["value"].as_f64().unwrap(),
+                    0.0,
+                    "window {n} row {i} must be equal, not above"
+                );
+            }
+        }
     }
 }

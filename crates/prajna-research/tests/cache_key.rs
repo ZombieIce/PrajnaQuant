@@ -1,6 +1,11 @@
+use serde_json::json;
+
 use prajna_research::{
     cache::key::{FactorKey, POLARS_VERSION},
-    factor::{AvailabilityAssumption, Factor, FactorKind, MomentumParams, RotationScoreParams},
+    factor::{
+        AvailabilityAssumption, Factor, FactorKind, MomentumParams, RotationScoreParams,
+        TrendFilterParams, TrendFilterStrictParams,
+    },
 };
 
 fn momentum(n: u32) -> Factor {
@@ -129,4 +134,25 @@ fn polars_version_matches_the_locked_dependency() {
         .next()
         .expect("Cargo.lock contains the polars package");
     assert_eq!(POLARS_VERSION, locked_version);
+}
+
+#[test]
+fn strict_trend_has_its_own_cache_key_and_leaves_trend_filter_v1_key_unchanged() {
+    let trend = Factor::new(FactorKind::TrendFilter, TrendFilterParams { n: 60 }).unwrap();
+    let strict = Factor::new(
+        FactorKind::TrendFilterStrict,
+        TrendFilterStrictParams { n: 60 },
+    )
+    .unwrap();
+    let trend_key = key(&trend, "dsv:one", "uni:one", AvailabilityAssumption::None);
+    let strict_key = key(&strict, "dsv:one", "uni:one", AvailabilityAssumption::None);
+    assert_ne!(trend_key, strict_key);
+    assert_eq!(
+        trend_key.key_object()["factor"],
+        json!({"kind": "trend_filter", "version": "1", "params": {"n": 60}})
+    );
+    assert_eq!(
+        strict_key.key_object()["factor"],
+        json!({"kind": "trend_filter_strict", "version": "1", "params": {"n": 60}})
+    );
 }
