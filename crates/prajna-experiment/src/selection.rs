@@ -109,7 +109,7 @@ struct Prepared {
 fn prepare(root: &Path, selection: &Selection) -> Result<Prepared, SelectionError> {
     if !matches!(
         selection.strategy.as_str(),
-        "buy_and_hold" | "ma_crossover" | "s2_rotation"
+        "buy_and_hold" | "ma_crossover" | "s2_rotation" | "single_etf_timing"
     ) {
         return Err(error(
             "invalid_selection",
@@ -187,6 +187,14 @@ fn prepare(root: &Path, selection: &Selection) -> Result<Prepared, SelectionErro
         .next()
         .expect("nonempty universe")
         .to_owned();
+    if selection.strategy == "single_etf_timing"
+        && (universe.members().len() != 1 || instruments[0]["kind"] != "etf")
+    {
+        return Err(error(
+            "invalid_selection",
+            "single_etf_timing requires exactly one ETF",
+        ));
+    }
     parameters(selection, universe.members().len())?;
     universe
         .validate_against(root, &selection.dsv)

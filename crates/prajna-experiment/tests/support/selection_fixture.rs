@@ -199,3 +199,17 @@ pub fn prepare_with_adjusted(
     }
     (dsv, versions)
 }
+
+#[allow(dead_code)]
+/// Explicit synthetic adjusted closes, independent from the raw trading prices.
+pub fn import_closes(root: &Path, dsv: &str, dates: &[&str], closes: &[&str]) -> String {
+    assert_eq!(dates.len(), closes.len());
+    let input = json!({"schema_version":1,"raw_dsv":dsv,"instrument_id":"510300.XSHG",
+        "method":"forward","method_version":"synthetic-timing@1",
+        "source":{"source_id":"synthetic","source_version":"1","source_ref":"timing-fixture"},
+        "observed_at":"2026-10-28T00:00:00Z","retrospective_assumption":"Synthetic retrospective history, not strict PIT",
+        "close_availability_assumption":"Session close assumed available at close",
+        "start":dates[0],"end":dates[dates.len()-1],
+        "rows":dates.iter().zip(closes).map(|(day, close)|json!({"trade_date":day,"open":close,"high":close,"low":close,"close":close})).collect::<Vec<_>>()});
+    prajna_data::adjusted_series::import(root, &serde_json::to_vec(&input).unwrap()).unwrap()
+}

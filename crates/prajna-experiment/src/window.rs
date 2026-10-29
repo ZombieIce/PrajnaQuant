@@ -349,6 +349,10 @@ pub fn parameter_warmup(kind: &str, parameters: &Value) -> Result<u64, String> {
     };
     match kind {
         "buy_and_hold" => Ok(0),
+        "single_etf_timing" => window(
+            "ma_window",
+            positive(parameters.get("ma_window"), "ma_window")?,
+        ),
         "ma_crossover" => window(
             "ma_crossover long_window",
             positive(parameters.get("long_window"), "long_window")?,

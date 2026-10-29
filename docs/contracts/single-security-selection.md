@@ -73,7 +73,11 @@ Universe；定义失败不会产生任务或伪成功结果。默认版本/来�
 ## HTTP
 
 `POST /api/v1/tasks/selections`：同上字段，另有必填 `idempotency_key`，可选
-`result_level: summary|standard`（沿用 T01 缺省 summary）。无测试专用生产端点。
+`result_level: summary|standard`（沿用 T01 缺省 summary）。新增的
+`single_etf_timing` 模板还接受 `full`，保存实际成交/费用与订单审计；其余策略
+仍拒绝 Full，不改变既有默认值或请求身份。Standard/择时 Full 都先尝试提升当前
+Execution，仅在 CLI 明确返回“无当前 Execution”（exit 6）时执行新 Run。
+模板参数和复权/原始价格职责见[择时契约](../single-etf-timing.md)。无测试专用生产端点。
 服务调用 `PRAJNA_SELECTION_CLI`（缺省 PATH 中 `prajna-freeze-selection`）并把 stdin
 转给 CLI，不直接依赖新平台 crate。CLI 成功后仅调用既有 T01 提交函数。
 

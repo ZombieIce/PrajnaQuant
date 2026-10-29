@@ -394,3 +394,7 @@ fake 的原生账户显式为 unavailable，不伪造原生快照。
 ## 价格因子研究（动量 / 波动率 / 严格均线趋势）
 
 `prajna-momentum --lake <root>` 提供显式版本的价格因子研究 JSON 命令，复用新平台 Factor/Cache：省略 `factor` 为 Momentum v1；`"factor":"volatility"` 复用 Volatility v1；`"factor":"trend_filter_strict"` 使用 #299 新增的严格 `close > MA` 定义（均线相等/`1e-12` 相对容差内为 0，不改 TrendFilter v1 的 `>=`）。生产页面 `/research/momentum` 可选择因子与窗口。输入、持久化与验证范围见[价格因子研究契约](../../docs/contracts/momentum-research.md)。
+
+单 ETF 趋势择时：`single_etf_timing` 的 version 1 参数为 `params_version`、
+`ma_window`、`rebalance_every`；显式绑定复权版本并冻结评价窗口，页面可配置成本。
+信号复用严格趋势因子，原始成交账本不变；见[模板契约](../../docs/single-etf-timing.md)。

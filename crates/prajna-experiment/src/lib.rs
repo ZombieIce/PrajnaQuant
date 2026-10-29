@@ -482,6 +482,27 @@ impl Experiment {
             universe.validate_against(lake_root.as_ref(), &input.dsv)?;
             validate_universe_venue(&universe, &venues)?;
             let research = parse_research_inputs(&input, lake_root.as_ref(), &universe, &venues)?;
+            if input.strategy == "single_etf_timing"
+                && (universe.members().len() != 1
+                    || research.0.len() != 1
+                    || research.1.is_none()
+                    || input.engine == "accurate_event")
+            {
+                return Err(invalid(
+                    "single_etf_timing requires one ETF, bound adjusted inputs/evaluation and Vector or Fast Event",
+                ));
+            }
+            if input.strategy == "single_etf_timing" {
+                let preview = prajna_data::dataset_preview::show(lake_root.as_ref(), &input.dsv)
+                    .map_err(|e| invalid(e.to_string()))?;
+                let member = universe.members()[0].to_string();
+                if !preview["instruments"].as_array().is_some_and(|rows| {
+                    rows.iter()
+                        .any(|row| row["instrument_id"] == member && row["kind"] == "etf")
+                }) {
+                    return Err(invalid("single_etf_timing requires an ETF Instrument"));
+                }
+            }
             adjusted_versions = research.0;
             evaluation = research.1;
             None
@@ -996,6 +1017,11 @@ impl Experiment {
         factor_values.extend(score_values);
         let factor_time_ms = factor_started.elapsed().as_millis();
 
+        let research_panel = if self.strategy_kind == "single_etf_timing" {
+            Some(timing::research_panel(self, lake_root, &panel)?)
+        } else {
+            None
+        };
         let costs = self.vector_costs();
         let run_started = Instant::now();
         let execute_one = |run: &ExpandedRun| {
@@ -1004,6 +1030,7 @@ impl Experiment {
                 run,
                 &factor_values,
                 &panel,
+                research_panel.as_ref().unwrap_or(&panel),
                 &statuses,
                 &executable_by_key,
                 &costs,
@@ -3013,3 +3040,5 @@ mod tests {
 }
 
 pub mod momentum;
+
+mod timing;

@@ -62,6 +62,14 @@ fn main() {
                 &dates,
             );
         }
+        if venue == "XSHG" {
+            research_fixture::import_closes(
+                &root,
+                dsv,
+                &["2026-01-05", "2026-01-06", "2026-01-07"],
+                &["10", "12", "12"],
+            );
+        }
         selections.insert(
             snapshot["instrument_id"].as_str().unwrap().into(),
             receipt["dsv"].clone(),

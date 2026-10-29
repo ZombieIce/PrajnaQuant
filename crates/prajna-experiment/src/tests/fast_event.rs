@@ -373,6 +373,7 @@ fn fast_invariant_failure_is_failed_while_other_runs_continue() {
                     run,
                     &HashMap::new(),
                     &panel,
+                    &panel,
                     &statuses,
                     &HashMap::new(),
                     &experiment.vector_costs(),

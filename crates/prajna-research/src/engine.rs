@@ -74,6 +74,14 @@ impl Engine {
             return VectorEngine::validate(strategy);
         }
         self.validate_mode(strategy.kind())?;
+        if matches!(self, Self::AccurateEvent { .. })
+            && matches!(strategy, VectorStrategy::SingleEtfTiming(_))
+        {
+            return Err(self.reject(
+                strategy.kind(),
+                "single_etf_timing supports Vector/Fast Event only",
+            ));
+        }
         if let VectorStrategy::TopKRank(params) = strategy {
             if params
                 .capabilities
