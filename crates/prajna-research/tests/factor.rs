@@ -2,7 +2,8 @@ use arrow_schema::{DataType as ArrowDataType, TimeUnit as ArrowTimeUnit};
 use polars::prelude::{DataType, TimeUnit, TimeZone};
 use prajna_research::factor::{
     AvailabilityAssumption, Factor, FactorGraph, FactorKind, FactorStatus, MomentumParams,
-    RotationScoreParams, TrendFilterParams, VALUES_SCHEMA_VERSION, VolatilityParams, values_schema,
+    RotationScoreParams, TrendFilterParams, TrendFilterStrictParams, VALUES_SCHEMA_VERSION,
+    VolatilityParams, values_schema,
 };
 use serde_json::json;
 
@@ -16,6 +17,10 @@ fn volatility(n: u32) -> Factor {
 
 fn trend_filter(n: u32) -> Factor {
     Factor::new(FactorKind::TrendFilter, TrendFilterParams { n }).unwrap()
+}
+
+fn trend_filter_strict(n: u32) -> Factor {
+    Factor::new(FactorKind::TrendFilterStrict, TrendFilterStrictParams { n }).unwrap()
 }
 
 fn rotation_score(w_s: f64, w_l: f64) -> Factor {
@@ -82,6 +87,32 @@ fn canonical_json_is_stable_and_preserves_exact_weight_bits() {
         rotation_score(0.0, 0.0).canonical_json(),
         rotation_score(-0.0, 0.0).canonical_json()
     );
+}
+
+#[test]
+fn strict_trend_is_a_new_versioned_identity_and_does_not_change_trend_filter_v1() {
+    // #299 must not silently turn TrendFilter v1's `>=` into the Spec's strict `>`.
+    assert_eq!(
+        trend_filter(60).canonical_json(),
+        json!({"kind": "trend_filter", "version": "1", "params": {"n": 60}})
+    );
+    assert_eq!(
+        trend_filter_strict(60).canonical_json(),
+        json!({"kind": "trend_filter_strict", "version": "1", "params": {"n": 60}})
+    );
+    assert_ne!(
+        trend_filter_strict(60).canonical_json(),
+        trend_filter(60).canonical_json()
+    );
+    assert_ne!(
+        trend_filter_strict(60).canonical_json(),
+        trend_filter_strict(59).canonical_json()
+    );
+    assert_eq!(
+        "trend_filter_strict".parse::<FactorKind>().unwrap(),
+        FactorKind::TrendFilterStrict
+    );
+    assert!(trend_filter_strict(1).dependencies().is_empty());
 }
 
 #[test]
@@ -192,6 +223,13 @@ fn construction_rejects_invalid_windows_weights_and_kind_mismatches() {
     assert!(Factor::new(FactorKind::Momentum, MomentumParams { n: 0 }).is_err());
     assert!(Factor::new(FactorKind::Volatility, VolatilityParams { n: 1 }).is_err());
     assert!(Factor::new(FactorKind::TrendFilter, TrendFilterParams { n: 0 }).is_err());
+    assert!(
+        Factor::new(
+            FactorKind::TrendFilterStrict,
+            TrendFilterStrictParams { n: 0 }
+        )
+        .is_err()
+    );
 
     for (w_s, w_l, w_v) in [
         (f64::NAN, 0.0, 0.0),
@@ -245,6 +283,7 @@ fn construction_rejects_invalid_windows_weights_and_kind_mismatches() {
         .is_err()
     );
     assert!(Factor::new(FactorKind::Volatility, MomentumParams { n: 2 }).is_err());
+    assert!(Factor::new(FactorKind::TrendFilterStrict, TrendFilterParams { n: 2 }).is_err());
     assert!("unregistered".parse::<FactorKind>().is_err());
 }
 
@@ -253,6 +292,7 @@ fn rotation_score_dependencies_reflect_roles_and_optional_trend() {
     assert!(momentum(3).dependencies().is_empty());
     assert!(volatility(5).dependencies().is_empty());
     assert!(trend_filter(10).dependencies().is_empty());
+    assert!(trend_filter_strict(10).dependencies().is_empty());
 
     let without_trend = score(3, 8, 5, None);
     let dependencies = without_trend.dependencies();

@@ -5,7 +5,10 @@ use prajna_domain::VenueId;
 use prajna_research::{
     StaticUniverse,
     cache::store::FactorCache,
-    factor::{AvailabilityAssumption, Factor, FactorKind, MomentumParams},
+    factor::{
+        AvailabilityAssumption, Factor, FactorError, FactorKind, MomentumParams,
+        TrendFilterStrictParams, VolatilityParams,
+    },
     load_panel_for_venues,
 };
 use serde::{Deserialize, Serialize};
@@ -34,6 +37,14 @@ fn storage(e: impl ToString) -> ResearchError {
         message: e.to_string(),
     }
 }
+/// Additional research factors added by #299. Omitting `factor` keeps the
+/// legacy Momentum request/report identity byte-for-byte unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FactorSelection {
+    Volatility,
+    TrendFilterStrict,
+}
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
@@ -42,6 +53,8 @@ pub struct Request {
     pub pool: Option<crate::pools::Reference>,
     pub adjusted: BTreeMap<String, String>,
     pub windows: Vec<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub factor: Option<FactorSelection>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
@@ -123,9 +136,14 @@ fn submit(root: &Path, mut request: Request) -> Result<Value, ResearchError> {
     let factors = request
         .windows
         .iter()
-        .map(|n| Factor::new(FactorKind::Momentum, MomentumParams { n: *n }))
+        .map(|n| selected_factor(request.factor, *n))
         .collect::<Result<Vec<_>, _>>()
         .map_err(invalid)?;
+    let (semantics, direction) = match request.factor {
+        None => ("momentum-research@2", "higher_is_stronger"),
+        Some(FactorSelection::Volatility) => ("factor-research@1", "lower_is_stronger"),
+        Some(FactorSelection::TrendFilterStrict) => ("factor-research@1", "binary_close_above_ma"),
+    };
     let universe = match (&request.instrument, &request.pool) {
         (Some(id), None) => {
             StaticUniverse::new("momentum-single@1", vec![id.parse().map_err(invalid)?])
@@ -343,7 +361,7 @@ fn submit(root: &Path, mut request: Request) -> Result<Value, ResearchError> {
     let execution =
         crate::ExecutionIdentity::capture(&input_id, std::env::current_dir().map_err(storage)?)
             .map_err(storage)?;
-    let report = json!({"execution":execution,"schema_version":1,"semantics":"momentum-research@2","request":request,"universe":universe.id().map_err(invalid)?,"members":members.iter().map(ToString::to_string).collect::<Vec<_>>(),"sources":sources,"input_binding":binding,"direction":"higher_is_stronger","missing_rule":"preserve Session axis; no fill; Factor status propagation","sample_assumption":"Static Universe; survivor bias; supplier retrospective adjustments; not strict PIT","factors":outputs});
+    let report = json!({"execution":execution,"schema_version":1,"semantics":semantics,"request":request,"universe":universe.id().map_err(invalid)?,"members":members.iter().map(ToString::to_string).collect::<Vec<_>>(),"sources":sources,"input_binding":binding,"direction":direction,"missing_rule":"preserve Session axis; no fill; Factor status propagation","sample_assumption":"Static Universe; survivor bias; supplier retrospective adjustments; not strict PIT","factors":outputs});
     let id = digest(&serde_json::to_vec(&report).map_err(storage)?);
     let path = location(root, &id)?;
     if path.exists() {
@@ -365,4 +383,17 @@ fn submit(root: &Path, mut request: Request) -> Result<Value, ResearchError> {
         .and_then(|directory| directory.sync_all())
         .map_err(storage)?;
     read(root, &id)
+}
+
+/// One research window of the selected factor; `None` is the legacy Momentum flow.
+fn selected_factor(selection: Option<FactorSelection>, n: u32) -> Result<Factor, FactorError> {
+    match selection {
+        None => Factor::new(FactorKind::Momentum, MomentumParams { n }),
+        Some(FactorSelection::Volatility) => {
+            Factor::new(FactorKind::Volatility, VolatilityParams { n })
+        }
+        Some(FactorSelection::TrendFilterStrict) => {
+            Factor::new(FactorKind::TrendFilterStrict, TrendFilterStrictParams { n })
+        }
+    }
 }

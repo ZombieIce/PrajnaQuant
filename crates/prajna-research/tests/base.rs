@@ -333,3 +333,98 @@ fn status_precedence_and_future_input_isolation() {
     .unwrap();
     assert_eq!(baseline.slice(0, 9), changed.slice(0, 9));
 }
+
+#[test]
+fn strict_trend_treats_ma_equality_as_not_above_and_keeps_v1_semantics() {
+    let panel = fixture();
+    let strict =
+        |n| Factor::new(FactorKind::TrendFilterStrict, TrendFilterStrictParams { n }).unwrap();
+    let non_strict = |n| Factor::new(FactorKind::TrendFilter, TrendFilterParams { n }).unwrap();
+
+    let frame = compute_base(
+        &panel,
+        &panel.instruments,
+        &strict(3),
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
+    // A closes 100,101,102,...: rows 0/1 need three closes; row 2 is above
+    // mean(100,101,102)=101, row 4 is below mean(102,103,99)=101.33.
+    check(&frame, 0, None, "insufficient_window");
+    check(&frame, 1, None, "insufficient_window");
+    check(&frame, 2, Some(1.0), "ok");
+    check(&frame, 4, Some(0.0), "ok");
+
+    // B n=1: close == its own mean, so strict trend is 0 while TrendFilter v1
+    // retains its documented `>=` result of 1. C rows 20/21 are both 100 with
+    // n=2, another exact-equality boundary.
+    let strict_one = compute_base(
+        &panel,
+        &panel.instruments,
+        &strict(1),
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
+    check(&strict_one, 10, Some(0.0), "ok");
+    let v1_one = compute_base(
+        &panel,
+        &panel.instruments,
+        &non_strict(1),
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
+    check(&v1_one, 10, Some(1.0), "ok");
+    let strict_two = compute_base(
+        &panel,
+        &panel.instruments,
+        &strict(2),
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
+    check(&strict_two, 21, Some(0.0), "ok");
+    let v1_two = compute_base(
+        &panel,
+        &panel.instruments,
+        &non_strict(2),
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
+    check(&v1_two, 21, Some(1.0), "ok");
+}
+
+#[test]
+fn strict_trend_missing_inputs_and_available_at_follow_window_sessions() {
+    let panel = fixture();
+    let mut has_bar = vec![true; 30];
+    has_bar[13] = false;
+    let mut grid = panel.grid.clone();
+    grid.with_column(Series::new("has_bar".into(), has_bar).into())
+        .unwrap();
+    let panel = Panel { grid, ..panel };
+    let strict = Factor::new(
+        FactorKind::TrendFilterStrict,
+        TrendFilterStrictParams { n: 3 },
+    )
+    .unwrap();
+    let frame = compute_base(
+        &panel,
+        &panel.instruments,
+        &strict,
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
+    check(&frame, 14, None, "missing_input");
+    check(&frame, 15, None, "missing_input");
+    // B rows 14/15/16 are 102/103/101: 101 is below their mean of 102.
+    check(&frame, 16, Some(0.0), "ok");
+    assert_eq!(
+        frame
+            .column("available_at")
+            .unwrap()
+            .datetime()
+            .unwrap()
+            .physical()
+            .get(16),
+        Some(panel.sessions[6].ts_close.as_unix_nanos())
+    );
+}

@@ -366,6 +366,9 @@ fn factor_key(factor: &Factor) -> String {
         FactorParams::Momentum(params) => format!("momentum({})", params.n),
         FactorParams::Volatility(params) => format!("volatility({})", params.n),
         FactorParams::TrendFilter(params) => format!("trend_filter({})", params.n),
+        FactorParams::TrendFilterStrict(params) => {
+            format!("trend_filter_strict({})", params.n)
+        }
         FactorParams::RotationScore(_) => factor.kind().as_str().to_owned(),
     }
 }

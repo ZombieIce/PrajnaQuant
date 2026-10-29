@@ -391,6 +391,6 @@ fake 的原生账户显式为 unavailable，不伪造原生快照。
 显式 `parameter_space` 可沿用 native list/grid，提交冻结相同绑定和 evaluation；
 协议、支持范围及合成验证见[共同评价窗口契约](../../docs/contracts/evaluation-window.md)。
 
-## 动量研究
+## 价格因子研究（动量 / 波动率 / 严格均线趋势）
 
-`prajna-momentum --lake <root>` 提供显式版本的动量研究 JSON 命令，复用新平台 Factor/Cache；生产页面 `/research/momentum`。输入、持久化与验证范围见[动量研究契约](../../docs/contracts/momentum-research.md)。
+`prajna-momentum --lake <root>` 提供显式版本的价格因子研究 JSON 命令，复用新平台 Factor/Cache：省略 `factor` 为 Momentum v1；`"factor":"volatility"` 复用 Volatility v1；`"factor":"trend_filter_strict"` 使用 #299 新增的严格 `close > MA` 定义（均线相等为 0，不改 TrendFilter v1 的 `>=`）。生产页面 `/research/momentum` 可选择因子与窗口。输入、持久化与验证范围见[价格因子研究契约](../../docs/contracts/momentum-research.md)。

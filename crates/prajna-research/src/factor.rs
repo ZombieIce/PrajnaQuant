@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 const MOMENTUM_VERSION: &str = "1";
 const VOLATILITY_VERSION: &str = "1";
 const TREND_FILTER_VERSION: &str = "1";
+const TREND_FILTER_STRICT_VERSION: &str = "1";
 const ROTATION_SCORE_VERSION: &str = "2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -129,7 +130,8 @@ pub fn values_schema() -> ValuesSchema {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-/// Closed MVP-1 M6 factor definitions, versioned independently by kind.
+/// Closed price-factor definitions, versioned independently by kind: the MVP-1
+/// M6/M7 set plus Issue #299's strict moving-average trend.
 ///
 /// The v1 inputs are D7 normalized `bars.close` values for Venue Sessions.
 /// Each value is observable after the current session close; its availability
@@ -148,6 +150,7 @@ pub fn values_schema() -> ValuesSchema {
 /// | [`Momentum`](Self::Momentum) | `close_t / close_(t-n) - 1`; larger values indicate stronger momentum. |
 /// | [`Volatility`](Self::Volatility) | Sample standard deviation of `n` consecutive close-to-close returns; the composite subtracts `w_v * volatility`. |
 /// | [`TrendFilter`](Self::TrendFilter) | `close_t >= mean(close_(t-n+1..t))`, yielding 1 or 0; zero filters a composite score. |
+/// | [`TrendFilterStrict`](Self::TrendFilterStrict) | `close_t > mean(close_(t-n+1..t))`, yielding 1 or 0; equality is 0. Added by Issue #299 so the Spec's strict `close > MA` never rewrites TrendFilter v1. Research only; not a RotationScore dependency. |
 /// | [`RotationScore`](Self::RotationScore) | `w_s * momentum(short) + w_l * momentum(long) - w_v * volatility(vol)`; larger scores rank higher. |
 ///
 /// `RotationScore` propagates dependency statuses in the order
@@ -161,6 +164,10 @@ pub enum FactorKind {
     Volatility,
     /// Uses `n` closes from `t-n+1` through `t`; `n` must be at least 1.
     TrendFilter,
+    /// Strict moving-average trend added by #299: `close_t > mean(close_(t-n+1..t))`,
+    /// yielding 1 or 0. Uses `n` closes from `t-n+1` through `t`; `n` must be at least 1.
+    /// A separate kind/version keeps TrendFilter v1 (`>=`) and its cache/run identities unchanged.
+    TrendFilterStrict,
     /// Composes the configured child factors; each window follows its child kind's rules.
     RotationScore,
 }
@@ -171,6 +178,7 @@ impl FactorKind {
             Self::Momentum => "momentum",
             Self::Volatility => "volatility",
             Self::TrendFilter => "trend_filter",
+            Self::TrendFilterStrict => "trend_filter_strict",
             Self::RotationScore => "rotation_score",
         }
     }
@@ -180,6 +188,7 @@ impl FactorKind {
             Self::Momentum => MOMENTUM_VERSION,
             Self::Volatility => VOLATILITY_VERSION,
             Self::TrendFilter => TREND_FILTER_VERSION,
+            Self::TrendFilterStrict => TREND_FILTER_STRICT_VERSION,
             Self::RotationScore => ROTATION_SCORE_VERSION,
         }
     }
@@ -199,6 +208,7 @@ impl FromStr for FactorKind {
             "momentum" => Ok(Self::Momentum),
             "volatility" => Ok(Self::Volatility),
             "trend_filter" => Ok(Self::TrendFilter),
+            "trend_filter_strict" => Ok(Self::TrendFilterStrict),
             "rotation_score" => Ok(Self::RotationScore),
             _ => Err(FactorError::UnknownKind(value.to_owned())),
         }
@@ -221,6 +231,11 @@ pub struct TrendFilterParams {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct TrendFilterStrictParams {
+    pub n: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct RotationScoreParams {
     pub short: u32,
     pub long: u32,
@@ -236,6 +251,7 @@ pub enum FactorParams {
     Momentum(MomentumParams),
     Volatility(VolatilityParams),
     TrendFilter(TrendFilterParams),
+    TrendFilterStrict(TrendFilterStrictParams),
     RotationScore(RotationScoreParams),
 }
 
@@ -254,6 +270,12 @@ impl From<VolatilityParams> for FactorParams {
 impl From<TrendFilterParams> for FactorParams {
     fn from(params: TrendFilterParams) -> Self {
         Self::TrendFilter(params)
+    }
+}
+
+impl From<TrendFilterStrictParams> for FactorParams {
+    fn from(params: TrendFilterStrictParams) -> Self {
+        Self::TrendFilterStrict(params)
     }
 }
 
@@ -336,6 +358,7 @@ impl FactorParams {
             Self::Momentum(_) => FactorKind::Momentum,
             Self::Volatility(_) => FactorKind::Volatility,
             Self::TrendFilter(_) => FactorKind::TrendFilter,
+            Self::TrendFilterStrict(_) => FactorKind::TrendFilterStrict,
             Self::RotationScore(_) => FactorKind::RotationScore,
         }
     }
@@ -421,6 +444,7 @@ impl Factor {
             FactorParams::Momentum(params) => json!({"n": params.n}),
             FactorParams::Volatility(params) => json!({"n": params.n}),
             FactorParams::TrendFilter(params) => json!({"n": params.n}),
+            FactorParams::TrendFilterStrict(params) => json!({"n": params.n}),
             FactorParams::RotationScore(params) => json!({
                 "short": params.short,
                 "long": params.long,
@@ -535,6 +559,7 @@ fn validate_params(kind: FactorKind, params: &FactorParams) -> Result<(), Factor
         FactorParams::Momentum(params) => window("n", params.n, 1),
         FactorParams::Volatility(params) => window("n", params.n, 2),
         FactorParams::TrendFilter(params) => window("n", params.n, 1),
+        FactorParams::TrendFilterStrict(params) => window("n", params.n, 1),
         FactorParams::RotationScore(params) => {
             window("short", params.short, 1)?;
             window("long", params.long, 1)?;

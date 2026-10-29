@@ -1,4 +1,5 @@
-//! Session-aligned M6/M7 base factors over the complete D7 Panel grid.
+//! Session-aligned base factors (MVP-1 M6/M7 plus #299 strict trend) over the
+//! complete D7 Panel grid.
 use std::collections::BTreeSet;
 
 use polars::lazy::dsl::max_horizontal;
@@ -23,6 +24,7 @@ pub fn compute_base(
         FactorParams::Momentum(p) => (p.n, p.n),
         FactorParams::Volatility(p) => (p.n, p.n),
         FactorParams::TrendFilter(p) => (p.n, p.n - 1),
+        FactorParams::TrendFilterStrict(p) => (p.n, p.n - 1),
         FactorParams::RotationScore(_) => {
             return Err(FactorError::Evaluation(
                 "compute_base requires a base factor".into(),
@@ -127,13 +129,19 @@ pub fn compute_base(
     }
     let value = match factor.params() {
         FactorParams::Momentum(_) => col("close") / lag("close", n)? - lit(1.0),
-        FactorParams::TrendFilter(_) => {
+        FactorParams::TrendFilter(_) | FactorParams::TrendFilterStrict(_) => {
             let sum = (0..n).try_fold(lit(0.0), |sum, offset| -> PolarsResult<Expr> {
                 Ok(sum + lag("close", offset)?)
             })?;
-            col("close")
-                .gt_eq(sum / lit(f64::from(n)))
-                .cast(DataType::Float64)
+            let mean = sum / lit(f64::from(n));
+            // TrendFilter v1 keeps its documented `>=`; #299's strict kind treats
+            // an exact moving-average equality as not above (`>`).
+            let above = if matches!(factor.params(), FactorParams::TrendFilterStrict(_)) {
+                col("close").gt(mean)
+            } else {
+                col("close").gt_eq(mean)
+            };
+            above.cast(DataType::Float64)
         }
         FactorParams::Volatility(_) => {
             let returns: Vec<_> = (0..n)
