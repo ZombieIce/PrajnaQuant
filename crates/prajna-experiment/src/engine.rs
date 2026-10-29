@@ -777,8 +777,26 @@ pub(super) fn execute(
                 .validate(strategy)
                 .map_err(|error| error.to_string())?;
         }
+        // The ledger and its reported Sessions cover exactly the frozen evaluation
+        // window; warm-up Sessions remain available to indicator computation on the
+        // full Panel but never produce a Decision, Fill or performance point.
+        let windowed_panel = experiment
+            .evaluation()
+            .map(|evaluation| panel.window(evaluation.start(), evaluation.end()))
+            .transpose()
+            .map_err(|error| error.to_string())?;
+        let ledger_panel = windowed_panel.as_ref().unwrap_or(panel);
         if let Some(config) = &experiment.engine.fast {
-            let decisions = decisions(engine, run, factors, panel, members, assumption)?;
+            let decisions = windowed_decisions(
+                experiment,
+                engine,
+                run,
+                factors,
+                panel,
+                ledger_panel,
+                members,
+                assumption,
+            )?;
             let portfolios = experiment
                 .engine
                 .capitals
@@ -810,7 +828,7 @@ pub(super) fn execute(
                     .map_err(|e| e.to_string())?;
                 let result = prajna_adapter::run_adapter(
                     packet.ok_or("missing Run packet")?,
-                    panel,
+                    ledger_panel,
                     statuses,
                     config,
                     &portfolios,
@@ -830,11 +848,11 @@ pub(super) fn execute(
             } else {
                 if let Some(pit) = &experiment.pit {
                     let actions = pit
-                        .corporate_action_schedule(panel)
+                        .corporate_action_schedule(ledger_panel)
                         .map_err(|e| e.to_string())?;
                     if pit.terminal_settlement_semantic_version.is_some() {
                         fast_event::run_fast_event_pit_with_terminal_settlement(
-                            panel,
+                            ledger_panel,
                             &pit.market,
                             &pit.risk,
                             config,
@@ -844,7 +862,7 @@ pub(super) fn execute(
                     } else {
                         match actions {
                             Some(actions) => fast_event::run_fast_event_pit_with_actions(
-                                panel,
+                                ledger_panel,
                                 &pit.market,
                                 &pit.risk,
                                 config,
@@ -852,7 +870,7 @@ pub(super) fn execute(
                                 &actions,
                             ),
                             None => fast_event::run_fast_event_pit(
-                                panel,
+                                ledger_panel,
                                 &pit.market,
                                 &pit.risk,
                                 config,
@@ -861,7 +879,7 @@ pub(super) fn execute(
                         }
                     }
                 } else {
-                    fast_event::run_fast_event(panel, statuses, config, &portfolios)
+                    fast_event::run_fast_event(ledger_panel, statuses, config, &portfolios)
                 }
                 .map_err(|e| e.to_string())?
             };
@@ -899,7 +917,16 @@ pub(super) fn execute(
             }
         } else {
             // Native strategy membership is the declared Universe, never all dataset instruments.
-            let decisions = decisions(engine, run, factors, panel, members, assumption)?;
+            let decisions = windowed_decisions(
+                experiment,
+                engine,
+                run,
+                factors,
+                panel,
+                ledger_panel,
+                members,
+                assumption,
+            )?;
             execution.result = Some(
                 if let Some(pit) = &experiment.pit {
                     let capital = experiment
@@ -907,11 +934,11 @@ pub(super) fn execute(
                         .vector_pit_capital
                         .ok_or("missing Vector PIT capital")?;
                     let actions = pit
-                        .corporate_action_schedule(panel)
+                        .corporate_action_schedule(ledger_panel)
                         .map_err(|e| e.to_string())?;
                     if pit.terminal_settlement_semantic_version.is_some() {
                         prajna_research::vector::run_vector_pit_with_terminal_settlement(
-                            panel,
+                            ledger_panel,
                             &decisions,
                             &pit.market,
                             &pit.risk,
@@ -922,7 +949,7 @@ pub(super) fn execute(
                     } else {
                         match actions {
                             Some(actions) => prajna_research::vector::run_vector_pit_with_actions(
-                                panel,
+                                ledger_panel,
                                 &decisions,
                                 &pit.market,
                                 &pit.risk,
@@ -931,7 +958,7 @@ pub(super) fn execute(
                                 &actions,
                             ),
                             None => prajna_research::vector::run_vector_pit(
-                                panel,
+                                ledger_panel,
                                 &decisions,
                                 &pit.market,
                                 &pit.risk,
@@ -942,7 +969,7 @@ pub(super) fn execute(
                     }
                 } else {
                     run_vector_with_policy(
-                        panel,
+                        ledger_panel,
                         &decisions,
                         experiment.engine.policy,
                         costs,
@@ -971,6 +998,39 @@ pub(super) fn execute(
         execution.summary = None;
     }
     execution
+}
+
+/// Decisions supplied to the ledger for one frozen evaluation window.
+///
+/// Entry-anchored strategies generate their first Decision on the window's first
+/// Session instead of the full panel's first Session. Every other native strategy
+/// keeps its warm-up-aware computation on the complete panel and only Decisions
+/// inside `[start, end]` reach the ledger; warm-up Decisions are dropped and a
+/// Decision on the final Session cannot execute.
+#[allow(clippy::too_many_arguments)]
+fn windowed_decisions(
+    experiment: &Experiment,
+    engine: Engine,
+    run: &ExpandedRun,
+    factors: &HashMap<String, DataFrame>,
+    panel: &Panel,
+    ledger_panel: &Panel,
+    members: &[InstrumentId],
+    assumption: AvailabilityAssumption,
+) -> Result<Vec<Decision>, String> {
+    let Some(evaluation) = experiment.evaluation() else {
+        return decisions(engine, run, factors, panel, members, assumption);
+    };
+    if run.run_spec["strategy"]["kind"].as_str() == Some("buy_and_hold") {
+        return decisions(engine, run, factors, ledger_panel, members, assumption);
+    }
+    Ok(decisions(engine, run, factors, panel, members, assumption)?
+        .into_iter()
+        .filter(|decision| {
+            decision.decision_session.session_date >= evaluation.start()
+                && decision.decision_session.session_date <= evaluation.end()
+        })
+        .collect())
 }
 
 // Defense at the Rust execution seam, including callers other than the Python binding.

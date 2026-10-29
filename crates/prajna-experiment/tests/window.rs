@@ -1,0 +1,639 @@
+//! T08a: frozen adjusted research binding, shared evaluation window and the
+//! Rust execution boundary. All inputs and expected values are synthetic and
+//! hand calculated; no real market data is read.
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+    process::{Command, Output},
+};
+
+use prajna_data::daily_publish::{DailyPublicationSelection, publish_daily};
+use prajna_domain::InstrumentKind;
+use prajna_experiment::{
+    Experiment,
+    pools::{Command as PoolCommand, command},
+    selection::{Selection, freeze, plan},
+};
+use serde_json::{Value, json};
+use tempfile::TempDir;
+
+#[path = "support/selection_fixture.rs"]
+mod fixture;
+
+#[path = "../../prajna-data/tests/support/opening_fixture.rs"]
+mod opening;
+
+fn binding(pairs: &[(&str, String)]) -> BTreeMap<String, String> {
+    pairs
+        .iter()
+        .map(|(instrument, version)| (instrument.to_string(), version.clone()))
+        .collect()
+}
+
+fn single_selection(
+    dsv: &str,
+    instrument: &str,
+    adjusted: Option<BTreeMap<String, String>>,
+) -> Selection {
+    let mut value = json!({
+        "dsv": dsv,
+        "instrument": instrument,
+        "strategy": "buy_and_hold"
+    });
+    if let Some(adjusted) = adjusted {
+        value["adjusted"] = json!(adjusted);
+    }
+    serde_json::from_value(value).unwrap()
+}
+
+fn pool_selection(dsv: &str, version: usize, adjusted: BTreeMap<String, String>) -> Selection {
+    serde_json::from_value(json!({
+        "dsv": dsv,
+        "pool": {"id":"dividend","version":version},
+        "strategy": "buy_and_hold",
+        "adjusted": adjusted
+    }))
+    .unwrap()
+}
+
+/// Publishes one new `dividend` pool version and returns its ordinal.
+fn publish_dividend(root: &Path, members: &[&str]) -> usize {
+    let registry = command(root, PoolCommand::List {}).unwrap();
+    let expected: Vec<String> =
+        serde_json::from_value(registry["data"]["pools"][1]["draft"].clone()).unwrap();
+    command(
+        root,
+        PoolCommand::Save {
+            id: "dividend".into(),
+            expected,
+            members: members.iter().map(ToString::to_string).collect(),
+        },
+    )
+    .unwrap();
+    let registry = command(root, PoolCommand::List {}).unwrap();
+    let expected: Vec<String> =
+        serde_json::from_value(registry["data"]["pools"][1]["draft"].clone()).unwrap();
+    command(
+        root,
+        PoolCommand::Publish {
+            id: "dividend".into(),
+            expected,
+        },
+    )
+    .unwrap();
+    let registry = command(root, PoolCommand::List {}).unwrap();
+    registry["data"]["pools"][1]["versions"]
+        .as_array()
+        .unwrap()
+        .len()
+}
+
+#[test]
+fn pool_selection_binds_adjusted_versions_and_freezes_the_shared_window() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    let (dsv, adjusted) = fixture::prepare_with_adjusted(root, true);
+    let version = publish_dividend(root, &["510300.XSHG", "510880.XSHG"]);
+    let selection = pool_selection(
+        &dsv,
+        version,
+        binding(&[
+            ("510300.XSHG", adjusted["510300.XSHG"].clone()),
+            ("510880.XSHG", adjusted["510880.XSHG"].clone()),
+        ]),
+    );
+    let frozen = freeze(root, &selection).unwrap();
+    let definition = &frozen["data"]["definition"];
+    assert_eq!(
+        definition["adjusted_versions"],
+        json!({
+            "510300.XSHG": adjusted["510300.XSHG"],
+            "510880.XSHG": adjusted["510880.XSHG"]
+        })
+    );
+    assert_eq!(
+        definition["evaluation"]["semantic_version"],
+        "common-window@1"
+    );
+    assert_eq!(definition["evaluation"]["start"], "2026-01-05");
+    assert_eq!(definition["evaluation"]["end"], "2026-01-07");
+    assert_eq!(definition["evaluation"]["common_start"], "2026-01-05");
+    assert_eq!(definition["evaluation"]["common_end"], "2026-01-07");
+    assert_eq!(definition["evaluation"]["warmup_sessions"], 0);
+    assert_eq!(frozen["data"]["window"]["runnable"], true);
+    assert_eq!(
+        frozen["data"]["window"]["members"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    // The same frozen inputs produce the same envelope and definition.
+    assert_eq!(freeze(root, &selection).unwrap(), frozen);
+
+    let experiment = Experiment::parse(&definition.to_string(), root).unwrap();
+    assert_eq!(experiment.adjusted_versions().len(), 2);
+    assert_eq!(
+        experiment.evaluation().unwrap().start().to_string(),
+        "2026-01-05"
+    );
+    assert_eq!(
+        experiment.evaluation().unwrap().end().to_string(),
+        "2026-01-07"
+    );
+    let mut unwindowed = definition.clone();
+    unwindowed
+        .as_object_mut()
+        .unwrap()
+        .remove("adjusted_versions");
+    unwindowed.as_object_mut().unwrap().remove("evaluation");
+    let unwindowed = Experiment::parse(&unwindowed.to_string(), root).unwrap();
+    assert_ne!(
+        experiment.id().unwrap(),
+        unwindowed.id().unwrap(),
+        "a frozen window and bound research inputs change the Experiment identity"
+    );
+    let runs = experiment.run_definitions(root).unwrap();
+    assert_eq!(runs[0].run_spec["evaluation"]["start"], "2026-01-05");
+    assert_eq!(runs[0].run_spec["evaluation"]["warmup_sessions"], 0);
+    assert!(runs[0].run_spec["adjusted_versions"].is_object());
+}
+
+#[test]
+fn adjusted_binding_validation_fails_closed_without_latest_or_fallback() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    let (dsv, adjusted) = fixture::prepare_with_adjusted(root, true);
+    let version = publish_dividend(root, &["510300.XSHG", "510880.XSHG"]);
+    let full = binding(&[
+        ("510300.XSHG", adjusted["510300.XSHG"].clone()),
+        ("510880.XSHG", adjusted["510880.XSHG"].clone()),
+    ]);
+    // A research-pool submission must bind every member.
+    let mut missing = full.clone();
+    missing.remove("510880.XSHG");
+    assert_eq!(
+        freeze(root, &pool_selection(&dsv, version, missing))
+            .unwrap_err()
+            .code,
+        "adjusted_version_missing"
+    );
+    // No binding at all is not a raw-price fallback.
+    assert_eq!(
+        freeze(root, &pool_selection(&dsv, version, BTreeMap::new()))
+            .unwrap_err()
+            .code,
+        "adjusted_version_missing"
+    );
+    // A version that names another security is rejected.
+    assert_eq!(
+        freeze(
+            root,
+            &pool_selection(
+                &dsv,
+                version,
+                binding(&[
+                    ("510300.XSHG", adjusted["510880.XSHG"].clone()),
+                    ("510880.XSHG", adjusted["510880.XSHG"].clone()),
+                ])
+            )
+        )
+        .unwrap_err()
+        .code,
+        "adjusted_instrument_mismatch"
+    );
+    // Syntax and integrity failures stay explicit.
+    let malformed = binding(&[
+        ("510300.XSHG", "adj:sha256:nothex".into()),
+        ("510880.XSHG", adjusted["510880.XSHG"].clone()),
+    ]);
+    assert_eq!(
+        freeze(root, &pool_selection(&dsv, version, malformed))
+            .unwrap_err()
+            .code,
+        "adjusted_series_invalid"
+    );
+    let absent = binding(&[
+        ("510300.XSHG", format!("adj:sha256:{}", "0".repeat(64))),
+        ("510880.XSHG", adjusted["510880.XSHG"].clone()),
+    ]);
+    assert_eq!(
+        freeze(root, &pool_selection(&dsv, version, absent))
+            .unwrap_err()
+            .code,
+        "adjusted_version_missing"
+    );
+    // An imported version with no research rows cannot supply a window.
+    let empty =
+        fixture::import_adjusted(root, &dsv, "510300.XSHG", "2026-01-05", "2026-01-07", &[]);
+    assert_eq!(
+        freeze(
+            root,
+            &pool_selection(
+                &dsv,
+                version,
+                binding(&[
+                    ("510300.XSHG", empty),
+                    ("510880.XSHG", adjusted["510880.XSHG"].clone()),
+                ])
+            )
+        )
+        .unwrap_err()
+        .code,
+        "adjusted_series_empty"
+    );
+}
+
+#[test]
+fn plan_reports_structured_blocking_and_the_frozen_window() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    let (dsv, adjusted) = fixture::prepare_with_adjusted(root, true);
+    let version = publish_dividend(root, &["510300.XSHG", "510880.XSHG"]);
+    let unbound = plan(root, &pool_selection(&dsv, version, BTreeMap::new())).unwrap();
+    assert_eq!(unbound["data"]["runnable"], false);
+    assert_eq!(
+        unbound["data"]["blocking"][0]["code"],
+        "adjusted_version_missing"
+    );
+    assert!(unbound["data"]["window"].is_null());
+    assert_eq!(unbound["data"]["pool"]["version"], json!(version));
+
+    let window = plan(
+        root,
+        &pool_selection(
+            &dsv,
+            version,
+            binding(&[
+                ("510300.XSHG", adjusted["510300.XSHG"].clone()),
+                ("510880.XSHG", adjusted["510880.XSHG"].clone()),
+            ]),
+        ),
+    )
+    .unwrap();
+    assert_eq!(window["data"]["runnable"], true);
+    assert_eq!(window["data"]["blocking"], json!([]));
+    assert_eq!(window["data"]["window"]["start"], "2026-01-05");
+    assert_eq!(window["data"]["window"]["end"], "2026-01-07");
+    assert_eq!(
+        window["data"]["window"]["parameters"][0]["warmup_sessions"],
+        0
+    );
+    assert!(
+        window["data"]["universe"]
+            .as_str()
+            .unwrap()
+            .starts_with("uni:sha256:")
+    );
+}
+
+#[test]
+fn definition_parse_rejects_incomplete_or_foreign_research_inputs() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    let (dsv, adjusted) = fixture::prepare_with_adjusted(root, true);
+    let version = publish_dividend(root, &["510300.XSHG", "510880.XSHG"]);
+    let selection = pool_selection(
+        &dsv,
+        version,
+        binding(&[
+            ("510300.XSHG", adjusted["510300.XSHG"].clone()),
+            ("510880.XSHG", adjusted["510880.XSHG"].clone()),
+        ]),
+    );
+    let frozen = freeze(root, &selection).unwrap();
+    let definition = frozen["data"]["definition"].clone();
+    let parse = |value: &Value| Experiment::parse(&value.to_string(), root);
+    assert!(parse(&definition).is_ok());
+    // An adjusted-only object is the planning seed: `Experiment::plan` derives
+    // the window from it and persisted selections write both objects.
+    let mut seed = definition.clone();
+    seed.as_object_mut().unwrap().remove("evaluation");
+    let seed = parse(&seed).unwrap();
+    assert!(seed.evaluation().is_none());
+    assert_eq!(seed.adjusted_versions().len(), 2);
+    assert!(
+        seed.run_definitions(root).unwrap()[0]
+            .run_spec
+            .get("evaluation")
+            .is_none()
+    );
+    let changes: [fn(&mut Value); 4] = [
+        |value: &mut Value| {
+            value.as_object_mut().unwrap().remove("adjusted_versions");
+        },
+        |value: &mut Value| {
+            value["evaluation"]["semantic_version"] = json!("common-window@2");
+        },
+        |value: &mut Value| {
+            value["evaluation"]["start"] = json!("2026-01-07");
+            value["evaluation"]["end"] = json!("2026-01-06");
+        },
+        |value: &mut Value| {
+            value["adjusted_versions"]["510300.XSHG"] = json!("adj:sha256:nothex");
+        },
+    ];
+    for change in changes {
+        let mut mutated = definition.clone();
+        change(&mut mutated);
+        assert!(
+            parse(&mutated).is_err(),
+            "mutated definition parsed: {mutated}"
+        );
+    }
+    // A version frozen against another raw DSV is rejected at parse time.
+    let foreign_dsv = fixture::prepare(root, false);
+    let mut foreign = definition.clone();
+    foreign["dsv"] = json!(foreign_dsv);
+    assert!(parse(&foreign).is_err());
+}
+
+struct Golden {
+    _temp: TempDir,
+    lake: PathBuf,
+    repo: PathBuf,
+    definition: PathBuf,
+    dsv: String,
+    adjusted: String,
+}
+
+fn isolated(command: &mut Command) -> &mut Command {
+    command
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_COMMON_DIR")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+}
+
+impl Golden {
+    /// Synthetic v2 dataset with a frozen execution-status table (required by the
+    /// real execution entry) plus one full-coverage adjusted research version.
+    fn new() -> Self {
+        let temp = TempDir::new().unwrap();
+        let lake = temp.path().join("lake");
+        let repo = temp.path().join("repository");
+        let definition = temp.path().join("experiment.json");
+        fs::create_dir(&repo).unwrap();
+        let input = lake.join("input").join("XSHG");
+        let (selection, _) = opening::prepare(&input, "XSHG", InstrumentKind::Etf, false);
+        let selection: DailyPublicationSelection = serde_json::from_value(selection).unwrap();
+        let manifest = publish_daily(&lake, selection, Path::new("receipt.json")).unwrap();
+        let dsv = manifest.dsv;
+        let adjusted = fixture::import_adjusted(
+            &lake,
+            &dsv,
+            "510300.XSHG",
+            "2026-01-05",
+            "2026-01-07",
+            &["2026-01-05", "2026-01-06", "2026-01-07"],
+        );
+        let golden = Self {
+            _temp: temp,
+            lake,
+            repo,
+            definition,
+            dsv,
+            adjusted,
+        };
+        golden.git(&["init", "--quiet"]);
+        fs::write(golden.repo.join("code.txt"), "synthetic code\n").unwrap();
+        golden.git(&["add", "code.txt"]);
+        golden.git(&[
+            "-c",
+            "user.name=Window Test",
+            "-c",
+            "user.email=window@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            "synthetic provenance",
+        ]);
+        golden
+    }
+
+    fn git(&self, args: &[&str]) {
+        let output = isolated(Command::new("git").args(args).current_dir(&self.repo))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn write(&self, definition: &Value) {
+        fs::write(&self.definition, serde_json::to_vec(definition).unwrap()).unwrap();
+    }
+
+    fn run(&self) -> Value {
+        let output = isolated(
+            Command::new(env!("CARGO_BIN_EXE_prajna-experiment"))
+                .arg("run")
+                .arg(&self.definition)
+                .arg("--lake")
+                .arg(&self.lake)
+                .arg("--level")
+                .arg("standard")
+                .current_dir(&self.repo),
+        )
+        .env("RAYON_NUM_THREADS", "2")
+        .output()
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).unwrap()
+    }
+
+    fn result(&self, run: &Value) -> Value {
+        let exp = run["exp"].as_str().unwrap();
+        let exe = run["exe"].as_str().unwrap();
+        let output: Output = isolated(
+            Command::new(env!("CARGO_BIN_EXE_prajna-experiment"))
+                .arg("result")
+                .arg(exp)
+                .arg(exe)
+                .arg("--lake")
+                .arg(&self.lake)
+                .current_dir(&self.repo),
+        )
+        .env("RAYON_NUM_THREADS", "2")
+        .output()
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).unwrap()
+    }
+
+    fn close_rows<'a>(&self, result: &'a Value) -> Vec<&'a Value> {
+        result["data"]["runs"][0]["series"]["account_valuations"]
+            .as_array()
+            .expect("saved account valuations")
+            .iter()
+            .filter(|row| row["valuation_point"] == "close")
+            .collect()
+    }
+}
+
+#[test]
+fn production_cli_runs_only_the_frozen_window_with_hand_calculated_fast_event_ledger() {
+    let golden = Golden::new();
+    // The supplier series ends on 2026-01-06 even though raw Bars continue on
+    // 2026-01-07: the shared window must end on the last research Session.
+    let truncated = fixture::import_adjusted(
+        &golden.lake,
+        &golden.dsv,
+        "510300.XSHG",
+        "2026-01-05",
+        "2026-01-07",
+        &["2026-01-05", "2026-01-06"],
+    );
+    let selection = single_selection(
+        &golden.dsv,
+        "510300.XSHG",
+        Some(binding(&[("510300.XSHG", truncated)])),
+    );
+    let frozen = freeze(&golden.lake, &selection).unwrap();
+    let definition = frozen["data"]["definition"].clone();
+    assert_eq!(definition["evaluation"]["start"], "2026-01-05");
+    assert_eq!(definition["evaluation"]["end"], "2026-01-06");
+    golden.write(&definition);
+
+    let run = golden.run();
+    let result = golden.result(&run);
+    let summary = &result["data"]["runs"][0]["summary"];
+    assert_eq!(summary["session_count"], 2);
+    assert_eq!(summary["n_returns"], 1);
+    assert_eq!(summary["executed_count"], 1);
+    let total_return = summary["total_return"].as_f64().unwrap();
+    assert!(
+        (total_return - 0.009_490_440_06).abs() < 1e-9,
+        "{total_return}"
+    );
+    let rows = golden.close_rows(&result);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["session_date"], "2026-01-05");
+    assert_eq!(rows[0]["cash"], "1000000");
+    assert_eq!(rows[0]["equity"], "1000000");
+    assert_eq!(rows[0]["positions"], json!({}));
+    assert_eq!(rows[1]["session_date"], "2026-01-06");
+    // Independent hand calculation: 99,900 at 10.002, commission 299.75994,
+    // cash 500.44006 + 99,900 * 10.1 = 1,009,490.44006.
+    assert_eq!(rows[1]["cash"], "500.44006");
+    assert_eq!(rows[1]["equity"], "1009490.44006");
+    assert_eq!(rows[1]["positions"]["510300.XSHG"]["quantity"], "99900");
+    assert_eq!(rows[1]["positions"]["510300.XSHG"]["price"], "10.1");
+    assert_eq!(rows[1]["dividend_receivable"], "0");
+    assert!(
+        rows.iter().all(|row| row["session_date"] != "2026-01-07"),
+        "the supplier-truncated research window must not evaluate 2026-01-07"
+    );
+}
+
+#[test]
+fn production_cli_excludes_warmup_sessions_from_decisions_fills_and_performance() {
+    let golden = Golden::new();
+    let legacy = single_selection(&golden.dsv, "510300.XSHG", None);
+    let frozen = freeze(&golden.lake, &legacy).unwrap();
+    let mut definition = frozen["data"]["definition"].clone();
+    definition["adjusted_versions"] = json!({"510300.XSHG": golden.adjusted});
+    definition["evaluation"] = json!({
+        "semantic_version": "common-window@1",
+        "warmup_sessions": 1,
+        "common_start": "2026-01-05",
+        "common_end": "2026-01-07",
+        "start": "2026-01-06",
+        "end": "2026-01-07"
+    });
+    Experiment::parse(&definition.to_string(), &golden.lake).unwrap();
+    golden.write(&definition);
+
+    let run = golden.run();
+    let result = golden.result(&run);
+    let summary = &result["data"]["runs"][0]["summary"];
+    assert_eq!(summary["session_count"], 2);
+    assert_eq!(summary["n_returns"], 1);
+    let rows = golden.close_rows(&result);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["session_date"], "2026-01-06");
+    assert_eq!(rows[0]["equity"], "1000000");
+    assert_eq!(rows[0]["positions"], json!({}));
+    assert_eq!(rows[1]["session_date"], "2026-01-07");
+    assert_eq!(rows[1]["equity"], "1009490.44006");
+    assert_eq!(rows[1]["positions"]["510300.XSHG"]["quantity"], "99900");
+    assert!(
+        rows.iter().all(|row| row["session_date"] != "2026-01-05"),
+        "the warm-up Session must not appear as performance"
+    );
+}
+
+#[test]
+fn vector_event_honors_the_same_frozen_window() {
+    let golden = Golden::new();
+    let legacy = single_selection(&golden.dsv, "510300.XSHG", None);
+    let frozen = freeze(&golden.lake, &legacy).unwrap();
+    let mut definition = frozen["data"]["definition"].clone();
+    definition["engine"] = json!("vector");
+    definition.as_object_mut().unwrap().remove("fast_event");
+    definition["adjusted_versions"] = json!({"510300.XSHG": golden.adjusted});
+    definition["evaluation"] = json!({
+        "semantic_version": "common-window@1",
+        "warmup_sessions": 1,
+        "common_start": "2026-01-05",
+        "common_end": "2026-01-07",
+        "start": "2026-01-06",
+        "end": "2026-01-07"
+    });
+    Experiment::parse(&definition.to_string(), &golden.lake).unwrap();
+    golden.write(&definition);
+
+    let run = golden.run();
+    let result = golden.result(&run);
+    assert_eq!(result["data"]["runs"][0]["summary"]["session_count"], 2);
+    let sessions = result["data"]["runs"][0]["series"]["sessions"]
+        .as_array()
+        .expect("saved Vector sessions");
+    assert_eq!(sessions.len(), 2);
+    assert_eq!(sessions[0]["session_date"], "2026-01-06");
+    assert_eq!(sessions[1]["session_date"], "2026-01-07");
+    assert!(
+        sessions
+            .iter()
+            .all(|session| session["session_date"] != "2026-01-05")
+    );
+}
+
+#[test]
+fn legacy_single_security_selection_keeps_the_unwindowed_definition_and_identity() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    let (dsv, _) = fixture::prepare_with_adjusted(root, true);
+    let selection = single_selection(&dsv, "510300.XSHG", None);
+    let frozen = freeze(root, &selection).unwrap();
+    let definition = &frozen["data"]["definition"];
+    assert!(definition.get("adjusted_versions").is_none());
+    assert!(definition.get("evaluation").is_none());
+    assert!(frozen["data"].get("window").is_none());
+    let experiment = Experiment::parse(&definition.to_string(), root).unwrap();
+    assert!(experiment.adjusted_versions().is_empty());
+    assert!(experiment.evaluation().is_none());
+    assert!(
+        experiment.run_definitions(root).unwrap()[0]
+            .run_spec
+            .get("evaluation")
+            .is_none()
+    );
+}

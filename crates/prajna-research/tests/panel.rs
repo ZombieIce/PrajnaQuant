@@ -5,6 +5,7 @@ mod cn_daily;
 
 use std::fs;
 
+use chrono::NaiveDate;
 use polars::prelude::{DataType, TimeUnit, TimeZone};
 use prajna_domain::{TimestampNs, VenueId};
 use prajna_research::{Panel, PanelError, load_panel, load_panel_for_venues};
@@ -33,6 +34,94 @@ fn panel_error(calendar: Vec<cn_daily::CalendarVenue>) -> PanelError {
         &[venue("XSHG"), venue("XSHE")],
     )
     .unwrap_err()
+}
+
+#[test]
+fn window_slices_sessions_and_remaps_indices_without_deleting_the_axis() {
+    let lake = tempfile::tempdir().unwrap();
+    let dsv = common::publish_v1(lake.path());
+    let venue = VenueId::new("SYNTH").unwrap();
+    let panel = load_panel(lake.path(), &dsv, &venue).unwrap();
+    let start = panel.sessions[3].session_date;
+    let end = panel.sessions[7].session_date;
+    let windowed = panel.window(start, end).unwrap();
+    assert_eq!(windowed.sessions.len(), 5);
+    assert_eq!(windowed.sessions.first().unwrap().session_date, start);
+    assert_eq!(windowed.sessions.last().unwrap().session_date, end);
+    assert_eq!(windowed.instruments, panel.instruments);
+    assert_eq!(windowed.grid.height(), 5 * windowed.instruments.len());
+    let indices = windowed
+        .grid
+        .column("session_index")
+        .unwrap()
+        .u32()
+        .unwrap();
+    assert!(
+        indices.iter().flatten().all(|index| index < 5),
+        "session_index must be remapped onto the windowed axis"
+    );
+    // Raw decimals are preserved for the same instrument/session pair.
+    let id = |panel: &Panel, row: usize| {
+        panel
+            .grid
+            .column("instrument_id")
+            .unwrap()
+            .str()
+            .unwrap()
+            .get(row)
+            .unwrap()
+            .to_owned()
+    };
+    let original_row = (0..panel.grid.height())
+        .find(|row| {
+            id(&panel, *row) == "A.SYNTH"
+                && panel
+                    .grid
+                    .column("session_index")
+                    .unwrap()
+                    .u32()
+                    .unwrap()
+                    .get(*row)
+                    == Some(3)
+        })
+        .unwrap();
+    let windowed_row = (0..windowed.grid.height())
+        .find(|row| {
+            id(&windowed, *row) == "A.SYNTH"
+                && windowed
+                    .grid
+                    .column("session_index")
+                    .unwrap()
+                    .u32()
+                    .unwrap()
+                    .get(*row)
+                    == Some(0)
+        })
+        .unwrap();
+    let decimal = |panel: &Panel, row: usize, column: &str| {
+        panel
+            .grid
+            .column(column)
+            .unwrap()
+            .str()
+            .unwrap()
+            .get(row)
+            .map(str::to_owned)
+    };
+    assert_eq!(
+        decimal(&panel, original_row, "open_decimal"),
+        decimal(&windowed, windowed_row, "open_decimal")
+    );
+    assert_eq!(
+        decimal(&panel, original_row, "close_decimal"),
+        decimal(&windowed, windowed_row, "close_decimal")
+    );
+    assert!(panel.window(end, start).is_err());
+    assert!(
+        panel
+            .window(NaiveDate::from_ymd_opt(2030, 1, 1).unwrap(), end)
+            .is_err()
+    );
 }
 
 #[test]

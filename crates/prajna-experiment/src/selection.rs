@@ -1,7 +1,11 @@
-//! Versioned single-security selection; no execution or browser-derived defaults.
-use std::path::Path;
+//! Versioned selection: frozen task definitions without execution or browser defaults.
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
-use prajna_data::dataset_preview;
+use prajna_data::dataset_preview::PreviewError;
+use prajna_data::{adjusted_series, dataset_preview};
 use prajna_domain::{InstrumentId, Notional, Quantity};
 use prajna_research::{StaticUniverse, UniverseError};
 use serde::{Deserialize, Serialize};
@@ -19,6 +23,9 @@ pub struct Selection {
     pub strategy: String,
     #[serde(default)]
     pub settings: Settings,
+    /// Explicit immutable adjusted research version per Universe member.
+    #[serde(default)]
+    pub adjusted: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -88,6 +95,321 @@ fn experiment_error(failure: ExperimentError) -> SelectionError {
     }
 }
 
+/// Prepares the frozen Universe and Dataset evidence shared by freeze and plan.
+struct Prepared {
+    frozen_pool: Option<crate::pools::PoolVersion>,
+    universe: StaticUniverse,
+    instruments: Vec<Value>,
+    venue: String,
+    warnings: Value,
+}
+
+fn prepare(root: &Path, selection: &Selection) -> Result<Prepared, SelectionError> {
+    if selection.strategy != "buy_and_hold" {
+        return Err(error("invalid_selection", "strategy must be buy_and_hold"));
+    }
+    let frozen_pool = selection
+        .pool
+        .as_ref()
+        .map(|reference| {
+            if !selection.instrument.is_empty() {
+                return Err(error(
+                    "invalid_selection",
+                    "choose instrument or pool, not both",
+                ));
+            }
+            crate::pools::resolve(root, reference).map_err(|e| error(e.code, e.message))
+        })
+        .transpose()?;
+    let universe = if let Some(version) = &frozen_pool {
+        StaticUniverse::load(root, &version.universe).map_err(universe_error)?
+    } else {
+        let id: InstrumentId = selection
+            .instrument
+            .parse()
+            .map_err(|e| error("invalid_selection", e))?;
+        StaticUniverse::new(
+            format!("single-security@1:{}", selection.instrument),
+            vec![id],
+        )
+        .map_err(|e| error("invalid_selection", e))?
+    };
+    let preview = dataset_preview::show(root, &selection.dsv).map_err(|e| error(e.code(), e))?;
+    let mut instruments = Vec::new();
+    let mut venues = BTreeSet::new();
+    for id in universe.members() {
+        let venue = id.venue().as_str();
+        if !matches!(venue, "XSHG" | "XSHE") {
+            return Err(error(
+                "unsupported_venue",
+                "selection supports XSHG/XSHE only",
+            ));
+        }
+        venues.insert(venue);
+        let instrument = preview["instruments"]
+            .as_array()
+            .and_then(|items| {
+                items
+                    .iter()
+                    .find(|item| item["instrument_id"].as_str() == Some(id.to_string().as_str()))
+            })
+            .ok_or_else(|| {
+                error(
+                    "instrument_not_in_dataset",
+                    "security is absent from the fixed DSV",
+                )
+            })?;
+        validate_instrument(instrument, venue)?;
+        if frozen_pool.is_some() && instrument["kind"] != "etf" {
+            return Err(error(
+                "invalid_selection",
+                "research pools require ETF members",
+            ));
+        }
+        instruments.push(instrument.clone());
+    }
+    if venues.len() > 1 {
+        return Err(error(
+            "unsupported_venue",
+            "pool versions may contain both venues, but this entry-only buy-and-hold selection requires one venue",
+        ));
+    }
+    let venue = venues
+        .into_iter()
+        .next()
+        .expect("nonempty universe")
+        .to_owned();
+    universe
+        .validate_against(root, &selection.dsv)
+        .map_err(universe_error)?;
+    Ok(Prepared {
+        frozen_pool,
+        universe,
+        instruments,
+        venue,
+        warnings: preview["warnings"].clone(),
+    })
+}
+
+fn adjusted_json(values: &BTreeMap<InstrumentId, String>) -> Value {
+    Value::Object(
+        values
+            .iter()
+            .map(|(instrument, version)| (instrument.to_string(), Value::String(version.clone())))
+            .collect(),
+    )
+}
+
+/// Validates the explicit per-member adjusted research versions.
+///
+/// The binding is required for research-pool submissions (the T08a window path)
+/// and optional for the legacy single-security Buy & Hold path. Missing, corrupt,
+/// foreign-DSV or mismatched-identity versions fail closed; no latest version is
+/// selected and no other version is substituted.
+fn research_inputs(
+    root: &Path,
+    selection: &Selection,
+    members: &[InstrumentId],
+    required: bool,
+) -> Result<BTreeMap<InstrumentId, String>, SelectionError> {
+    if selection.adjusted.is_empty() {
+        if required {
+            return Err(error(
+                "adjusted_version_missing",
+                "research pool submissions require an explicit adjusted version for every member",
+            ));
+        }
+        return Ok(BTreeMap::new());
+    }
+    let mut frozen = BTreeMap::new();
+    for (key, version) in &selection.adjusted {
+        let instrument: InstrumentId = key
+            .parse()
+            .map_err(|e| error("adjusted_instrument_mismatch", format!("{key}: {e}")))?;
+        if !members.contains(&instrument) {
+            return Err(error(
+                "adjusted_instrument_mismatch",
+                format!("{key} is not a member of the selected Universe"),
+            ));
+        }
+        frozen.insert(instrument, version.clone());
+    }
+    for member in members {
+        if !frozen.contains_key(member) {
+            return Err(error(
+                "adjusted_version_missing",
+                format!("missing adjusted version for {member}"),
+            ));
+        }
+    }
+    for (instrument, version) in &frozen {
+        let research = adjusted_series::read(root, version).map_err(|failure| {
+            let code = match &failure {
+                PreviewError::NotFound(_) => "adjusted_version_missing",
+                _ => "adjusted_series_invalid",
+            };
+            error(code, format!("{version} for {instrument}: {failure}"))
+        })?;
+        if research.raw_dsv != selection.dsv {
+            return Err(error(
+                "adjusted_raw_dsv_mismatch",
+                format!("{version} for {instrument} belongs to another raw DSV"),
+            ));
+        }
+        let research_instrument: InstrumentId = research
+            .instrument_id
+            .parse()
+            .map_err(|e| error("adjusted_instrument_mismatch", format!("{version}: {e}")))?;
+        if &research_instrument != instrument {
+            return Err(error(
+                "adjusted_instrument_mismatch",
+                format!("{version} names another security"),
+            ));
+        }
+        if research.rows.is_empty() {
+            return Err(error(
+                "adjusted_series_empty",
+                format!("{version} for {instrument} has no research rows"),
+            ));
+        }
+    }
+    Ok(frozen)
+}
+
+fn base_definition(
+    selection: &Selection,
+    prepared: &Prepared,
+    adjusted: &BTreeMap<InstrumentId, String>,
+) -> Result<Value, SelectionError> {
+    let settings = &selection.settings;
+    let universe = prepared
+        .universe
+        .id()
+        .map_err(|e| error("invalid_selection", e))?;
+    let mut definition = json!({
+        "experiment_version": 1, "dsv": selection.dsv, "universe": universe,
+        "venue": prepared.venue, "strategy": "buy_and_hold", "engine": "fast_event",
+        "availability_assumption": "treat_unknown_as_ts_close", "sessions_per_year": 252,
+        "unfilled_entry": "retry", "parameter_space": {"list": [{"params_version": 1}]},
+        "costs": {"commission_rate": settings.commission_rate,
+            "buy_slippage_bps": settings.buy_slippage_bps, "sell_slippage_bps": settings.sell_slippage_bps,
+            "buy_tax_rate": settings.buy_tax_rate, "sell_tax_rate": settings.sell_tax_rate},
+        "fast_event": {"currency": "CNY", "initial_cash": settings.initial_cash,
+            "sizing": "lot", "rebalance": "entry_only", "entry_budget": "remaining_cash",
+            "minimum_commission": settings.minimum_commission,
+            "portfolios": [{"id": 1, "capital": settings.initial_cash}], "lot_size_source": {"kind": "instrument"}}
+    });
+    if !adjusted.is_empty() {
+        definition["adjusted_versions"] = adjusted_json(adjusted);
+    }
+    Ok(definition)
+}
+
+/// Saves only a content-addressed Universe; the task service persists the definition.
+///
+/// A research-pool submission must bind an adjusted version for every member. The
+/// shared window is computed once, rejected when not runnable, and frozen in the
+/// definition so execution cannot drift. A single-security submission without an
+/// adjusted binding keeps the legacy T04b definition and identity.
+pub fn freeze(root: &Path, selection: &Selection) -> Result<Value, SelectionError> {
+    let prepared = prepare(root, selection)?;
+    let required = prepared.frozen_pool.is_some();
+    let adjusted = research_inputs(root, selection, prepared.universe.members(), required)?;
+    prepared
+        .universe
+        .store(root)
+        .map_err(|e| error("selection_store_failed", e))?;
+    let mut definition = base_definition(selection, &prepared, &adjusted)?;
+    let mut window = None;
+    if adjusted.is_empty() {
+        Experiment::parse(&definition.to_string(), root).map_err(experiment_error)?;
+    } else {
+        let experiment =
+            Experiment::parse(&definition.to_string(), root).map_err(experiment_error)?;
+        let planned = experiment.plan(root).map_err(experiment_error)?;
+        if !planned.runnable {
+            return Err(error(
+                "evaluation_window_not_runnable",
+                planned.block_message(),
+            ));
+        }
+        definition["evaluation"] = planned
+            .evaluation()
+            .expect("runnable window has an evaluation object");
+        Experiment::parse(&definition.to_string(), root).map_err(experiment_error)?;
+        window = Some(planned);
+    }
+    let mut response = json!({"schema_version": 1, "data": {
+        "selection_version": 1, "defaults_source": "mvp7-d7-simulation@1",
+        "definition": definition, "instrument": prepared.instruments[0],
+        "warnings": prepared.warnings,
+        "limitations": ["Static Universe is retrospective, not historical PIT membership",
+            "Unknown daily availability treated as close; no historical publication proof",
+            "Raw-price research; corporate-action total return is not complete"]
+    }});
+    if let Some(planned) = window {
+        response["data"]["adjusted"] = adjusted_json(&adjusted);
+        response["data"]["window"] =
+            serde_json::to_value(&planned).map_err(|e| error("invalid_selection", e))?;
+    }
+    if let Some(version) = prepared.frozen_pool {
+        response["data"]["pool"] = json!({"id":selection.pool.as_ref().expect("pool reference").id,
+            "version":version.version,"universe":version.universe,"members":version.members});
+        response["data"]["instruments"] = json!(prepared.instruments);
+    }
+    Ok(response)
+}
+
+/// Read-only precheck of the shared window for one frozen selection.
+///
+/// Missing or invalid adjusted bindings are returned as structured blocking
+/// reasons instead of errors so the T08b preflight page can display them. Errors
+/// that make the selection itself unreadable (unknown pool, absent Dataset member,
+/// mixed Venue, unsupported evidence) stay errors.
+pub fn plan(root: &Path, selection: &Selection) -> Result<Value, SelectionError> {
+    let prepared = prepare(root, selection)?;
+    let mut blocking = Vec::new();
+    let adjusted = match research_inputs(root, selection, prepared.universe.members(), true) {
+        Ok(adjusted) => adjusted,
+        Err(failure) => {
+            blocking.push(json!({"code": failure.code, "message": failure.message}));
+            BTreeMap::new()
+        }
+    };
+    let mut window = None;
+    if blocking.is_empty() {
+        let definition = base_definition(selection, &prepared, &adjusted)?;
+        let experiment =
+            Experiment::parse(&definition.to_string(), root).map_err(experiment_error)?;
+        let planned = experiment.plan(root).map_err(experiment_error)?;
+        if !planned.runnable {
+            blocking = planned
+                .blocking
+                .iter()
+                .map(|blocking| json!({"code": blocking.code, "message": blocking.message}))
+                .collect();
+        }
+        window = Some(serde_json::to_value(&planned).map_err(|e| error("invalid_selection", e))?);
+    }
+    let mut data = json!({
+        "selection_plan_version": 1,
+        "dsv": selection.dsv,
+        "strategy": selection.strategy,
+        "venue": prepared.venue,
+        "universe": prepared.universe.id().map_err(|e| error("invalid_selection", e))?,
+        "adjusted": adjusted_json(&adjusted),
+        "window": window,
+        "runnable": blocking.is_empty() && window.is_some(),
+        "blocking": blocking,
+        "instruments": prepared.instruments,
+    });
+    if let Some(version) = &prepared.frozen_pool {
+        data["pool"] = json!({"id":selection.pool.as_ref().expect("pool reference").id,
+            "version":version.version,"universe":version.universe,"members":version.members});
+    }
+    Ok(json!({"schema_version": 1, "data": data}))
+}
+
 /// Rejects a previewed instrument whose immutable evidence cannot support a tradable selection.
 fn validate_instrument(instrument: &Value, venue: &str) -> Result<(), SelectionError> {
     if !matches!(instrument["kind"].as_str(), Some("etf" | "equity"))
@@ -139,115 +461,6 @@ fn validate_instrument(instrument: &Value, venue: &str) -> Result<(), SelectionE
         ));
     }
     Ok(())
-}
-
-/// Saves only a content-addressed Universe; the task service persists the definition.
-pub fn freeze(root: &Path, selection: &Selection) -> Result<Value, SelectionError> {
-    if selection.strategy != "buy_and_hold" {
-        return Err(error("invalid_selection", "strategy must be buy_and_hold"));
-    }
-    let frozen_pool = selection
-        .pool
-        .as_ref()
-        .map(|reference| {
-            if !selection.instrument.is_empty() {
-                return Err(error(
-                    "invalid_selection",
-                    "choose instrument or pool, not both",
-                ));
-            }
-            crate::pools::resolve(root, reference).map_err(|e| error(e.code, e.message))
-        })
-        .transpose()?;
-    let universe = if let Some(version) = &frozen_pool {
-        StaticUniverse::load(root, &version.universe).map_err(universe_error)?
-    } else {
-        let id: InstrumentId = selection
-            .instrument
-            .parse()
-            .map_err(|e| error("invalid_selection", e))?;
-        StaticUniverse::new(
-            format!("single-security@1:{}", selection.instrument),
-            vec![id],
-        )
-        .map_err(|e| error("invalid_selection", e))?
-    };
-    let preview = dataset_preview::show(root, &selection.dsv).map_err(|e| error(e.code(), e))?;
-    let mut instruments = Vec::new();
-    let mut venues = std::collections::BTreeSet::new();
-    for id in universe.members() {
-        let venue = id.venue().as_str();
-        if !matches!(venue, "XSHG" | "XSHE") {
-            return Err(error(
-                "unsupported_venue",
-                "selection supports XSHG/XSHE only",
-            ));
-        }
-        venues.insert(venue);
-        let instrument = preview["instruments"]
-            .as_array()
-            .and_then(|items| {
-                items
-                    .iter()
-                    .find(|item| item["instrument_id"].as_str() == Some(id.to_string().as_str()))
-            })
-            .ok_or_else(|| {
-                error(
-                    "instrument_not_in_dataset",
-                    "security is absent from the fixed DSV",
-                )
-            })?;
-        validate_instrument(instrument, venue)?;
-        if frozen_pool.is_some() && instrument["kind"] != "etf" {
-            return Err(error(
-                "invalid_selection",
-                "research pools require ETF members",
-            ));
-        }
-        instruments.push(instrument);
-    }
-    let venue = venues.first().expect("nonempty universe");
-    universe
-        .validate_against(root, &selection.dsv)
-        .map_err(universe_error)?;
-    universe
-        .store(root)
-        .map_err(|e| error("selection_store_failed", e))?;
-    let settings = &selection.settings;
-    let definition = json!({
-        "experiment_version": 1, "dsv": selection.dsv, "universe": universe.id().map_err(|e| error("invalid_selection", e))?,
-        "venue": venue, "strategy": "buy_and_hold", "engine": "fast_event",
-        "availability_assumption": "treat_unknown_as_ts_close", "sessions_per_year": 252,
-        "unfilled_entry": "retry", "parameter_space": {"list": [{"params_version": 1}]},
-        "costs": {"commission_rate": settings.commission_rate,
-            "buy_slippage_bps": settings.buy_slippage_bps, "sell_slippage_bps": settings.sell_slippage_bps,
-            "buy_tax_rate": settings.buy_tax_rate, "sell_tax_rate": settings.sell_tax_rate},
-        "fast_event": {"currency": "CNY", "initial_cash": settings.initial_cash,
-            "sizing": "lot", "rebalance": "entry_only", "entry_budget": "remaining_cash",
-            "minimum_commission": settings.minimum_commission,
-            "portfolios": [{"id": 1, "capital": settings.initial_cash}], "lot_size_source": {"kind": "instrument"}}
-    });
-    if venues.len() > 1 {
-        return Err(error(
-            "unsupported_venue",
-            "pool versions may contain both venues, but this entry-only buy-and-hold selection requires one venue",
-        ));
-    }
-    Experiment::parse(&definition.to_string(), root).map_err(experiment_error)?;
-    let mut response = json!({"schema_version": 1, "data": {
-        "selection_version": 1, "defaults_source": "mvp7-d7-simulation@1",
-        "definition": definition, "instrument": instruments[0],
-        "warnings": preview["warnings"],
-        "limitations": ["Static Universe is retrospective, not historical PIT membership",
-            "Unknown daily availability treated as close; no historical publication proof",
-            "Raw-price research; corporate-action total return is not complete"]
-    }});
-    if let Some(version) = frozen_pool {
-        response["data"]["pool"] = json!({"id":selection.pool.as_ref().expect("pool reference").id,
-            "version":version.version,"universe":version.universe,"members":version.members});
-        response["data"]["instruments"] = json!(instruments);
-    }
-    Ok(response)
 }
 
 #[cfg(test)]

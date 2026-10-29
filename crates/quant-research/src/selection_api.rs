@@ -19,6 +19,9 @@ struct Request {
     strategy: String,
     #[serde(default, deserialize_with = "present_settings")]
     settings: Option<Value>,
+    /// Explicit immutable adjusted research version per Universe member.
+    #[serde(default)]
+    adjusted: Option<Value>,
     result_level: Option<String>,
 }
 
@@ -109,6 +112,9 @@ async fn submit_selection(
     if let Some(settings) = request.settings {
         selection["settings"] = settings;
     }
+    if let Some(adjusted) = request.adjusted {
+        selection["adjusted"] = adjusted;
+    }
     let frozen = tokio::task::spawn_blocking(move || -> std::io::Result<_> {
         let mut child = Command::new(state.cli)
             .arg("--lake")
@@ -154,18 +160,26 @@ async fn submit_selection(
     if !frozen.status.success() {
         let code = envelope["error"]["code"].as_str().unwrap_or("");
         let status = match code {
-            "invalid_selection" | "invalid_request" | "unsupported_venue"
-            | "invalid_definition" => StatusCode::BAD_REQUEST,
+            "invalid_selection"
+            | "invalid_request"
+            | "unsupported_venue"
+            | "invalid_definition"
+            | "adjusted_raw_dsv_mismatch"
+            | "adjusted_instrument_mismatch" => StatusCode::BAD_REQUEST,
             "dataset_not_found" | "instrument_not_in_dataset" | "pool_not_found" => {
                 StatusCode::NOT_FOUND
             }
-            "selection_evidence_missing" => StatusCode::UNPROCESSABLE_ENTITY,
+            "selection_evidence_missing"
+            | "adjusted_version_missing"
+            | "adjusted_series_empty"
+            | "evaluation_window_not_runnable" => StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_dataset_root" => StatusCode::SERVICE_UNAVAILABLE,
             "invalid_manifest"
             | "invalid_dataset_table"
             | "dataset_read_failed"
             | "selection_store_failed"
-            | "pool_store_failed" => StatusCode::INTERNAL_SERVER_ERROR,
+            | "pool_store_failed"
+            | "adjusted_series_invalid" => StatusCode::INTERNAL_SERVER_ERROR,
             _ => StatusCode::BAD_GATEWAY,
         };
         if envelope["error"]["message"].is_string() && status != StatusCode::BAD_GATEWAY {
@@ -360,6 +374,36 @@ mod tests {
             StatusCode::BAD_REQUEST
         );
         assert!(!temp.path().join("tasks").exists());
+    }
+
+    #[tokio::test]
+    async fn selection_forwards_adjusted_research_bindings_to_the_cli() {
+        let temp = tempfile::tempdir().unwrap();
+        let api = api(temp.path());
+        let captured = temp.path().join("captured.json");
+        let cli = temp.path().join("freeze");
+        let json = json!({"schema_version":1,"data":{"definition":{"synthetic":"definition"}}});
+        fs::write(
+            &cli,
+            format!(
+                "#!/bin/sh\ncat > '{}'\nprintf '%s' '{json}'\nexit 0\n",
+                captured.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
+        let state = SelectionState {
+            api,
+            root: Some(temp.path().into()),
+            cli,
+        };
+        let app = configured(state, "localhost:7878".into());
+        let mut body = request();
+        body["adjusted"] = json!({"510300.XSHG": "adj:sha256:synthetic"});
+        let (status, _) = submit(app, body, "localhost:7878").await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let captured: Value = serde_json::from_slice(&fs::read(captured).unwrap()).unwrap();
+        assert_eq!(captured["adjusted"]["510300.XSHG"], "adj:sha256:synthetic");
     }
 
     #[tokio::test]

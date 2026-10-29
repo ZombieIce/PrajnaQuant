@@ -122,3 +122,72 @@ pub fn prepare(root: &Path, known_listing: bool) -> String {
     .unwrap()
     .dsv
 }
+
+#[allow(dead_code)]
+/// Imports one explicit synthetic adjusted research series for a published DSV.
+/// `declared` is the supplier range; `dates` is the actual row coverage.
+pub fn import_adjusted(
+    root: &Path,
+    dsv: &str,
+    instrument: &str,
+    declared_start: &str,
+    declared_end: &str,
+    dates: &[&str],
+) -> String {
+    let rows = dates
+        .iter()
+        .map(|date| {
+            json!({
+                "trade_date": date,
+                "open": "10",
+                "high": "11",
+                "low": "9",
+                "close": "10"
+            })
+        })
+        .collect::<Vec<_>>();
+    let input = json!({
+        "schema_version": 1,
+        "raw_dsv": dsv,
+        "instrument_id": instrument,
+        "method": "forward",
+        "method_version": "synthetic-research@1",
+        "source": {"source_id":"synthetic", "source_version":"1", "source_ref":"fixture"},
+        "observed_at": "2026-10-28T00:00:00Z",
+        "retrospective_assumption": "Synthetic supplier history may be revised; not strict PIT",
+        "close_availability_assumption": "Synthetic daily close assumed known after the Session close",
+        "start": declared_start,
+        "end": declared_end,
+        "rows": rows
+    });
+    prajna_data::adjusted_series::import(root, &serde_json::to_vec(&input).unwrap()).unwrap()
+}
+
+#[allow(dead_code)]
+/// Publishes the synthetic Dataset and binds a full-coverage adjusted version to
+/// every member, returning the DSV and the canonical per-member versions.
+pub fn prepare_with_adjusted(
+    root: &Path,
+    known_listing: bool,
+) -> (String, std::collections::BTreeMap<String, String>) {
+    let dsv = prepare(root, known_listing);
+    let mut versions = std::collections::BTreeMap::new();
+    for instrument in [
+        "510300.XSHG",
+        "510880.XSHG",
+        "159952.XSHE",
+        "600519.XSHG",
+        "000001.XSHE",
+    ] {
+        let version = import_adjusted(
+            root,
+            &dsv,
+            instrument,
+            "2026-01-05",
+            "2026-01-07",
+            &["2026-01-05", "2026-01-06", "2026-01-07"],
+        );
+        versions.insert(instrument.to_string(), version);
+    }
+    (dsv, versions)
+}

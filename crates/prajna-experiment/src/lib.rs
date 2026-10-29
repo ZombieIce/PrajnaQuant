@@ -10,8 +10,9 @@ use std::{
     time::Instant,
 };
 
+use chrono::NaiveDate;
 use polars::prelude::DataFrame;
-use prajna_data::{ManifestError, read_manifest, restricted_jcs};
+use prajna_data::{ManifestError, adjusted_series, read_manifest, restricted_jcs};
 use prajna_domain::{InstrumentId, VenueId};
 use prajna_research::{
     Panel, StaticUniverse,
@@ -44,6 +45,7 @@ pub use python::{PreparedDecisions, PythonProvenance};
 mod result;
 mod storage;
 mod summary;
+pub mod window;
 mod worker;
 pub use accurate::{BackendDiagnostics, BackendFactory, ExperimentBackend};
 pub use engine::{ACCURATE_SEMANTIC_VERSION, BackendIdentity};
@@ -310,6 +312,65 @@ pub struct Experiment {
     strategy_kind: String,
     backend_factory: Option<Arc<dyn BackendFactory>>,
     pit: Option<Arc<pit::PitContext>>,
+    /// Bound immutable adjusted research versions; empty for legacy definitions.
+    adjusted_versions: BTreeMap<InstrumentId, String>,
+    /// Frozen shared research window; absent for legacy definitions.
+    evaluation: Option<Evaluation>,
+}
+
+/// Identity-bearing frozen evaluation window. Dates are canonical `YYYY-MM-DD`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Evaluation {
+    semantic_version: &'static str,
+    warmup_sessions: u64,
+    common_start: NaiveDate,
+    common_end: NaiveDate,
+    start: NaiveDate,
+    end: NaiveDate,
+}
+
+impl Evaluation {
+    pub fn semantic_version(&self) -> &'static str {
+        self.semantic_version
+    }
+    pub fn warmup_sessions(&self) -> u64 {
+        self.warmup_sessions
+    }
+    pub fn common_start(&self) -> NaiveDate {
+        self.common_start
+    }
+    pub fn common_end(&self) -> NaiveDate {
+        self.common_end
+    }
+    /// First Session included in the evaluation; earlier Sessions are warm-up.
+    pub fn start(&self) -> NaiveDate {
+        self.start
+    }
+    /// Last Session included in the evaluation; later Sessions are not run.
+    pub fn end(&self) -> NaiveDate {
+        self.end
+    }
+    fn to_json(&self) -> Value {
+        serde_json::json!({
+            "semantic_version": self.semantic_version,
+            "warmup_sessions": self.warmup_sessions,
+            "common_start": self.common_start.to_string(),
+            "common_end": self.common_end.to_string(),
+            "start": self.start.to_string(),
+            "end": self.end.to_string(),
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EvaluationInput {
+    semantic_version: String,
+    warmup_sessions: u64,
+    common_start: String,
+    common_end: String,
+    start: String,
+    end: String,
 }
 
 #[derive(Deserialize)]
@@ -342,6 +403,12 @@ struct DefinitionInput {
     backend: Option<engine::BackendIdentity>,
     #[serde(default)]
     pit: Option<pit::PitInput>,
+    /// Explicit immutable adjusted research version per Universe member.
+    #[serde(default)]
+    adjusted_versions: Option<BTreeMap<String, String>>,
+    /// Frozen common research window; required together with `adjusted_versions`.
+    #[serde(default)]
+    evaluation: Option<EvaluationInput>,
 }
 
 impl Experiment {
@@ -378,7 +445,14 @@ impl Experiment {
             }
         }
         read_manifest(lake_root.as_ref(), &input.dsv)?;
+        let mut adjusted_versions = BTreeMap::new();
+        let mut evaluation = None;
         let pit = if let Some(pit_input) = &input.pit {
+            if input.adjusted_versions.is_some() || input.evaluation.is_some() {
+                return Err(invalid(
+                    "PIT definitions cannot bind adjusted research versions or a common evaluation window",
+                ));
+            }
             if (input.strategy != "s2_pit_rotation" && !engine::is_python_strategy(&input.strategy))
                 || input.availability_assumption != "none"
                 || input.engine == "accurate_event"
@@ -407,6 +481,9 @@ impl Experiment {
             let universe = StaticUniverse::load(lake_root.as_ref(), &input.universe)?;
             universe.validate_against(lake_root.as_ref(), &input.dsv)?;
             validate_universe_venue(&universe, &venues)?;
+            let research = parse_research_inputs(&input, lake_root.as_ref(), &universe, &venues)?;
+            adjusted_versions = research.0;
+            evaluation = research.1;
             None
         };
         let costs = Costs::parse(&input.costs)?;
@@ -415,6 +492,12 @@ impl Experiment {
         engine.normalize_definition(&mut normalized, &input.strategy);
         if let Some(context) = &pit {
             normalized["pit"] = context.identity.clone();
+        }
+        if !adjusted_versions.is_empty() {
+            normalized["adjusted_versions"] = adjusted_versions_json(&adjusted_versions);
+        }
+        if let Some(evaluation) = &evaluation {
+            normalized["evaluation"] = evaluation.to_json();
         }
         Ok(Self {
             dsv: input.dsv,
@@ -429,6 +512,8 @@ impl Experiment {
             strategy_kind: input.strategy,
             backend_factory: None,
             pit,
+            adjusted_versions,
+            evaluation,
         })
     }
 
@@ -475,6 +560,99 @@ impl Experiment {
     }
     pub fn parameter_space(&self) -> &ParameterSpace {
         &self.parameter_space
+    }
+
+    /// Bound immutable adjusted research versions; empty for legacy definitions.
+    pub fn adjusted_versions(&self) -> &BTreeMap<InstrumentId, String> {
+        &self.adjusted_versions
+    }
+
+    /// Frozen shared research window; absent for legacy definitions.
+    pub fn evaluation(&self) -> Option<&Evaluation> {
+        self.evaluation.as_ref()
+    }
+
+    /// Plans the common data window, maximum warm-up and shared evaluation window
+    /// from the bound adjusted research series and every parameter combination.
+    ///
+    /// Legacy definitions without bound research inputs have no common window. The
+    /// plan consumes only the frozen inputs: it never reads a latest adjusted
+    /// version, fills a missing Session or substitutes raw Bars for research prices.
+    pub fn plan(&self, lake_root: impl AsRef<Path>) -> Result<window::WindowPlan, ExperimentError> {
+        let lake = lake_root.as_ref();
+        if self.pit.is_some() {
+            return Err(invalid(
+                "PIT definitions do not support a common evaluation window",
+            ));
+        }
+        if self.venues.len() != 1 {
+            return Err(invalid(
+                "a common evaluation window requires exactly one Venue",
+            ));
+        }
+        if self.adjusted_versions.is_empty() {
+            return Err(invalid(
+                "a common evaluation window requires a bound adjusted version for every Universe member",
+            ));
+        }
+        let universe = StaticUniverse::load(lake, &self.universe)?;
+        let venue = self
+            .venues
+            .first()
+            .expect("single-Venue definition")
+            .clone();
+        let panel = load_panel_for_venues(lake, &self.dsv, std::slice::from_ref(&venue))
+            .map_err(|error| invalid(error.to_string()))?;
+        let sessions = panel
+            .sessions
+            .iter()
+            .map(|session| session.session_date)
+            .collect::<Vec<_>>();
+        let mut coverage = Vec::new();
+        for instrument in universe.members() {
+            let version = self.adjusted_versions.get(instrument).ok_or_else(|| {
+                invalid(format!("missing bound adjusted version for {instrument}"))
+            })?;
+            let research = adjusted_series::read(lake, version).map_err(|error| {
+                invalid(format!(
+                    "bound adjusted version {version} for {instrument}: {error}"
+                ))
+            })?;
+            if research.raw_dsv != self.dsv {
+                return Err(invalid(format!(
+                    "bound adjusted version {version} for {instrument} belongs to another raw DSV"
+                )));
+            }
+            let research_instrument: InstrumentId = research
+                .instrument_id
+                .parse()
+                .map_err(|error| invalid(format!("bound adjusted instrument: {error}")))?;
+            if &research_instrument != instrument {
+                return Err(invalid(format!(
+                    "bound adjusted version {version} names another security"
+                )));
+            }
+            let dates = research
+                .rows
+                .iter()
+                .map(|row| row.trade_date)
+                .collect::<BTreeSet<_>>();
+            coverage.push(window::Coverage {
+                instrument: instrument.to_string(),
+                present: sessions.iter().map(|date| dates.contains(date)).collect(),
+            });
+        }
+        let mut parameters = Vec::new();
+        for run in self.expand(lake)? {
+            let values = &run.run_spec["strategy"]["parameters"];
+            let warmup_sessions =
+                window::parameter_warmup(&self.strategy_kind, values).map_err(invalid)?;
+            parameters.push(window::Parameter {
+                label: values.to_string(),
+                warmup_sessions,
+            });
+        }
+        window::plan(&sessions, &coverage, &parameters).map_err(invalid)
     }
 
     pub fn canonical_json(&self) -> Result<Vec<u8>, ExperimentError> {
@@ -533,6 +711,12 @@ impl Experiment {
             "engine": { "kind": "vector", "semantic_version": "vector@1" },
             "seed": Value::Null,
         });
+        if !self.adjusted_versions.is_empty() {
+            spec["adjusted_versions"] = adjusted_versions_json(&self.adjusted_versions);
+        }
+        if let Some(evaluation) = &self.evaluation {
+            spec["evaluation"] = evaluation.to_json();
+        }
         write_venue_scope(&mut spec, &self.venues);
         spec
     }
@@ -1122,6 +1306,154 @@ fn validate_parameter_value(name: &str, value: &Value) -> Result<(), ExperimentE
         None => return Err(invalid(format!("unknown strategy parameter {name}"))),
     }
     Ok(())
+}
+
+/// Validates the optional frozen research inputs against the loaded Universe and
+/// Dataset. Both objects are required together; legacy definitions keep neither.
+fn parse_research_inputs(
+    input: &DefinitionInput,
+    lake: &Path,
+    universe: &StaticUniverse,
+    venues: &BTreeSet<VenueId>,
+) -> Result<(BTreeMap<InstrumentId, String>, Option<Evaluation>), ExperimentError> {
+    let Some(adjusted) = &input.adjusted_versions else {
+        if input.evaluation.is_some() {
+            return Err(invalid(
+                "evaluation requires adjusted_versions for every Universe member",
+            ));
+        }
+        return Ok((BTreeMap::new(), None));
+    };
+    if venues.len() != 1 {
+        return Err(invalid(
+            "a common evaluation window requires exactly one Venue",
+        ));
+    }
+    if engine::is_python_strategy(&input.strategy) {
+        return Err(invalid(
+            "a common evaluation window requires a native strategy with a declared research warm-up",
+        ));
+    }
+    if input.engine == "accurate_event" {
+        return Err(invalid(
+            "a common evaluation window is supported by vector and fast_event only",
+        ));
+    }
+    let members = universe.members();
+    if adjusted.len() != members.len() {
+        return Err(invalid(
+            "adjusted_versions must bind every Universe member exactly once",
+        ));
+    }
+    let mut frozen = BTreeMap::new();
+    for (key, version) in adjusted {
+        let instrument: InstrumentId = key
+            .parse()
+            .map_err(|error| invalid(format!("adjusted_versions key {key}: {error}")))?;
+        if !members.contains(&instrument) {
+            return Err(invalid(format!(
+                "adjusted_versions key {key} is not a Universe member"
+            )));
+        }
+        if frozen.insert(instrument.clone(), version.clone()).is_some() {
+            return Err(invalid(format!(
+                "duplicate adjusted version for {instrument}"
+            )));
+        }
+        let research = adjusted_series::read(lake, version).map_err(|error| {
+            invalid(format!(
+                "bound adjusted version {version} for {instrument}: {error}"
+            ))
+        })?;
+        if research.raw_dsv != input.dsv {
+            return Err(invalid(format!(
+                "bound adjusted version {version} for {instrument} belongs to another raw DSV"
+            )));
+        }
+        let research_instrument: InstrumentId = research
+            .instrument_id
+            .parse()
+            .map_err(|error| invalid(format!("bound adjusted instrument: {error}")))?;
+        if research_instrument != instrument {
+            return Err(invalid(format!(
+                "bound adjusted version {version} names another security"
+            )));
+        }
+        if research.rows.is_empty() {
+            return Err(invalid(format!(
+                "bound adjusted version {version} for {instrument} has no research rows"
+            )));
+        }
+    }
+    if members.iter().any(|member| !frozen.contains_key(member)) {
+        return Err(invalid(
+            "adjusted_versions must bind every Universe member exactly once",
+        ));
+    }
+    let Some(evaluation) = &input.evaluation else {
+        // A research binding without a window is a planning seed: `Experiment::plan`
+        // derives the window from these frozen inputs. Persisted selections always
+        // write both objects.
+        return Ok((frozen, None));
+    };
+    if evaluation.semantic_version != window::EVALUATION_SEMANTIC_VERSION {
+        return Err(invalid(format!(
+            "evaluation.semantic_version must be {}",
+            window::EVALUATION_SEMANTIC_VERSION
+        )));
+    }
+    if evaluation.warmup_sessions > MAX_SAFE_INTEGER {
+        return Err(invalid(
+            "evaluation.warmup_sessions must not exceed 2^53 - 1",
+        ));
+    }
+    let date = |name: &str, value: &str| {
+        NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .map_err(|error| invalid(format!("evaluation.{name} must be YYYY-MM-DD: {error}")))
+    };
+    let common_start = date("common_start", &evaluation.common_start)?;
+    let common_end = date("common_end", &evaluation.common_end)?;
+    let start = date("start", &evaluation.start)?;
+    let end = date("end", &evaluation.end)?;
+    if common_start > start || start >= end || end > common_end {
+        return Err(invalid(
+            "evaluation requires common_start <= start < end <= common_end",
+        ));
+    }
+    for (instrument, version) in &frozen {
+        let research = adjusted_series::read(lake, version).map_err(|error| {
+            invalid(format!(
+                "bound adjusted version {version} for {instrument}: {error}"
+            ))
+        })?;
+        let first = research.rows.first().map(|row| row.trade_date);
+        let last = research.rows.last().map(|row| row.trade_date);
+        if first.is_none_or(|first| first > start) || last.is_none_or(|last| last < end) {
+            return Err(invalid(format!(
+                "bound adjusted version {version} for {instrument} has no rows at the evaluation window boundaries"
+            )));
+        }
+    }
+    Ok((
+        frozen,
+        Some(Evaluation {
+            semantic_version: window::EVALUATION_SEMANTIC_VERSION,
+            warmup_sessions: evaluation.warmup_sessions,
+            common_start,
+            common_end,
+            start,
+            end,
+        }),
+    ))
+}
+
+fn adjusted_versions_json(values: &BTreeMap<InstrumentId, String>) -> Value {
+    Value::Object(
+        values
+            .iter()
+            .map(|(instrument, version)| (instrument.to_string(), Value::String(version.clone())))
+            .collect(),
+    )
 }
 
 fn normalize_definition(
