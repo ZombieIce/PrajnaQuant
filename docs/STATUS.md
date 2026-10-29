@@ -70,6 +70,8 @@ POC-0 已按获确认的拆分发布为 [13 张本地执行票据](../.scratch/p
 
 单证券研究提交已接通 `prajna-freeze-selection` → `POST /api/v1/tasks/selections` → 既有 T01 持久任务：固定 DSV、确定性单成员 Universe、Rust 显式 D7 模拟默认值与 Fast Event 定义，要求 dataset-root/output 为同一 canonical root；保留旧身份和任务入口。使用 #350 正式 @2 固定状态证据合成发布产物，验证实际执行/Standard 持久结果与手算现金、成本及 NAV；旧 @1 缺状态表仍报错，未新增推导或放宽门禁。真实历史状态覆盖、PIT 与公司行动总回报未验证。详细边界见[冻结选择契约](contracts/single-security-selection.md)。 `/backtests` 已把该入口接到浏览器：选择已发布 DSV 与单只 ETF、显示 T01 持久 queued/running/succeeded/failed/interrupted 状态、成功后经 T04a 读取 Summary 与 Standard NAV/权益序列，任务 id 保留在 URL 并支持刷新/重开重读与“最近任务”重开；失败、中断和结果读取失败显示持久错误码，缺表/未完成不显示为成功或零交易。T04d 合成浏览器 E2E 覆盖成功、v1 缺状态失败、损坏结果表与旧 `/api/v1/runs` 兼容。真实历史数据、真实服务重启中断与浏览器性能未验证。
 
+研究池 `/pools` 已提供 Spec 三池 13 只 ETF 的持久草稿/不可变发布、显式旧版读取及固定 Dataset 元数据；经新平台 CLI 发布既有 StaticUniverse，旧 UUID Universe 与单证券身份保持兼容。单 Venue 已发布版本可经现有选择/任务入口冻结，后续编辑不改旧任务；混合 Venue 名单可管理但 entry-only 买入持有提交明确拒绝，跨资产执行仍待 #295。合成 CLI/生产浏览器与手算验证范围见[研究池契约](contracts/research-pools.md)；真实行情、完整 PIT 及公司行动总回报未验证。
+
 ### MVP 收口现状（2026-10-26）
 
 **MVP-6 有保留签收，milestone 已关闭。** [#235 第二轮](https://github.com/ZombieIce/PrajnaQuant/issues/235#issuecomment-6400855766)六项工程复核全部 pass；[#182 最终裁决](https://github.com/ZombieIce/PrajnaQuant/issues/182#issuecomment-6406038887)接受工程边界并保留证据处理流程 fail、第一轮 fail 和事件记录，不能表述为无保留整体通过。这里只校准已发生的验证状态，本次文档修改没有重跑引擎或补充真实数据证明。

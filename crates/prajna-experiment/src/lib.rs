@@ -37,6 +37,7 @@ mod accurate;
 mod engine;
 pub mod opening_evidence;
 pub mod pit;
+pub mod pools;
 mod python;
 pub mod selection;
 pub use python::{PreparedDecisions, PythonProvenance};

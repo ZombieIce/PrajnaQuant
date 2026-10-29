@@ -14,7 +14,8 @@ struct SelectionState {
 struct Request {
     idempotency_key: String,
     dsv: String,
-    instrument: String,
+    instrument: Option<String>,
+    pool: Option<Value>,
     strategy: String,
     #[serde(default, deserialize_with = "present_settings")]
     settings: Option<Value>,
@@ -98,8 +99,13 @@ async fn submit_selection(
             "--dataset-root must resolve to --output; cross-root copying is unsupported.",
         );
     }
-    let mut selection =
-        json!({"dsv":request.dsv,"instrument":request.instrument,"strategy":request.strategy});
+    let mut selection = json!({"dsv":request.dsv,"strategy":request.strategy});
+    if let Some(instrument) = request.instrument {
+        selection["instrument"] = json!(instrument);
+    }
+    if let Some(pool) = request.pool {
+        selection["pool"] = pool;
+    }
     if let Some(settings) = request.settings {
         selection["settings"] = settings;
     }
@@ -150,13 +156,16 @@ async fn submit_selection(
         let status = match code {
             "invalid_selection" | "invalid_request" | "unsupported_venue"
             | "invalid_definition" => StatusCode::BAD_REQUEST,
-            "dataset_not_found" | "instrument_not_in_dataset" => StatusCode::NOT_FOUND,
+            "dataset_not_found" | "instrument_not_in_dataset" | "pool_not_found" => {
+                StatusCode::NOT_FOUND
+            }
             "selection_evidence_missing" => StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_dataset_root" => StatusCode::SERVICE_UNAVAILABLE,
             "invalid_manifest"
             | "invalid_dataset_table"
             | "dataset_read_failed"
-            | "selection_store_failed" => StatusCode::INTERNAL_SERVER_ERROR,
+            | "selection_store_failed"
+            | "pool_store_failed" => StatusCode::INTERNAL_SERVER_ERROR,
             _ => StatusCode::BAD_GATEWAY,
         };
         if envelope["error"]["message"].is_string() && status != StatusCode::BAD_GATEWAY {

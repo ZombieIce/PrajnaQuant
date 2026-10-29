@@ -13,7 +13,9 @@ use crate::{Experiment, ExperimentError};
 #[serde(deny_unknown_fields)]
 pub struct Selection {
     pub dsv: String,
+    #[serde(default)]
     pub instrument: String,
+    pub pool: Option<crate::pools::Reference>,
     pub strategy: String,
     #[serde(default)]
     pub settings: Settings,
@@ -144,37 +146,67 @@ pub fn freeze(root: &Path, selection: &Selection) -> Result<Value, SelectionErro
     if selection.strategy != "buy_and_hold" {
         return Err(error("invalid_selection", "strategy must be buy_and_hold"));
     }
-    let id: InstrumentId = selection
-        .instrument
-        .parse()
-        .map_err(|e| error("invalid_selection", e))?;
-    let venue = id.venue().as_str();
-    if !matches!(venue, "XSHG" | "XSHE") {
-        return Err(error(
-            "unsupported_venue",
-            "selection supports XSHG/XSHE only",
-        ));
-    }
-    let preview = dataset_preview::show(root, &selection.dsv).map_err(|e| error(e.code(), e))?;
-    let instrument = preview["instruments"]
-        .as_array()
-        .and_then(|items| {
-            items
-                .iter()
-                .find(|item| item["instrument_id"] == selection.instrument)
+    let frozen_pool = selection
+        .pool
+        .as_ref()
+        .map(|reference| {
+            if !selection.instrument.is_empty() {
+                return Err(error(
+                    "invalid_selection",
+                    "choose instrument or pool, not both",
+                ));
+            }
+            crate::pools::resolve(root, reference).map_err(|e| error(e.code, e.message))
         })
-        .ok_or_else(|| {
-            error(
-                "instrument_not_in_dataset",
-                "security is absent from the fixed DSV",
-            )
-        })?;
-    validate_instrument(instrument, venue)?;
-    let universe = StaticUniverse::new(
-        format!("single-security@1:{}", selection.instrument),
-        vec![id.clone()],
-    )
-    .map_err(|e| error("invalid_selection", e))?;
+        .transpose()?;
+    let universe = if let Some(version) = &frozen_pool {
+        StaticUniverse::load(root, &version.universe).map_err(universe_error)?
+    } else {
+        let id: InstrumentId = selection
+            .instrument
+            .parse()
+            .map_err(|e| error("invalid_selection", e))?;
+        StaticUniverse::new(
+            format!("single-security@1:{}", selection.instrument),
+            vec![id],
+        )
+        .map_err(|e| error("invalid_selection", e))?
+    };
+    let preview = dataset_preview::show(root, &selection.dsv).map_err(|e| error(e.code(), e))?;
+    let mut instruments = Vec::new();
+    let mut venues = std::collections::BTreeSet::new();
+    for id in universe.members() {
+        let venue = id.venue().as_str();
+        if !matches!(venue, "XSHG" | "XSHE") {
+            return Err(error(
+                "unsupported_venue",
+                "selection supports XSHG/XSHE only",
+            ));
+        }
+        venues.insert(venue);
+        let instrument = preview["instruments"]
+            .as_array()
+            .and_then(|items| {
+                items
+                    .iter()
+                    .find(|item| item["instrument_id"].as_str() == Some(id.to_string().as_str()))
+            })
+            .ok_or_else(|| {
+                error(
+                    "instrument_not_in_dataset",
+                    "security is absent from the fixed DSV",
+                )
+            })?;
+        validate_instrument(instrument, venue)?;
+        if frozen_pool.is_some() && instrument["kind"] != "etf" {
+            return Err(error(
+                "invalid_selection",
+                "research pools require ETF members",
+            ));
+        }
+        instruments.push(instrument);
+    }
+    let venue = venues.first().expect("nonempty universe");
     universe
         .validate_against(root, &selection.dsv)
         .map_err(universe_error)?;
@@ -195,15 +227,27 @@ pub fn freeze(root: &Path, selection: &Selection) -> Result<Value, SelectionErro
             "minimum_commission": settings.minimum_commission,
             "portfolios": [{"id": 1, "capital": settings.initial_cash}], "lot_size_source": {"kind": "instrument"}}
     });
+    if venues.len() > 1 {
+        return Err(error(
+            "unsupported_venue",
+            "pool versions may contain both venues, but this entry-only buy-and-hold selection requires one venue",
+        ));
+    }
     Experiment::parse(&definition.to_string(), root).map_err(experiment_error)?;
-    Ok(json!({"schema_version": 1, "data": {
+    let mut response = json!({"schema_version": 1, "data": {
         "selection_version": 1, "defaults_source": "mvp7-d7-simulation@1",
-        "definition": definition, "instrument": instrument,
+        "definition": definition, "instrument": instruments[0],
         "warnings": preview["warnings"],
         "limitations": ["Static Universe is retrospective, not historical PIT membership",
             "Unknown daily availability treated as close; no historical publication proof",
             "Raw-price research; corporate-action total return is not complete"]
-    }}))
+    }});
+    if let Some(version) = frozen_pool {
+        response["data"]["pool"] = json!({"id":selection.pool.as_ref().expect("pool reference").id,
+            "version":version.version,"universe":version.universe,"members":version.members});
+        response["data"]["instruments"] = json!(instruments);
+    }
+    Ok(response)
 }
 
 #[cfg(test)]

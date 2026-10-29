@@ -9,7 +9,7 @@ const lake = () => {
 
 async function chooseDataset(page: Page, bars: number) {
   const versions = page.getByLabel('Dataset 版本', { exact: true });
-  await expect(versions.locator('option')).toHaveCount(5);
+  await expect(versions.locator('option')).toHaveCount(6);
   const candidates = await versions.locator('option').evaluateAll((options, bars) => options
     .filter((option) => (option.textContent ?? '').includes(`1 证券 / ${bars} Bars`))
     .map((option) => option.getAttribute('value') ?? ''), bars);
@@ -48,7 +48,7 @@ test('production selection submits, polls, reads the persisted result, and re-re
   page.on('response', (response) => { if (new URL(response.url()).pathname.endsWith('/result')) resultReads.push(response.status()); });
   await page.goto('/backtests');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('单 ETF 回测');
-  await expect(page.getByLabel('Dataset 版本', { exact: true }).locator('option')).toHaveCount(5);
+  await expect(page.getByLabel('Dataset 版本', { exact: true }).locator('option')).toHaveCount(6);
   await chooseDataset(page, 3);
   await page.getByRole('button', { name: '提交买入持有回测', exact: true }).click();
   await expect(page.getByTestId('task-status')).toContainText('已完成', { timeout: 60_000 });

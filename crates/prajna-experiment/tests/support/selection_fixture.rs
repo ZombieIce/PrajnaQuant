@@ -24,6 +24,7 @@ pub fn prepare(root: &Path, known_listing: bool) -> String {
     let evidence = SecurityEvidenceStore::open(root).unwrap();
     let records = [
         ("510300", "XSHG", InstrumentKind::Etf),
+        ("510880", "XSHG", InstrumentKind::Etf),
         ("159952", "XSHE", InstrumentKind::Etf),
         ("600519", "XSHG", InstrumentKind::Equity),
         ("000001", "XSHE", InstrumentKind::Equity),
@@ -57,11 +58,11 @@ pub fn prepare(root: &Path, known_listing: bool) -> String {
                 }
             },
             lot_size: FieldEvidence::Known {
-                value: Quantity::parse("100").unwrap(),
+                value: Quantity::parse(if symbol == "510880" { "10" } else { "100" }).unwrap(),
                 source: source.clone(),
             },
             price_increment: FieldEvidence::Known {
-                value: Price::parse("0.001").unwrap(),
+                value: Price::parse(if symbol == "510880" { "0.01" } else { "0.001" }).unwrap(),
                 source: source.clone(),
             },
             size_increment: FieldEvidence::Known {

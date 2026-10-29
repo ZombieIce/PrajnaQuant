@@ -35,13 +35,16 @@ if (!existsSync(join(fixture, 'synthetic-preview-fixture'))) throw new Error('Fi
 run(bin(join('examples', 'selection_fixture')), [lake]);
 const manifests = readdirSync(join(lake, 'manifests')).filter((name) => name.endsWith('.json'));
 if (manifests.length < 4) throw new Error(`Expected preview and selection Datasets, found ${manifests.length}`);
+run('cargo', ['test', '-p', 'prajna-experiment', '--test', 'pools', '--locked', '--offline',
+  'export_synthetic_pool_fixture', '--', '--ignored', '--exact'], root,
+  { PRAJNA_POOL_FIXTURE_ROOT: lake });
 run(bin('prajna-experiment'), ['--help']);
 const log = createWriteStream(join(local, 'server.log'), { flags: 'a' });
 const child = spawn(bin('quant-research'), ['serve', '--address', `127.0.0.1:${process.env.PRAJNA_E2E_PORT}`,
   '--web-dist', join(web, 'dist'), '--dataset-root', lake, '--output', lake,
   '--market-data-dir', join(local, 'market')],
   { cwd: root, env: { ...process.env, PRAJNA_DATASET_PREVIEW_CLI: bin('prajna-preview-dataset'),
-    PRAJNA_EXPERIMENT_CLI: bin('prajna-experiment'), PRAJNA_SELECTION_CLI: bin('prajna-freeze-selection') },
+    PRAJNA_EXPERIMENT_CLI: bin('prajna-experiment'), PRAJNA_SELECTION_CLI: bin('prajna-freeze-selection'), PRAJNA_POOLS_CLI: bin('prajna-pools') },
     stdio: ['ignore', 'pipe', 'pipe'] });
 child.stdout.pipe(log); child.stderr.pipe(log);
 child.on('error', (error) => { console.error(error); process.exitCode = 1; });
