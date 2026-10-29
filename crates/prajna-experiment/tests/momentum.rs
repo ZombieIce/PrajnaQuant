@@ -57,6 +57,23 @@ fn production_cli_persists_independent_golden_and_reads_identical_values() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     let request = inputs(root);
+    // Missing action evidence must not gate this independent price-factor workflow.
+    let facts = json!({"schema_version":1,"observed_at":"2026-08-01T00:00:00Z",
+        "coverage":[{"instrument_id":"510300.XSHG","kind":"etf",
+        "start":"2026-01-01","end":"2026-12-31","state":"missing_facts",
+        "reason":"synthetic action source and event terms unavailable",
+        "source":null,"available_at":null,"facts":[]}]});
+    let fact_version =
+        prajna_data::corporate_facts::import(root, &serde_json::to_vec(&facts).unwrap()).unwrap();
+    let coverage = prajna_data::corporate_facts::query(
+        root,
+        &fact_version,
+        "510300.XSHG",
+        "2026-01-01".parse().unwrap(),
+        "2026-12-31".parse().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(coverage["state"], "missing_facts");
     let mut child = Process::new(env!("CARGO_BIN_EXE_prajna-momentum"))
         .args(["--lake", root.to_str().unwrap()])
         .stdin(Stdio::piped())
