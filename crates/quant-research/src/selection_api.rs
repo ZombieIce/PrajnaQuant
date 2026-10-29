@@ -12,11 +12,14 @@ struct SelectionState {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Request {
+    #[serde(default)]
     idempotency_key: String,
     dsv: String,
     instrument: Option<String>,
     pool: Option<Value>,
     strategy: String,
+    parameter_space: Option<Value>,
+    expected_window: Option<Value>,
     #[serde(default, deserialize_with = "present_settings")]
     settings: Option<Value>,
     /// Explicit immutable adjusted research version per Universe member.
@@ -49,6 +52,10 @@ impl RunJobApi {
 fn configured(state: SelectionState, authority: String) -> Router {
     Router::new()
         .route("/api/v1/tasks/selections", post(submit_selection))
+        .route(
+            "/api/v1/tasks/selections/preflight",
+            post(preflight_selection),
+        )
         .layer(axum::extract::DefaultBodyLimit::max(64 * 1024))
         .with_state(state)
         .layer(axum::middleware::from_fn_with_state(
@@ -70,9 +77,24 @@ fn fail(status: StatusCode, code: &str, message: &str) -> Response {
         .into_response()
 }
 
+async fn preflight_selection(
+    State(state): State<SelectionState>,
+    request: Result<Json<Request>, JsonRejection>,
+) -> Response {
+    selection(state, request, true).await
+}
+
 async fn submit_selection(
     State(state): State<SelectionState>,
     request: Result<Json<Request>, JsonRejection>,
+) -> Response {
+    selection(state, request, false).await
+}
+
+async fn selection(
+    state: SelectionState,
+    request: Result<Json<Request>, JsonRejection>,
+    planning: bool,
 ) -> Response {
     let Ok(Json(request)) = request else {
         return fail(
@@ -115,10 +137,16 @@ async fn submit_selection(
     if let Some(adjusted) = request.adjusted {
         selection["adjusted"] = adjusted;
     }
+    if let Some(parameters) = request.parameter_space {
+        selection["parameter_space"] = parameters;
+    }
     let frozen = tokio::task::spawn_blocking(move || -> std::io::Result<_> {
-        let mut child = Command::new(state.cli)
-            .arg("--lake")
-            .arg(root)
+        let mut command = Command::new(state.cli);
+        command.arg("--lake").arg(root);
+        if planning {
+            command.arg("--plan");
+        }
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -190,7 +218,31 @@ async fn submit_selection(
             )
                 .into_response();
         }
-    } else if envelope["data"]["definition"].is_object() && envelope.get("error").is_none() {
+    } else if planning
+        && envelope["data"]["runnable"].is_boolean()
+        && envelope["data"]["blocking"].is_array()
+    {
+        return (
+            StatusCode::OK,
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(envelope),
+        )
+            .into_response();
+    } else if !planning
+        && envelope["data"]["definition"].is_object()
+        && envelope.get("error").is_none()
+    {
+        if request
+            .expected_window
+            .as_ref()
+            .is_some_and(|expected| expected != &envelope["data"]["window"])
+        {
+            return fail(
+                StatusCode::CONFLICT,
+                "selection_plan_changed",
+                "Preflight window changed; run preflight again.",
+            );
+        }
         let submitted = state.api.submit_experiment_task(SubmitExperimentTask {
             idempotency_key: request.idempotency_key,
             definition: envelope["data"]["definition"].clone(),
@@ -441,5 +493,75 @@ mod tests {
             StatusCode::CONFLICT
         );
         assert_eq!(api.list_experiment_tasks().len(), 1);
+    }
+    #[tokio::test]
+    async fn preflight_is_read_only_and_submission_rejects_a_changed_window() {
+        let temp = tempfile::tempdir().unwrap();
+        let captured = temp.path().join("input.json");
+        let args = temp.path().join("args");
+        let cli = temp.path().join("selection");
+        let plan = json!({"schema_version":1,"data":{"runnable":false,"blocking":[{"code":"insufficient_warmup"}],"window":null}});
+        fs::write(
+            &cli,
+            format!(
+                "#!/bin/sh\nprintf '%s' \"$*\" > '{}'\ncat > '{}'\nprintf '%s' '{}'\n",
+                args.display(),
+                captured.display(),
+                plan
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
+        let state = SelectionState {
+            api: api(temp.path()),
+            root: Some(temp.path().into()),
+            cli,
+        };
+        let body = json!({"dsv":"synthetic","pool":{"id":"dividend","version":2},"strategy":"ma_crossover",
+            "adjusted":{"510300.XSHG":"synthetic"},"parameter_space":{"list":[{"params_version":1,"short_window":1,"long_window":4}]}});
+        let response = configured(state.clone(), "localhost:7878".into())
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/tasks/selections/preflight")
+                    .header("host", "localhost:7878")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        let output: Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(output, plan);
+        assert!(fs::read_to_string(args).unwrap().ends_with("--plan"));
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fs::read(captured).unwrap()).unwrap(),
+            body
+        );
+        assert!(!temp.path().join("tasks").exists());
+        let mut state = state;
+        state.cli = script(
+            temp.path(),
+            json!({"schema_version":1,"data":{"definition":{"synthetic":true},"window":{"start":"2026-01-06"}}}),
+            0,
+        );
+        let mut body = request();
+        body["expected_window"] = json!({"start":"2026-01-05"});
+        let (status, response) = submit(
+            configured(state, "localhost:7878".into()),
+            body,
+            "localhost:7878",
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(response["error"]["code"], "selection_plan_changed");
+        assert!(!temp.path().join("tasks").exists());
     }
 }

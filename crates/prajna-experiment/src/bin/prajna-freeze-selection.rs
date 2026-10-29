@@ -1,6 +1,6 @@
 //! Production JSON-in / JSON-out selection boundary, called by the local service.
 use clap::Parser;
-use prajna_experiment::selection::{Selection, freeze};
+use prajna_experiment::selection::{Selection, freeze, plan};
 use serde_json::json;
 use std::{
     io::{self, Read},
@@ -12,6 +12,9 @@ use std::{
 struct Cli {
     #[arg(long)]
     lake: PathBuf,
+    /// Read-only common-window preflight; does not create a task or Universe.
+    #[arg(long)]
+    plan: bool,
 }
 
 fn main() -> ExitCode {
@@ -29,7 +32,14 @@ fn main() -> ExitCode {
         });
     let result = selection
         .map_err(|message| json!({"code":"invalid_selection","message":message}))
-        .and_then(|selection| freeze(&cli.lake, &selection).map_err(|e| json!(e)));
+        .and_then(|selection| {
+            if cli.plan {
+                plan(&cli.lake, &selection)
+            } else {
+                freeze(&cli.lake, &selection)
+            }
+            .map_err(|e| json!(e))
+        });
     match result {
         Ok(value) => {
             println!("{value}");

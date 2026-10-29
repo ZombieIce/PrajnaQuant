@@ -21,6 +21,8 @@ pub struct Selection {
     pub instrument: String,
     pub pool: Option<crate::pools::Reference>,
     pub strategy: String,
+    /// Existing native parameter list/grid; omitted only for legacy Buy & Hold.
+    pub parameter_space: Option<Value>,
     #[serde(default)]
     pub settings: Settings,
     /// Explicit immutable adjusted research version per Universe member.
@@ -105,8 +107,14 @@ struct Prepared {
 }
 
 fn prepare(root: &Path, selection: &Selection) -> Result<Prepared, SelectionError> {
-    if selection.strategy != "buy_and_hold" {
-        return Err(error("invalid_selection", "strategy must be buy_and_hold"));
+    if !matches!(
+        selection.strategy.as_str(),
+        "buy_and_hold" | "ma_crossover" | "s2_rotation"
+    ) {
+        return Err(error(
+            "invalid_selection",
+            "strategy must declare a native research window",
+        ));
     }
     let frozen_pool = selection
         .pool
@@ -171,7 +179,7 @@ fn prepare(root: &Path, selection: &Selection) -> Result<Prepared, SelectionErro
     if venues.len() > 1 {
         return Err(error(
             "unsupported_venue",
-            "pool versions may contain both venues, but this entry-only buy-and-hold selection requires one venue",
+            "pool versions may contain both venues, but this research selection requires one venue",
         ));
     }
     let venue = venues
@@ -179,6 +187,7 @@ fn prepare(root: &Path, selection: &Selection) -> Result<Prepared, SelectionErro
         .next()
         .expect("nonempty universe")
         .to_owned();
+    parameters(selection, universe.members().len())?;
     universe
         .validate_against(root, &selection.dsv)
         .map_err(universe_error)?;
@@ -340,18 +349,71 @@ fn plan_window(
             present: sessions.iter().map(|date| dates.contains(date)).collect(),
         });
     }
-    let warmup_sessions =
-        window::parameter_warmup(&selection.strategy, &json!({"params_version": 1}))
-            .map_err(|message| error("invalid_selection", message))?;
     window::plan(
         &sessions,
         &coverage,
-        &[window::Parameter {
-            label: json!({"params_version": 1}).to_string(),
-            warmup_sessions,
-        }],
+        &parameters(selection, prepared.universe.members().len())?,
     )
     .map_err(|message| error("invalid_selection", message))
+}
+
+fn parameter_space(selection: &Selection) -> Result<Value, SelectionError> {
+    selection
+        .parameter_space
+        .clone()
+        .or_else(|| {
+            (selection.strategy == "buy_and_hold").then(|| json!({"list":[{"params_version":1}]}))
+        })
+        .ok_or_else(|| {
+            error(
+                "invalid_selection",
+                "parameter_space is required for this strategy",
+            )
+        })
+}
+
+// Reuse the Experiment native parser and S2 validation, never accept a caller's warm-up count.
+fn parameters(
+    selection: &Selection,
+    members: usize,
+) -> Result<Vec<window::Parameter>, SelectionError> {
+    let parsed = crate::engine::parse_space(&selection.strategy, &parameter_space(selection)?)
+        .map_err(experiment_error)?;
+    let combinations = match parsed {
+        crate::ParameterSpace::Native { combinations, .. } => combinations,
+        space => {
+            let values = match space {
+                crate::ParameterSpace::Grid(axes) => {
+                    crate::expand_grid(&axes).map_err(experiment_error)?
+                }
+                crate::ParameterSpace::List(values) => values,
+                _ => unreachable!(),
+            };
+            let mut combinations = Vec::new();
+            for value in values {
+                let factor = value.factor().map_err(experiment_error)?;
+                value.strategy(factor).map_err(experiment_error)?;
+                if value.short >= value.long || value.top_k as u128 > members as u128 {
+                    return Err(error(
+                        "invalid_selection",
+                        "short must be below long and top_k must fit the Universe",
+                    ));
+                }
+                combinations.push(value.normalized());
+            }
+            combinations
+        }
+    };
+    combinations
+        .into_iter()
+        .map(|value| {
+            Ok(window::Parameter {
+                warmup_sessions: window::parameter_warmup(&selection.strategy, &value)
+                    .map_err(|e| error("invalid_selection", e))?,
+                label: value.to_string(),
+            })
+        })
+        .collect()
 }
 
 fn base_definition(
@@ -366,9 +428,9 @@ fn base_definition(
         .map_err(|e| error("invalid_selection", e))?;
     let mut definition = json!({
         "experiment_version": 1, "dsv": selection.dsv, "universe": universe,
-        "venue": prepared.venue, "strategy": "buy_and_hold", "engine": "fast_event",
+        "venue": prepared.venue, "strategy": selection.strategy, "engine": "fast_event",
         "availability_assumption": "treat_unknown_as_ts_close", "sessions_per_year": 252,
-        "unfilled_entry": "retry", "parameter_space": {"list": [{"params_version": 1}]},
+        "unfilled_entry": "retry", "parameter_space": parameter_space(selection)?,
         "costs": {"commission_rate": settings.commission_rate,
             "buy_slippage_bps": settings.buy_slippage_bps, "sell_slippage_bps": settings.sell_slippage_bps,
             "buy_tax_rate": settings.buy_tax_rate, "sell_tax_rate": settings.sell_tax_rate},
@@ -377,6 +439,14 @@ fn base_definition(
             "minimum_commission": settings.minimum_commission,
             "portfolios": [{"id": 1, "capital": settings.initial_cash}], "lot_size_source": {"kind": "instrument"}}
     });
+    if selection.strategy != "buy_and_hold" {
+        definition["unfilled_entry"] = json!("skip");
+        definition["fast_event"]["rebalance"] = json!("full_target");
+        definition["fast_event"]
+            .as_object_mut()
+            .expect("settings object")
+            .remove("entry_budget");
+    }
     if !adjusted.is_empty() {
         definition["adjusted_versions"] = adjusted_json(adjusted);
     }
@@ -391,7 +461,7 @@ fn base_definition(
 /// adjusted binding keeps the legacy T04b definition and identity.
 pub fn freeze(root: &Path, selection: &Selection) -> Result<Value, SelectionError> {
     let prepared = prepare(root, selection)?;
-    let required = prepared.frozen_pool.is_some();
+    let required = prepared.frozen_pool.is_some() || selection.strategy != "buy_and_hold";
     let adjusted = research_inputs(root, selection, prepared.universe.members(), required)?;
     prepared
         .universe
@@ -424,6 +494,9 @@ pub fn freeze(root: &Path, selection: &Selection) -> Result<Value, SelectionErro
             "Raw-price research; corporate-action total return is not complete"]
     }});
     if let Some(planned) = window {
+        response["data"]["limitations"][2] = json!(
+            "Supplier-adjusted research only; raw execution and valuation; corporate-action total return is not complete"
+        );
         response["data"]["adjusted"] = adjusted_json(&adjusted);
         response["data"]["window"] =
             serde_json::to_value(&planned).map_err(|e| error("invalid_selection", e))?;
