@@ -57,7 +57,8 @@ tables are reported separately so they cannot masquerade as coverage.
 prajna-preview-dataset catalog --root <LOCAL>
 prajna-preview-dataset show --root <LOCAL> --dsv <DSV>
 prajna-preview-dataset bars --root <LOCAL> --dsv <DSV> --instrument <ID> \
-  [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--limit 1..=1000] [--offset N]
+  [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--limit 1..=1000] [--offset N] \
+  [--adjusted-version <ADJ_VERSION>]
 ```
 
 Stdout is one JSON envelope (`schema_version` plus `data` or `error`); invalid
@@ -79,6 +80,8 @@ in [the API guide](../../docs/api.md#已发布研究-dataset-预览).
 `prajna-import-adjusted --root <LOCAL_LAKE> --input <SUPPLIER_JSON>` preserves an
 explicit supplier file as an immutable version linked to an exact raw DSV. Rust
 fixed-version reads and `/datasets` expose OHLC, method/source/assumptions and
-Session gaps; raw Bars remain execution/valuation prices. This is retrospective
-research input, not strict PIT, sequential TRI or dividend cash flow. Synthetic
-CLI/golden/browser evidence only. Schema, commands and limits: [contract](../../docs/contracts/adjusted-research-series.md).
+Session gaps; raw Bars remain execution/valuation prices. Each frozen object
+remains bound to its exact raw DSV; deleting that raw Dataset makes the object
+unreadable rather than rebinding it. This is retrospective research input, not
+strict PIT, sequential TRI or dividend cash flow. Synthetic CLI/golden/browser
+evidence only. Schema, commands and limits: [contract](../../docs/contracts/adjusted-research-series.md).

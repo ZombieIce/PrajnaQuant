@@ -28,7 +28,8 @@ error; valid Datasets in the same root remain readable. An empty root or an empt
 prajna-preview-dataset catalog --root <LOCAL>
 prajna-preview-dataset show --root <LOCAL> --dsv <DSV>
 prajna-preview-dataset bars --root <LOCAL> --dsv <DSV> --instrument <INSTRUMENT_ID> \
-  [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--limit 1..=1000] [--offset N]
+  [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--limit 1..=1000] [--offset N] \
+  [--adjusted-version <ADJ_VERSION>]
 ```
 
 `<DSV>` is `dsv:sha256:<64 lowercase hex>` or the bare 64 hex; otherwise the
@@ -53,6 +54,8 @@ provenance is not part of the DSV identity; the manifest is the commit marker.
 - Dataset identity, Normalizer identity, the descriptive `coverage`, per-venue
   Session coverage (count, first/last Session, first open/last close), instruments
   and warnings.
+- The adjusted-version catalog for this DSV. If only that catalog is unreadable,
+  raw detail still returns with `adjusted_series.error` and a warning.
 - One entry per `instruments` row: real instrument identity and venue, kind,
   native symbol, base/quote currency, timezone, lot size, price and size
   increments, lifecycle evidence, actual Bar coverage and source names.
@@ -86,13 +89,17 @@ source Raw hash, and a nullable reference price. Prices and quantities are
 decimal strings so scale-18 values are not rounded through JSON floating point.
 The response echoes the DSV/Normalizer identity, instrument identity, requested
 range, first/last Bar, unit labels and warnings (for example a missing source).
+With `--adjusted-version`, the command reads one explicit supplier-adjusted
+version through the [adjusted research series](adjusted-research-series.md)
+reader. That response is an adjusted sibling payload rather than a raw Bars
+superset; the contract lists the omitted raw-only fields.
 
 ## Limits and compatibility
 
 - Reads whole Parquet tables into memory per request; no pushdown or cache is
   claimed. `catalog` reads and validates all required tables for every DSV, so
   its cost grows with the lake size. Bars are paged after the Dataset is read.
-- Raw unadjusted Bars remain the default. The additive [adjusted research series](adjusted-research-series.md) contract exposes explicit imported supplier versions; corporate actions, execution status and factor/label/ledger results remain outside this preview entry.
+- Raw unadjusted Bars remain the default. The optional [adjusted research series](adjusted-research-series.md) contract exposes explicit imported supplier versions through `--adjusted-version`; its Bars payload is a documented sibling, not an additive superset. Corporate actions, execution status and factor/label/ledger results remain outside this preview entry.
 - The existing MVP-6 SZSE Normalizers, readers, results and archive identities
   are unchanged; this entry rejects the archive root rather than mixing them.
 - Checked-in tests publish synthetic XSHG/XSHE stock and ETF Datasets through

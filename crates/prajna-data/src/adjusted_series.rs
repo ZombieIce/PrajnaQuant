@@ -76,6 +76,31 @@ fn version(bytes: &[u8]) -> String {
     format!("adj:sha256:{}", crate::sha256(bytes))
 }
 
+fn check_row_date(
+    date: NaiveDate,
+    start: NaiveDate,
+    end: NaiveDate,
+    sessions: &BTreeSet<NaiveDate>,
+    raw_dates: &BTreeSet<&str>,
+) -> Result<()> {
+    if date < start || date > end {
+        return Err(invalid(
+            "adjusted row is outside the explicitly declared date range",
+        ));
+    }
+    if !sessions.contains(&date) {
+        return Err(invalid(
+            "adjusted row date is not a Session in the raw Dataset",
+        ));
+    }
+    if !raw_dates.contains(date.to_string().as_str()) {
+        return Err(invalid(
+            "adjusted row has no raw Bar in the raw Dataset; no price is invented",
+        ));
+    }
+    Ok(())
+}
+
 fn validate(root: &Path, input: &mut AdjustedInput) -> Result<Value> {
     if input.schema_version != 1
         || !matches!(input.method.as_str(), "forward" | "backward")
@@ -96,8 +121,21 @@ fn validate(root: &Path, input: &mut AdjustedInput) -> Result<Value> {
             "schema, method, source, date range and explicit assumptions are required",
         ));
     }
-    let manifest = crate::read_manifest(root, &input.raw_dsv)
-        .map_err(|_| invalid("raw Dataset is unavailable or invalid"))?;
+    let manifest = match crate::read_manifest(root, &input.raw_dsv) {
+        Ok(manifest) => manifest,
+        Err(crate::ManifestError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(PreviewError::NotFound(format!(
+                "raw Dataset Version {} does not exist",
+                input.raw_dsv
+            )));
+        }
+        Err(error) => {
+            return Err(PreviewError::Manifest {
+                dsv: input.raw_dsv.clone(),
+                message: error.to_string(),
+            });
+        }
+    };
     if manifest.dsv != input.raw_dsv || manifest.core.normalizer.id != "cn-stock-etf-daily" {
         return Err(invalid(
             "adjusted series requires an exact cn-stock-etf-daily raw DSV",
@@ -142,16 +180,16 @@ fn validate(root: &Path, input: &mut AdjustedInput) -> Result<Value> {
     input.rows.sort_by_key(|row| row.trade_date);
     let mut dates = BTreeSet::new();
     for row in &mut input.rows {
-        if row.trade_date < input.start
-            || row.trade_date > input.end
-            || !sessions.contains(&row.trade_date)
-            || !raw_dates.contains(row.trade_date.to_string().as_str())
-            || !dates.insert(row.trade_date)
-        {
-            return Err(invalid(
-                "adjusted row is duplicate, outside range, or has no raw Bar/Session",
-            ));
+        if !dates.insert(row.trade_date) {
+            return Err(invalid("adjusted row date is duplicated"));
         }
+        check_row_date(
+            row.trade_date,
+            input.start,
+            input.end,
+            &sessions,
+            &raw_dates,
+        )?;
         let mut prices = Vec::new();
         for value in [&mut row.open, &mut row.high, &mut row.low, &mut row.close] {
             let price = Price::parse(value).map_err(|_| invalid("invalid exact adjusted price"))?;
@@ -173,11 +211,42 @@ fn validate(root: &Path, input: &mut AdjustedInput) -> Result<Value> {
         .filter(|d| **d >= input.start && **d <= input.end && !dates.contains(d))
         .map(ToString::to_string)
         .collect::<Vec<_>>();
+    let missing_without_raw_bar = missing
+        .iter()
+        .filter(|date| !raw_dates.contains(date.as_str()))
+        .count();
+    let missing_with_raw_bar = missing.len() - missing_without_raw_bar;
     Ok(
         json!({"rows": dates.len(), "first": dates.first(), "last": dates.last(),
-        "missing_sessions": missing.len(), "session_gaps": missing.iter().take(dataset_preview::MAX_GAP_DATES).collect::<Vec<_>>(),
+        "missing_sessions": missing.len(),
+        "missing_sessions_with_raw_bar": missing_with_raw_bar,
+        "missing_sessions_without_raw_bar": missing_without_raw_bar,
+        "session_gaps": missing.iter().take(dataset_preview::MAX_GAP_DATES).collect::<Vec<_>>(),
         "session_gaps_truncated": missing.len() > dataset_preview::MAX_GAP_DATES}),
     )
+}
+
+/// Import failures caused by the referenced raw Dataset are invalid input (400);
+/// integrity failures keep their I/O/table status.
+fn import_error(error: PreviewError) -> PreviewError {
+    match &error {
+        PreviewError::NotFound(_) | PreviewError::Manifest { .. } => invalid(&error.to_string()),
+        _ => error,
+    }
+}
+
+/// A stored adjusted object whose frozen raw dependency no longer validates is an
+/// unreadable adjusted object, not an input error. Keep the underlying reason visible.
+fn read_error(error: PreviewError) -> PreviewError {
+    match &error {
+        PreviewError::InvalidInput(_)
+        | PreviewError::NotFound(_)
+        | PreviewError::Manifest { .. } => PreviewError::Table {
+            table: "adjusted_series".into(),
+            message: format!("frozen raw Dataset dependency failed: {error}"),
+        },
+        _ => error,
+    }
 }
 
 /// Imports one explicit supplier file, atomically and without overwriting old versions.
@@ -186,7 +255,7 @@ pub fn import(root: &Path, bytes: &[u8]) -> Result<String> {
     let root = dataset_preview::open_dataset_root(root)?;
     let mut input: AdjustedInput =
         serde_json::from_slice(bytes).map_err(|_| invalid("invalid adjusted input JSON"))?;
-    validate(&root, &mut input)?;
+    validate(&root, &mut input).map_err(import_error)?;
     // Preserve the exact imported source file; formatting changes also form a new version.
     let bytes = bytes.to_vec();
     let id = version(&bytes);
@@ -209,11 +278,8 @@ pub fn import(root: &Path, bytes: &[u8]) -> Result<String> {
     Ok(id)
 }
 
-/// Research consumers must freeze both this version and its raw DSV; reads verify both.
-/// Returns supplier OHLC only. There is no execution, dividend or account adapter.
-pub fn read(root: &Path, id: &str) -> Result<AdjustedInput> {
-    let root = dataset_preview::open_dataset_root(root)?;
-    let bytes = fs::read(path(&root, id)?).map_err(|error| {
+fn load(root: &Path, id: &str) -> Result<AdjustedInput> {
+    let bytes = fs::read(path(root, id)?).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             PreviewError::NotFound("adjusted version does not exist".into())
         } else {
@@ -223,13 +289,19 @@ pub fn read(root: &Path, id: &str) -> Result<AdjustedInput> {
     if version(&bytes) != id {
         return Err(corrupt());
     }
-    let mut input: AdjustedInput = serde_json::from_slice(&bytes).map_err(|_| corrupt())?;
-    validate(&root, &mut input).map_err(|_| corrupt())?;
+    serde_json::from_slice(&bytes).map_err(|_| corrupt())
+}
+
+/// Research consumers must freeze both this version and its raw DSV; reads verify both.
+/// Returns supplier OHLC only. There is no execution, dividend or account adapter.
+pub fn read(root: &Path, id: &str) -> Result<AdjustedInput> {
+    let root = dataset_preview::open_dataset_root(root)?;
+    let mut input = load(&root, id)?;
+    validate(&root, &mut input).map_err(read_error)?;
     Ok(input)
 }
 
-fn metadata(root: &Path, input: &mut AdjustedInput, id: &str) -> Result<Value> {
-    let coverage = validate(root, input)?;
+fn metadata(input: &AdjustedInput, id: &str, coverage: Value) -> Result<Value> {
     let mut value = serde_json::to_value(input).map_err(io)?;
     let obj = value.as_object_mut().expect("adjusted input object");
     obj.remove("rows");
@@ -241,8 +313,10 @@ fn metadata(root: &Path, input: &mut AdjustedInput, id: &str) -> Result<Value> {
 }
 
 /// Lists versions for one raw DSV without choosing a latest; corrupt objects stay visible.
+/// The raw DSV accepts the same full or bare 64-hex form as the preview reader.
 pub fn catalog(root: &Path, dsv: &str) -> Result<Value> {
     let root = dataset_preview::open_dataset_root(root)?;
+    let dsv = dataset_preview::normalize_dsv(dsv)?;
     let directory = checked_output_path(&root, Path::new("adjusted-series")).map_err(io)?;
     let mut versions = Vec::new();
     let mut invalid_versions = Vec::new();
@@ -256,14 +330,19 @@ pub fn catalog(root: &Path, dsv: &str) -> Result<Value> {
                 "adj:sha256:{}",
                 file.file_stem().and_then(|s| s.to_str()).unwrap_or("")
             );
-            match read(&root, &id) {
-                Ok(mut input) if input.raw_dsv == dsv => {
-                    versions.push(metadata(&root, &mut input, &id)?)
-                }
+            let invalid = |error: PreviewError| {
+                json!({
+                    "version": id,
+                    "error": format!("unreadable adjusted version; not selectable: {error}")
+                })
+            };
+            match load(&root, &id) {
+                Ok(mut input) if input.raw_dsv == dsv => match validate(&root, &mut input) {
+                    Ok(coverage) => versions.push(metadata(&input, &id, coverage)?),
+                    Err(error) => invalid_versions.push(invalid(error)),
+                },
                 Ok(_) => {}
-                Err(_) => invalid_versions.push(
-                    json!({"version": id, "error": "unreadable adjusted version; not selectable"}),
-                ),
+                Err(error) => invalid_versions.push(invalid(error)),
             }
         }
     }
@@ -272,17 +351,28 @@ pub fn catalog(root: &Path, dsv: &str) -> Result<Value> {
     Ok(json!({"versions": versions, "invalid_versions": invalid_versions}))
 }
 
-/// Uses the raw preview's range/pagination validation, while keeping adjusted gaps empty.
+/// Applies the preview's date/limit semantics to one frozen adjusted version.
 pub fn bars(root: &Path, request: &BarsRequest, id: &str) -> Result<Value> {
-    // Validate the original request even when the imported series is empty.
-    dataset_preview::bars(root, request)?;
-    let mut input = read(root, id)?;
-    if input.raw_dsv != request.dsv || input.instrument_id != request.instrument_id {
+    if request.limit == 0 {
+        return Err(invalid("limit must be positive"));
+    }
+    if let (Some(start), Some(end)) = (request.start, request.end) {
+        if start > end {
+            return Err(invalid("start must not be after end"));
+        }
+    }
+    let root = dataset_preview::open_dataset_root(root)?;
+    // The reader accepts the documented full or bare 64-hex raw DSV; compare the
+    // normalized form with the object's stored canonical DSV.
+    let dsv = dataset_preview::normalize_dsv(&request.dsv)?;
+    let mut input = load(&root, id)?;
+    let coverage = validate(&root, &mut input).map_err(read_error)?;
+    if input.raw_dsv != dsv || input.instrument_id != request.instrument_id {
         return Err(invalid(
             "adjusted version belongs to a different raw DSV or instrument",
         ));
     }
-    let info = metadata(root, &mut input, id)?;
+    let info = metadata(&input, id, coverage)?;
     let rows = input
         .rows
         .iter()
@@ -306,4 +396,55 @@ pub fn bars(root: &Path, request: &BarsRequest, id: &str) -> Result<Value> {
         "next_offset": (request.offset + items.len() < rows.len()).then_some(request.offset + items.len()),
         "items": items, "warnings": ["Historical publication time is Unknown; local observed_at is not historical availability."]}),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn date(month: u32, day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, month, day).unwrap()
+    }
+
+    #[test]
+    fn row_dates_are_checked_against_range_session_and_raw_bar_separately() {
+        let start = date(1, 5);
+        let end = date(1, 9);
+        let sessions = [date(1, 5), date(1, 8)]
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        let raw_dates = ["2026-01-05"].into_iter().collect::<BTreeSet<_>>();
+        let message = |value: Result<()>| value.unwrap_err().to_string();
+        assert!(
+            message(check_row_date(
+                date(1, 4),
+                start,
+                end,
+                &sessions,
+                &raw_dates
+            ))
+            .contains("outside the explicitly declared date range")
+        );
+        assert!(
+            message(check_row_date(
+                date(1, 6),
+                start,
+                end,
+                &sessions,
+                &raw_dates
+            ))
+            .contains("not a Session")
+        );
+        assert!(
+            message(check_row_date(
+                date(1, 8),
+                start,
+                end,
+                &sessions,
+                &raw_dates
+            ))
+            .contains("no raw Bar")
+        );
+        check_row_date(date(1, 5), start, end, &sessions, &raw_dates).unwrap();
+    }
 }

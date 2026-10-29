@@ -863,6 +863,33 @@ fn adjusted_cli_import_fixed_read_revision_and_independent_price_golden() {
         first["adjusted"]["coverage"]["session_gaps"],
         json!(["2026-01-06", "2026-01-07", "2026-01-09"])
     );
+    assert_eq!(first["adjusted"]["coverage"]["missing_sessions"], 3);
+    assert_eq!(
+        first["adjusted"]["coverage"]["missing_sessions_with_raw_bar"],
+        0
+    );
+    assert_eq!(
+        first["adjusted"]["coverage"]["missing_sessions_without_raw_bar"],
+        3
+    );
+    let bare_dsv = dsv_hex(&dsv);
+    let bare = preview_json(
+        &lake,
+        &[
+            "bars",
+            "--dsv",
+            bare_dsv,
+            "--instrument",
+            "510300.XSHG",
+            "--adjusted-version",
+            &id,
+        ],
+    );
+    assert_eq!(bare["items"][0]["close"], "5");
+    assert_eq!(
+        adjusted_series::catalog(&lake, bare_dsv).unwrap()["versions"][0]["version"],
+        json!(id)
+    );
     assert_eq!(first["items"][0]["available_at"], Value::Null);
     assert_eq!(first["items"][0]["volume"], Value::Null);
     let pinned = adjusted_series::read(&lake, &id).unwrap();
@@ -901,7 +928,7 @@ fn adjusted_cli_import_fixed_read_revision_and_independent_price_golden() {
         "price import cannot fabricate dividend/cash facts"
     );
     let request = BarsRequest {
-        dsv,
+        dsv: dsv.clone(),
         instrument_id: "510300.XSHG".into(),
         start: None,
         end: None,
@@ -910,6 +937,12 @@ fn adjusted_cli_import_fixed_read_revision_and_independent_price_golden() {
     };
     let page = adjusted_series::bars(&lake, &request, &id).unwrap();
     assert_eq!(page["next_offset"], 1);
+    let mut bare_request = request.clone();
+    bare_request.dsv = dsv_hex(&dsv).into();
+    assert_eq!(
+        adjusted_series::bars(&lake, &bare_request, &id).unwrap()["total"],
+        2
+    );
     let mut second = request.clone();
     second.offset = 1;
     assert_eq!(
@@ -965,6 +998,40 @@ fn adjusted_input_rejects_invalid_identity_source_method_dates_and_prices() {
             "{pointer}"
         );
     }
+    for bad_input in [
+        {
+            let mut input = input.clone();
+            input["unexpected"] = json!(true);
+            input
+        },
+        {
+            let mut input = input.clone();
+            input["source"]["unexpected"] = json!(true);
+            input
+        },
+        {
+            let mut input = input.clone();
+            input["rows"][0]["unexpected"] = json!(true);
+            input
+        },
+    ] {
+        assert!(
+            adjusted_import(&lake, &file, &bad_input).is_err(),
+            "the closed schema rejects unknown fields"
+        );
+    }
+    let mut missing_raw_bar = input.clone();
+    missing_raw_bar["rows"][0]["trade_date"] = json!("2026-01-06");
+    let output = adjusted_import(&lake, &file, &missing_raw_bar).unwrap_err();
+    assert_eq!(output.status.code(), Some(2));
+    let error: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(error["error"]["code"], "invalid_request");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("no raw Bar")
+    );
     assert!(
         !lake.join("adjusted-series").exists(),
         "invalid imports leave no published version"
@@ -989,6 +1056,14 @@ fn adjusted_empty_partial_updates_identity_isolation_and_corruption_are_explicit
     assert_eq!(
         detail["adjusted_series"]["versions"][0]["coverage"]["missing_sessions"],
         5
+    );
+    assert_eq!(
+        detail["adjusted_series"]["versions"][0]["coverage"]["missing_sessions_with_raw_bar"],
+        2
+    );
+    assert_eq!(
+        detail["adjusted_series"]["versions"][0]["coverage"]["missing_sessions_without_raw_bar"],
+        3
     );
     let mut partial = input.clone();
     partial["rows"].as_array_mut().unwrap().pop();
@@ -1080,7 +1155,7 @@ fn adjusted_empty_partial_updates_identity_isolation_and_corruption_are_explicit
 fn adjusted_import_and_read_reject_symlink_destination() {
     use std::os::unix::fs::symlink;
     let temp = tempfile::tempdir().unwrap();
-    let (_, input) = adjusted_fixture(temp.path());
+    let (dsv, input) = adjusted_fixture(temp.path());
     let lake = temp.path().join("lake");
     let other = temp.path().join("other");
     fs::create_dir(&other).unwrap();
@@ -1088,6 +1163,19 @@ fn adjusted_import_and_read_reject_symlink_destination() {
     assert!(adjusted_import(&lake, &temp.path().join("adjusted.json"), &input).is_err());
     assert!(
         prajna_data::adjusted_series::catalog(&lake, input["raw_dsv"].as_str().unwrap()).is_err()
+    );
+    let detail = preview_json(&lake, &["show", "--dsv", &dsv]);
+    assert_eq!(detail["adjusted_series"]["versions"], json!([]));
+    assert!(detail["adjusted_series"]["error"].is_string());
+    assert!(
+        detail["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning
+                .as_str()
+                .unwrap()
+                .contains("adjusted series catalog unavailable"))
     );
     assert_eq!(fs::read_dir(other).unwrap().count(), 0);
 }

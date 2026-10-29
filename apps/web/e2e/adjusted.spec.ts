@@ -39,6 +39,8 @@ test('production page pins adjusted revisions, gaps, raw role, empty and corrupt
   const metadata = page.getByTestId('adjusted-metadata');
   await expect(metadata).toContainText('synthetic-supplier');
   await expect(metadata).toContainText('2026-01-06、2026-01-07、2026-01-09');
+  await expect(metadata).toContainText('有原始 Bar 但供应商未提供：0');
+  await expect(metadata).toContainText('无原始 Bar：3');
   await expect(metadata).toContainText('不是严格 PIT');
   await expect(metadata).toContainText('不推导分红现金流');
   await prices.selectOption(revised);
@@ -49,6 +51,8 @@ test('production page pins adjusted revisions, gaps, raw role, empty and corrupt
   await prices.selectOption(empty);
   await expect(metadata).toContainText('实际 0 根');
   await expect(metadata).toContainText('缺失 Sessions：5');
+  await expect(metadata).toContainText('有原始 Bar 但供应商未提供：2');
+  await expect(metadata).toContainText('无原始 Bar：3');
   await expect(page.getByRole('status')).toContainText('该范围没有行情');
   // Real on-disk corruption after catalog selection: API failure remains visible.
   const root = process.env.PRAJNA_E2E_ROOT;

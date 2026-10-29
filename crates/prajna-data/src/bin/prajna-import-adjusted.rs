@@ -34,7 +34,13 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!("adjusted import failed ({})", error.code());
+            println!(
+                "{}",
+                serde_json::json!({
+                    "schema_version": 1,
+                    "error": {"code": error.code(), "message": error.to_string()}
+                })
+            );
             ExitCode::from(error.exit_code())
         }
     }

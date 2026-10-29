@@ -14,6 +14,12 @@ prajna-preview-dataset bars --root <LOCAL_LAKE> --dsv <RAW_DSV> \
   --start 2026-01-05 --end 2026-01-09 --limit 100 --offset 0
 ```
 
+Success prints `{"schema_version":1,"version":"adj:sha256:..."}` and exits `0`.
+An import rejection prints
+`{"schema_version":1,"error":{"code":"...","message":"..."}}` on stdout and
+exits `2` for invalid input/not-found or `1` for I/O/integrity failures; usage
+and unreadable `--input` errors remain on stderr with their existing exit codes.
+
 The import schema is closed. The example is completely synthetic; replace the
 raw DSV with an existing committed local Dataset for that security:
 
@@ -68,18 +74,37 @@ No API silently chooses a latest or substitutes another raw/adjusted version.
 
 `show` adds `adjusted_series.versions` for that raw DSV with method/source,
 assumptions and coverage; unreadable objects are visible in `invalid_versions`
-(root-wide because their raw identity cannot be trusted). Coverage reports actual
-row count/first/last and all missing Sessions in the declared range, including
-missing endpoints; gap dates are capped at 200 with total count and truncation.
-Missing data does not become a zero Bar or an implicit halt. `available_at` stays
-null; local observation time is never historical publication time.
+(root-wide because their raw identity cannot be trusted). If the adjusted catalog
+itself cannot be read (for example an unreadable or symlinked `adjusted-series/`),
+raw `show` detail remains available with an empty version list,
+`adjusted_series.error` and a warning. Coverage reports actual row
+count/first/last and all missing Sessions in the declared range, including
+missing endpoints. `missing_sessions_with_raw_bar` counts Sessions that have a
+raw Bar but no adjusted row (a supplier omission);
+`missing_sessions_without_raw_bar` counts Sessions where the raw Dataset has no
+Bar, so no adjusted price can exist. The two counts sum to `missing_sessions`.
+Gap dates are capped at 200 with total count and truncation; dates without a raw
+Bar are not called supplier adjustment gaps. Missing data does not become a zero
+Bar or an implicit halt. `available_at` stays null; local observation time is
+never historical publication time.
+
+Because the object stores only `raw_dsv`, removing or corrupting that raw Dataset
+makes the frozen adjusted object unreadable: `read`/`bars` fail and `show` lists
+it under `invalid_versions`. Consumers must freeze the raw DSV alongside the
+adjusted version; there is no rebinding to another raw DSV.
 
 The local API adds the optional `adjusted_version` bars query parameter, forwarded
 as `--adjusted-version` across the existing subprocess boundary. Omitting it keeps
 the existing raw response. `/datasets` lets users select a specific series version,
 inspect its source/assumptions/gaps, and switch back to raw prices. It displays empty
 and corrupt versions honestly. Decimal strings and warnings come from Rust.
-The schema-v1 preview envelope is retained with additive detail fields.
+The same `{schema_version:1,data:...}` envelope is used, but the adjusted Bars
+payload is a sibling of the raw Bars payload, not a superset. It omits the
+raw-only `normalizer_id`, `normalizer_version`, `instrument` and `range` fields
+and the raw item fields `source_raw_sha256`/`reference_price`; it adds the
+`adjusted` metadata object and uses `source` for the supplier source id. Both
+share `dsv`, paging, units and per-item
+`trade_date`/OHLC/`volume`/`amount`/`available_at`/`source`.
 
 Limits: all tables/files are loaded in memory; catalog validates each adjusted
 object, so large version catalogs incur repeated reads. There is no adjustment

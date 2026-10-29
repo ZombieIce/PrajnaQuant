@@ -6,9 +6,10 @@ type Summary = { dsv: string; created_at: string; normalizer_id: string; normali
 type Catalog = { datasets: Summary[]; invalid_manifests: { manifest: string; error: string }[] };
 type Field = { state: string; value: string | null; reason: string | null; source_id: string | null; observed_at: string | null };
 type Instrument = { instrument_id: string; venue: string; kind: string; native_symbol: string; base_currency: string | null; quote_currency: string | null; session_timezone: string; lot_size: string | null; price_increment: string | null; size_increment: string | null; lifecycle: { established_date: Field; listing_date: Field }; coverage: { bars: number; first_bar: string | null; last_bar: string | null; venue_sessions: number; sessions_in_bar_range: number; sessions_without_bar_in_observed_range: number; session_gaps: string[]; session_gaps_truncated: boolean; sessions_before_first_bar: number; sessions_after_last_bar: number; sources: string[]; bars_without_source: number } };
-type Adjustment = { version: string; instrument_id: string; method: string; method_version: string; source: unknown; observed_at: string; retrospective_assumption: string; close_availability_assumption: string; start: string; end: string; available_at: null; notice: string; coverage: { rows: number; first: string | null; last: string | null; missing_sessions: number; session_gaps: string[]; session_gaps_truncated: boolean } };
-type Detail = { adjusted_series: { versions: Adjustment[]; invalid_versions: unknown[] }; dsv: string; created_at: string; normalizer_id: string; normalizer_version: string; coverage: unknown; venues: unknown[]; instruments: Instrument[]; warnings: string[] };
-type Bar = { trade_date: string; open: string; high: string; low: string; close: string; volume: string; amount: string | null; available_at: string | null; source: string | null; source_raw_sha256: string | null; reference_price: string | null };
+type Adjustment = { version: string; instrument_id: string; method: string; method_version: string; source: unknown; observed_at: string; retrospective_assumption: string; close_availability_assumption: string; start: string; end: string; available_at: null; notice: string; coverage: { rows: number; first: string | null; last: string | null; missing_sessions: number; missing_sessions_with_raw_bar: number; missing_sessions_without_raw_bar: number; session_gaps: string[]; session_gaps_truncated: boolean } };
+type AdjustedCatalog = { versions: Adjustment[]; invalid_versions: unknown[]; error?: string };
+type Detail = { adjusted_series?: AdjustedCatalog; dsv: string; created_at: string; normalizer_id: string; normalizer_version: string; coverage: unknown; venues: unknown[]; instruments: Instrument[]; warnings: string[] };
+type Bar = { trade_date: string; open: string; high: string; low: string; close: string; volume: string | null; amount: string | null; available_at: string | null; source: string | null; source_raw_sha256?: string | null; reference_price?: string | null };
 type Bars = { dsv: string; total: number; offset: number; next_offset: number | null; price_adjustment: string; price_unit: string; volume_unit: string; amount_unit: string; items: Bar[]; warnings: string[] };
 const known = (value: string | null | undefined) => value ?? 'Unknown（未知）';
 const lifecycle = (field: Field) => field.state === 'known' ? known(field.value) : `${field.state} · ${known(field.reason)}`;
@@ -60,17 +61,20 @@ export default function DatasetPage() {
 function DatasetDetail({ detail }: { detail: Detail }) {
   const [id, setId] = useState('');
   const instrument = detail.instruments.find((item) => item.instrument_id === id);
+  const adjustedCatalog = detail.adjusted_series;
+  const adjustments = adjustedCatalog?.versions ?? [];
   return <>
     <Panel title="数据口径与覆盖">
       <p><code>{detail.dsv}</code></p><p>Normalizer：{detail.normalizer_id} @ {detail.normalizer_version} · 创建于 {detail.created_at}</p>
       <p>成交与估值使用原始未复权价格；复权序列仅作研究输入，不产生分红现金流。Session 覆盖不等于可交易行情覆盖，缺行情不视为停牌或零价。</p>
       {detail.warnings.map((warning, index) => <ErrorBox key={index}>{warning}</ErrorBox>)}
       <details><summary>发布声明与交易所 Session 覆盖</summary><pre>{json({ coverage: detail.coverage, venues: detail.venues })}</pre></details>
-      {detail.adjusted_series.invalid_versions.length > 0 && <ErrorBox>存在不可读取的复权版本（本机目录）：<pre>{json(detail.adjusted_series.invalid_versions)}</pre></ErrorBox>}
+      {adjustedCatalog?.error && <ErrorBox>复权版本目录不可读取，原始 Dataset 明细仍可查看：{adjustedCatalog.error}</ErrorBox>}
+      {adjustedCatalog && adjustedCatalog.invalid_versions.length > 0 && <ErrorBox>存在不可读取的复权版本（本机目录）：<pre>{json(adjustedCatalog.invalid_versions)}</pre></ErrorBox>}
       <label>证券<select aria-label="证券" value={id} onChange={(e) => setId(e.target.value)}><option value="">请选择证券</option>{detail.instruments.map((item) => <option key={item.instrument_id} value={item.instrument_id}>{item.native_symbol} · {item.venue} · {item.kind}</option>)}</select></label>
       {!detail.instruments.length && <p>该版本未包含证券，不能据此宣称有行情覆盖。</p>}
     </Panel>
-    {instrument && <><InstrumentDetail instrument={instrument} /><BarsPreview key={id} dsv={detail.dsv} instrument={instrument} adjustments={detail.adjusted_series.versions.filter((v) => v.instrument_id === id)} /></>}
+    {instrument && <><InstrumentDetail instrument={instrument} /><BarsPreview key={id} dsv={detail.dsv} instrument={instrument} adjustments={adjustments.filter((v) => v.instrument_id === id)} /></>}
   </>;
 }
 
@@ -119,8 +123,8 @@ function BarsPreview({ dsv, instrument, adjustments }: { dsv: string; instrument
       <p>方法 {adjusted.method} @ {adjusted.method_version}；仅作研究输入，成交/估值仍用原始价，不推导分红现金流。</p>
       <p>供应商追溯复权，不是严格 PIT，也不是顺序总回报指数。历史发布时间 Unknown；本地采集时间 {adjusted.observed_at} 不代表历史可用时刻。</p>
       <p>追溯调整假设：{adjusted.retrospective_assumption}；收盘可用假设：{adjusted.close_availability_assumption}</p>
-      <p>声明区间 {adjusted.start} 至 {adjusted.end}；实际 {adjusted.coverage.rows} 根，{known(adjusted.coverage.first)} 至 {known(adjusted.coverage.last)}；缺失 Sessions：{adjusted.coverage.missing_sessions}。</p>
-      <p>复权缺口：{adjusted.coverage.session_gaps.join('、') || '无'}{adjusted.coverage.session_gaps_truncated ? '（日期列表截断）' : ''}</p>
+      <p>声明区间 {adjusted.start} 至 {adjusted.end}；实际 {adjusted.coverage.rows} 根，{known(adjusted.coverage.first)} 至 {known(adjusted.coverage.last)}；缺失 Sessions：{adjusted.coverage.missing_sessions}（有原始 Bar 但供应商未提供：{adjusted.coverage.missing_sessions_with_raw_bar}；无原始 Bar：{adjusted.coverage.missing_sessions_without_raw_bar}）。</p>
+      <p>无原始 Bar 的日期不可调整，不视为供应商复权缺口。声明区间内缺失日期：{adjusted.coverage.session_gaps.join('、') || '无'}{adjusted.coverage.session_gaps_truncated ? '（日期列表截断）' : ''}</p>
       <details open><summary>复权来源与固定版本口径</summary><pre>{json(adjusted.source)}</pre></details>
     </div>}
 
