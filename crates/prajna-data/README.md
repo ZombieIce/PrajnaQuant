@@ -85,3 +85,7 @@ remains bound to its exact raw DSV; deleting that raw Dataset makes the object
 unreadable rather than rebinding it. This is retrospective research input, not
 strict PIT, sequential TRI or dividend cash flow. Synthetic CLI/golden/browser
 evidence only. Schema, commands and limits: [contract](../../docs/contracts/adjusted-research-series.md).
+
+## Offline corporate-action facts
+
+`prajna-corporate-facts import/read` publishes and reads fixed Shanghai/Shenzhen stock/ETF fact versions in an explicit local root. Four scoped states preserve missing amounts/dates/source/history availability; price research stays independent. Commands, fields, scope semantics and compatibility: [ADR 0032](../../docs/decisions/0032-cn-corporate-action-fact-versions.md). Synthetic tests only; page and ledger integration remain separate.

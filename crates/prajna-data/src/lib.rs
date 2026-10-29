@@ -2,6 +2,7 @@
 
 pub mod adjusted_series;
 pub mod cninfo;
+pub mod corporate_facts;
 pub mod daily_publish;
 pub mod daily_raw;
 pub mod dataset_preview;
