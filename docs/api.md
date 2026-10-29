@@ -18,7 +18,8 @@
 | Result / Factor | GET /api/v1/factor-reports | Implemented；可按 signal_key 与显式 universe_id/version_id 筛选已保存 report；缺少 Universe 身份的旧报告只在未筛选列表中出现，前端标为未知 |
 | Experiment task | POST/GET /api/v1/tasks/experiments、GET /api/v1/tasks/experiments/{id} | Implemented；T01 新平台任务提交/列表/单项，共用串行队列与持久状态。提交可选 `result_level: summary|standard`，默认 summary；级别不同不能复用同一 idempotency key。Standard 任务先经 `prajna-experiment promote` 只提升已有 Execution 的 Completed Run（failed Run 保持原级别，全 failed 为 succeeded+replayed；重放失败整批中止）；仅 promote exit 6（Execution 目录不存在）时回退 run，manifest 缺失/损坏不回退 |
 | Result / Experiment task | GET /api/v1/tasks/experiments/{id}/result | Implemented（T04a）；仅 succeeded 任务，经 `prajna-experiment result` 校验全部已保存表 hash 并读取持久 Summary 与已保存 NAV/权益序列，保留 CLI envelope；404/409/403/500/502/503 可读，成功与错误均 no-store。字段与限制见[结果读取契约](contracts/experiment-result-read.md) |
-| Selection / Experiment task | POST /api/v1/tasks/selections | 固定 DSV 单证券 buy-and-hold 选择经 Rust 冻结 CLI，再提交既有 T01；要求 dataset-root/output 为同一 canonical root，本机 Host/Origin 限定。默认版本、字段、持久化、错误及限制见[冻结选择契约](contracts/single-security-selection.md) |
+| Research pools | GET/POST /api/v1/research-pools | 三个 Static Universe 池的草稿、不可变发布与固定版本读取；本机 CLI 边界，见[研究池契约](contracts/research-pools.md) |
+| Selection / Experiment task | POST /api/v1/tasks/selections | 固定 DSV 单证券或显式已发布单 Venue 池版本 buy-and-hold 选择经 Rust 冻结 CLI，再提交既有 T01；要求 dataset-root/output 为同一 canonical root，本机 Host/Origin 限定。默认版本、字段、持久化、错误及限制见[冻结选择契约](contracts/single-security-selection.md) |
 | Universe | GET /api/v1/universes | Implemented；支持 asset_scope/status/q/limit，小型本地注册表暂不支持 cursor；只读/列 `<uuid>.json` 用户配置，跳过同目录的内容寻址 StaticUniverse 文件 |
 | Universe | POST /api/v1/universes | Implemented；创建草稿 |
 | Universe | GET /api/v1/universes/{id} | Implemented；元数据、版本摘要和草稿 |

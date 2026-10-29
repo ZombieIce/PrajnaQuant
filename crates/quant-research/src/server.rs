@@ -36,6 +36,8 @@ use uuid::Uuid;
 mod dataset_api;
 #[path = "market_api.rs"]
 mod market_api;
+#[path = "pool_api.rs"]
+mod pool_api;
 #[path = "run_jobs.rs"]
 mod run_jobs;
 #[path = "universe_api.rs"]
@@ -117,6 +119,7 @@ pub async fn serve_with_dataset_root(
         .merge(run_jobs.router())
         .merge(market_api::router(Arc::new(market_data_dir)))
         .layer(CorsLayer::permissive())
+        .merge(pool_api::router(dataset_root.clone(), socket.to_string()))
         .merge(dataset_api::router(dataset_root, socket.to_string()))
         .merge(selections)
         .merge(experiment_results);

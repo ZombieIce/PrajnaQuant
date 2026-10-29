@@ -30,6 +30,10 @@ MVP-7 的本机研究任务需要复用既有数据、因子与 Experiment 能�
 
 `POST /api/v1/tasks/selections` 调用独立 `prajna-freeze-selection` CLI，从固定 DSV/证券冻结显式 buy-and-hold 定义后复用原 T01 提交，服务仍不编译新平台 crate。提交要求 dataset-root 与 output canonicalize 相同，避免 T01 的 `--lake <output>` 读取另一数据根；不复制/迁移 Dataset。默认版本、选择证据与拒绝条件、响应及原始价格研究限制见[契约](../contracts/single-security-selection.md)。新路由按本机 Host/Origin 限定，位于旧 permissive CORS 外；原任务接口/身份和旧诊断保持不变。
 
+## 研究池适配（#292）
+
+`GET/POST /api/v1/research-pools` 复用子进程边界调用 `prajna-pools`，本机 Host/Origin/no-store 与 Dataset 路由一致；新平台 CLI 拥有池发布、既有 StaticUniverse 身份及本机持久化，旧服务只适配命令/envelope。冻结选择可显式引用已发布池版本，原单证券身份与旧 UUID Universe 不变；范围与错误见[研究池契约](../contracts/research-pools.md)。
+
 ## 后果与限制
 
 此边界默认执行并读取 Summary 结果，显式请求 Standard 时会提升已有 Summary Execution；不把新平台核心编译进旧服务，也不修改已有 Experiment 身份或结果表内容（提升会按已有的显式能力补写明细；manifest 的默认级别不改变）。结果读取验证所有已保存表 hash，但只返回 Summary 与 NAV/权益表，不提供 orders/fills/权重明细、分页或按需提升；T01 尚不提供 HTTP 取消或重试端点。持久过程组身份与清理原语为后续取消路径提供服务端能力。进程检查与 CLI 诊断验证使用合成输入，不证明真实行情、策略收益或完整 MVP-7 产品流程；受限沙箱可能无法检查或终止子进程组，此时实现拒绝清理并明确报告未验证的所有权。

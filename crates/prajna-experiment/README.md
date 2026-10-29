@@ -363,3 +363,5 @@ fake 的原生账户显式为 unavailable，不伪造原生快照。
 定义，并在返回前用 `Experiment::parse` 校验。默认配置 `mvp7-d7-simulation@1`；
 不是完整分红总回报或历史 PIT 声明。生产 HTTP 经此 CLI 提交既有 T01 任务，
 配置、响应、合成验证与限制见[冻结选择契约](../../docs/contracts/single-security-selection.md)。
+
+研究池：`prajna-pools --lake <LOCAL>` 通过 JSON 命令管理三池草稿/不可变版本；`prajna-freeze-selection` 可引用显式池版本，见[契约](../../docs/contracts/research-pools.md)。旧单证券选择保持兼容；跨 Venue entry-only 提交仍拒绝。
