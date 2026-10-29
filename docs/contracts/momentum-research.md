@@ -35,6 +35,13 @@ Momentum 研究：该字段不序列化进报告，所以旧请求与已存报�
 `FactorKind` v1（`close_t > mean(close_(t-n+1..t))`，相等输出 0），不是把
 既有 TrendFilter v1 的 `>=` 悄悄改成 `>`。
 
+`trend_filter_strict` 的数值相等政策：研究价以十进制字符串导入、在 Rust 中以
+f64 计算，十进制相等的均值通常不能被 f64 精确表示。因此 v1 仅在
+`close - mean > 1e-12 * max(1, |close|, |mean|)` 时输出 1，容差内视为相等并输出 0；
+这是对 Spec“均线相等不算高于”的数值实现，避免同一常数序列在不同窗口下因均值
+舍入而产生 1。该容差属于 `trend_filter_strict` v1 语义，修改它需要升版本。
+`TrendFilter` v1 继续使用原始 f64 `>=`，其身份、Cache 和已存结果不变。
+
 `instrument` 与 `pool: {id, version}` 二选一。池解析不可变已发布版本，
 只接受 Dataset 中的 ETF；可在同一国内 Session 轴上研究沪深池，
 不表示混合 Venue 策略执行已经交付。每个成员必须恰好绑定一个显式调整版本，
@@ -80,11 +87,13 @@ payload 字节的 SHA-256（包含浮点值，不冒称受限 JCS）。先写唯
 验证：`cargo test -p prajna-experiment --test momentum --locked --offline` 覆盖
 真实 CLI、130 Session 线性价独立 golden、Momentum 20/60/120/1、Cache 复用、
 未来改动、缺失、显式绑定、沪深已发布池、非法窗口/股票、损坏与符号链接；
-#299 另覆盖 Volatility v1 的逐行手算样本方差、严格趋势的均线相等（1 Session
-均值与 2 Session 相等边界）、预热、内部缺失、调整序列修订不改过去值、
-非法窗口与未知 `factor`。`prajna-research` 的 factor/base/cache_key 测试核对
-新 kind 独立 canonical 身份与 Cache key，以及 TrendFilter v1 的 `>=` 行为/身份
-未变。`apps/web/e2e/factor-research.spec.ts` 通过 #341 真实服务/CLI/发布 fixture
+#299 另覆盖 Volatility v1 的逐行手算样本方差、严格趋势的均线相等（1 Session、
+2 Session 与变化窗口的十进制相等边界）、预热、内部缺失、调整序列修订不改过去值、
+非法窗口与未知 `factor`；数值相等回归使用非精确可表示常数 `3.826`，经真实
+CLI 覆盖 1/2/3/20/60/120 全部窗口输出 0。`prajna-research` 的 factor/base/cache_key
+测试核对新 kind 独立 canonical 身份与 Cache key，以及 TrendFilter v1 的 `>=`
+行为/身份未变。PyO3 消费者支持该 kind：`prajna-py` clippy/test 与 Python
+`Factor("trend_filter_strict", {"n": 2})` 的 read/cache golden 通过。`apps/web/e2e/factor-research.spec.ts` 通过 #341 真实服务/CLI/发布 fixture
 选择波动率与严格均线趋势、改窗口、保存并核对持久报告与页面值/图表；
 `momentum.spec.ts` 继续覆盖旧动量路径。不 mock 成功。
 无浏览器 fixture 根环境变量时，exporter 在自有临时 lake 实际执行导出，

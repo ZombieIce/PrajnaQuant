@@ -1,5 +1,6 @@
 use prajna_research::factor::{
-    Factor, FactorKind, MomentumParams, RotationScoreParams, TrendFilterParams, VolatilityParams,
+    Factor, FactorKind, MomentumParams, RotationScoreParams, TrendFilterParams,
+    TrendFilterStrictParams, VolatilityParams,
 };
 use pyo3::{prelude::*, types::PyDict};
 use serde::Deserialize;
@@ -69,6 +70,7 @@ pub(crate) fn definition(kind: &str, json: &str) -> PyResult<Factor> {
                 FactorKind::Momentum => Factor::new(kind, MomentumParams { n }),
                 FactorKind::Volatility => Factor::new(kind, VolatilityParams { n }),
                 FactorKind::TrendFilter => Factor::new(kind, TrendFilterParams { n }),
+                FactorKind::TrendFilterStrict => Factor::new(kind, TrendFilterStrictParams { n }),
                 FactorKind::RotationScore => unreachable!("handled above"),
             }
         }

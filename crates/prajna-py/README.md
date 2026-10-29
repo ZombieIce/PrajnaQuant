@@ -165,6 +165,7 @@ strictly checked Rust parameters. The existing read-only API retains
 | `momentum` | `n >= 1` | 1 |
 | `volatility` | `n >= 2` | 1 |
 | `trend_filter` | `n >= 1` | 1 |
+| `trend_filter_strict` | `n >= 1` | 1（`close > MA`，相等/容差内为 0；见 Factor 契约） |
 | `rotation_score` | `short`, `long`, `vol`, `w_s`, `w_l`, `w_v`, optional `trend` | 2 |
 
 Windows, input `close`, availability propagation, missing/status rules and
@@ -308,11 +309,14 @@ summary = prajna.read_run(
   Universe members and venue mismatches raise `ValueError`. Valid selections
   with no matching dates return a schema-preserving empty table.
 - `Factor(kind, params)`: frozen Rust declaration. Kinds are `momentum`,
-  `volatility`, `trend_filter` (each `{"n": <integer>}`), and `rotation_score`
-  (`short`, `long`, `vol`, `w_s`, `w_l`, `w_v`, optional `trend`).
-  Unknown kinds/parameters and invalid windows/numbers raise `ValueError`.
-  Computation, versions, missing rules and availability propagation remain
-  those of Rust's [Factor registry](../prajna-research/src/factor.rs).
+  `volatility`, `trend_filter`, `trend_filter_strict` (each `{"n": <integer>}`),
+  and `rotation_score` (`short`, `long`, `vol`, `w_s`, `w_l`, `w_v`, optional
+  `trend`). `trend_filter_strict` is the #299 strict `close > MA` definition:
+  equality (including a relative numeric tolerance for non-exactly-representable
+  prices) is not above, unlike `trend_filter`'s `>=`. Unknown kinds/parameters
+  and invalid windows/numbers raise `ValueError`. Computation, versions, missing
+  rules and availability propagation remain those of Rust's
+  [Factor registry](../prajna-research/src/factor.rs).
 - `read_factor(lake, dsv, universe, venue, factor, *, availability_assumption="none")`:
   reads or computes the **entire DSV** for the stored Universe using the same
   `FactorCache::get_or_compute` and `FactorKey::for_tree` as the CLI. The explicit

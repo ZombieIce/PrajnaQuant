@@ -9,7 +9,7 @@ use prajna_research::{
     compute,
     factor::{
         AvailabilityAssumption, Factor, FactorKind, MomentumParams, RotationScoreParams,
-        TrendFilterParams, VolatilityParams,
+        TrendFilterParams, TrendFilterStrictParams, VolatilityParams,
     },
     load_panel,
 };
@@ -61,6 +61,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Factor::new(FactorKind::Momentum, MomentumParams { n: 2 })?,
         Factor::new(FactorKind::Volatility, VolatilityParams { n: 2 })?,
         Factor::new(FactorKind::TrendFilter, TrendFilterParams { n: 2 })?,
+        Factor::new(
+            FactorKind::TrendFilterStrict,
+            TrendFilterStrictParams { n: 2 },
+        )?,
         Factor::new(
             FactorKind::RotationScore,
             RotationScoreParams {

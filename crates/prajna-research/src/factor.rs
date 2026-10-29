@@ -150,7 +150,7 @@ pub fn values_schema() -> ValuesSchema {
 /// | [`Momentum`](Self::Momentum) | `close_t / close_(t-n) - 1`; larger values indicate stronger momentum. |
 /// | [`Volatility`](Self::Volatility) | Sample standard deviation of `n` consecutive close-to-close returns; the composite subtracts `w_v * volatility`. |
 /// | [`TrendFilter`](Self::TrendFilter) | `close_t >= mean(close_(t-n+1..t))`, yielding 1 or 0; zero filters a composite score. |
-/// | [`TrendFilterStrict`](Self::TrendFilterStrict) | `close_t > mean(close_(t-n+1..t))`, yielding 1 or 0; equality is 0. Added by Issue #299 so the Spec's strict `close > MA` never rewrites TrendFilter v1. Research only; not a RotationScore dependency. |
+/// | [`TrendFilterStrict`](Self::TrendFilterStrict) | `close_t > mean(close_(t-n+1..t))`, yielding 1 or 0; equality is 0. Decimal prices are f64, so equality uses a documented `1e-12 * max(1, \|close\|, \|mean\|)` relative tolerance. Added by Issue #299 so the Spec's strict `close > MA` never rewrites TrendFilter v1. Research only; not a RotationScore dependency. |
 /// | [`RotationScore`](Self::RotationScore) | `w_s * momentum(short) + w_l * momentum(long) - w_v * volatility(vol)`; larger scores rank higher. |
 ///
 /// `RotationScore` propagates dependency statuses in the order

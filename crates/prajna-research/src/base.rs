@@ -11,6 +11,14 @@ use crate::{
     factor::{AvailabilityAssumption, Factor, FactorError, FactorParams, FactorStatus},
 };
 
+/// Relative equality tolerance for `TrendFilterStrict`. Adjusted/raw prices are
+/// decimal strings parsed into f64, so an exactly-equal decimal moving average
+/// is usually not representable as an exact f64 mean. Values within
+/// `1e-12 * max(1, |close|, |mean|)` are treated as equal ("not above").
+/// `TrendFilter` v1 keeps its raw `>=` comparison so old identities/results stay
+/// unchanged.
+const STRICT_TREND_RELATIVE_TOLERANCE: f64 = 1e-12;
+
 /// Evaluate a base factor for the sorted, unique Universe members over every Session.
 /// Only required historical closes contribute to validity and availability.
 /// Composite factors and persistent caching are intentionally separate contracts.
@@ -135,9 +143,18 @@ pub fn compute_base(
             })?;
             let mean = sum / lit(f64::from(n));
             // TrendFilter v1 keeps its documented `>=`; #299's strict kind treats
-            // an exact moving-average equality as not above (`>`).
+            // an exact moving-average equality as not above (`>`). A documented
+            // relative tolerance makes decimal equality survive f64 mean rounding.
             let above = if matches!(factor.params(), FactorParams::TrendFilterStrict(_)) {
-                col("close").gt(mean)
+                // max(1, |close|, |mean|) without an `abs` expression feature.
+                let scale = max_horizontal(vec![
+                    col("close"),
+                    -col("close"),
+                    mean.clone(),
+                    -mean.clone(),
+                    lit(1.0),
+                ])?;
+                col("close").gt(mean + scale * lit(STRICT_TREND_RELATIVE_TOLERANCE))
             } else {
                 col("close").gt_eq(mean)
             };

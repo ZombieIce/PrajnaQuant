@@ -523,3 +523,79 @@ fn strict_trend_equality_warmup_missing_and_adjusted_binding_are_independent() {
         }
     }
 }
+
+/// Submits through the production `prajna-momentum` binary (JSON stdin/stdout).
+fn run_production_cli(root: &Path, request: Value) -> Value {
+    use std::{
+        io::Write,
+        process::{Command as Process, Stdio},
+    };
+    let mut child = Process::new(env!("CARGO_BIN_EXE_prajna-momentum"))
+        .args(["--lake", root.to_str().unwrap()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            json!({"op":"submit","request":request})
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[test]
+fn strict_trend_non_representable_equal_means_are_zero_through_production_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let mut request = inputs(root);
+    let version = request["adjusted"]["510300.XSHG"].as_str().unwrap();
+    let mut input =
+        serde_json::to_value(prajna_data::adjusted_series::read(root, version).unwrap()).unwrap();
+    // 3.826 is not exactly representable in binary64; every Session's decimal
+    // close equals the decimal mean, so the strict kind must persist 0 at every
+    // window (Issue #299 review B2).
+    for row in input["rows"].as_array_mut().unwrap() {
+        for field in ["open", "high", "low", "close"] {
+            row[field] = json!("3.826");
+        }
+    }
+    let constant =
+        prajna_data::adjusted_series::import(root, &serde_json::to_vec(&input).unwrap()).unwrap();
+    request["adjusted"]["510300.XSHG"] = json!(constant);
+    request["factor"] = json!("trend_filter_strict");
+    request["windows"] = json!([1, 2, 3, 20, 60, 120]);
+    let value = run_production_cli(root, request);
+    let report = &value["data"]["report"];
+    assert_eq!(report["direction"], "binary_close_above_ma");
+    let factors = report["factors"].as_array().unwrap();
+    assert_eq!(factors.len(), 6);
+    for (factor, n) in factors.iter().zip([1_usize, 2, 3, 20, 60, 120]) {
+        let rows = factor["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 130);
+        for (i, row) in rows.iter().enumerate() {
+            if i + 1 < n {
+                assert_eq!(row["status"], "insufficient_window", "window {n} row {i}");
+                assert!(row["value"].is_null());
+            } else {
+                assert_eq!(row["status"], "ok", "window {n} row {i}");
+                assert_eq!(
+                    row["value"].as_f64().unwrap(),
+                    0.0,
+                    "window {n} row {i} must be equal, not above"
+                );
+            }
+        }
+    }
+}
