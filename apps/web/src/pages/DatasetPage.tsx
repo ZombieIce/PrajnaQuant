@@ -11,6 +11,20 @@ type AdjustedCatalog = { versions: Adjustment[]; invalid_versions: unknown[]; er
 type Detail = { adjusted_series?: AdjustedCatalog; dsv: string; created_at: string; normalizer_id: string; normalizer_version: string; coverage: unknown; venues: unknown[]; instruments: Instrument[]; warnings: string[] };
 type Bar = { trade_date: string; open: string; high: string; low: string; close: string; volume: string | null; amount: string | null; available_at: string | null; source: string | null; source_raw_sha256?: string | null; reference_price?: string | null };
 type Bars = { dsv: string; total: number; offset: number; next_offset: number | null; price_adjustment: string; price_unit: string; volume_unit: string; amount_unit: string; items: Bar[]; warnings: string[] };
+type ActionState = 'covered' | 'no_events' | 'missing_facts' | 'unknown';
+type ActionScope = { instrument_id: string; kind: string; start: string; end: string; state: ActionState; reason: string; facts: number; incomplete_facts: number };
+type ActionVersion = { version: string; observed_at: string; scopes: ActionScope[] };
+type ActionsCatalog = { versions: ActionVersion[]; invalid_versions: { version: string; error: string }[] };
+type ActionSource = { source_id: string; source_version: string; source_ref: string };
+type ActionFact = { event_id: string; kind: string; record_date: string | null; ex_date: string | null; pay_date: string | null; effective_date: string | null; cash_per_share: string | null; share_ratio: string | null; source: ActionSource | null; available_at: string | null };
+type ActionCoverage = { instrument_id: string; kind: string; start: string; end: string; state: ActionState; reason: string; source: ActionSource | null; available_at: string | null; facts: ActionFact[] };
+type ActionDetail = { version: string; instrument_id: string; start: string; end: string; state: ActionState; coverage: ActionCoverage | null; observed_at: string; missing: { event_id: string; fields: string[] }[] | null; notice: string };
+const actionStates: Record<ActionState, string> = { covered: '已覆盖', no_events: '明确无事件', missing_facts: '缺事实', unknown: '未知' };
+const actionKinds: Record<string, string> = { dividend: '分红', share_conversion: '拆分/折算', liquidation: '清算' };
+const actionState = (state: ActionState) => actionStates[state] ?? state;
+const scopeText = (scope: ActionScope) => `${actionState(scope.state)} · ${scope.start} 至 ${scope.end}`;
+const sourceText = (source: ActionSource | null) => source ? `${source.source_id} @ ${source.source_version} · ${source.source_ref}` : '缺失（未提供来源）';
+const present = (value: string | null) => value ?? '缺失（未提供）';
 const known = (value: string | null | undefined) => value ?? 'Unknown（未知）';
 const lifecycle = (field: Field) => field.state === 'known' ? known(field.value) : `${field.state} · ${known(field.reason)}`;
 const json = (value: unknown) => JSON.stringify(value, null, 2);
@@ -55,7 +69,118 @@ export default function DatasetPage() {
     {detailError && <ErrorBox>{detailError}</ErrorBox>}
     {dsv && !detail && !detailError && <p role="status">正在读取固定版本…</p>}
     {detail?.dsv === dsv && <DatasetDetail key={dsv} detail={detail} />}
+    <ActionsCoverage />
   </main></>;
+}
+
+function ActionsCoverage() {
+  const [catalog, setCatalog] = useState<ActionsCatalog | null>(null);
+  const [catalogError, setCatalogError] = useState('');
+  const [refresh, setRefresh] = useState(0);
+  const [version, setVersion] = useState('');
+  const [instrument, setInstrument] = useState('');
+  const [scopeKey, setScopeKey] = useState('');
+  const [start, setStart] = useState('');
+  const [end, setEnd] = useState('');
+  const [request, setRequest] = useState<{ start: string; end: string } | null>(null);
+  const [detail, setDetail] = useState<ActionDetail | null>(null);
+  const [detailError, setDetailError] = useState('');
+  useEffect(() => {
+    const controller = new AbortController();
+    setCatalog(null); setCatalogError('');
+    api<Envelope<ActionsCatalog>>('/api/v1/corporate-actions', { signal: controller.signal })
+      .then((r) => { if (!controller.signal.aborted) setCatalog(r.data); })
+      .catch((e: Error) => { if (!controller.signal.aborted) setCatalogError(e.message); });
+    return () => controller.abort();
+  }, [refresh]);
+  useEffect(() => {
+    const controller = new AbortController();
+    setDetail(null); setDetailError('');
+    if (!version || !instrument || !request) return () => controller.abort();
+    const params = new URLSearchParams({ instrument, start: request.start, end: request.end });
+    api<Envelope<ActionDetail>>(`/api/v1/corporate-actions/${encodeURIComponent(version)}?${params}`, { signal: controller.signal })
+      .then((r) => { if (!controller.signal.aborted) setDetail(r.data); })
+      .catch((e: Error) => { if (!controller.signal.aborted) setDetailError(e.message); });
+    return () => controller.abort();
+  }, [version, instrument, request]);
+  const selected = catalog?.versions.find((item) => item.version === version);
+  const scopes = selected?.scopes ?? [];
+  const instruments = [...new Set(scopes.map((scope) => scope.instrument_id))];
+  const matching = scopes.filter((scope) => scope.instrument_id === instrument);
+  const reset = () => { setInstrument(''); setScopeKey(''); setStart(''); setEnd(''); setRequest(null); setDetail(null); setDetailError(''); };
+  const choose = (next: string) => {
+    setInstrument(next); setScopeKey(''); setDetail(null); setDetailError(''); setRequest(null);
+    const first = scopes.find((scope) => scope.instrument_id === next);
+    if (!first) { setStart(''); setEnd(''); return; }
+    setScopeKey(`${first.start}/${first.end}`); setStart(first.start); setEnd(first.end); setRequest({ start: first.start, end: first.end });
+  };
+  const chooseScope = (key: string) => {
+    const scope = matching.find((item) => `${item.start}/${item.end}` === key);
+    if (!scope) return;
+    setScopeKey(key); setStart(scope.start); setEnd(scope.end); setDetail(null); setDetailError('');
+    setRequest({ start: scope.start, end: scope.end });
+  };
+  return <Panel title="公司行动事实覆盖">
+    <p>只读查看已持久化的固定事实版本；按版本、证券和声明区间显示已覆盖、明确无事件、缺事实和未知。预览不发布、下载或重算事实，<code>observed_at</code> 只是本地采集时间。</p>
+    <button type="button" className="secondary" onClick={() => { setVersion(''); reset(); setRefresh((n) => n + 1); }}>刷新行动事实</button>
+    {catalogError && <ErrorBox>{catalogError}</ErrorBox>}
+    {!catalog && !catalogError && <p role="status">正在读取公司行动事实版本…</p>}
+    {catalog && <>
+      <label>公司行动事实版本<select aria-label="公司行动事实版本" value={version} onChange={(e) => { if (e.target.value !== version) reset(); setVersion(e.target.value); }}>
+        <option value="">请选择具体版本</option>
+        {catalog.versions.map((item) => <option key={item.version} value={item.version}>{item.observed_at} · {item.scopes.length} 条范围 · {item.version}</option>)}
+      </select></label>
+      {!catalog.versions.length && <p role="status">没有可读取的公司行动事实版本。</p>}
+      {catalog.invalid_versions.length > 0 && <ErrorBox>存在不可读取的公司行动事实版本；它们未列入可选版本。<pre>{json(catalog.invalid_versions)}</pre></ErrorBox>}
+    </>}
+    {selected && <>
+      <p>固定版本 <code>{selected.version}</code> · 采集时间 {selected.observed_at}（不是历史可用时刻）</p>
+      <label>行动事实证券<select aria-label="行动事实证券" value={instrument} onChange={(e) => choose(e.target.value)}>
+        <option value="">请选择证券</option>
+        {instruments.map((id) => <option key={id} value={id}>{id}</option>)}
+      </select></label>
+      {!instruments.length && <p role="status">该版本没有声明任何证券；未知不等于无事件。</p>}
+      {instrument && !matching.length && <p role="status">该版本没有该证券的声明覆盖；不拼接其他范围，也不推断为无事件。</p>}
+      {matching.length > 0 && <>
+        <label>声明覆盖区间<select aria-label="声明覆盖区间" value={scopeKey} onChange={(e) => chooseScope(e.target.value)}>
+          {matching.map((scope) => <option key={`${scope.start}/${scope.end}`} value={`${scope.start}/${scope.end}`}>{scopeText(scope)} · {scope.reason} · {scope.facts} 条事件{scope.incomplete_facts ? `（${scope.incomplete_facts} 条缺项）` : ''}</option>)}
+        </select></label>
+        <form className="market-range" onSubmit={(e) => { e.preventDefault(); if (start && end) { setDetail(null); setDetailError(''); setRequest({ start, end }); } }}>
+          <label>开始日期<input aria-label="行动事实开始日期" type="date" value={start} onChange={(e) => setStart(e.target.value)} /></label>
+          <label>结束日期<input aria-label="行动事实结束日期" type="date" value={end} onChange={(e) => setEnd(e.target.value)} /></label>
+          <button type="submit" className="primary" disabled={!start || !end}>读取固定版本</button>
+        </form>
+        {detailError && <ErrorBox>{detailError}</ErrorBox>}
+        {!detail && !detailError && request && <p role="status">正在读取固定行动事实版本…</p>}
+        {detail?.version === version && <ActionDetailPanel detail={detail} />}
+      </>}
+    </>}
+  </Panel>;
+}
+
+function ActionDetailPanel({ detail }: { detail: ActionDetail }) {
+  const scope = detail.coverage;
+  const missing = (detail.missing ?? []).filter((item) => item.fields.length > 0);
+  return <div data-testid="action-detail">
+    <p>固定版本 <code>{detail.version}</code> · 证券 {detail.instrument_id} · 区间 {detail.start} 至 {detail.end} · 状态：<b>{actionState(detail.state)}</b></p>
+    {detail.state === 'unknown' && !scope && <p role="status">该区间不完整落在任何声明覆盖内，返回未知；没有拼接或推断为无事件。</p>}
+    {scope && <>
+      <p>声明区间 {scope.start} 至 {scope.end}；原因：{scope.reason}</p>
+      <p>声明来源：{sourceText(scope.source)}；声明历史可用时刻：{present(scope.available_at)}</p>
+      <p>版本采集时间 {detail.observed_at} 只是本地观察，不替代历史发布时间。</p>
+      {detail.state === 'no_events' && <p role="status">来源明确声明该证券/区间无公司行动事件；这不是公告全集完备证明。</p>}
+      {detail.state === 'missing_facts' && <p role="status">该范围存在事实缺口；缺失字段不显示为已具备。</p>}
+      {missing.length > 0 && <p>缺项：{missing.map((item) => `${item.event_id} → ${item.fields.join('、')}`).join('；')}</p>}
+      {scope.facts.length ? <div style={{ overflowX: 'auto' }}><table>
+        <thead><tr>{['事件', '类型', '登记日', '除权日', '发放日', '生效日', '每股现金', '折算比例', '来源', '历史可用时刻', '缺项'].map((x) => <th key={x}>{x}</th>)}</tr></thead>
+        <tbody>{scope.facts.map((fact) => {
+          const fields = missing.find((item) => item.event_id === fact.event_id)?.fields ?? [];
+          return <tr key={fact.event_id}>{[fact.event_id, actionKinds[fact.kind] ?? fact.kind, present(fact.record_date), present(fact.ex_date), present(fact.pay_date), present(fact.effective_date), present(fact.cash_per_share), present(fact.share_ratio), sourceText(fact.source), present(fact.available_at), fields.length ? `缺失：${fields.join('、')}` : '—'].map((value, index) => <td key={index}>{value}</td>)}</tr>;
+        })}</tbody>
+      </table></div> : <p role="status">该声明范围没有已提供事件；缺失字段不补造。</p>}
+    </>}
+    <p>{detail.notice}</p>
+  </div>;
 }
 
 function DatasetDetail({ detail }: { detail: Detail }) {

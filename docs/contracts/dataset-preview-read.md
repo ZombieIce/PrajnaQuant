@@ -94,12 +94,55 @@ version through the [adjusted research series](adjusted-research-series.md)
 reader. That response is an adjusted sibling payload rather than a raw Bars
 superset; the contract lists the omitted raw-only fields.
 
+## Corporate-action fact coverage
+
+The same read-only command lists persisted #360 corporate-action fact versions
+and reads one fixed version, security and closed range. It never publishes,
+downloads, recalculates, rewrites a fact file or chooses a latest version.
+
+```sh
+prajna-preview-dataset actions-catalog --root <LOCAL>
+prajna-preview-dataset actions --root <LOCAL> --version <CAF_VERSION> \
+  --instrument <INSTRUMENT_ID> --start YYYY-MM-DD --end YYYY-MM-DD
+```
+
+`actions-catalog` reads `<root>/corporate-facts/*.json` and revalidates every
+version through the production fact reader. Each summary carries the fixed
+`caf:sha256:` version, its local `observed_at` and each declared scope's
+instrument identity, kind, closed range, four-state `state`, reason, event count
+and incomplete-event count. Versions are ordered by `observed_at` descending and
+then version id; an old or superseded revision stays listed, and no version is
+marked latest. A missing `--root` directory is a root error, not an empty version
+list; an empty or absent `corporate-facts/` directory inside an existing root
+returns an empty list. A version whose bytes no longer match its identity or no longer satisfy the
+contract is reported in `invalid_versions` with its identity and error while
+valid versions in the same root remain readable.
+
+`actions` requires an explicit version, instrument and closed range, and forwards
+them to `corporate_facts::query`. The response is #360's scoped payload inside
+the same `schema_version`/`data` envelope: state, the original declared scope
+(including its facts and source/history availability), `missing` field names per
+event, the version's `observed_at` and the read-only notice. A range not wholly
+inside one declared scope is `unknown`; ranges are never stitched together and
+missing dates/amounts/source/availability remain null rather than being shown as
+present. Events are returned for the declared scope, not clipped to the queried
+sub-range. `observed_at` is local observation time, not historical availability.
+
+The local service exposes the catalog at `/api/v1/corporate-actions` and the
+scoped read at `/api/v1/corporate-actions/{version}?instrument=&start=&end=`,
+with the same Host/HTTP-Origin restriction, no-store responses, argv-only CLI
+call and status mapping as the Dataset routes (invalid input 400, missing version
+404, unavailable root/CLI 503, corrupt version or I/O failure 500, invalid CLI
+envelope 502). The `/datasets` page renders this independently from Dataset
+browsing, so a missing or corrupt fact version cannot hide unrelated Dataset or
+factor views.
+
 ## Limits and compatibility
 
 - Reads whole Parquet tables into memory per request; no pushdown or cache is
   claimed. `catalog` reads and validates all required tables for every DSV, so
   its cost grows with the lake size. Bars are paged after the Dataset is read.
-- Raw unadjusted Bars remain the default. The optional [adjusted research series](adjusted-research-series.md) contract exposes explicit imported supplier versions through `--adjusted-version`; its Bars payload is a documented sibling, not an additive superset. Corporate actions, execution status and factor/label/ledger results remain outside this preview entry.
+- Raw unadjusted Bars remain the default. The optional [adjusted research series](adjusted-research-series.md) contract exposes explicit imported supplier versions through `--adjusted-version`; its Bars payload is a documented sibling, not an additive superset. Corporate-action facts are readable only through the separate coverage modes above; this preview entry does not derive, publish or apply them. Execution status and factor/label/ledger results remain outside this preview entry.
 - The existing MVP-6 SZSE Normalizers, readers, results and archive identities
   are unchanged; this entry rejects the archive root rather than mixing them.
 - Checked-in tests publish synthetic XSHG/XSHE stock and ETF Datasets through

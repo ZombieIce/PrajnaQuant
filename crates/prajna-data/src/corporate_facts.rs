@@ -306,10 +306,8 @@ pub fn import(directory: &Path, bytes: &[u8]) -> Result<String> {
     Ok(id)
 }
 
-/// Verifies persisted bytes and contract on every read, including incomplete versions.
-pub fn read(directory: &Path, id: &str) -> Result<Input> {
-    let root = root(directory)?;
-    let bytes = fs::read(path(&root, id)?).map_err(|error| {
+fn read_root(root: &Path, id: &str) -> Result<Input> {
+    let bytes = fs::read(path(root, id)?).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             PreviewError::NotFound("fact version does not exist".into())
         } else {
@@ -322,6 +320,99 @@ pub fn read(directory: &Path, id: &str) -> Result<Input> {
     let input: Input = serde_json::from_slice(&bytes).map_err(|_| corrupt())?;
     validate(&input).map_err(|_| corrupt())?;
     Ok(input)
+}
+
+/// Verifies persisted bytes and contract on every read, including incomplete versions.
+pub fn read(directory: &Path, id: &str) -> Result<Input> {
+    read_root(&root(directory)?, id)
+}
+
+/// Lists persisted fact versions with their declared scopes. Read-only and no
+/// implicit latest: every version, including a superseded revision, is returned.
+/// Invalid and foreign files are isolated instead of failing the whole view.
+pub fn catalog(directory: &Path) -> Result<Value> {
+    let root = root(directory)?;
+    if !root.is_dir() {
+        return Err(PreviewError::Root(
+            "fact root does not exist or is not a directory".into(),
+        ));
+    }
+    let directory = root.join("corporate-facts");
+    let entries = match fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(json!({
+                "schema_version": 1,
+                "versions": [],
+                "invalid_versions": [],
+                "notice": "No persisted fact version exists in this root."
+            }));
+        }
+        Err(error) => return Err(io(error)),
+    };
+    let mut versions = Vec::new();
+    let mut invalid_versions = Vec::new();
+    for entry in entries {
+        let path = entry.map_err(io)?.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
+            invalid_versions.push(json!({
+                "version": path.display().to_string(),
+                "error": "fact version file name is not UTF-8"
+            }));
+            continue;
+        };
+        let id = format!("caf:sha256:{stem}");
+        match read_root(&root, &id) {
+            Ok(input) => {
+                let observed = DateTime::parse_from_rfc3339(&input.observed_at)
+                    .map(|value| value.timestamp())
+                    .unwrap_or_default();
+                versions.push((observed, summarize(&id, &input)));
+            }
+            Err(error) => invalid_versions.push(json!({
+                "version": id,
+                "error": error.to_string()
+            })),
+        }
+    }
+    versions.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| left.1["version"].as_str().cmp(&right.1["version"].as_str()))
+    });
+    invalid_versions.sort_by(|left, right| {
+        left["version"]
+            .as_str()
+            .unwrap_or_default()
+            .cmp(right["version"].as_str().unwrap_or_default())
+    });
+    Ok(json!({
+        "schema_version": 1,
+        "versions": versions.into_iter().map(|(_, summary)| summary).collect::<Vec<_>>(),
+        "invalid_versions": invalid_versions,
+        "notice": "Read-only scoped facts. No latest pointer, publish, download, recalculation or announcement-universe completeness proof."
+    }))
+}
+
+fn summarize(id: &str, input: &Input) -> Value {
+    json!({
+        "version": id,
+        "observed_at": input.observed_at,
+        "scopes": input.coverage.iter().map(|scope| json!({
+            "instrument_id": scope.instrument_id,
+            "kind": scope.kind,
+            "start": scope.start,
+            "end": scope.end,
+            "state": scope.state,
+            "reason": scope.reason,
+            "facts": scope.facts.len(),
+            "incomplete_facts": scope.facts.iter().filter(|fact| !fact.missing().is_empty()).count()
+        })).collect::<Vec<_>>()
+    })
 }
 
 /// A range must fit wholly inside one explicit assertion. Outside/ambiguous

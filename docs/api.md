@@ -10,6 +10,8 @@
 | Dataset | GET /api/v1/datasets | 已发布研究 Dataset 目录；有效版本及隔离的 invalid_manifests，不选择 latest |
 | Dataset | GET /api/v1/datasets/{dsv} | 固定版本的证券、交易条款、生命周期证据、实际 Session/Bar 覆盖及区间缺口 |
 | Dataset | GET /api/v1/datasets/{dsv}/bars?instrument=&start=&end=&limit=&offset=&adjusted_version= | 固定版本/证券 Bars；缺省为原始未复权价，显式 `adjusted_version=adj:sha256:...` 为该版本供应商复权研究价（字段差异见契约）。闭区间日期、默认 250/最多 1000，返回 total/offset/next_offset；定点数为字符串 |
+| Corporate actions | GET /api/v1/corporate-actions | 已持久公司行动事实版本目录（只读、无 latest）；有效版本含 `observed_at` 与逐范围证券/区间/四态/事件计数，坏版本隔离在 `invalid_versions` |
+| Corporate actions | GET /api/v1/corporate-actions/{version}?instrument=&start=&end= | 固定 `caf:sha256:` 版本、证券与闭区间的四态读取；透传 #360 `query`，范围未完整落在单一声明范围返回 unknown，缺日期/金额/来源/历史可用时刻保持 null 并给出字段名 |
 | Factor | GET /api/v1/signals | Implemented；固定信号目录 |
 | Factor | GET /api/v1/signals/{key} | Implemented；单个定义，未知 key 为 404 |
 | Result / Factor | GET /api/research/signals/{key}/report | Implemented；按文件修改时间找最新已保存 report，未运行则 404。报告标注 `calendar_basis`、标签方法、评价状态、coverage/missing 计数；Pearson/Rank IC、分组前瞻收益在截面不足时为 null/空数组。分组收益是标签，不是组合净值 |
@@ -55,6 +57,10 @@ Universe 管理页默认用普通序号显示版本并隐藏 ID/哈希；折叠�
 服务通过 `PRAJNA_DATASET_PREVIEW_CLI`（缺省在 PATH 查找 `prajna-preview-dataset`）调用只读 CLI；无新平台 crate 直接依赖。成功与读取错误保留 schema version 1 的 CLI JSON envelope，成功体为 `{schema_version:1,data:...}`，不会计算因子、填补缺失或触发发布/下载。参数通过 argv 传递，不经 shell；bars 只接受上表参数（`instrument`、`start`、`end`、`limit`、`offset` 及可选 `adjusted_version`），未知参数拒绝。非法输入 400、版本/证券不存在 404、root 或 CLI 不可用 503、manifest/表/IO 失败 500、CLI 协议异常 502，响应不缓存。详细字段/限制见 [读取契约](contracts/dataset-preview-read.md)。
 
 页面不默认选版本/证券；日期筛选与分页固定 DSV，切换选择取消旧请求，错误、空目录、坏版本、缺行情及 Unknown 明示。价格/数量字符串直接展示，生命周期与实际行情起点分开，不将 Session 数量等同可交易覆盖。真实明细仅经本机服务在本机页面展示，禁止转贴到公开渠道。CLI 当前每请求读取整表，catalog 验证所有版本；本票不声称大规模性能或完整真实数据验收。
+
+公司行动事实覆盖复用同一只读 CLI、本机 root 与 Host/Origin 边界：`actions-catalog` 读取 `<dataset-root>/corporate-facts` 的持久事实版本，`actions` 固定版本/证券/闭区间并原样转发 #360 `query`；不发布、下载、重算或选择 latest，坏版本单独列出，四态及缺项不伪装为已具备。页面与 Dataset 浏览相互独立，事实缺口或读取失败只影响该面板。状态码与 Dataset 路由一致；字段和限制见[读取契约](contracts/dataset-preview-read.md#corporate-action-fact-coverage)。
+
+合成生产浏览器验证（T04c 框架，`apps/web/e2e/actions.spec.ts`）经真实 `prajna-corporate-facts import` 发布两条合成事实版本（原始+修订）→ 真实 Axum/CLI → 构建后的 `/datasets` 页面，覆盖四态、修订/旧版、缺项、坏版本、空目录及无关 Dataset 浏览；不 mock 成功响应，也不使用真实事实。
 
 合成生产 API/浏览器验证准备（fixture root 必须尚不存在）：
 

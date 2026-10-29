@@ -59,7 +59,16 @@ prajna-preview-dataset show --root <LOCAL> --dsv <DSV>
 prajna-preview-dataset bars --root <LOCAL> --dsv <DSV> --instrument <ID> \
   [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--limit 1..=1000] [--offset N] \
   [--adjusted-version <ADJ_VERSION>]
+prajna-preview-dataset actions-catalog --root <LOCAL>
+prajna-preview-dataset actions --root <LOCAL> --version <CAF_VERSION> \
+  --instrument <ID> --start YYYY-MM-DD --end YYYY-MM-DD
 ```
+
+`actions-catalog` lists every persisted corporate-action fact version below
+`<LOCAL>/corporate-facts` with its declared scopes and four-state labels, and
+isolates invalid versions; `actions` passes one fixed version, security and
+closed range through the #360 `query` reader. Neither mode publishes, downloads,
+recalculates, chooses a latest version or merges partial ranges into coverage.
 
 Stdout is one JSON envelope (`schema_version` plus `data` or `error`); invalid
 input or not-found exits 2, I/O or integrity failures exit 1. Unknown and missing
@@ -73,7 +82,9 @@ validated. Full fields,
 limits and compatibility: [Dataset preview contract](../../docs/contracts/dataset-preview-read.md).
 The local service exposes this reader at `/api/v1/datasets` and `/datasets`
 with an explicit `serve --dataset-root`; configuration and synthetic checks are
-in [the API guide](../../docs/api.md#已发布研究-dataset-预览).
+in [the API guide](../../docs/api.md#已发布研究-dataset-预览). The same page
+exposes the read-only `/api/v1/corporate-actions` view over persisted fact
+versions; missing facts never hide Dataset or factor browsing.
 
 ## Supplier-adjusted research prices
 
@@ -88,4 +99,4 @@ evidence only. Schema, commands and limits: [contract](../../docs/contracts/adju
 
 ## Offline corporate-action facts
 
-`prajna-corporate-facts import/read` publishes and reads fixed Shanghai/Shenzhen stock/ETF fact versions in an explicit local root. Four scoped states preserve missing amounts/dates/source/history availability; price research stays independent. Commands, fields, scope semantics and compatibility: [ADR 0032](../../docs/decisions/0032-cn-corporate-action-fact-versions.md). Synthetic tests only; page and ledger integration remain separate.
+`prajna-corporate-facts import/read` publishes and reads fixed Shanghai/Shenzhen stock/ETF fact versions in an explicit local root. Four scoped states preserve missing amounts/dates/source/history availability; price research stays independent. Commands, fields, scope semantics and compatibility: [ADR 0032](../../docs/decisions/0032-cn-corporate-action-fact-versions.md). The read-only coverage view is delivered through `/datasets`; synthetic tests only, and ledger integration remains separate.

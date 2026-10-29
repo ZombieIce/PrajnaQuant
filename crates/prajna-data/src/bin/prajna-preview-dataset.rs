@@ -7,11 +7,15 @@
 use std::{collections::BTreeMap, path::PathBuf, process::ExitCode};
 
 use chrono::NaiveDate;
-use prajna_data::dataset_preview::{self, BarsRequest, PreviewError};
+use prajna_data::{
+    corporate_facts,
+    dataset_preview::{self, BarsRequest, PreviewError},
+};
 
-const USAGE: &str = "Usage: prajna-preview-dataset <catalog|show|bars> --root <LOCAL> \
+const USAGE: &str = "Usage: prajna-preview-dataset <catalog|show|bars|actions-catalog|actions> --root <LOCAL> \
 [--dsv <DSV>] [--instrument <ID>] [--start YYYY-MM-DD] [--end YYYY-MM-DD] \
-[--limit <1..=1000>] [--offset <N>] [--adjusted-version <ADJ_VERSION>]";
+[--limit <1..=1000>] [--offset <N>] [--adjusted-version <ADJ_VERSION>] \
+[--version <CAF_VERSION>]";
 
 fn main() -> ExitCode {
     if std::env::args()
@@ -57,6 +61,7 @@ fn run() -> Result<serde_json::Value, PreviewError> {
             "--limit",
             "--offset",
             "--adjusted-version",
+            "--version",
         ]
         .contains(&flag.as_str())
         {
@@ -118,6 +123,39 @@ fn run() -> Result<serde_json::Value, PreviewError> {
                 Some(version) => prajna_data::adjusted_series::bars(&root, &request, version)?,
                 None => dataset_preview::bars(&root, &request)?,
             }))
+        }
+        "actions-catalog" => {
+            if options.keys().any(|flag| flag != "--root") {
+                return Err(invalid(&format!(
+                    "actions-catalog accepts only --root; {USAGE}"
+                )));
+            }
+            Ok(with_data(corporate_facts::catalog(&root)?))
+        }
+        "actions" => {
+            let version = options
+                .get("--version")
+                .ok_or_else(|| invalid("actions requires --version"))?;
+            let instrument = options
+                .get("--instrument")
+                .ok_or_else(|| invalid("actions requires --instrument"))?;
+            if options.keys().any(|flag| {
+                !matches!(
+                    flag.as_str(),
+                    "--root" | "--version" | "--instrument" | "--start" | "--end"
+                )
+            }) {
+                return Err(invalid(&format!(
+                    "actions accepts --version, --instrument, --start and --end; {USAGE}"
+                )));
+            }
+            let start = date_option(&options, "--start")?
+                .ok_or_else(|| invalid("actions requires --start"))?;
+            let end =
+                date_option(&options, "--end")?.ok_or_else(|| invalid("actions requires --end"))?;
+            Ok(with_data(corporate_facts::query(
+                &root, version, instrument, start, end,
+            )?))
         }
         _ => Err(invalid(USAGE)),
     }
