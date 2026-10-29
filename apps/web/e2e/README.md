@@ -105,3 +105,11 @@ keep one worker until fixture ownership supports parallelism. Any new
 output-producing page must use the same `--dataset-root`/`--output` lake as
 `/backtests`, or start its own server, because T04b rejects unequal roots; do not
 weaken that production check for tests.
+
+`adjusted.spec.ts` reuses the production publisher/exporter plus the real
+`prajna-import-adjusted` CLI. It checks pinned revisions, source/assumptions,
+missing endpoints, empty input, raw-price switching and a real corrupt-file API
+error. The exporter imports only synthetic supplier JSON. Rust integration tests
+separately check literal hand-calculated OHLC; browser checks are transport/display
+evidence. Existing Node must support the Playwright ESM config (18.19+); use a
+newer local runtime and `PRAJNA_CHROME_EXECUTABLE` when needed.

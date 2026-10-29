@@ -9,7 +9,7 @@
 | Market | GET /api/v1/daily-bars?instrument_id=&snapshot_id=&start=&end=&limit=&cursor=&adjustment=none | Implemented；稳定 `SH/SZ/BJ:code` 主键、闭区间且最长 3661 自然日、默认 250/最多 1000 行升序分页；回显固定快照 ID/数据及 manifest hash、截止日、原始未复权口径、CNY/股或 CNY/份、股/份成交量与可空 CNY 成交额。`qfq/hfq` 拒绝；不补零、不抽样 high/low。无发布快照 503，坏 hash/身份 409，未知证券 404，参数/游标 400 |
 | Dataset | GET /api/v1/datasets | 已发布研究 Dataset 目录；有效版本及隔离的 invalid_manifests，不选择 latest |
 | Dataset | GET /api/v1/datasets/{dsv} | 固定版本的证券、交易条款、生命周期证据、实际 Session/Bar 覆盖及区间缺口 |
-| Dataset | GET /api/v1/datasets/{dsv}/bars?instrument=&start=&end=&limit=&offset= | 固定版本/证券原始未复权 Bars，闭区间日期、默认 250/最多 1000，返回 total/offset/next_offset；定点数为字符串 |
+| Dataset | GET /api/v1/datasets/{dsv}/bars?instrument=&start=&end=&limit=&offset=&adjusted_version= | 固定版本/证券 Bars；缺省为原始未复权价，显式 `adjusted_version=adj:sha256:...` 为该版本供应商复权研究价（字段差异见契约）。闭区间日期、默认 250/最多 1000，返回 total/offset/next_offset；定点数为字符串 |
 | Factor | GET /api/v1/signals | Implemented；固定信号目录 |
 | Factor | GET /api/v1/signals/{key} | Implemented；单个定义，未知 key 为 404 |
 | Result / Factor | GET /api/research/signals/{key}/report | Implemented；按文件修改时间找最新已保存 report，未运行则 404。报告标注 `calendar_basis`、标签方法、评价状态、coverage/missing 计数；Pearson/Rank IC、分组前瞻收益在截面不足时为 null/空数组。分组收益是标签，不是组合净值 |
@@ -52,7 +52,7 @@ Universe 管理页默认用普通序号显示版本并隐藏 ID/哈希；折叠�
 
 `/datasets` 使用上述独立 Dataset 路由。`serve --dataset-root <LOCAL_LAKE>` 必须显式配置，省略时 API 返回 503 `dataset_root_unconfigured`；不回退 `--output`、旧行情快照或 MVP-6 存档。配置 root 的验证由生产读取入口执行（包括拒绝固定 MVP-6 存档及其后代），不会创建 root。服务仍只绑定 loopback。Dataset 路由独立于旧 permissive CORS：Host 必须匹配实际绑定地址，Origin 缺省（本机 CLI/同源 GET）或与服务打印的 HTTP origin 完全一致才允许；外部/opaque Origin、其他端口和外部 Host 返回 403 JSON/no-store，包含预检，不向外部 origin 授权 CORS。请使用服务打印的地址打开页面；本机别名或独立开发端口不自动受信。该边界只约束新 Dataset 路由，旧路由契约不变。
 
-服务通过 `PRAJNA_DATASET_PREVIEW_CLI`（缺省在 PATH 查找 `prajna-preview-dataset`）调用只读 CLI；无新平台 crate 直接依赖。成功与读取错误保留 schema version 1 的 CLI JSON envelope，成功体为 `{schema_version:1,data:...}`，不会计算因子、填补缺失或触发发布/下载。参数通过 argv 传递，不经 shell；bars 只接受上表参数，未知参数拒绝。非法输入 400、版本/证券不存在 404、root 或 CLI 不可用 503、manifest/表/IO 失败 500、CLI 协议异常 502，响应不缓存。详细字段/限制见 [读取契约](contracts/dataset-preview-read.md)。
+服务通过 `PRAJNA_DATASET_PREVIEW_CLI`（缺省在 PATH 查找 `prajna-preview-dataset`）调用只读 CLI；无新平台 crate 直接依赖。成功与读取错误保留 schema version 1 的 CLI JSON envelope，成功体为 `{schema_version:1,data:...}`，不会计算因子、填补缺失或触发发布/下载。参数通过 argv 传递，不经 shell；bars 只接受上表参数（`instrument`、`start`、`end`、`limit`、`offset` 及可选 `adjusted_version`），未知参数拒绝。非法输入 400、版本/证券不存在 404、root 或 CLI 不可用 503、manifest/表/IO 失败 500、CLI 协议异常 502，响应不缓存。详细字段/限制见 [读取契约](contracts/dataset-preview-read.md)。
 
 页面不默认选版本/证券；日期筛选与分页固定 DSV，切换选择取消旧请求，错误、空目录、坏版本、缺行情及 Unknown 明示。价格/数量字符串直接展示，生命周期与实际行情起点分开，不将 Session 数量等同可交易覆盖。真实明细仅经本机服务在本机页面展示，禁止转贴到公开渠道。CLI 当前每请求读取整表，catalog 验证所有版本；本票不声称大规模性能或完整真实数据验收。
 

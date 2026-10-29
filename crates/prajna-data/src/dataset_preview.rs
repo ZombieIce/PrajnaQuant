@@ -231,6 +231,15 @@ pub fn show(root: &Path, dsv: &str) -> Result<Value, PreviewError> {
         })
         .collect::<Vec<_>>();
     venues.sort_by(|left, right| left["venue"].as_str().cmp(&right["venue"].as_str()));
+    let adjusted_series = match crate::adjusted_series::catalog(&root, &manifest.dsv) {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            warnings.push(format!(
+                "adjusted series catalog unavailable; raw Dataset detail remains readable: {error}"
+            ));
+            json!({"versions": [], "invalid_versions": [], "error": error.to_string()})
+        }
+    };
     Ok(json!({
         "schema_version": PREVIEW_SCHEMA_VERSION,
         "dsv": manifest.dsv,
@@ -240,7 +249,8 @@ pub fn show(root: &Path, dsv: &str) -> Result<Value, PreviewError> {
         "coverage": manifest.provenance.coverage,
         "venues": venues,
         "instruments": instruments,
-        "warnings": warnings
+        "warnings": warnings,
+        "adjusted_series": adjusted_series
     }))
 }
 
@@ -786,7 +796,7 @@ fn kind_label(kind: InstrumentKind) -> &'static str {
     }
 }
 
-fn normalize_dsv(input: &str) -> Result<String, PreviewError> {
+pub(crate) fn normalize_dsv(input: &str) -> Result<String, PreviewError> {
     let hex = input.strip_prefix("dsv:sha256:").unwrap_or(input);
     if hex.len() != 64
         || !hex

@@ -103,6 +103,7 @@ struct BarsQuery {
     end: Option<String>,
     limit: Option<String>,
     offset: Option<String>,
+    adjusted_version: Option<String>,
 }
 
 async fn bars(
@@ -132,6 +133,7 @@ async fn bars(
         ("end", query.end),
         ("limit", query.limit),
         ("offset", query.offset),
+        ("adjusted-version", query.adjusted_version),
     ] {
         if let Some(value) = value {
             args.extend([format!("--{name}"), value]);
@@ -330,6 +332,18 @@ mod tests {
                     "1",
                     "--offset",
                     "1",
+                ],
+            ),
+            (
+                "/api/v1/datasets/synthetic/bars?instrument=510300.XSHG&adjusted_version=adj%3Asha256%3Asynthetic",
+                vec![
+                    "bars",
+                    "--dsv",
+                    "synthetic",
+                    "--instrument",
+                    "510300.XSHG",
+                    "--adjusted-version",
+                    "adj:sha256:synthetic",
                 ],
             ),
         ] {
