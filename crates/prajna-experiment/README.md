@@ -70,6 +70,25 @@ Venue 或显式 lot 越界时整体失败，不静默选第一个 Venue。Run Sp
 `@14`（lot）与 `vector@10`；单 Venue 版本、旧身份与已保存结果不变。Accurate、adapter、PIT 与 Python
 策略仍限单 Venue（多 Venue 仅非 PIT、价格收益、`full_target`）。契约见 [ADR 0028](../../docs/decisions/0028-multi-venue-experiment-run.md)。
 
+## 共同评价窗口与冻结复权研究输入（#297/T08a）
+
+定义新增可选 `adjusted_versions`（逐成员 `adj:sha256`）与 `evaluation`
+（`common-window@1`：`warmup_sessions`、`common_start`/`common_end`、
+`start`/`end`）。两者进入 Experiment/Run 身份；`Experiment::parse` 在执行侧
+重新读取每个版本并校验 raw DSV、证券、窗口覆盖与顺序，失败 fail closed。
+`Experiment::plan(lake)` 从绑定复权序列的真实 Session 覆盖和每个参数组合的
+声明预热计算 `WindowPlan`（共同窗口/最大预热/评价窗口/逐组合可运行/阻断原因）；
+预热缺口只后移评价起点，不删除 Session、不填零、不以原始价替代研究信号。
+
+带 `evaluation` 的 Fast Event/Vector Run 把账本 Panel 切片到评价窗口：预热
+Session 不产生 Decision、Fill 或绩效，结果/Summary 从评价起点开始，窗口末
+Decision 不成交；Buy & Hold 的建仓锚点移到窗口首 Session。成交/估值仍用原始
+Bar，Fast/Vector 语义版本与无窗口旧定义的身份/结果不变。单 Venue 池的选择
+入口必须逐成员绑定复权版本；T04b 单证券未绑定时保留旧路径。完整契约见
+[共同评价窗口](../../docs/contracts/evaluation-window.md) 与
+[ADR 0031](../../docs/decisions/0031-common-evaluation-window-and-adjusted-binding.md)；
+预检/页面由 #356/T08b 承接。
+
 ## MVP-6 离线 PIT S2（#177）
 
 新增、显式选择 `strategy: "s2_pit_rotation"`；旧 `s2_rotation`、Static Universe、

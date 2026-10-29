@@ -109,6 +109,8 @@ share `dsv`, paging, units and per-item
 Limits: all tables/files are loaded in memory; catalog validates each adjusted
 object, so large version catalogs incur repeated reads. There is no adjustment
 collector, strict historical PIT claim, sequential total-return index, cash-flow
-inference, task/Factor integration or real-market validation in this ticket.
-Supplier revisions must be imported explicitly and selected by a new frozen
-research definition. True source/raw documents and production details stay local.
+inference or real-market validation in this ticket. Supplier revisions must be
+imported explicitly and selected by a new frozen research definition.
+[共同评价窗口契约](evaluation-window.md)（T08a #297）现在把逐成员版本绑定到
+selection/Experiment 定义并进入 Run 身份，执行侧重新读取校验；因子/标签消费者
+仍由后续票接线。True source/raw documents and production details stay local.

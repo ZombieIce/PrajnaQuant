@@ -9,7 +9,9 @@ use arrow_array::{
     Array, Date32Array, Decimal128Array, RecordBatch, StringArray, TimestampNanosecondArray,
 };
 use chrono::{Duration, NaiveDate};
-use polars::prelude::{DataFrame, DataType, NamedFrom, Series, TimeUnit, TimeZone};
+use polars::prelude::{
+    BooleanChunked, DataFrame, DataType, NamedFrom, NewChunkedArray, Series, TimeUnit, TimeZone,
+};
 use prajna_data::{
     DataError, ExecutionStatusRow, ManifestError, execution_status_from_record_batch, read_manifest,
 };
@@ -29,6 +31,62 @@ pub struct Panel {
     pub sessions: Vec<PanelSession>,
     pub instruments: Vec<InstrumentId>,
     pub grid: DataFrame,
+}
+
+impl Panel {
+    /// Inclusive Session subset used by a frozen evaluation window.
+    ///
+    /// Sessions are never interpolated or deleted from the original Session axis:
+    /// the returned Panel contains exactly the Sessions `[start, end]` and the
+    /// grid's `session_index` is remapped to the new zero-based axis. Raw prices,
+    /// instrument identity and row order are preserved; a missing Bar stays
+    /// `has_bar = false` instead of becoming a zero or a substituted price.
+    pub fn window(&self, start: NaiveDate, end: NaiveDate) -> Result<Self, PanelError> {
+        let start_index = self
+            .sessions
+            .iter()
+            .position(|session| session.session_date == start)
+            .ok_or_else(|| {
+                invalid_table(
+                    "sessions",
+                    format!("window start {start} is not a Session of this panel"),
+                )
+            })?;
+        let end_index = self
+            .sessions
+            .iter()
+            .position(|session| session.session_date == end)
+            .ok_or_else(|| {
+                invalid_table(
+                    "sessions",
+                    format!("window end {end} is not a Session of this panel"),
+                )
+            })?;
+        if start_index > end_index {
+            return Err(invalid_table("sessions", "window start is after its end"));
+        }
+        let indices = self.grid.column("session_index")?.u32()?;
+        let mut mask = Vec::with_capacity(indices.len());
+        let mut remapped = Vec::new();
+        for index in indices.iter() {
+            let index =
+                index.ok_or_else(|| invalid_table("bars", "panel session_index is null"))? as usize;
+            let in_window = index >= start_index && index <= end_index;
+            mask.push(in_window);
+            if in_window {
+                remapped.push((index - start_index) as u32);
+            }
+        }
+        let mut grid = self
+            .grid
+            .filter(&BooleanChunked::from_slice("window".into(), &mask))?;
+        grid.with_column(Series::new("session_index".into(), remapped).into())?;
+        Ok(Self {
+            sessions: self.sessions[start_index..=end_index].to_vec(),
+            instruments: self.instruments.clone(),
+            grid,
+        })
+    }
 }
 
 pub type ExecutionStatusMap = BTreeMap<(InstrumentId, NaiveDate), ExecutionStatusRow>;

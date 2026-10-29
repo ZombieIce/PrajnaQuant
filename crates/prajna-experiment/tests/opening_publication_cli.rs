@@ -102,7 +102,7 @@ fn production_opening_evidence_cli_chain_matches_hand_calculation_and_gates() {
                     .unwrap(),
             );
             let (mut selection, mut snapshot) =
-                fixture::prepare(&input, venue, InstrumentKind::Etf, gate == "no_bar");
+                fixture::prepare(&input, venue, InstrumentKind::Etf, gate == "no_bar", None);
             // Block all execution opens in negative cases, including retry on S3.
             for fact in snapshot["facts"].as_array_mut().unwrap() {
                 match gate {

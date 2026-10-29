@@ -35,6 +35,21 @@ CLI 返回前必经 `Experiment::parse`，失败不提交任务。成功 stdout 
 错误是 `{schema_version:1,error:{code,message}}`，退出码 2（clap 参数错误使用其标准
 stderr/退出 2）。成功退出 0。HTTP 不传播 stderr。
 
+## 冻结复权研究输入与共同评价窗口（T08a #297）
+
+选择请求新增可选 `adjusted: {"<InstrumentId>": "adj:sha256:<64hex>"}`。**池提交必须
+逐成员绑定**；单证券提交省略时保留上面的 T04b 原始价 Buy & Hold 旧定义与旧身份，
+提供时进入窗口路径。绑定经 T07 `adjusted_series::read` 校验原始 DSV、证券与非空
+序列，缺失/损坏/不符 fail closed，不选 latest、不回退其他版本。窗口按冻结复权
+行覆盖和参数最大预热计算，写入定义的 `adjusted_versions` 与 `evaluation`
+（`common-window@1`），进入 Experiment/Run 身份；`Experiment::parse` 在执行侧
+重新读取校验，Fast/Vector 只评价窗口内 Session（预热无成交/绩效），成交/估值
+仍用原始 Bar。成功 envelope 在窗口路径新增 `adjusted` 与 `window`，错误新增
+`adjusted_version_missing`/`adjusted_series_invalid`/`adjusted_raw_dsv_mismatch`/
+`adjusted_instrument_mismatch`/`adjusted_series_empty`/
+`evaluation_window_not_runnable`。完整语义、窗口算法与兼容边界见
+[共同评价窗口契约](evaluation-window.md)。
+
 ## 证据、持久化与身份
 
 复用 Dataset preview 的正式 manifest/必需表及冻结证据读取，要求证券属于该 DSV、

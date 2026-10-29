@@ -20,7 +20,8 @@ fn main() {
     let mut selections = serde_json::Map::new();
     for venue in ["XSHG", "XSHE"] {
         let input = root.join("synthetic-input").join(venue);
-        let (selection, snapshot) = fixture::prepare(&input, venue, InstrumentKind::Etf, false);
+        let (selection, snapshot) =
+            fixture::prepare(&input, venue, InstrumentKind::Etf, false, None);
         let path = input.join("selection.json");
         fs::write(&path, serde_json::to_vec(&selection).unwrap()).unwrap();
         let receipt = format!("{venue}-receipt.json");

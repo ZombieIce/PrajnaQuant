@@ -50,10 +50,14 @@ pool_store_failed 500，协议异常 502。响应 no-store，按实际本机 Hos
 `pool:{id,version}`，与非空 `instrument` 互斥。只有明确发布序号可消费，没有 latest。
 选择固定 DSV，加载该版本 StaticUniverse，逐成员核对 ETF、真实 venue、生命周期、
 覆盖和正交易增量等现有门禁；不在浏览器计算。池缺版本 404，缺 Dataset 成员 404，
-未知必要证据 422，损坏 500。定义固定 Universe 内容身份、DSV 及全部有效成本，
+未知必要证据 422，损坏 500。**池提交还必须逐成员绑定 T07 adjusted version** 并
+冻结共同评价窗口（`adjusted_versions` + `evaluation`），见
+[共同评价窗口契约](evaluation-window.md)；缺失/损坏/DSV 或证券不符 fail closed。
+定义固定 Universe 内容身份、DSV、逐成员复权版本、评价窗口及全部有效成本，
 通过 `Experiment::parse` 后复用原持久任务提交。成功 selection envelope 增加
-`pool:{id,version,universe,members}` 和 `instruments`，任务 experiment.json 的
-Universe 指向不可变文件，其 label 可追溯池/版本；不会动态解析未来草稿。
+`pool:{id,version,universe,members}`、`instruments`、`adjusted` 与 `window`，
+任务 experiment.json 的 Universe 指向不可变文件，其 label 可追溯池/版本；
+不会动态解析未来草稿。
 
 旧单证券字段、响应与 Universe label/身份不变。此提交仍使用已有 entry-only
 buy-and-hold，只接受单 Venue；沪深混合池可编辑/发布/读取，但该提交返回明确的

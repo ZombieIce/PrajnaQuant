@@ -190,7 +190,7 @@ fn concurrent_processes_do_not_lose_updates_or_overwrite_stale_drafts() {
 fn pool_selection_freezes_old_members_and_dataset_without_changing_legacy_identity() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    let dsv = fixture::prepare(root, true);
+    let (dsv, adjusted) = fixture::prepare_with_adjusted(root, true);
     let registry = command(root, PoolCommand::List {}).unwrap();
     let legacy: Selection = serde_json::from_value(
         json!({"dsv":dsv,"instrument":"510300.XSHG","strategy":"buy_and_hold"}),
@@ -209,10 +209,14 @@ fn pool_selection_freezes_old_members_and_dataset_without_changing_legacy_identi
         json!(["510300.XSHG", "510880.XSHG"]),
         Value::Null,
     );
-    let selection: Selection = serde_json::from_value(
-        json!({"dsv":dsv,"pool":{"id":"dividend","version":2},"strategy":"buy_and_hold"}),
-    )
-    .unwrap();
+    let pool_adjusted = json!({
+        "510300.XSHG": adjusted["510300.XSHG"],
+        "510880.XSHG": adjusted["510880.XSHG"],
+    });
+    let selection: Selection =
+        serde_json::from_value(json!({"dsv":dsv,"pool":{"id":"dividend","version":2},
+            "strategy":"buy_and_hold","adjusted":pool_adjusted}))
+        .unwrap();
     let first = freeze(root, &selection).unwrap();
     Experiment::parse(&first["data"]["definition"].to_string(), root).unwrap();
     assert_eq!(first["data"]["definition"]["venue"], json!("XSHG"));
@@ -220,6 +224,23 @@ fn pool_selection_freezes_old_members_and_dataset_without_changing_legacy_identi
         first["data"]["pool"]["members"].as_array().unwrap().len(),
         2
     );
+    assert_eq!(
+        first["data"]["definition"]["adjusted_versions"],
+        pool_adjusted
+    );
+    assert_eq!(
+        first["data"]["definition"]["evaluation"]["start"],
+        json!("2026-01-05")
+    );
+    assert_eq!(
+        first["data"]["definition"]["evaluation"]["end"],
+        json!("2026-01-07")
+    );
+    assert_eq!(
+        first["data"]["definition"]["evaluation"]["warmup_sessions"],
+        json!(0)
+    );
+    assert_eq!(first["data"]["window"]["runnable"], json!(true));
     change(
         root,
         "save",
