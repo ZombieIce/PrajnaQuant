@@ -38,13 +38,15 @@ if (manifests.length < 4) throw new Error(`Expected preview and selection Datase
 run('cargo', ['test', '-p', 'prajna-experiment', '--test', 'pools', '--locked', '--offline',
   'export_synthetic_pool_fixture', '--', '--ignored', '--exact'], root,
   { PRAJNA_POOL_FIXTURE_ROOT: lake });
+run('cargo', ['test', '-p', 'prajna-experiment', '--test', 'momentum', '--locked', '--offline',
+  'export_momentum_fixture', '--', '--ignored', '--exact'], root, { PRAJNA_MOMENTUM_FIXTURE_ROOT: lake });
 run(bin('prajna-experiment'), ['--help']);
 const log = createWriteStream(join(local, 'server.log'), { flags: 'a' });
 const child = spawn(bin('quant-research'), ['serve', '--address', `127.0.0.1:${process.env.PRAJNA_E2E_PORT}`,
   '--web-dist', join(web, 'dist'), '--dataset-root', lake, '--output', lake,
   '--market-data-dir', join(local, 'market')],
   { cwd: root, env: { ...process.env, PRAJNA_DATASET_PREVIEW_CLI: bin('prajna-preview-dataset'),
-    PRAJNA_EXPERIMENT_CLI: bin('prajna-experiment'), PRAJNA_SELECTION_CLI: bin('prajna-freeze-selection'), PRAJNA_POOLS_CLI: bin('prajna-pools') },
+    PRAJNA_EXPERIMENT_CLI: bin('prajna-experiment'), PRAJNA_SELECTION_CLI: bin('prajna-freeze-selection'), PRAJNA_POOLS_CLI: bin('prajna-pools'), PRAJNA_MOMENTUM_CLI: bin('prajna-momentum') },
     stdio: ['ignore', 'pipe', 'pipe'] });
 child.stdout.pipe(log); child.stderr.pipe(log);
 child.on('error', (error) => { console.error(error); process.exitCode = 1; });

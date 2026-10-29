@@ -90,6 +90,9 @@ pub async fn serve_with_dataset_root(
         output: output.clone(),
     };
     let run_jobs = run_jobs::RunJobApi::start(output.as_ref().clone(), state.universes.clone());
+    let momentum = run_jobs
+        .clone()
+        .momentum_router(dataset_root.clone(), socket.to_string());
     let experiment_results = run_jobs.clone().result_router(socket.to_string());
     let selections = run_jobs
         .clone()
@@ -120,6 +123,7 @@ pub async fn serve_with_dataset_root(
         .merge(market_api::router(Arc::new(market_data_dir)))
         .layer(CorsLayer::permissive())
         .merge(pool_api::router(dataset_root.clone(), socket.to_string()))
+        .merge(momentum)
         .merge(dataset_api::router(dataset_root, socket.to_string()))
         .merge(selections)
         .merge(experiment_results);

@@ -35,6 +35,8 @@ use std::{
 };
 use uuid::Uuid;
 
+#[path = "momentum_api.rs"]
+mod momentum_api;
 #[path = "selection_api.rs"]
 mod selection_api;
 
@@ -343,8 +345,10 @@ impl RunJobApi {
             let Ok(mut task) = serde_json::from_slice::<ExperimentTask>(&bytes) else {
                 continue;
             };
-            if task.task_type != EXPERIMENT_TASK_TYPE
-                || task.task_version != EXPERIMENT_TASK_VERSION
+            if !matches!(
+                task.task_type.as_str(),
+                EXPERIMENT_TASK_TYPE | "prajna_momentum"
+            ) || task.task_version != EXPERIMENT_TASK_VERSION
             {
                 continue;
             }
@@ -538,7 +542,7 @@ impl RunJobApi {
         let now = chrono::Utc::now().to_rfc3339();
         let task = ExperimentTask {
             task_id: Uuid::new_v4(),
-            task_type: EXPERIMENT_TASK_TYPE.into(),
+            task_type: task_type(&request.definition).into(),
             task_version: EXPERIMENT_TASK_VERSION,
             status: ExperimentTaskStatus::Queued,
             stage: "queued".into(),
@@ -872,7 +876,12 @@ impl RunJobApi {
                 QueueItem::ExperimentTask(id) => {
                     let task = store.tasks.get_mut(&id).expect("queued experiment task");
                     task.status = ExperimentTaskStatus::Running;
-                    task.stage = "starting_experiment_cli".into();
+                    task.stage = if task.task_type == "prajna_momentum" {
+                        "starting_momentum_cli"
+                    } else {
+                        "starting_experiment_cli"
+                    }
+                    .into();
                     task.updated_at = chrono::Utc::now().to_rfc3339();
                     let _ = persist_experiment_task(&self.0.output, task);
                     QueuedWork::ExperimentTask(Box::new(task.clone()))
@@ -935,6 +944,12 @@ impl RunJobApi {
             )
         })?;
         validate_experiment_task_request(&request).map_err(|error| error.0)?;
+        if task.task_type != task_type(&request.definition) {
+            return Err(run_error(
+                "task_type_changed",
+                "task type does not match its frozen definition",
+            ));
+        }
         if canonical_experiment_task_hash(&request).map_err(|error| error.0)? != task.request_sha256
         {
             return Err(run_error(
@@ -954,6 +969,19 @@ impl RunJobApi {
             ));
         }
 
+        if task.task_type == "prajna_momentum" {
+            return self.execute_experiment_cli(
+                task,
+                &directory,
+                vec![
+                    "--lake".into(),
+                    self.0.output.as_os_str().to_owned(),
+                    "--input".into(),
+                    definition_path.as_os_str().to_owned(),
+                ],
+                "momentum.stdout",
+            );
+        }
         let result_level = request
             .result_level
             .as_deref()
@@ -1011,7 +1039,14 @@ impl RunJobApi {
         let stdout = fs::File::create(&stdout_path)
             .map_err(|error| run_error("task_output_create_failed", &error.to_string()))?;
         let process_generation = Uuid::new_v4();
-        let mut command = Command::new(&self.0.experiment_cli);
+        let cli = if task.task_type == "prajna_momentum" {
+            std::env::var_os("PRAJNA_MOMENTUM_CLI")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| self.0.experiment_cli.with_file_name("prajna-momentum"))
+        } else {
+            self.0.experiment_cli.clone()
+        };
+        let mut command = Command::new(cli);
         command
             .args(&args)
             .stdin(Stdio::null())
@@ -1065,13 +1100,33 @@ impl RunJobApi {
         self.set_experiment_process_group(task.task_id, None, None)?;
         let stderr = stderr?;
         if let Some(error) = experiment_cli_error(&wait.status, &stderr) {
+            if task.task_type == "prajna_momentum" {
+                if let Ok(bytes) = fs::read(&stdout_path) {
+                    if let Ok(envelope) = serde_json::from_slice::<Value>(&bytes) {
+                        if let (Some(code), Some(message)) = (
+                            envelope["error"]["code"].as_str(),
+                            envelope["error"]["message"].as_str(),
+                        ) {
+                            return Err(run_error(code, message));
+                        }
+                    }
+                }
+            }
             return Err(error);
         }
         let bytes = fs::read(&stdout_path)
             .map_err(|error| run_error("experiment_cli_output_missing", &error.to_string()))?;
-        let result: Value = serde_json::from_slice(&bytes)
+        let mut result: Value = serde_json::from_slice(&bytes)
             .map_err(|error| run_error("experiment_cli_output_invalid", &error.to_string()))?;
-        if result.get("exp").and_then(Value::as_str).is_none()
+        if task.task_type == "prajna_momentum" {
+            let id = result["data"]["id"].as_str().ok_or_else(|| {
+                run_error(
+                    "momentum_result_missing",
+                    "momentum CLI did not return a saved report",
+                )
+            })?;
+            result = json!({"report_id":id});
+        } else if result.get("exp").and_then(Value::as_str).is_none()
             || result.get("exe").and_then(Value::as_str).is_none()
         {
             return Err(run_error(
@@ -1104,9 +1159,19 @@ impl RunJobApi {
         task.process_group_id = process_group_id;
         task.process_group_generation = process_group_generation;
         task.stage = if process_group_id.is_some() {
-            "running_experiment_cli".into()
+            if task.task_type == "prajna_momentum" {
+                "running_momentum_cli"
+            } else {
+                "running_experiment_cli"
+            }
+            .into()
         } else {
-            "reading_experiment_result".into()
+            if task.task_type == "prajna_momentum" {
+                "reading_momentum_report"
+            } else {
+                "reading_experiment_result"
+            }
+            .into()
         };
         task.updated_at = chrono::Utc::now().to_rfc3339();
         persist_experiment_task(&self.0.output, task).map_err(|error| error.0)
@@ -1525,9 +1590,16 @@ fn validate_experiment_task_request(request: &SubmitExperimentTask) -> Result<()
     }
     Ok(())
 }
+fn task_type(definition: &Value) -> &'static str {
+    if definition["op"] == "submit" {
+        "prajna_momentum"
+    } else {
+        EXPERIMENT_TASK_TYPE
+    }
+}
 fn canonical_experiment_task_hash(request: &SubmitExperimentTask) -> Result<String, ApiFailure> {
     let mut value = json!({
-        "task_type": EXPERIMENT_TASK_TYPE,
+        "task_type": task_type(&request.definition),
         "task_version": EXPERIMENT_TASK_VERSION,
         "definition": &request.definition,
     });
@@ -3364,6 +3436,62 @@ mod tests {
             source_ref: "synthetic fixture".into(),
         }
     }
+    #[test]
+    fn momentum_tasks_pin_definitions_deduplicate_recover_and_retain_results() {
+        let (api, _, _dir) = fixture();
+        let request = SubmitExperimentTask {
+            idempotency_key: "momentum-fixed".into(),
+            definition: json!({"op":"submit","request":{"dsv":"synthetic-fixed","windows":[20,60,120],"adjusted":{"510300.XSHG":"fixed"}}}),
+            result_level: None,
+        };
+        let (task, created) = api.submit_experiment_task(request.clone()).unwrap();
+        assert!(created);
+        assert_eq!(task.task_type, "prajna_momentum");
+        let (duplicate, created) = api.submit_experiment_task(request.clone()).unwrap();
+        assert!(!created);
+        assert_eq!(duplicate.task_id, task.task_id);
+        let mut changed = request.clone();
+        changed.definition["request"]["windows"] = json!([1]);
+        assert_eq!(
+            api.submit_experiment_task(changed).unwrap_err().0.code,
+            "idempotency_conflict"
+        );
+        let directory = experiment_task_dir(&api.0.output, task.task_id);
+        assert_eq!(
+            read_experiment_request(&directory).unwrap().definition,
+            request.definition
+        );
+        api.recover();
+        assert!(matches!(
+            api.get_experiment_task(task.task_id).unwrap().status,
+            ExperimentTaskStatus::Interrupted
+        ));
+        let mut running = task.clone();
+        running.status = ExperimentTaskStatus::Running;
+        persist_experiment_task(&api.0.output, &running).unwrap();
+        api.recover();
+        assert!(matches!(
+            api.get_experiment_task(task.task_id).unwrap().status,
+            ExperimentTaskStatus::Interrupted
+        ));
+        let mut completed = task.clone();
+        completed.status = ExperimentTaskStatus::Succeeded;
+        completed.result = Some(json!({"report_id":"synthetic-saved-report"}));
+        persist_experiment_task(&api.0.output, &completed).unwrap();
+        api.recover();
+        let restored = api.get_experiment_task(task.task_id).unwrap();
+        assert!(matches!(restored.status, ExperimentTaskStatus::Succeeded));
+        assert_eq!(restored.result, completed.result);
+        let mut failed = task;
+        failed.status = ExperimentTaskStatus::Failed;
+        failed.error = Some(run_error("invalid_momentum", "invalid window"));
+        persist_experiment_task(&api.0.output, &failed).unwrap();
+        api.recover();
+        let restored = api.get_experiment_task(failed.task_id).unwrap();
+        assert!(matches!(restored.status, ExperimentTaskStatus::Failed));
+        assert_eq!(restored.error.unwrap().code, "invalid_momentum");
+    }
+
     fn fixture() -> (RunJobApi, SubmitRun, tempfile::TempDir) {
         fixture_with_cli(PathBuf::from("prajna-experiment"))
     }

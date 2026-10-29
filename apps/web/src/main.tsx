@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Header, PageErrorBoundary } from './shared';
 import './styles.css';
 
+const MomentumPage = lazy(() => import('./pages/MomentumPage'));
 const FactorDirectory = lazy(() => import('./pages/FactorDirectory'));
 const FactorDetail = lazy(() => import('./pages/FactorDetail'));
 const StrategyDirectory = lazy(() => import('./pages/StrategyDirectory'));
@@ -15,7 +16,7 @@ const BacktestsPage = lazy(() => import('./pages/BacktestsPage'));
 
 function Page() {
   const path = location.pathname;
-  const route = path === '/pools' ? <PoolsPage /> : path === '/backtests' ? <BacktestsPage />
+  const route = path === '/research/momentum' ? <MomentumPage /> : path === '/pools' ? <PoolsPage /> : path === '/backtests' ? <BacktestsPage />
     : path === '/datasets' ? <DatasetPage />
     : path === '/market' ? <MarketPage />
     : path === '/factors' ? <FactorDirectory />
