@@ -178,7 +178,10 @@ fn future_changes_preserve_past_missing_and_binding_are_explicit() {
 #[test]
 #[ignore = "explicit synthetic browser fixture export"]
 fn export_momentum_fixture() {
-    let root = std::path::PathBuf::from(std::env::var_os("PRAJNA_MOMENTUM_FIXTURE_ROOT").unwrap());
+    let temporary = tempfile::tempdir().unwrap();
+    let root = std::env::var_os("PRAJNA_MOMENTUM_FIXTURE_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| temporary.path().to_owned());
     let request = inputs(&root);
     std::fs::write(
         root.join("synthetic-momentum-request.json"),
@@ -268,4 +271,64 @@ fn research_store_rejects_symbolic_links() {
     std::os::unix::fs::symlink(external.path(), dir.path().join("momentum-research")).unwrap();
     assert!(submit(dir.path(), request).is_err());
     assert_eq!(std::fs::read_dir(external.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn mixed_sign_and_constant_histograms_count_every_valid_sample_once() {
+    for prices in [[1, 5, 2], [2, 2, 2], [5, 1, 2]] {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let dsv = fixture::prepare(root, true);
+        let version = fixture::import_adjusted(
+            root,
+            &dsv,
+            "510300.XSHG",
+            "2026-01-05",
+            "2026-01-07",
+            &["2026-01-05", "2026-01-06", "2026-01-07"],
+        );
+        let mut input =
+            serde_json::to_value(prajna_data::adjusted_series::read(root, &version).unwrap())
+                .unwrap();
+        for (row, price) in input["rows"].as_array_mut().unwrap().iter_mut().zip(prices) {
+            for field in ["open", "high", "low", "close"] {
+                row[field] = json!(price.to_string());
+            }
+        }
+        let version =
+            prajna_data::adjusted_series::import(root, &serde_json::to_vec(&input).unwrap())
+                .unwrap();
+        let result=submit(root,json!({"dsv":dsv,"instrument":"510300.XSHG","adjusted":{"510300.XSHG":version},"windows":[1]})).unwrap();
+        let factor = &result["data"]["report"]["factors"][0];
+        let bins = factor["distribution"].as_array().unwrap();
+        let expected = [
+            f64::from(prices[1]) / f64::from(prices[0]) - 1.0,
+            f64::from(prices[2]) / f64::from(prices[1]) - 1.0,
+        ];
+        assert_eq!(
+            bins.iter()
+                .map(|b| b["count"].as_u64().unwrap())
+                .sum::<u64>(),
+            2
+        );
+        for (row, value) in factor["rows"].as_array().unwrap()[1..].iter().zip(expected) {
+            assert!((row["value"].as_f64().unwrap() - value).abs() < 1e-12);
+            assert_eq!(
+                bins.iter()
+                    .enumerate()
+                    .filter(|(i, b)| value >= b["low"].as_f64().unwrap()
+                        && if *i == 9 {
+                            value <= b["high"].as_f64().unwrap()
+                        } else {
+                            value < b["high"].as_f64().unwrap()
+                        })
+                    .count(),
+                1
+            );
+        }
+        assert_eq!(
+            bins[9]["high"].as_f64().unwrap(),
+            expected[0].max(expected[1])
+        );
+    }
 }

@@ -326,7 +326,11 @@ fn submit(root: &Path, mut request: Request) -> Result<Value, ResearchError> {
         if let (Some(min), Some(max)) = (valid.first(), valid.last()) {
             for i in 0..10 {
                 let low = min + (max - min) * f64::from(i) / 10.0;
-                let high = min + (max - min) * f64::from(i + 1) / 10.0;
+                let high = if i == 9 {
+                    *max
+                } else {
+                    min + (max - min) * f64::from(i + 1) / 10.0
+                };
                 let count = valid
                     .iter()
                     .filter(|v| **v >= low && if i == 9 { **v <= high } else { **v < high })
@@ -339,7 +343,7 @@ fn submit(root: &Path, mut request: Request) -> Result<Value, ResearchError> {
     let execution =
         crate::ExecutionIdentity::capture(&input_id, std::env::current_dir().map_err(storage)?)
             .map_err(storage)?;
-    let report = json!({"execution":execution,"schema_version":1,"semantics":"momentum-research@1","request":request,"universe":universe.id().map_err(invalid)?,"members":members.iter().map(ToString::to_string).collect::<Vec<_>>(),"sources":sources,"input_binding":binding,"direction":"higher_is_stronger","missing_rule":"preserve Session axis; no fill; Factor status propagation","sample_assumption":"Static Universe; survivor bias; supplier retrospective adjustments; not strict PIT","factors":outputs});
+    let report = json!({"execution":execution,"schema_version":1,"semantics":"momentum-research@2","request":request,"universe":universe.id().map_err(invalid)?,"members":members.iter().map(ToString::to_string).collect::<Vec<_>>(),"sources":sources,"input_binding":binding,"direction":"higher_is_stronger","missing_rule":"preserve Session axis; no fill; Factor status propagation","sample_assumption":"Static Universe; survivor bias; supplier retrospective adjustments; not strict PIT","factors":outputs});
     let id = digest(&serde_json::to_vec(&report).map_err(storage)?);
     let path = location(root, &id)?;
     if path.exists() {
