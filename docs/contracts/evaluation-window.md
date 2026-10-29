@@ -50,7 +50,8 @@ HTTP 与 `/pools` 页面属于 [#356/T08b](https://github.com/ZombieIce/PrajnaQu
    `common_end` = 所有成员最后一个复权行的最小日期。缺失 Session 不删除、
    不压缩日历、不填零，也不以原始价替代研究信号。
 3. **参数预热**：按冻结定义的每个参数组合声明窗口：`buy_and_hold` 0；
-   `ma_crossover` `long_window - 1`；`s2_rotation` `max(long, vol, trend) - 1`。
+   `ma_crossover` `long_window - 1`；`s2_rotation` `max(short, long, vol, trend - 1)`
+   （`trend` 可选；Momentum/Volatility 需要 `n + 1` closes，TrendFilter 需要 `n` closes）。
    Python、PIT 与无声明窗口的策略显式拒绝。预热 Session 数不等于观测数：
    `warmup_sessions = required_observations - 1`。
 4. **参数就绪 Session**：从 `common_start` 起，首个使该参数所需尾随
@@ -87,8 +88,8 @@ HTTP 与 `/pools` 页面属于 [#356/T08b](https://github.com/ZombieIce/PrajnaQu
 latest、不重新推导窗口。`Experiment::parse` 在执行侧重新读取每个绑定版本并
 校验上述条件，同时要求 `common_start <= start < end <= common_end`、每个版本
 的首/末复权行覆盖评价窗口；失败即拒绝定义（fail closed）。没有这两个字段的
-旧定义保持原身份与原行为；只有 `adjusted_versions` 的“计划种子”仅用于
-`Experiment::plan` 推导窗口，持久化选择始终同时写入两者。PIT、多 Venue、
+旧定义保持原身份与原行为；只有 `adjusted_versions`、没有 `evaluation` 的对象不是可执行定义，
+`Experiment::parse`/CLI/执行入口拒绝它（planning-only），持久化选择始终同时写入两者。PIT、多 Venue、
 Python 与 Accurate 定义不支持共同评价窗口。
 
 ## 执行边界

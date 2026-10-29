@@ -572,6 +572,20 @@ impl Experiment {
         self.evaluation.as_ref()
     }
 
+    /// Rejects a research binding without its frozen evaluation window.
+    ///
+    /// `Experiment::parse` already enforces the pair, so this is the defense at
+    /// the execution and persisted-definition seams. Legacy definitions with
+    /// neither object stay valid; any new research-bound definition needs both.
+    fn require_complete_research_inputs(&self) -> Result<(), ExperimentError> {
+        if self.adjusted_versions.is_empty() == self.evaluation.is_none() {
+            return Ok(());
+        }
+        Err(invalid(
+            "an adjusted research binding requires its frozen evaluation window; adjusted-only definitions are planning-only and cannot execute or persist",
+        ))
+    }
+
     /// Plans the common data window, maximum warm-up and shared evaluation window
     /// from the bound adjusted research series and every parameter combination.
     ///
@@ -669,6 +683,7 @@ impl Experiment {
         &self,
         lake_root: impl AsRef<Path>,
     ) -> Result<Vec<RunDefinition>, ExperimentError> {
+        self.require_complete_research_inputs()?;
         if self.pit.is_none() && engine::is_python_strategy(&self.strategy_kind) {
             if let ParameterSpace::Native { combinations, .. } = &self.parameter_space {
                 return engine::python_run_specs(self, combinations);
@@ -818,6 +833,7 @@ impl Experiment {
         threads: usize,
         level: ResultLevel,
     ) -> Result<ExecutionReport, ExperimentError> {
+        self.require_complete_research_inputs()?;
         self.execute_prepared(lake_root, threads, level, None)
     }
 
@@ -1054,6 +1070,7 @@ impl Experiment {
         result_level: ResultLevel,
         threads: usize,
     ) -> Result<StoredExecution, ExperimentError> {
+        self.require_complete_research_inputs()?;
         let lake_root = lake_root.as_ref();
         let identity = ExecutionIdentity::capture(&self.id()?, repository)?;
         storage::promote(
@@ -1391,10 +1408,9 @@ fn parse_research_inputs(
         ));
     }
     let Some(evaluation) = &input.evaluation else {
-        // A research binding without a window is a planning seed: `Experiment::plan`
-        // derives the window from these frozen inputs. Persisted selections always
-        // write both objects.
-        return Ok((frozen, None));
+        return Err(invalid(
+            "adjusted_versions and evaluation must be provided together; an adjusted-only definition is planning-only and cannot execute",
+        ));
     };
     if evaluation.semantic_version != window::EVALUATION_SEMANTIC_VERSION {
         return Err(invalid(format!(

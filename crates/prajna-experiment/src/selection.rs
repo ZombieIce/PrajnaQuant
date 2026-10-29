@@ -6,12 +6,12 @@ use std::{
 
 use prajna_data::dataset_preview::PreviewError;
 use prajna_data::{adjusted_series, dataset_preview};
-use prajna_domain::{InstrumentId, Notional, Quantity};
-use prajna_research::{StaticUniverse, UniverseError};
+use prajna_domain::{InstrumentId, Notional, Quantity, VenueId};
+use prajna_research::{PanelError, StaticUniverse, UniverseError, load_panel_for_venues};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{Experiment, ExperimentError};
+use crate::{Experiment, ExperimentError, window};
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -243,37 +243,115 @@ fn research_inputs(
         }
     }
     for (instrument, version) in &frozen {
-        let research = adjusted_series::read(root, version).map_err(|failure| {
-            let code = match &failure {
-                PreviewError::NotFound(_) => "adjusted_version_missing",
-                _ => "adjusted_series_invalid",
-            };
-            error(code, format!("{version} for {instrument}: {failure}"))
-        })?;
-        if research.raw_dsv != selection.dsv {
-            return Err(error(
-                "adjusted_raw_dsv_mismatch",
-                format!("{version} for {instrument} belongs to another raw DSV"),
-            ));
-        }
-        let research_instrument: InstrumentId = research
-            .instrument_id
-            .parse()
-            .map_err(|e| error("adjusted_instrument_mismatch", format!("{version}: {e}")))?;
-        if &research_instrument != instrument {
-            return Err(error(
-                "adjusted_instrument_mismatch",
-                format!("{version} names another security"),
-            ));
-        }
-        if research.rows.is_empty() {
-            return Err(error(
-                "adjusted_series_empty",
-                format!("{version} for {instrument} has no research rows"),
-            ));
-        }
+        read_adjusted(root, &selection.dsv, instrument, version)?;
     }
     Ok(frozen)
+}
+
+/// Reads and validates one explicit adjusted research version for the selection.
+fn read_adjusted(
+    root: &Path,
+    dsv: &str,
+    instrument: &InstrumentId,
+    version: &str,
+) -> Result<adjusted_series::AdjustedInput, SelectionError> {
+    let research = adjusted_series::read(root, version).map_err(|failure| {
+        let code = match &failure {
+            PreviewError::NotFound(_) => "adjusted_version_missing",
+            _ => "adjusted_series_invalid",
+        };
+        error(code, format!("{version} for {instrument}: {failure}"))
+    })?;
+    if research.raw_dsv != dsv {
+        return Err(error(
+            "adjusted_raw_dsv_mismatch",
+            format!("{version} for {instrument} belongs to another raw DSV"),
+        ));
+    }
+    let research_instrument: InstrumentId = research
+        .instrument_id
+        .parse()
+        .map_err(|e| error("adjusted_instrument_mismatch", format!("{version}: {e}")))?;
+    if &research_instrument != instrument {
+        return Err(error(
+            "adjusted_instrument_mismatch",
+            format!("{version} names another security"),
+        ));
+    }
+    if research.rows.is_empty() {
+        return Err(error(
+            "adjusted_series_empty",
+            format!("{version} for {instrument} has no research rows"),
+        ));
+    }
+    Ok(research)
+}
+
+fn panel_error(failure: PanelError) -> SelectionError {
+    let code = match &failure {
+        PanelError::Manifest(_) | PanelError::InvalidManifest(_) => "invalid_manifest",
+        PanelError::Data(_) | PanelError::InvalidTableData(_) => "invalid_dataset_table",
+        PanelError::Polars(_)
+        | PanelError::InvalidVenueSelection(_)
+        | PanelError::InconsistentSessionAxis(_) => "dataset_read_failed",
+    };
+    error(code, failure)
+}
+
+/// Plans the common research window from validated in-memory selection inputs.
+///
+/// The precheck is read-only: it does not store the content-addressed Universe or
+/// the Experiment definition, so a first single-security precheck works before any
+/// freeze. Coverage comes from the bound adjusted rows on the frozen Session axis;
+/// execution prices stay raw.
+fn plan_window(
+    root: &Path,
+    selection: &Selection,
+    prepared: &Prepared,
+    adjusted: &BTreeMap<InstrumentId, String>,
+) -> Result<window::WindowPlan, SelectionError> {
+    let venue: VenueId = prepared
+        .venue
+        .parse()
+        .map_err(|e| error("invalid_selection", e))?;
+    let panel = load_panel_for_venues(root, &selection.dsv, std::slice::from_ref(&venue))
+        .map_err(panel_error)?;
+    let sessions = panel
+        .sessions
+        .iter()
+        .map(|session| session.session_date)
+        .collect::<Vec<_>>();
+    let mut coverage = Vec::new();
+    for member in prepared.universe.members() {
+        let version = adjusted.get(member).ok_or_else(|| {
+            error(
+                "adjusted_version_missing",
+                format!("missing adjusted version for {member}"),
+            )
+        })?;
+        let research = read_adjusted(root, &selection.dsv, member, version)?;
+        let dates = research
+            .rows
+            .iter()
+            .map(|row| row.trade_date)
+            .collect::<BTreeSet<_>>();
+        coverage.push(window::Coverage {
+            instrument: member.to_string(),
+            present: sessions.iter().map(|date| dates.contains(date)).collect(),
+        });
+    }
+    let warmup_sessions =
+        window::parameter_warmup(&selection.strategy, &json!({"params_version": 1}))
+            .map_err(|message| error("invalid_selection", message))?;
+    window::plan(
+        &sessions,
+        &coverage,
+        &[window::Parameter {
+            label: json!({"params_version": 1}).to_string(),
+            warmup_sessions,
+        }],
+    )
+    .map_err(|message| error("invalid_selection", message))
 }
 
 fn base_definition(
@@ -324,9 +402,7 @@ pub fn freeze(root: &Path, selection: &Selection) -> Result<Value, SelectionErro
     if adjusted.is_empty() {
         Experiment::parse(&definition.to_string(), root).map_err(experiment_error)?;
     } else {
-        let experiment =
-            Experiment::parse(&definition.to_string(), root).map_err(experiment_error)?;
-        let planned = experiment.plan(root).map_err(experiment_error)?;
+        let planned = plan_window(root, selection, &prepared, &adjusted)?;
         if !planned.runnable {
             return Err(error(
                 "evaluation_window_not_runnable",
@@ -362,10 +438,12 @@ pub fn freeze(root: &Path, selection: &Selection) -> Result<Value, SelectionErro
 
 /// Read-only precheck of the shared window for one frozen selection.
 ///
-/// Missing or invalid adjusted bindings are returned as structured blocking
-/// reasons instead of errors so the T08b preflight page can display them. Errors
-/// that make the selection itself unreadable (unknown pool, absent Dataset member,
-/// mixed Venue, unsupported evidence) stay errors.
+/// Planning uses the validated in-memory Universe and bound adjusted rows; it does
+/// not require (or write) a stored Universe, so a first single-security precheck
+/// works before any freeze. Missing or invalid adjusted bindings are returned as
+/// structured blocking reasons instead of errors so the T08b preflight page can
+/// display them. Errors that make the selection itself unreadable (unknown pool,
+/// absent Dataset member, mixed Venue, unsupported evidence) stay errors.
 pub fn plan(root: &Path, selection: &Selection) -> Result<Value, SelectionError> {
     let prepared = prepare(root, selection)?;
     let mut blocking = Vec::new();
@@ -378,10 +456,7 @@ pub fn plan(root: &Path, selection: &Selection) -> Result<Value, SelectionError>
     };
     let mut window = None;
     if blocking.is_empty() {
-        let definition = base_definition(selection, &prepared, &adjusted)?;
-        let experiment =
-            Experiment::parse(&definition.to_string(), root).map_err(experiment_error)?;
-        let planned = experiment.plan(root).map_err(experiment_error)?;
+        let planned = plan_window(root, selection, &prepared, &adjusted)?;
         if !planned.runnable {
             blocking = planned
                 .blocking

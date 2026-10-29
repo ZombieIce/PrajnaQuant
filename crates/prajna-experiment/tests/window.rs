@@ -154,6 +154,9 @@ fn pool_selection_binds_adjusted_versions_and_freezes_the_shared_window() {
         unwindowed.id().unwrap(),
         "a frozen window and bound research inputs change the Experiment identity"
     );
+    let planned = experiment.plan(root).unwrap();
+    assert_eq!(planned.start.as_deref(), Some("2026-01-05"));
+    assert_eq!(planned.end.as_deref(), Some("2026-01-07"));
     let runs = experiment.run_definitions(root).unwrap();
     assert_eq!(runs[0].run_spec["evaluation"]["start"], "2026-01-05");
     assert_eq!(runs[0].run_spec["evaluation"]["warmup_sessions"], 0);
@@ -289,6 +292,33 @@ fn plan_reports_structured_blocking_and_the_frozen_window() {
 }
 
 #[test]
+fn first_single_security_precheck_plans_from_in_memory_inputs_without_writing_a_universe() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    let (dsv, adjusted) = fixture::prepare_with_adjusted(root, true);
+    let selection = single_selection(
+        &dsv,
+        "510300.XSHG",
+        Some(binding(&[("510300.XSHG", adjusted["510300.XSHG"].clone())])),
+    );
+    // No pool was published and no Universe was frozen: the precheck must work
+    // from the validated in-memory Universe and the bound adjusted rows.
+    let planned = plan(root, &selection).unwrap();
+    assert_eq!(planned["data"]["runnable"], true);
+    assert_eq!(planned["data"]["window"]["start"], "2026-01-05");
+    assert_eq!(planned["data"]["window"]["end"], "2026-01-07");
+    let universe = planned["data"]["universe"].as_str().unwrap();
+    let hex = universe
+        .strip_prefix("uni:sha256:")
+        .expect("content-addressed Universe");
+    assert!(
+        !root.join("universes").join(format!("{hex}.json")).exists(),
+        "a read-only precheck must not store a Universe"
+    );
+    assert_eq!(plan(root, &selection).unwrap(), planned);
+}
+
+#[test]
 fn definition_parse_rejects_incomplete_or_foreign_research_inputs() {
     let temp = TempDir::new().unwrap();
     let root = temp.path();
@@ -306,22 +336,21 @@ fn definition_parse_rejects_incomplete_or_foreign_research_inputs() {
     let definition = frozen["data"]["definition"].clone();
     let parse = |value: &Value| Experiment::parse(&value.to_string(), root);
     assert!(parse(&definition).is_ok());
-    // An adjusted-only object is the planning seed: `Experiment::plan` derives
-    // the window from it and persisted selections write both objects.
+    // An adjusted-only object is not an executable definition: the research
+    // binding and its frozen window are written together by the selection.
     let mut seed = definition.clone();
     seed.as_object_mut().unwrap().remove("evaluation");
-    let seed = parse(&seed).unwrap();
-    assert!(seed.evaluation().is_none());
-    assert_eq!(seed.adjusted_versions().len(), 2);
+    let failure = parse(&seed).unwrap_err().to_string();
     assert!(
-        seed.run_definitions(root).unwrap()[0]
-            .run_spec
-            .get("evaluation")
-            .is_none()
+        failure.contains("provided together") || failure.contains("planning-only"),
+        "{failure}"
     );
-    let changes: [fn(&mut Value); 4] = [
+    let changes: [fn(&mut Value); 5] = [
         |value: &mut Value| {
             value.as_object_mut().unwrap().remove("adjusted_versions");
+        },
+        |value: &mut Value| {
+            value.as_object_mut().unwrap().remove("evaluation");
         },
         |value: &mut Value| {
             value["evaluation"]["semantic_version"] = json!("common-window@2");
@@ -431,8 +460,8 @@ impl Golden {
         fs::write(&self.definition, serde_json::to_vec(definition).unwrap()).unwrap();
     }
 
-    fn run(&self) -> Value {
-        let output = isolated(
+    fn run_output(&self) -> Output {
+        isolated(
             Command::new(env!("CARGO_BIN_EXE_prajna-experiment"))
                 .arg("run")
                 .arg(&self.definition)
@@ -444,7 +473,11 @@ impl Golden {
         )
         .env("RAYON_NUM_THREADS", "2")
         .output()
-        .unwrap();
+        .unwrap()
+    }
+
+    fn run(&self) -> Value {
+        let output = self.run_output();
         assert!(
             output.status.success(),
             "stdout={} stderr={}",
@@ -613,6 +646,35 @@ fn vector_event_honors_the_same_frozen_window() {
         sessions
             .iter()
             .all(|session| session["session_date"] != "2026-01-05")
+    );
+}
+
+#[test]
+fn production_cli_rejects_an_adjusted_only_planning_seed() {
+    let golden = Golden::new();
+    let legacy = single_selection(&golden.dsv, "510300.XSHG", None);
+    let frozen = freeze(&golden.lake, &legacy).unwrap();
+    let mut seed = frozen["data"]["definition"].clone();
+    seed["adjusted_versions"] = json!({"510300.XSHG": golden.adjusted});
+    assert!(seed.get("evaluation").is_none());
+    golden.write(&seed);
+
+    let output = golden.run_output();
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("provided together") || stderr.contains("planning-only"),
+        "stderr={stderr}"
+    );
+    assert!(
+        !golden.lake.join("experiments").exists(),
+        "a rejected seed must not execute or persist a result"
     );
 }
 
