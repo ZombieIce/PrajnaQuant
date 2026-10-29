@@ -520,7 +520,7 @@ impl Experiment {
         if let Some(evaluation) = &evaluation {
             normalized["evaluation"] = evaluation.to_json();
         }
-        Ok(Self {
+        let experiment = Self {
             dsv: input.dsv,
             universe: input.universe,
             venues,
@@ -535,7 +535,22 @@ impl Experiment {
             pit,
             adjusted_versions,
             evaluation,
-        })
+        };
+        if experiment.strategy_kind == "single_etf_timing" {
+            let planned = experiment.plan(lake_root.as_ref())?;
+            if !planned.runnable {
+                return Err(invalid(format!(
+                    "single_etf_timing readiness: {}",
+                    planned.block_message()
+                )));
+            }
+            if planned.evaluation() != experiment.evaluation.as_ref().map(Evaluation::to_json) {
+                return Err(invalid(
+                    "single_etf_timing readiness: frozen evaluation does not match all parameter windows and adjusted coverage",
+                ));
+            }
+        }
+        Ok(experiment)
     }
 
     /// Runtime transport is excluded from content identity; Backend identity is not.

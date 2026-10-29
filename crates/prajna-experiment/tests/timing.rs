@@ -249,3 +249,91 @@ fn skipped_buy_retains_cash_and_later_signal_replaces_a_deferred_exit() {
         "9945.009"
     );
 }
+
+#[test]
+fn native_definition_and_cli_reject_insufficient_or_inconsistent_timing_readiness() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    let mut selection = setup(root, false);
+    let frozen = freeze(root, &selection).unwrap();
+    let valid = frozen["data"]["definition"].clone();
+    let mut invalid = Vec::new();
+    let mut insufficient = valid.clone();
+    insufficient["parameter_space"]["list"][0]["ma_window"] = json!(100);
+    invalid.push(insufficient);
+    let mut mixed = valid.clone();
+    mixed["parameter_space"]["list"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"params_version":1,"ma_window":3,"rebalance_every":2}));
+    invalid.push(mixed);
+    let mut early = valid.clone();
+    early["evaluation"]["start"] = json!(DATES[0]);
+    invalid.push(early);
+    let mut wrong_warmup = valid.clone();
+    wrong_warmup["evaluation"]["warmup_sessions"] = json!(0);
+    invalid.push(wrong_warmup);
+    for definition in invalid {
+        let failure = Experiment::parse(&definition.to_string(), root)
+            .unwrap_err()
+            .to_string();
+        assert!(failure.contains("timing readiness"), "{failure}");
+        let path = root.join("invalid-native.json");
+        std::fs::write(&path, definition.to_string()).unwrap();
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_prajna-experiment"))
+            .arg("run")
+            .arg(&path)
+            .arg("--lake")
+            .arg(root)
+            .arg("--level")
+            .arg("full")
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stderr).contains("timing readiness"));
+        assert!(!root.join("experiments").exists());
+    }
+    // The longest parameter determines readiness; consistent list and grid
+    // definitions remain accepted without changing their frozen identities.
+    selection.parameter_space =
+        Some(json!({"grid":{"params_version":[1],"ma_window":[2,3],"rebalance_every":[2]}}));
+    let frozen = freeze(root, &selection).unwrap();
+    assert_eq!(
+        frozen["data"]["definition"]["evaluation"]["start"],
+        DATES[2]
+    );
+    assert_eq!(
+        frozen["data"]["definition"]["evaluation"]["warmup_sessions"],
+        2
+    );
+    assert_eq!(
+        Experiment::parse(&frozen["data"]["definition"].to_string(), root)
+            .unwrap()
+            .run_definitions(root)
+            .unwrap()
+            .len(),
+        2
+    );
+    // A missing Session inside the trailing window postpones readiness; a
+    // native caller cannot move the frozen start back across that gap.
+    let dates = DATES
+        .iter()
+        .enumerate()
+        .filter_map(|(i, d)| (i != 1).then_some(*d))
+        .collect::<Vec<_>>();
+    let adjusted = fixture::import_closes(root, &selection.dsv, &dates, &vec!["10"; dates.len()]);
+    selection.adjusted.insert("510300.XSHG".into(), adjusted);
+    let frozen = freeze(root, &selection).unwrap();
+    assert_eq!(
+        frozen["data"]["definition"]["evaluation"]["start"],
+        DATES[4]
+    );
+    let mut through_gap = frozen["data"]["definition"].clone();
+    through_gap["evaluation"]["start"] = json!(DATES[3]);
+    assert!(Experiment::parse(&through_gap.to_string(), root).is_err());
+}

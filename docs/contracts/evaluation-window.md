@@ -50,7 +50,7 @@ HTTP 与 `/pools` 页面由 [#356/T08b](https://github.com/ZombieIce/PrajnaQuant
    `common_end` = 所有成员最后一个复权行的最小日期。缺失 Session 不删除、
    不压缩日历、不填零，也不以原始价替代研究信号。
 3. **参数预热**：按冻结定义的每个参数组合声明窗口：`buy_and_hold` 0；
-   `ma_crossover` `long_window - 1`；`s2_rotation` `max(short, long, vol, trend - 1)`
+   `ma_crossover` `long_window - 1`；`single_etf_timing` `ma_window - 1`；`s2_rotation` `max(short, long, vol, trend - 1)`
    （`trend` 可选；Momentum/Volatility 需要 `n + 1` closes，TrendFilter 需要 `n` closes）。
    Python、PIT 与无声明窗口的策略显式拒绝。预热 Session 数不等于观测数：
    `warmup_sessions = required_observations - 1`。
@@ -85,12 +85,17 @@ HTTP 与 `/pools` 页面由 [#356/T08b](https://github.com/ZombieIce/PrajnaQuant
 ```
 
 两者进入 Experiment 的规范化身份和 Run Spec（`run:sha256`），后续执行不读取
-latest、不重新推导窗口。`Experiment::parse` 在执行侧重新读取每个绑定版本并
+latest、不以运行时重算结果替换冻结窗口。`Experiment::parse` 在执行侧重新读取每个绑定版本并
 校验上述条件，同时要求 `common_start <= start < end <= common_end`、每个版本
 的首/末复权行覆盖评价窗口；失败即拒绝定义（fail closed）。没有这两个字段的
 旧定义保持原身份与原行为；只有 `adjusted_versions`、没有 `evaluation` 的对象不是可执行定义，
 `Experiment::parse`/CLI/执行入口拒绝它（planning-only），持久化选择始终同时写入两者。PIT、多 Venue、
 Python 与 Accurate 定义不支持共同评价窗口。
+
+`single_etf_timing` 在原生 `Experiment::parse`/CLI 边界还以全部 list/grid 参数与
+冻结复权覆盖重新规划并校验就绪条件：任何组合历史不足，或定义中的预热/共同
+窗口/评价窗口与计划不一致，均拒绝；不默默改写冻结窗口或把无法就绪的参数
+报告为成功现金回测。旧策略的定义与身份保持原行为。
 
 ## 执行边界
 
@@ -137,7 +142,7 @@ adjusted,pool?,instruments,window,runnable,blocking}}`。预检不写 Universe/�
 退出 2/envelope；不把错误伪装为空覆盖或零值。
 
 Selection 可选 `parameter_space` 沿用 Experiment 的 native `list` / `grid`，
-`strategy` 接受 buy_and_hold、ma_crossover、s2_rotation。只有 buy_and_hold
+`strategy` 接受 buy_and_hold、ma_crossover、single_etf_timing、s2_rotation。只有 buy_and_hold
 省略时使用旧唯一 `{params_version:1}`；其它策略必须显式给出参数并绑定复权版本。
 参数由现有 native parser 验证，S2 沿用成员数/因子/策略校验；预热来自 Rust 声明，
 不接受客户端 warm-up 数。买入持有仍是 entry_only/retry，其它模板为既有
