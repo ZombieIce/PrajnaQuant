@@ -12,7 +12,7 @@ test('pool edits publish immutable versions and freeze a real production task', 
   const catalog = await (await page.request.get('/api/v1/datasets')).json();
   const details = await Promise.all(catalog.data.datasets.map(async (d: { dsv: string }) => (await page.request.get(`/api/v1/datasets/${encodeURIComponent(d.dsv)}`)).json()));
   const tradable = details.find((d) => d.data.normalizer_version === '2' && d.data.instruments[0].instrument_id === '510300.XSHG').data.dsv;
-  const varied = details.find((d) => d.data.instruments.some((i: { instrument_id: string }) => i.instrument_id === '510880.XSHG')).data.dsv;
+  const varied = details.find((d) => d.data.instruments.some((i: { instrument_id: string; coverage: { bars: number } }) => i.instrument_id === '510880.XSHG' && i.coverage.bars === 3)).data.dsv;
   await page.goto('/pools');
   await page.getByLabel('研究池', { exact: true }).selectOption('dividend');
   await expect(page.getByTestId('pool-members').getByRole('listitem')).toHaveCount(4);
@@ -108,7 +108,7 @@ test('production pool preflight preserves bindings, blockers, native combination
   page.on('pageerror', e => errors.push(e.message));
   const catalog = (await (await page.request.get('/api/v1/datasets')).json()).data.datasets;
   const details = await Promise.all(catalog.map(async (d: { dsv: string }) => (await page.request.get(`/api/v1/datasets/${encodeURIComponent(d.dsv)}`)).json()));
-  const varied = details.find(d => d.data.instruments.some((i: { instrument_id: string }) => i.instrument_id === '510880.XSHG')).data;
+  const varied = details.find(d => d.data.instruments.some((i: { instrument_id: string; coverage: { bars: number } }) => i.instrument_id === '510880.XSHG' && i.coverage.bars === 3)).data;
   const tradable = details.find(d => d.data.normalizer_version === '2' && d.data.instruments[0].instrument_id === '510300.XSHG').data;
   const publish = async (members: string[]) => {
     const registry = (await (await page.request.get('/api/v1/research-pools')).json()).data;

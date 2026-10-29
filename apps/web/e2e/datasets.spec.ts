@@ -14,8 +14,9 @@ test('production Dataset page reads synthetic ETF and stock, lifecycle, gaps, Ba
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('研究数据预览');
   const versions = page.getByLabel('Dataset 版本', { exact: true });
   // The shared synthetic lake also holds two #350 @2 selection Datasets; this
-  // spec only exercises the v1 preview fixtures (2 Bars each).
-  await expect(versions.locator('option')).toHaveCount(6);
+  // spec only exercises the v1 preview fixtures (2 Bars each). The momentum
+  // fixture adds a separate 130-Session Dataset.
+  await expect(versions.locator('option')).toHaveCount(7);
   const values = await versions.locator('option').evaluateAll(options => options
     .filter(o => (o.textContent ?? '').includes('1 证券 / 2 Bars'))
     .map(o => o.getAttribute('value') ?? ''));
@@ -43,7 +44,7 @@ test('production Dataset page reads synthetic ETF and stock, lifecycle, gaps, Ba
   await page.getByRole('button', { name: '刷新目录', exact: true }).click();
   expect((await refreshed).status()).toBe(200);
   await expect(versions).toHaveValue('');
-  await expect(versions.locator('option')).toHaveCount(6);
+  await expect(versions.locator('option')).toHaveCount(7);
   await expect(page.locator('tbody tr')).toHaveCount(0);
   expect(errors).toEqual([]);
   expect(requests.some(url => url.includes('/bars?'))).toBe(true);
@@ -53,7 +54,7 @@ test('production Dataset page reads synthetic ETF and stock, lifecycle, gaps, Ba
 test('corrupt version is visible on selection and catalog refresh', async ({ page }) => {
   await page.goto('/datasets');
   const versions = page.getByLabel('Dataset 版本', { exact: true });
-  await expect(versions.locator('option')).toHaveCount(6);
+  await expect(versions.locator('option')).toHaveCount(7);
   const preview = await versions.locator('option').evaluateAll(options => options
     .filter(o => (o.textContent ?? '').includes('1 证券 / 2 Bars'))
     .map(o => o.getAttribute('value') ?? ''));
@@ -70,7 +71,7 @@ test('corrupt version is visible on selection and catalog refresh', async ({ pag
     await expect(page.getByLabel('证券', { exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: '刷新目录', exact: true }).click();
     await expect(page.getByRole('alert')).toContainText('存在不可读取的版本');
-    await expect(versions.locator('option')).toHaveCount(5);
+    await expect(versions.locator('option')).toHaveCount(6);
   } finally { await writeFile(manifest, original); }
 });
 

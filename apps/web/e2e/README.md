@@ -121,3 +121,5 @@ and compares the displayed plan with the persisted adjusted_versions/evaluation
 and actual result Sessions. Refresh preserves explicit choices but requires a new
 preflight; later pool edits cannot change the saved task. Only synthetic inputs
 are exported; no real-data, PIT or full total-return validation is implied.
+
+`momentum.spec.ts` 使用额外130 Session合成 Dataset，默认20/60/120窗口，核对真实 CLI 持久报告与页面时序/缺失、分布图、来源及刷新/损坏行为。线性价格独立数值 golden 位于 `prajna-experiment/tests/momentum.rs`；该 fixture 与三日池 fixture 分开，不改变原有池预检假设。

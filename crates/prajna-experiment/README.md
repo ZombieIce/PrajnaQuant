@@ -390,3 +390,7 @@ fake 的原生账户显式为 unavailable，不伪造原生快照。
 `POST /api/v1/tasks/selections/preflight` 与 `/pools` 使用同一 Rust 结果。
 显式 `parameter_space` 可沿用 native list/grid，提交冻结相同绑定和 evaluation；
 协议、支持范围及合成验证见[共同评价窗口契约](../../docs/contracts/evaluation-window.md)。
+
+## 动量研究
+
+`prajna-momentum --lake <root>` 提供显式版本的动量研究 JSON 命令，复用新平台 Factor/Cache；生产页面 `/research/momentum`。输入、持久化与验证范围见[动量研究契约](../../docs/contracts/momentum-research.md)。

@@ -10,12 +10,20 @@ use serde_json::{Value, json};
 use std::path::Path;
 
 pub fn prepare(root: &Path, known_listing: bool) -> String {
-    let days = ["2026-01-05", "2026-01-06", "2026-01-07"];
+    prepare_days(
+        root,
+        known_listing,
+        &["2026-01-05", "2026-01-06", "2026-01-07"],
+    )
+}
+
+#[allow(dead_code)]
+pub fn prepare_days(root: &Path, known_listing: bool, days: &[&str]) -> String {
     let calendar = json!({"schema_version":1,"venues": (["XSHG","XSHE"].map(|venue|json!({
         "venue_id":venue,"source":{"source_id":"synthetic","source_version":"1","source_ref":"fixture"},
-        "coverage_start":days[0],"coverage_end":days[2],"sessions":days.map(|day|json!({
+        "coverage_start":days[0],"coverage_end":days[days.len()-1],"sessions":days.iter().map(|day|json!({
             "session_date":day,"ts_open":format!("{day}T09:30:00+08:00"),"ts_close":format!("{day}T15:00:00+08:00")
-        }))
+        })).collect::<Vec<_>>()
     })))});
     let calendars = CalendarStore::open(root).unwrap();
     let calendar_id = calendars
@@ -104,7 +112,7 @@ pub fn prepare(root: &Path, known_listing: bool) -> String {
     ];
     for (symbol, venue, _) in records {
         let native = format!("{}{symbol}", if venue == "XSHG" { "sh" } else { "sz" });
-        let body = json!({"code":0,"data":{native:{"day":days.map(|day|json!([day,"10","10","11","9","100"]))}}});
+        let body = json!({"code":0,"data":{native:{"day":days.iter().map(|day|json!([day,"10","10","11","9","100"])).collect::<Vec<_>>()}}});
         hashes.push(put(&serde_json::to_vec(&body).unwrap(),"tencent_fqkline_daily",
             json!({"method_version":"tencent-fqkline-day/1","instrument_id":format!("{symbol}.{venue}")})));
     }

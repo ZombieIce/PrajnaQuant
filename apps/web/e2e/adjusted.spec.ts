@@ -7,7 +7,7 @@ test('production page pins adjusted revisions, gaps, raw role, empty and corrupt
   page.on('pageerror', e => errors.push(e.message));
   await page.goto('/datasets');
   const datasets = page.getByLabel('Dataset 版本', { exact: true });
-  await expect(datasets.locator('option')).toHaveCount(6);
+  await expect(datasets.locator('option')).toHaveCount(7);
   const candidates = await datasets.locator('option').evaluateAll(options => options
     .filter(o => (o.textContent ?? '').includes('1 证券 / 2 Bars')).map(o => o.getAttribute('value')!));
   let dsv = '';

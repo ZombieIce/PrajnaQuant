@@ -16,7 +16,7 @@ type DatasetInstrument = {
 type DatasetDetail = { dsv: string; normalizer_version: string; instruments: DatasetInstrument[]; warnings: string[] };
 type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'interrupted';
 type Task = {
-  task_id: string; status: TaskStatus; stage: string; created_at: string; updated_at: string; result_level: string;
+  task_id: string; task_type: string; status: TaskStatus; stage: string; created_at: string; updated_at: string; result_level: string;
   error: { code: string; message: string; details?: unknown } | null;
   result: { exp?: string; exe?: string; run_count?: number; failed_count?: number } | null;
 };
@@ -108,7 +108,7 @@ export default function BacktestsPage() {
   const loadTasks = useCallback(async (signal?: AbortSignal) => {
     try {
       const response = await api<{ items: Task[] }>('/api/v1/tasks/experiments', { signal });
-      if (!signal?.aborted) { setTasks(response.items); setTasksError(null); }
+      if (!signal?.aborted) { setTasks(response.items.filter(t => t.task_type === 'prajna_experiment')); setTasksError(null); }
     } catch (error) {
       if (!signal?.aborted) setTasksError(error as Error);
     }
