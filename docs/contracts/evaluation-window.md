@@ -89,8 +89,7 @@ latest、不以运行时重算结果替换冻结窗口。`Experiment::parse` 在
 校验上述条件，同时要求 `common_start <= start < end <= common_end`、每个版本
 的首/末复权行覆盖评价窗口；失败即拒绝定义（fail closed）。没有这两个字段的
 旧定义保持原身份与原行为；只有 `adjusted_versions`、没有 `evaluation` 的对象不是可执行定义，
-`Experiment::parse`/CLI/执行入口拒绝它（planning-only），持久化选择始终同时写入两者。PIT、
-Python 与 Accurate 定义不支持共同评价窗口；#295 起沪深同池（XSHG+XSHE）的非 PIT
+`Experiment::parse`/CLI/执行入口拒绝它（planning-only），持久化选择始终同时写入两者。PIT、Python 与 Accurate 定义不支持共同评价窗口；#295 起沪深同池（XSHG+XSHE）的非 PIT
 池可使用同一冻结窗口，账本仍只有一套。
 
 `single_etf_timing` 在原生 `Experiment::parse`/CLI 边界还以全部 list/grid 参数与

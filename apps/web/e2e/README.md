@@ -150,8 +150,7 @@ choices but requires a new preflight; later pool edits cannot change the saved t
 the production pool entry, selects the executable XSHG+XSHE Dataset and per-member
 adjusted versions, runs the preflight (both Venues and the Rust-frozen window are
 displayed), submits the buy-and-hold baseline, and reads the persisted status,
-Summary and valuation rows on `/backtests` after refresh. The frozen
-`experiment.json` carries sorted `venues`, `full_target`, `retry` and no `venue`
+Summary and valuation rows on `/backtests` after refresh. The frozen `experiment.json` carries sorted `venues`, `full_target`, `retry` and no `venue`
 field; the rendered/API rows match an independent hand calculation (50,000 and
 49,900 units, cash `500.44006`, equity `999500.44006`). Selecting the mismatched
 shared-axis Dataset surfaces `inconsistent_venue_calendar` (422) with no runnable
