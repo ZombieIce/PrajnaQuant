@@ -28,6 +28,7 @@ pub struct Selection {
     /// Explicit immutable adjusted research version per Universe member.
     #[serde(default)]
     pub adjusted: BTreeMap<String, String>,
+    pub corporate_actions: Option<crate::actions::Binding>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -476,6 +477,15 @@ pub fn freeze(root: &Path, selection: &Selection) -> Result<Value, SelectionErro
         .store(root)
         .map_err(|e| error("selection_store_failed", e))?;
     let mut definition = base_definition(selection, &prepared, &adjusted)?;
+    if let Some(binding) = &selection.corporate_actions {
+        definition["corporate_actions"] =
+            serde_json::to_value(binding).map_err(|e| error("invalid_selection", e))?;
+        definition["fast_event"]["rebalance"] = json!("full_target");
+        definition["fast_event"]
+            .as_object_mut()
+            .expect("settings")
+            .remove("entry_budget");
+    }
     let mut window = None;
     if adjusted.is_empty() {
         Experiment::parse(&definition.to_string(), root).map_err(experiment_error)?;
@@ -508,6 +518,11 @@ pub fn freeze(root: &Path, selection: &Selection) -> Result<Value, SelectionErro
         response["data"]["adjusted"] = adjusted_json(&adjusted);
         response["data"]["window"] =
             serde_json::to_value(&planned).map_err(|e| error("invalid_selection", e))?;
+    }
+    if selection.corporate_actions.is_some() {
+        response["data"]["limitations"][2] = json!(
+            "Fixed structured corporate actions use the raw-price account ledger; completeness is reported by the execution, not guaranteed by the binding"
+        );
     }
     if let Some(version) = prepared.frozen_pool {
         response["data"]["pool"] = json!({"id":selection.pool.as_ref().expect("pool reference").id,

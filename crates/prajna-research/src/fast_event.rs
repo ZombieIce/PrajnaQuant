@@ -42,6 +42,8 @@ pub const TERMINAL_SETTLEMENT_INVESTABLE_EQUITY_LOT_ENGINE_VERSION: &str = "fast
 /// account. Only cross-Venue, non-PIT price-return Runs select these versions.
 pub const MULTI_VENUE_PARITY_ENGINE_VERSION: &str = "fast_event@13";
 pub const MULTI_VENUE_LOT_ENGINE_VERSION: &str = "fast_event@14";
+/// Explicit single-Venue Static Universe, lot/full-target action ledger.
+pub const STATIC_ACTION_ENGINE_VERSION: &str = "fast_event@15";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sizing {
@@ -397,6 +399,36 @@ pub fn run_fast_event_pit(
     )
 }
 
+/// Uses the existing ledger and normal lot planner, without MVP-6 PIT inputs.
+pub fn run_fast_event_with_actions(
+    panel: &Panel,
+    statuses: &ExecutionStatusMap,
+    config: &FastEventConfig,
+    portfolios: &[PortfolioRun],
+    actions: &CorporateActionSchedule,
+) -> Result<FastEventResult, FastEventError> {
+    if config.venues.len() != 1
+        || config.sizing != Sizing::Lot
+        || portfolios
+            .iter()
+            .any(|p| p.rebalance != Rebalance::FullTarget)
+    {
+        return Err(invalid(
+            "Static actions require single-Venue lot/full_target",
+        ));
+    }
+    run_with_execution(
+        panel,
+        statuses,
+        config,
+        portfolios,
+        None,
+        None,
+        Some(actions),
+        None,
+    )
+}
+
 pub fn run_fast_event_pit_with_actions(
     panel: &Panel,
     market: &crate::etf_market::DerivedMarket,
@@ -521,7 +553,7 @@ fn run_with_execution(
             "multi-venue Fast Event requires the non-PIT price-return entry",
         ));
     }
-    if (actions.is_some() || terminal_settlement.is_some()) && pit.is_none() {
+    if terminal_settlement.is_some() && pit.is_none() {
         return Err(invalid(
             "PIT ledger extensions require the PIT Engine entry point",
         ));
@@ -1053,8 +1085,16 @@ fn run_with_execution(
     } else {
         vec![
             venue_assumption,
-            "T+1, price limits, currency-unit rounding and corporate actions are not modeled.",
-            "Static synthetic Universe evidence does not establish PIT or dividend total return.",
+            if actions.is_some() {
+                "T+1, price limits and currency-unit rounding are not modeled; fixed structured actions use the account ledger."
+            } else {
+                "T+1, price limits, currency-unit rounding and corporate actions are not modeled."
+            },
+            if actions.is_some() {
+                "Static Universe evidence does not establish historical PIT membership; action completeness is reported separately."
+            } else {
+                "Static synthetic Universe evidence does not establish PIT or dividend total return."
+            },
             "Valid raw bars mark even HALTED/UNKNOWN instruments; status gates execution only.",
             "Missing prices carry the last valid price of the same field, never zero.",
         ]
@@ -1072,7 +1112,9 @@ fn run_with_execution(
             .iter()
             .any(|p| p.rebalance == Rebalance::FullTarget);
     Ok(FastEventResult {
-        semantic_version: if config.venues.len() > 1 {
+        semantic_version: if actions.is_some() && pit.is_none() {
+            STATIC_ACTION_ENGINE_VERSION
+        } else if config.venues.len() > 1 {
             match config.sizing {
                 Sizing::VectorParity => MULTI_VENUE_PARITY_ENGINE_VERSION,
                 Sizing::Lot => MULTI_VENUE_LOT_ENGINE_VERSION,

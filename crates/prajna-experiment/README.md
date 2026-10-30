@@ -398,3 +398,12 @@ fake 的原生账户显式为 unavailable，不伪造原生快照。
 单 ETF 趋势择时：`single_etf_timing` 的 version 1 参数为 `params_version`、
 `ma_window`、`rebalance_every`；显式绑定复权版本并冻结评价窗口，页面可配置成本。
 信号复用严格趋势因子，原始成交账本不变；见[模板契约](../../docs/single-etf-timing.md)。
+
+### MVP-7 固定事实总回报账本
+
+冻结选择与原生 Experiment 定义可带 `corporate_actions: {"version":"caf:sha256:HEX",
+"dividend_tax_rate":"0"}`。将事实导入同一配置 lake，固定版本读取且无隐式 latest；
+支持单市场 Static Universe Fast Event lot/full_target，保存 Standard 后可通过 result
+与 read_run_table 读取 Summary/账户估值/行动表。发放只转现金，下一正常调仓再投资；
+原始价成交与估值，adjusted 研究不会再次给账户加分红。缺事实不伪装完整，
+省略绑定和 MVP-6 继续既有路径。详见 [ADR 0033](../../docs/decisions/0033-static-corporate-action-ledger.md)。

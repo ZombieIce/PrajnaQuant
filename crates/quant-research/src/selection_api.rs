@@ -25,6 +25,7 @@ struct Request {
     /// Explicit immutable adjusted research version per Universe member.
     #[serde(default)]
     adjusted: Option<Value>,
+    corporate_actions: Option<Value>,
     result_level: Option<String>,
 }
 
@@ -133,6 +134,9 @@ async fn selection(
     }
     if let Some(settings) = request.settings {
         selection["settings"] = settings;
+    }
+    if let Some(actions) = request.corporate_actions {
+        selection["corporate_actions"] = actions;
     }
     if let Some(adjusted) = request.adjusted {
         selection["adjusted"] = adjusted;
@@ -452,10 +456,17 @@ mod tests {
         let app = configured(state, "localhost:7878".into());
         let mut body = request();
         body["adjusted"] = json!({"510300.XSHG": "adj:sha256:synthetic"});
+        body["corporate_actions"] =
+            json!({"version":"caf:sha256:synthetic","dividend_tax_rate":"0.1"});
         let (status, _) = submit(app, body, "localhost:7878").await;
         assert_eq!(status, StatusCode::ACCEPTED);
         let captured: Value = serde_json::from_slice(&fs::read(captured).unwrap()).unwrap();
         assert_eq!(captured["adjusted"]["510300.XSHG"], "adj:sha256:synthetic");
+        assert_eq!(
+            captured["corporate_actions"]["version"],
+            "caf:sha256:synthetic"
+        );
+        assert_eq!(captured["corporate_actions"]["dividend_tax_rate"], "0.1");
     }
 
     #[tokio::test]

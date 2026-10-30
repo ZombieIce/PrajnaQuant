@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Synthetic production CLI -> HTTP -> persisted T01 execution. No external data.
 
-Build quant-research (app), prajna-experiment bins and example selection_fixture;
+Build quant-research (app), prajna-experiment bins, prajna-corporate-facts and example selection_fixture;
 pass the exclusive target/debug directory. All task identities stay in temp files.
 A failed run retains its per-run temporary directory for local inspection.
 """
@@ -146,6 +146,51 @@ def main():
                         assert Decimal(row["positions"][instrument]["quantity"]) == 99900
                         assert Decimal(row["cash"]) == Decimal("500.44006")
                         assert Decimal(row["equity"]) == Decimal("999500.44006" if row["valuation_point"] == "open_after" else "1009490.44006")
+            # Fixed facts must survive the real HTTP -> freeze -> T01 ->
+            # execution -> result path, without a test-only endpoint.
+            instrument, dsv = next(iter(selections.items()))
+            source = {"source_id": "synthetic", "source_version": "1", "source_ref": "http-fixture"}
+            fact_input = {"schema_version": 1, "observed_at": "2026-10-30T00:00:00Z", "coverage": [{
+                "instrument_id": instrument, "kind": "etf", "start": "2026-01-05", "end": "2026-01-07",
+                "state": "covered", "reason": "synthetic closed scope", "source": source,
+                "available_at": "2026-01-04T00:00:00Z", "facts": [{
+                    "event_id": "synthetic-dividend", "kind": "dividend", "record_date": "2026-01-06",
+                    "ex_date": "2026-01-07", "pay_date": "2026-01-07", "effective_date": None,
+                    "cash_per_share": "1", "share_ratio": None, "source": source,
+                    "available_at": "2026-01-04T00:00:00Z"}]}]}
+            fact_file = root / "facts.json"
+            fact_file.write_text(json.dumps(fact_input))
+            version = json.loads(subprocess.check_output([
+                binaries / "prajna-corporate-facts", "import", "--root", lake, "--input", fact_file], text=True))["version"]
+            binding = {"version": version, "dividend_tax_rate": "0"}
+            status, accepted = call("/api/v1/tasks/selections", {
+                "idempotency_key": "fixed-actions", "dsv": dsv, "instrument": instrument,
+                "strategy": "buy_and_hold", "result_level": "standard", "corporate_actions": binding})
+            assert status == 202
+            task_id = accepted["task"]["task_id"]
+            saved = json.loads((lake / "tasks" / task_id / "experiment.json").read_text())
+            assert saved["corporate_actions"] == binding
+            assert saved["fast_event"]["rebalance"] == "full_target"
+            deadline = time.monotonic() + 30
+            while True:
+                _, task = call(f"/api/v1/tasks/experiments/{task_id}")
+                if task["status"] in ["succeeded", "failed", "interrupted"]:
+                    break
+                assert time.monotonic() < deadline, "fixed-action task timed out"
+                time.sleep(0.05)
+            assert task["status"] == "succeeded" and task["result"]["failed_count"] == 0
+            status, result = call(f"/api/v1/tasks/experiments/{task_id}/result")
+            assert status == 200
+            run = result["data"]["runs"][0]
+            assert run["summary"]["corporate_action_completeness"]["is_complete"]
+            assert run["summary"]["return_basis"] == "total_return"
+            assert "corporate_actions" in run["tables"]["saved"]
+            rows = run["series"]["account_valuations"]
+            last_open = next(row for row in rows if row["session_date"] == "2026-01-07" and row["valuation_point"] == "open_after")
+            last_close = next(row for row in rows if row["session_date"] == "2026-01-07" and row["valuation_point"] == "close")
+            assert last_open["dividend_receivable"] == "99900" and last_close["dividend_receivable"] == "0"
+            assert Decimal(last_close["cash"]) - Decimal(last_open["cash"]) == 99900
+            assert last_open["positions"][instrument]["quantity"] == last_close["positions"][instrument]["quantity"] == "99900"
             # The legacy user-universe registry shares `universes/` with the
             # content-addressed StaticUniverse files written above.
             status, listed = call("/api/v1/universes")
@@ -178,7 +223,7 @@ def main():
                 second.terminate()
                 second.wait(timeout=10)
                 second_log.close()
-    print("Synthetic production selection HTTP/CLI/T01 E2E: PASS (Shanghai/Shenzhen ETFs, formal @2 inputs, actual fills and exact cash/NAV).")
+    print("Synthetic production selection HTTP/CLI/T01 E2E: PASS (Shanghai/Shenzhen ETFs, formal @2 inputs, actual fills, exact cash/NAV and fixed-action payment).")
 
 
 if __name__ == "__main__":

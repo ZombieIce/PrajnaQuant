@@ -43,4 +43,4 @@ Rust 消费者使用 import/read/query；CLI stdout 为 schema 1 JSON。真实�
 
 ## 验证范围
 
-`prajna-data/tests/corporate_facts.rs` 通过生产 CLI 验证输入→持久版本→读取输出、四态、沪深股票/ETF、精确金额/比例、缺项、幂等/修订/旧版、非法/冲突/损坏及受保护根/symlink。`prajna-experiment/tests/momentum.rs` 在 missing_facts 存在时调用真实动量研究 CLI，仍保存并读取与独立手算价格因子一致的结果。该隔离不表示总回报账本可忽略缺口；账本接入尚未交付。未涉及账户/执行数学，不扩大旧 golden 的结论。
+`prajna-data/tests/corporate_facts.rs` 通过生产 CLI 验证输入→持久版本→读取输出、四态、沪深股票/ETF、精确金额/比例、缺项、幂等/修订/旧版、非法/冲突/损坏及受保护根/symlink。`prajna-experiment/tests/momentum.rs` 在 missing_facts 存在时调用真实动量研究 CLI，仍保存并读取与独立手算价格因子一致的结果。该隔离不表示总回报账本可忽略缺口；账本接入由 [ADR 0033](0033-static-corporate-action-ledger.md) 的显式固定版本路径承接。未涉及账户/执行数学，不扩大旧 golden 的结论。

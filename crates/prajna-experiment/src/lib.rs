@@ -35,6 +35,7 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 mod accurate;
+pub mod actions;
 mod engine;
 pub mod opening_evidence;
 pub mod pit;
@@ -312,6 +313,7 @@ pub struct Experiment {
     strategy_kind: String,
     backend_factory: Option<Arc<dyn BackendFactory>>,
     pit: Option<Arc<pit::PitContext>>,
+    actions: Option<Arc<actions::Context>>,
     /// Bound immutable adjusted research versions; empty for legacy definitions.
     adjusted_versions: BTreeMap<InstrumentId, String>,
     /// Frozen shared research window; absent for legacy definitions.
@@ -403,6 +405,8 @@ struct DefinitionInput {
     backend: Option<engine::BackendIdentity>,
     #[serde(default)]
     pit: Option<pit::PitInput>,
+    #[serde(default)]
+    corporate_actions: Option<actions::Binding>,
     /// Explicit immutable adjusted research version per Universe member.
     #[serde(default)]
     adjusted_versions: Option<BTreeMap<String, String>>,
@@ -507,6 +511,14 @@ impl Experiment {
             evaluation = research.1;
             None
         };
+        let actions = input
+            .corporate_actions
+            .as_ref()
+            .map(|binding| {
+                engine.validate_static_actions(input.pit.is_some())?;
+                actions::Context::load(lake_root.as_ref(), binding).map(Arc::new)
+            })
+            .transpose()?;
         let costs = Costs::parse(&input.costs)?;
         let parameter_space = engine::parse_space(&input.strategy, &input.parameter_space)?;
         let mut normalized = normalize_definition(&input, &venues, costs, &parameter_space);
@@ -519,6 +531,9 @@ impl Experiment {
         }
         if let Some(evaluation) = &evaluation {
             normalized["evaluation"] = evaluation.to_json();
+        }
+        if let Some(actions) = &actions {
+            normalized["corporate_actions"] = actions.identity();
         }
         let experiment = Self {
             dsv: input.dsv,
@@ -533,6 +548,7 @@ impl Experiment {
             strategy_kind: input.strategy,
             backend_factory: None,
             pit,
+            actions,
             adjusted_versions,
             evaluation,
         };
@@ -768,6 +784,9 @@ impl Experiment {
         if let Some(evaluation) = &self.evaluation {
             spec["evaluation"] = evaluation.to_json();
         }
+        if let Some(actions) = &self.actions {
+            spec["corporate_actions"] = actions.identity();
+        }
         write_venue_scope(&mut spec, &self.venues);
         spec
     }
@@ -917,12 +936,36 @@ impl Experiment {
         let venues = self.venues.iter().cloned().collect::<Vec<_>>();
         let native_panel = load_panel_for_venues(lake_root, &self.dsv, &venues)
             .map_err(|error| execution_error("load shared Venue panel", error))?;
-        let panel = if let Some(pit) = &self.pit {
+        let mut panel = if let Some(pit) = &self.pit {
             prajna_research::pit_strategy::lifecycle_panel(&native_panel, &pit.catalog)
                 .map_err(|e| invalid(e.to_string()))?
         } else {
             native_panel
         };
+        if self.actions.is_some() {
+            let members = universe
+                .as_ref()
+                .ok_or_else(|| invalid("static actions require Universe"))?
+                .members();
+            let ids = panel
+                .grid
+                .column("instrument_id")
+                .map_err(|e| invalid(e.to_string()))?
+                .str()
+                .map_err(|e| invalid(e.to_string()))?;
+            let selected = members
+                .iter()
+                .map(ToString::to_string)
+                .collect::<BTreeSet<_>>();
+            let mask = polars::prelude::BooleanChunked::from_iter(
+                (0..ids.len()).map(|i| ids.get(i).is_some_and(|id| selected.contains(id))),
+            );
+            panel.grid = panel
+                .grid
+                .filter(&mask)
+                .map_err(|e| invalid(e.to_string()))?;
+            panel.instruments.retain(|id| members.contains(id));
+        }
         let statuses = if self.pit.is_some() {
             BTreeMap::new()
         } else {

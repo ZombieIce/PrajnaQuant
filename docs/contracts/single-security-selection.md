@@ -1,8 +1,8 @@
 # 单证券冻结选择与任务提交（#340）
 
 本入口完成固定 Dataset Version 的单证券选择 → Rust 冻结定义 → 既有 T01
-持久任务。首个产品使用单 ETF；通用身份路径兼容沪深股票。原单证券入口保持兼容；#292 新增池引用与页面见[研究池契约](research-pools.md)。本契约不表示跨 Venue
-组合、PIT Universe 或完整公司行动总回报入口。浏览器仅提交选择，不计算费用或绩效。
+持久任务。首个产品使用单 ETF；通用身份路径兼容沪深股票。原单证券入口保持兼容；#292 新增池引用与页面见[研究池契约](research-pools.md)。默认入口不表示跨 Venue
+组合、PIT Universe 或完整公司行动总回报；显式行动绑定见下文。浏览器仅提交选择，不计算费用或绩效。
 
 ## 生产入口与默认配置
 
@@ -28,7 +28,7 @@ stdin 为一个 JSON 对象，最多 64 KiB；必填 `dsv`、完整 `instrument`
 收费。冻结定义显式保存全部实际参数、`fast_event`、CNY、252 Session/年、单 VP
 全部本金、`sizing: lot`、`lot_size_source: instrument`、`rebalance: entry_only`、
 `entry_budget: remaining_cash`、`unfilled_entry: retry`、buy-and-hold 参数版本 1。
-不主动恢复持仓权重；本入口不新增分红再投资或公司行动模型。
+默认不主动恢复持仓权重；省略 corporate_actions 时不启用分红再投资或公司行动账本。
 
 CLI 返回前必经 `Experiment::parse`，失败不提交任务。成功 stdout 是
 `{schema_version:1,data:{selection_version:1,defaults_source,definition,instrument,warnings,limitations}}`；
@@ -130,3 +130,11 @@ python3.12 scripts/test-selection-http.py target/debug
 冻结/执行 CLI、读取持久结果；身份与明细仅存在每次运行的临时本机目录，成功时删除，
 失败时保留并只在终端报告该临时路径；不提供把缺表失败当成功的验收模式。
 HTTP 单元测试的模拟 CLI 仅验证适配错误/持久化，不替代此 E2E。
+
+## 固定公司行动（#307）
+
+请求可选 `corporate_actions: {version, dividend_tax_rate}`，由 HTTP 原样经 argv/stdin
+交给 Rust 冻结 CLI。版本从同一配置 lake 根校验，进入冻结定义与任务幂等内容；
+显式绑定选择单市场 lot/full_target，税率为精确定点字符串，不由浏览器计算。
+缺事实返回可执行但显式不完整的结果；版本不存在/损坏或不支持引擎在解析时拒绝。
+省略字段沿用旧路径。`scripts/test-selection-http.py` 增补生产事实导入 CLI→HTTP→冻结任务→Standard 总回报结果/发放转桶合成验证，运行前另构建 `prajna-corporate-facts`。适用范围、完整性和时序见 [ADR 0033](../decisions/0033-static-corporate-action-ledger.md)。
