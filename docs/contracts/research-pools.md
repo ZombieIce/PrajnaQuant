@@ -64,14 +64,12 @@ pool_store_failed 500，协议异常 502。响应 no-store，按实际本机 Hos
 buy-and-hold；T08b 可显式传入既有 native 参数组合（见共同窗口契约）。
 
 **跨 Venue 池（#295/T06c）**：已发布版本可同时含 `XSHG` 与 `XSHE`。选择入口按池
-成员的真实 Venue 集合加载一次共享 Session 轴，定义写排序后的 `venues`（单 Venue
-仍写旧 `venue` 字段并保持旧身份）；只有多 Venue Run 改用 `full_target`
+成员的真实 Venue 集合加载一次共享 Session 轴，定义写排序后的 `venues`（单 Venue 仍写旧 `venue` 字段并保持旧身份）；只有多 Venue Run 改用 `full_target`
 （ADR 0027/0028 要求），`buy_and_hold` 保持 `retry` 并省略 `entry_budget`。
 预检 envelope 增加 `venues`，冻结 envelope 增加 `venues` 与 `engine`（`kind`、`semantic_version`，由 Rust 复用 Run Spec 规范化投影，例如多 Venue lot
 为 `fast_event@14`）。单 Venue 多成员仍使用既有期初等权买入持有 entry-only 定义，
 数值口径与多 Venue 基线不同。共享 Session 轴缺失日期或开收盘时刻不一致返回结构性 `inconsistent_venue_calendar`（HTTP 422），所选 Venue 无 Instrument/Session 返回
-`invalid_venue_selection`（422）；不补齐、不压缩日历，也不选第一个 Venue。多 Venue
-基线仍是价格收益、非 PIT、无公司行动，不作为总回报结论。
+`invalid_venue_selection`（422）；不补齐、不压缩日历，也不选第一个 Venue。多 Venue 基线仍是价格收益、非 PIT、无公司行动，不作为总回报结论。
 原始价格、默认成本、收盘 Decision/下 Session open、未知日线 available_at 的收盘
 假设及分红总回报限制沿用[冻结选择契约](single-security-selection.md)。
 
