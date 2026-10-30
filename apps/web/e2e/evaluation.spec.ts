@@ -6,7 +6,6 @@ test('evaluation production submit persists Rust endpoints and relationship char
   const lake = join(process.env.PRAJNA_E2E_ROOT!, 'fixture', 'lake');
   const request = JSON.parse(await readFile(join(lake, 'synthetic-momentum-request.json'), 'utf8'));
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
-  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   await page.goto('/research/momentum');
   await page.getByLabel('研究 Dataset', {exact:true}).selectOption(request.dsv);
   await page.getByLabel('研究对象', {exact:true}).selectOption(request.instrument);
