@@ -70,6 +70,18 @@ Venue 或显式 lot 越界时整体失败，不静默选第一个 Venue。Run Sp
 `@14`（lot）与 `vector@10`；单 Venue 版本、旧身份与已保存结果不变。Accurate、adapter、PIT 与 Python
 策略仍限单 Venue（多 Venue 仅非 PIT、价格收益、`full_target`）。契约见 [ADR 0028](../../docs/decisions/0028-multi-venue-experiment-run.md)。
 
+## 跨 Venue 池选择与基线提交（#295/T06c）
+
+`prajna-freeze-selection` 现在接受同时含 `XSHG`/`XSHE` 成员的已发布池版本：按成员真实 Venue
+集合用 `load_panel_for_venues` 加载一次共享 Session 轴并规划同一共同窗口；冻结定义写排序后的
+`venues`（单 Venue 仍写旧 `venue` 字段、身份不变），多 Venue 买入持有使用 `full_target` +
+`retry` 且省略 `entry_budget`（ADR 0027/0028）。预检 envelope 增加 `venues`，冻结 envelope
+增加 `venues` 与 `engine:{kind,semantic_version}`；后者由 `Experiment::engine_identity` 复用
+执行时的 Run Spec 规范化，只作展示/交接，不进入身份。共享轴缺日期或开收盘时刻不一致返回
+`inconsistent_venue_calendar`，所选 Venue 无 Instrument/Session 返回 `invalid_venue_selection`
+（HTTP 422），不补日、不压缩、不选第一个 Venue。多 Venue 基线仍是价格收益，不含公司行动或
+PIT；生产数据集按单证券发布，把多个单证券 Dataset 装配成池输入仍不在本入口范围。
+
 ## 共同评价窗口与冻结复权研究输入（#297/T08a）
 
 定义新增可选 `adjusted_versions`（逐成员 `adj:sha256`）与 `evaluation`
@@ -83,8 +95,8 @@ Venue 或显式 lot 越界时整体失败，不静默选第一个 Venue。Run Sp
 带 `evaluation` 的 Fast Event/Vector Run 把账本 Panel 切片到评价窗口：预热
 Session 不产生 Decision、Fill 或绩效，结果/Summary 从评价起点开始，窗口末
 Decision 不成交；Buy & Hold 的建仓锚点移到窗口首 Session。成交/估值仍用原始
-Bar，Fast/Vector 语义版本与无窗口旧定义的身份/结果不变。单 Venue 池的选择
-入口必须逐成员绑定复权版本；T04b 单证券未绑定时保留旧路径。完整契约见
+Bar，Fast/Vector 语义版本与无窗口旧定义的身份/结果不变。池的选择入口必须逐成员
+绑定复权版本（包括 #295 的沪深同池版本）；T04b 单证券未绑定时保留旧路径。完整契约见
 [共同评价窗口](../../docs/contracts/evaluation-window.md) 与
 [ADR 0031](../../docs/decisions/0031-common-evaluation-window-and-adjusted-binding.md)；
 预检/页面由 #356/T08b 承接。

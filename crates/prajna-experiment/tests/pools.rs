@@ -273,11 +273,13 @@ fn pool_selection_freezes_old_members_and_dataset_without_changing_legacy_identi
     );
     let mut mixed = serde_json::to_value(&selection).unwrap();
     mixed["pool"]["version"] = json!(4);
+    // A mixed XSHG+XSHE version is no longer rejected at the Venue scope; the
+    // per-member adjusted binding is what must match the frozen pool exactly.
     assert_eq!(
         freeze(root, &serde_json::from_value(mixed).unwrap())
             .unwrap_err()
             .code,
-        "unsupported_venue"
+        "adjusted_instrument_mismatch"
     );
     let mut missing: Value = serde_json::to_value(&selection).unwrap();
     missing["pool"]["version"] = json!(1);
@@ -298,9 +300,13 @@ fn pool_selection_freezes_old_members_and_dataset_without_changing_legacy_identi
 }
 
 #[test]
-#[ignore = "exports only a synthetic production Dataset for browser tests"]
+#[ignore = "exports only synthetic production Datasets for browser tests"]
 fn export_synthetic_pool_fixture() {
     if let Some(root) = std::env::var_os("PRAJNA_POOL_FIXTURE_ROOT") {
-        fixture::prepare_with_adjusted(Path::new(&root), true);
+        let root = Path::new(&root);
+        // Shared Venue fixture: executable 2 Venue x 3 Session Dataset.
+        fixture::prepare_executable_multi_venue(root, true, None);
+        // Structural shared-axis disagreement for the visible failure path.
+        fixture::prepare_executable_multi_venue(root, true, Some("2026-01-06"));
     }
 }

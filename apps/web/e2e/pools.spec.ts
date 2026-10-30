@@ -135,11 +135,14 @@ test('production pool preflight preserves bindings, blockers, native combination
   await expect(submit).toBeDisabled();
   expect((await check()).status()).toBe(404);
   await expect(page.getByRole('alert')).toContainText('security is absent');
-  // A mixed Venue version can be managed but this research entry refuses it.
+  // A mixed XSHG+XSHE version is accepted by the Venue scope; every member must
+  // still bind its own adjusted version before the shared window can run.
   const mixed = await publish(['510300.XSHG', '159952.XSHE']);
   await select(mixed, varied.dsv);
-  expect((await check()).status()).toBe(400);
-  await expect(page.getByRole('alert')).toContainText('requires one venue');
+  const mixedPlan = (await (await check()).json()).data;
+  expect([...mixedPlan.venues].sort()).toEqual(['XSHE', 'XSHG']);
+  expect(mixedPlan.runnable).toBe(false);
+  await expect(page.getByTestId('pool-preflight')).toContainText('adjusted_version_missing');
   await expect(submit).toBeDisabled();
   // Each member chooses its own immutable version; a partial map cannot run.
   const pair = await publish(['510300.XSHG', '510880.XSHG']);
