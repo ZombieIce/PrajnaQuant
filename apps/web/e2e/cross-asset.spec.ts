@@ -154,11 +154,11 @@ test('cross-asset pool baseline runs through the production entry and reads the 
     session_date: string; valuation_point: string; cash: string; equity: string;
     positions: Record<string, { quantity: string }>;
   }[];
+  const summary = result.data.runs[0].summary;
+  await expect(page.getByTestId('result-metrics')).toContainText(`${(summary.total_return * 100).toFixed(2)}%`);
   const entered = rows.find((row) => row.session_date === '2026-01-06' && row.valuation_point === 'close');
   const opened = rows.find((row) => row.session_date === '2026-01-05' && row.valuation_point === 'close');
   if (!entered || !opened) throw new Error('Expected the persisted evaluation-window rows');
-  // Independent hand calculation on the synthetic 10.00 open, lot 100:
-  // 159952.XSHE buys floor(0.5 x 1,000,000 / 10) = 50,000 shares first
   expect(opened.positions).toEqual({});
   expect(opened.cash).toBe('1000000');
   expect(entered.cash).toBe('500.44006');

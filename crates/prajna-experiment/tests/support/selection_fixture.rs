@@ -23,12 +23,8 @@ pub fn prepare_days(root: &Path, known_listing: bool, days: &[&str]) -> String {
     publish(root, known_listing, days, None, false)
 }
 
-/// Test-only wrapper that keeps the production v1 Normalizer as the single
-/// normalization authority and appends a synthetic TRADABLE status table so a
-/// multi-Venue fixture can enter the real Fast Event execution path. The id stays
-/// `cn-stock-etf-daily` because the T07 adjusted import contract requires that
-/// raw-DSV identity; the version string is explicitly synthetic and never a
-/// claimed production version. No production code path uses this wrapper.
+/// Test-only wrapper around the production v1 Normalizer adding a synthetic TRADABLE status
+/// table for executable multi-Venue fixtures; the id stays `cn-stock-etf-daily` (T07) and the version is synthetic.
 struct ExecutableStatusNormalizer {
     base: CnStockEtfDaily,
     config: String,

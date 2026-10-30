@@ -240,6 +240,9 @@ fn mixed_venue_pool_freezes_runner_identity_and_persists_the_hand_calculated_bas
         runs[0].run_spec["engine"]["semantic_version"],
         "fast_event@14"
     );
+    let window_plan = experiment.plan(&repo.lake).unwrap();
+    assert_eq!(window_plan.warmup_sessions, 0);
+    assert_eq!(window_plan.start.unwrap().to_string(), "2026-01-05");
 
     fs::write(&repo.definition, serde_json::to_vec(definition).unwrap()).unwrap();
     let run = repo.run();
@@ -256,10 +259,7 @@ fn mixed_venue_pool_freezes_runner_identity_and_persists_the_hand_calculated_bas
             .find(|row| row["session_date"] == date && row["valuation_point"] == point)
             .unwrap_or_else(|| panic!("missing {date} {point}"))
     };
-    // Independent hand calculation on the synthetic 10.00 open, lot 100:
-    // 159952.XSHE buys floor(0.5 x 1,000,000 / 10) = 50,000 shares first
-    // (50,000 x 10.002 + 150.03 = 500,250.03); 510300.XSHG then buys the largest
-    // cash-limited lot, 49,900 (49,900 x 10.002 + 149.72994 = 499,249.52994).
+    // Independent hand calculation on the synthetic 10.00 open, lot 100.
     let entered = row("2026-01-06", "close");
     assert_eq!(entered["cash"], "500.44006");
     assert_eq!(entered["positions"]["159952.XSHE"]["quantity"], "50000");
