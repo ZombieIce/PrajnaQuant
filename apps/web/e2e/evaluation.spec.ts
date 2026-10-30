@@ -6,6 +6,7 @@ test('evaluation production submit persists Rust endpoints and relationship char
   const lake = join(process.env.PRAJNA_E2E_ROOT!, 'fixture', 'lake');
   const request = JSON.parse(await readFile(join(lake, 'synthetic-momentum-request.json'), 'utf8'));
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   await page.goto('/research/momentum');
   await page.getByLabel('研究 Dataset', {exact:true}).selectOption(request.dsv);
   await page.getByLabel('研究对象', {exact:true}).selectOption(request.instrument);
@@ -43,6 +44,15 @@ test('evaluation production submit persists Rust endpoints and relationship char
     await expect(rows.first().locator('td').nth(3)).toHaveText(String(p.forward_return));
   }
   await expect(page.locator('canvas')).toHaveCount(5);
+  // Canvas existence and tables alone cannot prove the scatter renderer was registered.
+  await expect.poll(() => page.locator('canvas').nth(2).evaluate(canvas => {
+    const image = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
+    let blue = 0;
+    for (let i = 0; i < image.length; i += 4) {
+      if (image[i] < 120 && image[i+1] < 160 && image[i+2] > 140 && image[i+3] > 128) blue++;
+    }
+    return blue;
+  })).toBeGreaterThan(100);
   await page.getByRole('heading', {name:'因子与 1 Session 后续收益关系',exact:true}).scrollIntoViewIfNeeded();
   await page.screenshot({path:test.info().outputPath('evaluation-relationship.png')});
   await page.reload();
