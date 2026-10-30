@@ -94,6 +94,7 @@ pub async fn serve_with_dataset_root(
         .clone()
         .momentum_router(dataset_root.clone(), socket.to_string());
     let experiment_results = run_jobs.clone().result_router(socket.to_string());
+    let comparisons = run_jobs.clone().comparison_router(socket.to_string());
     let selections = run_jobs
         .clone()
         .selection_router(dataset_root.clone(), socket.to_string());
@@ -126,7 +127,8 @@ pub async fn serve_with_dataset_root(
         .merge(momentum)
         .merge(dataset_api::router(dataset_root, socket.to_string()))
         .merge(selections)
-        .merge(experiment_results);
+        .merge(experiment_results)
+        .merge(comparisons);
     let app = api.fallback_service(
         ServeDir::new(&web_dist)
             .append_index_html_on_directories(true)

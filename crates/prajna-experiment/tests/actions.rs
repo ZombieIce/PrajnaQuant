@@ -1083,3 +1083,349 @@ fn holding_pool_formal_definition_and_nonzero_execution_costs() {
     assert_eq!(result.fills[0].fill.price().to_string(), "10.001");
     assert_eq!(result.sessions[1].close.account.cash.to_string(), "999.1");
 }
+
+// --- #375 frozen strategy-benchmark comparison -----------------------------
+
+use prajna_experiment::{
+    comparison::{self, ReinvestmentPolicy},
+    pools::{self, Command as PoolCommand},
+    selection::Settings,
+};
+
+fn selection_of(request: &Value) -> Selection {
+    serde_json::from_value(request.clone()).unwrap()
+}
+
+fn freeze_comparison_cli(root: &Path, selection: &Selection, policy: ReinvestmentPolicy) -> Value {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_prajna-freeze-comparison"))
+        .arg("--lake")
+        .arg(root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            serde_json::to_vec(&json!({"selection": selection, "reinvestment_calendar": policy}))
+                .unwrap()
+                .as_slice(),
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+fn reject_comparison(root: &Path, request: &Value) -> &'static str {
+    comparison::freeze(
+        root,
+        &comparison::Request {
+            selection: selection_of(request),
+            reinvestment_calendar: ReinvestmentPolicy::StrategyRebalance,
+        },
+    )
+    .unwrap_err()
+    .code
+}
+
+fn run_definition(root: &Path, name: &str, definition: &Value) -> Value {
+    let file = root.join(name);
+    fs::write(&file, definition.to_string()).unwrap();
+    let execution = cli(
+        root,
+        &[
+            "run",
+            file.to_str().unwrap(),
+            "--level",
+            "standard",
+            "--threads",
+            "1",
+        ],
+    );
+    assert_eq!(execution["failed_count"], 0, "{execution}");
+    execution
+}
+
+fn read_result(root: &Path, execution: &Value) -> Value {
+    cli(
+        root,
+        &[
+            "result",
+            execution["exp"].as_str().unwrap(),
+            execution["exe"].as_str().unwrap(),
+        ],
+    )
+}
+
+fn close_rows(result: &Value) -> Vec<Value> {
+    result["data"]["runs"][0]["series"]["account_valuations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["valuation_point"] == "close")
+        .cloned()
+        .collect()
+}
+
+fn single_position(row: &Value) -> &str {
+    row["positions"]
+        .as_object()
+        .unwrap()
+        .values()
+        .next()
+        .and_then(|position| position["quantity"].as_str())
+        .unwrap_or("0")
+}
+
+#[test]
+fn frozen_single_etf_comparison_runs_reads_and_keeps_first_valuation() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let request = setup(root);
+    let selection = selection_of(&request);
+    let frozen = freeze_comparison_cli(root, &selection, ReinvestmentPolicy::StrategyRebalance);
+    let data = &frozen["data"];
+    assert_eq!(data["semantic_version"], "strategy-benchmark-comparison@1");
+    assert_eq!(data["benchmark"]["kind"], "single_etf");
+    assert_eq!(data["comparability"]["initial_cash"], "10005");
+    assert_eq!(data["comparability"]["evaluation"]["start"], DATES[1]);
+    assert_eq!(data["comparability"]["evaluation"]["end"], DATES[9]);
+    assert_eq!(
+        data["comparability"]["reinvestment_calendar"]["decision_dates"],
+        json!([DATES[3], DATES[5], DATES[7], DATES[9]])
+    );
+    let checks = data["comparability"]["checks"].as_array().unwrap();
+    for field in [
+        "dsv",
+        "universe",
+        "costs",
+        "adjusted_versions",
+        "evaluation",
+        "corporate_actions",
+    ] {
+        assert!(checks.iter().any(|value| value == field), "{field}");
+    }
+
+    let strategy_run = run_definition(
+        root,
+        "comparison-strategy.json",
+        &data["strategy"]["definition"],
+    );
+    let benchmark_run = run_definition(
+        root,
+        "comparison-benchmark.json",
+        &data["benchmark"]["definition"],
+    );
+    let strategy = read_result(root, &strategy_run);
+    let benchmark = read_result(root, &benchmark_run);
+    assert_eq!(benchmark_run["exp"], data["benchmark"]["experiment"]);
+    assert_eq!(
+        benchmark["data"]["runs"][0]["run_id"],
+        data["benchmark"]["run"]
+    );
+
+    let rows = close_rows(&benchmark);
+    assert_eq!(rows.len(), 9);
+    let expected = [
+        ("10005", "0", "10005", "0"),
+        ("0", "1000", "10000", "0"),
+        ("0", "1000", "9800", "1800"),
+        ("1800", "1000", "9800", "0"),
+        ("1800", "1000", "9800", "0"),
+        ("195", "2400", "9795", "0"),
+        ("195", "2400", "9795", "0"),
+        ("195", "2400", "9795", "0"),
+        ("195", "2400", "9795", "0"),
+    ];
+    for (index, row) in rows.iter().enumerate() {
+        assert_eq!(row["session_date"], DATES[index + 1]);
+        assert_eq!(row["cash"], expected[index].0);
+        assert_eq!(single_position(row), expected[index].1);
+        assert_eq!(row["equity"], expected[index].2);
+        assert_eq!(row["dividend_receivable"], expected[index].3);
+    }
+    let summary = &benchmark["data"]["runs"][0]["summary"];
+    assert_eq!(benchmark["data"]["runs"][0]["accounting_verified"], true);
+    assert_eq!(
+        summary["total_return"].as_f64().unwrap(),
+        9795.0 / 10005.0 - 1.0
+    );
+    assert_eq!(
+        summary["corporate_action_completeness"]["is_complete"],
+        true
+    );
+    assert_eq!(close_rows(&strategy).len(), rows.len());
+
+    let no_reinvestment = freeze_comparison_cli(root, &selection, ReinvestmentPolicy::None);
+    assert_eq!(
+        no_reinvestment["data"]["comparability"]["reinvestment_calendar"]["decision_dates"],
+        json!([])
+    );
+    assert_ne!(
+        no_reinvestment["data"]["benchmark"]["run"],
+        data["benchmark"]["run"]
+    );
+}
+
+#[test]
+fn comparison_rejects_unsupported_or_incomplete_inputs() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let request = setup(root);
+    let mut no_actions = request.clone();
+    no_actions
+        .as_object_mut()
+        .unwrap()
+        .remove("corporate_actions");
+    assert_eq!(
+        reject_comparison(root, &no_actions),
+        "comparison_requires_corporate_actions"
+    );
+    let mut multiple = request.clone();
+    let first = multiple["parameter_space"]["list"][0].clone();
+    let mut second = first.clone();
+    second["ma_window"] = json!(3);
+    multiple["parameter_space"]["list"] = json!([first, second]);
+    assert_eq!(
+        reject_comparison(root, &multiple),
+        "comparison_requires_single_run"
+    );
+    let mut unsupported = request;
+    unsupported["strategy"] = json!("ma_crossover");
+    unsupported["parameter_space"] =
+        json!({"list":[{"params_version":1,"short_window":2,"long_window":3}]});
+    assert_eq!(
+        reject_comparison(root, &unsupported),
+        "comparison_unsupported_strategy"
+    );
+}
+
+#[test]
+fn frozen_equal_weight_comparison_uses_actual_lots_and_marks_incomplete_facts() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let dsv = fixture::prepare_executable_days(root, true, &DATES);
+    let members = ["510300.XSHG", "510880.XSHG"];
+    let adjusted = members
+        .iter()
+        .map(|member| {
+            (
+                (*member).to_string(),
+                fixture::import_adjusted(root, &dsv, member, DATES[0], DATES[9], &DATES),
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let version =
+        corporate_facts::import(root, &serde_json::to_vec(&facts("510300.XSHG")).unwrap()).unwrap();
+    let registry = pools::command(root, PoolCommand::List {}).unwrap();
+    let draft = serde_json::from_value(
+        registry["data"]["pools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|pool| pool["id"] == "dividend")
+            .unwrap()["draft"]
+            .clone(),
+    )
+    .unwrap();
+    let expected_members: Vec<String> = members.iter().map(|member| (*member).into()).collect();
+    pools::command(
+        root,
+        PoolCommand::Save {
+            id: "dividend".into(),
+            members: expected_members.clone(),
+            expected: draft,
+        },
+    )
+    .unwrap();
+    let published = pools::command(
+        root,
+        PoolCommand::Publish {
+            id: "dividend".into(),
+            expected: expected_members,
+        },
+    )
+    .unwrap();
+    let pool_version = published["data"]["pools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|pool| pool["id"] == "dividend")
+        .unwrap()["versions"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()["version"]
+        .as_u64()
+        .unwrap() as usize;
+    let selection = Selection {
+        dsv,
+        instrument: String::new(),
+        pool: Some(pools::Reference {
+            id: "dividend".into(),
+            version: pool_version,
+        }),
+        strategy: "s2_rotation".into(),
+        parameter_space: Some(
+            json!({"list":[{"short":1,"long":2,"vol":2,"w_s":0.5,"w_l":0.5,"w_v":0.0,"trend":null,"top_k":1,"rebalance_every":1}]}),
+        ),
+        settings: Settings {
+            initial_cash: "10000".into(),
+            commission_rate: 0.0,
+            minimum_commission: "5".into(),
+            buy_slippage_bps: 0.0,
+            sell_slippage_bps: 0.0,
+            buy_tax_rate: 0.0,
+            sell_tax_rate: 0.0,
+        },
+        adjusted,
+        corporate_actions: Some(prajna_experiment::actions::Binding {
+            version,
+            dividend_tax_rate: "0.1".into(),
+        }),
+    };
+    let frozen = freeze_comparison_cli(root, &selection, ReinvestmentPolicy::StrategyRebalance);
+    let data = &frozen["data"];
+    assert_eq!(data["benchmark"]["kind"], "equal_weight_pool");
+    assert_eq!(
+        data["comparability"]["reinvestment_calendar"]["decision_dates"],
+        json!([
+            DATES[3], DATES[4], DATES[5], DATES[6], DATES[7], DATES[8], DATES[9]
+        ])
+    );
+    let strategy_run = run_definition(root, "pool-strategy.json", &data["strategy"]["definition"]);
+    let benchmark_run = run_definition(
+        root,
+        "pool-benchmark.json",
+        &data["benchmark"]["definition"],
+    );
+    let benchmark = read_result(root, &benchmark_run);
+    let rows = close_rows(&benchmark);
+    assert_eq!(rows.len(), 8);
+    assert_eq!(rows[0]["session_date"], DATES[2]);
+    assert_eq!(rows[0]["equity"], "10000");
+    assert_eq!(rows[1]["session_date"], DATES[3]);
+    assert_eq!(rows[1]["cash"], "90");
+    assert_eq!(rows[1]["positions"]["510300.XSHG"]["quantity"], "500");
+    assert_eq!(rows[1]["positions"]["510880.XSHG"]["quantity"], "490");
+    assert_eq!(rows[1]["equity"], "9990");
+    let summary = &benchmark["data"]["runs"][0]["summary"];
+    assert_eq!(
+        summary["corporate_action_completeness"]["is_complete"],
+        false
+    );
+    assert!(
+        summary["corporate_action_completeness"]["reasons"]
+            .as_array()
+            .is_some_and(|reasons| !reasons.is_empty())
+    );
+    assert_eq!(strategy_run["failed_count"], 0);
+    assert_eq!(benchmark["data"]["runs"][0]["accounting_verified"], true);
+}

@@ -10,6 +10,7 @@ prajna-experiment diff <exe-a> <exe-b> --lake <dir>
 prajna-experiment result <exp> <exe> --lake <dir> [--run <run-id>]
 prajna-experiment promote <experiment.json> --lake <dir> --level standard|full
                          [--threads N]
+prajna-freeze-comparison --lake <dir> < comparison-request.json
 ```
 
 `result` 只读已保存的 Execution：校验实验/执行身份与 manifest 中每一张已保存表的 hash，输出 `schema_version: 1` 的 Summary/NAV envelope；缺表保持 `not_saved` / `not_produced_by_engine`，不执行、不提升、不重算。字段、错误映射和 HTTP 适配见 [结果读取契约](../../docs/contracts/experiment-result-read.md)。
@@ -442,3 +443,19 @@ Session open 只分配现金买入；不卖出恢复权重，缺行情/不可交
 Standard 为此新路径保存 orders/fills/费用及行动/现金/权益，尝试目的区分入场和再投，
 末日 pending 明确保留。旧 BuyAndHold 定义和身份不变；费用、余量和价格增量规则见
 [ADR 0034](../../docs/decisions/0034-holding-benchmark-execution.md)。
+
+### 冻结策略—基准对照（#375/T19b）
+
+`prajna-freeze-comparison --lake <LOCAL>` 从 stdin 读取 `{selection, reinvestment_calendar}`，
+复用 `prajna-freeze-selection` 的策略冻结，再在 Rust 中派生对应 `holding_benchmark@1`：
+
+- `single_etf_timing` → `single_etf` 同证券买入持有；
+- 单 Venue `s2_rotation` → `equal_weight_pool` 冻结池期初等权持有；
+- 其他模板、多参数、多 Venue、Vector/Accurate/PIT、缺公司行动/窗口/复权版本拒绝。
+
+基准定义复制策略的 DSV、Universe、真实 Venue、成本、本金、最低佣金、可用性假设、
+`adjusted_versions`、`evaluation` 与公司行动版本，并使用冻结策略 Run 的
+`rebalance_every` 从评价窗口派生显式再投资日历；`none` 声明不再投资。两个角色均
+固定 `standard` 结果级别。成功 envelope 含 `strategy`/`benchmark` 的冻结
+`definition`、预期 `experiment`/`run` 身份与 `comparability`；不改变旧定义/结果身份。
+输出、拒绝码、任务 API 与读取核对见 [ADR 0035](../../docs/decisions/0035-strategy-benchmark-comparison.md)。

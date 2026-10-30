@@ -35,6 +35,8 @@ use std::{
 };
 use uuid::Uuid;
 
+#[path = "comparison_api.rs"]
+mod comparison_api;
 #[path = "momentum_api.rs"]
 mod momentum_api;
 #[path = "selection_api.rs"]
@@ -53,6 +55,7 @@ const MAX_SNAPSHOT_ROWS: i64 = 2_000_000;
 const MAX_UNIVERSE_INSTRUMENTS: usize = 100;
 const EXPERIMENT_TASK_TYPE: &str = "prajna_experiment";
 const EXPERIMENT_TASK_VERSION: u32 = 1;
+const COMPARISON_TASK_TYPE: &str = "prajna_comparison";
 const DEFAULT_RESULT_LEVEL: &str = "summary";
 
 fn default_result_level() -> String {
@@ -351,7 +354,7 @@ impl RunJobApi {
             };
             if !matches!(
                 task.task_type.as_str(),
-                EXPERIMENT_TASK_TYPE | "prajna_momentum"
+                EXPERIMENT_TASK_TYPE | COMPARISON_TASK_TYPE | "prajna_momentum"
             ) || task.task_version != EXPERIMENT_TASK_VERSION
             {
                 continue;
@@ -942,6 +945,9 @@ impl RunJobApi {
     }
     fn execute_experiment_task(&self, task: &ExperimentTask) -> Result<Value, RunError> {
         let directory = experiment_task_dir(&self.0.output, task.task_id);
+        if task.task_type == COMPARISON_TASK_TYPE {
+            return self.execute_comparison_task(task, &directory);
+        }
         let request = read_experiment_request(&directory).ok_or_else(|| {
             run_error(
                 "task_request_missing",

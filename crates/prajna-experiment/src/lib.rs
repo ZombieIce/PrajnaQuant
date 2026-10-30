@@ -37,6 +37,7 @@ use sha2::{Digest, Sha256};
 mod accurate;
 pub mod actions;
 pub mod benchmark;
+pub mod comparison;
 mod engine;
 pub mod opening_evidence;
 pub mod pit;

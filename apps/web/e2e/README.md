@@ -91,6 +91,19 @@ to prove an explicit empty state, and keeps Dataset detail readable throughout.
 Rendered values are compared with real API payloads; no mock is used, and fault
 mutations restore the invocation-owned lake in `finally`.
 
+`comparisons.spec.ts` operates the production `/comparisons` page and the new
+comparison task/result routes. It freezes a single-ETF timing strategy through the
+real selection/comparison CLI, executes and reads both authoritative roles, checks
+rendered rows and metrics against the result API, reloads and reopens the persisted
+task, corrupts the saved benchmark `account_valuations.parquet`, and removes the
+frozen benchmark role to prove explicit failure states. A second flow publishes a
+temporary same-pool version, runs an equal-weight pool comparison with incomplete
+corporate-action facts, and checks that the page keeps both authoritative curves
+while marking the comparison incomplete. A third flow imports an explicit adjusted
+version for the v1 XSHG Dataset and proves a real comparison task fails with its
+persisted CLI error and no fabricated result. These are synthetic checks; they do
+not establish real total return or PIT completeness.
+
 `backtests.spec.ts` operates the production `/backtests` page: choose the v2 XSHG
 ETF, submit through `POST /api/v1/tasks/selections`, observe the persisted task
 become `succeeded`, read `GET /api/v1/tasks/experiments/{id}/result`, and assert
