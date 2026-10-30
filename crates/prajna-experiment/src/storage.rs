@@ -335,7 +335,7 @@ pub struct StoredRun {
     pub not_produced_by_engine: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accounting_verified: Option<bool>,
-    /// PIT session membership/eligibility and evidence identities survive Summary.
+    /// PIT or fixed-action evidence identities survive Summary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_spec: Option<Value>,
 }
@@ -1204,6 +1204,7 @@ fn stored_run(
         run_spec: execution
             .run_spec
             .get("pit")
+            .or_else(|| execution.run_spec.get("corporate_actions"))
             .map(|_| execution.run_spec.clone()),
     }
 }

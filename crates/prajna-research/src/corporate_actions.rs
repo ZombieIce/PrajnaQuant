@@ -97,6 +97,7 @@ pub struct CorporateActionSchedule {
     actions: Vec<CorporateActionRow>,
     coverage: Vec<CorporateActionCoverage>,
     dividend_tax_rate: Notional,
+    incomplete_reasons: Vec<String>,
 }
 
 impl CorporateActionSchedule {
@@ -159,6 +160,7 @@ impl CorporateActionSchedule {
             actions,
             coverage,
             dividend_tax_rate: Notional::ZERO,
+            incomplete_reasons: Vec::new(),
         })
     }
 
@@ -235,6 +237,12 @@ impl CorporateActionSchedule {
             .collect();
         Self::new(version, index.actions().to_vec(), coverage)?
             .with_dividend_tax_rate(dividend_tax_rate)
+    }
+
+    /// Consumer evidence gaps do not fabricate executable events.
+    pub fn with_incomplete_reasons(mut self, reasons: Vec<String>) -> Self {
+        self.incomplete_reasons = reasons;
+        self
     }
 
     pub fn version(&self) -> &str {
@@ -394,7 +402,7 @@ impl<'a> CorporateActionProcessor<'a> {
         ignore_liquidations: bool,
     ) -> Result<Self, CorporateActionError> {
         schedule.validate_for_panel(panel)?;
-        let mut reasons = Vec::new();
+        let mut reasons = schedule.incomplete_reasons.clone();
         for coverage in &schedule.coverage {
             match coverage.status {
                 ActionCoverageStatus::Complete => {}

@@ -357,6 +357,19 @@ impl EngineSettings {
             "retry"
         }
     }
+    pub(super) fn validate_static_actions(&self, pit: bool) -> Result<(), ExperimentError> {
+        if pit
+            || self.backend.is_some()
+            || self.venues.len() != 1
+            || self.fast.as_ref().is_none_or(|c| c.sizing != Sizing::Lot)
+            || self.rebalance != Rebalance::FullTarget
+        {
+            return Err(invalid(
+                "corporate_actions require Static Universe single-Venue Fast Event lot/full_target",
+            ));
+        }
+        Ok(())
+    }
     pub(super) fn configure_pit(
         &mut self,
         catalog: &prajna_research::pit_universe::HistoricalCatalog,
@@ -483,6 +496,9 @@ impl EngineSettings {
         }
         if let Some(backend) = &self.backend {
             value["backend"] = serde_json::json!(backend);
+        }
+        if value.get("corporate_actions").is_some() {
+            value["engine"]["semantic_version"] = fast_event::STATIC_ACTION_ENGINE_VERSION.into();
         }
     }
     pub(super) fn set_policy(&self, strategy: &mut VectorStrategy) {
@@ -888,6 +904,15 @@ pub(super) fn execute(
                             ),
                         }
                     }
+                } else if let Some(actions) = &experiment.actions {
+                    let schedule = actions.schedule(ledger_panel).map_err(|e| e.to_string())?;
+                    fast_event::run_fast_event_with_actions(
+                        ledger_panel,
+                        statuses,
+                        config,
+                        &portfolios,
+                        &schedule,
+                    )
                 } else {
                     fast_event::run_fast_event(ledger_panel, statuses, config, &portfolios)
                 }
