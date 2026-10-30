@@ -16,11 +16,20 @@ fn dates() -> Vec<String> {
 fn inputs(root: &Path) -> Value {
     let days = dates();
     let refs = days.iter().map(String::as_str).collect::<Vec<_>>();
-    let dsv = fixture::prepare_days(root, true, &refs);
+    let dsv = fixture::prepare_executable_days(root, true, &refs);
     let version = fixture::import_adjusted(
         root,
         &dsv,
         "510300.XSHG",
+        &days[0],
+        days.last().unwrap(),
+        &refs,
+    );
+    // The same executable XSHG panel carries a second ETF for the comparison E2E.
+    fixture::import_adjusted(
+        root,
+        &dsv,
+        "510880.XSHG",
         &days[0],
         days.last().unwrap(),
         &refs,

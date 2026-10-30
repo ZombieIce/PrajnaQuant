@@ -308,19 +308,5 @@ fn export_synthetic_pool_fixture() {
         fixture::prepare_executable_multi_venue(root, true, None);
         // Structural shared-axis disagreement for the visible failure path.
         fixture::prepare_executable_multi_venue(root, true, Some("2026-01-06"));
-        // Six shared Sessions for a same-Venue equal-weight comparison whose
-        // S2 warm-up still leaves a non-empty evaluation window.
-        let days = [
-            "2026-01-05",
-            "2026-01-06",
-            "2026-01-07",
-            "2026-01-08",
-            "2026-01-09",
-            "2026-01-12",
-        ];
-        let dsv = fixture::prepare_executable_days(root, true, &days);
-        for member in ["510300.XSHG", "510880.XSHG"] {
-            fixture::import_adjusted(root, &dsv, member, days[0], days[5], &days);
-        }
     }
 }

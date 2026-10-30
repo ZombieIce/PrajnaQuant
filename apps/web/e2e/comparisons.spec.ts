@@ -168,7 +168,7 @@ test('equal-weight pool comparison reports incomplete action facts and keeps aut
     const published = await (await page.request.post('/api/v1/research-pools', { data: { op: 'publish', id: 'cross-asset', expected: draft } })).json();
     version = published.data.pools.find((item: { id: string }) => item.id === 'cross-asset').versions.at(-1).version;
     const details = await catalogDetails(page);
-    const executable = details.find((item) => item.normalizer_version === 'synthetic-pool-executable@1' && item.sessions === 12);
+    const executable = details.find((item) => item.normalizer_version === 'synthetic-pool-executable@1' && item.bars === 650);
     expect(executable).toBeTruthy();
     const adjusted = executable!.detail.adjusted_series.versions as { instrument_id: string; version: string }[];
     const actions = await originalActions(page);
