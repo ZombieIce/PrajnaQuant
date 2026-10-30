@@ -4,8 +4,9 @@ import { Chart } from '../Chart';
 type Pool = { id: string; name: string; versions: { version: number; members: string[] }[] };
 type Adjusted = { version: string; instrument_id: string; method_version: string };
 type Row = { instrument: string; date: string; value: number | null; status: string; available_at_ns: string | null };
-type Factor = { definition: { kind: string; version: string; params: { n: number } }; rows: Row[]; distribution: { low: number; high: number; count: number }[]; status_counts: Record<string, number> };
-type Report = { id: string; report: { factors: Factor[]; members: string[]; sources: unknown; sample_assumption: string; semantics: string; direction: string; request: unknown } };
+type Relationship = { horizon: number; expected_count: number; effective_count: number; missing_count: number; missing_ratio: number | null; points: { instrument: string; date: string; factor_value: number; forward_return: number }[] };
+type Factor = { relationships?: Relationship[]; definition: { kind: string; version: string; params: { n: number } }; rows: Row[]; distribution: { low: number; high: number; count: number }[]; status_counts: Record<string, number> };
+type Report = { id: string; report: { factors: Factor[]; members: string[]; sources: unknown; sample_assumption: string; semantics: string; direction: string; request: unknown; evaluation?: { version: string; usage: string; labels: { instrument: string; date: string; horizon: number; entry_date: string | null; exit_date: string | null; value: number | null; status: string }[] } } };
 type Reply = { data: Report };
 type Kind = 'momentum' | 'volatility' | 'trend_filter_strict';
 // Momentum stays the legacy request shape (no factor field) so old report identities and saved work remain reusable.
@@ -26,6 +27,7 @@ export default function MomentumPage() {
   const [adjusted, setAdjusted] = useState<Record<string, string>>({});
   const [kind, setKind] = useState<Kind>('momentum');
   const [windows, setWindows] = useState('20,60,120');
+  const [evaluation, setEvaluation] = useState(false);
   const [report, setReport] = useState<Report | null>(null);
   const [recent, setRecent] = useState<{ id: string }[]>([]);
   const [error, setError] = useState('');
@@ -78,7 +80,7 @@ export default function MomentumPage() {
       const ns = windows.split(/[,，\s]+/).filter(Boolean).map(Number);
       if (!ns.length || ns.some(n => !Number.isSafeInteger(n) || n < 1)) throw new Error('窗口必须为正整数 Session');
       const request = { dsv, ...(selectedPool ? { pool: { id: selectedPool.id, version: selectedPool.version } } : { instrument: choice }), windows: ns,
-        adjusted: Object.fromEntries(members.map(m => [m, adjusted[m] ?? ''])), ...(kind === 'momentum' ? {} : { factor: kind }) };
+        adjusted: Object.fromEntries(members.map(m => [m, adjusted[m] ?? ''])), ...(kind === 'momentum' ? {} : { factor: kind }), ...(evaluation ? { evaluation: 'next_open_to_forward_open_v1' } : {}) };
       const v = await api<{ task: NonNullable<typeof task> }>(endpoint, { method: 'POST', body: JSON.stringify({ op: 'submit', request, idempotency_key: crypto.randomUUID() }) });
       setTask(v.task); setTasks(previous => [v.task, ...previous.filter(t => t.task_id !== v.task.task_id)]);
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
@@ -90,6 +92,7 @@ export default function MomentumPage() {
       {members.map(m => <label key={m}>{m} 复权版本<select aria-label={`${m} 研究复权版本`} value={adjusted[m] ?? ''} onChange={e => setAdjusted({ ...adjusted, [m]: e.target.value })}><option value="">显式选择版本</option>{versions.filter(v => v.instrument_id === m).map(v => <option key={v.version} value={v.version}>{v.method_version} · {v.version}</option>)}</select></label>)}
       <label>研究因子<select aria-label="研究因子" value={kind} onChange={e => { const next = e.target.value as Kind; setKind(next); setWindows(factorKinds.find(k => k.value === next)!.windows); }}>{factorKinds.map(k => <option key={k.value} value={k.value}>{k.label}</option>)}</select></label>
       <label>窗口 Session<input aria-label="研究窗口" value={windows} onChange={e => setWindows(e.target.value)} /></label>
+      <label><input type="checkbox" aria-label="评价后续收益" checked={evaluation} onChange={e => setEvaluation(e.target.checked)} />评价 1/5/20 Session 后续收益（同一复权价；不扣费用）</label>
       <button disabled={busy || !choice || members.some(m => !adjusted[m])} onClick={submit}>{busy ? '处理中…' : '计算并保存研究'}</button>
     </Panel>
     {task && <p data-testid="momentum-task-status">{task.status} · {task.stage}</p>}
@@ -97,10 +100,20 @@ export default function MomentumPage() {
     {error && <ErrorBox>{error}</ErrorBox>}
     <Panel title="已保存研究">{recent.map(r => <button disabled={busy} key={r.id} onClick={() => open(r.id)}>打开 {r.id}</button>)}</Panel>
     {report && <><p>{report.report.sample_assumption}</p><p data-testid="factor-semantics">语义 {report.report.semantics} · 方向 {report.report.direction}</p><details><summary>固定输入、来源与可用性假设</summary><pre>{JSON.stringify({ request: report.report.request, sources: report.report.sources }, null, 2)}</pre></details>
+      {report.report.evaluation && <Panel title="评价标签">
+        <p data-testid="evaluation-contract">{report.report.evaluation.version} · 下一 Session open 至再后 N Session open；仅作评价，重叠标签不复利为可交易净值。Static Universe，小样本不证明有效性。</p>
+        <details><summary>标签端点与缺失明细</summary><table data-testid="evaluation-labels"><thead><tr><th>证券</th><th>信号日期</th><th>期限 Session</th><th>入场端点</th><th>退出端点</th><th>后续收益</th><th>状态</th></tr></thead><tbody>{report.report.evaluation.labels.map(r => <tr key={`${r.instrument}:${r.date}:${r.horizon}`}><td>{r.instrument}</td><td>{r.date}</td><td>{r.horizon}</td><td>{r.entry_date ?? '—'}</td><td>{r.exit_date ?? '—'}</td><td>{r.value ?? '—'}</td><td>{r.status}</td></tr>)}</tbody></table></details>
+      </Panel>}
       {report.report.factors.map((factor, index) => <Panel key={index} title={`${factorLabel(factor.definition.kind)} ${factor.definition.params.n} Session`}>
         <p data-testid="missing-counts">状态 / 缺失：{JSON.stringify(factor.status_counts)}</p>
         <Chart option={{ tooltip: { trigger: 'axis' }, legend: {}, xAxis: { type: 'category', data: [...new Set(factor.rows.map(r => r.date))] }, yAxis: { type: 'value' }, series: report.report.members.map(m => ({ name: m, type: 'line', connectNulls: false, data: factor.rows.filter(r => r.instrument === m).map(r => r.value) })) }} />
         <Chart option={{ tooltip: {}, xAxis: { type: 'category', data: factor.distribution.map(b => `${b.low.toFixed(4)}–${b.high.toFixed(4)}`) }, yAxis: { type: 'value' }, series: [{ type: 'bar', data: factor.distribution.map(b => b.count) }] }} />
+        {factor.relationships?.map(r => <section key={r.horizon}>
+          <h3>因子与 {r.horizon} Session 后续收益关系</h3>
+          <p data-testid="relationship-counts">有效样本 {r.effective_count} / {r.expected_count} · 缺失 {r.missing_count} · 缺失比例 {r.missing_ratio ?? 'Unknown'}</p>
+          <Chart option={{ tooltip: {}, xAxis: { type: 'value', name: '因子值' }, yAxis: { type: 'value', name: '后续收益' }, series: [{ type: 'scatter', data: r.points.map(p => [p.factor_value, p.forward_return]) }] }} />
+          <details><summary>关系样本明细</summary><table data-testid="relationship-values"><thead><tr><th>证券</th><th>日期</th><th>因子值</th><th>后续收益</th></tr></thead><tbody>{r.points.map(p => <tr key={`${p.instrument}:${p.date}`}><td>{p.instrument}</td><td>{p.date}</td><td>{p.factor_value}</td><td>{p.forward_return}</td></tr>)}</tbody></table></details>
+        </section>)}
         <table data-testid="momentum-values"><thead><tr><th>证券</th><th>日期</th><th>值</th><th>状态</th><th>可用时刻 ns</th></tr></thead><tbody>{factor.rows.map(r => <tr key={`${r.instrument}:${r.date}`}><td>{r.instrument}</td><td>{r.date}</td><td>{r.value ?? '—'}</td><td>{r.status}</td><td>{r.available_at_ns ?? 'Unknown'}</td></tr>)}</tbody></table>
       </Panel>)}</>}
   </main></>;

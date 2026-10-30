@@ -310,3 +310,65 @@ fn three_by_ten_fixture_decisions_match_the_independent_golden() {
         assert_eq!(decision.targets.values().next(), Some(&1.0));
     }
 }
+
+#[test]
+fn future_evaluation_opens_cannot_change_factor_scores_or_decisions() {
+    let mut panel = fixture_panel();
+    let strategy = configured_strategy(1, 1);
+    let scores = compute(
+        &panel,
+        &panel.instruments,
+        &strategy.score,
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
+    let before = strategy.decide(&scores, &panel.sessions).unwrap();
+    let dates = panel
+        .sessions
+        .iter()
+        .map(|s| s.session_date)
+        .collect::<Vec<_>>();
+    let members = panel
+        .instruments
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    let mut opens = std::collections::BTreeMap::new();
+    for member in &members {
+        for date in &dates {
+            opens.insert((member.clone(), *date), 10.0);
+        }
+    }
+    let labels = prajna_research::evaluation::labels(&dates, &members, &opens).unwrap();
+    let mut changed_open = panel
+        .grid
+        .column("open")
+        .unwrap()
+        .f64()
+        .unwrap()
+        .iter()
+        .collect::<Vec<_>>();
+    *changed_open.last_mut().unwrap() = Some(999.0);
+    panel
+        .grid
+        .with_column(Series::new("open".into(), changed_open).into())
+        .unwrap();
+    opens.insert(
+        (members.last().unwrap().clone(), *dates.last().unwrap()),
+        999.0,
+    );
+    let revised_labels = prajna_research::evaluation::labels(&dates, &members, &opens).unwrap();
+    assert_ne!(labels, revised_labels);
+    let revised_scores = compute(
+        &panel,
+        &panel.instruments,
+        &strategy.score,
+        AvailabilityAssumption::None,
+    )
+    .unwrap();
+    assert!(scores.equals_missing(&revised_scores));
+    assert_eq!(
+        before,
+        strategy.decide(&revised_scores, &panel.sessions).unwrap()
+    );
+}

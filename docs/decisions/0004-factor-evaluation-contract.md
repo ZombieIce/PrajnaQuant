@@ -22,3 +22,17 @@
 因子报告 JSON 增加标签方法、日历来源、评价状态、coverage/missing 计数、Pearson IC 和稳定性字段，原有旧报告字段以默认值兼容读取；部分统计字段现在可为 null。前端因子详情展示逐期标签和缺失值，不再展示伪累计曲线。
 
 市场日历若来自不完整快照或观察 bar 日期并集，不能证明全市场没有共同缺失日期。真实数据覆盖仍须由独立日历和历史 Universe 证据验证。该 ADR 不定义基准收益、超额收益或信息比率。
+
+
+## MVP-7 新平台显式扩展（#300）
+
+新平台不依赖旧 `quant-research` 评价器。可选
+`next_open_to_forward_open_v1` 请求生成 `next_open_to_forward_open@1` 标签及
+`factor-evaluation@1` 研究报告；省略时保留旧请求和报告身份。
+按 Dataset 的完整、严格对齐 Session 轴确定 i+1/i+1+N 端点，使用因子绑定的
+同一供应商复权版本 open，不扣交易费，不采用观察 bar 日期并集回退。
+缺端点或未来 Session 不足为 null，保存端点与原因；标签不进入 Factor/Cache/
+Decision。散点有效配对数量与缺失分母由 Rust 生成，页面不复利标签为 NAV。
+此处不改变上文旧报告的诊断口径、IC/分组契约或历史结论；新平台 IC/分组
+由后续独立票交付。完整输入/结果/兼容及验证入口见
+[价格因子研究契约](../contracts/momentum-research.md#未来收益评价-v1)。
