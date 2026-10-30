@@ -599,3 +599,139 @@ fn strict_trend_non_representable_equal_means_are_zero_through_production_cli() 
         }
     }
 }
+
+fn evaluation_cli(root: &Path, request: Value) -> Value {
+    use std::{
+        io::Write,
+        process::{Command as Process, Stdio},
+    };
+    let mut child = Process::new(env!("CARGO_BIN_EXE_prajna-momentum"))
+        .args(["--lake", root.to_str().unwrap()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            json!({"op":"submit","request":request})
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+#[test]
+fn evaluation_cli_fixed_labels_persist_and_future_opens_never_change_factors() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let mut request = inputs(root);
+    let legacy = submit(root, request.clone()).unwrap();
+    assert!(legacy["data"]["report"].get("evaluation").is_none());
+    request["evaluation"] = json!("next_open_to_forward_open_v1");
+    let original = evaluation_cli(root, request.clone());
+    let data = &original["data"];
+    assert_eq!(data["report"]["semantics"], "factor-evaluation@1");
+    assert_eq!(
+        data["report"]["evaluation"]["version"],
+        "next_open_to_forward_open@1"
+    );
+    let labels = data["report"]["evaluation"]["labels"].as_array().unwrap();
+    assert_eq!(labels.len(), 390);
+    for (offset, expected) in [
+        (0, 12.0 / 11.0 - 1.0),
+        (1, 16.0 / 11.0 - 1.0),
+        (2, 31.0 / 11.0 - 1.0),
+    ] {
+        assert!((labels[offset]["value"].as_f64().unwrap() - expected).abs() < 1e-12);
+    }
+    assert!(labels[389]["value"].is_null());
+    assert_eq!(
+        command(
+            root,
+            Command::Read {
+                id: data["id"].as_str().unwrap().into()
+            }
+        )
+        .unwrap(),
+        original
+    );
+    let persisted: Value = serde_json::from_slice(
+        &std::fs::read(root.join(format!(
+            "momentum-research/{}.json",
+            data["id"].as_str().unwrap()
+        )))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(persisted, *data);
+    for factor in data["report"]["factors"].as_array().unwrap() {
+        for relation in factor["relationships"].as_array().unwrap() {
+            let n = relation["effective_count"].as_u64().unwrap();
+            assert_eq!(relation["points"].as_array().unwrap().len() as u64, n);
+            assert_eq!(n + relation["missing_count"].as_u64().unwrap(), 130);
+            for point in relation["points"].as_array().unwrap() {
+                assert!(point["factor_value"].is_number() && point["forward_return"].is_number());
+            }
+        }
+    }
+    // Change only future adjusted open/high; factor close inputs stay byte-identical.
+    let version = request["adjusted"]["510300.XSHG"].as_str().unwrap();
+    let mut input =
+        serde_json::to_value(prajna_data::adjusted_series::read(root, version).unwrap()).unwrap();
+    input["rows"][100]["open"] = json!("999");
+    input["rows"][100]["high"] = json!("999");
+    let changed_version =
+        prajna_data::adjusted_series::import(root, &serde_json::to_vec(&input).unwrap()).unwrap();
+    request["adjusted"]["510300.XSHG"] = json!(changed_version);
+    let changed = evaluation_cli(root, request.clone());
+    assert_ne!(changed["data"]["id"], data["id"]);
+    for (a, b) in data["report"]["factors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(changed["data"]["report"]["factors"].as_array().unwrap())
+    {
+        assert_eq!(a["rows"], b["rows"]);
+        assert_eq!(a["distribution"], b["distribution"]);
+        assert_eq!(a["status_counts"], b["status_counts"]);
+    }
+    let changed_labels = changed["data"]["report"]["evaluation"]["labels"]
+        .as_array()
+        .unwrap();
+    assert_ne!(labels[98 * 3]["value"], changed_labels[98 * 3]["value"]);
+    assert_eq!(labels[..79 * 3], changed_labels[..79 * 3]);
+    // Missing adjusted endpoint: never use the later available day instead.
+    input["rows"].as_array_mut().unwrap().remove(100);
+    let missing_version =
+        prajna_data::adjusted_series::import(root, &serde_json::to_vec(&input).unwrap()).unwrap();
+    request["adjusted"]["510300.XSHG"] = json!(missing_version);
+    let missing = evaluation_cli(root, request.clone());
+    let missing_labels = &missing["data"]["report"]["evaluation"]["labels"];
+    assert_eq!(missing_labels[98 * 3]["status"], "missing_exit_open");
+    assert!(missing_labels[98 * 3]["value"].is_null());
+    assert_eq!(missing_labels[99 * 3]["status"], "missing_entry_open");
+    assert_eq!(
+        command(
+            root,
+            Command::Read {
+                id: data["id"].as_str().unwrap().into()
+            }
+        )
+        .unwrap(),
+        original
+    );
+    let mut unknown_version = request.clone();
+    unknown_version["evaluation"] = json!("unknown");
+    assert!(serde_json::from_value::<Request>(unknown_version).is_err());
+    request["forward_return"] = json!(1.0);
+    assert!(serde_json::from_value::<Request>(request).is_err());
+}

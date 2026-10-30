@@ -45,9 +45,16 @@ pub enum FactorSelection {
     Volatility,
     TrendFilterStrict,
 }
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvaluationSelection {
+    NextOpenToForwardOpenV1,
+}
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluation: Option<EvaluationSelection>,
     pub dsv: String,
     pub instrument: Option<String>,
     pub pool: Option<crate::pools::Reference>,
@@ -185,6 +192,7 @@ fn submit(root: &Path, mut request: Request) -> Result<Value, ResearchError> {
     let mut panel = load_panel_for_venues(root, &request.dsv, &venues).map_err(invalid)?;
     let mut sources = BTreeMap::new();
     let mut prices = BTreeMap::new();
+    let mut opens = BTreeMap::new();
     for member in members {
         let version = request
             .adjusted
@@ -203,6 +211,10 @@ fn submit(root: &Path, mut request: Request) -> Result<Value, ResearchError> {
                 return Err(invalid("invalid adjusted close"));
             }
             prices.insert((member.to_string(), row.trade_date), close);
+            if request.evaluation.is_some() {
+                let open: f64 = row.open.parse().map_err(invalid)?;
+                opens.insert((member.to_string(), row.trade_date), open);
+            }
         }
         let mut provenance = serde_json::to_value(&input).map_err(invalid)?;
         provenance.as_object_mut().unwrap().remove("rows");
@@ -270,6 +282,23 @@ fn submit(root: &Path, mut request: Request) -> Result<Value, ResearchError> {
     );
     checked_output_path(root, Path::new("features/.staging")).map_err(storage)?;
     let cache = FactorCache::open(root).map_err(storage)?;
+    // Evaluation is downstream of the factor input adapter. Future opens are never
+    // inserted into the factor Panel, registered as a Factor, or sent to a strategy.
+    let labels = request
+        .evaluation
+        .map(|_| {
+            prajna_research::evaluation::labels(
+                &panel
+                    .sessions
+                    .iter()
+                    .map(|s| s.session_date)
+                    .collect::<Vec<_>>(),
+                &members.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                &opens,
+            )
+            .map_err(invalid)
+        })
+        .transpose()?;
     let mut outputs = Vec::new();
     for factor in factors {
         let key = prajna_research::cache::key::FactorKey::for_tree(
@@ -356,12 +385,29 @@ fn submit(root: &Path, mut request: Request) -> Result<Value, ResearchError> {
                 bins.push(json!({"low":low,"high":high,"count":count}));
             }
         }
-        outputs.push(json!({"definition":factor.canonical_json(),"rows":rows,"distribution":bins,"status_counts":counts}));
+        let mut output = json!({"definition":factor.canonical_json(),"rows":rows,"distribution":bins,"status_counts":counts});
+        if let Some(labels) = &labels {
+            output["relationships"] = relationships(&rows, labels);
+        }
+        outputs.push(output);
     }
     let execution =
         crate::ExecutionIdentity::capture(&input_id, std::env::current_dir().map_err(storage)?)
             .map_err(storage)?;
-    let report = json!({"execution":execution,"schema_version":1,"semantics":semantics,"request":request,"universe":universe.id().map_err(invalid)?,"members":members.iter().map(ToString::to_string).collect::<Vec<_>>(),"sources":sources,"input_binding":binding,"direction":direction,"missing_rule":"preserve Session axis; no fill; Factor status propagation","sample_assumption":"Static Universe; survivor bias; supplier retrospective adjustments; not strict PIT","factors":outputs});
+    let mut report = json!({"execution":execution,"schema_version":1,"semantics":semantics,"request":request,"universe":universe.id().map_err(invalid)?,"members":members.iter().map(ToString::to_string).collect::<Vec<_>>(),"sources":sources,"input_binding":binding,"direction":direction,"missing_rule":"preserve Session axis; no fill; Factor status propagation","sample_assumption":"Static Universe; survivor bias; supplier retrospective adjustments; not strict PIT","factors":outputs});
+    if let Some(labels) = labels {
+        report["semantics"] = json!("factor-evaluation@1");
+        report["factor_semantics"] = json!(semantics);
+        report["evaluation"] = json!({
+            "version":prajna_research::evaluation::VERSION,
+            "method":"next_open_to_forward_open", "horizons":[1,5,20],
+            "calendar_basis":"Dataset exchange Sessions; strict venue alignment",
+            "price_basis":"same bound supplier-adjusted version as factors; no transaction costs",
+            "missing_rule":"null on missing endpoints or insufficient future Sessions; never skip dates",
+            "usage":"evaluation only; overlapping labels are not a tradable NAV",
+            "labels":labels
+        });
+    }
     let id = digest(&serde_json::to_vec(&report).map_err(storage)?);
     let path = location(root, &id)?;
     if path.exists() {
@@ -396,4 +442,34 @@ fn selected_factor(selection: Option<FactorSelection>, n: u32) -> Result<Factor,
             Factor::new(FactorKind::TrendFilterStrict, TrendFilterStrictParams { n })
         }
     }
+}
+
+/// Pair only valid factor/label samples in Rust; the browser only plots these points.
+fn relationships(rows: &[Value], labels: &[prajna_research::evaluation::Label]) -> Value {
+    let values = rows
+        .iter()
+        .filter_map(|r| {
+            Some((
+                (r["instrument"].as_str()?, r["date"].as_str()?),
+                r["value"].as_f64()?,
+            ))
+        })
+        .collect::<BTreeMap<_, _>>();
+    json!(prajna_research::evaluation::HORIZONS.iter().map(|horizon| {
+        let mut points = Vec::new();
+        let expected_count = labels.iter().filter(|l| l.horizon == *horizon).count();
+        for label in labels.iter().filter(|l| l.horizon == *horizon) {
+            if let (Some(factor_value), Some(forward_return)) = (
+                values.get(&(label.instrument.as_str(), label.date.to_string().as_str())), label.value
+            ) {
+                points.push(json!({"instrument":label.instrument,"date":label.date,
+                    "factor_value":factor_value,"forward_return":forward_return}));
+            }
+        }
+        json!({"horizon":horizon,"expected_count":expected_count,
+            "effective_count":points.len(),"missing_count":expected_count-points.len(),
+            "missing_ratio":if expected_count == 0 {None} else {Some((expected_count-points.len()) as f64 / expected_count as f64)},
+            "sample_assumption":"Static Universe; small samples do not establish predictive validity",
+            "points":points})
+    }).collect::<Vec<_>>())
 }

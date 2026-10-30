@@ -118,3 +118,41 @@ from a Git checkout with its compiler provenance available. Recovery tests cover
 both pending states and retained success/error facts; production browser tests
 cross-check task, frozen request and report, including factor selection, failed
 computation and duplicate conflict.
+
+## 未来收益评价 v1
+
+`submit.request` 可显式选择 `"evaluation":"next_open_to_forward_open_v1"`。
+省略字段仍生成原报告（字段不序列化），旧报告可读取；未知版本/`forward_return`
+输入被拒绝。新报告用 `semantics:"factor-evaluation@1"`，原因子语义保存在
+`factor_semantics`。该扩展适用于上述三类因子，沿用同一 Dataset、成员、每成员
+复权版本和来源/可用性假设，不从 latest 或另一种价格口径取标签。
+
+Rust `prajna_research::evaluation` 独立于 FactorKind、FactorCache 和 Decision。
+`evaluation.version="next_open_to_forward_open@1"`；每成员每个 Session 都有
+1/5/20 三行标签：T=Session[i] 收盘评分，entry=Session[i+1] open，
+exit=Session[i+1+N] open，`value=exit/entry-1`，不扣交易费。
+日轴是 Dataset 的完整交易所 Session（沪深严格对齐），不是有效 bar 日期并集。
+例如 open 为 10、12、15 的连续三 Session，第一日 H=1 标签为 15/12-1=0.25；
+第二日的 H=1 缺未来退出 Session，返回 null；不能以 close 代替 open。
+标签不意味着端点一定可成交，也不是含现金分红的账户总回报。
+
+输出保存 `instrument/date/horizon/entry_date/exit_date/value/status`；端点 Session
+存在而该复权 open 缺失时为 `missing_entry_open` 或 `missing_exit_open`；尾端不足为
+`insufficient_future_sessions`；极端有限价产生非有限比值为 `non_finite_return`。
+这些状态均 value=null，不跳缺失日期、不填零；中间缺 bar 不压缩期限。
+非正/非有限 open、错误成员/日历、重复成员或不严格递增 Session 拒绝计算。
+
+每个 factor 的 `relationships` 保存三个期限的有效配对点（证券、日期、因子值、
+后续收益）、expected/effective/missing 数量与 missing_ratio，均由 Rust 生成。
+分母是固定成员 × 全部报告 Session，预热因子和尾端标签缺失均计入配对缺失；
+这与标签本身缺失率不同。页面只画已配对的散点，展示端点/null/原因与样本数，
+不重算收益或统计；静态事后 Universe 与小样本限制继续披露。
+重叠标签不复利为 NAV；本扩展不计算 IC、Rank IC 或分组结果。
+调整 open 只传到评价模块，绝不写入因子 Panel/评分或策略信息集；复权版本的
+回溯性假设仍然存在，不能因未来数据隔离测试通过就声称严格历史 PIT。
+
+定向证据入口：`prajna-research/tests/evaluation.rs` 独立合成端点/多成员/周末/
+缺失/数值边界 golden；`tests/strategy.rs` 未来 open 改价只改变标签而不改变因子与
+Decision；`prajna-experiment/tests/momentum.rs` 生产 CLI 持久/read/旧版兼容与未来
+复权 open 隔离；`apps/web/e2e/evaluation.spec.ts` 真实 API/队列/CLI/持久报告/页面
+散点样本闭环。全部使用合成输入，真实数据与真实标签未验证。

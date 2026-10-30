@@ -8,6 +8,7 @@ mod compute;
 pub use compute::compute;
 mod dsv;
 pub mod engine;
+pub mod evaluation;
 pub mod factor;
 pub mod fast_event;
 mod panel;
