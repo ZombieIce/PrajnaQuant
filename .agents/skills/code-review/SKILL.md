@@ -57,6 +57,10 @@ Each smell reads *what it is* → *how to fix*; match it against the diff:
 
 ### 4. Spawn both sub-agents in parallel
 
+Before dispatch, apply the [tracker capability/isolation contract](../../../docs/agents/issue-tracker.md#review-dispatch-shared-contract) at the actual dispatching level: tools, free slots and remaining depth. Use fresh sessions with `fork_turns: "none"`; each reads original standards/spec sources and uses its own worktree at the pinned head. Record unknown depth/model fields and actual launch results separately. If two isolated parallel agents cannot launch, report the concrete block; sequential checking does not fulfill this skill. An authorized non-implementing coordinator may directly dispatch both briefs to avoid an extra nesting level.
+
+When used for a ticket's independent review, also follow [review-pr](../review-pr/SKILL.md) for risk, evidence attribution, full first coverage versus incremental re-review and PR publication. Include its required coverage separately from the briefs' findings word limit; missing original requirements remain a coverage gap, not a completed high-risk review with Spec skipped. Keep explicit standalone code-review's two-axis behavior. Pass only original sources/pointers and the pinned diff context, not implementation reasoning or the other axis's conclusions.
+
 **Standards sub-agent prompt** should include:
 
 - The full diff command and commit list.

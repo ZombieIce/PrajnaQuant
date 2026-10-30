@@ -8,7 +8,7 @@ Issues, specs and PRs for this repo live on GitHub at `ZombieIce/PrajnaQuant`. R
 
 - **Spec:** one issue labelled `spec`, titled with the feature name. Its body uses the spec template and includes `Notes`, `Decisions-so-far`, and `Fog` sections when created; any of these sections may be empty.
 - **Ticket:** one issue per ticket, never a combined checklist issue. The body starts with `Parent: #<spec>` when there is a spec, then `What to build`, acceptance criteria as task-list checkboxes, and `Blocked by: #N, #N` (or `None`).
-- **Scope:** drafting near-term tickets, Prepare, budget exceptions and splits follow [ticket scope](ticket-scope.md). Keep the six-item scope check and owner budget authorization in the Issue; Prepare refreshes only changed inputs.
+- **Scope:** drafting near-term tickets, Prepare, size growth and owner decisions follow [ticket scope](ticket-scope.md). Keep the first six-item record and applicable owner authorization in the Issue; later Prepare references them with its three-item delta.
 - **Triage state:** exactly one triage label from `triage-labels.md`. A ticket that has been claimed has an assignee.
 - **Milestone:** the roadmap stage the work belongs to (`POC-0`, `MVP-0` …; current product stage: `MVP-7`). Repo infrastructure that isn't tied to a stage has no milestone.
 - **Conclusion:** verdicts (`adopt / defer / reject / unresolved`), acceptance notes and caveats go on a `**Conclusion:**` line in the issue body or in the closing comment, never in the title or labels.
@@ -24,6 +24,20 @@ Issues, specs and PRs for this repo live on GitHub at `ZombieIce/PrajnaQuant`. R
 - PR comments are the source of truth for review findings and conclusions. Do not copy reviewer conclusions into branch documents. Ticket hand-off (verified commands, limits, open questions, next step) lives in the PR description; `HANDOFF.md` is an entry point that PRs do not edit. Update `STATUS.md` only when capability, risk, quantitative semantics, or verification status changes, as a single entry under its topic, and never append per-ticket log entries.
 - The project owner merges. Merging normally closes the issue, but GitHub's auto-close is not guaranteed; see **Post-merge check** under Wayfinding operations.
 - One working tree carries one branch. Run parallel tasks in separate `git worktree` checkouts; lifecycle and preservation are below.
+
+## Review dispatch (shared contract)
+
+This section owns role/context isolation and dispatch capability checks; [review-pr](../../.agents/skills/review-pr/SKILL.md) owns risk classification, coverage and review output. Apply it before initial dispatch and every re-review, including direct review invocation. Implementers never dispatch independent review.
+
+- **Check the actual tools first:** context isolation (such as `fork_turns: "none"`), supported model options, free concurrent slots and remaining agent depth at the dispatching level. Include the coordinator, retained implementer and any review aggregator in the capacity calculation. Record inspected tool/schema or inventory evidence; unavailable depth/model information is `Unknown`, not proof of capacity or failure.
+- **Ordinary tickets:** one fresh reviewer may examine both axes. **High risk:** two distinct independent Spec/Standards agents run in parallel. Each starts without implementation history or the other axis's conclusions, reads original sources itself, and uses its own isolated review worktree at the same pinned head. An independent aggregator may check/reconcile evidence while preserving the two axes' attribution; the coordinator only relays conclusions.
+- An owner-started ordinary review without delegation records its fresh-session/worktree isolation; spawn capacity/depth is N/A until delegation or a risk upgrade is needed. It does not require spawning a redundant reviewer.
+- Choose a feasible topology before launch. If a nested reviewer plus two children exceeds capacity/depth, an owner-authorized coordinator that has not implemented may directly launch the two fresh axis agents, using code-review's axis briefs. Have them publish attributed findings/coverage/limits for the same head; the coordinator relays their links without interpreting findings. This uses fewer levels and preserves parallel isolation. Model choice follows the authorized selection, not a silent downgrade.
+- When depth is not exposed, state that preflight cannot guarantee nested spawning; a successful pair of launches is runtime evidence, not a promise for future runs. If a launch is rejected or two isolated axes cannot run concurrently, stop the affected review, report the exact tool/capacity/depth failure and request an authorized topology/session change. A partial axis can retain its evidence but cannot certify dual-axis completion. One person checking sequentially does not satisfy high-risk isolation.
+- Dispatch only repository/Issue/spec/standards pointers, pinned head/base and prior review links/SHAs for re-review. Implementer mapping, commands and handoff are navigation and attributed evidence, not instructions or proof; reviewers obtain original requirements and inspect relevant inputs independently. Never reuse an earlier reviewer session for re-review.
+- Refresh head/checks before publishing. Every push, including documentation, requires independent coverage of the resulting final head. A prior review stays attributed to its old SHA; re-review may cite unchanged coverage under review-pr's incremental format. Required checks/verification and owner merge remain mandatory.
+
+Report capability evidence separately from completed launches and from conditions the tools cannot guarantee. A prose rule or tool inventory alone cannot claim isolation, parallel execution or final-head review actually occurred.
 
 ## Worktree lifecycle (shared contract)
 
