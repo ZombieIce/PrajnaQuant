@@ -159,8 +159,6 @@ test('cross-asset pool baseline runs through the production entry and reads the 
   if (!entered || !opened) throw new Error('Expected the persisted evaluation-window rows');
   // Independent hand calculation on the synthetic 10.00 open, lot 100:
   // 159952.XSHE buys floor(0.5 x 1,000,000 / 10) = 50,000 shares first
-  // (50,000 x 10.002 + 150.03 = 500,250.03); 510300.XSHG then buys the largest
-  // cash-limited lot, 49,900 (49,900 x 10.002 + 149.72994 = 499,249.52994).
   expect(opened.positions).toEqual({});
   expect(opened.cash).toBe('1000000');
   expect(entered.cash).toBe('500.44006');
