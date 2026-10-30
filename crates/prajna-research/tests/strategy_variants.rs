@@ -308,3 +308,142 @@ fn parameters_universe_and_unknown_or_late_availability_are_checked() {
             .is_empty()
     );
 }
+
+#[test]
+fn timing_unavailable_signals_do_not_create_cash_targets_or_shift_schedule() {
+    use prajna_research::{
+        factor::AvailabilityAssumption,
+        timing::{self, TimingParams},
+    };
+    let raw = panel();
+    let mut panel = raw
+        .window(raw.sessions[0].session_date, raw.sessions[9].session_date)
+        .unwrap();
+    let member = panel.instruments[0].clone();
+    let params = TimingParams {
+        params_version: 1,
+        ma_window: 2,
+        rebalance_every: 2,
+    };
+    let start = panel.sessions[4].session_date;
+    let decisions = timing::decide(
+        &panel,
+        std::slice::from_ref(&member),
+        &params,
+        AvailabilityAssumption::TreatUnknownAsTsClose,
+        Some(start),
+    )
+    .unwrap();
+    assert_eq!(
+        decisions
+            .iter()
+            .map(|d| d.decision_session.session_date)
+            .collect::<Vec<_>>(),
+        [4, 6, 8].map(|i| panel.sessions[i].session_date)
+    );
+    let ids = panel.grid.column("instrument_id").unwrap().str().unwrap();
+    let indices = panel.grid.column("session_index").unwrap().u32().unwrap();
+    let times = (0..panel.grid.height())
+        .map(|i| {
+            let index = indices.get(i).unwrap() as usize;
+            if ids.get(i) == Some(member.to_string().as_str()) && index == 4 {
+                None
+            } else {
+                Some(panel.sessions[index].ts_close.as_unix_nanos())
+            }
+        })
+        .collect::<Vec<_>>();
+    panel
+        .grid
+        .with_column(
+            Series::new("close_available_at".into(), times)
+                .cast(&DataType::Datetime(
+                    TimeUnit::Nanoseconds,
+                    Some(TimeZone::UTC),
+                ))
+                .unwrap()
+                .into(),
+        )
+        .unwrap();
+    let decisions = timing::decide(
+        &panel,
+        std::slice::from_ref(&member),
+        &params,
+        AvailabilityAssumption::None,
+        Some(start),
+    )
+    .unwrap();
+    assert_eq!(
+        decisions
+            .iter()
+            .map(|d| d.decision_session.session_date)
+            .collect::<Vec<_>>(),
+        [6, 8].map(|i| panel.sessions[i].session_date)
+    );
+    let bars = panel
+        .grid
+        .column("session_index")
+        .unwrap()
+        .u32()
+        .unwrap()
+        .iter()
+        .map(|i| i != Some(6))
+        .collect::<Vec<_>>();
+    panel
+        .grid
+        .with_column(Series::new("has_bar".into(), bars).into())
+        .unwrap();
+    let decisions = timing::decide(
+        &panel,
+        &[member],
+        &params,
+        AvailabilityAssumption::None,
+        Some(start),
+    )
+    .unwrap();
+    assert_eq!(
+        decisions
+            .iter()
+            .map(|d| d.decision_session.session_date)
+            .collect::<Vec<_>>(),
+        [8].map(|i| panel.sessions[i].session_date)
+    );
+    let indices = panel.grid.column("session_index").unwrap().u32().unwrap();
+    let late = indices
+        .iter()
+        .map(|i| i.map(|i| panel.sessions[i as usize].ts_close.as_unix_nanos() + 1))
+        .collect::<Vec<_>>();
+    panel
+        .grid
+        .with_column(
+            Series::new("close_available_at".into(), late)
+                .cast(&DataType::Datetime(
+                    TimeUnit::Nanoseconds,
+                    Some(TimeZone::UTC),
+                ))
+                .unwrap()
+                .into(),
+        )
+        .unwrap();
+    assert!(
+        timing::decide(
+            &panel,
+            &panel.instruments[..1],
+            &params,
+            AvailabilityAssumption::None,
+            Some(start)
+        )
+        .unwrap()
+        .is_empty()
+    );
+    assert!(
+        timing::decide(
+            &panel,
+            &panel.instruments,
+            &params,
+            AvailabilityAssumption::None,
+            None
+        )
+        .is_err()
+    );
+}

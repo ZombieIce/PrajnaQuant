@@ -63,10 +63,14 @@ fn is_summary_level(level: &str) -> bool {
     level == DEFAULT_RESULT_LEVEL
 }
 
-fn normalized_result_level(level: Option<&str>) -> Result<Option<String>, ApiFailure> {
+fn normalized_result_level(
+    level: Option<&str>,
+    definition: &Value,
+) -> Result<Option<String>, ApiFailure> {
     match level {
         None | Some(DEFAULT_RESULT_LEVEL) => Ok(None),
         Some("standard") => Ok(Some("standard".into())),
+        Some("full") if definition["strategy"] == "single_etf_timing" => Ok(Some("full".into())),
         Some(other) => Err(ApiFailure::new(
             StatusCode::BAD_REQUEST,
             "invalid_request",
@@ -506,7 +510,8 @@ impl RunJobApi {
         &self,
         mut request: SubmitExperimentTask,
     ) -> Result<(ExperimentTask, bool), ApiFailure> {
-        let result_level = normalized_result_level(request.result_level.as_deref())?;
+        let result_level =
+            normalized_result_level(request.result_level.as_deref(), &request.definition)?;
         request.result_level = result_level.clone();
         validate_experiment_task_request(&request)?;
         let request_hash = canonical_experiment_task_hash(&request)?;
@@ -994,9 +999,9 @@ impl RunJobApi {
             OsString::from("--level"),
             OsString::from(result_level),
         ];
-        if result_level == "standard" {
+        if matches!(result_level, "standard" | "full") {
             // Prefer promoting the current Execution: this both upgrades an
-            // existing Summary result and makes an already-Standard result a
+            // existing Summary result and makes an already-saved requested level a
             // no-op. Only fall back to executing when promote reports that no
             // current Execution exists (exit 6); an existing but unreadable or
             // partially replayable Execution must not be retried as `run`.
@@ -1009,7 +1014,7 @@ impl RunJobApi {
                     OsString::from("--lake"),
                     self.0.output.as_os_str().to_owned(),
                     OsString::from("--level"),
-                    OsString::from("standard"),
+                    OsString::from(result_level),
                 ],
                 "cli-promote.stdout",
             );
@@ -1571,7 +1576,7 @@ fn canonical_hash(request: &SubmitRun) -> Result<String, ApiFailure> {
         .map_err(ApiFailure::from_error)
 }
 fn validate_experiment_task_request(request: &SubmitExperimentTask) -> Result<(), ApiFailure> {
-    normalized_result_level(request.result_level.as_deref())?;
+    normalized_result_level(request.result_level.as_deref(), &request.definition)?;
     if request.idempotency_key.trim().is_empty() || request.idempotency_key.len() > 128 {
         return Err(ApiFailure::new(
             StatusCode::BAD_REQUEST,
@@ -4136,5 +4141,36 @@ mod tests {
             details: json!({"exit_code": 6}),
         };
         assert!(!promote_missing_execution(&other));
+    }
+}
+
+#[cfg(test)]
+mod timing_result_level_tests {
+    use super::*;
+    #[test]
+    fn full_is_an_explicit_timing_audit_level_without_changing_legacy_requests() {
+        let timing = json!({"strategy":"single_etf_timing"});
+        assert_eq!(
+            normalized_result_level(Some("full"), &timing)
+                .unwrap()
+                .as_deref(),
+            Some("full")
+        );
+        for kind in ["buy_and_hold", "ma_crossover", "s2_rotation"] {
+            let definition = json!({"strategy":kind});
+            assert!(normalized_result_level(Some("full"), &definition).is_err());
+            assert_eq!(
+                normalized_result_level(Some("standard"), &definition)
+                    .unwrap()
+                    .as_deref(),
+                Some("standard")
+            );
+            assert!(
+                normalized_result_level(None, &definition)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        assert!(normalized_result_level(Some("unknown"), &timing).is_err());
     }
 }

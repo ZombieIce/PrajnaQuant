@@ -618,6 +618,7 @@ pub enum VectorStrategy {
     TopKRank(TopKRank),
     BuyAndHold(BuyAndHoldParams),
     MaCrossover(MaCrossoverParams),
+    SingleEtfTiming(crate::timing::TimingParams),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -671,6 +672,13 @@ impl VectorStrategy {
             {
                 Ok(())
             }
+            VectorStrategy::SingleEtfTiming(params)
+                if params.params_version == 1
+                    && params.ma_window > 0
+                    && params.rebalance_every > 0 =>
+            {
+                Ok(())
+            }
             _ => Err(EngineError::InvalidParameters(
                 "unsupported version or MA windows".into(),
             )),
@@ -681,6 +689,7 @@ impl VectorStrategy {
             Self::TopKRank(_) => "top_k_rank",
             Self::BuyAndHold(_) => "buy_and_hold",
             Self::MaCrossover(_) => "ma_crossover",
+            Self::SingleEtfTiming(_) => "single_etf_timing",
         }
     }
 
@@ -689,6 +698,7 @@ impl VectorStrategy {
             Self::TopKRank(_) => 1,
             Self::BuyAndHold(params) => params.params_version,
             Self::MaCrossover(params) => params.params_version,
+            Self::SingleEtfTiming(params) => params.params_version,
         }
     }
 
@@ -696,7 +706,7 @@ impl VectorStrategy {
         match self {
             Self::TopKRank(params) => params.unfilled_entry,
             Self::BuyAndHold(_) => UnfilledEntry::Retry,
-            Self::MaCrossover(_) => UnfilledEntry::Skip,
+            Self::MaCrossover(_) | Self::SingleEtfTiming(_) => UnfilledEntry::Skip,
         }
     }
 
@@ -764,6 +774,9 @@ impl VectorStrategy {
                 .collect()),
             Self::MaCrossover(params) => {
                 super::ma_crossover::decide(panel, members, params, assumption)
+            }
+            Self::SingleEtfTiming(params) => {
+                crate::timing::decide(panel, members, params, assumption, None)
             }
         }
     }

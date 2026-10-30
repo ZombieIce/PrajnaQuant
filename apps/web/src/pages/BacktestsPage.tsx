@@ -13,7 +13,8 @@ type DatasetInstrument = {
   lifecycle: { listing_date: LifecycleField };
   coverage: { bars: number; first_bar: string | null; last_bar: string | null; sources: string[]; bars_without_source: number };
 };
-type DatasetDetail = { dsv: string; normalizer_version: string; instruments: DatasetInstrument[]; warnings: string[] };
+type Adjusted = { instrument_id: string; version: string; method_version: string };
+type DatasetDetail = { dsv: string; normalizer_version: string; instruments: DatasetInstrument[]; warnings: string[]; adjusted_series: { versions: Adjusted[] } };
 type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'interrupted';
 type Task = {
   task_id: string; task_type: string; status: TaskStatus; stage: string; created_at: string; updated_at: string; result_level: string;
@@ -74,6 +75,11 @@ export default function BacktestsPage() {
   const [detail, setDetail] = useState<DatasetDetail | null>(null);
   const [detailError, setDetailError] = useState<Error | null>(null);
   const [instrumentId, setInstrumentId] = useState('');
+  const [strategy, setStrategy] = useState('buy_and_hold');
+  const [adjusted, setAdjusted] = useState('');
+  const [maWindow, setMaWindow] = useState('60');
+  const [frequency, setFrequency] = useState('5');
+  const [settings, setSettings] = useState({ initial_cash: '1000000', commission_rate: '0.0003', minimum_commission: '5', buy_slippage_bps: '2', sell_slippage_bps: '2', buy_tax_rate: '0', sell_tax_rate: '0' });
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tasksError, setTasksError] = useState<Error | null>(null);
   const [taskId, setTaskId] = useState(() => new URLSearchParams(location.search).get('task') ?? '');
@@ -97,7 +103,7 @@ export default function BacktestsPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    setDetail(null); setDetailError(null); setInstrumentId('');
+    setDetail(null); setDetailError(null); setInstrumentId(''); setAdjusted('');
     if (!dsv) return;
     api<Envelope<DatasetDetail>>(`/api/v1/datasets/${encodeURIComponent(dsv)}`, { signal: controller.signal })
       .then((response) => { if (!controller.signal.aborted) setDetail(response.data); })
@@ -160,7 +166,10 @@ export default function BacktestsPage() {
     try {
       const response = await call<{ task: Task; created: boolean }>('/api/v1/tasks/selections', {
         method: 'POST',
-        body: JSON.stringify({ idempotency_key: crypto.randomUUID(), dsv, instrument: instrumentId, strategy: 'buy_and_hold', result_level: 'standard' }),
+        body: JSON.stringify({ idempotency_key: crypto.randomUUID(), dsv, instrument: instrumentId, strategy, result_level: strategy === 'single_etf_timing' ? 'full' : 'standard',
+          ...(strategy === 'single_etf_timing' ? { adjusted: { [instrumentId]: adjusted },
+            parameter_space: { list: [{ params_version: 1, ma_window: Number(maWindow), rebalance_every: Number(frequency) }] },
+            settings: { ...settings, commission_rate: Number(settings.commission_rate), buy_slippage_bps: Number(settings.buy_slippage_bps), sell_slippage_bps: Number(settings.sell_slippage_bps), buy_tax_rate: Number(settings.buy_tax_rate), sell_tax_rate: Number(settings.sell_tax_rate) } } : {}) }),
       });
       setTaskId(response.task.task_id); setTask(response.task); setTaskError(null);
       setResult(null); setResultError(null);
@@ -182,10 +191,13 @@ export default function BacktestsPage() {
   return <><Header /><main className="backtests-page">
     <div className="page-title-row"><div>
       <h1>单 ETF 回测</h1>
-      <p>选择已发布 Dataset 与单只 ETF，经冻结选择入口提交买入持有任务；状态与结果均读取服务端持久记录。浏览器不计算费用、净值或绩效。</p>
+      <p>选择已发布 Dataset 与单只 ETF，经冻结选择入口提交回测任务；状态与结果均读取服务端持久记录。浏览器不计算费用、净值或绩效。</p>
     </div></div>
 
-    <Panel title="提交买入持有回测">
+    <Panel title="配置单 ETF 回测">
+      <label>策略模板<select aria-label="策略模板" value={strategy} onChange={e => setStrategy(e.target.value)}>
+        <option value="buy_and_hold">买入持有</option><option value="single_etf_timing">单 ETF 趋势择时（严格 close &gt; MA）</option>
+      </select></label>
       {catalogError && errorDetails(catalogError)}
       {!catalog && !catalogError && <p role="status">正在读取已发布 Dataset 目录…</p>}
       {catalog && <>
@@ -204,7 +216,7 @@ export default function BacktestsPage() {
       {dsv && !detail && !detailError && <p role="status">正在读取固定版本…</p>}
       {detail?.dsv === dsv && <>
         <label>ETF
-          <select aria-label="ETF" value={instrumentId} onChange={(event) => setInstrumentId(event.target.value)} disabled={!etfs.length}>
+          <select aria-label="ETF" value={instrumentId} onChange={(event) => { setInstrumentId(event.target.value); setAdjusted(''); }} disabled={!etfs.length}>
             <option value="">{etfs.length ? '请选择单只 ETF' : '该版本没有 ETF'}</option>
             {etfs.map((item) => <option key={item.instrument_id} value={item.instrument_id}>{item.native_symbol} · {item.venue} · {item.instrument_id}</option>)}
           </select>
@@ -216,9 +228,20 @@ export default function BacktestsPage() {
           {' '}· 来源：{selected.coverage.sources.join('、') || '未记录'} · 缺来源 Bars：{selected.coverage.bars_without_source}
         </p>}
         {selectedVersion && <p className="hint">Normalizer：{selectedVersion.normalizer_version} · DSV：<code>{selectedVersion.dsv}</code></p>}
-        <p className="hint">Rust 默认参数：本金 1,000,000 CNY、佣金 3bp、最低佣金 5 CNY、买卖滑点各 2bp、税 0；浏览器不覆盖隐含值。提交使用 Standard 级别以持久化 NAV/权益表。</p>
+        {strategy === 'single_etf_timing' && <>
+          <label>研究复权版本<select aria-label="研究复权版本" value={adjusted} onChange={e => setAdjusted(e.target.value)}>
+            <option value="">请选择固定版本</option>{(detail.adjusted_series?.versions ?? []).filter(v => v.instrument_id === instrumentId).map(v => <option key={v.version} value={v.version}>{v.method_version} · {v.version}</option>)}
+          </select></label>
+          <p className="hint">信号采用所选复权收盘序列，成交与估值采用原始价；供应商回溯复权并非严格 PIT。收盘可用是假设，历史发布时间 Unknown。预热不计交易或绩效；从冻结评价起点每 N Session 调仓，相等为空仓，缺失信号不产生新目标。T 日收盘信号下一 Session 尝试成交，受阻卖出延期，受阻买入资金留现金；后续调仓目标替换延期目标。</p>
+        </>}
+        <p className="hint">Rust 默认参数：本金 1,000,000 CNY、佣金 3bp、最低佣金 5 CNY、买卖滑点各 2bp、税 0，仅为模拟假设；择时模板可在下方编辑。买入持有使用 Standard 保存 NAV/权益；趋势择时使用 Full 同时保存实际成交、费用和延期审计。</p>
         <form onSubmit={submit}>
-          <button type="submit" className="primary" disabled={busy || !dsv || !selected}>提交买入持有回测</button>
+          {strategy === 'single_etf_timing' && <>
+            <label>均线窗口（Session）<input aria-label="均线窗口" type="number" min="1" step="1" required value={maWindow} onChange={e => setMaWindow(e.target.value)} /></label>
+            <label>调仓频率（Session）<input aria-label="调仓频率" type="number" min="1" step="1" required value={frequency} onChange={e => setFrequency(e.target.value)} /></label>
+            {(Object.entries({ initial_cash: '本金（CNY）', commission_rate: '佣金率', minimum_commission: '最低佣金（CNY）', buy_slippage_bps: '买入滑点（bp）', sell_slippage_bps: '卖出滑点（bp）', buy_tax_rate: '买入税率', sell_tax_rate: '卖出税率' }) as [keyof typeof settings, string][]).map(([key, label]) => <label key={key}>{label}<input aria-label={label} type="number" min={key === 'initial_cash' ? '0.00000001' : '0'} step="any" required value={settings[key]} onChange={e => setSettings({ ...settings, [key]: e.target.value })} /></label>)}
+          </>}
+          <button type="submit" className="primary" disabled={busy || !dsv || !selected || (strategy === 'single_etf_timing' && !adjusted)}>{strategy === 'single_etf_timing' ? '提交趋势择时回测' : '提交买入持有回测'}</button>
           {busy && <span role="status">正在经生产入口冻结选择并提交任务…</span>}
         </form>
       </>}

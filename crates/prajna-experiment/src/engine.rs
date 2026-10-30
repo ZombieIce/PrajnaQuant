@@ -73,11 +73,15 @@ impl EngineSettings {
     ) -> Result<Self, ExperimentError> {
         if !matches!(
             input.strategy.as_str(),
-            "s2_rotation" | "s2_pit_rotation" | "buy_and_hold" | "ma_crossover"
+            "s2_rotation"
+                | "s2_pit_rotation"
+                | "buy_and_hold"
+                | "ma_crossover"
+                | "single_etf_timing"
         ) && !is_python_strategy(&input.strategy)
         {
             return Err(invalid(
-                "strategy must be s2_rotation, buy_and_hold, ma_crossover or strategy_id@version",
+                "strategy must be s2_rotation, buy_and_hold, ma_crossover, single_etf_timing or strategy_id@version",
             ));
         }
         let policy = match input.unfilled_entry.as_deref() {
@@ -513,6 +517,8 @@ pub(super) fn parse_space(kind: &str, space: &Value) -> Result<ParameterSpace, E
             .ok_or_else(|| invalid("grid must be object"))?;
         let expected = if kind == "s2_pit_rotation" {
             vec!["lookback", "top_k", "rebalance_every"]
+        } else if kind == "single_etf_timing" {
+            vec!["params_version", "ma_window", "rebalance_every"]
         } else if kind == "buy_and_hold" {
             vec!["params_version"]
         } else {
@@ -637,6 +643,9 @@ fn native_strategy(kind: &str, value: &Value) -> Result<VectorStrategy, Experime
         "buy_and_hold" => {
             VectorStrategy::BuyAndHold(serde_json::from_value::<BuyAndHoldParams>(value.clone())?)
         }
+        "single_etf_timing" => {
+            VectorStrategy::SingleEtfTiming(serde_json::from_value(value.clone())?)
+        }
         "ma_crossover" => {
             VectorStrategy::MaCrossover(serde_json::from_value::<MaCrossoverParams>(value.clone())?)
         }
@@ -716,6 +725,7 @@ pub(super) fn execute(
     run: &ExpandedRun,
     factors: &HashMap<String, DataFrame>,
     panel: &Panel,
+    research_panel: &Panel,
     statuses: &ExecutionStatusMap,
     executable: &HashMap<(InstrumentId, chrono::NaiveDate), bool>,
     costs: &VectorCosts,
@@ -792,7 +802,7 @@ pub(super) fn execute(
                 engine,
                 run,
                 factors,
-                panel,
+                research_panel,
                 ledger_panel,
                 members,
                 assumption,
@@ -922,7 +932,7 @@ pub(super) fn execute(
                 engine,
                 run,
                 factors,
-                panel,
+                research_panel,
                 ledger_panel,
                 members,
                 assumption,
@@ -1021,6 +1031,22 @@ fn windowed_decisions(
     let Some(evaluation) = experiment.evaluation() else {
         return decisions(engine, run, factors, panel, members, assumption);
     };
+    if let RunStrategy::Native(VectorStrategy::SingleEtfTiming(params)) = &run.strategy {
+        return prajna_research::timing::decide(
+            panel,
+            members,
+            params,
+            assumption,
+            Some(evaluation.start()),
+        )
+        .map(|decisions| {
+            decisions
+                .into_iter()
+                .filter(|d| d.decision_session.session_date <= evaluation.end())
+                .collect()
+        })
+        .map_err(|error| error.to_string());
+    }
     if run.run_spec["strategy"]["kind"].as_str() == Some("buy_and_hold") {
         return decisions(engine, run, factors, ledger_panel, members, assumption);
     }
