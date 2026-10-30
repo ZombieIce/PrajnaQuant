@@ -81,3 +81,7 @@ prajna-experiment result <exp> <exe> --lake <lake> [--run <run-id>]
 结构性不一致、缺基准和行动事实不完整的错误/`comparable=false` 语义见
 [ADR 0035](../decisions/0035-strategy-benchmark-comparison.md)。旧单 Run 结果入口
 及其错误映射不变。
+
+对照的 `comparability.validation_version=effective-rules-calendar@2` 表示已核验冻结
+行情滑点买价与 tick 对齐、再投资日历来自实际策略 Decision。旧比较缺此版本时
+保留权威结果读取，但 `comparable=false`，原因 `comparison:effective_rules_calendar_unverified`。

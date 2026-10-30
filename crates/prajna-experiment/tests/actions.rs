@@ -1275,6 +1275,41 @@ fn frozen_single_etf_comparison_runs_reads_and_keeps_first_valuation() {
 }
 
 #[test]
+fn comparison_rejects_non_tick_buy_slippage_without_changing_legacy_execution() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let mut request = setup(root);
+    request["settings"]["buy_slippage_bps"] = json!(0.1);
+    // Legacy execution/identities remain supported; only comparison is invalid.
+    let definition = frozen(root, &request);
+    let executed = execute(root, &request);
+    assert_eq!(
+        executed.runs[0].fast_event_result.as_ref().unwrap().fills[0]
+            .fill
+            .price()
+            .to_string(),
+        "10.0001"
+    );
+    let run = run_definition(root, "legacy-non-tick.json", &definition);
+    assert_eq!(close_rows(&read_result(root, &run)).len(), 9);
+    assert_eq!(
+        reject_comparison(root, &request),
+        "comparison_price_rules_mismatch"
+    );
+    // Tick-aligned nonzero slippage remains a supported comparison.
+    request["settings"]["buy_slippage_bps"] = json!(10);
+    let accepted = freeze_comparison_cli(root, &selection_of(&request), ReinvestmentPolicy::None);
+    for role in ["strategy", "benchmark"] {
+        let run = run_definition(
+            root,
+            &format!("aligned-{role}.json"),
+            &accepted["data"][role]["definition"],
+        );
+        assert_eq!(close_rows(&read_result(root, &run)).len(), 9);
+    }
+}
+
+#[test]
 fn comparison_rejects_unsupported_or_incomplete_inputs() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
@@ -1391,6 +1426,69 @@ fn frozen_equal_weight_comparison_uses_actual_lots_and_marks_incomplete_facts() 
             dividend_tax_rate: "0.1".into(),
         }),
     };
+    let mut asymmetric = selection_of(&serde_json::to_value(&selection).unwrap());
+    asymmetric.adjusted.insert(
+        members[1].into(),
+        fixture::import_adjusted(
+            root,
+            &asymmetric.dsv,
+            members[1],
+            DATES[1],
+            DATES[9],
+            &DATES[1..],
+        ),
+    );
+    asymmetric.parameter_space = Some(
+        json!({"list":[{"short":1,"long":2,"vol":2,"w_s":0.5,"w_l":0.5,"w_v":0.0,"trend":null,"top_k":1,"rebalance_every":2}]}),
+    );
+    let cadence = freeze_comparison_cli(root, &asymmetric, ReinvestmentPolicy::StrategyRebalance);
+    assert_eq!(
+        cadence["data"]["comparability"]["evaluation"]["start"],
+        DATES[3]
+    );
+    assert_eq!(
+        cadence["data"]["comparability"]["reinvestment_calendar"]["decision_dates"],
+        json!([DATES[4], DATES[6], DATES[8]])
+    );
+    let executed = Experiment::parse(&cadence["data"]["strategy"]["definition"].to_string(), root)
+        .unwrap()
+        .execute(root, 1)
+        .unwrap();
+    use prajna_research::strategy::ExecutionEvent;
+    let actual_dates = executed.runs[0]
+        .fast_event_result
+        .as_ref()
+        .unwrap()
+        .attempts
+        .iter()
+        .map(|attempt| {
+            let (ExecutionEvent::Deferred {
+                decision_session, ..
+            }
+            | ExecutionEvent::Executed {
+                decision_session, ..
+            }
+            | ExecutionEvent::RetryableExecution {
+                decision_session, ..
+            }
+            | ExecutionEvent::PendingAtEnd {
+                decision_session, ..
+            }) = &attempt.event;
+            decision_session.session_date.to_string()
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        actual_dates,
+        [DATES[4], DATES[6], DATES[8]].map(String::from).into()
+    );
+    for role in ["strategy", "benchmark"] {
+        let run = run_definition(
+            root,
+            &format!("asymmetric-{role}.json"),
+            &cadence["data"][role]["definition"],
+        );
+        assert_eq!(close_rows(&read_result(root, &run)).len(), 7);
+    }
     let frozen = freeze_comparison_cli(root, &selection, ReinvestmentPolicy::StrategyRebalance);
     let data = &frozen["data"];
     assert_eq!(data["benchmark"]["kind"], "equal_weight_pool");

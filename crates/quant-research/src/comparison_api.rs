@@ -92,7 +92,7 @@ fn freeze_status(code: &str) -> StatusCode {
         | "comparison_requires_single_run"
         | "comparison_requires_single_venue"
         | "comparison_requires_fast_event"
-        | "comparison_requires_rebalance_schedule"
+        | "comparison_price_rules_mismatch"
         | "comparison_benchmark_invalid"
         | "comparison_definition_mismatch"
         | "comparison_window_invalid"
@@ -118,6 +118,10 @@ impl RunJobApi {
                 ),
                 crate::server::dataset_api::local_page,
             ))
+            .layer(axum::middleware::map_response(|mut response: Response| async move {
+                response.headers_mut().insert(header::CACHE_CONTROL, axum::http::HeaderValue::from_static("no-store"));
+                response
+            }))
     }
 
     fn submit_frozen_comparison(
@@ -517,6 +521,9 @@ fn verify_comparison(
     let caf = comparison["comparability"]["corporate_actions"]["version"].as_str();
     let mut mismatches = Vec::new();
     let mut reasons = Vec::new();
+    if comparison["comparability"]["validation_version"] != "effective-rules-calendar@2" {
+        reasons.push("comparison:effective_rules_calendar_unverified".into());
+    }
     let mut date_sets = Vec::new();
     for (role, result) in [("strategy", strategy), ("benchmark", benchmark)] {
         let expected_exp = comparison[role]["experiment"].as_str().unwrap_or_default();
@@ -714,4 +721,39 @@ async fn get_comparison_result(State(api): State<RunJobApi>, Path(id): Path<Stri
         Json(body),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_comparison_cannot_claim_effective_rule_or_calendar_verification() {
+        let mut comparison = json!({"strategy":{"experiment":"exp","run":"run"},
+            "benchmark":{"experiment":"exp","run":"run"},
+            "comparability":{"evaluation":{"start":"2026-01-05","end":"2026-01-05"},
+                "corporate_actions":{"version":"caf"},"validation_version":"effective-rules-calendar@2"}});
+        let result = json!({"data":{"exp":"exp","runs":[{"run_id":"run","status":"completed",
+            "accounting_verified":true,"summary":{"return_basis":"total_return","session_count":1,
+                "corporate_action_schedule_version":"caf","corporate_action_completeness":{"is_complete":true}},
+            "series":{"account_valuations":[{"session_date":"2026-01-05","valuation_point":"close"}]}}]}});
+        assert_eq!(
+            verify_comparison(&comparison, &result, &result).unwrap()["comparable"],
+            true
+        );
+        comparison["comparability"]
+            .as_object_mut()
+            .unwrap()
+            .remove("validation_version");
+        let verification = verify_comparison(&comparison, &result, &result).unwrap();
+        assert_eq!(verification["comparable"], false);
+        assert_eq!(
+            verification["reasons"],
+            json!(["comparison:effective_rules_calendar_unverified"])
+        );
+        assert_eq!(
+            freeze_status("comparison_price_rules_mismatch"),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+    }
 }

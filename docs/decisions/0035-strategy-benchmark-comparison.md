@@ -27,8 +27,20 @@
 lot/size/price 规则和收益口径；任一项不一致即拒绝冻结或读取失败，不补日、不缩短
 窗口、不以 latest 或另一成本模型替代。
 
+旧策略普通 lot 买价不按 tick 向上取整，持有基准会取整；为保留两者旧定义/Run
+身份，比较冻结在完整评价窗口逐成员检查所有有行情的原始 open，复用 Rust
+`lot_execution_price` 计算滑点后买价。任一买价不对齐该 Instrument tick 即 422
+`comparison_price_rules_mismatch`，含未必触发买入的 Session（保守拒绝）；对齐的
+非零滑点仍支持。持有基准无卖出，不增加第二套成交/账户计算。
+`comparability.validation_version=effective-rules-calendar@2` 记录新校验边界；读取
+缺此版本的旧比较仍展示权威结果，但 `comparable=false` 并列出
+`comparison:effective_rules_calendar_unverified`，不得追认旧可比结论。
+
 再投资日历在运行前声明并保存：`strategy_rebalance` 从冻结策略 Run 的
-`rebalance_every` 与评价窗口派生评价起点后的真实 Session close 序列，作为 #374 的
+完整研究面板评分与执行器 `windowed_decisions` 复用实际 Decision close 序列，
+保留首个可评分 Session 的周期锚点，再过滤评价窗口；不把共同评价起点当成轮动
+周期锚点。择时同样复用绑定复权面板与实际 Decision（缺失信号不虚构日期）。
+评价起点已有独立期初建仓 Decision，再投资日历只保存其后的实际决策日，作为 #374 的
 normal decision closes，下一 Session open 只分配当时可用现金；发放前应收不可花，
 已有持仓不卖出恢复权重。`none` 显式空日历，分红留现金。页面/API 必须显式选择。
 

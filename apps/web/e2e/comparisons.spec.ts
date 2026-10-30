@@ -69,12 +69,23 @@ test('frozen single-ETF comparison reads authoritative roles, reopens, and expos
   await page.getByLabel('均线窗口', { exact: true }).fill('2');
   await page.getByLabel('调仓频率', { exact: true }).fill('1');
   await fillCosts(page);
+  const submitted = page.waitForResponse((response) => response.url().endsWith('/api/v1/tasks/comparisons') && response.request().method() === 'POST');
   await page.getByRole('button', { name: '提交策略—基准对照', exact: true }).click();
+  const submission = await submitted;
+  expect(submission.status()).toBe(202);
+  expect(submission.headers()['cache-control']).toBe('no-store');
+  const duplicate = await page.request.post('/api/v1/tasks/comparisons', { data: submission.request().postDataJSON() });
+  expect(duplicate.status()).toBe(200);
+  expect(duplicate.headers()['cache-control']).toBe('no-store');
   await expect(page.getByTestId('comparison-status')).toContainText('已完成', { timeout: 60_000 });
   await expect(page.getByTestId('comparison-valuations')).toBeVisible();
 
   const taskId = new URL(page.url()).searchParams.get('task');
   expect(taskId).toBeTruthy();
+  for (const path of ['', `/${taskId}`, `/${taskId}/result`, '/invalid-id']) {
+    const response = await page.request.get(`/api/v1/tasks/comparisons${path}`);
+    expect(response.headers()['cache-control']).toBe('no-store');
+  }
   const task = await (await page.request.get(`/api/v1/tasks/comparisons/${taskId}`)).json();
   expect(task.task_type).toBe('prajna_comparison');
   expect(task.status).toBe('succeeded');
@@ -103,8 +114,8 @@ test('frozen single-ETF comparison reads authoritative roles, reopens, and expos
   await expect(page.getByTestId('comparison-facts')).toContainText('2026-01-07');
   await expect(page.getByTestId('comparison-metrics')).toContainText('0.67%');
   const expectedRows = [
-    ['策略（single_etf_timing）', benchmarkRows[0].session_date, benchmarkRows[0].cash, benchmarkRows[0].equity, position(benchmarkRows[0])],
-    ['策略（single_etf_timing）', benchmarkRows[1].session_date, benchmarkRows[1].cash, benchmarkRows[1].equity, position(benchmarkRows[1])],
+    ['策略（single_etf_timing）', strategyRows[0].session_date, strategyRows[0].cash, strategyRows[0].equity, position(strategyRows[0])],
+    ['策略（single_etf_timing）', strategyRows[1].session_date, strategyRows[1].cash, strategyRows[1].equity, position(strategyRows[1])],
     ['基准（single_etf）', benchmarkRows[0].session_date, benchmarkRows[0].cash, benchmarkRows[0].equity, position(benchmarkRows[0])],
     ['基准（single_etf）', benchmarkRows[1].session_date, benchmarkRows[1].cash, benchmarkRows[1].equity, position(benchmarkRows[1])],
   ];
@@ -197,8 +208,14 @@ test('equal-weight pool comparison reports incomplete action facts and keeps aut
     expect(result.data.verification.comparable).toBe(false);
     expect(result.data.verification.reasons.some((reason: string) => reason.includes('corporate_actions_incomplete'))).toBe(true);
     expect(result.data.comparability.benchmark_kind).toBe('equal_weight_pool');
-    expect(closeRows(result.data.strategy.runs[0]).length).toBeGreaterThan(0);
-    expect(closeRows(result.data.benchmark.runs[0]).length).toBeGreaterThan(0);
+    const strategyRows = closeRows(result.data.strategy.runs[0]);
+    const benchmarkRows = closeRows(result.data.benchmark.runs[0]);
+    expect(strategyRows.map((row) => row.equity)).not.toEqual(benchmarkRows.map((row) => row.equity));
+    const expectedRows = [
+      ...[strategyRows[0], strategyRows.at(-1)!].map((row) => ['策略（s2_rotation）', row.session_date, row.cash, row.equity, position(row)]),
+      ...[benchmarkRows[0], benchmarkRows.at(-1)!].map((row) => ['基准（equal_weight_pool）', row.session_date, row.cash, row.equity, position(row)]),
+    ];
+    expect(await resultRows(page, 'comparison-valuations')).toEqual(expectedRows);
     const reloadRows = await resultRows(page, 'comparison-valuations');
     await page.reload();
     await expect(page.getByTestId('comparison-verification')).toBeVisible();
@@ -209,7 +226,7 @@ test('equal-weight pool comparison reports incomplete action facts and keeps aut
   }
 });
 
-test('comparison task failure is explicit and shows no fabricated result', async ({ page }) => {
+test('comparison rejects incompatible price rules and shows real task failures without fabricated results', async ({ page }) => {
   test.setTimeout(120_000);
   const details = await catalogDetails(page);
   const failure = details.find((item) => item.bars === 2 && item.detail.instruments.some((instrument: { instrument_id: string; kind: string }) =>
@@ -245,6 +262,14 @@ test('comparison task failure is explicit and shows no fabricated result', async
   await page.getByLabel('均线窗口', { exact: true }).fill('1');
   await page.getByLabel('调仓频率', { exact: true }).fill('1');
   await fillCosts(page);
+  const rejected = page.waitForResponse((response) => response.url().endsWith('/api/v1/tasks/comparisons') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: '提交策略—基准对照', exact: true }).click();
+  const rejection = await rejected;
+  expect(rejection.status()).toBe(422);
+  expect(rejection.headers()['cache-control']).toBe('no-store');
+  await expect(page.getByText('comparison_price_rules_mismatch', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('comparison-status')).toContainText('尚未提交或选择对照任务');
+  await fillCosts(page, { slippage: '0' });
   await page.getByRole('button', { name: '提交策略—基准对照', exact: true }).click();
   await expect(page.getByTestId('comparison-status')).toContainText('失败', { timeout: 60_000 });
   await expect(page.getByTestId('comparison-status')).toContainText('experiment_cli_failed');

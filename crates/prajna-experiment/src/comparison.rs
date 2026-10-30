@@ -2,8 +2,7 @@
 //! in Rust from the frozen strategy selection; browsers never assemble it.
 use std::path::Path;
 
-use chrono::NaiveDate;
-use prajna_research::{Panel, StaticUniverse, load_panel_for_venues};
+use prajna_research::{Panel, StaticUniverse, cache::store::FactorCache, load_panel_for_venues};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -81,70 +80,63 @@ fn strategy_kind(definition: &Value) -> Result<&str, ComparisonError> {
     }
 }
 
-fn rebalance_every(run_spec: &Value) -> Result<usize, ComparisonError> {
-    run_spec["strategy"]["parameters"]["rebalance_every"]
-        .as_u64()
-        .and_then(|value| usize::try_from(value).ok())
-        .filter(|value| *value > 0)
-        .ok_or_else(|| {
-            error(
-                "comparison_requires_rebalance_schedule",
-                "frozen strategy has no positive rebalance_every",
-            )
-        })
-}
-
-/// Session closes after the evaluation start at the strategy's declared cadence.
+/// Reuse execution's full-panel scoring, cadence and evaluation filtering.
 fn calendar(
+    root: &Path,
+    strategy: &Experiment,
     panel: &Panel,
-    start: NaiveDate,
-    end: NaiveDate,
-    every: usize,
+    universe: &StaticUniverse,
     policy: ReinvestmentPolicy,
 ) -> Result<Value, ComparisonError> {
-    let start_index = panel
-        .sessions
-        .iter()
-        .position(|session| session.session_date == start)
-        .ok_or_else(|| {
-            error(
-                "comparison_window_invalid",
-                "evaluation start is not a Session",
-            )
-        })?;
-    let end_index = panel
-        .sessions
-        .iter()
-        .position(|session| session.session_date == end)
-        .ok_or_else(|| {
-            error(
-                "comparison_window_invalid",
-                "evaluation end is not a Session",
-            )
-        })?;
-    let dates = if policy == ReinvestmentPolicy::None {
-        Vec::new()
-    } else {
-        let mut dates = Vec::new();
-        let Some(mut index) = start_index.checked_add(every) else {
-            return Ok(
-                json!({"semantic_version": CALENDAR_VERSION, "policy": policy, "decision_dates": []}),
-            );
-        };
-        while index <= end_index {
-            dates.push(panel.sessions[index].session_date);
-            let Some(next) = index.checked_add(every) else {
-                break;
-            };
-            index = next;
+    let mut dates = Vec::new();
+    if policy == ReinvestmentPolicy::StrategyRebalance {
+        let run = strategy.expand(root).map_err(experiment_error)?.remove(0);
+        let assumption = strategy
+            .availability_assumption()
+            .map_err(experiment_error)?;
+        let mut factors = std::collections::HashMap::new();
+        if let Some(factor) = &run.factor {
+            let values = FactorCache::open(root)
+                .and_then(|cache| {
+                    cache.get_or_compute(
+                        panel,
+                        universe.members(),
+                        strategy.universe(),
+                        &strategy.dsv,
+                        factor,
+                        assumption,
+                    )
+                })
+                .map_err(|e| error("comparison_calendar_failed", e))?;
+            factors.insert(factor.canonical_json().to_string(), values);
         }
-        dates
-    };
-    Ok(json!({
-        "semantic_version": CALENDAR_VERSION,
-        "policy": policy,
-        "decision_dates": dates.iter().map(ToString::to_string).collect::<Vec<_>>(),
-    }))
+        let research = if strategy.strategy_kind == "single_etf_timing" {
+            Some(crate::timing::research_panel(strategy, root, panel).map_err(experiment_error)?)
+        } else {
+            None
+        };
+        let evaluation = strategy.evaluation().unwrap();
+        let ledger = panel
+            .window(evaluation.start(), evaluation.end())
+            .map_err(|e| error("comparison_window_invalid", e))?;
+        dates = crate::engine::windowed_decisions(
+            strategy,
+            strategy.engine.selection(),
+            &run,
+            &factors,
+            research.as_ref().unwrap_or(panel),
+            &ledger,
+            universe.members(),
+            assumption,
+        )
+        .map_err(|e| error("comparison_calendar_failed", e))?
+        .into_iter()
+        .map(|d| d.decision_session.session_date)
+        // Entry already has its own Decision at the first evaluation close.
+        .filter(|date| *date > evaluation.start())
+        .collect();
+    }
+    Ok(json!({"semantic_version": CALENDAR_VERSION, "policy": policy, "decision_dates": dates}))
 }
 
 fn benchmark_definition(
@@ -266,6 +258,7 @@ fn comparability(
         .ok_or_else(|| error("comparison_definition_invalid", "missing initial cash"))?;
     Ok(json!({
         "semantic_version": RELATION_VERSION,
+        "validation_version": "effective-rules-calendar@2",
         "strategy_kind": strategy_kind,
         "benchmark_kind": benchmark_kind,
         "dsv": strategy["dsv"],
@@ -327,22 +320,21 @@ pub fn freeze(root: &Path, request: &Request) -> Result<Value, ComparisonError> 
             "freeze exactly one strategy parameter combination for a comparison",
         ));
     }
-    let every = rebalance_every(&strategy_runs[0].run_spec)?;
     let dsv = definition["dsv"]
         .as_str()
         .ok_or_else(|| error("comparison_definition_invalid", "missing DSV"))?;
     let venues = strategy.venues().iter().cloned().collect::<Vec<_>>();
     let panel = load_panel_for_venues(root, dsv, &venues)
         .map_err(|failure| error("dataset_read_failed", failure))?;
-    let calendar = calendar(
-        &panel,
-        evaluation.start(),
-        evaluation.end(),
-        every,
-        request.reinvestment_calendar,
-    )?;
     let universe = StaticUniverse::load(root, strategy.universe())
         .map_err(|failure| error("dataset_read_failed", failure))?;
+    let calendar = calendar(
+        root,
+        &strategy,
+        &panel,
+        &universe,
+        request.reinvestment_calendar,
+    )?;
     let benchmark_kind = if strategy_kind == "single_etf_timing" {
         if universe.members().len() != 1 {
             return Err(error(
@@ -364,6 +356,15 @@ pub fn freeze(root: &Path, request: &Request) -> Result<Value, ComparisonError> 
             "derived benchmark must expand to exactly one Run",
         ));
     }
+    strategy
+        .engine
+        .validate_comparison_prices(
+            &panel
+                .window(evaluation.start(), evaluation.end())
+                .map_err(|e| error("comparison_window_invalid", e))?,
+            &benchmark.holding_benchmark.as_ref().unwrap().price_ticks,
+        )
+        .map_err(|e| error("comparison_price_rules_mismatch", e))?;
     let comparability = comparability(
         &definition,
         &benchmark_definition,
