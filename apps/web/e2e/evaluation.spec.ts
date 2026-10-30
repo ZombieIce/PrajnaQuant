@@ -46,6 +46,7 @@ test('evaluation production submit persists Rust endpoints and relationship char
   await expect(page.locator('canvas')).toHaveCount(5);
   // Canvas existence and tables alone cannot prove the scatter renderer was registered.
   await expect.poll(() => page.locator('canvas').nth(2).evaluate(canvas => {
+    if (!(canvas instanceof HTMLCanvasElement)) throw new Error('expected canvas');
     const image = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
     let blue = 0;
     for (let i = 0; i < image.length; i += 4) {
