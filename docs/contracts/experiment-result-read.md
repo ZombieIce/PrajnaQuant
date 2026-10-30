@@ -72,3 +72,12 @@ prajna-experiment result <exp> <exe> --lake <lake> [--run <run-id>]
 
 - 本票逐表校验已保存结果，但只返回 Summary 与 NAV 序列表；大 lake 性能、分页、按需明细和完整图表不在本契约。
 - 公开验证只用合成 fixture；真实结果、明细、hash 和 Run/Execution 身份留在本机。
+
+## 策略—基准对照结果
+
+`GET /api/v1/tasks/comparisons/{id}/result` 复用本契约的每角色
+`prajna-experiment result`，校验持久 exp/Run 身份、共同 evaluation 起止与 close
+日期集、会计/收益口径/公司行动版本，再组合为 `strategy`/`benchmark` 两个角色；
+结构性不一致、缺基准和行动事实不完整的错误/`comparable=false` 语义见
+[ADR 0035](../decisions/0035-strategy-benchmark-comparison.md)。旧单 Run 结果入口
+及其错误映射不变。
