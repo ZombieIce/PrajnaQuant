@@ -37,7 +37,7 @@ Break the work at independent behavior/contract boundaries under the shared scop
 
 Give each ticket its **blocking edges**: the other tickets that must complete before it can start. A ticket with no blockers can start immediately.
 
-For every near-term ticket, include the six-item template from the shared scope rule. Resolve a triggered size review through explicit owner budget authorization or an approved contract-boundary split before publication as `ready-for-agent`. Owner approval of a breakdown alone is not an explicit budget exception. Done: each near-term ticket has an evidenced scope check and a continuation/authorization/split decision; deferred checks on distant tickets remain visible.
+For every near-term ticket, retain the complete first six-item check from the shared scope rule. A size review alone may conclude continue; apply that rule's pause/owner-decision conditions rather than treating its review threshold as a hard budget. Record the first owner-approved estimate and any explicit hard cap; approval of a breakdown does not waive a required decision. Done: each near-term ticket has baseline evidence, acceptance scenarios, a size/reviewability assessment when triggered and a continuation/authorization/split decision; deferred checks remain visible.
 
 **Wide refactors are the exception to vertical slicing.** A **wide refactor** is one mechanical change (rename a column, retype a shared symbol) whose **blast radius** fans across the whole codebase, so a single edit breaks thousands of call sites at once and no vertical slice can land green. Don't force it into a tracer bullet; sequence it as **expand–contract**. First expand: add the new form beside the old so nothing breaks. Then migrate the call sites over in batches sized by blast radius (per package, per directory), each batch its own ticket blocked by the expand, keeping CI green batch to batch because the old form still exists. Finally contract: delete the old form once no caller remains, in a ticket blocked by every migrate batch. When even the batches can't stay green alone, keep the sequence but let them share an integration branch that all block a final integrate-and-verify ticket; green is promised only there.
 
@@ -48,7 +48,7 @@ Present the proposed breakdown as a numbered list. For each ticket, show:
 - **Title**: short descriptive name
 - **Blocked by**: which other tickets (if any) must complete first
 - **What it delivers**: the end-to-end behaviour this ticket makes work
-- **Scope check**: the six-item result for near-term tickets; flag requested budget exceptions with scope and total upper bound, or deferred checks for distant tickets
+- **Scope check**: the first six-item result for near-term tickets; flag decisions that require owner authorization with scope and total upper bound, or deferred checks for distant tickets
 
 Ask the user:
 
@@ -60,7 +60,7 @@ Iterate until the user approves the breakdown.
 
 ### 5. Publish the tickets to the configured tracker
 
-Publish the approved tickets to `ZombieIce/PrajnaQuant`, one Issue per ticket in dependency order (blockers first), using actual Issue numbers in `Blocked by`. Apply exactly one triage label: `ready-for-agent` when the scope check is complete and requirements/budget settled; `needs-triage` for deferred checks or pending decisions. Record explicit owner budget authorization in the corresponding Issue. Blocking edges still control when a ready ticket can be claimed.
+Publish the approved tickets to `ZombieIce/PrajnaQuant`, one Issue per ticket in dependency order (blockers first), using actual Issue numbers in `Blocked by`. Apply exactly one triage label: `ready-for-agent` when the scope check and continuation decision are complete and requirements settled; `needs-triage` for deferred checks or pending decisions. Record any required owner authorization in the corresponding Issue. Blocking edges still control when a ready ticket can be claimed.
 
 Work the **frontier**: any ticket whose blockers are all done. For a purely linear chain that means top to bottom.
 
