@@ -370,6 +370,43 @@ impl EngineSettings {
         }
         Ok(())
     }
+    pub(super) fn configure_holding_benchmark(
+        &mut self,
+        benchmark: &crate::benchmark::Context,
+    ) -> Result<(), ExperimentError> {
+        self.validate_static_actions(false)?;
+        let config = self
+            .fast
+            .as_ref()
+            .ok_or_else(|| invalid("missing holding config"))?;
+        for rule in benchmark.identity["execution_rules"].as_array().unwrap() {
+            let id: InstrumentId = rule["instrument_id"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .map_err(|e| invalid(format!("holding id: {e}")))?;
+            for key in ["lot_size", "size_increment"] {
+                let increment: Quantity = rule[key]
+                    .as_str()
+                    .ok_or_else(|| invalid("holding requires quantity rules"))?
+                    .parse()
+                    .map_err(|e| invalid(format!("holding increment: {e}")))?;
+                if increment <= Quantity::ZERO
+                    || config.lot_sizes[&id].mantissa() % increment.mantissa() != 0
+                {
+                    return Err(invalid(
+                        "holding lot must respect native lot/size increments",
+                    ));
+                }
+            }
+        }
+        self.rebalance = Rebalance::CashOnly;
+        self.policy = UnfilledEntry::Skip;
+        if let Some(settings) = &mut self.normalized {
+            settings["rebalance"] = "cash_only".into();
+        }
+        Ok(())
+    }
     pub(super) fn configure_pit(
         &mut self,
         catalog: &prajna_research::pit_universe::HistoricalCatalog,
@@ -497,7 +534,10 @@ impl EngineSettings {
         if let Some(backend) = &self.backend {
             value["backend"] = serde_json::json!(backend);
         }
-        if value.get("corporate_actions").is_some() {
+        if value.get("holding_benchmark").is_some() {
+            value["engine"]["semantic_version"] =
+                fast_event::HOLDING_BENCHMARK_ENGINE_VERSION.into();
+        } else if value.get("corporate_actions").is_some() {
             value["engine"]["semantic_version"] = fast_event::STATIC_ACTION_ENGINE_VERSION.into();
         }
     }
@@ -906,13 +946,24 @@ pub(super) fn execute(
                     }
                 } else if let Some(actions) = &experiment.actions {
                     let schedule = actions.schedule(ledger_panel).map_err(|e| e.to_string())?;
-                    fast_event::run_fast_event_with_actions(
-                        ledger_panel,
-                        statuses,
-                        config,
-                        &portfolios,
-                        &schedule,
-                    )
+                    if let Some(benchmark) = &experiment.holding_benchmark {
+                        fast_event::run_fast_event_holding(
+                            ledger_panel,
+                            statuses,
+                            config,
+                            &portfolios,
+                            &schedule,
+                            &benchmark.price_ticks,
+                        )
+                    } else {
+                        fast_event::run_fast_event_with_actions(
+                            ledger_panel,
+                            statuses,
+                            config,
+                            &portfolios,
+                            &schedule,
+                        )
+                    }
                 } else {
                     fast_event::run_fast_event(ledger_panel, statuses, config, &portfolios)
                 }
@@ -1053,6 +1104,9 @@ fn windowed_decisions(
     members: &[InstrumentId],
     assumption: AvailabilityAssumption,
 ) -> Result<Vec<Decision>, String> {
+    if let Some(benchmark) = &experiment.holding_benchmark {
+        return Ok(benchmark.decisions(ledger_panel, members));
+    }
     let Some(evaluation) = experiment.evaluation() else {
         return decisions(engine, run, factors, panel, members, assumption);
     };

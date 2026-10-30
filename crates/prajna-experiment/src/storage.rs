@@ -112,6 +112,7 @@ impl ResultLevel {
                 Self::Standard if run.run_spec["engine"]["kind"] == "accurate_event" => {
                     &ACCURATE_STANDARD
                 }
+                Self::Standard if run.run_spec.get("holding_benchmark").is_some() => &FAST_FULL,
                 Self::Standard if terminal_settlement => &FAST_TERMINAL_STANDARD,
                 Self::Standard => &FAST_STANDARD,
                 Self::Full if run.run_spec["engine"]["kind"] == "accurate_event" => &ACCURATE_FULL,
@@ -2331,7 +2332,23 @@ pub(super) fn execution_rows(
         return accurate_rows(run, table);
     }
     if let Some(result) = &run.fast_event_result {
-        return fast_rows(result, table);
+        let mut rows = fast_rows(result, table)?;
+        if table == "orders" && run.run_spec.get("holding_benchmark").is_some() {
+            for (_, payload) in &mut rows {
+                let mut value: Value = serde_json::from_str(payload)?;
+                if value["record_type"] == "attempt" {
+                    value["purpose"] =
+                        if value["decision_session"] == run.run_spec["evaluation"]["start"] {
+                            "initial_entry"
+                        } else {
+                            "calendar_cash_reinvestment"
+                        }
+                        .into();
+                    *payload = json_payload(&value)?;
+                }
+            }
+        }
+        return Ok(rows);
     }
 
     fn accurate_rows(

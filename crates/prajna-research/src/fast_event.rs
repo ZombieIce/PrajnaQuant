@@ -44,6 +44,7 @@ pub const MULTI_VENUE_PARITY_ENGINE_VERSION: &str = "fast_event@13";
 pub const MULTI_VENUE_LOT_ENGINE_VERSION: &str = "fast_event@14";
 /// Explicit single-Venue Static Universe, lot/full-target action ledger.
 pub const STATIC_ACTION_ENGINE_VERSION: &str = "fast_event@15";
+pub const HOLDING_BENCHMARK_ENGINE_VERSION: &str = "fast_event@16";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sizing {
@@ -54,6 +55,8 @@ pub enum Sizing {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rebalance {
     FullTarget,
+    /// Buy equal cash slices; never sell or restore portfolio weights.
+    CashOnly,
     /// POC-only variant: keep unentered targets pending, including cash-limited entries.
     EntryOnly(EntryBudget),
 }
@@ -369,7 +372,9 @@ pub fn run_fast_event(
     config: &FastEventConfig,
     portfolios: &[PortfolioRun],
 ) -> Result<FastEventResult, FastEventError> {
-    run_with_execution(panel, statuses, config, portfolios, None, None, None, None)
+    run_with_execution(
+        panel, statuses, config, portfolios, None, None, None, None, None,
+    )
 }
 
 pub fn run_fast_event_pit(
@@ -394,6 +399,7 @@ pub fn run_fast_event_pit(
         portfolios,
         None,
         Some((market, risk)),
+        None,
         None,
         None,
     )
@@ -426,6 +432,35 @@ pub fn run_fast_event_with_actions(
         None,
         Some(actions),
         None,
+        None,
+    )
+}
+
+/// Versioned holding execution: buy-only cash allocation with Instrument ticks.
+pub fn run_fast_event_holding(
+    panel: &Panel,
+    statuses: &ExecutionStatusMap,
+    config: &FastEventConfig,
+    portfolios: &[PortfolioRun],
+    actions: &CorporateActionSchedule,
+    price_ticks: &BTreeMap<InstrumentId, Price>,
+) -> Result<FastEventResult, FastEventError> {
+    if portfolios
+        .iter()
+        .any(|p| p.rebalance != Rebalance::CashOnly)
+    {
+        return Err(invalid("holding execution requires cash_only portfolios"));
+    }
+    run_with_execution(
+        panel,
+        statuses,
+        config,
+        portfolios,
+        None,
+        None,
+        Some(actions),
+        None,
+        Some(price_ticks),
     )
 }
 
@@ -453,6 +488,7 @@ pub fn run_fast_event_pit_with_actions(
         None,
         Some((market, risk)),
         Some(actions),
+        None,
         None,
     )
 }
@@ -483,6 +519,7 @@ pub fn run_fast_event_pit_with_terminal_settlement(
         Some((market, risk)),
         actions,
         Some(&schedule),
+        None,
     )
 }
 
@@ -528,6 +565,7 @@ pub fn run_lot_with_execution(
         None,
         None,
         None,
+        None,
     )
 }
 
@@ -544,8 +582,37 @@ fn run_with_execution(
     )>,
     actions: Option<&CorporateActionSchedule>,
     terminal_settlement: Option<&TerminalSettlementSchedule>,
+    price_ticks: Option<&BTreeMap<InstrumentId, Price>>,
 ) -> Result<FastEventResult, FastEventError> {
     validate(panel, config, portfolios)?;
+    if let Some(ticks) = price_ticks {
+        if panel
+            .instruments
+            .iter()
+            .any(|id| ticks.get(id).is_none_or(|p| p.mantissa() <= 0))
+        {
+            return Err(invalid(
+                "holding benchmark requires positive price increments for every member",
+            ));
+        }
+    }
+    if portfolios
+        .iter()
+        .any(|p| p.rebalance == Rebalance::CashOnly)
+        && (actions.is_none()
+            || price_ticks.is_none()
+            || pit.is_some()
+            || execution.is_some()
+            || config.sizing != Sizing::Lot
+            || config.venues.len() != 1
+            || portfolios.iter().any(|p| {
+                p.rebalance != Rebalance::CashOnly || p.unfilled_entry != UnfilledEntry::Skip
+            }))
+    {
+        return Err(invalid(
+            "cash_only requires static single-Venue lot actions and skip policy",
+        ));
+    }
     if config.venues.len() > 1
         && (pit.is_some() || actions.is_some() || terminal_settlement.is_some())
     {
@@ -736,6 +803,13 @@ fn run_with_execution(
                 .keys()
                 .cloned()
                 .collect::<BTreeSet<_>>();
+            // Cash-only execution has no sell legs; a blocked old holding must
+            // not prevent another member from spending its declared cash slice.
+            let held = if portfolio.rebalance == Rebalance::CashOnly {
+                BTreeSet::new()
+            } else {
+                held
+            };
             if let Some(event) = state.attempt(session, &held, |id, _| gates[id]) {
                 let execution = match &event {
                     ExecutionEvent::Executed { applied, .. } => Some((applied, false)),
@@ -784,6 +858,7 @@ fn run_with_execution(
                                     pre_open_equity,
                                     limit_buys_to_cash: true,
                                     retained: None,
+                                    price_ticks,
                                 },
                                 &open.prices,
                                 session,
@@ -858,6 +933,7 @@ fn run_with_execution(
                     config.costs,
                     account.portfolios()[&previous.portfolio_id()].cash(),
                     config.lot_sizes[previous.instrument_id()],
+                    None,
                 )?;
                 record_adjustment(
                     &mut sizing_adjustments,
@@ -1099,7 +1175,12 @@ fn run_with_execution(
             "Missing prices carry the last valid price of the same field, never zero.",
         ]
     };
-    if config.sizing == Sizing::Lot && !external_execution {
+    if portfolios
+        .iter()
+        .any(|p| p.rebalance == Rebalance::CashOnly)
+    {
+        assumptions.push("Holding benchmarks buy equal cash slices only on declared close Decisions; unavailable buys wait for the next declared Decision, no sales restore weights, and buy execution prices round upward to Instrument ticks before actual fees.");
+    } else if config.sizing == Sizing::Lot && !external_execution {
         assumptions.push("Normal lot full-target quantities use available cash plus securities at pre-trade valuation, excluding dividend and liquidation receivables; actual weights, cost and turnover use total NAV. Retry and entry-only retain their own budget rules.");
     }
     if terminal_settlement.is_some() {
@@ -1112,7 +1193,12 @@ fn run_with_execution(
             .iter()
             .any(|p| p.rebalance == Rebalance::FullTarget);
     Ok(FastEventResult {
-        semantic_version: if actions.is_some() && pit.is_none() {
+        semantic_version: if portfolios
+            .iter()
+            .any(|p| p.rebalance == Rebalance::CashOnly)
+        {
+            HOLDING_BENCHMARK_ENGINE_VERSION
+        } else if actions.is_some() && pit.is_none() {
             STATIC_ACTION_ENGINE_VERSION
         } else if config.venues.len() > 1 {
             match config.sizing {
@@ -1263,6 +1349,7 @@ struct TargetAttempt<'a> {
     pre_open_equity: Option<Notional>,
     limit_buys_to_cash: bool,
     retained: Option<&'a BTreeSet<InstrumentId>>,
+    price_ticks: Option<&'a BTreeMap<InstrumentId, Price>>,
 }
 
 struct SessionLotAttempt {
@@ -1311,6 +1398,7 @@ fn pit_fills(
                         pre_open_equity: None,
                         limit_buys_to_cash: true,
                         retained: Some(&skipped_buys),
+                        price_ticks: None,
                     },
                     prices,
                     session,
@@ -1508,6 +1596,7 @@ fn plan_buys_after_sells(
                 pre_open_equity: Some(attempt.pre_open_equity),
                 limit_buys_to_cash: false,
                 retained: None,
+                price_ticks: None,
             },
             prices,
             session,
@@ -1539,7 +1628,47 @@ fn lot_fills(
     } else {
         BTreeMap::new()
     };
-    if run.rebalance == Rebalance::FullTarget {
+    if run.rebalance == Rebalance::CashOnly {
+        desired = portfolio.positions().clone();
+        let count = attempt.original.values().filter(|w| **w > 0.0).count();
+        if count == 0 {
+            return Ok(Vec::new());
+        }
+        let budget = portfolio
+            .cash()
+            .checked_div_decimal(Notional::parse(&count.to_string())?)?;
+        for (instrument, target) in attempt.applied {
+            if *target <= 0.0 {
+                continue;
+            }
+            let requested = quantity(budget, prices[instrument])?;
+            let rounded = floor_lot(requested, config.lot_sizes[instrument])?;
+            record_adjustment(
+                adjustments,
+                run.id,
+                instrument,
+                session,
+                QuantityAdjustmentKind::Target,
+                SizingAdjustmentReason::LotRounding,
+                requested,
+                rounded,
+            );
+            let current = portfolio
+                .positions()
+                .get(instrument)
+                .copied()
+                .unwrap_or(Quantity::ZERO);
+            desired.insert(
+                instrument.clone(),
+                Quantity::from_mantissa(
+                    current
+                        .mantissa()
+                        .checked_add(rounded.mantissa())
+                        .ok_or(FixedPointError::Overflow)?,
+                )?,
+            );
+        }
+    } else if run.rebalance == Rebalance::FullTarget {
         let equity = match attempt.pre_open_equity {
             Some(equity) => equity,
             None if !attempt.retry => investable_budget(account, run.id, prices)?,
@@ -1618,7 +1747,7 @@ fn lot_fills(
     for side in [Side::Sell, Side::Buy] {
         let entry_budget = if side == Side::Buy {
             match run.rebalance {
-                Rebalance::FullTarget => None,
+                Rebalance::FullTarget | Rebalance::CashOnly => None,
                 Rebalance::EntryOnly(mode) => {
                     let count = attempt
                         .original
@@ -1704,6 +1833,20 @@ fn lot_fills(
                         config.costs,
                         cash,
                         config.lot_sizes[instrument],
+                        attempt
+                            .price_ticks
+                            .map(|ticks| {
+                                let price = lot_execution_price(price, side, config.costs)?;
+                                let tick = ticks[instrument].mantissa();
+                                let rounded = price
+                                    .mantissa()
+                                    .checked_add(tick - 1)
+                                    .ok_or(FixedPointError::Overflow)?
+                                    / tick
+                                    * tick;
+                                Ok::<_, FastEventError>(Price::from_mantissa(rounded)?)
+                            })
+                            .transpose()?,
                     )?
                 };
                 q = fill
@@ -1742,6 +1885,7 @@ fn cash_limited_lot_fill(
     costs: FastEventCosts,
     cash: Notional,
     lot: Quantity,
+    execution_price: Option<Price>,
 ) -> Result<Option<Fill>, FastEventError> {
     let mut q = order.quantity();
     while q > Quantity::ZERO {
@@ -1753,7 +1897,10 @@ fn cash_limited_lot_fill(
             q,
             order.submitted_at(),
         )?;
-        let fill = lot_fill(candidate, raw, costs)?;
+        let fill = match execution_price {
+            Some(price) => lot_fill_at_price(candidate, raw, price, costs)?,
+            None => lot_fill(candidate, raw, costs)?,
+        };
         if add(cash, fill.cash_delta())? >= Notional::ZERO {
             return Ok(Some(fill));
         }
