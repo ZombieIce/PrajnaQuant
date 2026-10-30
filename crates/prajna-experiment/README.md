@@ -425,3 +425,20 @@ fake 的原生账户显式为 unavailable，不伪造原生快照。
 1/5/20 Session 固定开盘端点评价标签及持久因子收益散点样本；生产页面可选开启。
 省略保持旧报告语义，标签不能输入因子或策略，重叠标签不复利为 NAV。
 见[评价 v1 契约](../../docs/contracts/momentum-research.md#未来收益评价-v1)。
+
+### 独立持有基准
+
+在上述冻结 BuyAndHold 正式定义中增加 `holding_benchmark`，然后使用既有
+`prajna-experiment run <definition.json> --lake <root> --level standard` 与 `result`：
+
+```json
+{"holding_benchmark":{"semantic_version":"holding-benchmark@1","kind":"equal_weight_pool","reinvestment_calendar":{"semantic_version":"session-close-calendar@1","decision_dates":[]}}}
+```
+
+`single_etf` 要求恰一 ETF，`equal_weight_pool` 使用冻结 Universe 全部 ETF。
+必须显式绑定行动事实与税率、adjusted_versions/evaluation，单 Venue Fast Event lot；
+日历为空表示不再投资。非空日期是评价起点之后的 Session **close Decision**，下一
+Session open 只分配现金买入；不卖出恢复权重，缺行情/不可交易等下一声明日期。
+Standard 为此新路径保存 orders/fills/费用及行动/现金/权益，尝试目的区分入场和再投，
+末日 pending 明确保留。旧 BuyAndHold 定义和身份不变；费用、余量和价格增量规则见
+[ADR 0034](../../docs/decisions/0034-holding-benchmark-execution.md)。

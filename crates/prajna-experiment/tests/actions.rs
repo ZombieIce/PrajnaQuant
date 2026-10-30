@@ -737,3 +737,349 @@ fn same_venue_same_event_names_keep_instrument_identity_through_saved_execution(
         assert!(corporate_facts::import(root, &serde_json::to_vec(&duplicate).unwrap()).is_err());
     }
 }
+
+fn holding_definition(root: &Path) -> Value {
+    let mut definition = frozen(root, &setup(root));
+    definition["strategy"] = json!("buy_and_hold");
+    definition["unfilled_entry"] = json!("retry");
+    definition["parameter_space"] = json!({"list":[{"params_version":1}]});
+    definition["holding_benchmark"] = json!({"semantic_version":"holding-benchmark@1","kind":"single_etf",
+        "reinvestment_calendar":{"semantic_version":"session-close-calendar@1","decision_dates":[DATES[3],DATES[4],DATES[9]]}});
+    definition
+}
+#[test]
+fn holding_benchmark_hand_ledger_and_formal_cli_standard_roundtrip() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let definition = holding_definition(root);
+    let experiment = Experiment::parse(&definition.to_string(), root).unwrap();
+    let report = experiment.execute(root, 1).unwrap();
+    assert!(report.runs[0].error.is_none(), "{:?}", report.runs[0].error);
+    let result = report.runs[0].fast_event_result.as_ref().unwrap();
+    assert_eq!(result.semantic_version, "fast_event@16");
+    // Evaluation starts day1 (day0 warm-up). Entry at day2 open; ex-date
+    // creates 1,800 receivable. Day4 open cannot spend close's payment.
+    // Declared day4 close buys 200 at day5 open, fee5, residual195.
+    // Day6 split doubles 1,200 -> 2,400 with no trade/fee.
+    let cash = ["10005", "0", "0", "1800", "195", "195", "195", "195", "195"];
+    let receivable = ["0", "0", "1800", "0", "0", "0", "0", "0", "0"];
+    let quantities = [
+        "0", "1000", "1000", "1000", "1200", "2400", "2400", "2400", "2400",
+    ];
+    let equity = [
+        "10005", "10000", "9800", "9800", "9795", "9795", "9795", "9795", "9795",
+    ];
+    for (i, session) in result.sessions.iter().enumerate() {
+        session.open_after.validate().unwrap();
+        session.close.validate().unwrap();
+        let account = &session.close.account;
+        assert_eq!(account.cash.to_string(), cash[i]);
+        assert_eq!(account.dividend_receivable.to_string(), receivable[i]);
+        assert_eq!(account.equity.to_string(), equity[i]);
+        assert_eq!(
+            account
+                .positions
+                .values()
+                .next()
+                .map(|p| p.quantity.to_string())
+                .unwrap_or_else(|| "0".into()),
+            quantities[i]
+        );
+    }
+    assert_eq!(result.fills.len(), 2);
+    assert_eq!(
+        result.fills[0].fill.order().submitted_at(),
+        result.sessions[1].session.ts_open
+    );
+    assert_eq!(
+        result.fills[1].fill.executed_at(),
+        result.sessions[4].session.ts_open
+    );
+    assert!(result.attempts.iter().any(|a| matches!(
+        a.event,
+        prajna_research::strategy::ExecutionEvent::PendingAtEnd { .. }
+    )));
+    assert_eq!(
+        report.runs[0].summary.as_ref().unwrap().total_return,
+        Some(9795.0 / 10005.0 - 1.0)
+    );
+    let file = root.join("holding.json");
+    fs::write(&file, definition.to_string()).unwrap();
+    let stored = cli(
+        root,
+        &[
+            "run",
+            file.to_str().unwrap(),
+            "--level",
+            "standard",
+            "--threads",
+            "1",
+        ],
+    );
+    assert_eq!(stored["failed_count"], 0);
+    let exp = stored["exp"].as_str().unwrap();
+    let exe = stored["exe"].as_str().unwrap();
+    let read = cli(root, &["result", exp, exe]);
+    let run = &read["data"]["runs"][0];
+    for table in [
+        "account_valuations",
+        "portfolio_valuations",
+        "orders",
+        "fills",
+        "fee_settlements",
+        "corporate_actions",
+    ] {
+        let (_, batches) = read_run_table(
+            root,
+            exp,
+            exe,
+            run["run_id"].as_str().unwrap(),
+            ResultLevel::Standard,
+            table,
+        )
+        .unwrap();
+        if table != "fee_settlements" {
+            assert!(!batches.is_empty());
+        }
+        if table == "orders" || table == "account_valuations" {
+            let values = batches
+                .iter()
+                .flat_map(|b| {
+                    b.column(1)
+                        .as_any()
+                        .downcast_ref::<arrow_array::StringArray>()
+                        .unwrap()
+                        .iter()
+                        .flatten()
+                        .map(|s| serde_json::from_str::<Value>(s).unwrap())
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+            if table == "account_valuations" {
+                let closes = values
+                    .iter()
+                    .filter(|v| v["valuation_point"] == "close")
+                    .collect::<Vec<_>>();
+                assert_eq!(closes.len(), equity.len());
+                for (i, row) in closes.iter().enumerate() {
+                    assert_eq!(row["cash"], cash[i]);
+                    assert_eq!(row["dividend_receivable"], receivable[i]);
+                    assert_eq!(row["equity"], equity[i]);
+                    assert_eq!(row["session_date"], DATES[i + 1]);
+                }
+                continue;
+            }
+            assert!(values.iter().any(|v| v["purpose"] == "initial_entry"));
+            assert!(
+                values
+                    .iter()
+                    .any(|v| v["purpose"] == "calendar_cash_reinvestment"
+                        && v["kind"] == "pending_at_end")
+            );
+        }
+    }
+    let spec = &experiment.run_definitions(root).unwrap()[0].run_spec;
+    assert_eq!(
+        spec["holding_benchmark"]["execution_rules"][0]["price_increment"],
+        "0.001"
+    );
+    assert_eq!(
+        spec["holding_benchmark"]["execution_rules"][0]["lot_size"],
+        "100"
+    );
+    assert_eq!(spec["engine"]["semantic_version"], "fast_event@16");
+}
+#[test]
+fn holding_binding_validation_versions_identity_and_incomplete_facts() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let definition = holding_definition(root);
+    let id = |value: &Value| {
+        Experiment::parse(&value.to_string(), root)
+            .unwrap()
+            .run_definitions(root)
+            .unwrap()[0]
+            .run_id
+            .clone()
+    };
+    let benchmark_id = id(&definition);
+    let mut old = definition.clone();
+    old.as_object_mut().unwrap().remove("holding_benchmark");
+    let old_id = id(&old);
+    assert_ne!(benchmark_id, old_id);
+    assert_eq!(
+        Experiment::parse(&old.to_string(), root)
+            .unwrap()
+            .run_definitions(root)
+            .unwrap()[0]
+            .run_spec["engine"]["semantic_version"],
+        "fast_event@15"
+    );
+    let mut dates = definition.clone();
+    dates["holding_benchmark"]["reinvestment_calendar"]["decision_dates"] = json!([]);
+    assert_ne!(id(&dates), benchmark_id);
+    assert_eq!(id(&old), old_id);
+    for (key, value) in [
+        ("corporate_actions", Value::Null),
+        ("evaluation", Value::Null),
+        ("engine", json!("vector")),
+        ("strategy", json!("single_etf_timing")),
+    ] {
+        let mut bad = definition.clone();
+        bad[key] = value;
+        assert!(Experiment::parse(&bad.to_string(), root).is_err(), "{key}");
+    }
+    for invalid_dates in [
+        json!([DATES[4], DATES[3]]),
+        json!([DATES[4], DATES[4]]),
+        json!([DATES[0]]),
+        json!(["2026-01-11"]),
+        json!(["2027-01-01"]),
+    ] {
+        let mut bad = definition.clone();
+        bad["holding_benchmark"]["reinvestment_calendar"]["decision_dates"] = invalid_dates;
+        assert!(Experiment::parse(&bad.to_string(), root).is_err());
+    }
+    let mut bad_lot = definition.clone();
+    bad_lot["fast_event"]["lot_size_source"] =
+        json!({"kind":"explicit","values":{"510300.XSHG":"3"}});
+    assert!(Experiment::parse(&bad_lot.to_string(), root).is_err());
+    for path in ["semantic_version", "kind"] {
+        let mut bad = definition.clone();
+        bad["holding_benchmark"][path] = json!("unsupported");
+        assert!(Experiment::parse(&bad.to_string(), root).is_err());
+    }
+    let mut input = facts("510300.XSHG");
+    input["coverage"][0]["facts"][0]["pay_date"] = Value::Null;
+    input["coverage"][0]["state"] = json!("missing_facts");
+    let version = corporate_facts::import(root, &serde_json::to_vec(&input).unwrap()).unwrap();
+    let mut incomplete = definition;
+    incomplete["corporate_actions"]["version"] = json!(version);
+    let report = Experiment::parse(&incomplete.to_string(), root)
+        .unwrap()
+        .execute(root, 1)
+        .unwrap();
+    assert!(
+        !report.runs[0]
+            .fast_event_result
+            .as_ref()
+            .unwrap()
+            .corporate_action_completeness
+            .is_complete
+    );
+}
+
+#[test]
+fn holding_pool_formal_definition_and_nonzero_execution_costs() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let file = root.join("pool.json");
+    multi::prepare_same_venue(root, &file);
+    let mut definition: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    let (dsv, _) = fixture::prepare_executable_multi_venue(root, true, None);
+    definition["dsv"] = json!(dsv);
+    let members = ["510300.XSHG", "510880.XSHG"];
+    let coverage = members.map(|id| json!({"instrument_id":id,"kind":"etf","start":DATES[0],"end":DATES[2],"state":"no_events","reason":"synthetic","source":source(),"available_at":"2026-01-01T00:00:00Z","facts":[]}));
+    let version = corporate_facts::import(
+        root,
+        &serde_json::to_vec(
+            &json!({"schema_version":1,"observed_at":"2026-10-30T00:00:00Z","coverage":coverage}),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    definition["corporate_actions"] = json!({"version":version,"dividend_tax_rate":"0"});
+    definition["adjusted_versions"] = members
+        .iter()
+        .map(|id| {
+            (
+                (*id).to_string(),
+                json!(fixture::import_adjusted(
+                    root,
+                    definition["dsv"].as_str().unwrap(),
+                    id,
+                    DATES[0],
+                    DATES[2],
+                    &DATES[..3]
+                )),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>()
+        .into();
+    definition["evaluation"] = json!({"semantic_version":"common-window@1","common_start":DATES[0],"common_end":DATES[2],"start":DATES[0],"end":DATES[2],"warmup_sessions":0});
+    definition["costs"]["commission_rate"] = json!(0);
+    definition["fast_event"]["minimum_commission"] = json!("5");
+    definition["holding_benchmark"] = json!({"semantic_version":"holding-benchmark@1","kind":"equal_weight_pool","reinvestment_calendar":{"semantic_version":"session-close-calendar@1","decision_dates":[]}});
+    let report = Experiment::parse(&definition.to_string(), root)
+        .unwrap()
+        .execute(root, 1)
+        .unwrap();
+    let result = report.runs[0].fast_event_result.as_ref().unwrap();
+    assert_eq!(result.fills.len(), 2);
+    assert_eq!(result.sessions[1].close.account.cash.to_string(), "90");
+    assert_eq!(result.sessions[1].close.account.equity.to_string(), "9990");
+    let quantities = result.sessions[1]
+        .close
+        .account
+        .positions
+        .values()
+        .map(|p| p.quantity.to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(quantities, vec!["500", "490"]);
+    fs::write(&file, definition.to_string()).unwrap();
+    let stored = cli(
+        root,
+        &[
+            "run",
+            file.to_str().unwrap(),
+            "--level",
+            "standard",
+            "--threads",
+            "1",
+        ],
+    );
+    assert_eq!(stored["failed_count"], 0);
+    let read = cli(
+        root,
+        &[
+            "result",
+            stored["exp"].as_str().unwrap(),
+            stored["exe"].as_str().unwrap(),
+        ],
+    );
+    assert!(
+        read["data"]["runs"][0]["tables"]["saved"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("fills"))
+    );
+    definition["holding_benchmark"]["kind"] = json!("single_etf");
+    assert!(Experiment::parse(&definition.to_string(), root).is_err());
+    let second = tempfile::tempdir().unwrap();
+    let mut definition = holding_definition(second.path());
+    definition["costs"]["commission_rate"] = json!(0.01);
+    definition["costs"]["buy_slippage_bps"] = json!(100);
+    definition["costs"]["buy_tax_rate"] = json!(0.01);
+    let report = Experiment::parse(&definition.to_string(), second.path())
+        .unwrap()
+        .execute(second.path(), 1)
+        .unwrap();
+    let result = report.runs[0].fast_event_result.as_ref().unwrap();
+    assert_eq!(result.fills[0].fill.order().quantity().to_string(), "900");
+    assert_eq!(result.fills[0].fill.price().to_string(), "10.1");
+    assert_eq!(result.sessions[1].close.account.cash.to_string(), "733.2");
+    assert_eq!(
+        result.sessions[1].close.account.equity.to_string(),
+        "9733.2"
+    );
+    definition["costs"]["commission_rate"] = json!(0);
+    definition["costs"]["buy_tax_rate"] = json!(0);
+    definition["costs"]["buy_slippage_bps"] = json!(0.1);
+    let report = Experiment::parse(&definition.to_string(), second.path())
+        .unwrap()
+        .execute(second.path(), 1)
+        .unwrap();
+    let result = report.runs[0].fast_event_result.as_ref().unwrap();
+    assert_eq!(result.fills[0].fill.price().to_string(), "10.001");
+    assert_eq!(result.sessions[1].close.account.cash.to_string(), "999.1");
+}

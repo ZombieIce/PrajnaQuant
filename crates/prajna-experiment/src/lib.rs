@@ -36,6 +36,7 @@ use sha2::{Digest, Sha256};
 
 mod accurate;
 pub mod actions;
+pub mod benchmark;
 mod engine;
 pub mod opening_evidence;
 pub mod pit;
@@ -314,6 +315,7 @@ pub struct Experiment {
     backend_factory: Option<Arc<dyn BackendFactory>>,
     pit: Option<Arc<pit::PitContext>>,
     actions: Option<Arc<actions::Context>>,
+    holding_benchmark: Option<benchmark::Context>,
     /// Bound immutable adjusted research versions; empty for legacy definitions.
     adjusted_versions: BTreeMap<InstrumentId, String>,
     /// Frozen shared research window; absent for legacy definitions.
@@ -407,6 +409,8 @@ struct DefinitionInput {
     pit: Option<pit::PitInput>,
     #[serde(default)]
     corporate_actions: Option<actions::Binding>,
+    #[serde(default)]
+    holding_benchmark: Option<benchmark::Binding>,
     /// Explicit immutable adjusted research version per Universe member.
     #[serde(default)]
     adjusted_versions: Option<BTreeMap<String, String>>,
@@ -519,6 +523,11 @@ impl Experiment {
                 actions::Context::load(lake_root.as_ref(), binding).map(Arc::new)
             })
             .transpose()?;
+        let holding_benchmark =
+            benchmark::Context::load(&input, lake_root.as_ref(), evaluation.as_ref())?;
+        if let Some(benchmark) = &holding_benchmark {
+            engine.configure_holding_benchmark(benchmark)?;
+        }
         let costs = Costs::parse(&input.costs)?;
         let parameter_space = engine::parse_space(&input.strategy, &input.parameter_space)?;
         let mut normalized = normalize_definition(&input, &venues, costs, &parameter_space);
@@ -535,6 +544,9 @@ impl Experiment {
         if let Some(actions) = &actions {
             normalized["corporate_actions"] = actions.identity();
         }
+        if let Some(benchmark) = &holding_benchmark {
+            normalized["holding_benchmark"] = benchmark.identity.clone();
+        }
         let experiment = Self {
             dsv: input.dsv,
             universe: input.universe,
@@ -549,6 +561,7 @@ impl Experiment {
             backend_factory: None,
             pit,
             actions,
+            holding_benchmark,
             adjusted_versions,
             evaluation,
         };
@@ -791,6 +804,9 @@ impl Experiment {
         }
         if let Some(actions) = &self.actions {
             spec["corporate_actions"] = actions.identity();
+        }
+        if let Some(benchmark) = &self.holding_benchmark {
+            spec["holding_benchmark"] = benchmark.identity.clone();
         }
         write_venue_scope(&mut spec, &self.venues);
         spec

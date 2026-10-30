@@ -1454,3 +1454,250 @@ fn liquidation_reconciles_shared_positions_across_virtual_portfolios() {
     );
     assert_eq!(result.corporate_action_ledger.len(), 4);
 }
+
+#[test]
+fn holding_pool_cash_only_golden_drift_status_missing_bar_and_fees() {
+    use prajna_data::ExecutionStatusRow;
+    use prajna_research::fast_event::run_fast_event_holding;
+    // Three ETFs × ten Sessions: winner doubles, loser halves, one mark
+    // disappears. There must never be a sell to restore equal weights.
+    let lake = fixture::lake();
+    let f = fixture::fixture_with_missing_bars_and_action_prices(
+        lake.path(),
+        10.0,
+        false,
+        (3..=10)
+            .flat_map(|day| [((0, day), (20.0, 20.0)), ((1, day), (5.0, 5.0))])
+            .collect(),
+        BTreeSet::from([(2, 5)]),
+    );
+    let mut panel =
+        prajna_research::load_panel(lake.path(), &f.dsv, &"SZSE".parse().unwrap()).unwrap();
+    // The reused PIT fixture's third security starts on day4. This static
+    // holding golden explicitly supplies its synthetic day1–3 bars at10.
+    for name in ["open", "close"] {
+        let values = panel
+            .grid
+            .column(name)
+            .unwrap()
+            .f64()
+            .unwrap()
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                if i / 10 == 2 && i % 10 < 3 {
+                    Some(10.0)
+                } else {
+                    v
+                }
+            })
+            .collect::<Vec<_>>();
+        panel
+            .grid
+            .with_column(Series::new(name.into(), values).into())
+            .unwrap();
+    }
+    for name in ["open_decimal", "close_decimal"] {
+        let values = panel
+            .grid
+            .column(name)
+            .unwrap()
+            .str()
+            .unwrap()
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                if i / 10 == 2 && i % 10 < 3 {
+                    Some("10".to_string())
+                } else {
+                    v.map(str::to_string)
+                }
+            })
+            .collect::<Vec<_>>();
+        panel
+            .grid
+            .with_column(Series::new(name.into(), values).into())
+            .unwrap();
+    }
+    let values = panel
+        .grid
+        .column("has_bar")
+        .unwrap()
+        .bool()
+        .unwrap()
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            if i / 10 == 2 && i % 10 < 3 {
+                Some(true)
+            } else {
+                v
+            }
+        })
+        .collect::<Vec<_>>();
+    panel
+        .grid
+        .with_column(Series::new("has_bar".into(), values).into())
+        .unwrap();
+    let ids = panel.instruments.clone();
+    let actions = CorporateActionSchedule::new(
+        "synthetic-holding-no-events",
+        vec![],
+        ids.iter()
+            .map(|id| CorporateActionCoverage {
+                instrument_id: id.clone(),
+                start: fixture::date(1),
+                end: fixture::date(10),
+                observed_actions: 0,
+                unapplied_action_dates: vec![],
+                unexplained_price_jumps: vec![],
+                status: ActionCoverageStatus::Complete,
+            })
+            .collect(),
+    )
+    .unwrap();
+    let decisions = [0, 3, 9].map(|i| Decision {
+        decision_session: panel.sessions[i].clone(),
+        ranked: vec![],
+        targets: ids.iter().map(|id| (id.clone(), 1.0 / 3.0)).collect(),
+    });
+    let config = FastEventConfig {
+        currency: "CNY".parse().unwrap(),
+        venues: BTreeSet::from(["SZSE".parse().unwrap()]),
+        initial_cash: "3303".parse().unwrap(),
+        sizing: Sizing::Lot,
+        costs: FastEventCosts {
+            minimum_commission: "1".parse().unwrap(),
+            ..FastEventCosts::ZERO
+        },
+        lot_sizes: ids
+            .iter()
+            .map(|id| (id.clone(), "100".parse().unwrap()))
+            .collect(),
+    };
+    let portfolios = [PortfolioRun {
+        id: VirtualPortfolioId(1),
+        capital: config.initial_cash,
+        decisions: decisions.to_vec(),
+        unfilled_entry: UnfilledEntry::Skip,
+        rebalance: Rebalance::CashOnly,
+    }];
+    let statuses = ids
+        .iter()
+        .flat_map(|id| {
+            panel.sessions.iter().map(move |session| {
+                (
+                    (id.clone(), session.session_date),
+                    ExecutionStatusRow {
+                        instrument_id: id.clone(),
+                        session_date: session.session_date,
+                        trade_status: "TRADABLE".into(),
+                        is_tradable: true,
+                        available_at: Some(session.ts_open),
+                        source: "synthetic".into(),
+                    },
+                )
+            })
+        })
+        .collect::<BTreeMap<_, _>>();
+    let ticks = ids
+        .iter()
+        .map(|id| (id.clone(), "0.001".parse().unwrap()))
+        .collect();
+    let result =
+        run_fast_event_holding(&panel, &statuses, &config, &portfolios, &actions, &ticks).unwrap();
+    assert_eq!(result.semantic_version, "fast_event@16");
+    assert_eq!(result.fills.len(), 3);
+    assert!(
+        result
+            .fills
+            .iter()
+            .all(|f| f.fill.order().side() == prajna_account::Side::Buy)
+    );
+    // Each initial cash slice=1,101; buys100 at10, fee1 -> residual300.
+    // Raw drift: 100*20 +100*5 +100*10 +300 =3,800 (never normalize costs away).
+    for (i, session) in result.sessions.iter().enumerate() {
+        session.open_after.validate().unwrap();
+        session.close.validate().unwrap();
+        assert_eq!(
+            session.close.account.equity.to_string(),
+            if i == 0 {
+                "3303"
+            } else if i == 1 {
+                "3300"
+            } else {
+                "3800"
+            }
+        );
+        if i > 0 {
+            assert_eq!(session.close.account.cash.to_string(), "300");
+            assert!(
+                session
+                    .close
+                    .account
+                    .positions
+                    .values()
+                    .all(|p| p.quantity.to_string() == "100")
+            );
+        }
+    }
+    assert_eq!(
+        result.sessions[4].close_sources[&ids[2]].session_date,
+        fixture::date(4)
+    );
+    assert!(result.attempts.iter().any(|a| matches!(
+        a.event,
+        prajna_research::strategy::ExecutionEvent::PendingAtEnd { .. }
+    )));
+    // A missing buy Bar plus a halted held member cannot block the other
+    // member's cash-only buy. All unavailable slices stay as cash, no retries.
+    let mut config = config.clone();
+    config.initial_cash = "30303".parse().unwrap();
+    let mut portfolios = portfolios.clone();
+    portfolios[0].capital = config.initial_cash;
+    portfolios[0].decisions = vec![decisions[0].clone(), decisions[1].clone()];
+    let mut statuses = statuses.clone();
+    for day in [2, 5] {
+        statuses
+            .get_mut(&(ids[0].clone(), fixture::date(day)))
+            .unwrap()
+            .is_tradable = false;
+    }
+    let blocked =
+        run_fast_event_holding(&panel, &statuses, &config, &portfolios, &actions, &ticks).unwrap();
+    assert!(
+        blocked
+            .fills
+            .iter()
+            .all(|fill| fill.fill.order().instrument_id() != &ids[0])
+    );
+    assert!(
+        blocked
+            .fills
+            .iter()
+            .any(|fill| fill.fill.executed_at() == panel.sessions[4].ts_open
+                && fill.fill.order().instrument_id() == &ids[1])
+    );
+    assert!(
+        blocked
+            .fills
+            .iter()
+            .all(|fill| fill.fill.executed_at() != panel.sessions[2].ts_open)
+    );
+    assert!(blocked.sessions.iter().all(|s| s.close.validate().is_ok()));
+    // Cash below one lot plus commission is retained, recorded as an adjustment.
+    let mut tiny = config;
+    tiny.initial_cash = "3003".parse().unwrap();
+    tiny.costs.minimum_commission = "2".parse().unwrap();
+    let mut ports = portfolios;
+    ports[0].capital = tiny.initial_cash;
+    ports[0].decisions = vec![decisions[0].clone()];
+    let poor = run_fast_event_holding(&panel, &statuses, &tiny, &ports, &actions, &ticks).unwrap();
+    assert!(poor.fills.len() <= 2);
+    assert!(
+        poor.sessions
+            .iter()
+            .all(|s| s.close.account.cash >= Notional::ZERO)
+    );
+    assert!(!poor.sizing_adjustments.is_empty());
+}
