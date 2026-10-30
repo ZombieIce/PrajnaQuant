@@ -11,8 +11,33 @@ type Adjusted = { version: string; instrument_id: string; method_version: string
 type Window = { common_start: string | null; common_end: string | null; start: string | null; end: string | null;
   warmup_sessions: number; warmup_sessions_used: number; warnings: string[];
   parameters: { label: string; warmup_sessions: number; runnable: boolean; reason?: string }[] };
-type Plan = { runnable: boolean; universe: string; adjusted: Record<string, string>; window: Window | null;
+type Plan = { runnable: boolean; universe: string; venues: string[]; adjusted: Record<string, string>; window: Window | null;
   blocking: { code: string; message: string }[] };
+type Frozen = {
+  definition: { dsv: string; universe: string; venues?: string[] };
+  engine: { kind: string; semantic_version: string };
+  venues: string[];
+  window: Window | null;
+  pool: { id: string; version: number };
+};
+type CallError = Error & { code?: string; details?: unknown };
+async function call<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const failure = (body?.error ?? {}) as { code?: string; message?: string; details?: unknown };
+    const error = new Error(failure.message ?? `请求失败（${response.status}）`) as CallError;
+    error.code = failure.code ?? 'http_error';
+    error.details = failure.details;
+    throw error;
+  }
+  return body as T;
+}
+const structuralHint = (code?: string) => code === 'inconsistent_venue_calendar'
+  ? '结构性共享日历错误：所选 Dataset 的 XSHG/XSHE 交易日集合或开收盘时刻不一致；Rust 不补齐、不压缩日历，也不选第一个 Venue。'
+  : code === 'invalid_venue_selection'
+    ? '结构性 Venue 选择错误：所选集合中有 Venue 缺少 Instrument 或 Session；不生成伪 Venue，也不静默改用其他 Venue。'
+    : null;
 const saved = () => { try { return JSON.parse(localStorage.getItem('pool-selection@1') ?? '{}'); } catch { return {}; } };
 const field = (value: Field) => value.state === 'known' ? value.value : `${value.state} · ${value.reason ?? '未知原因'}`;
 const same = (a: string[], b: string[]) => JSON.stringify(a) === JSON.stringify(b);
@@ -35,12 +60,14 @@ export default function PoolsPage() {
   const [strategy, setStrategy] = useState<string>(() => saved().strategy ?? 'buy_and_hold');
   const [parameterText, setParameterText] = useState<string>(() => saved().parameterText ?? '{"list":[{"params_version":1}]}');
   const [plan, setPlan] = useState<{ key: string; data: Plan } | null>(null);
+  const [frozen, setFrozen] = useState<Frozen | null>(null);
+  const [submitError, setSubmitError] = useState<CallError | null>(null);
   let parameters: unknown;
   try { parameters = JSON.parse(parameterText); } catch { parameters = null; }
   const selection = { dsv, pool: { id, version }, strategy, adjusted, parameter_space: parameters };
   const selectionKey = JSON.stringify(selection);
   const currentPlan = plan?.key === selectionKey ? plan.data : null;
-  useEffect(() => { setTask(''); }, [selectionKey]);
+  useEffect(() => { setTask(''); setFrozen(null); setSubmitError(null); }, [selectionKey]);
   useEffect(() => {
     localStorage.setItem('pool-selection@1', JSON.stringify({ id, version, dsv, adjusted, strategy, parameterText }));
   }, [id, version, dsv, adjusted, strategy, parameterText]);
@@ -74,21 +101,22 @@ export default function PoolsPage() {
     finally { setBusy(false); }
   };
   const preflight = async () => {
-    setBusy(true); setError(''); setPlan(null);
+    setBusy(true); setError(''); setPlan(null); setFrozen(null); setTask(''); setSubmitError(null);
     const key = selectionKey;
     try {
-      const result = await api<{ data: Plan }>('/api/v1/tasks/selections/preflight', { method: 'POST', body: JSON.stringify({ ...selection, idempotency_key: 'preflight' }) });
+      const result = await call<{ data: Plan }>('/api/v1/tasks/selections/preflight', { method: 'POST', body: JSON.stringify({ ...selection, idempotency_key: 'preflight' }) });
       setPlan({ key, data: result.data });
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setSubmitError(e as CallError); }
     finally { setBusy(false); }
   };
   const submit = async () => {
     if (!currentPlan?.runnable) return;
-    setBusy(true); setError(''); setTask('');
+    setBusy(true); setError(''); setTask(''); setFrozen(null); setSubmitError(null);
     try {
-      const result = await api<{ task: { task_id: string } }>('/api/v1/tasks/selections', { method: 'POST', body: JSON.stringify({ ...selection, idempotency_key: crypto.randomUUID(), expected_window: currentPlan.window, result_level: 'standard' }) });
+      const result = await call<{ task: { task_id: string }; selection: Frozen }>('/api/v1/tasks/selections', { method: 'POST', body: JSON.stringify({ ...selection, idempotency_key: crypto.randomUUID(), expected_window: currentPlan.window, result_level: 'standard' }) });
       setTask(result.task.task_id);
-    } catch (e) { setError((e as Error).message); }
+      setFrozen(result.selection);
+    } catch (e) { setSubmitError(e as CallError); }
     finally { setBusy(false); }
   };
   return <><Header /><main className="dataset-page pools-page"><h1>研究池版本管理</h1>
@@ -124,10 +152,12 @@ export default function PoolsPage() {
           <option value="buy_and_hold">买入持有</option><option value="ma_crossover">均线交叉</option><option value="s2_rotation">轮动</option></select></label>
         <label>参数组合 JSON<textarea aria-label="参数组合 JSON" disabled={busy} value={parameterText} onChange={(e) => setParameterText(e.target.value)} /></label>
         {!parameters && <p>请输入有效参数列表或网格 JSON，预热由 Rust 校验。</p>}
-        <p>单交易所池；复权价仅作研究，原始价负责成交/估值，分红总回报未完整验证。默认模拟成本由 Rust 冻结。</p>
+        <p>支持单交易所与沪深同池（XSHG+XSHE）；多 Venue 基线按 ADR 0027 使用 full_target，Rust 冻结真实 Venue 集合，不补日、不压缩日历，也不选单一 Venue。复权价仅作研究，原始价负责成交/估值，分红总回报未完整验证；默认模拟成本由 Rust 冻结。</p>
         <button className="secondary" disabled={busy || !dsv || !published || !parameters} onClick={() => void preflight()}>预检共同窗口</button>
         {currentPlan && <div data-testid="pool-preflight" className={currentPlan.runnable ? 'notice' : 'blocked'}>
-          <strong>{currentPlan.runnable ? '可运行' : '不可运行'}</strong><p>Universe {currentPlan.universe}</p>
+          <strong>{currentPlan.runnable ? '可运行' : '不可运行'}</strong>
+          <p data-testid="plan-venues">Venue 范围：{currentPlan.venues.join('、')}（各自真实交易所；不合并为单一 Venue）</p>
+          <p>Universe {currentPlan.universe}</p>
           {currentPlan.window && <><p>共同数据窗口：{currentPlan.window.common_start ?? 'Unknown'} ～ {currentPlan.window.common_end ?? 'Unknown'}</p>
             <p>最大预热：{currentPlan.window.warmup_sessions} Sessions；实际预热：{currentPlan.window.warmup_sessions_used} Sessions</p>
             <p>评价窗口/可运行范围：{currentPlan.window.start ?? 'Unknown'} ～ {currentPlan.window.end ?? 'Unknown'}</p>
@@ -135,8 +165,21 @@ export default function PoolsPage() {
             {currentPlan.window.warnings.map((w, index) => <p key={index}>{w}</p>)}</>}
           <ul>{currentPlan.blocking.map((b, index) => <li key={index}><code>{b.code}</code>：{b.message}</li>)}</ul>
         </div>}
+        {submitError && <ErrorBox>
+          <strong>预检/提交未通过</strong>
+          <p><code>{submitError.code ?? 'http_error'}</code>：{submitError.message}</p>
+          {structuralHint(submitError.code) && <p>{structuralHint(submitError.code)}</p>}
+          <p>页面不展示替代计划、零交易或伪造成功。</p>
+        </ErrorBox>}
         <button className="primary" disabled={busy || !currentPlan?.runnable} onClick={() => void submit()}>提交固定池实验</button>
-        {task && <p><a href={`/backtests?task=${encodeURIComponent(task)}`}>查看固定池任务</a></p>}
+        {frozen && <div data-testid="frozen-selection" className="notice">
+          <strong>冻结输入（Rust 选择/任务入口）</strong>
+          <p>输入池：{frozen.pool.id} v{frozen.pool.version} · Dataset：<code>{frozen.definition.dsv}</code></p>
+          <p>Venue：{frozen.venues.join('、')} · 引擎：<code>{frozen.engine.semantic_version}</code>（{frozen.engine.kind}）</p>
+          <p>Universe：<code>{frozen.definition.universe}</code>{frozen.window ? ` · 评价窗口：${frozen.window.start ?? 'Unknown'} ～ ${frozen.window.end ?? 'Unknown'}（预热 ${frozen.window.warmup_sessions} Sessions）` : ''}</p>
+          <p>浏览器只展示 Rust 冻结与持久结果，不计算费用、净值或绩效。</p>
+          {task && <p><a href={`/backtests?task=${encodeURIComponent(task)}`}>查看固定池任务</a></p>}
+        </div>}
       </Panel>
     </>}
   </main></>;

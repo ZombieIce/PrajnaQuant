@@ -80,7 +80,7 @@ test('production facts page shows four scoped states, revision and old version',
   await expect(detail).toContainText('fixture://corporate-actions');
 
   const datasets = page.getByLabel('Dataset 版本', { exact: true });
-  await expect(datasets.locator('option')).toHaveCount(7);
+  await expect(datasets.locator('option')).toHaveCount(8);
   await datasets.selectOption({ index: 1 });
   await expect(page.locator('main')).toContainText('数据口径与覆盖');
   expect(errors).toEqual([]);
@@ -106,7 +106,7 @@ test('corrupt, unavailable and empty fact versions are explicit without blocking
     await failed;
     await expect(page.getByRole('alert')).toContainText('invalid or corrupt fact version');
     await expect(page.getByTestId('action-detail')).toHaveCount(0);
-    await expect(page.getByLabel('Dataset 版本', { exact: true }).locator('option')).toHaveCount(7);
+    await expect(page.getByLabel('Dataset 版本', { exact: true }).locator('option')).toHaveCount(8);
     const refreshed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/corporate-actions' && response.status() === 200);
     await page.getByRole('button', { name: '刷新行动事实', exact: true }).click();
     await refreshed;
@@ -122,7 +122,7 @@ test('corrupt, unavailable and empty fact versions are explicit without blocking
     await refreshed;
     await expect(page.getByText('没有可读取的公司行动事实版本。', { exact: true })).toBeVisible();
     const datasets = page.getByLabel('Dataset 版本', { exact: true });
-    await expect(datasets.locator('option')).toHaveCount(7);
+    await expect(datasets.locator('option')).toHaveCount(8);
     await datasets.selectOption({ index: 1 });
     await expect(page.locator('main')).toContainText('数据口径与覆盖');
   } finally {

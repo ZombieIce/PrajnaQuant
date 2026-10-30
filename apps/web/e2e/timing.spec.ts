@@ -9,7 +9,7 @@ test('strict timing uses configured adjusted signal, freezes costs, reads and re
   page.on('pageerror', error => errors.push(error.message));
   await page.getByLabel('策略模板', { exact: true }).selectOption('single_etf_timing');
   const datasets = page.getByLabel('Dataset 版本', { exact: true });
-  await expect(datasets.locator('option')).toHaveCount(7);
+  await expect(datasets.locator('option')).toHaveCount(8);
   const catalog = await (await page.request.get('/api/v1/datasets')).json();
   let dsv = ''; let adjusted = '';
   for (const item of catalog.data.datasets) {

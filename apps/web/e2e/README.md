@@ -50,7 +50,12 @@ The Playwright webServer performs these steps, all from this checkout:
    #350 `cn-stock-etf-daily@2` status Datasets through the real publisher, so the
    lake now holds four Datasets: two v1 preview fixtures and two v2 selection
    fixtures. The v2 XSHG dataset executes; the v1 XSHG dataset stays as a real
-   missing-`execution_status` failure case.
+   missing-`execution_status` failure case. The ignored `export_synthetic_pool_fixture`
+   then publishes two multi-Venue Datasets through the real `publish_dataset` path
+   with a test-only wrapper around the production v1 Normalizer: one executable
+   XSHG+XSHE fixture (synthetic TRADABLE `execution_status`) and one with an XSHE
+   Session missing from both its calendar and source rows for the structural
+   shared-axis failure case. Neither is a second production publication path.
 5. Run `prajna-data`'s opt-in `export_synthetic_corporate_facts_fixture`
    integration test and publish its two synthetic inputs (an original and a
    revision) with the real `prajna-corporate-facts import`, so the same lake also
@@ -69,7 +74,7 @@ The Playwright webServer performs these steps, all from this checkout:
 
 `datasets.spec.ts` verifies selection, lifecycle, coverage gaps, exact raw prices,
 an empty Bar range, refresh, corrupted version isolation, empty catalog and missing
-lake. Its option-count assertions include the two extra v2 Datasets and its loops
+lake. Its option-count assertions include the extra v2 and multi-Venue Datasets and its loops
 filter the v1 preview fixtures by `1 证券 / 2 Bars`; it does not rely on the lake
 containing only the preview fixtures. When the whole lake is unavailable the
 independent corporate-action panel also reports an error, so that spec checks
@@ -136,11 +141,21 @@ newer local runtime and `PRAJNA_CHROME_EXECUTABLE` when needed.
 
 `pools.spec.ts` also consumes T08b preflight through the production CLI/HTTP.
 It selects immutable adjusted versions per member, checks missing bindings/members,
-mixed Venue, insufficient warm-up, early research end and internal Session gaps,
-and compares the displayed plan with the persisted adjusted_versions/evaluation
-and actual result Sessions. Refresh preserves explicit choices but requires a new
-preflight; later pool edits cannot change the saved task. Only synthetic inputs
-are exported; no real-data, PIT or full total-return validation is implied.
+XSHG+XSHE Venue scope, insufficient warm-up, early research end and internal
+Session gaps, and compares the displayed plan with the persisted
+adjusted_versions/evaluation and actual result Sessions. Refresh preserves explicit
+choices but requires a new preflight; later pool edits cannot change the saved task.
+
+`cross-asset.spec.ts` covers #295: it publishes one mixed-venue pool version through
+the production pool entry, selects the executable XSHG+XSHE Dataset and per-member
+adjusted versions, runs the preflight (both Venues and the Rust-frozen window are
+displayed), submits the buy-and-hold baseline, and reads the persisted status,
+Summary and valuation rows on `/backtests` after refresh. The frozen `experiment.json` carries sorted `venues`, `full_target`, `retry` and no `venue`
+field; the rendered/API rows match an independent hand calculation (50,000 and
+49,900 units, cash `500.44006`, equity `999500.44006`). Selecting the mismatched
+shared-axis Dataset surfaces `inconsistent_venue_calendar` (422) with no runnable
+plan. Only synthetic inputs are exported; no real-data, PIT or full total-return
+validation is implied.
 
 `momentum.spec.ts` 使用额外130 Session合成 Dataset，默认20/60/120窗口，核对真实 CLI 持久报告与页面时序/缺失、分布图、来源及刷新/损坏行为。线性价格独立数值 golden 位于 `prajna-experiment/tests/momentum.rs`；该 fixture 与三日池 fixture 分开，不改变原有池预检假设。
 

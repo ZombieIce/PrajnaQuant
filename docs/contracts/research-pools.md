@@ -55,22 +55,34 @@ pool_store_failed 500，协议异常 502。响应 no-store，按实际本机 Hos
 [共同评价窗口契约](evaluation-window.md)；缺失/损坏/DSV 或证券不符 fail closed。
 定义固定 Universe 内容身份、DSV、逐成员复权版本、评价窗口及全部有效成本，
 通过 `Experiment::parse` 后复用原持久任务提交。成功 selection envelope 增加
-`pool:{id,version,universe,members}`、`instruments`、`adjusted` 与 `window`，
+`pool:{id,version,universe,members}`、`instruments`、`adjusted`、`venues`、
+`engine` 与 `window`（单 Venue 预检仍保留 `venue`），
 任务 experiment.json 的 Universe 指向不可变文件，其 label 可追溯池/版本；
 不会动态解析未来草稿。
 
-旧单证券字段、响应与 Universe label/身份不变。默认提交仍使用已有 entry-only
-buy-and-hold；T08b 可显式传入既有 native 参数组合（见共同窗口契约）。只接受
-单 Venue；沪深混合池可编辑/发布/读取，但该提交返回明确的
-unsupported_venue（400）。本票不改多 Venue 引擎或把 entry-only 改为 full_target；
-跨资产池产品执行由 #295 收口。单 Venue 多成员使用既有期初等权买入持有。
+旧单证券字段、Universe label/身份与已保存结果不变；成功响应只新增下文附加字段。默认提交仍使用已有 entry-only
+buy-and-hold；T08b 可显式传入既有 native 参数组合（见共同窗口契约）。
+
+**跨 Venue 池（#295/T06c）**：已发布版本可同时含 `XSHG` 与 `XSHE`。选择入口按池
+成员的真实 Venue 集合加载一次共享 Session 轴，定义写排序后的 `venues`（单 Venue 仍写旧 `venue` 字段并保持旧身份）；只有多 Venue Run 改用 `full_target`
+（ADR 0027/0028 要求），`buy_and_hold` 保持 `retry` 并省略 `entry_budget`。
+预检 envelope 增加 `venues`，冻结 envelope 增加 `venues` 与 `engine`（`kind`、`semantic_version`，由 Rust 复用 Run Spec 规范化投影，例如多 Venue lot
+为 `fast_event@14`）。单 Venue 多成员仍使用既有期初等权买入持有 entry-only 定义，
+数值口径与多 Venue 基线不同。共享 Session 轴缺失日期或开收盘时刻不一致返回结构性 `inconsistent_venue_calendar`（HTTP 422），所选 Venue 无 Instrument/Session 返回
+`invalid_venue_selection`（422）；不补齐、不压缩日历，也不选第一个 Venue。多 Venue 基线仍是价格收益、非 PIT、无公司行动，不作为总回报结论。
 原始价格、默认成本、收盘 Decision/下 Session open、未知日线 available_at 的收盘
 假设及分红总回报限制沿用[冻结选择契约](single-security-selection.md)。
 
 ## 验证范围
 
 公开仅合成：CLI 测试覆盖 13 个预置成员、并发冲突、重复发布、旧版读取、损坏拒绝、
-多成员冻结及旧单证券兼容；Playwright 启动真实生产服务/CLI，编辑/发布/读旧版本，
-读取正式 Dataset 的不同手数/价格增量，提交固定版本并核对后续编辑不改旧任务。
-复用独立手算 100 万/10.002 成交/99,900 数量及现金和权益，验证原时序/成本保持。
-不宣称真实行情、全历史 PIT、公司行动总回报或整个 MVP-7 完成。
+多成员冻结及旧单证券兼容；测试用 wrapper Normalizer 经正式 `publish_dataset` 发布
+可执行沪深同池 Dataset（补合成 TRADABLE 状态；不是第二条生产发布路径），
+`prajna-freeze-selection`/`prajna-experiment run`/`result` 跑通多 Venue 基线并核对
+独立手算 1,000,000 本金、50,000/49,900 数量、现金 `500.44006` 与权益
+`999500.44006`；共享轴损坏在两个入口均返回结构性错误且不写 Execution。Playwright
+启动真实生产服务/CLI，编辑/发布/读旧版本，读取正式 Dataset 的不同手数/价格增量，
+提交单 Venue 固定版本并核对后续编辑不改旧任务，另以跨资产版本走 `/pools` 预检、
+提交、冻结身份展示与 `/backtests` 持久结果读取。复用独立手算 100 万/10.002 成交/
+99,900 数量及现金和权益，验证原时序/成本保持。不宣称真实行情、全历史 PIT、
+公司行动总回报、真实跨 Venue 数据装配或整个 MVP-7 完成。

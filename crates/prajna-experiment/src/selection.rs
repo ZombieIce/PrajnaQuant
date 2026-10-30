@@ -103,7 +103,8 @@ struct Prepared {
     frozen_pool: Option<crate::pools::PoolVersion>,
     universe: StaticUniverse,
     instruments: Vec<Value>,
-    venue: String,
+    /// Real Venues of the Universe members; a shared pool may contain XSHG+XSHE.
+    venues: BTreeSet<VenueId>,
     warnings: Value,
 }
 
@@ -154,7 +155,7 @@ fn prepare(root: &Path, selection: &Selection) -> Result<Prepared, SelectionErro
                 "selection supports XSHG/XSHE only",
             ));
         }
-        venues.insert(venue);
+        venues.insert(id.venue().clone());
         let instrument = preview["instruments"]
             .as_array()
             .and_then(|items| {
@@ -177,17 +178,6 @@ fn prepare(root: &Path, selection: &Selection) -> Result<Prepared, SelectionErro
         }
         instruments.push(instrument.clone());
     }
-    if venues.len() > 1 {
-        return Err(error(
-            "unsupported_venue",
-            "pool versions may contain both venues, but this research selection requires one venue",
-        ));
-    }
-    let venue = venues
-        .into_iter()
-        .next()
-        .expect("nonempty universe")
-        .to_owned();
     if selection.strategy == "single_etf_timing"
         && (universe.members().len() != 1 || instruments[0]["kind"] != "etf")
     {
@@ -204,7 +194,7 @@ fn prepare(root: &Path, selection: &Selection) -> Result<Prepared, SelectionErro
         frozen_pool,
         universe,
         instruments,
-        venue,
+        venues,
         warnings: preview["warnings"].clone(),
     })
 }
@@ -216,6 +206,10 @@ fn adjusted_json(values: &BTreeMap<InstrumentId, String>) -> Value {
             .map(|(instrument, version)| (instrument.to_string(), Value::String(version.clone())))
             .collect(),
     )
+}
+
+fn venue_names(venues: &BTreeSet<VenueId>) -> Vec<&str> {
+    venues.iter().map(VenueId::as_str).collect()
 }
 
 /// Validates the explicit per-member adjusted research versions.
@@ -309,9 +303,9 @@ fn panel_error(failure: PanelError) -> SelectionError {
     let code = match &failure {
         PanelError::Manifest(_) | PanelError::InvalidManifest(_) => "invalid_manifest",
         PanelError::Data(_) | PanelError::InvalidTableData(_) => "invalid_dataset_table",
-        PanelError::Polars(_)
-        | PanelError::InvalidVenueSelection(_)
-        | PanelError::InconsistentSessionAxis(_) => "dataset_read_failed",
+        PanelError::InvalidVenueSelection(_) => "invalid_venue_selection",
+        PanelError::InconsistentSessionAxis(_) => "inconsistent_venue_calendar",
+        PanelError::Polars(_) => "dataset_read_failed",
     };
     error(code, failure)
 }
@@ -328,12 +322,10 @@ fn plan_window(
     prepared: &Prepared,
     adjusted: &BTreeMap<InstrumentId, String>,
 ) -> Result<window::WindowPlan, SelectionError> {
-    let venue: VenueId = prepared
-        .venue
-        .parse()
-        .map_err(|e| error("invalid_selection", e))?;
-    let panel = load_panel_for_venues(root, &selection.dsv, std::slice::from_ref(&venue))
-        .map_err(panel_error)?;
+    // The shared axis is validated and loaded once for the real Venue set, never
+    // per member and never by picking one Venue of a mixed pool.
+    let venues = prepared.venues.iter().cloned().collect::<Vec<_>>();
+    let panel = load_panel_for_venues(root, &selection.dsv, &venues).map_err(panel_error)?;
     let sessions = panel
         .sessions
         .iter()
@@ -437,7 +429,7 @@ fn base_definition(
         .map_err(|e| error("invalid_selection", e))?;
     let mut definition = json!({
         "experiment_version": 1, "dsv": selection.dsv, "universe": universe,
-        "venue": prepared.venue, "strategy": selection.strategy, "engine": "fast_event",
+        "strategy": selection.strategy, "engine": "fast_event",
         "availability_assumption": "treat_unknown_as_ts_close", "sessions_per_year": 252,
         "unfilled_entry": "retry", "parameter_space": parameter_space(selection)?,
         "costs": {"commission_rate": settings.commission_rate,
@@ -448,8 +440,15 @@ fn base_definition(
             "minimum_commission": settings.minimum_commission,
             "portfolios": [{"id": 1, "capital": settings.initial_cash}], "lot_size_source": {"kind": "instrument"}}
     });
-    if selection.strategy != "buy_and_hold" {
-        definition["unfilled_entry"] = json!("skip");
+    crate::write_venue_scope(&mut definition, &prepared.venues);
+    // ADR 0027/0028: multi-Venue Fast Event accepts only full_target. A single
+    // Venue keeps the historical entry-only Buy & Hold definition and identity.
+    if selection.strategy != "buy_and_hold" || prepared.venues.len() > 1 {
+        definition["unfilled_entry"] = json!(if selection.strategy == "buy_and_hold" {
+            "retry"
+        } else {
+            "skip"
+        });
         definition["fast_event"]["rebalance"] = json!("full_target");
         definition["fast_event"]
             .as_object_mut()
@@ -487,8 +486,8 @@ pub fn freeze(root: &Path, selection: &Selection) -> Result<Value, SelectionErro
             .remove("entry_budget");
     }
     let mut window = None;
-    if adjusted.is_empty() {
-        Experiment::parse(&definition.to_string(), root).map_err(experiment_error)?;
+    let experiment = if adjusted.is_empty() {
+        Experiment::parse(&definition.to_string(), root).map_err(experiment_error)?
     } else {
         let planned = plan_window(root, selection, &prepared, &adjusted)?;
         if !planned.runnable {
@@ -500,12 +499,15 @@ pub fn freeze(root: &Path, selection: &Selection) -> Result<Value, SelectionErro
         definition["evaluation"] = planned
             .evaluation()
             .expect("runnable window has an evaluation object");
-        Experiment::parse(&definition.to_string(), root).map_err(experiment_error)?;
+        let experiment =
+            Experiment::parse(&definition.to_string(), root).map_err(experiment_error)?;
         window = Some(planned);
-    }
+        experiment
+    };
     let mut response = json!({"schema_version": 1, "data": {
         "selection_version": 1, "defaults_source": "mvp7-d7-simulation@1",
         "definition": definition, "instrument": prepared.instruments[0],
+        "venues": venue_names(&prepared.venues), "engine": experiment.engine_identity(),
         "warnings": prepared.warnings,
         "limitations": ["Static Universe is retrospective, not historical PIT membership",
             "Unknown daily availability treated as close; no historical publication proof",
@@ -539,7 +541,8 @@ pub fn freeze(root: &Path, selection: &Selection) -> Result<Value, SelectionErro
 /// works before any freeze. Missing or invalid adjusted bindings are returned as
 /// structured blocking reasons instead of errors so the T08b preflight page can
 /// display them. Errors that make the selection itself unreadable (unknown pool,
-/// absent Dataset member, mixed Venue, unsupported evidence) stay errors.
+/// absent Dataset member, unsupported evidence) stay errors; a shared-axis
+/// disagreement is a structural `inconsistent_venue_calendar` error, not a plan.
 pub fn plan(root: &Path, selection: &Selection) -> Result<Value, SelectionError> {
     let prepared = prepare(root, selection)?;
     let mut blocking = Vec::new();
@@ -566,7 +569,7 @@ pub fn plan(root: &Path, selection: &Selection) -> Result<Value, SelectionError>
         "selection_plan_version": 1,
         "dsv": selection.dsv,
         "strategy": selection.strategy,
-        "venue": prepared.venue,
+        "venues": venue_names(&prepared.venues),
         "universe": prepared.universe.id().map_err(|e| error("invalid_selection", e))?,
         "adjusted": adjusted_json(&adjusted),
         "window": window,
@@ -574,6 +577,15 @@ pub fn plan(root: &Path, selection: &Selection) -> Result<Value, SelectionError>
         "blocking": blocking,
         "instruments": prepared.instruments,
     });
+    // Single-Venue plans keep the historical `venue` spelling; mixed Venue sets
+    // are never collapsed into one Venue for display or identity.
+    if let Some(venue) = prepared
+        .venues
+        .first()
+        .filter(|_| prepared.venues.len() == 1)
+    {
+        data["venue"] = json!(venue.as_str());
+    }
     if let Some(version) = &prepared.frozen_pool {
         data["pool"] = json!({"id":selection.pool.as_ref().expect("pool reference").id,
             "version":version.version,"universe":version.universe,"members":version.members});

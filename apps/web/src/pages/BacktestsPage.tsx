@@ -190,8 +190,8 @@ export default function BacktestsPage() {
 
   return <><Header /><main className="backtests-page">
     <div className="page-title-row"><div>
-      <h1>单 ETF 回测</h1>
-      <p>选择已发布 Dataset 与单只 ETF，经冻结选择入口提交回测任务；状态与结果均读取服务端持久记录。浏览器不计算费用、净值或绩效。</p>
+      <h1>回测与结果</h1>
+      <p>本页提交单 ETF 回测；已发布研究池（含沪深同池基线）在 <a href="/pools">研究池</a> 提交，并在本页读取同一持久任务的状态、Summary 与曲线。状态与结果均读取服务端持久记录，浏览器不计算费用、净值或绩效。</p>
     </div></div>
 
     <Panel title="配置单 ETF 回测">

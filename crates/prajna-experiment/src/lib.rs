@@ -485,7 +485,7 @@ impl Experiment {
             let universe = StaticUniverse::load(lake_root.as_ref(), &input.universe)?;
             universe.validate_against(lake_root.as_ref(), &input.dsv)?;
             validate_universe_venue(&universe, &venues)?;
-            let research = parse_research_inputs(&input, lake_root.as_ref(), &universe, &venues)?;
+            let research = parse_research_inputs(&input, lake_root.as_ref(), &universe)?;
             if input.strategy == "single_etf_timing"
                 && (universe.members().len() != 1
                     || research.0.len() != 1
@@ -601,6 +601,20 @@ impl Experiment {
         }
     }
 
+    /// Engine kind and semantic version selected by this definition.
+    ///
+    /// Read-only projection for callers that display what a frozen definition will
+    /// execute under (for example the local selection envelope). It reuses the
+    /// same Run Spec normalization as execution and never changes identity.
+    pub fn engine_identity(&self) -> Value {
+        let mut spec = self.run_spec_base(serde_json::json!({
+            "kind": self.strategy_kind,
+            "parameters": {},
+        }));
+        self.engine.normalize_spec(&mut spec);
+        spec["engine"].clone()
+    }
+
     pub fn pit_context(&self) -> Option<&pit::PitContext> {
         self.pit.as_deref()
     }
@@ -651,23 +665,14 @@ impl Experiment {
                 "PIT definitions do not support a common evaluation window",
             ));
         }
-        if self.venues.len() != 1 {
-            return Err(invalid(
-                "a common evaluation window requires exactly one Venue",
-            ));
-        }
         if self.adjusted_versions.is_empty() {
             return Err(invalid(
                 "a common evaluation window requires a bound adjusted version for every Universe member",
             ));
         }
         let universe = StaticUniverse::load(lake, &self.universe)?;
-        let venue = self
-            .venues
-            .first()
-            .expect("single-Venue definition")
-            .clone();
-        let panel = load_panel_for_venues(lake, &self.dsv, std::slice::from_ref(&venue))
+        let venues = self.venues.iter().cloned().collect::<Vec<_>>();
+        let panel = load_panel_for_venues(lake, &self.dsv, &venues)
             .map_err(|error| invalid(error.to_string()))?;
         let sessions = panel
             .sessions
@@ -1416,7 +1421,6 @@ fn parse_research_inputs(
     input: &DefinitionInput,
     lake: &Path,
     universe: &StaticUniverse,
-    venues: &BTreeSet<VenueId>,
 ) -> Result<(BTreeMap<InstrumentId, String>, Option<Evaluation>), ExperimentError> {
     let Some(adjusted) = &input.adjusted_versions else {
         if input.evaluation.is_some() {
@@ -1426,11 +1430,6 @@ fn parse_research_inputs(
         }
         return Ok((BTreeMap::new(), None));
     };
-    if venues.len() != 1 {
-        return Err(invalid(
-            "a common evaluation window requires exactly one Venue",
-        ));
-    }
     if engine::is_python_strategy(&input.strategy) {
         return Err(invalid(
             "a common evaluation window requires a native strategy with a declared research warm-up",
@@ -1628,7 +1627,7 @@ fn parse_venues(input: &DefinitionInput) -> Result<BTreeSet<VenueId>, Experiment
 }
 
 /// Writes the canonical Venue scope: one Venue keeps `venue`, several use the sorted set.
-fn write_venue_scope(value: &mut Value, venues: &BTreeSet<VenueId>) {
+pub(crate) fn write_venue_scope(value: &mut Value, venues: &BTreeSet<VenueId>) {
     if venues.len() == 1 {
         if let Some(venue) = venues.first() {
             value["venue"] = Value::String(venue.as_str().to_owned());

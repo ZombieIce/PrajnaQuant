@@ -31,7 +31,7 @@ stdin 为一个 JSON 对象，最多 64 KiB；必填 `dsv`、完整 `instrument`
 默认不主动恢复持仓权重；省略 corporate_actions 时不启用分红再投资或公司行动账本。
 
 CLI 返回前必经 `Experiment::parse`，失败不提交任务。成功 stdout 是
-`{schema_version:1,data:{selection_version:1,defaults_source,definition,instrument,warnings,limitations}}`；
+`{schema_version:1,data:{selection_version:1,defaults_source,definition,instrument,warnings,limitations,venues,engine}}`；`venues`/`engine` 为 #295 起的附加字段（单 Venue 仍给 `venue`，`engine.kind`/`engine.semantic_version` 由 Rust 投影），旧字段与身份不变。
 错误是 `{schema_version:1,error:{code,message}}`，退出码 2（clap 参数错误使用其标准
 stderr/退出 2）。成功退出 0。HTTP 不传播 stderr。
 

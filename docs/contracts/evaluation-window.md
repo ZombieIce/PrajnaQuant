@@ -89,8 +89,8 @@ latest、不以运行时重算结果替换冻结窗口。`Experiment::parse` 在
 校验上述条件，同时要求 `common_start <= start < end <= common_end`、每个版本
 的首/末复权行覆盖评价窗口；失败即拒绝定义（fail closed）。没有这两个字段的
 旧定义保持原身份与原行为；只有 `adjusted_versions`、没有 `evaluation` 的对象不是可执行定义，
-`Experiment::parse`/CLI/执行入口拒绝它（planning-only），持久化选择始终同时写入两者。PIT、多 Venue、
-Python 与 Accurate 定义不支持共同评价窗口。
+`Experiment::parse`/CLI/执行入口拒绝它（planning-only），持久化选择始终同时写入两者。PIT、Python 与 Accurate 定义不支持共同评价窗口；#295 起沪深同池（XSHG+XSHE）的非 PIT
+池可使用同一冻结窗口，账本仍只有一套。
 
 `single_etf_timing` 在原生 `Experiment::parse`/CLI 边界还以全部 list/grid 参数与
 冻结复权覆盖重新规划并校验就绪条件：任何组合历史不足，或定义中的预热/共同
@@ -134,19 +134,23 @@ Panel：
 ## T08b 生产预检与页面提交
 
 `prajna-freeze-selection --lake <LOCAL> --plan` 消费上述 Selection JSON，退出 0
-返回 `{schema_version:1,data:{selection_plan_version:1,dsv,strategy,venue,universe,
-adjusted,pool?,instruments,window,runnable,blocking}}`。预检不写 Universe/任务；
+返回 `{schema_version:1,data:{selection_plan_version:1,dsv,strategy,venues,venue?,universe,
+adjusted,pool?,instruments,window,runnable,blocking}}`；单 Venue 保留旧 `venue`，
+多 Venue 只给排序后的 `venues`。冻结 envelope 另含 `engine:{kind,semantic_version}`
+（Rust 投影，例如多 Venue lot 为 `fast_event@14`）。预检不写 Universe/任务；
 `window` 是上述 WindowPlan，缺绑定时为 null，`blocking` 包含 code/message。
 窗口或绑定不可运行仍是成功读取的预检（runnable=false），不是命令错误。
-未知池、DSV 缺成员、混合 Venue、损坏底层数据等无法读取选择的失败保持原错误
-退出 2/envelope；不把错误伪装为空覆盖或零值。
+未知池、DSV 缺成员、损坏底层数据等无法读取选择的失败保持原错误退出 2/envelope；
+共享 Session 轴缺失日期/开收盘时刻不一致返回结构性 `inconsistent_venue_calendar`
+（HTTP 422），所选 Venue 无 Instrument/Session 返回 `invalid_venue_selection`（422），
+不补齐、不压缩也不选第一个 Venue。不把错误伪装为空覆盖或零值。
 
 Selection 可选 `parameter_space` 沿用 Experiment 的 native `list` / `grid`，
 `strategy` 接受 buy_and_hold、ma_crossover、single_etf_timing、s2_rotation。只有 buy_and_hold
 省略时使用旧唯一 `{params_version:1}`；其它策略必须显式给出参数并绑定复权版本。
 参数由现有 native parser 验证，S2 沿用成员数/因子/策略校验；预热来自 Rust 声明，
-不接受客户端 warm-up 数。买入持有仍是 entry_only/retry，其它模板为既有
-full_target/skip，不改变执行实现。此处只提供统一选择输入，不交付策略模板产品页
+不接受客户端 warm-up 数。单 Venue 买入持有仍是 entry_only/retry，其它模板为既有 full_target/skip；
+多 Venue 买入持有改为 full_target/retry（ADR 0027/0028 要求），执行实现不变。此处只提供统一选择输入，不交付策略模板产品页
 或参数比较报告。旧单证券省略新字段时定义、身份及响应保持兼容。
 
 `POST /api/v1/tasks/selections/preflight` 使用同一 Selection 字段（可省略

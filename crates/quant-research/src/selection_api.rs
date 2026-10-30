@@ -204,7 +204,9 @@ async fn selection(
             "selection_evidence_missing"
             | "adjusted_version_missing"
             | "adjusted_series_empty"
-            | "evaluation_window_not_runnable" => StatusCode::UNPROCESSABLE_ENTITY,
+            | "evaluation_window_not_runnable"
+            | "invalid_venue_selection"
+            | "inconsistent_venue_calendar" => StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_dataset_root" => StatusCode::SERVICE_UNAVAILABLE,
             "invalid_manifest"
             | "invalid_dataset_table"
@@ -385,6 +387,8 @@ mod tests {
             ("dataset_not_found", 404),
             ("instrument_not_in_dataset", 404),
             ("selection_evidence_missing", 422),
+            ("invalid_venue_selection", 422),
+            ("inconsistent_venue_calendar", 422),
             ("invalid_dataset_root", 503),
             ("invalid_manifest", 500),
             ("invalid_dataset_table", 500),
