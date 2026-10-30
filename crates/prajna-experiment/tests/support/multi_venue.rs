@@ -65,8 +65,19 @@ impl Normalizer for MultiVenueNormalizer {
             .and_then(Value::as_array)
             .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>())
             .unwrap_or_default();
+        let same_venue = fixture["same_venue"].as_bool().unwrap_or(false);
+        let instruments_input = if same_venue {
+            [("510300", "XSHG"), ("510880", "XSHG")]
+        } else {
+            INSTRUMENTS
+        };
+        let venues: &[&str] = if same_venue {
+            &["XSHG"]
+        } else {
+            &["XSHG", "XSHE"]
+        };
         let mut sessions = vec![];
-        for venue in ["XSHG", "XSHE"] {
+        for venue in venues.iter().copied() {
             for date in DATES {
                 if venue == "XSHE" && missing.contains(&date) {
                     continue;
@@ -77,7 +88,7 @@ impl Normalizer for MultiVenueNormalizer {
         let mut instruments = vec![];
         let mut bars = vec![];
         let mut statuses = vec![];
-        for (symbol, venue) in INSTRUMENTS {
+        for (symbol, venue) in instruments_input {
             let id = InstrumentId::new(symbol, VenueId::new(venue).expect("static Venue"))
                 .expect("static Instrument");
             instruments.push(
@@ -160,13 +171,29 @@ impl Normalizer for MultiVenueNormalizer {
 /// writes the Fast Event definition used by the CLI/storage regression.
 /// `missing_xshe_session` drops one XSHE day to exercise the structural failure.
 pub fn prepare(lake: &Path, definition: &Path, missing_xshe_session: Option<&str>) {
+    prepare_inner(lake, definition, missing_xshe_session, false)
+}
+
+#[allow(dead_code)]
+pub fn prepare_same_venue(lake: &Path, definition: &Path) {
+    prepare_inner(lake, definition, None, true)
+}
+
+fn prepare_inner(
+    lake: &Path,
+    definition: &Path,
+    missing_xshe_session: Option<&str>,
+    same_venue: bool,
+) {
     let store = RawStore::open(lake).expect("open synthetic lake");
+    let mut input =
+        json!({"missing_xshe_sessions":missing_xshe_session.into_iter().collect::<Vec<_>>()});
+    if same_venue {
+        input["same_venue"] = json!(true);
+    }
     let raw = store
         .put(
-            &serde_json::to_vec(&json!({
-                "missing_xshe_sessions": missing_xshe_session.into_iter().collect::<Vec<_>>(),
-            }))
-            .expect("encode fixture"),
+            &serde_json::to_vec(&input).expect("encode fixture"),
             SourceRecordInput {
                 content_type: "application/json".into(),
                 source_kind: SourceKind::Fixture,
@@ -189,7 +216,12 @@ pub fn prepare(lake: &Path, definition: &Path, missing_xshe_session: Option<&str
         "2026-10-28T00:00:00Z",
     )
     .expect("publish synthetic multi-Venue Dataset");
-    let members = INSTRUMENTS
+    let instruments_input = if same_venue {
+        [("510300", "XSHG"), ("510880", "XSHG")]
+    } else {
+        INSTRUMENTS
+    };
+    let members = instruments_input
         .map(|(symbol, venue)| {
             InstrumentId::new(symbol, VenueId::new(venue).expect("static Venue"))
                 .expect("static Instrument")
@@ -201,7 +233,7 @@ pub fn prepare(lake: &Path, definition: &Path, missing_xshe_session: Option<&str
         "experiment_version": 1,
         "dsv": manifest.dsv,
         "universe": universe.id().expect("Universe identity"),
-        "venues": ["XSHG", "XSHE"],
+        "venues": if same_venue { vec!["XSHG"] } else { vec!["XSHG", "XSHE"] },
         "strategy": "buy_and_hold",
         "engine": "fast_event",
         "availability_assumption": "none",
@@ -211,7 +243,7 @@ pub fn prepare(lake: &Path, definition: &Path, missing_xshe_session: Option<&str
         "parameter_space": {"list": [{"params_version": 1}]},
         "unfilled_entry": "retry",
         "fast_event": {"currency": "CNY", "initial_cash": "10000",
-            "sizing": "vector_parity", "rebalance": "full_target",
+            "sizing": if same_venue { "lot" } else { "vector_parity" }, "rebalance": "full_target",
             "minimum_commission": "0",
             "portfolios": [{"id": 1, "capital": "10000"}],
             "lot_size_source": {"kind": "instrument"}},

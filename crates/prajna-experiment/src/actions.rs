@@ -122,7 +122,11 @@ impl Context {
                             .ok_or_else(|| invalid("action timestamp overflow"))?,
                     );
                     rows.push(CorporateActionRow {
-                        announcement_id: fact.event_id.clone(),
+                        // Source uniqueness is per Instrument; the legacy schedule
+                        // requires global announcement identities. JSON tuple encoding
+                        // preserves both fields without delimiter/escaping collisions.
+                        announcement_id: serde_json::json!([instrument.to_string(), fact.event_id])
+                            .to_string(),
                         action_index: 0,
                         instrument_id: instrument.clone(),
                         kind: fact.kind,

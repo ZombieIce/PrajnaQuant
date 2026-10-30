@@ -32,6 +32,10 @@ covered/no_events 声明须完整包含评价区间，否则结果覆盖未知�
 同证券同日多个开盘事件仍由既有账本拒绝未确定顺序。
 
 版本固定保留事件来源/历史 available_at；observed_at 不作发布时间。
+事实唯一键是 `(instrument_id, event_id)`；新增桥接以该二元组的紧凑 JSON 数组字符串
+作为既有账本的全局 announcement_id，action_index 为 0。两证券同名事件不合并，
+分隔符、引号或 Unicode 不造成身份碰撞；同证券重复事件仍在事实导入时拒绝。
+这只影响 MVP-7 新桥接，MVP-6 announcement_id 和全局去重规则保持不变。
 桥接的旧 CorporateActionRow 以事实 available_at 的日期填其必填 announced_date，
 announced_at 保持空；它不对外宣称公告日期，不进入信号可知性或 TRI。
 原事实版本才是来源及历史可用性权威；账本按实际权益日期结算，不用发布时刻推迟权益。

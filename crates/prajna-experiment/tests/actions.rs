@@ -19,6 +19,9 @@ use std::{
 #[allow(dead_code)]
 #[path = "support/selection_fixture.rs"]
 mod fixture;
+#[allow(dead_code)]
+#[path = "support/multi_venue.rs"]
+mod multi;
 #[path = "../../prajna-data/tests/support/opening_fixture.rs"]
 mod opening;
 const DATES: [&str; 10] = [
@@ -514,7 +517,7 @@ fn record_holder_keeps_cash_right_after_sale_and_ex_date_buyer_has_no_right() {
                 result
                     .corporate_action_ledger
                     .iter()
-                    .filter(|r| r.announcement_id == "dividend")
+                    .filter(|r| r.announcement_id == r#"["510300.XSHG","dividend"]"#)
                     .all(|r| r.net_amount.to_string() == "0")
             );
         }
@@ -536,7 +539,7 @@ fn fractional_split_reports_rounding_and_off_session_fact_remains_incomplete() {
     let split = result
         .corporate_action_ledger
         .iter()
-        .find(|r| r.announcement_id == "split")
+        .find(|r| r.announcement_id == r#"["510300.XSHG","split"]"#)
         .unwrap();
     assert_eq!(split.theoretical_quantity.unwrap().to_string(), "1000.5");
     assert_eq!(split.quantity_after.unwrap().to_string(), "1000");
@@ -618,5 +621,119 @@ fn either_domestic_venue_runs_with_explicit_no_event_scope() {
         let legacy = frozen(root, &old);
         assert_eq!(legacy["fast_event"]["rebalance"], "entry_only");
         assert!(legacy.get("corporate_actions").is_none());
+    }
+}
+
+#[test]
+fn same_venue_same_event_names_keep_instrument_identity_through_saved_execution() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let definition_file = root.join("experiment.json");
+    multi::prepare_same_venue(root, &definition_file);
+    let mut definition: Value =
+        serde_json::from_slice(&fs::read(&definition_file).unwrap()).unwrap();
+    definition["costs"]["commission_rate"] = json!(0);
+    let mut first = facts("510300.XSHG")["coverage"][0].clone();
+    first["end"] = json!(DATES[2]);
+    first["facts"].as_array_mut().unwrap().truncate(1);
+    first["facts"][0]["record_date"] = json!(DATES[1]);
+    first["facts"][0]["ex_date"] = json!(DATES[2]);
+    first["facts"][0]["pay_date"] = json!(DATES[2]);
+    first["facts"][0]["cash_per_share"] = json!("1");
+    let mut second = first.clone();
+    second["instrument_id"] = json!("510880.XSHG");
+    second["facts"][0]["cash_per_share"] = json!("2");
+    for name in ["dividend", "dividend/510300.XSHG:\"汉字"] {
+        first["facts"][0]["event_id"] = json!(name);
+        second["facts"][0]["event_id"] = json!(name);
+        let input = json!({"schema_version":1,"observed_at":"2026-10-30T00:00:00Z","coverage":[first,second]});
+        let version = corporate_facts::import(root, &serde_json::to_vec(&input).unwrap()).unwrap();
+        definition["corporate_actions"] = json!({"version":version,"dividend_tax_rate":"0"});
+        let experiment = Experiment::parse(&definition.to_string(), root).unwrap();
+        let report = experiment.execute(root, 1).unwrap();
+        assert!(report.runs[0].error.is_none(), "{:?}", report.runs[0].error);
+        let result = report.runs[0].fast_event_result.as_ref().unwrap();
+        assert!(result.corporate_action_completeness.is_complete);
+        assert_eq!(result.corporate_action_ledger.len(), 6);
+        assert_eq!(
+            result
+                .sessions
+                .last()
+                .unwrap()
+                .close
+                .account
+                .cash
+                .to_string(),
+            "1500"
+        );
+        assert_eq!(
+            result
+                .sessions
+                .last()
+                .unwrap()
+                .close
+                .account
+                .equity
+                .to_string(),
+            "11600"
+        );
+        let ids = result
+            .corporate_action_ledger
+            .iter()
+            .map(|r| r.announcement_id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(ids.len(), 2);
+        for entry in &result.corporate_action_ledger {
+            assert_eq!(
+                serde_json::from_str::<Value>(&entry.announcement_id).unwrap(),
+                json!([entry.instrument_id.to_string(), name])
+            );
+            assert_eq!(
+                entry.net_amount.to_string(),
+                if entry.instrument_id.to_string() == "510300.XSHG" {
+                    "500"
+                } else {
+                    "1000"
+                }
+            );
+        }
+        fs::write(&definition_file, definition.to_string()).unwrap();
+        let execution = cli(
+            root,
+            &[
+                "run",
+                definition_file.to_str().unwrap(),
+                "--level",
+                "standard",
+            ],
+        );
+        assert_eq!(execution["failed_count"], 0);
+        let read = cli(
+            root,
+            &[
+                "result",
+                execution["exp"].as_str().unwrap(),
+                execution["exe"].as_str().unwrap(),
+            ],
+        );
+        let run = &read["data"]["runs"][0];
+        let (_, batches) = read_run_table(
+            root,
+            execution["exp"].as_str().unwrap(),
+            execution["exe"].as_str().unwrap(),
+            run["run_id"].as_str().unwrap(),
+            ResultLevel::Standard,
+            "corporate_actions",
+        )
+        .unwrap();
+        assert_eq!(batches.iter().map(|b| b.num_rows()).sum::<usize>(), 6);
+        // Same-security duplicate event names remain invalid at the source boundary.
+        let mut duplicate = input.clone();
+        let fact = duplicate["coverage"][0]["facts"][0].clone();
+        duplicate["coverage"][0]["facts"]
+            .as_array_mut()
+            .unwrap()
+            .push(fact);
+        assert!(corporate_facts::import(root, &serde_json::to_vec(&duplicate).unwrap()).is_err());
     }
 }
