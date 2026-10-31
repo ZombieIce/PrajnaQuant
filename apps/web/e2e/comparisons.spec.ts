@@ -190,7 +190,7 @@ test('frozen single-ETF comparison reads authoritative roles, reopens, and expos
   expect(await resultRows(page, 'comparison-valuations')).toEqual(expectedRows);
 
   const summaryTable = join(lake(), 'experiments', hex(result.data.strategy.exp), 'executions', hex(result.data.strategy.exe),
-    'runs', hex(result.data.strategy.runs[0].run_id), 'summary.parquet');
+    'summary.parquet');
   const originalSummary = await readFile(summaryTable);
   try {
     await writeFile(summaryTable, Buffer.from('synthetic corrupt complete summary report'));
