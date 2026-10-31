@@ -14,6 +14,7 @@ import socket
 import subprocess
 import sys
 import time
+import traceback
 from urllib.parse import quote
 
 from workflow_process import OwnedRun, ProcessControlError
@@ -410,7 +411,8 @@ def record(args):
                 finally:
                     # Cleanup is independent of leader exit and covers nested recorders/sessions.
                     owned.close()
-            except (OSError, ProcessControlError):
+            except (OSError, ProcessControlError) as error:
+                traceback.print_exception(error, file=stream)  # Raw ownership diagnostics remain local.
                 exit_code, stopped_reason = 126, 'ownership_or_cleanup_unverified'
     parsed = counts(log.read_text(errors='replace'), args.kind)
     valid = bool(parsed) and parsed['failed'] == 0 and (parsed['executed'] > 0 or bool(args.allow_empty))

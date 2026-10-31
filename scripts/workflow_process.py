@@ -140,7 +140,8 @@ class OwnedRun:
             group = row['group']
             # Preserve ownership across reparenting, while detecting reused leader PIDs.
             # A leaderless group remains leased by its surviving group members.
-            if group in table:
+            is_live_child = group == self.child.pid and self.child.poll() is None
+            if group in table and not is_live_child:
                 try:
                     birth = process_birth(group)
                 except ProcessControlError:
@@ -148,6 +149,7 @@ class OwnedRun:
                         raise
                 else:
                     if birth != row['birth']:
+                        self.groups.discard(group)  # It is now explicitly unowned, even on failure cleanup.
                         raise ProcessControlError('verification group identity changed')
             groups.add(group)
         return groups

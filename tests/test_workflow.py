@@ -568,7 +568,8 @@ class OwnedLifecycleTests(unittest.TestCase):
                 self.assertTrue(pid not in table or table[pid][2].startswith('Z'), 'owned descendant survived return')
                 self.assertFalse(marker.exists(), 'owned descendant continued writing after cancellation')
                 self.assertIsNone(outsider.poll(), 'unrelated sibling must remain alive')
-                self.assertEqual(report['exit_code'], {'timeout': 124, 'race': 124, 'disk': 125, 'normal': 0}[reason])
+                self.assertEqual(report['exit_code'], {'timeout': 124, 'race': 124, 'disk': 125, 'normal': 0}[reason],
+                                 (root/'outer.log').read_text()[-2000:])
                 if nested:
                     self.assertFalse((root/'inner.log').read_text(), 'terminated inner command has no false pass')
             finally:
@@ -598,7 +599,34 @@ class OwnedLifecycleTests(unittest.TestCase):
                 self.assertEqual(result['exit_code'], 126)
                 self.assertEqual(result['stopped_reason'], 'ownership_or_cleanup_unverified')
                 self.assertIsNone(outsider.poll())
-                self.assertEqual((root/'refused.log').read_text(), '')
+                self.assertNotIn('test result:', (root/'refused.log').read_text())
+                self.assertIn('unverified inherited verification scope', (root/'refused.log').read_text())
+            finally:
+                outsider.terminate()
+                outsider.wait(timeout=5)
+
+    def test_reused_group_identity_is_excluded_from_failure_cleanup(self):
+        import workflow_process as control
+        with tempfile.TemporaryDirectory() as d:
+            outsider = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'], start_new_session=True)
+            try:
+                with (Path(d)/'controlled.log').open('w') as stream:
+                    owned = control.OwnedRun([sys.executable, '-c', 'import time; time.sleep(30)'],
+                                             w.ROOT, dict(os.environ), stream)
+                    entry = owned.root/f'{owned.node}.json'
+                    original = entry.read_text()
+                    row = json.loads(original)
+                    row.update(group=outsider.pid, birth='different process birth')
+                    entry.write_text(json.dumps(row))
+                    owned.groups.add(outsider.pid)  # Model a previously leased PID reused by another group.
+                    try:
+                        with self.assertRaises(control.ProcessControlError):
+                            owned.close()
+                        self.assertIsNone(outsider.poll(), 'identity rejection must also exclude failure cleanup')
+                        self.assertIsNotNone(owned.child.poll())
+                    finally:
+                        entry.write_text(original)
+                        owned.close()
             finally:
                 outsider.terminate()
                 outsider.wait(timeout=5)
