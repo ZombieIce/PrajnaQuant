@@ -51,7 +51,15 @@ fn setup_scenario(root: &Path, blocked: &[usize], closes: &[&str]) -> Selection 
         selection["status_snapshot"] = json!(opening::put(&input, &snapshot));
     }
     let selection: DailyPublicationSelection = serde_json::from_value(selection).unwrap();
-    let dsv = publish_daily(root, selection, Path::new("receipt.json"))
+    let receipt = format!(
+        "timing-{}-receipt.json",
+        blocked
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join("-")
+    );
+    let dsv = publish_daily(root, selection, Path::new(&receipt))
         .unwrap()
         .dsv;
     let adjusted = fixture::import_closes(root, &dsv, &DATES, closes);
@@ -336,4 +344,46 @@ fn native_definition_and_cli_reject_insufficient_or_inconsistent_timing_readines
     let mut through_gap = frozen["data"]["definition"].clone();
     through_gap["evaluation"]["start"] = json!(DATES[3]);
     assert!(Experiment::parse(&through_gap.to_string(), root).is_err());
+}
+
+/// Opt-in browser fixture: published synthetic inputs, never a mocked result.
+#[test]
+#[ignore]
+fn export_result_details_fixture() {
+    // The browser harness passes its owned lake; the ignored CI run exports into
+    // a disposable root so the production fixture path still executes.
+    let temporary;
+    let root = match std::env::var_os("PRAJNA_DETAILS_FIXTURE_ROOT") {
+        Some(root) => std::path::PathBuf::from(root),
+        None => {
+            temporary = TempDir::new().unwrap();
+            temporary.path().to_owned()
+        }
+    };
+    let mut definitions = Vec::new();
+    for blocked in [&[4][..], &[2][..]] {
+        let selection = setup_scenario(
+            &root,
+            blocked,
+            &["10", "12", "12", "12", "8", "8", "14", "14", "14", "10"],
+        );
+        definitions.push(freeze(&root, &selection).unwrap()["data"]["definition"].clone());
+    }
+    let mut selection = setup(&root, false);
+    let adjusted = fixture::import_closes(&root, &selection.dsv, &DATES, &["10"; 10]);
+    selection.adjusted.insert("510300.XSHG".into(), adjusted);
+    definitions.push(freeze(&root, &selection).unwrap()["data"]["definition"].clone());
+    selection.strategy = "buy_and_hold".into();
+    selection.parameter_space = None;
+    selection.adjusted.clear();
+    let mut vector = freeze(&root, &selection).unwrap()["data"]["definition"].clone();
+    vector["engine"] = json!("vector");
+    vector.as_object_mut().unwrap().remove("fast_event");
+    Experiment::parse(&vector.to_string(), &root).unwrap();
+    definitions.push(vector);
+    std::fs::write(
+        root.join("result-details-definitions.json"),
+        serde_json::to_vec(&definitions).unwrap(),
+    )
+    .unwrap();
 }

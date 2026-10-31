@@ -1280,3 +1280,126 @@ fn multi_venue_definition_boundaries_reject_mismatched_scope_and_python_strategy
     );
     assert!(!example.lake.join("experiments").exists());
 }
+
+#[test]
+fn result_details_read_saved_native_tables_and_keep_absence_explicit() {
+    for event in [false, true] {
+        let example = Example::new();
+        if event {
+            example.write_definition(|value| {
+                value["engine"] = json!("fast_event");
+                value["fast_event"] = json!({"currency":"CNY","initial_cash":"100000",
+                    "sizing":"lot","rebalance":"full_target","minimum_commission":"5",
+                    "portfolios":[{"id":1,"capital":"100000"}],"lot_size_source":{"kind":"instrument"}});
+            });
+        }
+        let first = json_output(example.run(&["--level", "full", "--threads", "1"]), 0);
+        let exp = first["exp"].as_str().unwrap();
+        let exe = first["exe"].as_str().unwrap();
+        let before = tree(&example.lake);
+        let result = json_output(example.result(exp, exe, &[]), 0);
+        for run in result["data"]["runs"].as_array().unwrap() {
+            let names = if event {
+                vec!["orders", "fills", "fee_settlements"]
+            } else {
+                vec!["executions", "weights_after_execution", "pending_at_end"]
+            };
+            for table in names {
+                let (_, batches) = prajna_experiment::read_run_table(
+                    &example.lake,
+                    exp,
+                    exe,
+                    run["run_id"].as_str().unwrap(),
+                    prajna_experiment::ResultLevel::Full,
+                    table,
+                )
+                .unwrap();
+                let payloads = batches
+                    .iter()
+                    .flat_map(|batch| {
+                        let column = batch
+                            .column_by_name("payload")
+                            .unwrap()
+                            .as_any()
+                            .downcast_ref::<StringArray>()
+                            .unwrap();
+                        (0..batch.num_rows())
+                            .map(|i| serde_json::from_str::<Value>(column.value(i)).unwrap())
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>();
+                let served = run["details"][table].as_array().unwrap();
+                assert_eq!(served.len(), payloads.len());
+                for (served, stored) in served.iter().zip(payloads) {
+                    // Transport parity with the read path; independent Unix-ns
+                    // goldens live in `result::tests` and the browser fixture.
+                    let mut expected = stored.clone();
+                    normalize_detail_timestamps(&mut expected);
+                    assert_eq!(served, &expected, "{table}");
+                }
+            }
+            if event {
+                assert_eq!(run["units"]["currency"], "CNY");
+                assert_eq!(run["allocations"].as_array().unwrap().len(), 504);
+                // No fee-only settlement in this lot fixture: saved empty is explicit.
+                assert_eq!(run["details"]["fee_settlements"], json!([]));
+            } else {
+                assert!(run["details"].get("fills").is_none());
+                assert!(
+                    run["tables"]["not_produced_by_engine"]
+                        .as_array()
+                        .unwrap()
+                        .contains(&json!("fills"))
+                );
+                assert!(run["allocations"].is_null());
+            }
+        }
+        assert_eq!(before, tree(&example.lake));
+        if event {
+            let definition = example
+                .lake
+                .join("experiments")
+                .join(exp.rsplit(':').next().unwrap())
+                .join("experiment.json");
+            let saved = fs::read(&definition).unwrap();
+            fs::remove_file(&definition).unwrap();
+            let unknown = json_output(example.result(exp, exe, &[]), 0);
+            assert!(unknown["data"]["runs"][0]["units"]["currency"].is_null());
+            assert!(unknown["data"]["runs"][0]["details"]["fills"].is_array());
+            let mut corrupt: Value = serde_json::from_slice(&saved).unwrap();
+            corrupt["fast_event"]["currency"] = json!("USD");
+            fs::write(&definition, serde_json::to_vec(&corrupt).unwrap()).unwrap();
+            let output = example.result(exp, exe, &[]);
+            status(&output, 1);
+            assert!(output.stdout.is_empty());
+            fs::write(definition, saved).unwrap();
+        }
+    }
+}
+
+/// Transport parity oracle for this CLI test. Independent timestamp semantics
+/// are covered by `result::tests::nanoseconds_remain_exact_for_browser_transport`.
+fn normalize_detail_timestamps(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            for (key, value) in fields {
+                if ["executed_at", "submitted_at", "attempted_at", "ts_open"]
+                    .contains(&key.as_str())
+                {
+                    if value.is_number() {
+                        *value = json!(value.to_string());
+                    } else if let Some(t) = value
+                        .as_str()
+                        .and_then(|s| prajna_domain::TimestampNs::parse(s).ok())
+                    {
+                        *value = json!(t.as_unix_nanos().to_string());
+                    }
+                } else {
+                    normalize_detail_timestamps(value);
+                }
+            }
+        }
+        Value::Array(rows) => rows.iter_mut().for_each(normalize_detail_timestamps),
+        _ => {}
+    }
+}

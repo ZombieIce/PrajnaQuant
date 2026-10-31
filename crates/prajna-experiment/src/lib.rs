@@ -2585,7 +2585,7 @@ mod tests {
         assert_eq!(stored.manifest.runs[0].not_saved.len(), 7);
         assert_eq!(
             stored.manifest.runs[0].not_produced_by_engine,
-            ["orders", "fills", "cash_ledger"]
+            ["orders", "fills", "cash_ledger", "fee_settlements"]
         );
         let summary = stored.path.join("summary.parquet");
         let summary_reader =
