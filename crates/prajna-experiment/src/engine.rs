@@ -1017,11 +1017,12 @@ pub(super) fn execute(
                 experiment.sessions_per_year,
                 &experiment.availability_assumption,
             )?);
-            if experiment.performance.is_some() {
+            if let Some(context) = &experiment.performance {
                 crate::performance::complete(
                     execution.summary.as_mut().unwrap(),
                     &result,
                     benchmark,
+                    context.calendar(),
                 )?;
             }
             if let Some(diagnostics) = &execution.backend_diagnostics {

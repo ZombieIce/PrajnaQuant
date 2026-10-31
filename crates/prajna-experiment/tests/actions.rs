@@ -1657,7 +1657,10 @@ fn complete_summary_frozen_benchmark_and_definition_failures() {
     let request = setup(root);
     let data = freeze_comparison_cli(root, &selection_of(&request), ReinvestmentPolicy::None);
     let mut strategy = data["data"]["strategy"]["definition"].clone();
-    let benchmark = data["data"]["benchmark"]["definition"].clone();
+    // Comparison roles already opt into the complete Summary; the embedded
+    // benchmark definition must not nest that selection.
+    let mut benchmark = data["data"]["benchmark"]["definition"].clone();
+    benchmark.as_object_mut().unwrap().remove("summary");
     strategy["summary"] =
         json!({"semantic_version":"complete-performance@1", "benchmark_definition":benchmark});
     let report = Experiment::parse(&strategy.to_string(), root)
@@ -1752,5 +1755,209 @@ fn complete_summary_cash_costs_include_embedded_slippage_once() {
     assert_eq!(
         result.sessions[1].close.account.equity.to_string(),
         "9896.82"
+    );
+}
+
+#[test]
+fn calendar_report_golden_saves_reads_and_matches_complete_summary() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let mut definition = holding_definition(root);
+    definition["summary"] =
+        json!({"semantic_version":"complete-performance@1","calendar":"calendar-performance@1"});
+    let report = Experiment::parse(&definition.to_string(), root)
+        .unwrap()
+        .execute(root, 1)
+        .unwrap();
+    let summary = serde_json::to_value(report.runs[0].summary.as_ref().unwrap()).unwrap();
+    let calendar = &summary["complete"]["calendar"];
+    assert_eq!(calendar["semantic_version"], "calendar-performance@1");
+    assert_eq!(calendar["valuation_point"], "close");
+    assert_eq!(calendar["initial_capital"], "10005");
+    assert_eq!(calendar["evaluation_start"], DATES[1]);
+    assert_eq!(calendar["evaluation_end"], DATES[9]);
+    assert_eq!(calendar["sessions"], 9);
+    assert_eq!(calendar["available"], true);
+    assert_eq!(calendar["monthly"].as_array().unwrap().len(), 1);
+    assert_eq!(calendar["annual"].as_array().unwrap().len(), 1);
+    assert_eq!(calendar["monthly"][0]["label"], "2026-01");
+    assert_eq!(calendar["monthly"][0]["start_basis"], "initial_capital");
+    assert!(calendar["monthly"][0]["start_session"].is_null());
+    assert_eq!(calendar["monthly"][0]["end_session"], DATES[9]);
+    // First segment uses initial capital, so the entry costs are not reset away.
+    near(
+        &calendar["monthly"][0]["return_value"],
+        9795.0 / 10005.0 - 1.0,
+    );
+    assert_eq!(
+        calendar["annual"][0]["return_value"],
+        calendar["monthly"][0]["return_value"]
+    );
+    let result = report.runs[0].fast_event_result.as_ref().unwrap();
+    assert_eq!(
+        calendar["points"].as_array().unwrap().len(),
+        result.sessions.len()
+    );
+    for (point, session) in calendar["points"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(&result.sessions)
+    {
+        let account = &session.close.account;
+        let amount = |n: prajna_domain::Notional| n.to_string().parse::<f64>().unwrap();
+        let equity = amount(account.equity);
+        let holdings: f64 = account
+            .positions
+            .values()
+            .map(|position| amount(position.market_value))
+            .sum();
+        assert_eq!(point["equity"], account.equity.to_string());
+        near(&point["nav"], equity / 10005.0);
+        assert!(
+            (amount(account.cash)
+                + holdings
+                + amount(account.dividend_receivable)
+                + amount(account.liquidation_receivable)
+                - equity)
+                .abs()
+                < 1e-9
+        );
+    }
+    near(
+        &calendar["max_drawdown"],
+        summary["max_drawdown"].as_f64().unwrap(),
+    );
+    assert_eq!(
+        calendar["drawdown_peak_session"],
+        summary["drawdown_peak_session"]
+    );
+    assert_eq!(
+        calendar["drawdown_trough_session"],
+        summary["drawdown_trough_session"]
+    );
+    let path = root.join("calendar.json");
+    fs::write(&path, definition.to_string()).unwrap();
+    let stored = cli(root, &["run", path.to_str().unwrap(), "--level", "summary"]);
+    let exp = stored["exp"].as_str().unwrap();
+    let exe = stored["exe"].as_str().unwrap();
+    let read = cli(root, &["result", exp, exe]);
+    assert_eq!(read["data"]["runs"][0]["summary"], summary);
+    let replay = cli(root, &["run", path.to_str().unwrap(), "--level", "summary"]);
+    assert_eq!(replay["written_bytes"], 0);
+}
+
+#[test]
+fn calendar_report_marks_incomplete_corporate_facts_unavailable() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let mut definition = holding_definition(root);
+    definition["summary"] =
+        json!({"semantic_version":"complete-performance@1","calendar":"calendar-performance@1"});
+    let mut incomplete = facts("510300.XSHG");
+    incomplete["coverage"][0]["state"] = json!("missing_facts");
+    let version = corporate_facts::import(root, &serde_json::to_vec(&incomplete).unwrap()).unwrap();
+    definition["corporate_actions"]["version"] = json!(version);
+    let report = Experiment::parse(&definition.to_string(), root)
+        .unwrap()
+        .execute(root, 1)
+        .unwrap();
+    let summary = serde_json::to_value(report.runs[0].summary.as_ref().unwrap()).unwrap();
+    let calendar = &summary["complete"]["calendar"];
+    assert_eq!(calendar["available"], false);
+    assert_eq!(calendar["reason"], "corporate_actions_incomplete");
+    assert!(calendar["max_drawdown"].is_null());
+    assert_eq!(calendar["points"].as_array().unwrap().len(), 0);
+    assert_eq!(calendar["monthly"].as_array().unwrap().len(), 0);
+    assert_eq!(calendar["annual"].as_array().unwrap().len(), 0);
+    assert!(summary["complete"]["metrics"]["total_return"]["value"].is_null());
+}
+
+#[test]
+fn frozen_comparison_roles_save_complete_summary_and_calendar_report() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let request = setup(root);
+    let frozen = freeze_comparison_cli(root, &selection_of(&request), ReinvestmentPolicy::None);
+    let data = &frozen["data"];
+    assert_eq!(
+        data["comparability"]["performance"]["summary"],
+        "complete-performance@1"
+    );
+    assert_eq!(
+        data["comparability"]["performance"]["calendar"],
+        "calendar-performance@1"
+    );
+    assert!(
+        data["strategy"]["definition"]["summary"]["benchmark_definition"]
+            .get("summary")
+            .is_none()
+    );
+    assert_eq!(
+        data["strategy"]["definition"]["summary"]["benchmark_definition"]["holding_benchmark"]["semantic_version"],
+        "holding-benchmark@1"
+    );
+    let strategy_run = run_definition(
+        root,
+        "calendar-strategy.json",
+        &data["strategy"]["definition"],
+    );
+    let benchmark_run = run_definition(
+        root,
+        "calendar-benchmark.json",
+        &data["benchmark"]["definition"],
+    );
+    assert_eq!(strategy_run["exp"], data["strategy"]["experiment"]);
+    assert_eq!(benchmark_run["exp"], data["benchmark"]["experiment"]);
+    let strategy = read_result(root, &strategy_run);
+    let benchmark = read_result(root, &benchmark_run);
+    let strategy_summary = &strategy["data"]["runs"][0]["summary"];
+    let benchmark_summary = &benchmark["data"]["runs"][0]["summary"];
+    let strategy_complete = &strategy_summary["complete"];
+    let benchmark_complete = &benchmark_summary["complete"];
+    assert_eq!(
+        strategy_complete["semantic_version"],
+        "complete-performance@1"
+    );
+    assert_eq!(
+        benchmark_complete["semantic_version"],
+        "complete-performance@1"
+    );
+    let calendar = &strategy_complete["calendar"];
+    assert_eq!(calendar["available"], true);
+    assert_eq!(calendar["evaluation_start"], DATES[1]);
+    assert_eq!(calendar["evaluation_end"], DATES[9]);
+    near(
+        &calendar["monthly"][0]["return_value"],
+        strategy_complete["metrics"]["total_return"]["value"]
+            .as_f64()
+            .unwrap(),
+    );
+    near(
+        &calendar["max_drawdown"],
+        strategy_summary["max_drawdown"].as_f64().unwrap(),
+    );
+    near(
+        &strategy_complete["metrics"]["benchmark_return"]["value"],
+        benchmark_complete["metrics"]["total_return"]["value"]
+            .as_f64()
+            .unwrap(),
+    );
+    near(
+        &strategy_complete["metrics"]["excess_return"]["value"],
+        strategy_complete["metrics"]["total_return"]["value"]
+            .as_f64()
+            .unwrap()
+            - benchmark_complete["metrics"]["total_return"]["value"]
+                .as_f64()
+                .unwrap(),
+    );
+    assert_eq!(
+        benchmark_complete["metrics"]["benchmark_return"]["reason"],
+        "benchmark_not_bound"
+    );
+    near(
+        &benchmark_complete["calendar"]["max_drawdown"],
+        benchmark_summary["max_drawdown"].as_f64().unwrap(),
     );
 }
