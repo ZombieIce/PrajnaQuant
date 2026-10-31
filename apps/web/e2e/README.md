@@ -183,3 +183,14 @@ pending、零成交且保留现金以及 Standard/Summary 未保存差异，刷�
 新增 Dataset manifests 在 finally 从目录恢复移除，保留结果/日志在本次临时
 合成 lake；不影响其他测试的固定目录数。独立金额 golden 仍由 Rust timing
 测试验证，真实数据未参与。
+
+The #371 PR workflow now runs this suite for approved affected paths, using
+Node 22, Python 3.12 and locked Chromium on Ubuntu. Its required `lightweight`
+summary fails on missing/failed required work; only a successful explicit path
+applicability decision allows the web job to be N/A. Full retains its existing
+build job. See [workflow tools](../../../docs/agents/workflow-tools.md).
+Fixture cargo tests use the shared positive-execution-count recorder and keep
+per-fixture JSON plus raw logs under the invocation-owned local directory.
+`preparation-timings.jsonl` records each build/fixture step separately; these are
+local software timings, not CI CPU cost or research evidence. No raw browser
+artifacts are uploaded by the PR job.

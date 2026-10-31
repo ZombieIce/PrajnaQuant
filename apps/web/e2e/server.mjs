@@ -13,11 +13,23 @@ const lake = join(fixture, 'lake');
 const facts = join(fixture, 'corporate-actions');
 const target = process.env.CARGO_TARGET_DIR ?? join(root, 'target');
 const bin = (name) => join(target, 'debug', name + (process.platform === 'win32' ? '.exe' : ''));
+let invocation = 0;
 function run(command, args, cwd = root, extra = {}) {
+  const started = performance.now();
+  if (command === 'cargo' && args[0] === 'test') {
+    args = [join(root, 'scripts/workflow.py'), 'run', '--kind', 'cargo',
+      '--executor', 'browser-fixture', '--selection', args.join(' '),
+      '--log', join(local, `fixture-${++invocation}.log`),
+      '--output', join(local, `fixture-${invocation}.json`), '--', command, ...args];
+    command = process.env.PRAJNA_TEST_PYTHON ?? 'python3.12';
+  }
   appendFileSync(join(local, 'server.log'), `\n$ ${command} ${args.join(' ')}\n`);
   const result = spawnSync(command, args, { cwd, env: { ...process.env, ...extra },
     encoding: 'utf8', timeout: 1_200_000, maxBuffer: 16 * 1024 * 1024 });
   appendFileSync(join(local, 'server.log'), `${result.stdout ?? ''}${result.stderr ?? ''}`);
+  appendFileSync(join(local, 'preparation-timings.jsonl'), JSON.stringify({
+    command, args, seconds: (performance.now() - started) / 1000, exit: result.status,
+  }) + '\n');
   if (result.error || result.status !== 0) {
     console.error(result.stderr ?? result.error);
     throw new Error(`E2E preparation failed: ${command} (see ${local}/server.log)`);

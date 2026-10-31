@@ -25,6 +25,20 @@ Issues, specs and PRs for this repo live on GitHub at `ZombieIce/PrajnaQuant`. R
 - The project owner merges. Merging normally closes the issue, but GitHub's auto-close is not guaranteed; see **Post-merge check** under Wayfinding operations.
 - One working tree carries one branch. Run parallel tasks in separate `git worktree` checkouts; lifecycle and preservation are below.
 
+## CI 与 Review 并行交接
+
+实现者本机适用必需验证已完成，PR、验收证据及当前 `ready SHA` 齐备后即可交接；CI queued/pending 不阻止负责人或授权协调者启动独立 Review。实现者不为等待 CI 延迟交接，也不自行启动 reviewer。
+
+三种输出分别为：
+
+- **已交接**：当前实现证据/ready SHA 可供 Review；CI 可以 pending，尚无独立通过结论。
+- **已审查但 CI pending**：最终 HEAD 已有有效独立审查，必需检查尚未完成，不称可合并。
+- **可交负责人合并**：协调者已刷新并核对最终 HEAD 独立覆盖、所有发现回应、票内必需验收及必需 CI 成功。负责人合并。
+
+协调者负责最终汇总；分支导致失败交回实现者，环境失败记录具体缺口，不改算通过。修复 push 后重新取得最终 HEAD 独立增量覆盖，验证按 [影响复用规则](verification.md#最终-head-与影响复用)选择复跑范围。状态查询一次取紧凑快照、有限等待，优先使用现有完成事件；无事件能力时报告 pending，不增加定时机器人、自动提醒或自动合并，不新增 triage label。
+
+只读检查及显式清理命令见 [工作流辅助工具](workflow-tools.md)。评论标记/SHA只证明声明存在，审查独立上下文、发现解决及有效性须人工判断；工具不输出合并许可。
+
 ## Review dispatch (shared contract)
 
 This section owns role/context isolation and dispatch capability checks; [review-pr](../../.agents/skills/review-pr/SKILL.md) owns risk classification, coverage and review output. Apply it before initial dispatch and every re-review, including direct review invocation. Implementers never dispatch independent review.
@@ -61,5 +75,5 @@ Fetch the current Issue and comments using the connector, or `gh issue view <N> 
 - **Blocking:** a `Blocked by: #N, #N` line. A ticket is unblocked when every listed issue is closed as completed.
 - **Frontier:** `gh issue list --state open --label ready-for-agent`. Keep issues with no assignee whose blockers are all closed; the lowest number wins.
 - **Claim:** `gh issue edit <N> --add-assignee @me` and a comment saying the work has started, before any work.
-- **Resolve:** merge the PR that says `Closes #N` (owner), or for non-code tickets add the answer as a comment and `gh issue close <N>`. Remove the issue's triage label when it is closed (`gh issue edit <N> --remove-label <label>`; auto-close does not do this); its closed state and `Conclusion` express the outcome, not its labels. When the ticket belongs to a map issue, after the PR is merged or the issue is closed, the implementation agent appends a gist and a link to the map issue's `Decisions-so-far`; if the implementation agent is unavailable, the review agent does so. No `Decisions-so-far` update is needed when there is no map issue.
+- **Resolve:** merge the PR that says `Closes #N` (owner), or for non-code tickets add the answer as a comment and `gh issue close <N>`. Use explicit opt-in `python3.12 scripts/workflow.py cleanup --repo ZombieIce/PrajnaQuant --issue <N> --apply` (dry-run without `--apply`), or remove the issue's triage label when it is closed (`gh issue edit <N> --remove-label <label>`; auto-close does not do this); its closed state and `Conclusion` express the outcome, not its labels. When the ticket belongs to a map issue, after the PR is merged or the issue is closed, the implementation agent appends a gist and a link to the map issue's `Decisions-so-far`; if the implementation agent is unavailable, the review agent does so. No `Decisions-so-far` update is needed when there is no map issue.
 - **Post-merge check:** after merging, the owner (or an agent the owner names) runs `gh issue view <N> --json state,labels`. If the issue is still open, run `gh issue close <N> --reason completed` and say in a comment that auto-close did not fire. If `labels` still lists a triage label once the issue is closed, remove it with `gh issue edit <N> --remove-label <label>`. A ticket that stays open blocks its dependents in the Frontier and Blocking checks.
