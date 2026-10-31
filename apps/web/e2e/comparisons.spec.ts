@@ -142,7 +142,7 @@ test('frozen single-ETF comparison reads authoritative roles, reopens, and expos
   await expect(page.getByTestId('comparison-complete-metrics-strategy')).toContainText(`${(strategyComplete.metrics.total_return.value * 100).toFixed(2)}%`);
   expect(strategyComplete.metrics.calmar).toEqual({ value: null, reason: 'zero_drawdown' });
   expect(strategyComplete.metrics.max_drawdown.value).toBe(0);
-  expect(calendar.drawdown_peak_session).toBe(null);
+  expect([calendar.drawdown_peak_session, calendar.drawdown_trough_session]).toEqual([undefined, undefined]);
   await expect(page.getByTestId('comparison-complete-metrics-strategy')).toContainText('最大回撤为零，Calmar 无定义');
   await expect(page.getByTestId('comparison-complete-metrics-strategy')).toContainText(`${(strategyComplete.metrics.benchmark_return.value * 100).toFixed(2)}%`);
   expect(await page.getByTestId('comparison-amounts-strategy').locator('td[data-amount="total_execution_cost"]').innerText()).toBe(strategyComplete.amounts.total_execution_cost);
@@ -272,7 +272,7 @@ test('equal-weight pool comparison reports incomplete action facts and keeps aut
     expect(incompleteCalendar.reason).toBe('corporate_actions_incomplete');
     expect(incompleteCalendar.points).toEqual([]);
     expect(incompleteCalendar.monthly).toEqual([]);
-    expect(incompleteCalendar.max_drawdown).toBe(null);
+    expect([incompleteCalendar.max_drawdown, incompleteCalendar.drawdown_peak_session, incompleteCalendar.drawdown_trough_session]).toEqual([undefined, undefined, undefined]);
     await expect(page.getByTestId('comparison-calendar-strategy')).toContainText('公司行动事实不完整');
     await expect(page.getByTestId('comparison-monthly-strategy')).toHaveCount(0);
     await expect(page.getByTestId('comparison-drawdown')).toContainText('均没有可用的权威回撤序列');

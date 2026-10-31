@@ -25,8 +25,8 @@ type Metric = { value: number | null; reason: string | null };
 type CalendarPeriod = { label: string; start_basis: 'initial_capital' | 'previous_close'; start_session: string | null; end_session: string; return_value: number };
 type CalendarPoint = { session_date: string; equity: string; nav: number; drawdown: number };
 type CalendarReport = { semantic_version: string; valuation_point: string; initial_capital: string; evaluation_start: string | null; evaluation_end: string | null;
-  sessions: number; available: boolean; reason: string | null; max_drawdown: number | null; drawdown_peak_session: string | null;
-  drawdown_trough_session: string | null; points: CalendarPoint[]; monthly: CalendarPeriod[]; annual: CalendarPeriod[]; missing_months: string[] };
+  sessions: number; available: boolean; reason?: string | null; max_drawdown?: number | null; drawdown_peak_session?: string | null;
+  drawdown_trough_session?: string | null; points: CalendarPoint[]; monthly: CalendarPeriod[]; annual: CalendarPeriod[]; missing_months: string[] };
 type CompleteSummary = { semantic_version: string; currency: string; evaluation_start: string | null; evaluation_end: string | null;
   metrics: Record<string, Metric>; amounts: Record<string, string>; fill_count: number; fee_settlement_count: number; calendar?: CalendarReport | null };
 type Summary = { total_return: number | null; annualized_return: number | null; annualized_volatility: number | null;
@@ -476,7 +476,7 @@ function CalendarRole({ role, label }: { role: RoleResult; label: string }) {
   if (!calendar.available) return <div data-testid={`comparison-calendar-${role.role}`}><ErrorBox>{label}日历报告不可用：{calendarReasonText[calendar.reason ?? ''] ?? calendar.reason ?? '未知原因'}；不显示零收益或零回撤。</ErrorBox></div>;
   return <div data-testid={`comparison-calendar-${role.role}`}>
     <p>{label}：估值时点 <code>{calendar.valuation_point}</code> · 初始资本 {calendar.initial_capital} {complete?.currency ?? ''} · 评价 {calendar.evaluation_start} ～ {calendar.evaluation_end}（{calendar.sessions} Sessions） · 报告 <code>{calendar.semantic_version}</code></p>
-    <p>最大回撤 <b>{calendar.max_drawdown === null ? '不可计算' : pct(calendar.max_drawdown)}</b> · 峰值 {calendar.drawdown_peak_session ?? '无（未出现回撤）'} · 谷值 {calendar.drawdown_trough_session ?? '无'}</p>
+    <p>最大回撤 <b>{calendar.max_drawdown == null ? '不可计算' : pct(calendar.max_drawdown)}</b> · 峰值 {calendar.drawdown_peak_session ?? '无（未出现回撤）'} · 谷值 {calendar.drawdown_trough_session ?? '无'}</p>
     <PeriodTable title={`月度收益（${label}）`} testId={`comparison-monthly-${role.role}`} periods={calendar.monthly} />
     <PeriodTable title={`年度收益（${label}）`} testId={`comparison-annual-${role.role}`} periods={calendar.annual} />
     {calendar.missing_months.length > 0 && <p className="hint" data-testid={`comparison-missing-months-${role.role}`}>无评价 Session 的月份（不填零）：{calendar.missing_months.join('、')}</p>}
