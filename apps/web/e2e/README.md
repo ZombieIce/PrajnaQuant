@@ -194,4 +194,3 @@ per-fixture JSON plus raw logs under the invocation-owned local directory.
 `preparation-timings.jsonl` records each build/fixture step separately; these are
 local software timings, not CI CPU cost or research evidence. No raw browser
 artifacts are uploaded by the PR job.
-
