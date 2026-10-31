@@ -104,7 +104,7 @@ export default function MomentumPage() {
     <Panel title="已保存研究">{recent.map(r => <button disabled={busy} key={r.id} onClick={() => open(r.id)}>打开 {r.id}</button>)}</Panel>
     {report && <><p>{report.report.sample_assumption}</p><p data-testid="factor-semantics">语义 {report.report.semantics} · 方向 {report.report.direction}</p><details><summary>固定输入、来源与可用性假设</summary><pre>{JSON.stringify({ request: report.report.request, sources: report.report.sources }, null, 2)}</pre></details>
       {report.report.evaluation && <Panel title="评价标签">
-        <p data-testid="evaluation-contract">{report.report.evaluation.version} · 统计 {report.report.evaluation.statistics_version ?? '—'} · 下一 Session open 至再后 N Session open；仅作评价，重叠标签不复利为可交易净值。Static Universe，小样本不证明有效性。</p>
+        <p data-testid="evaluation-contract">{report.report.evaluation.version}{report.report.evaluation.statistics_version ? ` · 统计 ${report.report.evaluation.statistics_version}` : ''} · 下一 Session open 至再后 N Session open；仅作评价，重叠标签不复利为可交易净值。Static Universe，小样本不证明有效性。</p>
         <details><summary>标签端点与缺失明细</summary><table data-testid="evaluation-labels"><thead><tr><th>证券</th><th>信号日期</th><th>期限 Session</th><th>入场端点</th><th>退出端点</th><th>后续收益</th><th>状态</th></tr></thead><tbody>{report.report.evaluation.labels.map(r => <tr key={`${r.instrument}:${r.date}:${r.horizon}`}><td>{r.instrument}</td><td>{r.date}</td><td>{r.horizon}</td><td>{r.entry_date ?? '—'}</td><td>{r.exit_date ?? '—'}</td><td>{r.value ?? '—'}</td><td>{r.status}</td></tr>)}</tbody></table></details>
       </Panel>}
       {report.report.factors.map((factor, index) => <Panel key={index} title={`${factorLabel(factor.definition.kind)} ${factor.definition.params.n} Session`}>

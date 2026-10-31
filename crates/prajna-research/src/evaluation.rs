@@ -239,10 +239,10 @@ fn cross_section(xs: &[f64], ys: &[f64]) -> (Option<f64>, Option<f64>, &'static 
     if xs.len() < MINIMUM_CROSS_SECTION {
         return (None, None, "insufficient_cross_section");
     }
-    if distinct(xs) == 1 {
+    if distinct_count(xs) == 1 {
         return (None, None, "zero_variance_factor");
     }
-    if distinct(ys) == 1 {
+    if distinct_count(ys) == 1 {
         return (None, None, "zero_variance_label");
     }
     let pearson_value = pearson(xs, ys);
@@ -269,24 +269,21 @@ fn summary(series: &[StatisticRow]) -> StatisticsSummary {
     let mut reasons = BTreeMap::new();
     let pearson_mean = mean(&pearson, "pearson_ic_mean", &mut reasons);
     let rank_mean = mean(&rank, "rank_ic_mean", &mut reasons);
-    let rank_stddev = if rank.len() < 2 {
-        reasons.insert(
-            "rank_ic_stddev".into(),
-            if rank.is_empty() {
-                "no_evaluated_cross_sections"
-            } else {
-                "insufficient_series"
-            },
-        );
+    let rank_short_reason = if rank.is_empty() {
+        Some("no_evaluated_cross_sections")
+    } else if rank.len() < 2 {
+        Some("insufficient_series")
+    } else {
+        None
+    };
+    let rank_stddev = if let Some(reason) = rank_short_reason {
+        reasons.insert("rank_ic_stddev".into(), reason);
         None
     } else {
         Some(stddev(&rank, rank_mean.unwrap_or_default()))
     };
-    let rank_ir = if rank.is_empty() {
-        reasons.insert("rank_ic_ir".into(), "no_evaluated_cross_sections");
-        None
-    } else if rank.len() < 2 {
-        reasons.insert("rank_ic_ir".into(), "insufficient_series");
+    let rank_ir = if let Some(reason) = rank_short_reason {
+        reasons.insert("rank_ic_ir".into(), reason);
         None
     } else if rank_stddev == Some(0.0) {
         reasons.insert("rank_ic_ir".into(), "zero_dispersion");
@@ -339,7 +336,7 @@ fn stddev(values: &[f64], mean: f64) -> f64 {
 }
 
 /// Counts distinct finite values; ties are equal `f64` values, not close values.
-fn distinct(values: &[f64]) -> usize {
+fn distinct_count(values: &[f64]) -> usize {
     let mut sorted = values.to_vec();
     sorted.sort_by(f64::total_cmp);
     sorted.dedup_by(|left, right| left.total_cmp(right).is_eq());
