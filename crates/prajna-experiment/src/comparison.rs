@@ -203,8 +203,8 @@ fn benchmark_definition(
 /// returns are produced by Rust instead of the browser.
 fn performance_binding(benchmark: Option<Value>) -> Value {
     let mut summary = json!({
-        "semantic_version": "complete-performance@1",
-        "calendar": "calendar-performance@1",
+        "semantic_version": crate::performance::VERSION,
+        "calendar": crate::performance::CALENDAR_VERSION,
     });
     if let Some(benchmark) = benchmark {
         summary["benchmark_definition"] = benchmark;

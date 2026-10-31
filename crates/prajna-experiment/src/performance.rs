@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::Path};
 
-const VERSION: &str = "complete-performance@1";
+pub(crate) const VERSION: &str = "complete-performance@1";
 pub const CALENDAR_VERSION: &str = "calendar-performance@1";
 
 #[derive(Debug, Deserialize)]
@@ -474,11 +474,9 @@ pub(crate) fn complete(
     Ok(())
 }
 
-/// Build the versioned close-valuation calendar report from the same authoritative
-/// close equity sequence used by the complete Summary. The first segment is
-/// measured from initial capital (so entry costs are not reset away); a month or
-/// year without an evaluation Session is absent from the period list and reported
-/// in `missing_months` instead of becoming a zero return.
+/// Build the calendar report from the same close series as the complete Summary.
+/// The first segment starts from initial capital; months without a Session are
+/// listed in `missing_months` instead of becoming zero returns.
 fn build_calendar(
     initial: Notional,
     closes: &[(NaiveDate, Notional)],
@@ -595,8 +593,7 @@ fn build_calendar(
     }
 }
 
-/// Split the close series into calendar periods; the first period starts from
-/// initial capital and every later period from the previous included close.
+/// Split the close series into periods; the first starts from initial capital.
 fn periods(
     series: &[(NaiveDate, f64)],
     initial_value: f64,

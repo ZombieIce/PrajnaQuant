@@ -140,8 +140,10 @@ test('frozen single-ETF comparison reads authoritative roles, reopens, and expos
   expect(await calendarRows(page, 'comparison-monthly-benchmark')).toEqual(expectedPeriods(benchmarkComplete.calendar.monthly));
   await expect(page.getByTestId('comparison-performance-strategy')).toContainText('complete-performance@1');
   await expect(page.getByTestId('comparison-complete-metrics-strategy')).toContainText(`${(strategyComplete.metrics.total_return.value * 100).toFixed(2)}%`);
-  expect(strategyComplete.metrics.calmar.value).not.toBeNull();
-  await expect(page.getByTestId('comparison-complete-metrics-strategy')).toContainText(strategyComplete.metrics.calmar.value.toFixed(3));
+  expect(strategyComplete.metrics.calmar).toEqual({ value: null, reason: 'zero_drawdown' });
+  expect(strategyComplete.metrics.max_drawdown.value).toBe(0);
+  expect(calendar.drawdown_peak_session).toBe(null);
+  await expect(page.getByTestId('comparison-complete-metrics-strategy')).toContainText('最大回撤为零，Calmar 无定义');
   await expect(page.getByTestId('comparison-complete-metrics-strategy')).toContainText(`${(strategyComplete.metrics.benchmark_return.value * 100).toFixed(2)}%`);
   expect(await page.getByTestId('comparison-amounts-strategy').locator('td[data-amount="total_execution_cost"]').innerText()).toBe(strategyComplete.amounts.total_execution_cost);
   expect(await page.getByTestId('comparison-amounts-benchmark').locator('td[data-amount="initial_capital"]').innerText()).toBe(benchmarkComplete.amounts.initial_capital);

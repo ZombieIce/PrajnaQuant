@@ -516,6 +516,37 @@ fn same_number(left: &Value, right: &Value) -> bool {
     }
 }
 
+/// Compare amount spellings by exact decimal value (`10000`, `10000.00`, `1e4`).
+fn same_decimal(left: &Value, right: &Value) -> bool {
+    let parts = |value: &Value| -> Option<(bool, String, i64)> {
+        let value = value.as_str()?;
+        let (negative, value) = match value.strip_prefix('-') {
+            Some(value) => (true, value),
+            None => (false, value.strip_prefix('+').unwrap_or(value)),
+        };
+        let (mantissa, exponent) = match value.split_once('e').or_else(|| value.split_once('E')) {
+            Some((mantissa, exponent)) => (mantissa, exponent.parse::<i64>().ok()?),
+            None => (value, 0),
+        };
+        let (integer, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+        let digits = format!("{integer}{fraction}");
+        let significant = digits.trim_start_matches('0');
+        let trimmed = significant.trim_end_matches('0');
+        if trimmed.is_empty() {
+            return Some((false, "0".into(), 0));
+        }
+        Some((
+            negative,
+            trimmed.into(),
+            exponent - fraction.len() as i64 + (significant.len() - trimmed.len()) as i64,
+        ))
+    };
+    match (parts(left), parts(right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => left == right,
+    }
+}
+
 /// Verify the opt-in complete Summary and calendar report on a frozen role.
 /// Legacy comparisons without the binding stay readable; new frozen roles must
 /// have a persisted report, and incomplete reports are surfaced as reasons
@@ -558,7 +589,10 @@ fn verify_complete_report(
     {
         mismatches.push(format!("{role} calendar evaluation window changed"));
     }
-    if calendar["initial_capital"] != comparison["comparability"]["initial_cash"] {
+    if !same_decimal(
+        &calendar["initial_capital"],
+        &comparison["comparability"]["initial_cash"],
+    ) {
         mismatches.push(format!("{role} calendar initial capital changed"));
     }
     if calendar["available"] != true {
@@ -889,6 +923,26 @@ mod tests {
         let benchmark = result("exp-b", "run-b", &summary);
         let verified = verify_comparison(&comparison, &strategy, &benchmark).unwrap();
         assert_eq!(verified["comparable"], true);
+        // Frozen definitions keep the caller's spelling; the report stores the
+        // canonical scale-18 value. Equivalent spellings must not 409.
+        for spelling in ["1000.00", "1e3"] {
+            let mut equivalent = comparison.clone();
+            equivalent["comparability"]["initial_cash"] = json!(spelling);
+            assert_eq!(
+                verify_comparison(&equivalent, &strategy, &benchmark).unwrap()["comparable"],
+                true,
+                "{spelling}"
+            );
+        }
+        let mut different = comparison.clone();
+        different["comparability"]["initial_cash"] = json!("2000");
+        assert_eq!(
+            verify_comparison(&different, &strategy, &benchmark)
+                .unwrap_err()
+                .0
+                .code,
+            "comparison_result_mismatch"
+        );
 
         let mut missing = summary.clone();
         missing["complete"]
