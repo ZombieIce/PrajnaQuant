@@ -21,6 +21,12 @@ const closeRows = (run: { series?: { account_valuations?: CloseRow[] } }): Close
     .sort((left, right) => left.session_date.localeCompare(right.session_date));
 const position = (row: { positions?: Record<string, { quantity: string }> }) => Object.entries(row.positions ?? {})
   .map(([id, value]) => `${id} ${value.quantity}`).join('；') || '无持仓';
+const calendarRows = async (page: Page, testId: string) => page.getByTestId(testId).locator('tbody tr').evaluateAll((rows) => rows.map((row) => {
+  const data = (row as HTMLTableRowElement).dataset;
+  return { label: data.label, start: data.start, end: data.end, value: data.return };
+}));
+const expectedPeriods = (periods: { label: string; start_session: string | null; end_session: string; return_value: number }[]) =>
+  periods.map((period) => ({ label: period.label, start: period.start_session ?? 'initial_capital', end: period.end_session, value: String(period.return_value) }));
 
 async function catalogDetails(page: Page) {
   const catalog = (await (await page.request.get('/api/v1/datasets')).json()).data.datasets as { dsv: string; normalizer_version: string; sessions: number; bars: number; instruments: number }[];
@@ -109,6 +115,39 @@ test('frozen single-ETF comparison reads authoritative roles, reopens, and expos
   expect(benchmarkRows[1].equity).toBe('10066.991');
   expect(benchmarkRows[1].cash).toBe('976.991');
   expect(result.data.benchmark.runs[0].summary.total_return).toBeCloseTo(0.0066991, 10);
+  const strategyComplete = result.data.strategy.runs[0].summary.complete;
+  const benchmarkComplete = result.data.benchmark.runs[0].summary.complete;
+  expect(strategyComplete.semantic_version).toBe('complete-performance@1');
+  expect(benchmarkComplete.semantic_version).toBe('complete-performance@1');
+  const calendar = strategyComplete.calendar;
+  expect(calendar.semantic_version).toBe('calendar-performance@1');
+  expect(calendar.valuation_point).toBe('close');
+  expect(calendar.initial_capital).toBe('10000');
+  expect(calendar.evaluation_start).toBe('2026-01-06');
+  expect(calendar.evaluation_end).toBe('2026-01-07');
+  expect(calendar.sessions).toBe(2);
+  expect(calendar.available).toBe(true);
+  expect(calendar.monthly).toHaveLength(1);
+  expect(calendar.monthly[0].label).toBe('2026-01');
+  expect(calendar.monthly[0].start_basis).toBe('initial_capital');
+  expect(calendar.monthly[0].start_session).toBe(null);
+  expect(calendar.monthly[0].end_session).toBe('2026-01-07');
+  expect(calendar.max_drawdown).toBeCloseTo(result.data.strategy.runs[0].summary.max_drawdown, 12);
+  const strategyMonthly = await calendarRows(page, 'comparison-monthly-strategy');
+  const strategyAnnual = await calendarRows(page, 'comparison-annual-strategy');
+  expect(strategyMonthly).toEqual(expectedPeriods(calendar.monthly));
+  expect(strategyAnnual).toEqual(expectedPeriods(calendar.annual));
+  expect(await calendarRows(page, 'comparison-monthly-benchmark')).toEqual(expectedPeriods(benchmarkComplete.calendar.monthly));
+  await expect(page.getByTestId('comparison-performance-strategy')).toContainText('complete-performance@1');
+  await expect(page.getByTestId('comparison-complete-metrics-strategy')).toContainText(`${(strategyComplete.metrics.total_return.value * 100).toFixed(2)}%`);
+  expect(strategyComplete.metrics.calmar.value).not.toBeNull();
+  await expect(page.getByTestId('comparison-complete-metrics-strategy')).toContainText(strategyComplete.metrics.calmar.value.toFixed(3));
+  await expect(page.getByTestId('comparison-complete-metrics-strategy')).toContainText(`${(strategyComplete.metrics.benchmark_return.value * 100).toFixed(2)}%`);
+  expect(await page.getByTestId('comparison-amounts-strategy').locator('td[data-amount="total_execution_cost"]').innerText()).toBe(strategyComplete.amounts.total_execution_cost);
+  expect(await page.getByTestId('comparison-amounts-benchmark').locator('td[data-amount="initial_capital"]').innerText()).toBe(benchmarkComplete.amounts.initial_capital);
+  await expect(page.getByTestId('comparison-calendar-strategy')).toContainText('calendar-performance@1');
+  await expect(page.getByTestId('comparison-calendar-strategy')).toContainText(`最大回撤 ${(calendar.max_drawdown * 100).toFixed(2)}%`);
+  await expect(page.getByTestId('comparison-facts')).toContainText('complete-performance@1');
   await expect(page.getByTestId('comparison-facts')).toContainText('2026-01-06 ～ 2026-01-07');
   await expect(page.getByTestId('comparison-facts')).toContainText('10000 CNY');
   await expect(page.getByTestId('comparison-facts')).toContainText('2026-01-07');
@@ -124,6 +163,8 @@ test('frozen single-ETF comparison reads authoritative roles, reopens, and expos
   await page.reload();
   await expect(page.getByTestId('comparison-valuations')).toBeVisible();
   expect(await resultRows(page, 'comparison-valuations')).toEqual(expectedRows);
+  expect(await calendarRows(page, 'comparison-monthly-strategy')).toEqual(strategyMonthly);
+  expect(await calendarRows(page, 'comparison-annual-strategy')).toEqual(strategyAnnual);
   await page.goto('/comparisons');
   await expect(page.getByRole('button', { name: '查看此对照', exact: true }).first()).toBeVisible();
   await page.getByRole('button', { name: '查看此对照', exact: true }).first().click();
@@ -145,6 +186,22 @@ test('frozen single-ETF comparison reads authoritative roles, reopens, and expos
   await page.reload();
   await expect(page.getByTestId('comparison-valuations')).toBeVisible();
   expect(await resultRows(page, 'comparison-valuations')).toEqual(expectedRows);
+
+  const summaryTable = join(lake(), 'experiments', hex(result.data.strategy.exp), 'executions', hex(result.data.strategy.exe),
+    'runs', hex(result.data.strategy.runs[0].run_id), 'summary.parquet');
+  const originalSummary = await readFile(summaryTable);
+  try {
+    await writeFile(summaryTable, Buffer.from('synthetic corrupt complete summary report'));
+    await page.reload();
+    await expect(page.getByRole('heading', { name: '持久对照结果不可用', exact: true })).toBeVisible();
+    await expect(page.getByTestId('comparison-complete-metrics-strategy')).toHaveCount(0);
+    await expect(page.getByTestId('comparison-monthly-strategy')).toHaveCount(0);
+  } finally {
+    await writeFile(summaryTable, originalSummary);
+  }
+  await page.reload();
+  await expect(page.getByTestId('comparison-monthly-strategy')).toBeVisible();
+  expect(await calendarRows(page, 'comparison-monthly-strategy')).toEqual(strategyMonthly);
 
   const comparisonFile = join(lake(), 'tasks', taskId!, 'comparison.json');
   const originalComparison = await readFile(comparisonFile, 'utf8');
@@ -208,6 +265,15 @@ test('equal-weight pool comparison reports incomplete action facts and keeps aut
     expect(result.data.verification.comparable).toBe(false);
     expect(result.data.verification.reasons.some((reason: string) => reason.includes('corporate_actions_incomplete'))).toBe(true);
     expect(result.data.comparability.benchmark_kind).toBe('equal_weight_pool');
+    const incompleteCalendar = result.data.strategy.runs[0].summary.complete.calendar;
+    expect(incompleteCalendar.available).toBe(false);
+    expect(incompleteCalendar.reason).toBe('corporate_actions_incomplete');
+    expect(incompleteCalendar.points).toEqual([]);
+    expect(incompleteCalendar.monthly).toEqual([]);
+    expect(incompleteCalendar.max_drawdown).toBe(null);
+    await expect(page.getByTestId('comparison-calendar-strategy')).toContainText('公司行动事实不完整');
+    await expect(page.getByTestId('comparison-monthly-strategy')).toHaveCount(0);
+    await expect(page.getByTestId('comparison-drawdown')).toContainText('均没有可用的权威回撤序列');
     const strategyRows = closeRows(result.data.strategy.runs[0]);
     const benchmarkRows = closeRows(result.data.benchmark.runs[0]);
     expect(strategyRows.map((row) => row.equity)).not.toEqual(benchmarkRows.map((row) => row.equity));

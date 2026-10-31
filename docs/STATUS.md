@@ -72,7 +72,7 @@ POC-0 已按获确认的拆分发布为 [13 张本地执行票据](../.scratch/p
 
 研究池 `/pools` 已提供 Spec 三池 13 只 ETF 的持久草稿/不可变发布、显式旧版读取及固定 Dataset 元数据；经新平台 CLI 发布既有 StaticUniverse，旧 UUID Universe 与单证券身份保持兼容。单 Venue 与沪深同池（XSHG+XSHE；#295/T06c）已发布版本均可经现有选择/任务入口冻结和提交，后续编辑不改旧任务；多 Venue 冻结写真实 `venues` 并使用 `full_target`/`fast_event@14`，页面显示池/DSV/Venue/引擎身份，共享轴不一致返回结构性错误。合成 CLI/浏览器手算与生产入口 E2E 的验证范围见[研究池契约](contracts/research-pools.md)；多单证券 Dataset 装配、真实行情、完整 PIT 及公司行动总回报未验证。
 
-完整绩效 Summary 已提供显式 `complete-performance@1` 定义/CLI 保存读取：首日成本纳入 close 权益收益、252 年化、Calmar、冻结持有基准/超额、执行费用金额/费率与事件次数分列，逐指标不可计算原因；旧定义/存档不升级。合成手算账本与 CLI replay/promotion 覆盖见 [ADR 0036](decisions/0036-versioned-complete-performance-summary.md)；页面/日历图、真实总回报验收尚未交付。
+完整绩效 Summary 已提供显式 `complete-performance@1` 定义/CLI 保存读取：首日成本纳入 close 权益收益、252 年化、Calmar、冻结持有基准/超额、执行费用金额/费率与事件次数分列，逐指标不可计算原因；旧定义/存档不升级。合成手算账本与 CLI replay/promotion 覆盖见 [ADR 0036](decisions/0036-versioned-complete-performance-summary.md)。同日 [#379](https://github.com/ZombieIce/PrajnaQuant/issues/379) 交付显式 `calendar-performance@1` 报告与策略—基准完整绩效页面：权威 close 回撤/峰谷、月/年收益、缺月与不可用原因，页面/E2E 只读保存值；见 [ADR 0037](decisions/0037-authoritative-calendar-report-and-performance-page.md)。仍为合成范围，真实总回报验收尚未交付。
 
 ### MVP 收口现状（2026-10-26）
 
