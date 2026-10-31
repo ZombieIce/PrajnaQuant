@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
+const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
 
 test('saved native details distinguish fills, deferral, skipped buys, empty tables, and missing levels', async ({ page }) => {
   test.setTimeout(240_000);

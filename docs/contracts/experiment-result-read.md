@@ -61,7 +61,7 @@ prajna-experiment result <exp> <exe> --lake <lake> [--run <run-id>]
 - `tables.saved`、`tables.not_saved`、`tables.not_produced_by_engine` 来自 Execution manifest。`saved` 表示该表已通过 logical hash 校验，而不是“存在但未验证”；缺表不得显示为零交易、零值或已保存。
 - `details` 是其余已保存非 Summary 表的对象，按表名返回原生行（包括订单、成交、费用结算、执行尝试、权重、pending、行动账本及已有 Backend 审计）。仅已保存表有键；已保存空表是 `[]`，不把未保存或引擎不产生的表补成空数组。payload 中已有字段优先，附加 Arrow 列只补缺字段，避免 JSON 数组被辅助字符串列替换。
 - 明细中的 `executed_at/submitted_at/attempted_at/ts_open` 数字或 RFC3339 时间统一转为十进制字符串，单位 Unix ns，避免浏览器 Number 丢精度；其他金额、数量仍保留原生字符串，Vector 比例保留原生 number。
-- `allocations` 是从已保存 `account_valuations` 读取的 Rust 展示投影；未保存该表为 `null`，已保存空表为 `[]`。每行保留日期/估值点、现金、权益、账户级未分配资本、两类应收、持仓数量/价格/市值，并补 `cash_weight`、两类应收 `*_weight`、逐证券 `weight`。权重 = 对应已保存金额 / 含应收总权益，使用既有 scale-18 定点除法，ties-to-even；不改变成交、账户或持久文件。应收计权益但不可花费，现金权重不含应收。缺字段/非法金额/非正权益不能算权重，返回 `null`；总权益不可用时附 `weight_unavailable_reason=missing_or_nonpositive_equity`。不从缺字段反推零持仓/零现金。
+- `allocations` 是从已保存 `account_valuations` 读取的 Rust 展示投影；未保存该表为 `null`，已保存空表为 `[]`。每行保留日期/估值点、现金、权益、`unallocated_capital`、两类应收、持仓数量/价格/市值，并补 `cash_weight`、两类应收 `*_weight`、逐证券 `weight`。`unallocated_capital` 是账户级未分配资本，账户 `cash` 已包含该金额，但组合不能直接支配；旧 payload 缺该字段时为 `null`。权重 = 对应已保存金额 / 含应收总权益，使用既有 scale-18 定点除法，ties-to-even；不改变成交、账户或持久文件。应收计权益但不可花费，现金权重不含应收。缺字段/非法金额/非正权益不能算权重，返回 `null`；总权益不可用时附 `weight_unavailable_reason=missing_or_nonpositive_equity`。不从缺字段反推零持仓/零现金。
 - `units` 包含 `currency`、`weight=fraction_of_total_equity`、`vector_cost=fraction_of_previous_nav`、`timestamp=unix_nanoseconds`。币种读取已保存 canonical `experiment.json` 的 `fast_event.currency`，并核验该文件内容身份；文件缺失或 Vector 无账户币种时为 `null`，不假设 CNY。缺定义文件仍可读已保存表；定义存在但损坏/身份不符则读取失败。不依赖原行情或重新运行。
 
 ## 明细页面（T21）
