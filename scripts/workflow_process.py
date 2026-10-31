@@ -1,6 +1,7 @@
 """Lifecycle of one foreground verification, including nested recorders (POSIX)."""
 from __future__ import annotations
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -21,12 +22,14 @@ class ProcessControlError(Exception):
 
 def process_table():
     try:
-        result = subprocess.run(['ps', '-axo', 'pid=,ppid=,pgid=,stat='],
-                                capture_output=True, text=True, timeout=5)
+        result = subprocess.run(['ps', '-axo', 'pid=,ppid=,pgid=,stat=,uid=,lstart='],
+                                capture_output=True, text=True, timeout=5,
+                                env={**os.environ, 'LC_ALL': 'C', 'TZ': 'UTC'})
         if result.returncode:
             raise ProcessControlError('process ownership inspection unavailable')
-        return {int(pid): (int(parent), int(group), state) for pid, parent, group, state in
-                (line.split() for line in result.stdout.splitlines())}
+        return {int(pid): (int(parent), int(group), state, birth)
+                for pid, parent, group, state, uid, birth in
+                (line.split(maxsplit=5) for line in result.stdout.splitlines()) if int(uid) == os.getuid()}
     except (OSError, ValueError, subprocess.TimeoutExpired):
         raise ProcessControlError('process ownership inspection unavailable') from None
 
@@ -39,10 +42,35 @@ def process_birth(pid):
     return result.stdout.strip()
 
 
+def scope_context(root, node):
+    # A whitespace-free value is observable through both /proc and macOS ps.
+    return base64.urlsafe_b64encode(json.dumps([str(root), node]).encode()).decode()
+
+
+def process_scope(pid):
+    """Read only the reserved scope value; never log process arguments/environment."""
+    try:
+        if sys.platform == 'linux':
+            values = Path(f'/proc/{pid}/environ').read_bytes().split(b'\0')
+        else:
+            result = subprocess.run(['ps', 'eww', '-p', str(pid), '-o', 'command='],
+                                    capture_output=True, timeout=5)
+            if result.returncode:
+                raise ProcessLookupError
+            values = result.stdout.split()
+        prefix = (SCOPE_ENV + '=').encode()
+        return next((v[len(prefix):].decode('ascii') for v in values if v.startswith(prefix)), None)
+    except (OSError, UnicodeError, subprocess.TimeoutExpired):
+        row = process_table().get(pid)
+        if row is None or row[2].startswith('Z'):
+            return None
+        raise ProcessControlError('verification scope inspection unavailable') from None
+
+
 def descendants(table, seeds):
     owned = set(seeds)
     while True:
-        more = {pid for pid, (parent, _, _) in table.items() if parent in owned} - owned
+        more = {pid for pid, row in table.items() if row[0] in owned} - owned
         if not more:
             return owned
         owned.update(more)
@@ -60,21 +88,25 @@ def send_group(group, sig):
 class OwnedRun:
     """Private inherited registry retains nested group ownership after reparenting.
 
-    Registry discovery is confined to the root's private directory. Process snapshots
-    also capture detached foreground descendants such as Playwright's web server.
+    Registry discovery is confined to the root's private directory. New same-UID
+    processes are checked only for the inherited private scope value; this also
+    finds non-recorder detached descendants after their parent has exited.
     No caller-supplied PID/group is accepted as a control target.
     """
     def __init__(self, command, cwd, env, stream):
         self.child = None
         self.groups = set()
+        self.leases = {}
         self.node = uuid.uuid4().hex
         self.root = None
         self.owner = False
+        self.nodes = {self.node}
         table = process_table()  # Fail before starting work when ownership is unobservable.
+        self.baseline = {pid: row[3] for pid, row in table.items()}
         context = env.get(SCOPE_ENV)
         if context:
             try:
-                directory, parent = json.loads(context)
+                directory, parent = json.loads(base64.urlsafe_b64decode(context))
                 self.root = Path(directory)
                 info = self.root.stat()
                 root_pid = json.loads((self.root / 'owner.json').read_text())['pid']
@@ -92,7 +124,7 @@ class OwnedRun:
             (self.root / 'owner.json').write_text(json.dumps({'pid': os.getpid()}))
             parent = None
         self.parent = parent
-        child_env = {**env, SCOPE_ENV: json.dumps([str(self.root), self.node])}
+        child_env = {**env, SCOPE_ENV: scope_context(self.root, self.node)}
         read_fd, write_fd = os.pipe()
         try:
             # Exec is released only after the private ownership registration is visible.
@@ -105,6 +137,8 @@ class OwnedRun:
             pending.write_text(json.dumps({'parent': parent, 'group': self.child.pid,
                                            'birth': process_birth(self.child.pid)}))
             pending.replace(self.root / f'{self.node}.json')
+            if process_scope(self.child.pid) != child_env[SCOPE_ENV]:
+                raise ProcessControlError('verification scope inheritance unobservable')
             os.write(write_fd, b'1')
         except BaseException:
             if self.child is not None:
@@ -126,7 +160,7 @@ class OwnedRun:
                 entries[path.stem] = json.loads(path.read_text())
             except FileNotFoundError:
                 continue  # Another completed recorder already verified and removed its entry.
-        nodes = {self.node}
+        nodes = set(self.nodes)
         while True:
             more = {n for n, row in entries.items() if row['parent'] in nodes} - nodes
             if not more:
@@ -154,18 +188,40 @@ class OwnedRun:
             groups.add(group)
         return groups
 
+    def discover(self):
+        self.groups.update(self.registered_groups())
+        table = process_table()
+        for group, birth in self.leases.items():
+            if group in table and table[group][3] != birth:
+                self.groups.discard(group)
+                raise ProcessControlError('verification group identity changed')
+        contexts = {scope_context(self.root, node) for node in self.nodes}
+        # Inspect only new same-UID processes. The inherited private token retains
+        # ownership when a short-lived parent exits before the first snapshot.
+        tagged = {pid for pid, row in table.items()
+                  if not row[2].startswith('Z') and self.baseline.get(pid) != row[3]
+                  and process_scope(pid) in contexts}
+        seeds = tagged | {pid for pid, row in table.items() if row[1] in self.groups}
+        owned = descendants(table, seeds)
+        for pid in owned:
+            group = table[pid][1]
+            if group in self.groups:
+                continue
+            members = {p for p, row in table.items() if row[1] == group and not row[2].startswith('Z')}
+            if group == os.getpgrp() or not members <= owned:
+                raise ProcessControlError('owned process joined an unowned group')
+            self.groups.add(group)
+            if group in table:
+                self.leases[group] = table[group][3]
+        return {row[1] for row in table.values() if row[1] in self.groups and not row[2].startswith('Z')}
+
     def close(self):
-        """Freeze creators before TERM, then KILL survivors even if the leader exited."""
+        """Discover through shutdown: TERM handlers may create detached work too."""
         try:
-            # Freeze until discovery stabilizes, including registrations racing cancellation.
             stable = 0
             for _ in range(16):
                 previous = set(self.groups)
-                self.groups.update(self.registered_groups())
-                table = process_table()
-                seeds = {pid for pid, (_, group, _) in table.items() if group in self.groups}
-                owned = descendants(table, seeds)
-                self.groups.update(pid for pid in owned if table[pid][1] == pid)
+                self.discover()
                 for group in self.groups:
                     send_group(group, signal.SIGSTOP)
                 stable = stable + 1 if self.groups == previous else 0
@@ -178,22 +234,24 @@ class OwnedRun:
                 send_group(group, signal.SIGCONT)
             deadline = time.monotonic() + 0.5
             while True:
-                table = process_table()
-                alive = {group for _, group, state in table.values()
-                         if group in self.groups and not state.startswith('Z')}
+                alive = self.discover()
                 if not alive or time.monotonic() >= deadline:
                     break
                 time.sleep(0.02)
-            for group in alive:
-                send_group(group, signal.SIGKILL)
-            if self.child is not None:
-                self.child.wait(timeout=5)
+            # Re-discover on every pass, including after KILL and leader reaping.
+            # Never return based solely on the pre-TERM set of process groups.
             deadline = time.monotonic() + 2
-            while any(group in self.groups and not state.startswith('Z')
-                      for _, group, state in process_table().values()):
+            while True:
+                alive = self.discover()
+                if not alive:
+                    break
+                for group in alive:
+                    send_group(group, signal.SIGKILL)
                 if time.monotonic() >= deadline:
                     raise ProcessControlError('owned verification processes remain')
                 time.sleep(0.02)
+            if self.child is not None:
+                self.child.wait(timeout=5)
             for node in getattr(self, 'nodes', {self.node}):
                 (self.root / f'{node}.json').unlink(missing_ok=True)
             if self.owner:

@@ -524,6 +524,15 @@ class OwnedLifecycleTests(unittest.TestCase):
                 parent.write_text('import subprocess,sys\n'
                     f'p=subprocess.Popen([sys.executable,{str(bridge)!r}],start_new_session=True)\n'
                     'p.wait()\n')
+            elif reason in ('term_spawn', 'disk_spawn'):
+                parent.write_text('import signal,subprocess,sys,time\nfrom pathlib import Path\n'
+                    'def stop(*_):\n'
+                    f'    subprocess.Popen([sys.executable,{str(leaf)!r}],start_new_session=True)\n'
+                    f'    while not Path({str(pid_file)!r}).exists(): time.sleep(0.01)\n'
+                    '    sys.exit(0)\n'
+                    'signal.signal(signal.SIGTERM, stop)\n'
+                    f'Path({str(root/"ready")!r}).touch()\n'
+                    'while True: time.sleep(0.01)\n')
             elif reason == 'race':
                 parent.write_text('import subprocess,sys,time\nfrom pathlib import Path\n'
                     f'while not Path({str(root/"release")!r}).exists(): time.sleep(0.01)\n'
@@ -531,19 +540,19 @@ class OwnedLifecycleTests(unittest.TestCase):
                     'time.sleep(30)\n')
             else:
                 parent.write_text('import subprocess,sys,time\nfrom pathlib import Path\n'
-                    f'subprocess.Popen([sys.executable,{str(leaf)!r}])\n'
+                    f'subprocess.Popen([sys.executable,{str(leaf)!r}],start_new_session={reason == "detached_normal"!r})\n'
                     f'while not Path({str(pid_file)!r}).exists(): time.sleep(0.01)\n'
-                    + ("print('test result: ok. 1 passed; 0 failed; 0 ignored;')\n" if reason == 'normal'
+                    + ("print('test result: ok. 1 passed; 0 failed; 0 ignored;')\n" if reason in ('normal', 'detached_normal')
                        else 'time.sleep(30)\n'))
             outsider = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'],
                                         start_new_session=True, stdout=subprocess.DEVNULL)
             try:
                 args = argparse.Namespace(command=[sys.executable, str(parent)], log=str(root/'outer.log'),
-                    output=None, timeout=2 if reason in ('timeout', 'race') else 15, kind='cargo', executor='synthetic-outer',
+                    output=None, timeout=2 if reason in ('timeout', 'race', 'term_spawn') else 15, kind='cargo', executor='synthetic-outer',
                     selection='owned lifecycle counterexample', allow_empty=None, allow_skips=None)
-                if reason == 'disk':
+                if reason in ('disk', 'disk_spawn'):
                     def space(_):
-                        return MagicMock(free=(9 if pid_file.exists() else 20)*1024**3)
+                        return MagicMock(free=(9 if (root/'ready' if reason == 'disk_spawn' else pid_file).exists() else 20)*1024**3)
                     with patch.object(w.shutil, 'disk_usage', side_effect=space):
                         report = w.record(args)
                 elif reason == 'race':
@@ -568,7 +577,8 @@ class OwnedLifecycleTests(unittest.TestCase):
                 self.assertTrue(pid not in table or table[pid][2].startswith('Z'), 'owned descendant survived return')
                 self.assertFalse(marker.exists(), 'owned descendant continued writing after cancellation')
                 self.assertIsNone(outsider.poll(), 'unrelated sibling must remain alive')
-                self.assertEqual(report['exit_code'], {'timeout': 124, 'race': 124, 'disk': 125, 'normal': 0}[reason],
+                self.assertEqual(report['exit_code'], {'timeout': 124, 'race': 124, 'term_spawn': 124, 'disk_spawn': 125,
+                                                          'disk': 125, 'normal': 0, 'detached_normal': 0}[reason],
                                  (root/'outer.log').read_text()[-2000:])
                 if nested:
                     self.assertFalse((root/'inner.log').read_text(), 'terminated inner command has no false pass')
@@ -594,7 +604,7 @@ class OwnedLifecycleTests(unittest.TestCase):
                 args = argparse.Namespace(command=[sys.executable, '-c', "print('test result: ok. 1 passed; 0 failed; 0 ignored;')"],
                     log=str(root/'refused.log'), output=None, timeout=5, kind='cargo', executor='synthetic',
                     selection='unrelated scope', allow_empty=None, allow_skips=None)
-                with patch.dict(os.environ, {control.SCOPE_ENV: json.dumps([str(root), '0'*32])}):
+                with patch.dict(os.environ, {control.SCOPE_ENV: control.scope_context(root, '0'*32)}):
                     result = w.record(args)
                 self.assertEqual(result['exit_code'], 126)
                 self.assertEqual(result['stopped_reason'], 'ownership_or_cleanup_unverified')
@@ -604,6 +614,39 @@ class OwnedLifecycleTests(unittest.TestCase):
             finally:
                 outsider.terminate()
                 outsider.wait(timeout=5)
+
+    def test_unobservable_inherited_marker_refuses_before_command_exec(self):
+        import workflow_process as control
+        with tempfile.TemporaryDirectory() as d:
+            marker = Path(d)/'executed'
+            with (Path(d)/'local.log').open('w') as stream, \
+                 patch.object(control, 'process_scope', return_value=None):
+                with self.assertRaises(control.ProcessControlError):
+                    control.OwnedRun([sys.executable, '-c',
+                        f'from pathlib import Path; Path({str(marker)!r}).touch()'],
+                        w.ROOT, dict(os.environ), stream)
+            self.assertFalse(marker.exists())
+
+    def test_unrelated_process_started_after_baseline_is_not_owned(self):
+        import workflow_process as control
+        with tempfile.TemporaryDirectory() as d, (Path(d)/'local.log').open('w') as stream:
+            owned = control.OwnedRun([sys.executable, '-c', 'import time; time.sleep(30)'],
+                                     w.ROOT, dict(os.environ), stream)
+            outsider = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'],
+                                        start_new_session=True)
+            try:
+                owned.close()
+                self.assertIsNone(outsider.poll())
+            finally:
+                outsider.terminate()
+                outsider.wait(timeout=5)
+
+    def test_linux_scope_extraction_discards_other_environment_values(self):
+        import workflow_process as control
+        with patch.object(control.sys, 'platform', 'linux'), \
+             patch.object(control.Path, 'read_bytes', return_value=b'OTHER=private\0' +
+                          control.SCOPE_ENV.encode() + b'=synthetic-scope\0'):
+            self.assertEqual(control.process_scope(123), 'synthetic-scope')
 
     def test_reused_group_identity_is_excluded_from_failure_cleanup(self):
         import workflow_process as control
@@ -639,6 +682,15 @@ class OwnedLifecycleTests(unittest.TestCase):
 
     def test_successful_leader_does_not_leave_background_work(self):
         self.check_stopped(False, 'normal')
+
+    def test_successful_leader_with_detached_nonrecorder_leaf(self):
+        self.check_stopped(False, 'detached_normal')
+
+    def test_term_handler_detached_leaf_is_discovered_after_parent_exit(self):
+        self.check_stopped(False, 'term_spawn')
+
+    def test_disk_stop_term_handler_detached_leaf_is_discovered(self):
+        self.check_stopped(False, 'disk_spawn')
 
     def test_nested_recorder_in_detached_server_is_stopped(self):
         self.check_stopped(True, 'timeout')
