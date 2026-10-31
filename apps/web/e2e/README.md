@@ -176,6 +176,13 @@ validation is implied.
 
 `factor-research.spec.ts` 覆盖 #299：同一生产因子研究页选择 Volatility v1 与新增严格均线趋势 `trend_filter_strict` v1，修改窗口后经真实任务/CLI 保存报告，核对持久 report 的 semantics/direction/definition/时序值与页面表格/图表一致；严格趋势窗口 1（close 等于自身均值）逐值为 0，窗口 60 在合成递增复权序列上为 1；波动率窗口 1 的失败任务经页面可见。`momentum.spec.ts` 继续覆盖旧动量路径，两者共用同一 fixture/服务生命周期且报告互不覆盖。
 
+`result-details.spec.ts` 覆盖 T21：运行期间复用 `timing.rs` 的十 Session
+生产发布 fixture，通过正式原生任务提交/CLI/结果 API，在 `/backtests` 核对
+成交金额、佣金/最低补足/税/滑点与单位、Rust 实际权重、延期/跳过/期末
+pending、零成交且保留现金以及 Standard/Summary 未保存差异，刷新重读。
+新增 Dataset manifests 在 finally 从目录恢复移除，保留结果/日志在本次临时
+合成 lake；不影响其他测试的固定目录数。独立金额 golden 仍由 Rust timing
+测试验证，真实数据未参与。
 
 The #371 PR workflow now runs this suite for approved affected paths, using
 Node 22, Python 3.12 and locked Chromium on Ubuntu. Its required `lightweight`
@@ -187,3 +194,4 @@ per-fixture JSON plus raw logs under the invocation-owned local directory.
 `preparation-timings.jsonl` records each build/fixture step separately; these are
 local software timings, not CI CPU cost or research evidence. No raw browser
 artifacts are uploaded by the PR job.
+

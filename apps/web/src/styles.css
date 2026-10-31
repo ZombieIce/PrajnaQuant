@@ -40,3 +40,4 @@
 @media(max-width:900px){.backtests-page .metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
 
 .pools-page textarea{display:block;width:min(100%,640px);min-height:150px;margin-top:8px;padding:10px;border:1px solid #cbd5e1;border-radius:6px;font:inherit;line-height:1.6;resize:vertical}
+.native-result-details dl{margin:0}.native-result-details dl>div{display:grid;grid-template-columns:minmax(130px,180px) minmax(0,1fr);gap:8px;padding:3px 0;border-bottom:1px solid #f1f5f9}.native-result-details dt{color:#64748b}.native-result-details dd{margin:0;overflow-wrap:anywhere}.native-result-details td{vertical-align:top}.native-result-details h3{margin-top:24px}.native-result-details .table-wrap{max-height:700px;overflow:auto}.native-result-details table{min-width:640px}

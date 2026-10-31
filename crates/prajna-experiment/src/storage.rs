@@ -28,7 +28,7 @@ use crate::{
 use prajna_research::vector::VectorResult;
 
 static NEXT_STAGE: AtomicU64 = AtomicU64::new(0);
-const NOT_PRODUCED_BY_ENGINE: [&str; 3] = ["orders", "fills", "cash_ledger"];
+const NOT_PRODUCED_BY_ENGINE: [&str; 4] = ["orders", "fills", "cash_ledger", "fee_settlements"];
 const FAST_STANDARD: [&str; 3] = [
     "account_valuations",
     "portfolio_valuations",
@@ -935,7 +935,7 @@ pub fn diff_executions(
     })
 }
 
-fn experiment_root(lake_root: &Path, experiment_id: &str) -> PathBuf {
+pub(crate) fn experiment_root(lake_root: &Path, experiment_id: &str) -> PathBuf {
     lake_root
         .join("experiments")
         .join(identity_hex(experiment_id).unwrap_or_default())
