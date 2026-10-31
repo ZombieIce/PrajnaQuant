@@ -347,6 +347,24 @@ class VerificationTests(unittest.TestCase):
             args = self.args(Path(d), '', command=[sys.executable, '-c', 'import time; time.sleep(5)'], timeout=1)
             self.assertEqual(w.record(args)['exit_code'], 124)
 
+    def test_disk_floor_refuses_new_process(self):
+        with tempfile.TemporaryDirectory() as d:
+            args = self.args(Path(d), 'test result: ok. 1 passed; 0 failed; 0 ignored;')
+            with patch.object(w.shutil, 'disk_usage', return_value=MagicMock(free=9*1024**3)), patch.object(w.subprocess, 'Popen') as child, patch.object(w, 'commit', return_value=HEAD), patch.object(w, 'git', return_value=''), patch.object(w, 'runtime_version', return_value='synthetic'):
+                report = w.record(args)
+            child.assert_not_called()
+            self.assertEqual(report['exit_code'], 125)
+            self.assertEqual(report['stopped_reason'], 'disk_reserve_before_start')
+
+    def test_disk_floor_stops_owned_process(self):
+        with tempfile.TemporaryDirectory() as d:
+            args = self.args(Path(d), '', command=[sys.executable, '-c', 'import time; time.sleep(10)'])
+            with patch.object(w.shutil, 'disk_usage', side_effect=[MagicMock(free=20*1024**3), MagicMock(free=9*1024**3)]):
+                report = w.record(args)
+            self.assertEqual(report['exit_code'], 125)
+            self.assertEqual(report['stopped_reason'], 'disk_reserve_during_run')
+            self.assertEqual(report['result'], 'failed')
+
     def test_source_log_path_rejected(self):
         with tempfile.TemporaryDirectory() as d:
             args = self.args(Path(d), '', log=str(w.ROOT/'private.log'))

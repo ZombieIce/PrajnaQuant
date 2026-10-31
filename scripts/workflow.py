@@ -18,6 +18,7 @@ from urllib.parse import quote
 
 TRIAGE = frozenset({'needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'wontfix'})
 ROOT = Path(__file__).resolve().parents[1]
+DISK_RESERVE = 10 * 1024**3
 
 
 class EvidenceError(Exception):
@@ -375,25 +376,44 @@ def record(args):
     if log.is_relative_to(ROOT):
         raise EvidenceError('error', 'raw test logs must be outside the repository')
     start = time.monotonic()
-    # Exclusive creation preserves prior evidence; child output never forwarded to public CI logs.
+    stopped_reason = None
+    minimum_free = shutil.disk_usage(ROOT).free
+    # Exclusive creation preserves prior evidence; child output stays local.
     with log.open('x') as stream:
-        try:
-            child = subprocess.Popen(command, cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT,
-                                     start_new_session=True,
-                                     env={**os.environ, 'NO_COLOR': '1', 'CARGO_TERM_COLOR': 'never'})
+        if minimum_free < DISK_RESERVE:
+            exit_code, stopped_reason = 125, 'disk_reserve_before_start'
+        else:
             try:
-                exit_code = child.wait(timeout=args.timeout)
-            except subprocess.TimeoutExpired:
-                # Only the process group created by this invocation; never attach to existing services.
-                os.killpg(child.pid, signal.SIGTERM)
-                try:
-                    child.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(child.pid, signal.SIGKILL)
-                    child.wait()
-                exit_code = 124
-        except OSError:
-            exit_code = 127
+                child = subprocess.Popen(command, cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT,
+                                         start_new_session=True,
+                                         env={**os.environ, 'NO_COLOR': '1', 'CARGO_TERM_COLOR': 'never'})
+                deadline = start + args.timeout
+                while child.poll() is None:
+                    minimum_free = min(minimum_free, shutil.disk_usage(ROOT).free)
+                    if minimum_free < DISK_RESERVE:
+                        stopped_reason = 'disk_reserve_during_run'
+                        break
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        stopped_reason = 'timeout'
+                        break
+                    try:
+                        child.wait(timeout=min(1, remaining))
+                    except subprocess.TimeoutExpired:
+                        pass
+                if stopped_reason:
+                    # Only the process group created by this invocation.
+                    os.killpg(child.pid, signal.SIGTERM)
+                    try:
+                        child.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(child.pid, signal.SIGKILL)
+                        child.wait()
+                    exit_code = 124 if stopped_reason == 'timeout' else 125
+                else:
+                    exit_code = child.returncode
+            except OSError:
+                exit_code = 127
     parsed = counts(log.read_text(errors='replace'), args.kind)
     valid = bool(parsed) and parsed['failed'] == 0 and (parsed['executed'] > 0 or bool(args.allow_empty))
     if parsed and args.kind != 'cargo' and parsed['skipped'] and not args.allow_skips:
@@ -406,6 +426,7 @@ def record(args):
                               'rust': runtime_version(['rustc', '--version']),
                               'browser_executable': os.environ.get('PRAJNA_CHROME_EXECUTABLE', 'unverified')},
               'counts': parsed, 'exit_code': exit_code, 'seconds': round(time.monotonic()-start, 3),
+              'stopped_reason': stopped_reason, 'minimum_free_gib': round(minimum_free/1024**3, 2),
               'allow_empty_reason': args.allow_empty, 'allow_skips_reason': args.allow_skips,
               'ignored_policy': 'cargo ignored are recorded; positive executed count still required'}
     if args.output:
