@@ -11,6 +11,8 @@ python3.12 scripts/workflow.py size --base <固定base> --head <固定head> --es
 python3.12 scripts/workflow.py preflight --browser <Chromium可执行文件>
 ```
 
+`preflight` 的总结果要求Rust/npm可用且输出有效，缺失或空输出报gaps；gh仅为本机浏览器验证的信息项，inspect/cleanup实际调用时仍必需。
+
 `inspect` 只访问明确仓库/Issue/PR：检查 open、唯一 ready-for-agent、认领冲突、正文和原生依赖、closed/completed 前置、当前 head 的 ready/review 声明及 required checks。`not_planned` 不满足前置；404 不推定为空，缺权限/元数据/状态竞态分别报告。正文只解析 `Blocked by` 中的前导依赖列表，括号内的 PR/来源不算 blocker。跨仓库依赖报告待核实，不将同号本仓票代入。
 
 评论采用严格可识别声明：`**Implementer:** Ready for independent review at <SHA>.`；review 索引行 `**Independent reviewer:** Reviewed head: <SHA>`。支持 7–40 位代码 SHA；无法识别报缺口，不从评论任意出现的 SHA 猜结论。声明只证明存在，不证明独立上下文、发现解决、验收完整或审查有效。使用新的异形声明须人工核对；不要为工具通过而补造审查。
@@ -43,7 +45,7 @@ python3.12 scripts/workflow.py run --kind unittest --executor implementer \
   -- python3.12 -m unittest tests.test_workflow -v
 ```
 
-支持 Cargo libtest、Python unittest、Playwright list reporter 汇总；不认识的输出失败，单纯 build/discovery 不算执行。记录显式命令/选择、执行者、代码 SHA、环境、数量、结果和 wall time；SHA在开始时固定，结束时再记录ending_sha；运行中head变化标source_changed（返回2），不能把旧执行归到新head。dirty起止状态同时记录；dirty执行要求人工说明范围及对最终head的适用依据，工具不推定dirty内容稳定。原始日志必须在仓库外，文件独占创建，不覆盖历史证据；子输出不回显，敏感内容仍仅本机保存。显式 `--timeout` 超时终止本次拥有的进程组；启动前及运行中监测10GiB磁盘保留线，不足拒绝/停止并记录exit125、原因及最小余量。只控制本次拥有的进程组，不连接已有服务。
+支持 Cargo libtest、Python unittest、Playwright list reporter 汇总；不认识的输出失败，单纯 build/discovery 不算执行。记录显式命令/选择、执行者、代码 SHA、环境、数量、结果和 wall time；SHA在开始时固定，结束时再记录ending_sha；运行中head变化标source_changed（返回2），不能把旧执行归到新head。dirty起止状态同时记录；dirty执行要求人工说明范围及对最终head的适用依据，工具不推定dirty内容稳定。原始日志必须在仓库外，文件独占创建，不覆盖历史证据；子输出不回显，敏感内容仍仅本机保存。显式 `--timeout` 超时终止本次拥有的进程组；启动前及运行中监测10GiB磁盘保留线，不足拒绝/停止并记录exit125、原因及最小余量。通过私有继承运行范围登记本次创建的进程组，执行前完成登记后再放行命令；停止时先冻结创建者并收集嵌套recorder/可观测的detached前台后代，再TERM、对残存组员KILL并确认。组首先退出不代表清理完成；嵌套调用保留自动传递的范围标记，不能手工设置或借用其他运行范围。只控制已确认属于本次调用的工作，不连接已有服务；进程可见性或清理无法确认则失败，不报告已完成。
 
 - 零执行默认失败；明确允许空集时传 `--allow-empty '适用理由'`，仍须有可信汇总，不能把缺日志当空集通过。
 - Cargo 默认 ignored 测试单列，实际执行正数即可；选择要求 ignored 时显式 `-- --ignored --exact`。手写 fixture 的生产浏览器准备已接入此记录器，四个导出必须实际执行，且保留原产物检查。

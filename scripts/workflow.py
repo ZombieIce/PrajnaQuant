@@ -16,6 +16,8 @@ import sys
 import time
 from urllib.parse import quote
 
+from workflow_process import OwnedRun, ProcessControlError
+
 TRIAGE = frozenset({'needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'wontfix'})
 ROOT = Path(__file__).resolve().parents[1]
 DISK_RESERVE = 10 * 1024**3
@@ -386,36 +388,30 @@ def record(args):
             exit_code, stopped_reason = 125, 'disk_reserve_before_start'
         else:
             try:
-                child = subprocess.Popen(command, cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT,
-                                         start_new_session=True,
-                                         env={**os.environ, 'NO_COLOR': '1', 'CARGO_TERM_COLOR': 'never'})
-                deadline = start + args.timeout
-                while child.poll() is None:
-                    minimum_free = min(minimum_free, shutil.disk_usage(ROOT).free)
-                    if minimum_free < DISK_RESERVE:
-                        stopped_reason = 'disk_reserve_during_run'
-                        break
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        stopped_reason = 'timeout'
-                        break
-                    try:
-                        child.wait(timeout=min(1, remaining))
-                    except subprocess.TimeoutExpired:
-                        pass
-                if stopped_reason:
-                    # Only the process group created by this invocation.
-                    os.killpg(child.pid, signal.SIGTERM)
-                    try:
-                        child.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        os.killpg(child.pid, signal.SIGKILL)
-                        child.wait()
-                    exit_code = 124 if stopped_reason == 'timeout' else 125
-                else:
-                    exit_code = child.returncode
-            except OSError:
-                exit_code = 127
+                owned = OwnedRun(command, ROOT,
+                                 {**os.environ, 'NO_COLOR': '1', 'CARGO_TERM_COLOR': 'never'}, stream)
+                child = owned.child
+                try:
+                    deadline = start + args.timeout
+                    while child.poll() is None:
+                        minimum_free = min(minimum_free, shutil.disk_usage(ROOT).free)
+                        if minimum_free < DISK_RESERVE:
+                            stopped_reason = 'disk_reserve_during_run'
+                            break
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            stopped_reason = 'timeout'
+                            break
+                        try:
+                            child.wait(timeout=min(1, remaining))
+                        except subprocess.TimeoutExpired:
+                            pass
+                    exit_code = (124 if stopped_reason == 'timeout' else 125) if stopped_reason else child.returncode
+                finally:
+                    # Cleanup is independent of leader exit and covers nested recorders/sessions.
+                    owned.close()
+            except (OSError, ProcessControlError):
+                exit_code, stopped_reason = 126, 'ownership_or_cleanup_unverified'
     parsed = counts(log.read_text(errors='replace'), args.kind)
     valid = bool(parsed) and parsed['failed'] == 0 and (parsed['executed'] > 0 or bool(args.allow_empty))
     if parsed and args.kind != 'cargo' and parsed['skipped'] and not args.allow_skips:
@@ -465,12 +461,15 @@ def preflight(port, browser):
                           ('rust', ['rustc', '--version']), ('npm', ['npm', '--version']), ('gh', ['gh', '--version'])]:
         try:
             r = process(command)
-            value = r.stdout.splitlines()[0] if r.returncode == 0 else 'unavailable'
+            value = r.stdout.splitlines()[0] if r.returncode == 0 and r.stdout.strip() else 'unavailable'
             checks[name] = value
         except EvidenceError as e:
             checks[name] = e.kind
     m = re.search(r'v(\d+)\.', checks['node'])
     checks['node_20_plus'] = bool(m and int(m[1]) >= 20)
+    checks['rust_available'] = bool(re.match(r'^rustc \d+\.', checks['rust']))
+    checks['npm_available'] = bool(re.match(r'^\d+\.\d+', checks['npm']))
+    checks['gh_scope'] = 'informational; required by inspect/cleanup, not local browser validation'
     checks['python_3_12'] = checks['python'].startswith('Python 3.12.')
     checks['python_stdlib'] = runtime_version(['python3.12', '-c', 'import pyexpat, ssl, venv; print("ok")']) == 'ok'
     checks['process_groups'] = process_visibility()
@@ -485,7 +484,7 @@ def preflight(port, browser):
     executable = browser or os.environ.get('PRAJNA_CHROME_EXECUTABLE')
     checks['browser'] = 'explicit_executable_found' if executable and os.access(executable, os.X_OK) else 'unverified'
     checks['coverage_warning'] = 'no-default-features excludes quant-research app reading tests; map CI features explicitly'
-    checks['result'] = 'capable_pending_behavior_test' if all((checks['node_20_plus'], checks['python_3_12'], checks['python_stdlib'],
+    checks['result'] = 'capable_pending_behavior_test' if all((checks['rust_available'], checks['npm_available'], checks['node_20_plus'], checks['python_3_12'], checks['python_stdlib'],
         checks['process_groups'], checks['disk_reserve_10gib'], checks['browser'] != 'unverified',
         checks['loopback_port'] == 'available_at_check_time')) else 'gaps'
     return checks

@@ -3,12 +3,17 @@ import argparse
 import copy
 import importlib.util
 import json
+import os
+import signal
+import time
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 
 SPEC = importlib.util.spec_from_file_location('workflow', Path(__file__).resolve().parents[1] / 'scripts/workflow.py')
 w = importlib.util.module_from_spec(SPEC)
@@ -468,6 +473,150 @@ class PreflightTests(unittest.TestCase):
                 side_effect=w.EvidenceError('permission', 'denied')):
             self.assertFalse(w.process_visibility())
         child.terminate.assert_called_once()
+
+
+    def test_missing_required_runtimes_are_gaps_and_gh_is_informational(self):
+        versions = {'node': 'v22.0.0', 'python3.12': 'Python 3.12.15', 'rustc': 'rustc 1.98.1',
+                    'npm': '10.0.0', 'gh': 'gh version synthetic'}
+        for missing in [(), ('rustc',), ('npm',), ('rustc', 'npm'), ('gh',)]:
+            def command(args):
+                return subprocess.CompletedProcess(args, 127 if args[0] in missing else 0,
+                    '' if args[0] in missing else versions[args[0]], '')
+            with patch.object(w, 'process', side_effect=command), patch.object(w, 'runtime_version', return_value='ok'), \
+                 patch.object(w, 'process_visibility', return_value=True), patch.object(w.socket, 'socket'), \
+                 patch.object(w.shutil, 'disk_usage', return_value=MagicMock(free=20*1024**3)), \
+                 patch.object(w.os, 'access', return_value=True):
+                result = w.preflight(18789, '/synthetic/browser')
+            expected = 'gaps' if set(missing) & {'rustc', 'npm'} else 'capable_pending_behavior_test'
+            self.assertEqual(result['result'], expected, missing)
+
+    def test_empty_successful_tool_output_is_not_available(self):
+        with patch.object(w, 'process', return_value=subprocess.CompletedProcess([], 0, '', '')), \
+             patch.object(w, 'runtime_version', return_value='ok'), patch.object(w, 'process_visibility', return_value=True), \
+             patch.object(w.socket, 'socket'), patch.object(w.shutil, 'disk_usage', return_value=MagicMock(free=20*1024**3)):
+            result = w.preflight(18789, '/synthetic/browser')
+        self.assertFalse(result['rust_available'])
+        self.assertFalse(result['npm_available'])
+        self.assertEqual(result['result'], 'gaps')
+
+
+class OwnedLifecycleTests(unittest.TestCase):
+    def check_stopped(self, nested, reason):
+        import workflow_process as control
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            pid_file, marker = root/'worker.pid', root/'survived'
+            leaf = root/'leaf.py'
+            leaf.write_text("import os,signal,time\nfrom pathlib import Path\n"
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                f"Path({str(pid_file)!r}).write_text(str(os.getpid()))\n"
+                "time.sleep(5)\n"
+                f"Path({str(marker)!r}).write_text('unexpected owned work')\n"
+                "time.sleep(30)\n")
+            parent = root/'parent.py'
+            if nested:
+                # Match Playwright's detached web-server -> fixture recorder -> command structure.
+                inner = [sys.executable, str(w.ROOT/'scripts/workflow.py'), 'run', '--kind', 'cargo',
+                         '--executor', 'synthetic-inner', '--selection', 'synthetic-leaf',
+                         '--timeout', '30', '--log', str(root/'inner.log'), '--', sys.executable, str(leaf)]
+                bridge = root/'bridge.py'
+                bridge.write_text(f'import subprocess\nsubprocess.run({inner!r}, check=False)\n')
+                parent.write_text('import subprocess,sys\n'
+                    f'p=subprocess.Popen([sys.executable,{str(bridge)!r}],start_new_session=True)\n'
+                    'p.wait()\n')
+            elif reason == 'race':
+                parent.write_text('import subprocess,sys,time\nfrom pathlib import Path\n'
+                    f'while not Path({str(root/"release")!r}).exists(): time.sleep(0.01)\n'
+                    f'subprocess.Popen([sys.executable,{str(leaf)!r}],start_new_session=True)\n'
+                    'time.sleep(30)\n')
+            else:
+                parent.write_text('import subprocess,sys,time\nfrom pathlib import Path\n'
+                    f'subprocess.Popen([sys.executable,{str(leaf)!r}])\n'
+                    f'while not Path({str(pid_file)!r}).exists(): time.sleep(0.01)\n'
+                    + ("print('test result: ok. 1 passed; 0 failed; 0 ignored;')\n" if reason == 'normal'
+                       else 'time.sleep(30)\n'))
+            outsider = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'],
+                                        start_new_session=True, stdout=subprocess.DEVNULL)
+            try:
+                args = argparse.Namespace(command=[sys.executable, str(parent)], log=str(root/'outer.log'),
+                    output=None, timeout=2 if reason in ('timeout', 'race') else 15, kind='cargo', executor='synthetic-outer',
+                    selection='owned lifecycle counterexample', allow_empty=None, allow_skips=None)
+                if reason == 'disk':
+                    def space(_):
+                        return MagicMock(free=(9 if pid_file.exists() else 20)*1024**3)
+                    with patch.object(w.shutil, 'disk_usage', side_effect=space):
+                        report = w.record(args)
+                elif reason == 'race':
+                    original_signal = control.send_group
+                    released = False
+                    def racing_signal(group, sig):
+                        nonlocal released
+                        if sig == signal.SIGSTOP and not released:
+                            released = True
+                            (root/'release').touch()
+                            until = time.monotonic() + 2
+                            while not pid_file.exists() and time.monotonic() < until:
+                                time.sleep(0.01)
+                        original_signal(group, sig)
+                    with patch.object(control, 'send_group', side_effect=racing_signal):
+                        report = w.record(args)
+                else:
+                    report = w.record(args)
+                self.assertTrue(pid_file.exists(), 'counterexample must actually start the descendant')
+                pid = int(pid_file.read_text())
+                table = control.process_table()
+                self.assertTrue(pid not in table or table[pid][2].startswith('Z'), 'owned descendant survived return')
+                self.assertFalse(marker.exists(), 'owned descendant continued writing after cancellation')
+                self.assertIsNone(outsider.poll(), 'unrelated sibling must remain alive')
+                self.assertEqual(report['exit_code'], {'timeout': 124, 'race': 124, 'disk': 125, 'normal': 0}[reason])
+                if nested:
+                    self.assertFalse((root/'inner.log').read_text(), 'terminated inner command has no false pass')
+            finally:
+                outsider.terminate()
+                outsider.wait(timeout=5)
+                # Exact synthetic leaf only, also cleans the probe if an assertion fails.
+                if pid_file.exists():
+                    pid = int(pid_file.read_text())
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+
+    def test_inherited_scope_from_unrelated_run_is_refused_without_signalling_it(self):
+        import workflow_process as control
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            outsider = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'], start_new_session=True)
+            try:
+                (root/'owner.json').write_text(json.dumps({'pid': outsider.pid}))
+                (root/('0'*32+'.json')).write_text(json.dumps({'parent': None, 'group': outsider.pid}))
+                args = argparse.Namespace(command=[sys.executable, '-c', "print('test result: ok. 1 passed; 0 failed; 0 ignored;')"],
+                    log=str(root/'refused.log'), output=None, timeout=5, kind='cargo', executor='synthetic',
+                    selection='unrelated scope', allow_empty=None, allow_skips=None)
+                with patch.dict(os.environ, {control.SCOPE_ENV: json.dumps([str(root), '0'*32])}):
+                    result = w.record(args)
+                self.assertEqual(result['exit_code'], 126)
+                self.assertEqual(result['stopped_reason'], 'ownership_or_cleanup_unverified')
+                self.assertIsNone(outsider.poll())
+                self.assertEqual((root/'refused.log').read_text(), '')
+            finally:
+                outsider.terminate()
+                outsider.wait(timeout=5)
+
+    def test_same_group_term_ignoring_descendant_after_leader_exit(self):
+        self.check_stopped(False, 'timeout')
+
+    def test_detached_spawn_racing_first_snapshot_is_rescanned_after_freeze(self):
+        self.check_stopped(False, 'race')
+
+    def test_successful_leader_does_not_leave_background_work(self):
+        self.check_stopped(False, 'normal')
+
+    def test_nested_recorder_in_detached_server_is_stopped(self):
+        self.check_stopped(True, 'timeout')
+
+    def test_disk_stop_covers_nested_recorder_and_preserves_unrelated_group(self):
+        self.check_stopped(True, 'disk')
 
 
 class TransportTests(unittest.TestCase):
