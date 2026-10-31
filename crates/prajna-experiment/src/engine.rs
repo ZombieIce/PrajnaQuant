@@ -831,6 +831,7 @@ pub(super) fn execute(
     members: &[InstrumentId],
     level: ResultLevel,
     packet: Option<&prajna_adapter::RunPacket>,
+    benchmark: Option<&crate::summary::RunSummary>,
 ) -> RunExecution {
     let mut execution = RunExecution {
         run_spec: run.run_spec.clone(),
@@ -1016,6 +1017,13 @@ pub(super) fn execute(
                 experiment.sessions_per_year,
                 &experiment.availability_assumption,
             )?);
+            if experiment.performance.is_some() {
+                crate::performance::complete(
+                    execution.summary.as_mut().unwrap(),
+                    &result,
+                    benchmark,
+                )?;
+            }
             if let Some(diagnostics) = &execution.backend_diagnostics {
                 execution
                     .summary

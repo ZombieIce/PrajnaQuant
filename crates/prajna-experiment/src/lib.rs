@@ -45,6 +45,7 @@ pub mod pools;
 mod python;
 pub mod selection;
 pub use python::{PreparedDecisions, PythonProvenance};
+mod performance;
 mod result;
 mod storage;
 mod summary;
@@ -52,6 +53,7 @@ pub mod window;
 mod worker;
 pub use accurate::{BackendDiagnostics, BackendFactory, ExperimentBackend};
 pub use engine::{ACCURATE_SEMANTIC_VERSION, BackendIdentity};
+pub use performance::{CompleteSummary, Metric};
 pub use result::read_persisted_result;
 pub use storage::{
     ExecutionDiff, InvocationStatistics, ResultLevel, ResultReadError, StoreAction,
@@ -317,6 +319,7 @@ pub struct Experiment {
     pit: Option<Arc<pit::PitContext>>,
     actions: Option<Arc<actions::Context>>,
     holding_benchmark: Option<benchmark::Context>,
+    performance: Option<performance::Context>,
     /// Bound immutable adjusted research versions; empty for legacy definitions.
     adjusted_versions: BTreeMap<InstrumentId, String>,
     /// Frozen shared research window; absent for legacy definitions.
@@ -412,6 +415,8 @@ struct DefinitionInput {
     corporate_actions: Option<actions::Binding>,
     #[serde(default)]
     holding_benchmark: Option<benchmark::Binding>,
+    #[serde(default)]
+    summary: Option<performance::Binding>,
     /// Explicit immutable adjusted research version per Universe member.
     #[serde(default)]
     adjusted_versions: Option<BTreeMap<String, String>>,
@@ -548,6 +553,11 @@ impl Experiment {
         if let Some(benchmark) = &holding_benchmark {
             normalized["holding_benchmark"] = benchmark.identity.clone();
         }
+        let performance =
+            performance::Context::load(&input, &serde_json::from_str(json)?, lake_root.as_ref())?;
+        if let Some(context) = &performance {
+            normalized["summary"] = context.identity.clone();
+        }
         let experiment = Self {
             dsv: input.dsv,
             universe: input.universe,
@@ -563,6 +573,7 @@ impl Experiment {
             pit,
             actions,
             holding_benchmark,
+            performance,
             adjusted_versions,
             evaluation,
         };
@@ -808,6 +819,9 @@ impl Experiment {
         }
         if let Some(benchmark) = &self.holding_benchmark {
             spec["holding_benchmark"] = benchmark.identity.clone();
+        }
+        if let Some(context) = &self.performance {
+            spec["summary"] = context.identity.clone();
         }
         write_venue_scope(&mut spec, &self.venues);
         spec
@@ -1104,6 +1118,11 @@ impl Experiment {
         };
         let costs = self.vector_costs();
         let run_started = Instant::now();
+        let benchmark = self
+            .performance
+            .as_ref()
+            .map(|context| context.execute_benchmark(lake_root))
+            .transpose()?;
         let execute_one = |run: &ExpandedRun| {
             engine::execute(
                 self,
@@ -1118,6 +1137,7 @@ impl Experiment {
                 members,
                 level,
                 packet.as_ref(),
+                benchmark.as_ref().and_then(Option::as_ref),
             )
         };
         let results = if packet.is_some() {

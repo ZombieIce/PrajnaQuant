@@ -72,6 +72,8 @@ POC-0 已按获确认的拆分发布为 [13 张本地执行票据](../.scratch/p
 
 研究池 `/pools` 已提供 Spec 三池 13 只 ETF 的持久草稿/不可变发布、显式旧版读取及固定 Dataset 元数据；经新平台 CLI 发布既有 StaticUniverse，旧 UUID Universe 与单证券身份保持兼容。单 Venue 与沪深同池（XSHG+XSHE；#295/T06c）已发布版本均可经现有选择/任务入口冻结和提交，后续编辑不改旧任务；多 Venue 冻结写真实 `venues` 并使用 `full_target`/`fast_event@14`，页面显示池/DSV/Venue/引擎身份，共享轴不一致返回结构性错误。合成 CLI/浏览器手算与生产入口 E2E 的验证范围见[研究池契约](contracts/research-pools.md)；多单证券 Dataset 装配、真实行情、完整 PIT 及公司行动总回报未验证。
 
+完整绩效 Summary 已提供显式 `complete-performance@1` 定义/CLI 保存读取：首日成本纳入 close 权益收益、252 年化、Calmar、冻结持有基准/超额、执行费用金额/费率与事件次数分列，逐指标不可计算原因；旧定义/存档不升级。合成手算账本与 CLI replay/promotion 覆盖见 [ADR 0036](decisions/0036-versioned-complete-performance-summary.md)；页面/日历图、真实总回报验收尚未交付。
+
 ### MVP 收口现状（2026-10-26）
 
 **MVP-6 有保留签收，milestone 已关闭。** [#235 第二轮](https://github.com/ZombieIce/PrajnaQuant/issues/235#issuecomment-6400855766)六项工程复核全部 pass；[#182 最终裁决](https://github.com/ZombieIce/PrajnaQuant/issues/182#issuecomment-6406038887)接受工程边界并保留证据处理流程 fail、第一轮 fail 和事件记录，不能表述为无保留整体通过。这里只校准已发生的验证状态，本次文档修改没有重跑引擎或补充真实数据证明。
