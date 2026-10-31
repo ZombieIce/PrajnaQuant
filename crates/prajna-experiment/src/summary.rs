@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub complete: Option<crate::performance::CompleteSummary>,
     pub total_return: Option<f64>,
     pub annualized_return: Option<f64>,
     pub n_returns: usize,
@@ -73,6 +75,7 @@ pub fn summarize(result: &VectorResult, sessions_per_year: u64) -> RunSummary {
     let (max_drawdown, drawdown_peak_session, drawdown_trough_session) = drawdown(&result.sessions);
 
     RunSummary {
+        complete: None,
         total_return,
         annualized_return,
         n_returns,
@@ -132,7 +135,7 @@ pub fn summarize(result: &VectorResult, sessions_per_year: u64) -> RunSummary {
     }
 }
 
-fn sample_std(values: &[f64]) -> f64 {
+pub(crate) fn sample_std(values: &[f64]) -> f64 {
     // A rounded mean would turn identical returns into a tiny nonzero deviation.
     if values.windows(2).all(|pair| pair[0] == pair[1]) {
         return 0.0;
@@ -461,6 +464,54 @@ mod tests {
         // total NAV (985 equity + 15 fees). Actual raw fill notional is 90.
         assert_eq!(summary.total_turnover, 0.15);
         assert_eq!(summary.total_cost, 0.015);
+        // Complete Summary includes the first close's cost; legacy E11 has zero returns here.
+        let mut result = result;
+        result.return_basis = ReturnBasis::TotalReturn;
+        result.corporate_action_completeness.is_complete = true;
+        let mut complete = summarize_fast(&result, 252, "none").unwrap();
+        crate::performance::complete(&mut complete, &result, None).unwrap();
+        assert_eq!(complete.n_returns, 1);
+        assert_eq!(complete.total_return, Some(985.0 / 1000.0 - 1.0));
+        assert_eq!(
+            complete.drawdown_peak_session.as_deref(),
+            Some("initial_capital")
+        );
+        let metrics = &complete.complete.as_ref().unwrap().metrics;
+        assert_eq!(
+            metrics["sharpe"].reason.as_deref(),
+            Some("insufficient_returns")
+        );
+        assert_eq!(
+            complete.complete.as_ref().unwrap().amounts["commission"],
+            "15"
+        );
+        assert_eq!(complete.complete.as_ref().unwrap().fill_count, 1);
+        assert_eq!(complete.complete.as_ref().unwrap().fee_settlement_count, 1);
+        let mut bad = result.clone();
+        bad.sessions[0].close.account.cash = Notional::ZERO;
+        assert!(crate::performance::complete(&mut complete, &bad, None).is_err());
+        bad = result.clone();
+        bad.config.initial_cash = Notional::ZERO;
+        assert!(crate::performance::complete(&mut complete, &bad, None).is_err());
+        let mut flat = result.clone();
+        flat.config.initial_cash = n("985");
+        flat.sessions.push(flat.sessions[0].clone());
+        let mut zero = summarize_fast(&flat, 252, "none").unwrap();
+        crate::performance::complete(&mut zero, &flat, None).unwrap();
+        let metrics = &zero.complete.as_ref().unwrap().metrics;
+        assert_eq!(metrics["annualized_volatility"].value, Some(0.0));
+        assert_eq!(metrics["sharpe"].reason.as_deref(), Some("zero_volatility"));
+        assert_eq!(metrics["calmar"].reason.as_deref(), Some("zero_drawdown"));
+        result.sessions.clear();
+        let mut empty = summarize_fast(&result, 252, "none").unwrap();
+        crate::performance::complete(&mut empty, &result, None).unwrap();
+        assert_eq!(
+            empty.complete.as_ref().unwrap().metrics["total_return"]
+                .reason
+                .as_deref(),
+            Some("empty_evaluation")
+        );
+
         assert_ne!(
             summary.total_turnover, 0.14,
             "raw fill notional is not used"

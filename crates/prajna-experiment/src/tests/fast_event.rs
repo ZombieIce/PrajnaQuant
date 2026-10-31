@@ -381,6 +381,7 @@ fn fast_invariant_failure_is_failed_while_other_runs_continue() {
                     only.members(),
                     ResultLevel::Summary,
                     None,
+                    None,
                 )
             })
             .collect::<Vec<_>>()

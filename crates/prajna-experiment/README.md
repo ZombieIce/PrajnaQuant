@@ -459,3 +459,11 @@ Standard 为此新路径保存 orders/fills/费用及行动/现金/权益，尝�
 固定 `standard` 结果级别。成功 envelope 含 `strategy`/`benchmark` 的冻结
 `definition`、预期 `experiment`/`run` 身份与 `comparability`；不改变旧定义/结果身份。
 输出、拒绝码、任务 API 与读取核对见 [ADR 0035](../../docs/decisions/0035-strategy-benchmark-comparison.md)。
+
+### 完整绩效 Summary（显式选择）
+
+正式定义增加 `"summary":{"semantic_version":"complete-performance@1"}` 后，使用原 `run`、
+`result`、replay/promotion 命令；可将冻结比较输出的 benchmark.definition 放入
+`summary.benchmark_definition`。新 Summary 限已冻结窗口/行动的 Static Fast Event，252 Session/年。
+`summary.complete` 保存逐指标 value/reason、币种成本金额和成交/费用事件次数；无选择时旧身份/内容不变。
+端点、首日成本、Calmar、超额、滑点与单位见 [ADR 0036](../../docs/decisions/0036-versioned-complete-performance-summary.md)。

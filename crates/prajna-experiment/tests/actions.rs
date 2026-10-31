@@ -1527,3 +1527,230 @@ fn frozen_equal_weight_comparison_uses_actual_lots_and_marks_incomplete_facts() 
     assert_eq!(strategy_run["failed_count"], 0);
     assert_eq!(benchmark["data"]["runs"][0]["accounting_verified"], true);
 }
+
+// #378: independent close-equity mathematics over the existing hand account.
+fn near(value: &Value, expected: f64) {
+    let actual = value.as_f64().unwrap();
+    assert!((actual - expected).abs() < 1e-10, "{actual} != {expected}");
+}
+#[test]
+fn complete_summary_cli_golden_save_read_replay_and_promote() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let mut definition = holding_definition(root);
+    let legacy = Experiment::parse(&definition.to_string(), root).unwrap();
+    let old = serde_json::to_value(
+        legacy.execute(root, 1).unwrap().runs[0]
+            .summary
+            .as_ref()
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(old.get("complete").is_none());
+    definition["summary"] = json!({"semantic_version":"complete-performance@1"});
+    let experiment = Experiment::parse(&definition.to_string(), root).unwrap();
+    assert_ne!(experiment.id().unwrap(), legacy.id().unwrap());
+    assert_ne!(
+        experiment.expand(root).unwrap()[0].run_id,
+        legacy.expand(root).unwrap()[0].run_id
+    );
+    let report = experiment.execute(root, 1).unwrap();
+    let result = report.runs[0].fast_event_result.as_ref().unwrap();
+    let summary = serde_json::to_value(report.runs[0].summary.as_ref().unwrap()).unwrap();
+    // Each close is cash + raw holdings + receivables; dividend paid never changes equity.
+    let closes = [
+        10005., 10000., 9800., 9800., 9795., 9795., 9795., 9795., 9795.,
+    ];
+    let mut previous = 10005.;
+    let mut returns = Vec::new();
+    for (row, expected) in result.sessions.iter().zip(closes) {
+        let a = &row.close.account;
+        let holdings: f64 = a
+            .positions
+            .values()
+            .map(|p| p.market_value.to_string().parse::<f64>().unwrap())
+            .sum();
+        let amount = |n: prajna_domain::Notional| n.to_string().parse::<f64>().unwrap();
+        assert_eq!(amount(a.equity), expected);
+        assert_eq!(
+            amount(a.cash)
+                + holdings
+                + amount(a.dividend_receivable)
+                + amount(a.liquidation_receivable),
+            expected
+        );
+        returns.push(expected / previous - 1.);
+        previous = expected;
+    }
+    let mean = returns.iter().sum::<f64>() / 9.;
+    let std = (returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / 8.).sqrt();
+    let annual = (9795f64 / 10005.).powf(252. / 9.) - 1.;
+    let drawdown = 9795. / 10005. - 1.;
+    let m = &summary["complete"]["metrics"];
+    near(&m["total_return"]["value"], drawdown);
+    near(&m["annualized_return"]["value"], annual);
+    near(&m["annualized_volatility"]["value"], std * 252f64.sqrt());
+    near(&m["sharpe"]["value"], mean / std * 252f64.sqrt());
+    near(&m["calmar"]["value"], annual / -drawdown);
+    assert_eq!(summary["n_returns"], 9);
+    assert_eq!(summary["drawdown_peak_session"], DATES[1]);
+    assert_eq!(summary["drawdown_trough_session"], DATES[5]);
+    assert_eq!(m["benchmark_return"]["reason"], "benchmark_not_bound");
+    assert_eq!(summary["complete"]["amounts"]["total_execution_cost"], "10");
+    assert_eq!(
+        summary["complete"]["amounts"]["minimum_commission_top_up"],
+        "10"
+    );
+    assert_eq!(summary["complete"]["fill_count"], 2);
+    let path = root.join("complete.json");
+    fs::write(&path, definition.to_string()).unwrap();
+    let stored = cli(root, &["run", path.to_str().unwrap(), "--level", "summary"]);
+    let exp = stored["exp"].as_str().unwrap();
+    let exe = stored["exe"].as_str().unwrap();
+    let read = cli(root, &["result", exp, exe]);
+    let run = &read["data"]["runs"][0];
+    assert_eq!(run["summary"], summary);
+    let id = run["run_id"].as_str().unwrap();
+    let (_, batches) = read_run_table(root, exp, exe, id, ResultLevel::Summary, "summary").unwrap();
+    let column = batches[0]
+        .column_by_name("summary_json")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<arrow_array::StringArray>()
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(column.value(0)).unwrap(),
+        summary
+    );
+    let replay = cli(root, &["run", path.to_str().unwrap(), "--level", "summary"]);
+    assert_eq!(replay["written_bytes"], 0);
+    let promoted = cli(
+        root,
+        &[
+            "run",
+            path.to_str().unwrap(),
+            "--level",
+            "standard",
+            "--promote",
+            id,
+        ],
+    );
+    assert_eq!(promoted["action"], "promoted");
+    assert_eq!(
+        cli(root, &["result", exp, exe])["data"]["runs"][0]["summary"],
+        summary
+    );
+    let old_after = serde_json::to_value(
+        legacy.execute(root, 1).unwrap().runs[0]
+            .summary
+            .as_ref()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(old_after, old);
+}
+
+#[test]
+fn complete_summary_frozen_benchmark_and_definition_failures() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let request = setup(root);
+    let data = freeze_comparison_cli(root, &selection_of(&request), ReinvestmentPolicy::None);
+    let mut strategy = data["data"]["strategy"]["definition"].clone();
+    let benchmark = data["data"]["benchmark"]["definition"].clone();
+    strategy["summary"] =
+        json!({"semantic_version":"complete-performance@1", "benchmark_definition":benchmark});
+    let report = Experiment::parse(&strategy.to_string(), root)
+        .unwrap()
+        .execute(root, 1)
+        .unwrap();
+    let s = serde_json::to_value(report.runs[0].summary.as_ref().unwrap()).unwrap();
+    let m = &s["complete"]["metrics"];
+    // Frozen no-reinvestment benchmark: entry fee5, dividend1800, split leaves equity9800.
+    near(&m["benchmark_return"]["value"], 9800. / 10005. - 1.);
+    near(
+        &m["excess_return"]["value"],
+        m["total_return"]["value"].as_f64().unwrap() - (9800. / 10005. - 1.),
+    );
+    run_definition(root, "summary-benchmark.json", &strategy);
+    for (path, value) in [
+        (vec!["summary", "semantic_version"], json!("unknown")),
+        (vec!["sessions_per_year"], json!(365)),
+        (
+            vec!["summary", "benchmark_definition", "costs", "sell_tax_rate"],
+            json!(0.1),
+        ),
+        (
+            vec![
+                "summary",
+                "benchmark_definition",
+                "fast_event",
+                "initial_cash",
+            ],
+            json!("20000"),
+        ),
+        (
+            vec!["summary", "benchmark_definition", "summary"],
+            json!({"semantic_version":"complete-performance@1"}),
+        ),
+    ] {
+        let mut bad = strategy.clone();
+        let mut target = &mut bad;
+        for key in path {
+            target = &mut target[key];
+        }
+        *target = value;
+        assert!(Experiment::parse(&bad.to_string(), root).is_err());
+    }
+    // Partial corporate facts are retained as diagnostics, never valid zero performance.
+    let mut incomplete = facts("510300.XSHG");
+    incomplete["coverage"][0]["state"] = json!("missing_facts");
+    let version = corporate_facts::import(root, &serde_json::to_vec(&incomplete).unwrap()).unwrap();
+    let mut bad = strategy.clone();
+    bad["corporate_actions"]["version"] = json!(version);
+    bad["summary"]["benchmark_definition"]["corporate_actions"]["version"] = json!(version);
+    let report = Experiment::parse(&bad.to_string(), root)
+        .unwrap()
+        .execute(root, 1)
+        .unwrap();
+    let summary = serde_json::to_value(report.runs[0].summary.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        summary["complete"]["metrics"]["calmar"]["reason"],
+        "corporate_actions_incomplete"
+    );
+    assert!(summary["complete"]["metrics"]["excess_return"]["value"].is_null());
+}
+
+#[test]
+fn complete_summary_cash_costs_include_embedded_slippage_once() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let mut definition = holding_definition(root);
+    definition["holding_benchmark"]["reinvestment_calendar"]["decision_dates"] = json!([]);
+    definition["costs"]["commission_rate"] = json!(0.001);
+    definition["costs"]["buy_tax_rate"] = json!(0.001);
+    definition["costs"]["buy_slippage_bps"] = json!(100);
+    definition["summary"] = json!({"semantic_version":"complete-performance@1"});
+    let report = Experiment::parse(&definition.to_string(), root)
+        .unwrap()
+        .execute(root, 1)
+        .unwrap();
+    let summary = serde_json::to_value(report.runs[0].summary.as_ref().unwrap()).unwrap();
+    let amounts = &summary["complete"]["amounts"];
+    // 900 shares at raw10/execution10.1: cash10005-9090-9.09-9.09=896.82.
+    assert_eq!(amounts["commission"], "9.09");
+    assert_eq!(amounts["tax"], "9.09");
+    assert_eq!(amounts["slippage"], "90");
+    assert_eq!(amounts["minimum_commission_top_up"], "0");
+    assert_eq!(amounts["total_execution_cost"], "108.18");
+    near(
+        &summary["complete"]["metrics"]["cumulative_cost_rate"]["value"],
+        108.18 / 10005.,
+    );
+    let result = report.runs[0].fast_event_result.as_ref().unwrap();
+    assert_eq!(result.sessions[1].close.account.cash.to_string(), "896.82");
+    assert_eq!(
+        result.sessions[1].close.account.equity.to_string(),
+        "9896.82"
+    );
+}
