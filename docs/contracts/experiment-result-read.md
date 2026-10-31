@@ -1,6 +1,6 @@
 # 已保存 Experiment 结果的只读入口（T04a）
 
-本契约固定 `prajna-experiment result` 及其 HTTP 适配的读取边界。入口只读取已持久化的 Experiment/Execution 和已经保存的结果表，不执行、不提升、不重算、不补零，也不修改 lake。
+本契约固定 `prajna-experiment result` 及其 HTTP 适配的读取边界。入口只读取已持久化的 Experiment/Execution 和已经保存的结果表，不执行、不提升、不重新计算回测结果、不补零，也不修改 lake；展示权重只在 Rust 从已保存估值投影。
 
 ## CLI
 
@@ -8,7 +8,7 @@
 prajna-experiment result <exp> <exe> --lake <lake> [--run <run-id>]
 ```
 
-`exp`、`exe`、`run` 必须是 `exp:sha256:`、`exe:sha256:`、`run:sha256:` 身份。命令校验 Execution manifest 的实验/执行身份，并通过既有 hash 校验读取路径验证 Summary **以及 manifest 中每一张已保存表**；只有 Summary 与已保存的 NAV/权益表（Vector `sessions`，Fast/Accurate `account_valuations`）进入 envelope。任一已保存表 hash 不符都会使命令失败，即使该表不属于返回的 NAV 序列。`--run` 只过滤返回的 Run，不缩小校验范围。退出码：`0` 成功；`1` 读取、身份、hash 或 I/O 失败；`2` `result` 的参数身份格式错误。错误写 stderr，不输出成功 envelope。
+`exp`、`exe`、`run` 必须是 `exp:sha256:`、`exe:sha256:`、`run:sha256:` 身份。命令校验 Execution manifest 的实验/执行身份，并通过既有 hash 校验读取路径验证 Summary **以及 manifest 中每一张已保存表**；Summary、已保存的 NAV/权益表（Vector `sessions`，Fast/Accurate `account_valuations`）及原生明细进入 envelope。任一已保存表 hash 不符都会使命令失败，即使该表不属于 NAV 序列。`--run` 只过滤返回的 Run，不缩小校验范围。退出码：`0` 成功；`1` 读取、身份、hash 或 I/O 失败；`2` `result` 的参数身份格式错误。错误写 stderr，不输出成功 envelope。
 
 成功只输出一个 JSON envelope：
 
@@ -49,7 +49,16 @@ prajna-experiment result <exp> <exe> --lake <lake> [--run <run-id>]
 - `accounting_verified` 对 event Run 是 boolean，对 Vector Run 为 `null`（Vector 没有该账本标记）。
 - 失败 Run 返回 `status: "failed"`、原 `result_level`、`summary: null`、空 `series`；`not_saved` 来自 manifest，目标级别表不会被伪造为已保存。
 - `tables.saved`、`tables.not_saved`、`tables.not_produced_by_engine` 来自 Execution manifest。`saved` 表示该表已通过 logical hash 校验，而不是“存在但未验证”；缺表不得显示为零交易、零值或已保存。
-- 本入口不返回 orders、fills、权重、排名等明细；后续明细票按 ResultLevel 扩展。
+- `details` 是其余已保存非 Summary 表的对象，按表名返回原生行（包括订单、成交、费用结算、执行尝试、权重、pending、行动账本及已有 Backend 审计）。仅已保存表有键；已保存空表是 `[]`，不把未保存或引擎不产生的表补成空数组。payload 中已有字段优先，附加 Arrow 列只补缺字段，避免 JSON 数组被辅助字符串列替换。
+- 明细中的 `executed_at/submitted_at/attempted_at/ts_open` 数字或 RFC3339 时间统一转为十进制字符串，单位 Unix ns，避免浏览器 Number 丢精度；其他金额、数量仍保留原生字符串，Vector 比例保留原生 number。
+- `allocations` 是从已保存 `account_valuations` 读取的 Rust 展示投影；未保存该表为 `null`，已保存空表为 `[]`。每行保留日期/估值点、现金、权益、两类应收、持仓数量/价格/市值，并补 `cash_weight`、两类应收 `*_weight`、逐证券 `weight`。权重 = 对应已保存金额 / 含应收总权益，使用既有 scale-18 定点除法，ties-to-even；不改变成交、账户或持久文件。应收计权益但不可花费，现金权重不含应收。缺字段/非法金额/非正权益不能算权重，返回 `null`；总权益不可用时附 `weight_unavailable_reason=missing_or_nonpositive_equity`。不从缺字段反推零持仓/零现金。
+- `units` 包含 `currency`、`weight=fraction_of_total_equity`、`vector_cost=fraction_of_previous_nav`、`timestamp=unix_nanoseconds`。币种读取已保存 canonical `experiment.json` 的 `fast_event.currency`，并核验该文件内容身份；文件缺失或 Vector 无账户币种时为 `null`，不假设 CNY。缺定义文件仍可读已保存表；定义存在但损坏/身份不符则读取失败。不依赖原行情或重新运行。
+
+## 明细页面（T21）
+
+`/backtests` 复用同一结果入口，逐 Run 展示实际持仓/现金/应收与权重、成交及比例佣金/最低佣金补足/税/滑点、独立费用结算、订单/延期/跳过/数量调整和期末目标/风险退出 pending。Summary `executed_count` 为执行事件数（包括成功全现金目标），不是 Fill 数；数量调整不是成交；含滑点成交价的滑点金额仅作解释，不能再次扣费。Vector 展示已保存开盘执行后权重、Session 的开盘/收盘现金及应收比例与成本率，不伪造金额账本或逐笔 Fill。
+
+每表分别显示 manifest 的未保存、引擎不产生、不可用、已保存空表。仅通过校验的已保存空成交表可以说明该表确认无成交，仍提示核对费用与受阻执行。失败/损坏结果沿用整体错误，不显示空交易。旧结果缺明细/缺资金构成保持不可用，页面不自动提升保存级别或执行。
 
 ## 任务级别
 
@@ -70,7 +79,7 @@ prajna-experiment result <exp> <exe> --lake <lake> [--run <run-id>]
 
 ## 限制
 
-- 本票逐表校验已保存结果，但只返回 Summary 与 NAV 序列表；大 lake 性能、分页、按需明细和完整图表不在本契约。
+- 本入口逐表校验并返回已保存结果；大 lake 性能、分页、按需提升和完整图表不在本契约，当前明细为整体返回。
 - 公开验证只用合成 fixture；真实结果、明细、hash 和 Run/Execution 身份留在本机。
 
 ## 策略—基准对照结果

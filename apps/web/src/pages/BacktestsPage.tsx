@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Chart } from '../Chart';
+import NativeResultDetails, { type NativeDetails } from '../components/NativeResultDetails';
 import { api, ErrorBox, Header, Panel, pct } from '../shared';
 
 type Envelope<T> = { schema_version: 1; data: T };
@@ -33,8 +34,8 @@ type ValuationRow = {
   session_date: string; valuation_point: 'open_after' | 'close'; scope?: string; portfolio_id?: number | string | null; cash: string; equity: string;
   positions?: Record<string, Position>; accounting_verified?: boolean;
 };
-type SessionRow = { session_date: string; nav: number; net_return?: number };
-type ResultRun = {
+type SessionRow = { [key: string]: unknown; session_date: string; nav: number; net_return?: number };
+type ResultRun = NativeDetails & {
   run_id: string; status: string; result_level: string; accounting_verified: boolean | null; error: string | null;
   summary: Summary | null;
   series: { sessions?: SessionRow[]; account_valuations?: ValuationRow[] };
@@ -307,7 +308,8 @@ function RunResult({ run }: { run: ResultRun }) {
   const unavailable = summary?.insufficient_sessions ? '不可计算（有效收益样本不足 2）'
     : summary?.zero_volatility ? '不可计算（收益波动为零）' : '不可计算';
   const positionText = (positions: Record<string, Position> | undefined) => {
-    const entries = Object.entries(positions ?? {});
+    if (!positions) return '持仓未记录（不可用）';
+    const entries = Object.entries(positions);
     return entries.length ? entries.map(([id, position]) => Object.keys(positions ?? {}).length === 1 ? position.quantity : `${id} ${position.quantity}`).join('；') : '无持仓';
   };
   return <Panel title={`RUN ${shortId(run.run_id)} · ${run.status}`}>
@@ -327,7 +329,7 @@ function RunResult({ run }: { run: ResultRun }) {
         <Metric label="最大回撤" value={summary.max_drawdown === null ? unavailable : pct(summary.max_drawdown)} />
         <Metric label="收益样本 / Session" value={`${summary.n_returns} / ${summary.session_count}`} />
       </section>
-      <p className="hint">成交 {summary.executed_count} · 延期 {summary.deferred_count} · 跳过买单 {summary.skipped_buy_count} · 累计成本率 {pct(summary.total_cost)} · 换手 {pct(summary.total_turnover)} · 收益口径 {summary.return_basis ?? '未记录'}</p>
+      <p className="hint">执行事件 {summary.executed_count} · 延期 {summary.deferred_count} · 跳过买入 {summary.skipped_buy_count} · 累计成本率 {pct(summary.total_cost)} · 换手 {pct(summary.total_turnover)} · 收益口径 {summary.return_basis ?? '未记录'}</p>
       {summary.pending_at_end && <ErrorBox>期末仍有 pending 目标/风险退出：最后交易日产生的待执行目标未成交，不代表已清仓。</ErrorBox>}
       {summary.insufficient_sessions && <p className="hint">有效收益样本不足 2，年化收益、波动与 Sharpe 不可计算；未以 0 代替。</p>}
       {summary.zero_volatility && <p className="hint">收益波动为零，Sharpe 不可计算；未以 0 代替。</p>}
@@ -349,6 +351,7 @@ function RunResult({ run }: { run: ResultRun }) {
       <thead><tr><th>日期</th><th>净值</th><th>净收益</th></tr></thead>
       <tbody>{sessions.map((row) => <tr key={row.session_date}><td>{row.session_date}</td><td>{row.nav}</td><td>{row.net_return ?? '未保存'}</td></tr>)}</tbody>
     </table></div>}
+    <NativeResultDetails run={run} sessions={run.series.sessions} />
   </Panel>;
 }
 

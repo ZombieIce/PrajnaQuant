@@ -13,7 +13,7 @@ prajna-experiment promote <experiment.json> --lake <dir> --level standard|full
 prajna-freeze-comparison --lake <dir> < comparison-request.json
 ```
 
-`result` 只读已保存的 Execution：校验实验/执行身份与 manifest 中每一张已保存表的 hash，输出 `schema_version: 1` 的 Summary/NAV envelope；缺表保持 `not_saved` / `not_produced_by_engine`，不执行、不提升、不重算。字段、错误映射和 HTTP 适配见 [结果读取契约](../../docs/contracts/experiment-result-read.md)。
+`result` 只读已保存的 Execution：校验实验/执行身份与 manifest 中每一张已保存表的 hash，输出 `schema_version: 1` 的 Summary/NAV/原生明细 envelope（含 Rust 估值权重展示投影）；缺表保持 `not_saved` / `not_produced_by_engine`，不执行、不提升、不重算。字段、错误映射和 HTTP 适配见 [结果读取契约](../../docs/contracts/experiment-result-read.md)。
 
 `--level` 默认 `summary`；省略 `--threads` 时使用 Rayon 默认线程数（包括 `RAYON_NUM_THREADS`），显式值必须大于零。Accurate 中该数值表示 worker 进程池槽位；Backend 不在 Rayon 线程上执行。线程数、ResultLevel 和 worker 路径不进入身份。CLI 从当前 Git 工作树捕获代码来源；lake 和定义可以用任意绝对路径。脏工作树照常运行，`reproducible=false`。
 
