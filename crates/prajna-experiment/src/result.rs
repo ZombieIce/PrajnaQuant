@@ -9,7 +9,10 @@ use serde_json::{Map, Value, json};
 
 use crate::{
     ExperimentError,
-    storage::{ResultLevel, ResultReadError, cell_json, read_execution_manifest, read_run_table},
+    storage::{
+        ResultLevel, ResultReadError, cell_json, experiment_root, read_execution_manifest,
+        read_run_table,
+    },
 };
 
 /// Version of the persisted-result JSON envelope. Additive fields may be added
@@ -36,10 +39,7 @@ pub fn read_persisted_result(
     let manifest = read_execution_manifest(lake, experiment_id, execution_id)?;
     // Older manifests omit static Run Specs. Read the stored canonical
     // Experiment for units without requiring source data or re-execution.
-    let definition_path = lake
-        .join("experiments")
-        .join(experiment_id.rsplit(':').next().unwrap_or_default())
-        .join("experiment.json");
+    let definition_path = experiment_root(lake, experiment_id).join("experiment.json");
     let definition = match std::fs::read(&definition_path) {
         Ok(bytes) => {
             let value: Value = serde_json::from_slice(&bytes)
@@ -203,6 +203,7 @@ fn allocation(row: &Value) -> Value {
     json!({
         "session_date": row.get("session_date"), "valuation_point": row.get("valuation_point"),
         "cash": row.get("cash"), "equity": row.get("equity"),
+        "unallocated_capital": row.get("unallocated_capital"),
         "cash_weight": ratio(row.get("cash")),
         "dividend_receivable": row.get("dividend_receivable"),
         "dividend_receivable_weight": ratio(row.get("dividend_receivable")),
@@ -329,11 +330,13 @@ mod tests {
         // Independent hand calculation: 25 cash + 60 security + 10 dividend
         // + 5 liquidation = 100 equity. Investable cash is only 25, not 40.
         let saved = json!({"session_date":"2026-01-05","valuation_point":"close",
-            "cash":"25","equity":"100","dividend_receivable":"10",
+            "cash":"25","equity":"100","unallocated_capital":"7",
+            "dividend_receivable":"10",
             "liquidation_receivable":"5","positions":{"SYNTH.XSHG":{
                 "quantity":"20","price":"3","market_value":"60"}}});
         let projected = allocation(&saved);
         assert_eq!(projected["cash"], "25");
+        assert_eq!(projected["unallocated_capital"], "7");
         assert_eq!(projected["cash_weight"], "0.25");
         assert_eq!(projected["dividend_receivable_weight"], "0.1");
         assert_eq!(projected["liquidation_receivable_weight"], "0.05");
@@ -355,6 +358,7 @@ mod tests {
         }
         let projected = allocation(&json!({"equity":"100"}));
         assert!(projected["cash_weight"].is_null());
+        assert!(projected["unallocated_capital"].is_null());
         assert!(projected["dividend_receivable_weight"].is_null());
         assert!(projected["positions"].is_null());
         // Decimal division retains scale-18 precision; no float conversion.

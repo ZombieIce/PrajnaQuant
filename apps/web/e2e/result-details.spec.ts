@@ -1,7 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { readFile, readdir, rm, appendFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 test('saved native details distinguish fills, deferral, skipped buys, empty tables, and missing levels', async ({ page }) => {
   test.setTimeout(240_000);
@@ -14,7 +17,7 @@ test('saved native details distinguish fills, deferral, skipped buys, empty tabl
   page.on('pageerror', error => errors.push(error.message));
   try {
   const prepared = spawnSync('cargo', ['test', '-p', 'prajna-experiment', '--test', 'timing', '--locked', '--offline', 'export_result_details_fixture', '--', '--ignored', '--exact'],
-    { cwd: resolve(process.cwd(), '../..'), env: { ...process.env, PRAJNA_DETAILS_FIXTURE_ROOT: lake }, encoding: 'utf8', timeout: 120_000 });
+    { cwd: repoRoot, env: { ...process.env, PRAJNA_DETAILS_FIXTURE_ROOT: lake }, encoding: 'utf8', timeout: 120_000 });
   await appendFile(join(local, 'details-fixture.log'), `${prepared.stdout ?? ''}${prepared.stderr ?? ''}`);
   expect(prepared.status, 'fixture preparation; diagnostics remain local').toBe(0);
     const definitions = JSON.parse(await readFile(join(lake, 'result-details-definitions.json'), 'utf8'));
@@ -58,10 +61,12 @@ test('saved native details distinguish fills, deferral, skipped buys, empty tabl
     await expect(page.getByTestId('native-pending')).toContainText(pending.decision_session);
     const close = traded.allocations.find((row: { session_date: string; valuation_point: string }) => row.session_date === '2026-01-07' && row.valuation_point === 'close');
     expect(close.cash).toBe('976.991'); expect(close.equity).toBe('9976.991');
+    expect(close.unallocated_capital).toBe('0');
     expect(close.positions['510300.XSHG'].market_value).toBe('9000');
     await page.getByLabel('持仓估值日期', { exact: true }).selectOption('2026-01-07');
     await expect(page.getByTestId('native-allocations')).toContainText(close.cash_weight);
     await expect(page.getByTestId('native-allocations')).toContainText(close.positions['510300.XSHG'].weight);
+    await expect(page.getByTestId('native-allocations')).toContainText('未分配资本');
     await page.reload();
     await expect(page.getByTestId('native-pending')).toContainText(pending.decision_session);
     await expect(page.getByTestId('native-fills')).toContainText(fill.costs.tax);
@@ -90,12 +95,18 @@ test('saved native details distinguish fills, deferral, skipped buys, empty tabl
     const summary = await run(lower, 'summary', 'details-summary');
     expect(summary.allocations).toBeNull();
     await expect(page.getByTestId('native-allocations')).toContainText('未保存');
+    // The task API permits `full` only for `single_etf_timing`, so this Vector
+    // buy-and-hold fixture stays at Standard: saved Vector weights are not
+    // produced, but the engine-not-produced/empty states remain browser-covered.
     const vector = await run(definitions[3], 'standard', 'details-vector');
-    expect(vector.tables.not_produced_by_engine).toContain('fills');
+    expect(vector.tables.not_produced_by_engine).toEqual(expect.arrayContaining(['fills', 'fee_settlements']));
     expect(vector.details.fills).toBeUndefined();
+    expect(vector.details.fee_settlements).toBeUndefined();
     await expect(page.getByTestId('native-fills')).toContainText('引擎不产生');
+    await expect(page.getByTestId('native-fee_settlements')).toContainText('引擎不产生');
     await expect(page.getByTestId('native-weights_after_execution')).toContainText('未保存');
-    await expect(page.getByTestId('native-sessions')).toBeVisible();
+    await expect(page.getByTestId('native-sessions')).toContainText('资金构成');
+    await expect(page.getByTestId('native-sessions')).toContainText('不可用（未记录）');
     expect(errors).toEqual([]);
   } finally {
     // Only manifests created by this invocation's test are removed from catalog;

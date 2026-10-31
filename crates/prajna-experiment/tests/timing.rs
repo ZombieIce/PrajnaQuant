@@ -352,10 +352,14 @@ fn native_definition_and_cli_reject_insufficient_or_inconsistent_timing_readines
 fn export_result_details_fixture() {
     // The browser harness passes its owned lake; the ignored CI run exports into
     // a disposable root so the production fixture path still executes.
-    let temporary = TempDir::new().unwrap();
-    let root = std::env::var_os("PRAJNA_DETAILS_FIXTURE_ROOT")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| temporary.path().to_owned());
+    let temporary;
+    let root = match std::env::var_os("PRAJNA_DETAILS_FIXTURE_ROOT") {
+        Some(root) => std::path::PathBuf::from(root),
+        None => {
+            temporary = TempDir::new().unwrap();
+            temporary.path().to_owned()
+        }
+    };
     let mut definitions = Vec::new();
     for blocked in [&[4][..], &[2][..]] {
         let selection = setup_scenario(

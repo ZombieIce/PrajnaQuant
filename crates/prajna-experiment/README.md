@@ -303,7 +303,7 @@ scale-18 字符串；空表仍保存并登记 logical hash。Orders 中 `record_
 Run manifest 的 `accounting_verified=true` 只表示成功 Run 已通过运行内两层、两点的
 精确恒等式；失败 Run 保存 `status=failed`、错误和 `accounting_verified=false`，无指标，
 其余 Run 继续。`not_saved` 区分 ResultLevel 省略的表，`not_produced_by_engine` 则是
-Engine 不产生的表；Vector 保持原有 orders/fills/cash_ledger 不产生声明。
+Engine 不产生的表；Vector 保持原有 orders/fills/cash_ledger/fee_settlements 不产生声明。
 Fast Event Summary 在摘要完成后释放明细，不跨整个 Rayon 扫描保留所有 Run 账本。
 提升、重放和 diff 复用 MVP-2 存储规则，已有表与 Summary 必须 logical hash 一致。
 重放 Summary 时若已有提升明细，会重新生成所需明细并校验，不能跳过验证。

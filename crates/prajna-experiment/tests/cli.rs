@@ -1331,27 +1331,11 @@ fn result_details_read_saved_native_tables_and_keep_absence_explicit() {
                 let served = run["details"][table].as_array().unwrap();
                 assert_eq!(served.len(), payloads.len());
                 for (served, stored) in served.iter().zip(payloads) {
-                    for (key, value) in stored.as_object().unwrap() {
-                        // Timestamp integers are stringified for lossless browser transport.
-                        let mut expected = value.clone();
-                        normalize_detail_timestamps(&mut expected);
-                        if ["executed_at", "submitted_at", "attempted_at", "ts_open"]
-                            .contains(&key.as_str())
-                        {
-                            expected = expected
-                                .as_str()
-                                .and_then(|s| prajna_domain::TimestampNs::parse(s).ok())
-                                .map(|t| json!(t.as_unix_nanos().to_string()))
-                                .unwrap_or_else(|| {
-                                    if expected.is_number() {
-                                        json!(expected.to_string())
-                                    } else {
-                                        expected
-                                    }
-                                });
-                        }
-                        assert_eq!(served[key], expected, "{table}/{key}");
-                    }
+                    // Transport parity with the read path; independent Unix-ns
+                    // goldens live in `result::tests` and the browser fixture.
+                    let mut expected = stored.clone();
+                    normalize_detail_timestamps(&mut expected);
+                    assert_eq!(served, &expected, "{table}");
                 }
             }
             if event {
@@ -1393,6 +1377,8 @@ fn result_details_read_saved_native_tables_and_keep_absence_explicit() {
     }
 }
 
+/// Transport parity oracle for this CLI test. Independent timestamp semantics
+/// are covered by `result::tests::nanoseconds_remain_exact_for_browser_transport`.
 fn normalize_detail_timestamps(value: &mut Value) {
     match value {
         Value::Object(fields) => {

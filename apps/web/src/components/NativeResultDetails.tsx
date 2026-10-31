@@ -10,8 +10,9 @@ export type NativeDetails = {
 const labels: Record<string, string> = {
   session_date: '执行/估值日期', decision_session: '决策日期', valuation_point: '估值点',
   instrument_id: '证券', portfolio_id: '组合', quantity: '数量（份）', price: '成交/估值价',
-  market_value: '持仓市值', weight: '权重（比例）', cash: '可用现金', equity: '总权益',
+  market_value: '持仓市值', weight: '权重（比例）', cash: '账户现金（含未分配资本）', equity: '总权益',
   cash_weight: '现金权重（比例）', dividend_receivable: '分红应收（不可花费）',
+  unallocated_capital: '未分配资本（账户级，不能由组合直接支配）',
   liquidation_receivable: '清算应收（不可花费）', dividend_receivable_weight: '分红应收权重（比例）',
   liquidation_receivable_weight: '清算应收权重（比例）', positions: '持仓',
   kind: '状态', record_type: '记录类型', order: '订单', fill: '成交', costs: '费用',
@@ -68,7 +69,7 @@ function SavedTable({ run, name, title, empty, rows, testId }: { run: NativeDeta
 }
 
 export default function NativeResultDetails({ run, sessions }: { run: NativeDetails; sessions?: Row[] }) {
-  const event = run.tables.saved.includes('account_valuations') || run.tables.not_saved.includes('account_valuations');
+  const isEventEngine = run.tables.saved.includes('account_valuations') || run.tables.not_saved.includes('account_valuations');
   const orders = run.details?.orders;
   const dates = [...new Set(run.allocations?.map(row => String(row.session_date)) ?? [])].sort();
   const [date, setDate] = useState(dates.at(-1) ?? '');
@@ -76,22 +77,22 @@ export default function NativeResultDetails({ run, sessions }: { run: NativeDeta
     <h2>持仓、现金和执行明细</h2>
     <p>金额单位：{run.units?.currency ?? '未记录（金额币种不可用）'}；数量单位：份；权重为 0–1 比例，总权益包含应收，应收不可花费。目标权重不代表实际持仓。Summary 执行事件计数包含全现金目标，不能当作实际 Fill 数量。</p>
     <p>成交价已经包含滑点时，滑点金额仅作解释，不能再加扣一次；最低佣金补足与比例佣金分别列示。成本率与金额不可相加。</p>
-    {event ? <section data-testid="native-allocations"><h3>实际持仓与现金（Rust 估值投影）</h3>
+    {isEventEngine ? <section data-testid="native-allocations"><h3>实际持仓与现金（Rust 估值投影）</h3>
       {!run.tables.saved.includes('account_valuations') || !Array.isArray(run.allocations)
         ? <p>{unavailable(run, 'account_valuations')}</p>
         : !run.allocations.length ? <p>已保存估值表为空，实际持仓不可用。</p>
-          : <><label>持仓估值日期<select aria-label="持仓估值日期" value={date} onChange={event => setDate(event.target.value)}>{dates.map(day => <option key={day}>{day}</option>)}</select></label><div className="table-wrap"><table><thead><tr><th>日期</th><th>估值点</th><th>现金 / 应收 / 实际权重</th></tr></thead>
+          : <><label>持仓估值日期<select aria-label="持仓估值日期" value={date} onChange={change => setDate(change.target.value)}>{dates.map(day => <option key={day}>{day}</option>)}</select></label><div className="table-wrap"><table><thead><tr><th>日期</th><th>估值点</th><th>现金 / 应收 / 实际权重</th></tr></thead>
             <tbody>{run.allocations.filter(row => row.session_date === date).map((row, i) => <tr key={i}><td>{String(row.session_date)}</td><td>{value(row.valuation_point)}</td>
               <td>{value(Object.fromEntries(Object.entries(row).filter(([key]) => !['session_date', 'valuation_point'].includes(key) && (key !== 'weight_unavailable_reason' || row[key] !== null))))}</td></tr>)}</tbody></table></div></>}
     </section> : <>
       <SavedTable run={run} name="weights_after_execution" title="实际开盘执行后权重（Vector）" empty="已保存实际权重表为空；不代表明细未保存。" />
-      <p>Vector 不产生现金金额账本；以下仅为保存的资金比例。旧 Session 缺资金构成时不可用。</p>
+      <p>Vector 不产生现金金额账本；以下仅为保存的资金比例。非账本 Vector 或旧 Session 未保存资金构成时不可用。</p>
       <SavedTable run={{ ...run, details: { ...run.details, sessions: sessions } }} name="sessions" title="Vector 现金/应收比例及逐日成本率" empty="已保存 Session 表为空：资金比例不可用。" rows={sessions?.map(row => ({ session_date: row.session_date, portfolio_components: row.portfolio_components, portfolio_components_close: row.portfolio_components_close, cost: row.cost }))} />
     </>}
     <SavedTable run={run} name="fills" title="实际成交与成交成本" empty="已保存成交表为空：该表确认无成交；仍需核对独立费用结算及延期/跳过记录。" />
     <SavedTable run={run} name="fee_settlements" title="独立费用结算（无成交数量）" empty="已保存费用结算表为空：无独立费用结算。" />
-    <SavedTable run={run} name={event ? 'orders' : 'executions'} title="订单、延期、跳过与数量调整" empty="已保存执行审计表为空：无审计记录。" />
-    {event ? <SavedTable run={run} name="orders" testId="native-pending" title="期末 pending 明细（目标 / 风险退出）" rows={orders?.filter(row => row.kind === 'pending_at_end' || row.record_type === 'risk_exit_pending_at_end')} empty="已保存订单审计中没有期末 pending 记录。" />
+    <SavedTable run={run} name={isEventEngine ? 'orders' : 'executions'} title="订单、延期、跳过与数量调整" empty="已保存执行审计表为空：无审计记录。" />
+    {isEventEngine ? <SavedTable run={run} name="orders" testId="native-pending" title="期末 pending 明细（目标 / 风险退出）" rows={orders?.filter(row => row.kind === 'pending_at_end' || row.record_type === 'risk_exit_pending_at_end')} empty="已保存订单审计中没有期末 pending 记录。" />
       : <SavedTable run={run} name="pending_at_end" title="期末 pending 目标" empty="已保存期末目标表为空：无期末目标；风险退出仍须核对执行审计。" />}
   </section>;
 }
