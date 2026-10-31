@@ -21,10 +21,19 @@ type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'interrupted';
 type Task = { task_id: string; task_type: string; status: TaskStatus; stage: string; created_at: string; updated_at: string; result_level: string;
   error: { code: string; message: string; details?: unknown } | null;
   result: { strategy?: { exp?: string; exe?: string }; benchmark?: { exp?: string; exe?: string } } | null };
+type Metric = { value: number | null; reason: string | null };
+type CalendarPeriod = { label: string; start_basis: 'initial_capital' | 'previous_close'; start_session: string | null; end_session: string; return_value: number };
+type CalendarPoint = { session_date: string; equity: string; nav: number; drawdown: number };
+type CalendarReport = { semantic_version: string; valuation_point: string; initial_capital: string; evaluation_start: string | null; evaluation_end: string | null;
+  sessions: number; available: boolean; reason?: string | null; max_drawdown?: number | null; drawdown_peak_session?: string | null;
+  drawdown_trough_session?: string | null; points: CalendarPoint[]; monthly: CalendarPeriod[]; annual: CalendarPeriod[]; missing_months: string[] };
+type CompleteSummary = { semantic_version: string; currency: string; evaluation_start: string | null; evaluation_end: string | null;
+  metrics: Record<string, Metric>; amounts: Record<string, string>; fill_count: number; fee_settlement_count: number; calendar?: CalendarReport | null };
 type Summary = { total_return: number | null; annualized_return: number | null; annualized_volatility: number | null;
   sharpe: number | null; max_drawdown: number | null; total_cost: number; executed_count: number;
   deferred_count: number; session_count: number; pending_at_end: boolean; insufficient_sessions: boolean;
-  zero_volatility: boolean; return_basis?: string | null; corporate_action_completeness?: { is_complete: boolean; reasons: string[] } | null };
+  zero_volatility: boolean; return_basis?: string | null; corporate_action_completeness?: { is_complete: boolean; reasons: string[] } | null;
+  complete?: CompleteSummary | null };
 type ValuationRow = { session_date: string; valuation_point: 'open_after' | 'close'; cash: string; equity: string; positions?: Record<string, { quantity: string }> };
 type ResultRun = { run_id: string; status: string; accounting_verified: boolean | null; error: string | null; summary: Summary | null; series: { account_valuations?: ValuationRow[] } };
 type RoleResult = { role: string; result_level: string; kind: string; definition: Record<string, unknown>; exp: string; exe: string; runs: ResultRun[] };
@@ -32,7 +41,8 @@ type Comparability = { semantic_version: string; strategy_kind: string; benchmar
   venues: string | string[] | null; initial_cash: string; minimum_commission: string; costs: Record<string, number>;
   sessions_per_year: number; adjusted_versions: Record<string, string>; evaluation: { start: string; end: string; warmup_sessions: number; common_start: string; common_end: string };
   corporate_actions: { version: string; dividend_tax_rate: string }; quantity_price_rules: { instrument_id: string; lot_size: string; price_increment: string; size_increment: string }[];
-  return_basis: string; reinvestment_calendar: { policy: 'strategy_rebalance' | 'none'; decision_dates: string[] }; checks: string[] };
+  return_basis: string; reinvestment_calendar: { policy: 'strategy_rebalance' | 'none'; decision_dates: string[] };
+  performance?: { summary: string; calendar: string | null } | null; checks: string[] };
 type Verification = { comparable: boolean; reasons: string[]; window: { start: string; end: string; session_count: number }; role_identities_verified: boolean };
 type ComparisonResult = { semantic_version: string; comparability: Comparability; verification: Verification; strategy: RoleResult; benchmark: RoleResult };
 
@@ -42,6 +52,9 @@ const shortId = (id: string) => (id.length > 20 ? `${id.slice(0, 18)}…` : id);
 const detailsJson = (value: unknown) => (value === null || value === undefined ? '' : JSON.stringify(value, null, 2));
 const actionStates: Record<ActionState, string> = { covered: '已覆盖', no_events: '明确无事件', missing_facts: '缺事实', unknown: '未知' };
 const reasonText: Record<string, string> = { corporate_actions_incomplete: '公司行动事实不完整，结果不能作为完整总回报结论。', accounting_unverified: '账本恒等式未通过核验。', return_basis_missing: '未记录总回报口径。', corporate_action_version_mismatch: '保存结果的公司行动版本与冻结关联不一致。' };
+const metricReasonText: Record<string, string> = { empty_evaluation: '评价窗口无 Session', insufficient_returns: '有效收益样本不足 2', zero_volatility: '收益波动为零，Sharpe 无定义', zero_drawdown: '最大回撤为零，Calmar 无定义', annualized_return_unavailable: '年化收益不可用', nonfinite_result: '结果非有限值', benchmark_not_bound: '未绑定冻结基准', benchmark_or_strategy_incomplete: '策略或基准不完整', corporate_actions_incomplete: '公司行动事实不完整', unavailable: '不可用' };
+const calendarReasonText: Record<string, string> = { corporate_actions_incomplete: '公司行动事实不完整，收益/回撤不可作完整结论', empty_evaluation: '评价窗口没有 Session' };
+const metricUnavailableText = (metric?: Metric) => !metric ? '未保存（缺少完整 Summary 字段）' : metric.reason ? `不可计算（${metricReasonText[metric.reason] ?? metric.reason}）` : '不可计算';
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } });
@@ -348,15 +361,24 @@ function ComparisonView({ result }: { result: ComparisonResult }) {
       <div data-testid="comparison-facts">
         <p>窗口：{c.evaluation.start} ～ {c.evaluation.end}（预热 {c.evaluation.warmup_sessions} Sessions；共同数据 {c.evaluation.common_start} ～ {c.evaluation.common_end}） · 初始本金：{c.initial_cash} CNY · {c.sessions_per_year} Sessions/年</p>
         <p>角色：策略 <code>{c.strategy_kind}</code> 对基准 <code>{c.benchmark_kind}</code> · 收益口径：{c.return_basis === 'total_return' ? '总回报（原始价成交/估值 + 净现金行动）' : c.return_basis} · 行动版本：<code>{c.corporate_actions.version}</code>（税率 {c.corporate_actions.dividend_tax_rate}）</p>
+        <p>完整绩效：<code>{c.performance?.summary ?? '未声明'}</code> · 日历报告：<code>{c.performance?.calendar ?? '未声明'}</code> · 页面只读取 Rust 已保存的指标/金额/回撤/月年收益，不重算绩效。</p>
         <p>成本：佣金 {cost.commission_rate} · 最低佣金 {c.minimum_commission} CNY · 买入滑点 {cost.buy_slippage_bps}bp · 卖出滑点 {cost.sell_slippage_bps}bp · 买入税 {cost.buy_tax_rate} · 卖出税 {cost.sell_tax_rate}。策略与基准使用同一成本模型，基准实际成交时计费。</p>
         <p>再投资日历：{c.reinvestment_calendar.policy === 'none' ? '明确声明不再投资（空日历）' : `按策略调仓 Session（${c.reinvestment_calendar.decision_dates.join('、') || '评价窗口内无可用日期'}）`}。分红到账后的下一声明 normal decision 才能再投；应收不提前使用。</p>
         <p>已核对：{c.checks.join('、')} · 身份核对：{v.role_identities_verified ? '策略/基准持久 exp/Run 与冻结定义一致' : '未通过'} · 评价窗口 {v.window.start} ～ {v.window.end}（{v.window.session_count} Sessions）。</p>
       </div>
     </Panel>
     <div className="run-status" data-testid="comparison-metrics">
-      <RoleMetrics title={`策略 · ${c.strategy_kind}`} run={strategy.runs[0]} />
-      <RoleMetrics title={`基准 · ${c.benchmark_kind}`} run={benchmark.runs[0]} />
+      <RoleReport role={strategy} label={`策略 · ${c.strategy_kind}`} />
+      <RoleReport role={benchmark} label={`基准 · ${c.benchmark_kind}`} />
     </div>
+    <DrawdownPanel strategy={strategy} benchmark={benchmark} />
+    <Panel title="权威日历收益（Rust 保存）">
+      <p className="hint">月/年收益、回撤与峰谷来自已保存 <code>calendar-performance@1</code> 报告；首段以初始资本为起点并保留首日成本，缺失月份不补零，页面不重算。</p>
+      <div className="run-status" data-testid="comparison-calendar">
+        <CalendarRole role={strategy} label="策略" />
+        <CalendarRole role={benchmark} label="基准" />
+      </div>
+    </Panel>
     {chart.dates.length > 0 ? <Panel title="策略/基准账户权益（CNY，收盘估值）"><div data-testid="comparison-chart">
       <Chart option={{
         tooltip: { trigger: 'axis', valueFormatter: (value) => value === null ? '未保存' : Number(value).toFixed(4) },
@@ -381,26 +403,111 @@ function ComparisonView({ result }: { result: ComparisonResult }) {
   </div>;
 }
 
-function RoleMetrics({ title, run }: { title: string; run?: ResultRun }) {
+const completeMetrics: { name: string; label: string; kind: 'percent' | 'number' }[] = [
+  { name: 'total_return', label: '累计收益', kind: 'percent' },
+  { name: 'annualized_return', label: '年化收益（252 Session/年）', kind: 'percent' },
+  { name: 'annualized_volatility', label: '年化波动', kind: 'percent' },
+  { name: 'sharpe', label: 'Sharpe（rf=0）', kind: 'number' },
+  { name: 'max_drawdown', label: '最大回撤', kind: 'percent' },
+  { name: 'calmar', label: 'Calmar', kind: 'number' },
+  { name: 'cumulative_cost_rate', label: '累计成本率（执行费用/期初权益）', kind: 'percent' },
+  { name: 'cumulative_turnover_rate', label: '累计换手率（成交基数/期初权益）', kind: 'percent' },
+];
+const benchmarkMetrics: typeof completeMetrics = [
+  { name: 'benchmark_return', label: '基准累计收益', kind: 'percent' },
+  { name: 'excess_return', label: '超额收益（收益率差）', kind: 'percent' },
+];
+const amountLabels: [string, string][] = [['commission', '佣金'], ['minimum_commission_top_up', '最低佣金补差'], ['tax', '成交税'], ['slippage', '滑点'], ['total_execution_cost', '总执行成本'], ['initial_capital', '初始资本']];
+
+function RoleReport({ role, label }: { role: RoleResult; label: string }) {
+  const run = role.runs[0];
   const summary = run?.summary;
-  const unavailable = !summary ? '不可计算（无 Summary）' : summary.insufficient_sessions ? '不可计算（有效收益样本不足 2）'
-    : summary.zero_volatility ? '不可计算（收益波动为零）' : '不可计算';
-  return <div>
-    <strong>{title}</strong>
+  const complete = summary?.complete;
+  return <div data-testid={`comparison-performance-${role.role}`}>
+    <strong>{label}</strong>
     {run?.error && <ErrorBox>Run 错误：{run.error}</ErrorBox>}
-    {!summary ? <ErrorBox>该角色没有 Summary；不显示为成功、零交易或零值。</ErrorBox> : <>
-      <section className="metrics">
-        <Metric label="累计收益" value={summary.total_return === null ? unavailable : pct(summary.total_return)} />
-        <Metric label="年化收益" value={summary.annualized_return === null ? unavailable : pct(summary.annualized_return)} />
-        <Metric label="年化波动" value={summary.annualized_volatility === null ? unavailable : pct(summary.annualized_volatility)} />
-        <Metric label="Sharpe" value={summary.sharpe === null ? unavailable : summary.sharpe.toFixed(3)} />
-        <Metric label="最大回撤" value={summary.max_drawdown === null ? unavailable : pct(summary.max_drawdown)} />
-        <Metric label="累计成本率" value={pct(summary.total_cost)} />
-      </section>
-      <p className="hint">成交 {summary.executed_count} · 延期 {summary.deferred_count} · Session {summary.session_count} · 收益口径 {summary.return_basis ?? '未记录'} · 账本核验 {run?.accounting_verified === null ? '未记录' : run?.accounting_verified ? '已核验' : '未通过'} · 行动事实 {summary.corporate_action_completeness?.is_complete ? '完整' : '不完整'}</p>
-      {summary.pending_at_end && <p className="hint">期末仍有 pending 目标/风险退出；不代表已清仓。</p>}
-    </>}
+    {!summary ? <ErrorBox>该角色没有 Summary；不显示为成功、零交易或零值。</ErrorBox>
+      : !complete ? <>
+        <ErrorBox>该角色保存结果没有完整绩效 Summary（旧结果或未声明 complete-performance@1）；不显示为零或替代成功值。</ErrorBox>
+        <LegacyMetrics summary={summary} />
+      </> : <CompleteDetail complete={complete} role={role.role} summary={summary} run={run} />}
   </div>;
+}
+
+function CompleteDetail({ complete, role, summary, run }: { complete: CompleteSummary; role: string; summary: Summary; run: ResultRun }) {
+  const metrics = [...completeMetrics, ...benchmarkMetrics];
+  return <>
+    <section className="metrics" data-testid={`comparison-complete-metrics-${role}`}>
+      {metrics.map((metric) => <CompleteMetric key={metric.name} label={metric.label} kind={metric.kind} metric={complete.metrics[metric.name]} />)}
+    </section>
+    <div className="table-wrap"><table data-testid={`comparison-amounts-${role}`}>
+      <thead><tr><th>账户币种金额（{complete.currency}）</th><th>值</th></tr></thead>
+      <tbody>{amountLabels.map(([key, label]) => <tr key={key}><td>{label}</td><td data-amount={key}>{complete.amounts[key] ?? '未保存'}</td></tr>)}</tbody>
+    </table></div>
+    <p className="hint">金额为 scale-18 十进制账户币种；费率/换手为累计比例，不是现金金额。成交事件 {complete.fill_count} · 费用结算事件 {complete.fee_settlement_count} · 执行 {summary.executed_count} · 延期 {summary.deferred_count} · Session {summary.session_count} · 收益口径 {summary.return_basis ?? '未记录'} · 账本核验 {run.accounting_verified === null ? '未记录' : run.accounting_verified ? '已核验' : '未通过'} · 行动事实 {summary.corporate_action_completeness?.is_complete ? '完整' : '不完整'} · 完整绩效定义 {complete.semantic_version}</p>
+    {summary.pending_at_end && <p className="hint">期末仍有 pending 目标/风险退出；不代表已清仓。</p>}
+  </>;
+}
+
+function CompleteMetric({ label, metric, kind }: { label: string; metric?: Metric; kind: 'percent' | 'number' }) {
+  const text = !metric || metric.value === null ? metricUnavailableText(metric) : kind === 'percent' ? pct(metric.value) : metric.value.toFixed(3);
+  return <div className="metric" data-metric={label} data-reason={metric?.reason ?? ''}><small>{label}</small><strong>{text}</strong></div>;
+}
+
+function LegacyMetrics({ summary }: { summary: Summary }) {
+  const unavailable = summary.insufficient_sessions ? '不可计算（有效收益样本不足 2）' : summary.zero_volatility ? '不可计算（收益波动为零）' : '不可计算';
+  return <>
+    <section className="metrics">
+      <Metric label="累计收益" value={summary.total_return === null ? unavailable : pct(summary.total_return)} />
+      <Metric label="年化收益" value={summary.annualized_return === null ? unavailable : pct(summary.annualized_return)} />
+      <Metric label="年化波动" value={summary.annualized_volatility === null ? unavailable : pct(summary.annualized_volatility)} />
+      <Metric label="Sharpe" value={summary.sharpe === null ? unavailable : summary.sharpe.toFixed(3)} />
+      <Metric label="最大回撤" value={summary.max_drawdown === null ? unavailable : pct(summary.max_drawdown)} />
+      <Metric label="累计成本率" value={pct(summary.total_cost)} />
+    </section>
+    <p className="hint">旧 Summary 指标（非完整定义），仅供旧任务读取；不冒充完整绩效。</p>
+  </>;
+}
+
+function CalendarRole({ role, label }: { role: RoleResult; label: string }) {
+  const complete = role.runs[0]?.summary?.complete;
+  const calendar = complete?.calendar;
+  if (!calendar) return <div data-testid={`comparison-calendar-${role.role}`}><ErrorBox>{label}未保存权威日历收益/回撤报告（旧结果或未请求 calendar-performance@1）；不显示为零。</ErrorBox></div>;
+  if (!calendar.available) return <div data-testid={`comparison-calendar-${role.role}`}><ErrorBox>{label}日历报告不可用：{calendarReasonText[calendar.reason ?? ''] ?? calendar.reason ?? '未知原因'}；不显示零收益或零回撤。</ErrorBox></div>;
+  return <div data-testid={`comparison-calendar-${role.role}`}>
+    <p>{label}：估值时点 <code>{calendar.valuation_point}</code> · 初始资本 {calendar.initial_capital} {complete?.currency ?? ''} · 评价 {calendar.evaluation_start} ～ {calendar.evaluation_end}（{calendar.sessions} Sessions） · 报告 <code>{calendar.semantic_version}</code></p>
+    <p>最大回撤 <b>{calendar.max_drawdown == null ? '不可计算' : pct(calendar.max_drawdown)}</b> · 峰值 {calendar.drawdown_peak_session ?? '无（未出现回撤）'} · 谷值 {calendar.drawdown_trough_session ?? '无'}</p>
+    <PeriodTable title={`月度收益（${label}）`} testId={`comparison-monthly-${role.role}`} periods={calendar.monthly} />
+    <PeriodTable title={`年度收益（${label}）`} testId={`comparison-annual-${role.role}`} periods={calendar.annual} />
+    {calendar.missing_months.length > 0 && <p className="hint" data-testid={`comparison-missing-months-${role.role}`}>无评价 Session 的月份（不填零）：{calendar.missing_months.join('、')}</p>}
+  </div>;
+}
+
+function PeriodTable({ title, testId, periods }: { title: string; testId: string; periods: CalendarPeriod[] }) {
+  if (!periods.length) return <ErrorBox>{title}：已保存报告没有可展示的区间；不补零。</ErrorBox>;
+  return <div><h3>{title}</h3><div className="table-wrap"><table data-testid={testId}>
+    <thead><tr><th>区间</th><th>起点依据</th><th>开始 Session</th><th>结束 Session</th><th>收益</th></tr></thead>
+    <tbody>{periods.map((period) => <tr key={period.label} data-label={period.label} data-start={period.start_session ?? 'initial_capital'} data-end={period.end_session} data-return={String(period.return_value)}>
+      <td>{period.label}</td><td>{period.start_basis === 'initial_capital' ? '期初本金' : '上一期收盘'}</td><td>{period.start_session ?? '期初本金'}</td><td>{period.end_session}</td><td>{pct(period.return_value)}</td>
+    </tr>)}</tbody>
+  </table></div></div>;
+}
+
+function DrawdownPanel({ strategy, benchmark }: { strategy: RoleResult; benchmark: RoleResult }) {
+  const roles = [strategy, benchmark].flatMap((role) => {
+    const calendar = role.runs[0]?.summary?.complete?.calendar;
+    return calendar?.available ? [{ role, calendar }] : [];
+  });
+  if (!roles.length) return <Panel title="权威回撤（close）"><div data-testid="comparison-drawdown"><ErrorBox>策略与基准均没有可用的权威回撤序列；不显示零回撤。</ErrorBox></div></Panel>;
+  const dates = [...new Set(roles.flatMap(({ calendar }) => calendar.points.map((point) => point.session_date)))].sort();
+  const series = roles.map(({ role, calendar }) => {
+    const values = new Map(calendar.points.map((point) => [point.session_date, point.drawdown]));
+    return { type: 'line' as const, showSymbol: false, connectNulls: false, name: role.role === 'strategy' ? '策略回撤' : '基准回撤', data: dates.map((date) => values.get(date) ?? null), color: role.role === 'strategy' ? '#2563eb' : '#dc2626' };
+  });
+  return <Panel title="权威回撤（close，负值）"><div data-testid="comparison-drawdown">
+    <Chart option={{ tooltip: { trigger: 'axis', valueFormatter: (value) => value === null ? '未保存' : `${(Number(value) * 100).toFixed(2)}%` }, legend: { data: series.map((item) => item.name) }, xAxis: { type: 'category', data: dates, boundaryGap: false }, yAxis: { type: 'value', name: '回撤' }, series }} />
+    <p className="hint">直接绘制已保存 <code>calendar.points.drawdown</code>；缺失日期空点，不填零、不重算、不重置首点。</p>
+  </div></Panel>;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

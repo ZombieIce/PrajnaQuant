@@ -198,6 +198,20 @@ fn benchmark_definition(
     Ok(Value::Object(benchmark))
 }
 
+/// Both comparison roles opt into the complete Summary and its calendar report.
+/// The strategy Summary binds the frozen holding benchmark so benchmark/excess
+/// returns are produced by Rust instead of the browser.
+fn performance_binding(benchmark: Option<Value>) -> Value {
+    let mut summary = json!({
+        "semantic_version": crate::performance::VERSION,
+        "calendar": crate::performance::CALENDAR_VERSION,
+    });
+    if let Some(benchmark) = benchmark {
+        summary["benchmark_definition"] = benchmark;
+    }
+    summary
+}
+
 fn require_equal(
     checks: &mut Vec<&'static str>,
     field: &'static str,
@@ -253,6 +267,21 @@ fn comparability(
             &benchmark["fast_event"][field],
         )?;
     }
+    for field in ["semantic_version", "calendar"] {
+        if strategy["summary"][field] != benchmark["summary"][field] {
+            return Err(error(
+                "comparison_definition_mismatch",
+                format!("strategy and benchmark disagree on summary.{field}"),
+            ));
+        }
+    }
+    if strategy["summary"]["benchmark_definition"]["holding_benchmark"].is_null() {
+        return Err(error(
+            "comparison_definition_mismatch",
+            "strategy Summary must bind the frozen holding benchmark",
+        ));
+    }
+    checks.push("summary");
     let initial_cash = strategy["fast_event"]["initial_cash"]
         .as_str()
         .ok_or_else(|| error("comparison_definition_invalid", "missing initial cash"))?;
@@ -261,6 +290,10 @@ fn comparability(
         "validation_version": "effective-rules-calendar@2",
         "strategy_kind": strategy_kind,
         "benchmark_kind": benchmark_kind,
+        "performance": {
+            "summary": strategy["summary"]["semantic_version"],
+            "calendar": strategy["summary"]["calendar"],
+        },
         "dsv": strategy["dsv"],
         "universe": strategy["universe"],
         "venues": strategy.get("venues").cloned().or_else(|| strategy.get("venue").cloned()).unwrap_or(Value::Null),
@@ -284,7 +317,7 @@ fn comparability(
 pub fn freeze(root: &Path, request: &Request) -> Result<Value, ComparisonError> {
     let selection = selection::freeze(root, &request.selection).map_err(selection_error)?;
     let definition = selection["data"]["definition"].clone();
-    let strategy_kind = strategy_kind(&definition)?;
+    let strategy_kind = strategy_kind(&definition)?.to_owned();
     if definition["corporate_actions"].is_null() {
         return Err(error(
             "comparison_requires_corporate_actions",
@@ -349,13 +382,6 @@ pub fn freeze(root: &Path, request: &Request) -> Result<Value, ComparisonError> 
     let benchmark_definition = benchmark_definition(&definition, benchmark_kind, &calendar)?;
     let benchmark =
         Experiment::parse(&benchmark_definition.to_string(), root).map_err(experiment_error)?;
-    let benchmark_runs = benchmark.run_definitions(root).map_err(experiment_error)?;
-    if benchmark_runs.len() != 1 {
-        return Err(error(
-            "comparison_benchmark_invalid",
-            "derived benchmark must expand to exactly one Run",
-        ));
-    }
     strategy
         .engine
         .validate_comparison_prices(
@@ -365,24 +391,47 @@ pub fn freeze(root: &Path, request: &Request) -> Result<Value, ComparisonError> 
             &benchmark.holding_benchmark.as_ref().unwrap().price_ticks,
         )
         .map_err(|e| error("comparison_price_rules_mismatch", e))?;
+    // The role definitions are the ones persisted/executed: both opt into the
+    // complete Summary and calendar report, and only the strategy Summary binds
+    // the derived holding benchmark.
+    let mut benchmark_role_definition = benchmark_definition.clone();
+    benchmark_role_definition["summary"] = performance_binding(None);
+    let mut strategy_role_definition = definition;
+    strategy_role_definition["summary"] = performance_binding(Some(benchmark_definition));
+    let strategy_role =
+        Experiment::parse(&strategy_role_definition.to_string(), root).map_err(experiment_error)?;
+    let benchmark_role = Experiment::parse(&benchmark_role_definition.to_string(), root)
+        .map_err(experiment_error)?;
+    let strategy_role_runs = strategy_role
+        .run_definitions(root)
+        .map_err(experiment_error)?;
+    let benchmark_role_runs = benchmark_role
+        .run_definitions(root)
+        .map_err(experiment_error)?;
+    if strategy_role_runs.len() != 1 || benchmark_role_runs.len() != 1 {
+        return Err(error(
+            "comparison_benchmark_invalid",
+            "each comparison role must expand to exactly one Run",
+        ));
+    }
     let comparability = comparability(
-        &definition,
-        &benchmark_definition,
-        &benchmark_runs[0].run_spec,
-        strategy_kind,
+        &strategy_role_definition,
+        &benchmark_role_definition,
+        &benchmark_role_runs[0].run_spec,
+        &strategy_kind,
         benchmark_kind,
         &calendar,
     )?;
     Ok(json!({"schema_version": 1, "data": {
         "semantic_version": SEMANTIC_VERSION,
         "strategy": {
-            "role": "strategy", "result_level": "standard", "definition": definition,
-            "experiment": strategy.id().map_err(experiment_error)?, "run": strategy_runs[0].run_id,
+            "role": "strategy", "result_level": "standard", "definition": strategy_role_definition,
+            "experiment": strategy_role.id().map_err(experiment_error)?, "run": strategy_role_runs[0].run_id,
         },
         "benchmark": {
             "role": "benchmark", "result_level": "standard", "kind": benchmark_kind,
-            "definition": benchmark_definition,
-            "experiment": benchmark.id().map_err(experiment_error)?, "run": benchmark_runs[0].run_id,
+            "definition": benchmark_role_definition,
+            "experiment": benchmark_role.id().map_err(experiment_error)?, "run": benchmark_role_runs[0].run_id,
         },
         "comparability": comparability,
     }}))

@@ -469,7 +469,7 @@ mod tests {
         result.return_basis = ReturnBasis::TotalReturn;
         result.corporate_action_completeness.is_complete = true;
         let mut complete = summarize_fast(&result, 252, "none").unwrap();
-        crate::performance::complete(&mut complete, &result, None).unwrap();
+        crate::performance::complete(&mut complete, &result, None, false).unwrap();
         assert_eq!(complete.n_returns, 1);
         assert_eq!(complete.total_return, Some(985.0 / 1000.0 - 1.0));
         assert_eq!(
@@ -489,22 +489,22 @@ mod tests {
         assert_eq!(complete.complete.as_ref().unwrap().fee_settlement_count, 1);
         let mut bad = result.clone();
         bad.sessions[0].close.account.cash = Notional::ZERO;
-        assert!(crate::performance::complete(&mut complete, &bad, None).is_err());
+        assert!(crate::performance::complete(&mut complete, &bad, None, false).is_err());
         bad = result.clone();
         bad.config.initial_cash = Notional::ZERO;
-        assert!(crate::performance::complete(&mut complete, &bad, None).is_err());
+        assert!(crate::performance::complete(&mut complete, &bad, None, false).is_err());
         let mut flat = result.clone();
         flat.config.initial_cash = n("985");
         flat.sessions.push(flat.sessions[0].clone());
         let mut zero = summarize_fast(&flat, 252, "none").unwrap();
-        crate::performance::complete(&mut zero, &flat, None).unwrap();
+        crate::performance::complete(&mut zero, &flat, None, false).unwrap();
         let metrics = &zero.complete.as_ref().unwrap().metrics;
         assert_eq!(metrics["annualized_volatility"].value, Some(0.0));
         assert_eq!(metrics["sharpe"].reason.as_deref(), Some("zero_volatility"));
         assert_eq!(metrics["calmar"].reason.as_deref(), Some("zero_drawdown"));
         result.sessions.clear();
         let mut empty = summarize_fast(&result, 252, "none").unwrap();
-        crate::performance::complete(&mut empty, &result, None).unwrap();
+        crate::performance::complete(&mut empty, &result, None, false).unwrap();
         assert_eq!(
             empty.complete.as_ref().unwrap().metrics["total_return"]
                 .reason

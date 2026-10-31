@@ -507,6 +507,134 @@ fn close_dates(result: &Value) -> Result<Vec<String>, String> {
     Ok(dates)
 }
 
+fn same_number(left: &Value, right: &Value) -> bool {
+    match (left.as_f64(), right.as_f64()) {
+        (Some(left), Some(right)) => {
+            (left - right).abs() <= 1e-12 * left.abs().max(right.abs()).max(1.0)
+        }
+        _ => left == right,
+    }
+}
+
+/// Compare amount spellings by exact decimal value (`10000`, `10000.00`, `1e4`).
+fn same_decimal(left: &Value, right: &Value) -> bool {
+    let parts = |value: &Value| -> Option<(bool, String, i64)> {
+        let value = value.as_str()?;
+        let (negative, value) = match value.strip_prefix('-') {
+            Some(value) => (true, value),
+            None => (false, value.strip_prefix('+').unwrap_or(value)),
+        };
+        let (mantissa, exponent) = match value.split_once('e').or_else(|| value.split_once('E')) {
+            Some((mantissa, exponent)) => (mantissa, exponent.parse::<i64>().ok()?),
+            None => (value, 0),
+        };
+        let (integer, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+        let digits = format!("{integer}{fraction}");
+        let significant = digits.trim_start_matches('0');
+        let trimmed = significant.trim_end_matches('0');
+        if trimmed.is_empty() {
+            return Some((false, "0".into(), 0));
+        }
+        Some((
+            negative,
+            trimmed.into(),
+            exponent - fraction.len() as i64 + (significant.len() - trimmed.len()) as i64,
+        ))
+    };
+    match (parts(left), parts(right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => left == right,
+    }
+}
+
+/// Verify the opt-in complete Summary and calendar report on a frozen role.
+/// Legacy comparisons without the binding stay readable; new frozen roles must
+/// have a persisted report, and incomplete reports are surfaced as reasons
+/// instead of becoming zero performance.
+fn verify_complete_report(
+    comparison: &Value,
+    role: &str,
+    summary: &Value,
+    reasons: &mut Vec<String>,
+    mismatches: &mut Vec<String>,
+) {
+    let Some(binding) = comparison[role]["definition"].get("summary") else {
+        return;
+    };
+    if !summary["complete"].is_object() {
+        mismatches.push(format!("{role} complete Summary is missing"));
+        return;
+    }
+    let complete = &summary["complete"];
+    if complete["semantic_version"] != binding["semantic_version"] {
+        mismatches.push(format!("{role} complete Summary version changed"));
+    }
+    let Some(calendar_version) = binding["calendar"].as_str() else {
+        return;
+    };
+    if !complete["calendar"].is_object() {
+        mismatches.push(format!("{role} calendar report is missing"));
+        return;
+    }
+    let calendar = &complete["calendar"];
+    if calendar["semantic_version"].as_str() != Some(calendar_version) {
+        mismatches.push(format!("{role} calendar report version changed"));
+    }
+    if calendar["valuation_point"] != "close" {
+        mismatches.push(format!("{role} calendar valuation point changed"));
+    }
+    let evaluation = &comparison["comparability"]["evaluation"];
+    if calendar["evaluation_start"] != evaluation["start"]
+        || calendar["evaluation_end"] != evaluation["end"]
+    {
+        mismatches.push(format!("{role} calendar evaluation window changed"));
+    }
+    if !same_decimal(
+        &calendar["initial_capital"],
+        &comparison["comparability"]["initial_cash"],
+    ) {
+        mismatches.push(format!("{role} calendar initial capital changed"));
+    }
+    if calendar["available"] != true {
+        reasons.push(format!(
+            "{role}:calendar_unavailable:{}",
+            calendar["reason"].as_str().unwrap_or("unknown")
+        ));
+        return;
+    }
+    if calendar["points"].as_array().map(Vec::len)
+        != calendar["sessions"].as_u64().map(|n| n as usize)
+    {
+        mismatches.push(format!("{role} calendar session count changed"));
+    }
+    if calendar["monthly"].as_array().is_none_or(Vec::is_empty)
+        || calendar["annual"].as_array().is_none_or(Vec::is_empty)
+    {
+        mismatches.push(format!("{role} calendar periods are missing"));
+    }
+    if !same_number(&calendar["max_drawdown"], &summary["max_drawdown"])
+        || calendar["drawdown_peak_session"] != summary["drawdown_peak_session"]
+        || calendar["drawdown_trough_session"] != summary["drawdown_trough_session"]
+    {
+        mismatches.push(format!(
+            "{role} calendar drawdown disagrees with its Summary"
+        ));
+    }
+    if let Some(nav) = calendar["points"]
+        .as_array()
+        .and_then(|points| points.last())
+        .and_then(|point| point["nav"].as_f64())
+    {
+        if let Some(total) = complete["metrics"]["total_return"]["value"].as_f64() {
+            if (nav - 1.0 - total).abs() > 1e-12 {
+                mismatches.push(format!(
+                    "{role} calendar endpoints disagree with its total return"
+                ));
+            }
+        }
+    }
+}
+
 fn verify_comparison(
     comparison: &Value,
     strategy: &Value,
@@ -559,6 +687,7 @@ fn verify_comparison(
                 reasons.push(format!("{role}:corporate_actions_incomplete"));
             }
         }
+        verify_complete_report(comparison, role, summary, &mut reasons, &mut mismatches);
         match close_dates(result) {
             Ok(dates) => {
                 if dates.first().map(String::as_str) != Some(start)
@@ -755,5 +884,116 @@ mod tests {
             freeze_status("comparison_price_rules_mismatch"),
             StatusCode::UNPROCESSABLE_ENTITY
         );
+    }
+
+    #[test]
+    fn complete_calendar_report_is_required_executed_and_checked_against_summary() {
+        let calendar = json!({
+            "semantic_version": "calendar-performance@1", "valuation_point": "close",
+            "initial_capital": "1000", "evaluation_start": "2026-01-05",
+            "evaluation_end": "2026-01-05", "sessions": 1, "available": true,
+            "max_drawdown": 0.0, "drawdown_peak_session": null, "drawdown_trough_session": null,
+            "points": [{"session_date": "2026-01-05", "equity": "1000", "nav": 1.0, "drawdown": 0.0}],
+            "monthly": [{"label": "2026-01", "start_basis": "initial_capital", "start_session": null,
+                "end_session": "2026-01-05", "return_value": 0.0}],
+            "annual": [{"label": "2026", "start_basis": "initial_capital", "start_session": null,
+                "end_session": "2026-01-05", "return_value": 0.0}],
+            "missing_months": []
+        });
+        let summary = json!({"return_basis":"total_return","session_count":1,
+            "corporate_action_schedule_version":"caf",
+            "corporate_action_completeness":{"is_complete":true},
+            "max_drawdown":0.0,"drawdown_peak_session":null,"drawdown_trough_session":null,
+            "complete":{"semantic_version":"complete-performance@1","currency":"CNY",
+                "metrics":{"total_return":{"value":0.0,"reason":null}},"calendar":calendar}});
+        let definition = json!({"summary":{"semantic_version":"complete-performance@1",
+            "calendar":"calendar-performance@1"}});
+        let comparison = json!({
+            "strategy":{"experiment":"exp-s","run":"run-s","definition":definition},
+            "benchmark":{"experiment":"exp-b","run":"run-b","definition":definition},
+            "comparability":{"evaluation":{"start":"2026-01-05","end":"2026-01-05"},
+                "corporate_actions":{"version":"caf"},"initial_cash":"1000",
+                "validation_version":"effective-rules-calendar@2"}});
+        let result = |exp: &str, run: &str, summary: &Value| {
+            json!({"data":{"exp":exp,"runs":[{
+            "run_id":run,"status":"completed","accounting_verified":true,"summary":summary,
+            "series":{"account_valuations":[{"session_date":"2026-01-05","valuation_point":"close"}]}}]}})
+        };
+        let strategy = result("exp-s", "run-s", &summary);
+        let benchmark = result("exp-b", "run-b", &summary);
+        let verified = verify_comparison(&comparison, &strategy, &benchmark).unwrap();
+        assert_eq!(verified["comparable"], true);
+        // Frozen definitions keep the caller's spelling; the report stores the
+        // canonical scale-18 value. Equivalent spellings must not 409.
+        for spelling in ["1000.00", "1e3"] {
+            let mut equivalent = comparison.clone();
+            equivalent["comparability"]["initial_cash"] = json!(spelling);
+            assert_eq!(
+                verify_comparison(&equivalent, &strategy, &benchmark).unwrap()["comparable"],
+                true,
+                "{spelling}"
+            );
+        }
+        let mut different = comparison.clone();
+        different["comparability"]["initial_cash"] = json!("2000");
+        assert_eq!(
+            verify_comparison(&different, &strategy, &benchmark)
+                .unwrap_err()
+                .0
+                .code,
+            "comparison_result_mismatch"
+        );
+
+        let mut missing = summary.clone();
+        missing["complete"]
+            .as_object_mut()
+            .unwrap()
+            .remove("calendar");
+        let failure =
+            verify_comparison(&comparison, &result("exp-s", "run-s", &missing), &benchmark)
+                .unwrap_err();
+        assert_eq!(failure.0.code, "comparison_result_mismatch");
+        assert!(
+            failure.0.details["reasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reason| reason.as_str().unwrap().contains("calendar"))
+        );
+
+        let mut incomplete = summary.clone();
+        incomplete["complete"]["calendar"]["available"] = json!(false);
+        incomplete["complete"]["calendar"]["reason"] = json!("corporate_actions_incomplete");
+        incomplete["complete"]["calendar"]["points"] = json!([]);
+        incomplete["complete"]["calendar"]["monthly"] = json!([]);
+        incomplete["complete"]["calendar"]["annual"] = json!([]);
+        incomplete["complete"]["calendar"]["max_drawdown"] = Value::Null;
+        let verified = verify_comparison(
+            &comparison,
+            &result("exp-s", "run-s", &incomplete),
+            &benchmark,
+        )
+        .unwrap();
+        assert_eq!(verified["comparable"], false);
+        assert!(
+            verified["reasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reason| reason
+                    .as_str()
+                    .unwrap()
+                    .contains("calendar_unavailable:corporate_actions_incomplete"))
+        );
+
+        let mut mismatched = summary;
+        mismatched["complete"]["calendar"]["max_drawdown"] = json!(-0.5);
+        let failure = verify_comparison(
+            &comparison,
+            &result("exp-s", "run-s", &mismatched),
+            &benchmark,
+        )
+        .unwrap_err();
+        assert_eq!(failure.0.code, "comparison_result_mismatch");
     }
 }

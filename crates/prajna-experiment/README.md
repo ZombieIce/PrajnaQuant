@@ -469,3 +469,11 @@ Standard 为此新路径保存 orders/fills/费用及行动/现金/权益，尝�
 `summary.benchmark_definition`。新 Summary 限已冻结窗口/行动的 Static Fast Event，252 Session/年。
 `summary.complete` 保存逐指标 value/reason、币种成本金额和成交/费用事件次数；无选择时旧身份/内容不变。
 端点、首日成本、Calmar、超额、滑点与单位见 [ADR 0036](../../docs/decisions/0036-versioned-complete-performance-summary.md)。
+
+### 权威日历收益/回撤报告（完整 Summary 内显式选择）
+
+完整 Summary 定义可再加 `"calendar":"calendar-performance@1"`，由同一 close 权益保存
+`summary.complete.calendar`：评价端点、初始资本、逐 close 净值/回撤、最大回撤峰谷与
+月/年收益（首段基于初始资本、缺月不填零、缺失月份单列）。读取仍用 `result`/`read_run_table`，
+replay/promotion 逻辑 hash 不变。对照入口为两角色显式启用并核对保存报告；页面只读展示。
+端点、缺月、不可用原因与页面单位见 [ADR 0037](../../docs/decisions/0037-authoritative-calendar-report-and-performance-page.md)。
