@@ -66,6 +66,48 @@ pub(super) struct EngineSettings {
     venues: BTreeSet<VenueId>,
 }
 impl EngineSettings {
+    /// Fail closed when the legacy strategy's slipped buy differs from the
+    /// holding engine's tick-rounded buy. No legacy execution or identity changes.
+    pub(super) fn validate_comparison_prices(
+        &self,
+        panel: &Panel,
+        ticks: &BTreeMap<InstrumentId, prajna_domain::Price>,
+    ) -> Result<(), String> {
+        let check = || -> Result<(), Box<dyn std::error::Error>> {
+            let costs = self
+                .fast
+                .as_ref()
+                .ok_or("comparison requires Fast Event")?
+                .costs;
+            let ids = panel.grid.column("instrument_id")?.str()?;
+            let opens = panel.grid.column("open_decimal")?.str()?;
+            for row in 0..ids.len() {
+                let (id, raw) = (ids.get(row), opens.get(row));
+                let Some(tick) = id.and_then(|id| {
+                    ticks
+                        .iter()
+                        .find(|(key, _)| key.to_string() == id)
+                        .map(|(_, tick)| tick)
+                }) else {
+                    continue;
+                };
+                let Some(raw) = raw else { continue };
+                let price = fast_event::lot_execution_price(
+                    raw.parse()?,
+                    prajna_account::Side::Buy,
+                    costs,
+                )?;
+                if price.mantissa() % tick.mantissa() != 0 {
+                    return Err(
+                        "slipped buy prices must align with Instrument ticks for comparison".into(),
+                    );
+                }
+            }
+            Ok(())
+        };
+        check().map_err(|e| e.to_string())
+    }
+
     pub(super) fn parse(
         input: &DefinitionInput,
         lake: &Path,
@@ -1094,7 +1136,7 @@ pub(super) fn execute(
 /// inside `[start, end]` reach the ledger; warm-up Decisions are dropped and a
 /// Decision on the final Session cannot execute.
 #[allow(clippy::too_many_arguments)]
-fn windowed_decisions(
+pub(super) fn windowed_decisions(
     experiment: &Experiment,
     engine: Engine,
     run: &ExpandedRun,

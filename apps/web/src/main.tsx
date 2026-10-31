@@ -13,10 +13,12 @@ const DatasetPage = lazy(() => import('./pages/DatasetPage'));
 const MarketPage = lazy(() => import('./pages/MarketPage'));
 const PoolsPage = lazy(() => import('./pages/PoolsPage'));
 const BacktestsPage = lazy(() => import('./pages/BacktestsPage'));
+const ComparisonsPage = lazy(() => import('./pages/ComparisonsPage'));
 
 function Page() {
   const path = location.pathname;
   const route = path === '/research/momentum' ? <MomentumPage /> : path === '/pools' ? <PoolsPage /> : path === '/backtests' ? <BacktestsPage />
+    : path === '/comparisons' ? <ComparisonsPage />
     : path === '/datasets' ? <DatasetPage />
     : path === '/market' ? <MarketPage />
     : path === '/factors' ? <FactorDirectory />

@@ -26,7 +26,7 @@ function run(command, args, cwd = root, extra = {}) {
 run('npm', ['run', 'build'], web);
 run('cargo', ['build', '-p', 'quant-research', '--bin', 'quant-research', '--locked', '--offline']);
 run('cargo', ['build', '-p', 'prajna-experiment', '--bins', '--example', 'selection_fixture', '--locked', '--offline']);
-run('cargo', ['build', '-p', 'prajna-data', '--bin', 'prajna-publish-daily', '--bin', 'prajna-corporate-facts', '--locked', '--offline']);
+run('cargo', ['build', '-p', 'prajna-data', '--bin', 'prajna-publish-daily', '--bin', 'prajna-corporate-facts', '--bin', 'prajna-import-adjusted', '--locked', '--offline']);
 run('cargo', ['test', '-p', 'prajna-data', '--test', 'dataset_preview_read', '--locked', '--offline',
   'export_synthetic_preview_fixture', '--', '--ignored', '--exact'], root,
   { PRAJNA_PREVIEW_FIXTURE_ROOT: fixture });

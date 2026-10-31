@@ -23,6 +23,13 @@ pub fn prepare_days(root: &Path, known_listing: bool, days: &[&str]) -> String {
     publish(root, known_listing, days, None, false)
 }
 
+/// Same synthetic publication as `prepare_days`, with the test-only TRADABLE
+/// execution-status table used by executable pool/rotation fixtures.
+#[allow(dead_code)]
+pub fn prepare_executable_days(root: &Path, known_listing: bool, days: &[&str]) -> String {
+    publish(root, known_listing, days, None, true)
+}
+
 /// Test-only wrapper around the production v1 Normalizer adding a synthetic TRADABLE status
 /// table for executable multi-Venue fixtures; the id stays `cn-stock-etf-daily` (T07) and the version is synthetic.
 struct ExecutableStatusNormalizer {
