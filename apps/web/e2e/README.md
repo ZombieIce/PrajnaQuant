@@ -175,3 +175,15 @@ validation is implied.
 `momentum.spec.ts` 使用额外130 Session合成 Dataset，默认20/60/120窗口，核对真实 CLI 持久报告与页面时序/缺失、分布图、来源及刷新/损坏行为。线性价格独立数值 golden 位于 `prajna-experiment/tests/momentum.rs`；该 fixture 与三日池 fixture 分开，不改变原有池预检假设。
 
 `factor-research.spec.ts` 覆盖 #299：同一生产因子研究页选择 Volatility v1 与新增严格均线趋势 `trend_filter_strict` v1，修改窗口后经真实任务/CLI 保存报告，核对持久 report 的 semantics/direction/definition/时序值与页面表格/图表一致；严格趋势窗口 1（close 等于自身均值）逐值为 0，窗口 60 在合成递增复权序列上为 1；波动率窗口 1 的失败任务经页面可见。`momentum.spec.ts` 继续覆盖旧动量路径，两者共用同一 fixture/服务生命周期且报告互不覆盖。
+
+
+The #371 PR workflow now runs this suite for approved affected paths, using
+Node 22, Python 3.12 and locked Chromium on Ubuntu. Its required `lightweight`
+summary fails on missing/failed required work; only a successful explicit path
+applicability decision allows the web job to be N/A. Full retains its existing
+build job. See [workflow tools](../../../docs/agents/workflow-tools.md).
+Fixture cargo tests use the shared positive-execution-count recorder and keep
+per-fixture JSON plus raw logs under the invocation-owned local directory.
+`preparation-timings.jsonl` records each build/fixture step separately; these are
+local software timings, not CI CPU cost or research evidence. No raw browser
+artifacts are uploaded by the PR job.

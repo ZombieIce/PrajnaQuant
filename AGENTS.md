@@ -32,15 +32,15 @@ Rust 是数据、因子、执行、账户、成本和绩效权威，避免新增
 
 一票一 Issue、一条从最新 `main` 拉出的 `<issue>-<slug>` 分支、一个含 `Closes #<issue>` 的 PR。只认领无 blocker 且 `ready-for-agent` 的票；口径未定先 `needs-triage`，等负责人定稿。只提交/推送自己的分支，不直推 main、不 force push 共享分支、不自行合并。一个工作区同一时间只承载一个分支，并行任务使用独立 worktree。
 
-拆票、Prepare、规模增长与权限裁决按 [票据范围规则](docs/agents/ticket-scope.md)：首次保留六项证据，已有记录时只发三项增量；达到 800 行复核可审查性，继续/暂停按该规则判断。同一行为的薄页面/API/持久化切片可一票交付。不得改写验收迎合实现或修改其他票状态/结论，调整在对应 Issue 提议。
+拆票、Prepare、规模增长与权限裁决按 [票据范围规则](docs/agents/ticket-scope.md)：首次保留六项证据，已有记录时只发三项增量；主要实现达到 800 行复核可审查性，估算两倍/总量 2000 强化复核，明确硬预算仍约束总量，继续/暂停按该规则判断。同一行为的薄页面/API/持久化切片可一票交付。不得改写验收迎合实现或修改其他票状态/结论，调整在对应 Issue 提议。
 
 负责人可直接启动 [implement-ticket](.agents/skills/implement-ticket/SKILL.md) / [review-pr](.agents/skills/review-pr/SKILL.md)，或授权 [ticket-loop](.agents/skills/ticket-loop/SKILL.md) 协调启动。实现者完成验收映射、定向验证和 `Self-check (implementer)`，不充当独立 reviewer、不自行启动 reviewer；每次独立 review/re-review 使用未参与实现且不继承实现上下文的新会话。普通票可由一名 reviewer 检查 Spec 与 Standards；高风险展开双轴并行，风险判定见 review-pr。显式 [code-review](.agents/skills/code-review/SKILL.md) 保留，不是普通票强制自查。票据不使用 implement-spec 的一 spec 一 PR 流程。
 
-Review 结论以 PR 评论为准；每个发现由实现者回应，任何新 push（含文档）均需独立 review 覆盖最终 head。必需验证未完成不称可合并；负责人合并。角色隔离、派发能力检查、最终 head、worktree 保留/清理与 tracker 操作的共同契约见 [issue-tracker](docs/agents/issue-tracker.md)；实现者必跑验证与 reviewer 独立复现、证据归属见 [verification](docs/agents/verification.md)。
+Review 结论以 PR 评论为准；每个发现由实现者回应，任何新 push（含文档）均需独立 review 覆盖最终 head。本机必需验证和 ready SHA 齐备即可 CI pending 交接，独立 Review 与 CI 并行；必需验证未完成不称可合并，负责人合并。角色隔离、派发能力检查、最终 head、worktree 保留/清理与 tracker 操作的共同契约见 [issue-tracker](docs/agents/issue-tracker.md)；实现者必跑验证与 reviewer 独立复现、证据归属见 [verification](docs/agents/verification.md)。
 
 ## Verification and Completion
 
-按改动范围执行 [定向验证规则](docs/agents/verification.md)：纯文档做 diff/链接/一致性检查；代码验证受影响入口，按需选 feature，不因例行交接编译全 workspace。该文档承接 Python 3.12/PyO3 环境、CI 来源及合成金标准要求；具体 CI 命令以 `.github/workflows/` 为准。
+按改动范围执行 [定向验证规则](docs/agents/verification.md)：纯文档做 diff/链接/一致性检查；代码验证受影响入口，按需选 feature，不因例行交接编译全 workspace。该文档承接 Python 3.12/PyO3 环境、CI 来源及合成金标准要求；具体 CI 命令以 `.github/workflows/` 为准。环境前检、零匹配记录及默认只读状态辅助见 [workflow-tools](docs/agents/workflow-tools.md)。
 
 交接在 PR 描述记录验收映射、命令结果、失败/环境限制、风险判断、验证范围、开放问题和唯一建议下一步；review 结论留 PR 评论。`HANDOFF.md` 仅作入口，不随 PR 修改。`docs/STATUS.md` 仅在能力、风险、量化口径或验证状态实际改变时在对应主题改一条，不追加逐票流水，纯文档/流程 PR 不改。接口、数据 schema 或量化口径变更时同步文档与必要 ADR；重要决策/契约变化同步相关 API/README。尽量在 review 前完成，避免后续 push 使审查过期。
 

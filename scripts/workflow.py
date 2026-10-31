@@ -38,7 +38,8 @@ def process(args, **kwargs):
 
 
 def repo_name(value):
-    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', value):
+    if (not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]+', value)
+            or value.split('/')[-1] in ('.', '..')):
         raise argparse.ArgumentTypeError('explicit owner/repository required')
     return value
 
@@ -115,14 +116,21 @@ def blockers(body):
         elif active:
             section.append(line)
     ids = set()
+    ambiguous = False
+    declared = False
     for line in section:
         # Only the leading dependency list; PRs/specs in parenthetical rationale are not blockers.
-        line = re.sub(r'^\s*(?:#{1,6}\s*)?(?:\*\*)?Blocked by(?:\*\*)?\s*:?\s*', '', line, flags=re.I)
+        line = re.sub(r'^\s*(?:#{1,6}\s*)?(?:\*\*)?Blocked by\s*:?(?:\*\*)?\s*:?\s*', '', line, flags=re.I)
         line = re.sub(r'^\s*[-*]\s*', '', line).strip()
         match = re.match(r'#\d+(?:\s*[,，、]\s*#\d+)*', line)
         if match:
             ids.update(map(int, re.findall(r'#(\d+)', match[0])))
-    return ids, found
+            declared = True
+        elif re.match(r'^(?:None\b|无)', line, re.I):
+            declared = True
+        elif '#' in line or 'http' in line or (line and not declared):
+            ambiguous = True
+    return ids, found, ambiguous or (found and not declared)
 
 
 def issue_gaps(issue, actor):
@@ -167,9 +175,11 @@ def inspect(api, number, actor, pr=None):
     issue = api.api(f'issues/{number}')
     gaps = issue_gaps(issue, actor)
     unknown = []
-    body_ids, has_field = blockers(issue.get('body') or '')
+    body_ids, has_field, ambiguous_body = blockers(issue.get('body') or '')
     if not has_field:
         unknown.append('Blocked by field absent')
+    elif ambiguous_body:
+        unknown.append('Blocked by syntax ambiguous or empty; manual verification required')
     native_ids = None
     try:
         native = api.pages(f'issues/{number}/dependencies/blocked_by')
@@ -226,18 +236,21 @@ def cleanup(api, number, apply=False):
     if not apply:
         return {'result': 'dry_run', 'would_remove': labels}
     removed = []
-    for label in labels:
-        # Refresh before each narrow DELETE. No PATCH of labels/body/state/closing reason.
-        current = api.api(f'issues/{number}')
-        if current['state'] != 'closed' or current.get('state_reason') != before.get('state_reason'):
-            return {'result': 'race', 'removed': removed, 'reason': 'state/closing reason changed'}
-        if label not in {x['name'] for x in current.get('labels', [])}:
-            continue
-        api.api(f'issues/{number}/labels/{quote(label, safe="")}', method='DELETE')
-        removed.append(label)
-    after = api.api(f'issues/{number}')
-    if after['state'] != 'closed' or after.get('state_reason') != before.get('state_reason'):
-        return {'result': 'race', 'removed': removed, 'reason': 'post-write state changed; manual reconciliation'}
+    try:
+        for label in labels:
+            # Refresh before each narrow DELETE. No PATCH of labels/body/state/closing reason.
+            current = api.api(f'issues/{number}')
+            if current['state'] != 'closed' or current.get('state_reason') != before.get('state_reason'):
+                return {'result': 'race', 'removed': removed, 'reason': 'state/closing reason changed'}
+            if label not in {x['name'] for x in current.get('labels', [])}:
+                continue
+            api.api(f'issues/{number}/labels/{quote(label, safe="")}', method='DELETE')
+            removed.append(label)
+        after = api.api(f'issues/{number}')
+        if after['state'] != 'closed' or after.get('state_reason') != before.get('state_reason'):
+            return {'result': 'race', 'removed': removed, 'reason': 'post-write state changed; manual reconciliation'}
+    except EvidenceError as e:
+        return {'result': e.kind, 'reason': str(e), 'removed': removed, 'recheck_required': True}
     return {'result': 'applied', 'removed': removed}
 
 
@@ -270,7 +283,7 @@ def classify(path, content, primary_docs=False):
     return 'implementation'
 
 
-def size(base, head, primary_docs=False):
+def size(base, head, primary_docs=False, estimate_upper=None, hard_budget=None):
     base, head = commit(base), commit(head)
     totals = dict.fromkeys(['implementation', 'tests_candidate', 'documentation', 'generated', 'unknown'], 0)
     files = []
@@ -295,7 +308,11 @@ def size(base, head, primary_docs=False):
             'binary_count': sum(f['lines'] is None for f in files),
             'classification_limit': 'test paths are candidates, not exemptions; unknown requires content review',
             'review_800': totals['implementation'] + totals['unknown'] >= 800,
-            'review_2000': sum(totals.values()) >= 2000}
+            'review_2000': sum(totals.values()) >= 2000,
+            'first_estimate_upper': estimate_upper,
+            'review_estimate_x2': None if estimate_upper is None else sum(totals.values()) >= 2 * estimate_upper,
+            'explicit_hard_budget': hard_budget,
+            'hard_budget_exceeded': None if hard_budget is None or any(f['lines'] is None for f in files) else sum(totals.values()) > hard_budget}
 
 
 def affected(paths):
@@ -397,6 +414,22 @@ def record(args):
     return report
 
 
+def process_visibility():
+    child = None
+    try:
+        child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(10)'],
+                                 start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        r = process(['ps', '-axo', 'pid=,pgid='])
+        pairs = {int(pid): int(pgid) for pid, pgid in re.findall(r'^\s*(\d+)\s+(\d+)\s*$', r.stdout, re.M)}
+        return r.returncode == 0 and os.getpid() in pairs and pairs.get(child.pid) == child.pid
+    except (OSError, EvidenceError):
+        return False
+    finally:
+        if child is not None:
+            child.terminate()
+            child.wait(timeout=5)
+
+
 def preflight(port, browser):
     checks = {}
     for name, command in [('node', ['node', '--version']), ('python', ['python3.12', '--version']),
@@ -411,11 +444,7 @@ def preflight(port, browser):
     checks['node_20_plus'] = bool(m and int(m[1]) >= 20)
     checks['python_3_12'] = checks['python'].startswith('Python 3.12.')
     checks['python_stdlib'] = runtime_version(['python3.12', '-c', 'import pyexpat, ssl, venv; print("ok")']) == 'ok'
-    try:
-        r = process(['ps', '-o', 'pid=,pgid=', '-p', str(os.getpid())])
-        checks['process_groups'] = r.returncode == 0 and bool(r.stdout.strip())
-    except EvidenceError:
-        checks['process_groups'] = False
+    checks['process_groups'] = process_visibility()
     try:
         with socket.socket() as s:
             s.bind(('127.0.0.1', port))
@@ -463,6 +492,8 @@ def parser():
         q.add_argument('--head', required=True)
         if name == 'size':
             q.add_argument('--primary-docs', action='store_true')
+            q.add_argument('--estimate-upper', type=positive, help='first approved upper; never a rolling estimate')
+            q.add_argument('--hard-budget', type=positive, help='only an explicitly authorized fixed-scope hard budget')
     q = sub.add_parser('gate')
     q.add_argument('--core', required=True)
     q.add_argument('--web', required=True)
@@ -493,7 +524,7 @@ def main():
         elif args.mode == 'cleanup':
             report = cleanup(GitHub(args.repo), args.issue, args.apply)
         elif args.mode == 'size':
-            report = size(args.base, args.head, args.primary_docs)
+            report = size(args.base, args.head, args.primary_docs, args.estimate_upper, args.hard_budget)
         elif args.mode == 'paths':
             paths = git('diff', '--name-only', '-z', '--no-renames', commit(args.base), commit(args.head), '--').split('\0')
             report = {'web_required': affected(list(filter(None, paths))), 'files': len(list(filter(None, paths)))}
@@ -506,6 +537,8 @@ def main():
         else:
             report = {'jobs': timings(json.loads(Path(args.jobs_json).read_text()))}
         json_output(report)
+        if report.get('result') in ('unknown', 'permission', 'error', 'unavailable'):
+            return 2
         return 0 if report.get('result') in (None, 'success', 'passed', 'dry_run', 'applied',
                                              'mechanical_evidence_only', 'capable_pending_behavior_test') else 1
     except EvidenceError as e:

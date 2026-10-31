@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 SPEC = importlib.util.spec_from_file_location('workflow', Path(__file__).resolve().parents[1] / 'scripts/workflow.py')
 w = importlib.util.module_from_spec(SPEC)
@@ -110,10 +110,21 @@ class InspectionTests(unittest.TestCase):
         self.assertEqual(w.inspect(api, 1, 'agent')['gaps'], [])
 
     def test_rationale_pr_reference_is_not_a_dependency(self):
-        ids, found = w.blockers('## Blocked by\n- #370（closed/completed，PR #372 已交付）\n## Scope\n#99')
+        ids, found, ambiguous = w.blockers('## Blocked by\n- #370（closed/completed，PR #372 已交付）\n## Scope\n#99')
         self.assertTrue(found)
         self.assertEqual(ids, {370})
         self.assertEqual(w.blockers('Blocked by: #2, #3')[0], {2, 3})
+
+    def test_bold_colon_dependency_declaration(self):
+        self.assertEqual(w.blockers('**Blocked by:** #2, #3'), ({2, 3}, True, False))
+        self.assertEqual(w.blockers('**Blocked by**: None'), (set(), True, False))
+
+    def test_unparsed_body_dependency_is_unknown_not_empty(self):
+        for body in ['## Blocked by\n', '## Blocked by\n- https://github.com/synthetic/repo/issues/2',
+                     '## Blocked by\n- [#2](https://github.com/synthetic/repo/issues/2)']:
+            api = FakeGitHub()
+            api.issues[1]['body'] = body
+            self.assertEqual(w.inspect(api, 1, 'agent')['result'], 'unknown')
 
     def test_body_native_disagreement(self):
         api = FakeGitHub()
@@ -237,9 +248,31 @@ class CleanupTests(unittest.TestCase):
     def test_permission_failure_explicit(self):
         a = self.api()
         a.permission = True
-        with self.assertRaises(w.EvidenceError) as e:
-            w.cleanup(a, 1, True)
-        self.assertEqual(e.exception.kind, 'permission')
+        report = w.cleanup(a, 1, True)
+        self.assertEqual(report['result'], 'permission')
+        self.assertEqual(report['removed'], [])
+        self.assertTrue(report['recheck_required'])
+
+    def test_partial_permission_failure_reports_completed_writes(self):
+        a = self.api()
+        def mutate(a, n):
+            if n == 3:
+                a.permission = True
+        a.on_read = mutate
+        report = w.cleanup(a, 1, True)
+        self.assertEqual(report['result'], 'permission')
+        self.assertEqual(report['removed'], ['needs-info'])
+        self.assertIn({'name': 'ready-for-agent'}, a.issues[1]['labels'])
+
+    def test_partial_refresh_failure_reports_completed_writes(self):
+        a = self.api()
+        def mutate(a, n):
+            if n == 3:
+                raise w.EvidenceError('unknown', 'synthetic unavailable read')
+        a.on_read = mutate
+        report = w.cleanup(a, 1, True)
+        self.assertEqual(report['result'], 'unknown')
+        self.assertEqual(report['removed'], ['needs-info'])
 
     def test_concurrent_label_removal_is_idempotent(self):
         a = self.api()
@@ -351,10 +384,12 @@ class ClassificationAndGateTests(unittest.TestCase):
             g('add', '.')
             g('commit', '-qm', 'change')
             with patch.object(w, 'ROOT', root):
-                r = w.size(base, 'HEAD')
+                r = w.size(base, 'HEAD', estimate_upper=2, hard_budget=4)
             self.assertEqual(r['total'], 5)
             self.assertEqual(r['totals']['implementation'], 4)
             self.assertEqual(r['totals']['documentation'], 1)
+            self.assertTrue(r['review_estimate_x2'])
+            self.assertTrue(r['hard_budget_exceeded'])
 
     def test_browser_trigger_paths(self):
         for path in ['apps/web/src/a.tsx', 'crates/x/src/lib.rs', 'Cargo.lock', 'src/main.rs',
@@ -372,7 +407,7 @@ class ClassificationAndGateTests(unittest.TestCase):
         self.assertEqual(w.gate({'core': 'success'}, False)['result'], 'failed')
 
     def test_explicit_repo_and_positive_targets(self):
-        for repo in ['all', '--repo', 'https://github.com/a/b', 'a/b/c']:
+        for repo in ['all', '--repo', 'https://github.com/a/b', 'a/b/c', '../repo', 'a/..', './repo']:
             with self.assertRaises(argparse.ArgumentTypeError):
                 w.repo_name(repo)
         self.assertEqual(w.repo_name('synthetic/repo'), 'synthetic/repo')
@@ -385,6 +420,26 @@ class ClassificationAndGateTests(unittest.TestCase):
         r = w.timings(data)[0]
         self.assertEqual(r['wall_seconds'], 10)
         self.assertIsNone(r['steps'][0]['seconds'])
+
+
+class PreflightTests(unittest.TestCase):
+    def test_global_ps_must_see_owned_child_group(self):
+        for output, expected in [(f'{w.os.getpid()} 99\n12345 12345\n', True),
+                                 (f'{w.os.getpid()} 99\n', False),
+                                 (f'{w.os.getpid()} 99\n12345 99\n', False)]:
+            child = MagicMock(pid=12345)
+            with patch.object(w.subprocess, 'Popen', return_value=child), patch.object(w, 'process',
+                    return_value=subprocess.CompletedProcess([], 0, output, '')):
+                self.assertEqual(w.process_visibility(), expected)
+            child.terminate.assert_called_once()
+            child.wait.assert_called_once()
+
+    def test_denied_global_ps_is_gap_and_child_cleaned(self):
+        child = MagicMock(pid=12345)
+        with patch.object(w.subprocess, 'Popen', return_value=child), patch.object(w, 'process',
+                side_effect=w.EvidenceError('permission', 'denied')):
+            self.assertFalse(w.process_visibility())
+        child.terminate.assert_called_once()
 
 
 class TransportTests(unittest.TestCase):

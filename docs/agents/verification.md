@@ -11,6 +11,20 @@
 
 验证记录是受权限约束的证据索引，真实数据/身份不因上述字段要求进入公开输出，仍遵守 AGENTS 与当前 Issue/spec。首次 review 的完整覆盖及 re-review 的增量格式见 [review-pr](../../.agents/skills/review-pr/SKILL.md)，最终 head 与角色隔离见 [tracker](issue-tracker.md)。
 
+## Prepare 验证能力前检
+
+Prepare 尽早运行 [preflight](workflow-tools.md)：核对 Node/Python/Rust、Python标准库可加载性、浏览器、`ps`/进程组可见性、loopback 端口、磁盘 10 GiB 保留量。给出实际可用环境/执行者或缺口；检查时端口可用不保证后续启动成功，浏览器文件存在不证明可启动。缺权限使用正常审批或具备能力的执行者，不放宽生产进程守卫或绕过沙箱。
+
+涉及产品路径时在实现中尽早实际运行生产入口合成 E2E，前检不替代行为验证。Acceptance Mapping 标明 CI job、命令/feature 实际覆盖；`quant-research --no-default-features` 不编译 app 读取侧，PR `web` job 显式运行 `comparison_api::tests` 和 app 生产浏览器链。其他新增 app 测试依其入口补定向运行，不能因 job 名存在推定已覆盖。
+
+## 最终 HEAD 与影响复用
+
+每次 push（含文档）均须独立增量审查最终 HEAD；不表示所有测试必须重跑。按代码、构建/配置、契约和依赖影响更新验收映射：受影响入口复跑；未变部分引用原执行者、PR记录、SHA、命令/匹配数量、环境及仍适用依据。未知标 unverified，缓存命中不代替实际执行。
+
+纯说明性文档不机械复跑 Golden/E2E；文档含契约、构建或验收变化仍评估行为影响。Issue 明确规定最终 HEAD 必跑项继续执行，除非对应 Issue 获明确变更。逐次执行证据留 PR，STATUS/ADR 保留稳定能力与真实验证边界，不能通过移动证据掩盖不一致。
+
+测试记录入口 `workflow.py run` 强制显式选择、执行者、原始日志位置，记录数量、结果、时间、SHA和环境；零匹配及缺少运行不通过，允许空集必须附原因。Rust 默认 ignored 数不自动失败；unittest/Playwright 跳过须说明适用理由，全部未执行仍不通过。调用者须确认数量覆盖必需选择，工具解析汇总不能推定每个必需场景已运行。
+
 ## 本机命令
 
 Rust 代码改动运行 `cargo fmt --all -- --check`，优先受影响 crate：
@@ -43,9 +57,9 @@ python -m unittest discover -s python/tests -v
 
 ## CI 来源
 
-[CI workflow](../../.github/workflows/ci.yml) 的 `lightweight` 是合并必需检查；它包含当前新平台 crate 的定向 lint/test、依赖图守卫、Python/PyO3、合成 POC 与 feature 类型检查，并非只测旧 quant-research。复现时读取受影响 steps 并在本机 Cargo 命令加 `--offline`，不要维护另一份完整 CI 命令清单。
+[CI workflow](../../.github/workflows/ci.yml) 的 `lightweight` 是合并必需汇总门禁；`core` 保留原验证命令，`web-applicability` 判断新增前端任务适用性，命中时 `web-production-validation` 必须成功。未命中是经批准的 N/A；缺失/失败/未授权跳过不得变绿。它包含当前新平台 crate 的定向 lint/test、依赖图守卫、Python/PyO3、合成 POC 与 feature 类型检查，并非只测旧 quant-research。复现时读取受影响 steps 并在本机 Cargo 命令加 `--offline`，不要维护另一份完整 CI 命令清单。
 
-[Full workflow](../../.github/workflows/full.yml) 由手动/每晚触发，不阻塞合并；workspace（bundled DuckDB）、B3、Nautilus、PyArrow 和前端等任务的实际命令、平台与不允许跳过的门禁以 workflow 为准。Issue 明确要求的验证即使不在必需 CI 中仍须完成。轻量 CI 设计内跳过 Nautilus 不证明真实 Backend 通过。
+[Full workflow](../../.github/workflows/full.yml) 由手动/每晚触发，不阻塞合并；workspace（bundled DuckDB）、B3、Nautilus、PyArrow 和前端 build 等任务的实际命令、平台与不允许跳过的门禁以 workflow 为准。Issue 明确要求的验证即使不在必需 CI 中仍须完成。轻量 CI 设计内跳过 Nautilus 不证明真实 Backend 通过。
 
 ## 量化验证与证据
 

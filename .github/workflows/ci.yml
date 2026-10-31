@@ -16,11 +16,19 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  lightweight:
-    name: lightweight
+  core:
+    name: core
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Workflow helper synthetic tests (positive count required)
+        run: >-
+          python scripts/workflow.py run --kind unittest --executor CI-core
+          --selection tests.test_workflow --log "$RUNNER_TEMP/workflow-tests.log"
+          -- python -m unittest tests.test_workflow -v
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -184,3 +192,101 @@ jobs:
 
       - name: MVP-5 record-only throughput report tests
         run: python -m unittest tests.test_mvp5_benchmark -v
+
+  paths:
+    name: web-applicability
+    runs-on: ubuntu-latest
+    outputs:
+      web: ${{ steps.paths.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Determine browser validation applicability
+        id: paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          python scripts/workflow.py paths --base "$BASE_SHA" --head "$HEAD_SHA" > "$RUNNER_TEMP/paths.json"
+          python - <<'PYTHON'
+          import json, os
+          with open(os.environ['RUNNER_TEMP'] + '/paths.json') as source:
+              result = json.load(source)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('web=' + str(result['web_required']).lower() + '\n')
+          print('Browser validation: ' + ('required' if result['web_required'] else 'not applicable by approved paths'))
+          PYTHON
+
+  web:
+    name: web-production-validation
+    needs: paths
+    if: needs.paths.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: web-app
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+        working-directory: apps/web
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - name: Verification environment preflight
+        run: |
+          BROWSER=$(cd apps/web && node --input-type=module -e "import { chromium } from '@playwright/test'; console.log(chromium.executablePath())")
+          python scripts/workflow.py preflight --browser "$BROWSER"
+      # The existing browser preparation remains offline after explicit lockfile fetch.
+      - run: cargo fetch --locked
+      - name: Build and E2E typecheck / discovery
+        working-directory: apps/web
+        run: |
+          npm run build
+          npm run test:e2e:check
+      # These app-feature reading-side tests are excluded by core's no-default-features test.
+      - name: App reading-side regression tests
+        run: >-
+          python scripts/workflow.py run --kind cargo --executor CI-web
+          --selection comparison_api::tests --log "$RUNNER_TEMP/app-reading.log"
+          -- cargo test -p quant-research --features app --lib comparison_api::tests --locked --offline
+      - name: Synthetic browser through production API and persisted Rust results
+        run: >-
+          python scripts/workflow.py run --kind playwright --executor CI-web
+          --selection all-existing-browser-specs --timeout 3300 --log "$RUNNER_TEMP/browser.log"
+          -- npm --prefix apps/web run test:e2e
+      # No upload-artifact: identities, raw service output, screenshots and traces stay runner-local.
+
+  lightweight:
+    name: lightweight
+    needs: [core, paths, web]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Preserve required gate semantics
+        env:
+          CORE: ${{ needs.core.result }}
+          PATHS: ${{ needs.paths.result }}
+          WEB: ${{ needs.web.result }}
+          WEB_REQUIRED: ${{ needs.paths.outputs.web }}
+        run: |
+          test "$PATHS" = success
+          python scripts/workflow.py gate --core "$CORE" --web "$WEB" --web-required "$WEB_REQUIRED"

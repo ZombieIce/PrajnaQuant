@@ -90,3 +90,5 @@ Use the six-item template in the shared scope rule, with baseline/evidence and a
 </issue-template>
 
 Keep acceptance behavioral. Scope evidence may name entry points/source/tests at the recorded baseline as navigation; it does not prescribe the future file layout. If a prototype snippet captures a decision more precisely than prose (state machine, schema or type shape), include only the decision-rich part and identify its origin.
+
+Environment preflight, compact read-only status, test-count records and opt-in closed-issue triage cleanup: [workflow tools](../../../docs/agents/workflow-tools.md). Apply [scope authority](../../../docs/agents/ticket-scope.md) for major-implementation 800 / estimate×2 / total 2000 review points and explicit hard budgets; tests and effective same-contract fixes continue when its conditions hold. Final-head review and test rerun scope are separate: use [impact-based evidence reuse](../../../docs/agents/verification.md#最终-head-与影响复用).
