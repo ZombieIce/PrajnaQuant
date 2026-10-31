@@ -111,7 +111,7 @@ fn calendar(
             factors.insert(factor.canonical_json().to_string(), values);
         }
         let research = if strategy.strategy_kind == "single_etf_timing" {
-            Some(crate::timing::research_panel(strategy, root, panel).map_err(experiment_error)?)
+            Some(crate::adjusted::research_panel(strategy, root, panel).map_err(experiment_error)?)
         } else {
             None
         };

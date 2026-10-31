@@ -111,7 +111,11 @@ struct Prepared {
 fn prepare(root: &Path, selection: &Selection) -> Result<Prepared, SelectionError> {
     if !matches!(
         selection.strategy.as_str(),
-        "buy_and_hold" | "ma_crossover" | "s2_rotation" | "single_etf_timing"
+        "buy_and_hold"
+            | "ma_crossover"
+            | "s2_rotation"
+            | "single_etf_timing"
+            | "pool_momentum_topk"
     ) {
         return Err(error(
             "invalid_selection",

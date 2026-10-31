@@ -73,11 +73,18 @@ fn normalized_result_level(
     match level {
         None | Some(DEFAULT_RESULT_LEVEL) => Ok(None),
         Some("standard") => Ok(Some("standard".into())),
-        Some("full") if definition["strategy"] == "single_etf_timing" => Ok(Some("full".into())),
+        Some("full")
+            if matches!(
+                definition["strategy"].as_str(),
+                Some("single_etf_timing" | "pool_momentum_topk")
+            ) =>
+        {
+            Ok(Some("full".into()))
+        }
         Some(other) => Err(ApiFailure::new(
             StatusCode::BAD_REQUEST,
             "invalid_request",
-            "result_level must be summary or standard",
+            "result_level must be summary, standard, or full for an audit template",
             json!({"result_level": other}),
         )),
     }
@@ -4154,14 +4161,17 @@ mod tests {
 mod timing_result_level_tests {
     use super::*;
     #[test]
-    fn full_is_an_explicit_timing_audit_level_without_changing_legacy_requests() {
+    fn full_is_an_explicit_audit_level_for_the_template_pair_only() {
+        for template in ["single_etf_timing", "pool_momentum_topk"] {
+            let definition = json!({"strategy":template});
+            assert_eq!(
+                normalized_result_level(Some("full"), &definition)
+                    .unwrap()
+                    .as_deref(),
+                Some("full")
+            );
+        }
         let timing = json!({"strategy":"single_etf_timing"});
-        assert_eq!(
-            normalized_result_level(Some("full"), &timing)
-                .unwrap()
-                .as_deref(),
-            Some("full")
-        );
         for kind in ["buy_and_hold", "ma_crossover", "s2_rotation"] {
             let definition = json!({"strategy":kind});
             assert!(normalized_result_level(Some("full"), &definition).is_err());
