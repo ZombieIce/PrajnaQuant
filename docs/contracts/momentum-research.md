@@ -123,9 +123,10 @@ computation and duplicate conflict.
 
 `submit.request` 可显式选择 `"evaluation":"next_open_to_forward_open_v1"`。
 省略字段仍生成原报告（字段不序列化），旧报告可读取；未知版本/`forward_return`
-输入被拒绝。新报告用 `semantics:"factor-evaluation@1"`，原因子语义保存在
-`factor_semantics`。该扩展适用于上述三类因子，沿用同一 Dataset、成员、每成员
-复权版本和来源/可用性假设，不从 latest 或另一种价格口径取标签。
+输入被拒绝。新报告用 `semantics:"factor-evaluation@2"`，原因子语义保存在
+`factor_semantics`；已存的 `factor-evaluation@1` 报告保持原字节可读。该扩展
+适用于上述三类因子，沿用同一 Dataset、成员、每成员复权版本和来源/可用性
+假设，不从 latest 或另一种价格口径取标签。
 
 Rust `prajna_research::evaluation` 独立于 FactorKind、FactorCache 和 Decision。
 `evaluation.version="next_open_to_forward_open@1"`；每成员每个 Session 都有
@@ -147,7 +148,7 @@ exit=Session[i+1+N] open，`value=exit/entry-1`，不扣交易费。
 分母是固定成员 × 全部报告 Session，预热因子和尾端标签缺失均计入配对缺失；
 这与标签本身缺失率不同。页面只画已配对的散点，展示端点/null/原因与样本数，
 不重算收益或统计；静态事后 Universe 与小样本限制继续披露。
-重叠标签不复利为 NAV；本扩展不计算 IC、Rank IC 或分组结果。
+重叠标签不复利为 NAV；IC/Rank IC 与样本诊断见下一节，分组结果仍不在本扩展内。
 调整 open 只传到评价模块，绝不写入因子 Panel/评分或策略信息集；复权版本的
 回溯性假设仍然存在，不能因未来数据隔离测试通过就声称严格历史 PIT。
 
@@ -156,3 +157,32 @@ exit=Session[i+1+N] open，`value=exit/entry-1`，不扣交易费。
 Decision；`prajna-experiment/tests/momentum.rs` 生产 CLI 持久/read/旧版兼容与未来
 复权 open 隔离；`apps/web/e2e/evaluation.spec.ts` 真实 API/队列/CLI/持久报告/页面
 散点样本闭环。全部使用合成输入，真实数据与真实标签未验证。
+
+## 截面 IC 与样本诊断 v1（#301）
+
+`evaluation:"next_open_to_forward_open_v1"` 的报告在每个因子保存 `statistics`
+数组（1/5/20 期限各一项），版本 `cross_section_ic@1`；输入是同一固定成员、
+Session 轴和每成员复权版本下的因子值与标签值，不读取原始价，也不新增
+Factor/Cache/Decision 输入。
+逐期保存 `date`、`expected_count`、`paired_count`、`pearson_ic`、`rank_ic`、
+`status`；期限级保存因子/标签可用计数、paired/missing 总数、缺失比例和
+`status_counts`。Pearson IC 对配对原始值计算；Rank IC 对两侧取 0 基平均秩
+（并列共享平均位置）后计算 Pearson。至少 3 个有效配对才计算，不足为双 null +
+`insufficient_cross_section`；一侧只有 1 个不同值为 `zero_variance_factor` /
+`zero_variance_label`（因子优先）；非有限的那一项为 null + `non_finite_statistic`。
+任何 null 都不是 0。
+
+汇总 `summary` 只用有定义的逐期 IC：可计算/不可计算截面数、Pearson 均值、
+Rank 均值/样本标准差/IR/严格正比例；`reasons` 只列 null 字段原因。零标准差 IR
+为 null + `zero_dispersion`；单期标准差/IR 为 null + `insufficient_series`；
+无可定义截面的均值/比例为 null + `no_evaluated_cross_sections`。例：3 成员因子
+[1,2,3]、H=1 标签 [4,9,16] 时 Pearson=0.9954022744967959、Rank=1；4 成员因子
+[1,2,2,3] 与标签 [1,2,4,8] 的平均秩 Rank=0.9486832980505138（独立手算 golden）。
+
+报告语义 `factor-evaluation@2`，`evaluation.statistics_version` 为
+`cross_section_ic@1`；`factor-evaluation@1` 旧报告与省略 `evaluation` 的旧请求
+均不变。页面只读取时序、汇总、样本与原因并绘图，缺失显示 `—`。IC 是重叠标签的
+关联诊断，不是可交易 NAV 或稳健有效性证明；小池截面只说明可计算，不说明显著。
+分组后续收益仍由 #302 承担。验证见 `prajna-research/tests/evaluation.rs` 手算
+golden、`prajna-experiment/tests/momentum.rs` 真实 CLI 单成员 null 持久化和
+`apps/web/e2e/ic.spec.ts` 三成员生产页面闭环；均为合成输入，真实行情未验证。

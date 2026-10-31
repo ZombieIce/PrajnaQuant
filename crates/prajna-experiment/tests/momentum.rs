@@ -218,6 +218,29 @@ fn export_momentum_fixture() {
         serde_json::to_vec(&request).unwrap(),
     )
     .unwrap();
+    // Bind a three-member synthetic cross-section on the same executable panel.
+    let days = dates();
+    let refs = days.iter().map(String::as_str).collect::<Vec<_>>();
+    let dsv = request["dsv"].as_str().unwrap();
+    let mut adjusted = request["adjusted"].as_object().unwrap().clone();
+    for instrument in ["510880.XSHG", "159952.XSHE"] {
+        let version = fixture::import_adjusted(
+            &root,
+            dsv,
+            instrument,
+            &days[0],
+            days.last().unwrap(),
+            &refs,
+        );
+        adjusted.insert(instrument.into(), json!(version));
+    }
+    let ic = json!({"dsv":dsv,"adjusted":adjusted,"windows":[1],
+        "evaluation":"next_open_to_forward_open_v1"});
+    std::fs::write(
+        root.join("synthetic-ic-request.json"),
+        serde_json::to_vec(&ic).unwrap(),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -648,7 +671,31 @@ fn evaluation_cli_fixed_labels_persist_and_future_opens_never_change_factors() {
     request["evaluation"] = json!("next_open_to_forward_open_v1");
     let original = evaluation_cli(root, request.clone());
     let data = &original["data"];
-    assert_eq!(data["report"]["semantics"], "factor-evaluation@1");
+    assert_eq!(data["report"]["semantics"], "factor-evaluation@2");
+    assert_eq!(
+        data["report"]["evaluation"]["statistics_version"],
+        "cross_section_ic@1"
+    );
+    // One instrument is below the minimum cross section at every date: both ICs
+    // are null with a sample reason, never zero, and the summary is unavailable.
+    let statistics = data["report"]["factors"][0]["statistics"]
+        .as_array()
+        .unwrap();
+    assert_eq!(statistics.len(), 3);
+    for statistic in statistics {
+        assert_eq!(statistic["minimum_cross_section"], 3);
+        assert_eq!(statistic["summary"]["evaluated_cross_sections"], 0);
+        assert!(statistic["summary"]["pearson_ic_mean"].is_null());
+        assert!(statistic["summary"]["rank_ic_mean"].is_null());
+        assert_eq!(
+            statistic["summary"]["reasons"]["pearson_ic_mean"],
+            "no_evaluated_cross_sections"
+        );
+        for row in statistic["series"].as_array().unwrap() {
+            assert_eq!(row["status"], "insufficient_cross_section");
+            assert!(row["pearson_ic"].is_null() && row["rank_ic"].is_null());
+        }
+    }
     assert_eq!(
         data["report"]["evaluation"]["version"],
         "next_open_to_forward_open@1"

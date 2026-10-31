@@ -170,6 +170,8 @@ shared-axis Dataset surfaces `inconsistent_venue_calendar` (422) with no runnabl
 plan. Only synthetic inputs are exported; no real-data, PIT or full total-return
 validation is implied.
 
+`ic.spec.ts` 覆盖 #301：经生产池入口运行时发布三成员 `cross-asset` 版本并在 finally 恢复 draft，在 `/research/momentum` 提交 `next_open_to_forward_open_v1`，核对持久报告 `factor-evaluation@2` / `cross_section_ic@1` 的逐期 Pearson/Rank IC、样本计数、状态与汇总（null 显示 `—`）、页面时序/汇总/原因和刷新重开；`evaluation.spec.ts` 另核对单成员 `insufficient_cross_section` 的 null 原因与新增统计图表。仅合成输入。
+
 `momentum.spec.ts` 使用额外130 Session合成 Dataset，默认20/60/120窗口，核对真实 CLI 持久报告与页面时序/缺失、分布图、来源及刷新/损坏行为。线性价格独立数值 golden 位于 `prajna-experiment/tests/momentum.rs`；该 fixture 与三日池 fixture 分开，不改变原有池预检假设。
 
 `factor-research.spec.ts` 覆盖 #299：同一生产因子研究页选择 Volatility v1 与新增严格均线趋势 `trend_filter_strict` v1，修改窗口后经真实任务/CLI 保存报告，核对持久 report 的 semantics/direction/definition/时序值与页面表格/图表一致；严格趋势窗口 1（close 等于自身均值）逐值为 0，窗口 60 在合成递增复权序列上为 1；波动率窗口 1 的失败任务经页面可见。`momentum.spec.ts` 继续覆盖旧动量路径，两者共用同一 fixture/服务生命周期且报告互不覆盖。
