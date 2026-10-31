@@ -33,6 +33,27 @@
 同一供应商复权版本 open，不扣交易费，不采用观察 bar 日期并集回退。
 缺端点或未来 Session 不足为 null，保存端点与原因；标签不进入 Factor/Cache/
 Decision。散点有效配对数量与缺失分母由 Rust 生成，页面不复利标签为 NAV。
-此处不改变上文旧报告的诊断口径、IC/分组契约或历史结论；新平台 IC/分组
-由后续独立票交付。完整输入/结果/兼容及验证入口见
+此处不改变上文旧报告的诊断口径、IC/分组契约或历史结论；新平台 IC 已由 #301
+交付，分组仍由后续独立票承担。完整输入/结果/兼容及验证入口见
 [价格因子研究契约](../contracts/momentum-research.md#未来收益评价-v1)。
+
+## MVP-7 新平台截面 IC 扩展（#301）
+
+新平台在 `next_open_to_forward_open_v1` 标签之上增加独立版本化
+`cross_section_ic@1`：逐 Session 截面 Pearson IC 与 Spearman Rank IC（并列取
+平均秩后作 Pearson），至少 3 个有效配对才计算（沿用本 ADR `max(quantiles,3)`，
+新平台无分组故为 3）。逐日保存有效配对与状态，期限级保存因子/标签可用计数和
+缺失比例。不足 3 对、常数因子、常数标签与非有限统计分别为
+`insufficient_cross_section`、`zero_variance_factor`、`zero_variance_label`、
+`non_finite_statistic`，相应值为 null，不以 0 代替；常数判定在阈值之后且因子
+优先，秩对并列值取平均位置。
+汇总只使用有定义的逐期 IC：Pearson 均值，Rank 均值、样本标准差（n-1）、
+IR=均值/标准差（标准差为 0 时 null + `zero_dispersion`）和严格大于 0 的比例；
+没有可定义截面或仅单期给出 `no_evaluated_cross_sections` 或
+`insufficient_series`。时间序列长度不构成统计显著性；几只 ETF 的 IC 只是研究
+诊断，不包装成稳健有效性证明，也不复利重叠标签为 NAV。
+
+新报告语义为 `factor-evaluation@2` 并保存 `statistics_version`；已存的
+`factor-evaluation@1` 报告继续按原字节读取，页面在缺少统计字段时保持旧展示。
+本扩展只进入评价报告，不进入 Factor/Cache/Decision 或策略；分组后续收益仍由
+独立票交付。旧 `quant-research` 的 IC/分组报告与口径不变。

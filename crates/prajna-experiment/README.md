@@ -423,7 +423,9 @@ fake 的原生账户显式为 unavailable，不伪造原生快照。
 
 
 价格因子研究可增加 `"evaluation":"next_open_to_forward_open_v1"`，生成 Rust
-1/5/20 Session 固定开盘端点评价标签及持久因子收益散点样本；生产页面可选开启。
+1/5/20 Session 固定开盘端点评价标签、持久因子收益散点样本，以及版本化
+`cross_section_ic@1` 的逐期 Pearson/Rank IC、样本诊断和可定义截面汇总（页面只读）；
+报告语义为 `factor-evaluation@2`，旧 `@1` 报告仍可读。生产页面可选开启。
 省略保持旧报告语义，标签不能输入因子或策略，重叠标签不复利为 NAV。
 见[评价 v1 契约](../../docs/contracts/momentum-research.md#未来收益评价-v1)。
 
