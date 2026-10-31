@@ -113,6 +113,47 @@ PR创建→合并为 GitHub created_at/merged_at 的差；Claim→Merge 使用�
 
 数据测试127–131秒、Experiment166–174秒、Prajna Python step274–298秒。后者混合fixture构建与Python执行，不能据总耗时推定Python解释器是瓶颈。Rust/Cargo和Node缓存已存在；本票不将已有缓存认作新增功能。
 
+## 本机最小串并行对照与决定
+
+固定代码 `b8d89cf`，两个独立 detached worktree（Rust/Python），各自独占从同一任务缓存APFS clone出的target；未并行共享可变实现工作区或target。Mac ARM64、Rust1.98.1、CPython3.12.15、maturin1.15.0、PyArrow23.0.1；repo dev/test line-tables-only profile，原Cargo并行度/测试线程默认值。初始缓存是已有缓存，不是冷构建；克隆不代表测试通过。候选相同选择：
+
+```sh
+# Rust角色；每个crate依次区分构建与实际test调用
+cargo test -p prajna-data --locked --offline --no-run
+cargo test -p prajna-data --locked --offline
+cargo test -p prajna-research --locked --offline --no-run
+cargo test -p prajna-research --locked --offline
+cargo test -p prajna-experiment --locked --offline --no-run
+cargo test -p prajna-experiment --locked --offline -- --include-ignored
+# Python角色，先激活其独占3.12 venv，PYO3_PYTHON/PRAJNA_TEST_PYTHON指向该解释器
+maturin develop --locked --offline
+cargo build -p prajna-experiment --bin prajna-experiment --example prepare_fixture --example acceptance_fixture --example pit_fixture --locked --offline
+python -m unittest discover -s python/tests -v
+```
+
+顺序方案执行Rust角色再Python角色；并行候选同时执行两个角色，保持以上命令/选择，不删测试。测试调用时间包含Cargo残余构建及doctest编译，不称纯执行CPU时间；maturin时间包含打包/安装。以下是单次探索性wall时间，不是受控统计基准或hosted CI收益：
+
+| 子任务 | 顺序秒 | 并行候选秒 / 状态 |
+|---|---:|---|
+| data构建 | 21.721 | 67.254 / 成功 |
+| data测试调用 | 170.106 | 197.628 / 成功 |
+| research构建 | 72.587 | 无完整执行记录 |
+| research测试调用 | 278.022 | 无完整执行记录 |
+| experiment构建 | 48.305 | 无完整执行记录 |
+| experiment测试调用 | 232.485 | 无完整执行记录 |
+| maturin构建/安装 | 111.797 | 191.834 / 成功 |
+| Python fixture/CLI构建 | 34.922 | 60.268 / exit101，linker errno28 |
+| Python集成测试 | 565.737 | 未执行 |
+| 整体wall | 1535.701 | 失败；无可比较的等覆盖成功总量 |
+
+顺序验证数量见PR执行证据：三个Rust包的实际测试均完成；Python 106个选择中105执行通过、1个可选真实Nautilus场景按原CI设计跳过，不作为真实Backend证据。并行候选linker写入及测量journal均出现ENOSPC；初版临时对照脚本漏了并行前磁盘复检，观察余量4.7GiB，低于项目10GiB保留线。该失败保留，不用部分成功数据计算提速。已退出候选、保留原始日志及恢复的测量journal，只回收本票完成/失败的临时缓存；原用户cache未改。顺序完成阶段的回收与其他本机负载也使本次不具备严格统计可比性。
+
+环境准备先遇到Homebrew pyexpat动态库符号不匹配，导致平台探测/venv安装失败；仅任务环境使用已安装expat的DYLD_LIBRARY_PATH，最终平台版本由真实sw_vers核对，未改系统或生产进程守卫。pip的任务隔离修复/依赖安装不计入两角色wall；它不是CI加速结果。原始历史job日志获取失败，历史子构建/纯测试时间仍Unknown；上述本机子命令计时不能冒充历史CI子耗时。
+
+**决定：保留原core内Rust/Python串行拓扑。** 当前没有等覆盖成功、受控且可外推至hosted runner的净收益证据，runner费用/CPU时间仍Unknown，不进行无证据的拆job重构。新增web job是已批准的质量覆盖，与优化收益分开。完整代码PR原有Golden/Python/兼容性及Full覆盖保留，实验失败不转成必需验证通过。
+
+实测后的工具修复：`workflow.py run`在启动前及运行中检查10GiB保留线，跌破时终止本次拥有的验证进程组，记录exit125/原因/最小余量并失败；不因已有部分passed结果变绿。启动拒绝及运行中止均有合成回归测试。后续若重试优化，先在容量足够且具备资源监测的runner，以相同代码/缓存条件/完整选择复测，再决定；本票不预先承诺提速。
+
 ## 后续3–5张可比票回看
 
 选择相同产品阶段、相近主要实现量/风险、相同runner/工具链及相同合成验证覆盖的连续3–5张票，保留选择理由与排除项；规则/基础设施票和量化高风险业务票分别比较。每票引用已有PR记录，不强制另写长retro。
