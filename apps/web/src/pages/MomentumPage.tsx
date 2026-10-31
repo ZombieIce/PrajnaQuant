@@ -5,8 +5,11 @@ type Pool = { id: string; name: string; versions: { version: number; members: st
 type Adjusted = { version: string; instrument_id: string; method_version: string };
 type Row = { instrument: string; date: string; value: number | null; status: string; available_at_ns: string | null };
 type Relationship = { horizon: number; expected_count: number; effective_count: number; missing_count: number; missing_ratio: number | null; points: { instrument: string; date: string; factor_value: number; forward_return: number }[] };
-type Factor = { relationships?: Relationship[]; definition: { kind: string; version: string; params: { n: number } }; rows: Row[]; distribution: { low: number; high: number; count: number }[]; status_counts: Record<string, number> };
-type Report = { id: string; report: { factors: Factor[]; members: string[]; sources: unknown; sample_assumption: string; semantics: string; direction: string; request: unknown; evaluation?: { version: string; usage: string; labels: { instrument: string; date: string; horizon: number; entry_date: string | null; exit_date: string | null; value: number | null; status: string }[] } } };
+type IcRow = { date: string; expected_count: number; paired_count: number; pearson_ic: number | null; rank_ic: number | null; status: string };
+type IcSummary = { evaluated_cross_sections: number; unavailable_cross_sections: number; pearson_ic_mean: number | null; rank_ic_mean: number | null; rank_ic_stddev: number | null; rank_ic_ir: number | null; rank_ic_positive_rate: number | null; reasons: Record<string, string> };
+type Statistic = { version: string; horizon: number; method: string; rank_method: string; minimum_cross_section: number; expected_cross_sections: number; expected_observations: number; factor_available_count: number; label_available_count: number; paired_count: number; missing_pair_count: number; missing_ratio: number; status_counts: Record<string, number>; series: IcRow[]; summary: IcSummary };
+type Factor = { statistics?: Statistic[]; relationships?: Relationship[]; definition: { kind: string; version: string; params: { n: number } }; rows: Row[]; distribution: { low: number; high: number; count: number }[]; status_counts: Record<string, number> };
+type Report = { id: string; report: { factors: Factor[]; members: string[]; sources: unknown; sample_assumption: string; semantics: string; direction: string; request: unknown; evaluation?: { version: string; statistics_version?: string; usage: string; labels: { instrument: string; date: string; horizon: number; entry_date: string | null; exit_date: string | null; value: number | null; status: string }[] } } };
 type Reply = { data: Report };
 type Kind = 'momentum' | 'volatility' | 'trend_filter_strict';
 // Momentum stays the legacy request shape (no factor field) so old report identities and saved work remain reusable.
@@ -101,13 +104,30 @@ export default function MomentumPage() {
     <Panel title="已保存研究">{recent.map(r => <button disabled={busy} key={r.id} onClick={() => open(r.id)}>打开 {r.id}</button>)}</Panel>
     {report && <><p>{report.report.sample_assumption}</p><p data-testid="factor-semantics">语义 {report.report.semantics} · 方向 {report.report.direction}</p><details><summary>固定输入、来源与可用性假设</summary><pre>{JSON.stringify({ request: report.report.request, sources: report.report.sources }, null, 2)}</pre></details>
       {report.report.evaluation && <Panel title="评价标签">
-        <p data-testid="evaluation-contract">{report.report.evaluation.version} · 下一 Session open 至再后 N Session open；仅作评价，重叠标签不复利为可交易净值。Static Universe，小样本不证明有效性。</p>
+        <p data-testid="evaluation-contract">{report.report.evaluation.version}{report.report.evaluation.statistics_version ? ` · 统计 ${report.report.evaluation.statistics_version}` : ''} · 下一 Session open 至再后 N Session open；仅作评价，重叠标签不复利为可交易净值。Static Universe，小样本不证明有效性。</p>
         <details><summary>标签端点与缺失明细</summary><table data-testid="evaluation-labels"><thead><tr><th>证券</th><th>信号日期</th><th>期限 Session</th><th>入场端点</th><th>退出端点</th><th>后续收益</th><th>状态</th></tr></thead><tbody>{report.report.evaluation.labels.map(r => <tr key={`${r.instrument}:${r.date}:${r.horizon}`}><td>{r.instrument}</td><td>{r.date}</td><td>{r.horizon}</td><td>{r.entry_date ?? '—'}</td><td>{r.exit_date ?? '—'}</td><td>{r.value ?? '—'}</td><td>{r.status}</td></tr>)}</tbody></table></details>
       </Panel>}
       {report.report.factors.map((factor, index) => <Panel key={index} title={`${factorLabel(factor.definition.kind)} ${factor.definition.params.n} Session`}>
         <p data-testid="missing-counts">状态 / 缺失：{JSON.stringify(factor.status_counts)}</p>
         <Chart option={{ tooltip: { trigger: 'axis' }, legend: {}, xAxis: { type: 'category', data: [...new Set(factor.rows.map(r => r.date))] }, yAxis: { type: 'value' }, series: report.report.members.map(m => ({ name: m, type: 'line', connectNulls: false, data: factor.rows.filter(r => r.instrument === m).map(r => r.value) })) }} />
         <Chart option={{ tooltip: {}, xAxis: { type: 'category', data: factor.distribution.map(b => `${b.low.toFixed(4)}–${b.high.toFixed(4)}`) }, yAxis: { type: 'value' }, series: [{ type: 'bar', data: factor.distribution.map(b => b.count) }] }} />
+        {factor.statistics?.map(s => {
+          const summaryRows: [string, number | null, string | undefined][] = [
+            ['Pearson IC 均值', s.summary.pearson_ic_mean, s.summary.reasons.pearson_ic_mean],
+            ['Rank IC 均值', s.summary.rank_ic_mean, s.summary.reasons.rank_ic_mean],
+            ['Rank IC 标准差', s.summary.rank_ic_stddev, s.summary.reasons.rank_ic_stddev],
+            ['Rank IC IR', s.summary.rank_ic_ir, s.summary.reasons.rank_ic_ir],
+            ['Rank IC 正比例', s.summary.rank_ic_positive_rate, s.summary.reasons.rank_ic_positive_rate],
+          ];
+          return <section key={`ic-${s.horizon}`} data-testid="factor-ic">
+            <h3>IC · {s.horizon} Session</h3>
+            <p data-testid="ic-contract">{s.version} · Pearson IC / Spearman Rank IC · 并列秩取平均（{s.rank_method}）· 最小截面 {s.minimum_cross_section} · 不可计算为 null（不以零代替）</p>
+            <p data-testid="ic-sample">可计算截面 {s.summary.evaluated_cross_sections} / {s.expected_cross_sections} · 配对样本 {s.paired_count} / {s.expected_observations} · 因子可用 {s.factor_available_count} · 标签可用 {s.label_available_count} · 缺失比例 {s.missing_ratio} · 状态 {JSON.stringify(s.status_counts)}</p>
+            <Chart option={{ tooltip: { trigger: 'axis' }, legend: {}, xAxis: { type: 'category', data: s.series.map(r => r.date) }, yAxis: { type: 'value', name: 'IC' }, series: [{ name: 'Pearson IC', type: 'line', connectNulls: false, data: s.series.map(r => r.pearson_ic) }, { name: 'Spearman Rank IC', type: 'line', connectNulls: false, data: s.series.map(r => r.rank_ic) }] }} />
+            <table data-testid="ic-summary"><thead><tr><th>统计</th><th>值</th><th>不可计算原因</th></tr></thead><tbody>{summaryRows.map(([label, value, reason]) => <tr key={label}><td>{label}</td><td>{value ?? '—'}</td><td>{reason ?? '—'}</td></tr>)}</tbody></table>
+            <details><summary>逐日 IC 与样本明细</summary><table data-testid="ic-series"><thead><tr><th>日期</th><th>配对 / 期望</th><th>Pearson IC</th><th>Rank IC</th><th>状态</th></tr></thead><tbody>{s.series.map(r => <tr key={r.date}><td>{r.date}</td><td>{r.paired_count} / {r.expected_count}</td><td>{r.pearson_ic ?? '—'}</td><td>{r.rank_ic ?? '—'}</td><td>{r.status}</td></tr>)}</tbody></table></details>
+          </section>;
+        })}
         {factor.relationships?.map(r => <section key={r.horizon}>
           <h3>因子与 {r.horizon} Session 后续收益关系</h3>
           <p data-testid="relationship-counts">有效样本 {r.effective_count} / {r.expected_count} · 缺失 {r.missing_count} · 缺失比例 {r.missing_ratio ?? 'Unknown'}</p>

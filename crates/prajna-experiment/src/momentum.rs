@@ -284,19 +284,17 @@ fn submit(root: &Path, mut request: Request) -> Result<Value, ResearchError> {
     let cache = FactorCache::open(root).map_err(storage)?;
     // Evaluation is downstream of the factor input adapter. Future opens are never
     // inserted into the factor Panel, registered as a Factor, or sent to a strategy.
+    let session_dates = panel
+        .sessions
+        .iter()
+        .map(|s| s.session_date)
+        .collect::<Vec<_>>();
+    let member_ids = members.iter().map(ToString::to_string).collect::<Vec<_>>();
     let labels = request
         .evaluation
         .map(|_| {
-            prajna_research::evaluation::labels(
-                &panel
-                    .sessions
-                    .iter()
-                    .map(|s| s.session_date)
-                    .collect::<Vec<_>>(),
-                &members.iter().map(ToString::to_string).collect::<Vec<_>>(),
-                &opens,
-            )
-            .map_err(invalid)
+            prajna_research::evaluation::labels(&session_dates, &member_ids, &opens)
+                .map_err(invalid)
         })
         .transpose()?;
     let mut outputs = Vec::new();
@@ -355,7 +353,9 @@ fn submit(root: &Path, mut request: Request) -> Result<Value, ResearchError> {
         let mut counts = BTreeMap::<String, usize>::new();
         let mut rows = Vec::new();
         let mut valid = Vec::new();
+        let mut values_by_key = BTreeMap::new();
         for i in 0..frame.height() {
+            let instrument = ids.get(i).ok_or_else(|| invalid("null instrument"))?;
             let date = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()
                 + chrono::Duration::days(i64::from(
                     dates.get(i).ok_or_else(|| invalid("null date"))?,
@@ -364,8 +364,9 @@ fn submit(root: &Path, mut request: Request) -> Result<Value, ResearchError> {
             *counts.entry(status.to_owned()).or_default() += 1;
             if let Some(value) = values.get(i) {
                 valid.push(value);
+                values_by_key.insert((instrument.to_owned(), date), value);
             }
-            rows.push(json!({"instrument":ids.get(i),"date":date.to_string(),"value":values.get(i),"status":status,"available_at_ns":available.get(i).map(|v|v.to_string())}));
+            rows.push(json!({"instrument":instrument,"date":date.to_string(),"value":values.get(i),"status":status,"available_at_ns":available.get(i).map(|v|v.to_string())}));
         }
         valid.sort_by(f64::total_cmp);
         // Histogram boundaries/counts are Rust report values, never browser calculations.
@@ -388,6 +389,16 @@ fn submit(root: &Path, mut request: Request) -> Result<Value, ResearchError> {
         let mut output = json!({"definition":factor.canonical_json(),"rows":rows,"distribution":bins,"status_counts":counts});
         if let Some(labels) = &labels {
             output["relationships"] = relationships(&rows, labels);
+            output["statistics"] = serde_json::to_value(
+                prajna_research::evaluation::statistics(
+                    &session_dates,
+                    &member_ids,
+                    &values_by_key,
+                    labels,
+                )
+                .map_err(invalid)?,
+            )
+            .map_err(invalid)?;
         }
         outputs.push(output);
     }
@@ -396,10 +407,11 @@ fn submit(root: &Path, mut request: Request) -> Result<Value, ResearchError> {
             .map_err(storage)?;
     let mut report = json!({"execution":execution,"schema_version":1,"semantics":semantics,"request":request,"universe":universe.id().map_err(invalid)?,"members":members.iter().map(ToString::to_string).collect::<Vec<_>>(),"sources":sources,"input_binding":binding,"direction":direction,"missing_rule":"preserve Session axis; no fill; Factor status propagation","sample_assumption":"Static Universe; survivor bias; supplier retrospective adjustments; not strict PIT","factors":outputs});
     if let Some(labels) = labels {
-        report["semantics"] = json!("factor-evaluation@1");
+        report["semantics"] = json!("factor-evaluation@2");
         report["factor_semantics"] = json!(semantics);
         report["evaluation"] = json!({
             "version":prajna_research::evaluation::VERSION,
+            "statistics_version":prajna_research::evaluation::STATISTICS_VERSION,
             "method":"next_open_to_forward_open", "horizons":[1,5,20],
             "calendar_basis":"Dataset exchange Sessions; strict venue alignment",
             "price_basis":"same bound supplier-adjusted version as factors; no transaction costs",

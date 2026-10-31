@@ -42,9 +42,17 @@ test('evaluation production submit persists Rust endpoints and relationship char
     await expect(rows.first().locator('td').nth(2)).toHaveText(String(p.factor_value));
     await expect(rows.first().locator('td').nth(3)).toHaveText(String(p.forward_return));
   }
-  await expect(page.locator('canvas')).toHaveCount(5);
+  const statistics = result.report.factors[0].statistics;
+  expect(statistics.map((statistic: { summary: { evaluated_cross_sections: number } }) => statistic.summary.evaluated_cross_sections)).toEqual([0, 0, 0]);
+  await expect(page.getByTestId('ic-series')).toHaveCount(3);
+  await expect(page.getByTestId('ic-series').first().locator('tbody tr')).toHaveCount(130);
+  await expect(page.getByTestId('ic-sample').first()).toContainText(`可计算截面 0 / ${statistics[0].expected_cross_sections}`);
+  await expect(page.getByTestId('ic-summary').first()).toContainText('no_evaluated_cross_sections');
+  await expect(page.getByTestId('ic-series').first().locator('tbody tr').first().locator('td').nth(2)).toHaveText('—');
+  await expect(page.getByTestId('ic-series').first().locator('tbody tr').first().locator('td').nth(4)).toHaveText('insufficient_cross_section');
+  await expect(page.locator('canvas')).toHaveCount(8);
   // Canvas existence and tables alone cannot prove the scatter renderer was registered.
-  await expect.poll(() => page.locator('canvas').nth(2).evaluate(canvas => {
+  await expect.poll(() => page.locator('canvas').nth(5).evaluate(canvas => {
     if (!(canvas instanceof HTMLCanvasElement)) throw new Error('expected canvas');
     const image = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
     let blue = 0;
