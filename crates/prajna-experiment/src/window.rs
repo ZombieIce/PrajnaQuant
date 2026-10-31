@@ -357,6 +357,9 @@ pub fn parameter_warmup(kind: &str, parameters: &Value) -> Result<u64, String> {
             "ma_crossover long_window",
             positive(parameters.get("long_window"), "long_window")?,
         ),
+        // Momentum needs `lookback + 1` closes, so its first evaluable Session
+        // index is `lookback`; the evaluation start anchors the rotation cadence.
+        "pool_momentum_topk" => positive(parameters.get("lookback"), "lookback"),
         "s2_rotation" => {
             // Momentum(short) and Momentum(long) need `n + 1` closes and
             // Volatility(vol) needs `vol + 1` closes, so their first evaluable

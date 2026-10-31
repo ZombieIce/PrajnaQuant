@@ -6,9 +6,9 @@ pub(super) fn research_panel(
     root: &Path,
     raw: &Panel,
 ) -> Result<Panel, ExperimentError> {
-    if experiment.adjusted_versions.len() != 1 || experiment.evaluation.is_none() {
+    if experiment.adjusted_versions.is_empty() || experiment.evaluation.is_none() {
         return Err(invalid(
-            "single_etf_timing requires one bound adjusted version and evaluation window",
+            "research templates require bound adjusted versions and a frozen evaluation window",
         ));
     }
     let mut prices = BTreeMap::new();

@@ -120,10 +120,11 @@ impl EngineSettings {
                 | "buy_and_hold"
                 | "ma_crossover"
                 | "single_etf_timing"
+                | "pool_momentum_topk"
         ) && !is_python_strategy(&input.strategy)
         {
             return Err(invalid(
-                "strategy must be s2_rotation, buy_and_hold, ma_crossover, single_etf_timing or strategy_id@version",
+                "strategy must be s2_rotation, buy_and_hold, ma_crossover, single_etf_timing, pool_momentum_topk or strategy_id@version",
             ));
         }
         let policy = match input.unfilled_entry.as_deref() {
@@ -617,6 +618,8 @@ pub(super) fn parse_space(kind: &str, space: &Value) -> Result<ParameterSpace, E
             vec!["lookback", "top_k", "rebalance_every"]
         } else if kind == "single_etf_timing" {
             vec!["params_version", "ma_window", "rebalance_every"]
+        } else if kind == "pool_momentum_topk" {
+            vec!["params_version", "lookback", "top_k", "rebalance_every"]
         } else if kind == "buy_and_hold" {
             vec!["params_version"]
         } else {
@@ -743,6 +746,9 @@ fn native_strategy(kind: &str, value: &Value) -> Result<VectorStrategy, Experime
         }
         "single_etf_timing" => {
             VectorStrategy::SingleEtfTiming(serde_json::from_value(value.clone())?)
+        }
+        "pool_momentum_topk" => {
+            VectorStrategy::PoolMomentumTopK(serde_json::from_value(value.clone())?)
         }
         "ma_crossover" => {
             VectorStrategy::MaCrossover(serde_json::from_value::<MaCrossoverParams>(value.clone())?)
@@ -1169,12 +1175,18 @@ pub(super) fn windowed_decisions(
             assumption,
             Some(evaluation.start()),
         )
-        .map(|decisions| {
-            decisions
-                .into_iter()
-                .filter(|d| d.decision_session.session_date <= evaluation.end())
-                .collect()
-        })
+        .map(|decisions| within_evaluation(decisions, evaluation.end()))
+        .map_err(|error| error.to_string());
+    }
+    if let RunStrategy::Native(VectorStrategy::PoolMomentumTopK(params)) = &run.strategy {
+        return prajna_research::pool_momentum::decide(
+            panel,
+            members,
+            params,
+            assumption,
+            Some(evaluation.start()),
+        )
+        .map(|decisions| within_evaluation(decisions, evaluation.end()))
         .map_err(|error| error.to_string());
     }
     if run.run_spec["strategy"]["kind"].as_str() == Some("buy_and_hold") {
@@ -1187,6 +1199,14 @@ pub(super) fn windowed_decisions(
                 && decision.decision_session.session_date <= evaluation.end()
         })
         .collect())
+}
+
+/// Keeps Decisions whose close exists inside the frozen evaluation window.
+fn within_evaluation(decisions: Vec<Decision>, end: chrono::NaiveDate) -> Vec<Decision> {
+    decisions
+        .into_iter()
+        .filter(|decision| decision.decision_session.session_date <= end)
+        .collect()
 }
 
 // Defense at the Rust execution seam, including callers other than the Python binding.

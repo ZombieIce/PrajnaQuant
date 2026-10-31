@@ -447,3 +447,208 @@ fn timing_unavailable_signals_do_not_create_cash_targets_or_shift_schedule() {
         .is_err()
     );
 }
+
+#[test]
+fn pool_momentum_ranks_actual_candidates_with_deterministic_ties_and_cash_decisions() {
+    use prajna_research::{
+        engine::Engine,
+        fast_event::{Rebalance, Sizing},
+        pool_momentum::{self, PoolMomentumTopKParams},
+    };
+    let raw = panel();
+    let mut panel = raw
+        .window(raw.sessions[0].session_date, raw.sessions[9].session_date)
+        .unwrap();
+    let ids = panel
+        .grid
+        .column("instrument_id")
+        .unwrap()
+        .str()
+        .unwrap()
+        .iter()
+        .map(|value| value.unwrap().to_owned())
+        .collect::<Vec<_>>();
+    let indices = panel
+        .grid
+        .column("session_index")
+        .unwrap()
+        .u32()
+        .unwrap()
+        .iter()
+        .map(|value| value.unwrap())
+        .collect::<Vec<_>>();
+    let closes = (0..panel.grid.height())
+        .map(|row| {
+            let index = indices[row] as f64;
+            Some(match ids[row].as_str() {
+                "A.SYNTH" => 100.0 + index,
+                "C.SYNTH" => 100.0 + 2.0 * index,
+                _ => 100.0,
+            })
+        })
+        .collect::<Vec<_>>();
+    panel
+        .grid
+        .with_column(Series::new("close".into(), closes).into())
+        .unwrap();
+    let start = panel.sessions[3].session_date;
+    let params = PoolMomentumTopKParams {
+        params_version: 1,
+        lookback: 2,
+        top_k: 2,
+        rebalance_every: 2,
+    };
+    let decisions = pool_momentum::decide(
+        &panel,
+        &panel.instruments,
+        &params,
+        AvailabilityAssumption::None,
+        Some(start),
+    )
+    .unwrap();
+    assert_eq!(
+        decisions
+            .iter()
+            .map(|decision| decision.decision_session.session_date)
+            .collect::<Vec<_>>(),
+        [3, 5, 7, 9].map(|index| panel.sessions[index].session_date)
+    );
+    let top = &decisions[0];
+    let a: InstrumentId = "A.SYNTH".parse().unwrap();
+    let c: InstrumentId = "C.SYNTH".parse().unwrap();
+    assert_eq!(
+        top.ranked
+            .iter()
+            .map(|(id, _, rank)| (id.clone(), *rank))
+            .collect::<Vec<_>>(),
+        vec![
+            (c.clone(), 1),
+            (a.clone(), 2),
+            ("B.SYNTH".parse().unwrap(), 3)
+        ]
+    );
+    assert_eq!(top.targets, BTreeMap::from([(a.clone(), 0.5), (c, 0.5)]));
+    assert_eq!(
+        pool_momentum::decide(
+            &panel,
+            &panel.instruments,
+            &params,
+            AvailabilityAssumption::None,
+            None
+        )
+        .unwrap()[0]
+            .decision_session
+            .session_date,
+        panel.sessions[2].session_date
+    );
+
+    // Identical scores tie by ascending InstrumentId; fewer than K candidates
+    // are equal-weighted over the actual count.
+    let closes = vec![Some(100.0); panel.grid.height()];
+    panel
+        .grid
+        .with_column(Series::new("close".into(), closes).into())
+        .unwrap();
+    let tie = pool_momentum::decide(
+        &panel,
+        &panel.instruments,
+        &PoolMomentumTopKParams {
+            top_k: 2,
+            ..params.clone()
+        },
+        AvailabilityAssumption::None,
+        Some(start),
+    )
+    .unwrap();
+    let b: InstrumentId = "B.SYNTH".parse().unwrap();
+    assert_eq!(
+        tie[0].targets,
+        BTreeMap::from([(a.clone(), 0.5), (b.clone(), 0.5)])
+    );
+    assert_eq!(
+        tie[0]
+            .ranked
+            .iter()
+            .map(|(_, _, rank)| *rank)
+            .collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    let wider = pool_momentum::decide(
+        &panel,
+        &panel.instruments,
+        &PoolMomentumTopKParams {
+            top_k: 5,
+            ..params.clone()
+        },
+        AvailabilityAssumption::None,
+        Some(start),
+    )
+    .unwrap();
+    assert!((wider[0].targets[&a] - 1.0 / 3.0).abs() < f64::EPSILON);
+    assert_eq!(wider[0].targets.len(), 3);
+
+    // A scheduled close with no available score is an explicit all-cash target.
+    let bars = (0..panel.grid.height())
+        .map(|row| indices[row] != 4)
+        .collect::<Vec<_>>();
+    panel
+        .grid
+        .with_column(Series::new("has_bar".into(), bars).into())
+        .unwrap();
+    let cash = pool_momentum::decide(
+        &panel,
+        &panel.instruments,
+        &PoolMomentumTopKParams {
+            rebalance_every: 1,
+            ..params.clone()
+        },
+        AvailabilityAssumption::None,
+        Some(start),
+    )
+    .unwrap();
+    let no_scores = cash
+        .iter()
+        .find(|decision| decision.decision_session.session_date == panel.sessions[4].session_date)
+        .unwrap();
+    assert!(no_scores.targets.is_empty());
+    assert!(no_scores.ranked.is_empty());
+
+    for params in [
+        PoolMomentumTopKParams {
+            params_version: 2,
+            ..params.clone()
+        },
+        PoolMomentumTopKParams {
+            lookback: 0,
+            ..params.clone()
+        },
+        PoolMomentumTopKParams {
+            top_k: 0,
+            ..params.clone()
+        },
+        PoolMomentumTopKParams {
+            rebalance_every: 0,
+            ..params.clone()
+        },
+    ] {
+        assert!(VectorEngine::validate(&VectorStrategy::PoolMomentumTopK(params)).is_err());
+    }
+    assert!(
+        Engine::AccurateEvent {
+            sizing: Sizing::Lot,
+            rebalance: Rebalance::FullTarget,
+        }
+        .validate(&VectorStrategy::PoolMomentumTopK(params.clone()))
+        .is_err()
+    );
+    assert!(
+        pool_momentum::decide(
+            &panel,
+            &panel.instruments,
+            &params,
+            AvailabilityAssumption::None,
+            Some(chrono::NaiveDate::from_ymd_opt(2030, 1, 1).unwrap()),
+        )
+        .is_err()
+    );
+}
