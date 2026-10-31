@@ -43,7 +43,7 @@ python3.12 scripts/workflow.py run --kind unittest --executor implementer \
   -- python3.12 -m unittest tests.test_workflow -v
 ```
 
-支持 Cargo libtest、Python unittest、Playwright list reporter 汇总；不认识的输出失败，单纯 build/discovery 不算执行。记录显式命令/选择、执行者、代码 SHA、环境、数量、结果和 wall time；工作区尚有改动时 SHA 只是锚点，交接需说明 dirty 范围及对最终 head 的适用依据。原始日志必须在仓库外，文件独占创建，不覆盖历史证据；子输出不回显，敏感内容仍仅本机保存。显式 `--timeout` 超时终止本次拥有的进程组；启动前及运行中监测10GiB磁盘保留线，不足拒绝/停止并记录exit125、原因及最小余量。只控制本次拥有的进程组，不连接已有服务。
+支持 Cargo libtest、Python unittest、Playwright list reporter 汇总；不认识的输出失败，单纯 build/discovery 不算执行。记录显式命令/选择、执行者、代码 SHA、环境、数量、结果和 wall time；SHA在开始时固定，结束时再记录ending_sha；运行中head变化标source_changed（返回2），不能把旧执行归到新head。dirty起止状态同时记录；dirty执行要求人工说明范围及对最终head的适用依据，工具不推定dirty内容稳定。原始日志必须在仓库外，文件独占创建，不覆盖历史证据；子输出不回显，敏感内容仍仅本机保存。显式 `--timeout` 超时终止本次拥有的进程组；启动前及运行中监测10GiB磁盘保留线，不足拒绝/停止并记录exit125、原因及最小余量。只控制本次拥有的进程组，不连接已有服务。
 
 - 零执行默认失败；明确允许空集时传 `--allow-empty '适用理由'`，仍须有可信汇总，不能把缺日志当空集通过。
 - Cargo 默认 ignored 测试单列，实际执行正数即可；选择要求 ignored 时显式 `-- --ignored --exact`。手写 fixture 的生产浏览器准备已接入此记录器，四个导出必须实际执行，且保留原产物检查。

@@ -375,6 +375,8 @@ def record(args):
     log = Path(args.log).resolve()
     if log.is_relative_to(ROOT):
         raise EvidenceError('error', 'raw test logs must be outside the repository')
+    source_sha = commit('HEAD')
+    dirty_at_start = bool(git('status', '--porcelain', '--untracked-files=normal').strip())
     start = time.monotonic()
     stopped_reason = None
     minimum_free = shutil.disk_usage(ROOT).free
@@ -418,9 +420,15 @@ def record(args):
     valid = bool(parsed) and parsed['failed'] == 0 and (parsed['executed'] > 0 or bool(args.allow_empty))
     if parsed and args.kind != 'cargo' and parsed['skipped'] and not args.allow_skips:
         valid = False
-    report = {'result': 'passed' if valid and exit_code == 0 else 'failed', 'command': command,
-              'sha': commit('HEAD'), 'executor': args.executor, 'selection': args.selection,
-              'working_tree_dirty': bool(git('status', '--porcelain', '--untracked-files=normal').strip()),
+    ending_sha = commit('HEAD')
+    dirty_at_end = bool(git('status', '--porcelain', '--untracked-files=normal').strip())
+    result = 'passed' if valid and exit_code == 0 else 'failed'
+    if source_sha != ending_sha:
+        result = 'source_changed'
+    report = {'result': result, 'command': command,
+              'sha': source_sha, 'ending_sha': ending_sha, 'executor': args.executor, 'selection': args.selection,
+              'working_tree_dirty': dirty_at_start, 'dirty_at_end': dirty_at_end,
+              'source_verification': 'clean_stable' if source_sha == ending_sha and not (dirty_at_start or dirty_at_end) else 'manual_mapping_required',
               'environment': {'platform': sys.platform, 'recorder_python': sys.version.split()[0],
                               'node': runtime_version(['node', '--version']),
                               'rust': runtime_version(['rustc', '--version']),
@@ -558,7 +566,7 @@ def main():
         else:
             report = {'jobs': timings(json.loads(Path(args.jobs_json).read_text()))}
         json_output(report)
-        if report.get('result') in ('unknown', 'permission', 'error', 'unavailable'):
+        if report.get('result') in ('unknown', 'permission', 'error', 'unavailable', 'source_changed'):
             return 2
         return 0 if report.get('result') in (None, 'success', 'passed', 'dry_run', 'applied',
                                              'mechanical_evidence_only', 'capable_pending_behavior_test') else 1

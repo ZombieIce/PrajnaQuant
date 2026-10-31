@@ -319,6 +319,16 @@ class VerificationTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 w.record(args)
 
+    def test_head_change_never_attributes_execution_to_new_head(self):
+        with tempfile.TemporaryDirectory() as d:
+            args = self.args(Path(d), 'test result: ok. 1 passed; 0 failed; 0 ignored;')
+            with patch.object(w, 'commit', side_effect=[HEAD, OLD]):
+                report = w.record(args)
+            self.assertEqual(report['sha'], HEAD)
+            self.assertEqual(report['ending_sha'], OLD)
+            self.assertEqual(report['result'], 'source_changed')
+            self.assertEqual(report['source_verification'], 'manual_mapping_required')
+
     def test_zero_match_actual_process_fails_unless_explicit(self):
         for allow, expected in [(None, 'failed'), ('explicit discovery-only empty scope', 'passed')]:
             with tempfile.TemporaryDirectory() as d:
