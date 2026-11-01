@@ -36,7 +36,7 @@ export default function PoolUpdates({ poolId, version, onSelect }: Props) {
   const selected = configurations.find(c => c.name === config);
   const attempts = data?.attempts.filter(a => a.pool === poolId && a.pool_version === version) ?? [];
   const last = data?.last_price_ready[`${poolId}:${version}`];
-  const submit = async (input: { op: 'prepare'; config: string } | { op: 'retry'; attempt: string }) => {
+  const submit = async (input: { op: 'prepare'; config: string } | { op: 'retry'; attempt: string; config?: string }) => {
     setBusy(true); setError('');
     try {
       await api('/api/v1/pool-updates', { method: 'POST', body: JSON.stringify(input) });
@@ -57,6 +57,7 @@ export default function PoolUpdates({ poolId, version, onSelect }: Props) {
   return <Panel title="手动更新固定研究池">
     <p>行情使用现有采集或显式已有采集报告；复权与行动需本机供应文件。未配置不猜来源，不生成复权价格或现金事实。</p>
     <p>每次固定本池版本、成员和日期。补跑只复用本计划成功成员；等待输入不占用任务队列。</p>
+    <p>补跑可从所选配置补充复权/行动映射；未选择时读取原命名配置。只能改变供应映射，固定成员、日期和行情证据不能改变。</p>
     <label>本机更新配置<select aria-label="本机更新配置" value={selected?.name ?? ''} disabled={busy} onChange={e => setConfig(e.target.value)}>
       <option value="">选择显式配置</option>{configurations.map(c => <option key={c.name} value={c.name}>{c.name} · {c.start} ～ {c.end}</option>)}
     </select></label>
@@ -85,7 +86,7 @@ export default function PoolUpdates({ poolId, version, onSelect }: Props) {
             <td>复权：{member.adjusted ?? member.adjustment_error ?? '尚未消费'}<p>行动：{attempt.actions.members?.[id]?.state ?? 'unknown'}</p></td>
           </tr>)}
         </tbody></table></div>
-        <button className="secondary" disabled={busy || !!active} onClick={() => void submit({ op: 'retry', attempt: attempt.id })}>补跑本计划</button>
+        <button className="secondary" disabled={busy || !!active} onClick={() => void submit({ op: 'retry', attempt: attempt.id, config: selected?.name })}>补跑本计划</button>
         <button className="primary" disabled={busy || !attempt.price_ready} onClick={() => void select(attempt)}>使用此固定版本研究</button>
       </section>;
     })}

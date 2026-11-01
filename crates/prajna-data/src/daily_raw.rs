@@ -273,6 +273,35 @@ pub struct DailyRawReport {
     pub chunks: Vec<ChunkReport>,
 }
 
+impl DailyRawReport {
+    /// Validates external reports before their completion flag can advance update success.
+    pub fn validate_consistency(&self) -> Result<(), DailyRawError> {
+        self.chunks
+            .iter()
+            .try_fold(0u32, |sum, chunk| sum.checked_add(chunk.candidate_attempts))
+            .ok_or_else(|| DailyRawError::invalid("collection attempt count overflow"))?;
+        if self.chunks.is_empty()
+            || self.summary != summarize(&self.chunks)
+            || self.status
+                != collection_status(&self.chunks, self.status == CollectionStatus::SourceStopped)
+            || (self.status == CollectionStatus::SourceStopped && self.summary.failed_chunks == 0)
+            || self.chunks.iter().any(|chunk| {
+                chunk.status == ChunkStatus::Complete
+                    && (chunk.actual_response_dates.is_empty()
+                        || !chunk
+                            .raw_objects
+                            .iter()
+                            .any(|raw| raw.outcome == RawResponseOutcome::AcceptedResponse))
+            })
+        {
+            return Err(DailyRawError::invalid(
+                "inconsistent collection report status/chunks/summary",
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Report plus its local file path. The path is intentionally not serialized into the report.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CollectionRun {
@@ -704,27 +733,7 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
         }
 
         let summary = summarize(&chunks);
-        let any_data = chunks
-            .iter()
-            .any(|chunk| chunk.status == ChunkStatus::Complete);
-        let has_failure = chunks.iter().any(|chunk| {
-            matches!(
-                chunk.status,
-                ChunkStatus::Failed | ChunkStatus::NotAttempted
-            )
-        });
-        let has_empty = chunks
-            .iter()
-            .any(|chunk| chunk.status == ChunkStatus::Empty);
-        let status = if self.source_stopped {
-            CollectionStatus::SourceStopped
-        } else if !has_failure && !has_empty {
-            CollectionStatus::Complete
-        } else if any_data {
-            CollectionStatus::Partial
-        } else {
-            CollectionStatus::Failed
-        };
+        let status = collection_status(&chunks, self.source_stopped);
         let report = DailyRawReport {
             schema_version: REPORT_SCHEMA_VERSION,
             report_id,
@@ -897,6 +906,18 @@ fn is_source_restriction(
                 .iter()
                 .any(|marker| text.contains(marker))
         })
+}
+
+fn collection_status(chunks: &[ChunkReport], source_stopped: bool) -> CollectionStatus {
+    if source_stopped {
+        CollectionStatus::SourceStopped
+    } else if chunks.iter().all(|c| c.status == ChunkStatus::Complete) {
+        CollectionStatus::Complete
+    } else if chunks.iter().any(|c| c.status == ChunkStatus::Complete) {
+        CollectionStatus::Partial
+    } else {
+        CollectionStatus::Failed
+    }
 }
 
 fn summarize(chunks: &[ChunkReport]) -> CollectionSummary {

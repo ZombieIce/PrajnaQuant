@@ -43,6 +43,16 @@ pub struct MemberConfig {
 struct Plan {
     config: Config,
     universe: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    config_name: Option<String>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SupplyMapping {
+    config: Option<String>,
+    adjusted_files: BTreeMap<String, Option<PathBuf>>,
+    actions_file: Option<PathBuf>,
+    actions_version: Option<String>,
 }
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -84,6 +94,8 @@ pub struct Attempt {
     pub adjusted_supplies: BTreeMap<String, Supply>,
     pub report_supplies: BTreeMap<String, Supply>,
     pub action_supply: Supply,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supply_mapping: Option<SupplyMapping>,
 }
 
 #[derive(Deserialize)]
@@ -95,6 +107,7 @@ pub enum Command {
     },
     Retry {
         attempt: String,
+        config: Option<String>,
         #[serde(default)]
         interrupted: bool,
     },
@@ -214,6 +227,7 @@ pub fn get(root: &Path, id: &str) -> Result<Attempt> {
             && frozen.adjusted_supplies == attempt.adjusted_supplies
             && frozen.report_supplies == attempt.report_supplies
             && frozen.action_supply == attempt.action_supply
+            && frozen.supply_mapping == attempt.supply_mapping
             && attempt.pool == plan.config.pool.id
             && attempt.pool_version == plan.config.pool.version
             && attempt.start == plan.config.start
@@ -241,8 +255,72 @@ fn persist(root: &Path, attempt: &Attempt) -> Result<()> {
         false,
     )
 }
-fn make_attempt(root: &Path, plan_id: String, previous: Option<Attempt>) -> Result<Attempt> {
+fn fixed_scope(config: &Config) -> Result<Value> {
+    let mut value = serde_json::to_value(config)?;
+    value
+        .as_object_mut()
+        .ok_or("invalid config")?
+        .remove("actions_file");
+    value
+        .as_object_mut()
+        .ok_or("invalid config")?
+        .remove("actions_version");
+    for member in value["members"]
+        .as_object_mut()
+        .ok_or("invalid members")?
+        .values_mut()
+    {
+        member
+            .as_object_mut()
+            .ok_or("invalid member")?
+            .remove("adjusted_file");
+    }
+    Ok(value)
+}
+fn make_attempt(
+    root: &Path,
+    plan_id: String,
+    previous: Option<Attempt>,
+    config_name: Option<&str>,
+) -> Result<Attempt> {
     let plan = load_plan(root, &plan_id)?;
+    let config_name = config_name
+        .or_else(|| {
+            previous
+                .as_ref()
+                .and_then(|a| a.supply_mapping.as_ref())
+                .and_then(|m| m.config.as_deref())
+        })
+        .or(plan.config_name.as_deref());
+    let replacement: Option<Config> = if previous.is_some() {
+        config_name
+            .map(|name| {
+                identifier(name)?;
+                read(root, &format!("configs/{name}.json"))
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    let supply_config = replacement.as_ref().unwrap_or(&plan.config);
+    require(
+        fixed_scope(supply_config)? == fixed_scope(&plan.config)?,
+        "retry configuration changes fixed plan scope",
+    )?;
+    require(
+        supply_config.actions_file.is_none() || supply_config.actions_version.is_none(),
+        "choose action file or fixed version, not both",
+    )?;
+    let mapping = SupplyMapping {
+        config: config_name.map(str::to_owned),
+        adjusted_files: supply_config
+            .members
+            .iter()
+            .map(|(id, m)| (id.clone(), m.adjusted_file.clone()))
+            .collect(),
+        actions_file: supply_config.actions_file.clone(),
+        actions_version: supply_config.actions_version.clone(),
+    };
     let mut attempt = Attempt {
         id: format!(
             "{}-{}",
@@ -267,7 +345,8 @@ fn make_attempt(root: &Path, plan_id: String, previous: Option<Attempt>) -> Resu
         actions: json!({"state":"unknown","reason":"not attempted"}),
         adjusted_supplies: BTreeMap::new(),
         report_supplies: BTreeMap::new(),
-        action_supply: snapshot(root, plan.config.actions_file.as_deref()),
+        action_supply: snapshot(root, mapping.actions_file.as_deref()),
+        supply_mapping: Some(mapping.clone()),
     };
     for (id, member) in &plan.config.members {
         let mut result = MemberResult {
@@ -296,9 +375,10 @@ fn make_attempt(root: &Path, plan_id: String, previous: Option<Attempt>) -> Resu
             }
         }
         attempt.members.insert(id.clone(), result);
-        attempt
-            .adjusted_supplies
-            .insert(id.clone(), snapshot(root, member.adjusted_file.as_deref()));
+        attempt.adjusted_supplies.insert(
+            id.clone(),
+            snapshot(root, mapping.adjusted_files[id].as_deref()),
+        );
         if !member.collect {
             attempt.report_supplies.insert(
                 id.clone(),
@@ -344,12 +424,13 @@ pub fn prepare(root: &Path, config_name: &str) -> Result<Attempt> {
     let plan = Plan {
         config,
         universe: pool.universe,
+        config_name: Some(config_name.into()),
     };
     let id = hash(&serde_json::to_vec(&plan)?);
     write(root, &format!("plans/{id}.json"), &plan, true)?;
-    make_attempt(root, id, None)
+    make_attempt(root, id, None, None)
 }
-pub fn retry(root: &Path, id: &str, interrupted: bool) -> Result<Attempt> {
+pub fn retry(root: &Path, id: &str, interrupted: bool, config: Option<&str>) -> Result<Attempt> {
     let mut previous = get(root, id)?;
     let lock = attempt_lock(root, id)?;
     lock.try_lock_exclusive()?;
@@ -359,7 +440,7 @@ pub fn retry(root: &Path, id: &str, interrupted: bool) -> Result<Attempt> {
         persist(root, &previous)?;
     }
     require(previous.status != "queued", "cannot retry a queued attempt")?;
-    make_attempt(root, previous.plan.clone(), Some(previous))
+    make_attempt(root, previous.plan.clone(), Some(previous), config)
 }
 fn attempt_lock(root: &Path, id: &str) -> Result<fs::File> {
     identifier(id)?;
@@ -418,6 +499,7 @@ where
         write(root, &relative, &report, true)?;
         (report, path(root, &relative)?, "explicit_report")
     };
+    report.validate_consistency()?;
     let collection = match report.status {
         daily_raw::CollectionStatus::Complete => collection,
         daily_raw::CollectionStatus::SourceStopped => "source_stopped",
@@ -482,7 +564,7 @@ fn import_adjustment(
     start: NaiveDate,
     end: NaiveDate,
 ) -> Result<String> {
-    let bytes = supplied(root, supply)?;
+    let mut bytes = supplied(root, supply)?;
     let mut value: Value = serde_json::from_slice(&bytes)?;
     if value["schema_version"] == "supplier-adjusted/1" {
         let object = value
@@ -498,13 +580,14 @@ fn import_adjustment(
         )?;
         object.insert("schema_version".into(), json!(1));
         object.insert("raw_dsv".into(), json!(dsv));
+        bytes = serde_json::to_vec(&value)?;
     }
     let input: adjusted_series::AdjustedInput = serde_json::from_value(value.clone())?;
     require(
         input.raw_dsv == dsv && input.instrument_id == id,
         "adjusted input DSV/instrument mismatch",
     )?;
-    let version = adjusted_series::import(root, &serde_json::to_vec(&value)?)?;
+    let version = adjusted_series::import(root, &bytes)?;
     let input = adjusted_series::read(root, &version)?;
     let manifest = prajna_data::read_manifest(root, dsv)?;
     let instrument: prajna_domain::InstrumentId = id.parse()?;
@@ -537,7 +620,12 @@ fn import_adjustment(
     Ok(version)
 }
 fn action_coverage(root: &Path, plan: &Plan, attempt: &Attempt) -> Result<Value> {
-    let version = if let Some(version) = &plan.config.actions_version {
+    let fixed_version = attempt
+        .supply_mapping
+        .as_ref()
+        .map(|m| &m.actions_version)
+        .unwrap_or(&plan.config.actions_version);
+    let version = if let Some(version) = fixed_version {
         corporate_facts::read(root, version)?;
         version.clone()
     } else {
@@ -778,14 +866,41 @@ pub fn list(root: &Path) -> Result<Value> {
     configs.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
     let mut last_price_ready = BTreeMap::new();
     let mut last_member_success = BTreeMap::new();
+    let mut price_success_times = BTreeMap::new();
+    let mut member_success_times = BTreeMap::new();
     for attempt in &attempts {
         let scope = format!("{}:{}", attempt.pool, attempt.pool_version);
         if attempt.price_ready {
-            last_price_ready.entry(scope.clone()).or_insert_with(|| json!({"attempt":attempt.id,"finished_at":attempt.finished_at,"dataset":attempt.dataset}));
+            let time = chrono::DateTime::parse_from_rfc3339(
+                attempt
+                    .finished_at
+                    .as_deref()
+                    .ok_or("ready attempt missing completion time")?,
+            )?;
+            if price_success_times
+                .get(&scope)
+                .is_none_or(|old| &time > old)
+            {
+                price_success_times.insert(scope.clone(), time);
+                last_price_ready.insert(scope.clone(), json!({"attempt":attempt.id,"finished_at":attempt.finished_at,"dataset":attempt.dataset}));
+            }
         }
         for (id, member) in &attempt.members {
             if member.publication == "succeeded" {
-                last_member_success.entry(format!("{scope}:{id}")).or_insert_with(|| json!({"attempt":attempt.id,"succeeded_at":member.succeeded_at,"coverage":member.coverage}));
+                let key = format!("{scope}:{id}");
+                let time = chrono::DateTime::parse_from_rfc3339(
+                    member
+                        .succeeded_at
+                        .as_deref()
+                        .ok_or("successful member missing success time")?,
+                )?;
+                if member_success_times
+                    .get(&key)
+                    .is_none_or(|old| &time > old || (&time == old && member.reused_from.is_none()))
+                {
+                    member_success_times.insert(key.clone(), time);
+                    last_member_success.insert(key, json!({"attempt":attempt.id,"succeeded_at":member.succeeded_at,"coverage":member.coverage}));
+                }
             }
         }
     }
@@ -801,7 +916,8 @@ pub fn command(root: &Path, command: Command) -> Result<Value> {
         Command::Retry {
             attempt,
             interrupted,
-        } => json!({"attempt":retry(&root,&attempt,interrupted)?}),
+            config,
+        } => json!({"attempt":retry(&root,&attempt,interrupted,config.as_deref())?}),
         Command::PoolUpdate { attempt } => json!({"attempt":execute(&root,&attempt)?}),
     };
     Ok(json!({"schema_version":1,"data":data}))

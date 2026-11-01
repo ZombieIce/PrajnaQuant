@@ -7,8 +7,8 @@ test('production pool update, missing input retry, frozen experiment and persist
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   const lake = join(process.env.PRAJNA_E2E_ROOT!, 'fixture', 'lake');
-  const memberFile = join(lake, 'update-inputs', 'XSHE', 'adjusted.json');
-  const supplier = await readFile(memberFile, 'utf8');
+  const configFile = join(lake, 'pool-updates', 'configs', 'synthetic.json');
+  const configured = await readFile(configFile, 'utf8');
   const registry = (await (await page.request.get('/api/v1/research-pools')).json()).data;
   const pool = registry.pools.find((p: { id: string }) => p.id === 'bonds');
   const members = ['159952.XSHE', '510300.XSHG'];
@@ -39,7 +39,10 @@ test('production pool update, missing input retry, frozen experiment and persist
   const frozen = await readFile(definitionPath, 'utf8');
   expect(JSON.parse(frozen).dsv).toBe(fixedDsv);
   // A new attempt consumes a new supplier snapshot. The old ready attempt remains readable.
-  await writeFile(memberFile, '{}');
+  const missing: { start: string; members: Record<string, { adjusted_file: string | null }>; actions_file: string | null } = JSON.parse(configured);
+  missing.members['159952.XSHE'].adjusted_file = null;
+  missing.actions_file = null;
+  await writeFile(configFile, JSON.stringify(missing));
   await page.getByRole('button', { name: '更新选定池', exact: true }).click();
   await expect(page.getByTestId('pool-update-attempt')).toHaveCount(2);
   await expect(first.getByTestId('update-readiness')).toContainText('价格研究输入：待补充', { timeout: 60_000 });
@@ -48,12 +51,21 @@ test('production pool update, missing input retry, frozen experiment and persist
   await expect(page.getByTestId('update-last-success')).toContainText(fixedDsv);
   await expect(first.getByRole('button', { name: '使用此固定版本研究', exact: true })).toBeDisabled();
   const failedId = await first.getAttribute('data-attempt');
-  await writeFile(memberFile, supplier);
+  const failed = (await (await page.request.get('/api/v1/pool-updates')).json()).data.attempts.find((a: { id: string }) => a.id === failedId);
+  missing.start = '2026-01-06';
+  await writeFile(configFile, JSON.stringify(missing));
+  await first.getByRole('button', { name: '补跑本计划', exact: true }).click();
+  await expect(page.getByText('retry configuration changes fixed plan scope', { exact: false })).toBeVisible();
+  await expect(page.getByTestId('pool-update-attempt')).toHaveCount(2);
+  await writeFile(configFile, configured);
   await first.getByRole('button', { name: '补跑本计划', exact: true }).click();
   await expect(page.getByTestId('pool-update-attempt')).toHaveCount(3);
   await expect(first.getByTestId('update-readiness')).toContainText('价格研究输入：已就绪', { timeout: 60_000 });
   await expect(first).toContainText(`显式复用尝试 ${failedId}`);
+  await expect(first.getByTestId('update-readiness')).toContainText('行动覆盖：范围已覆盖');
   const retriedId = await first.getAttribute('data-attempt');
+  const retried = (await (await page.request.get('/api/v1/pool-updates')).json()).data.attempts.find((a: { id: string }) => a.id === retriedId);
+  expect(retried.plan).toBe(failed.plan);
   expect(await readFile(definitionPath, 'utf8')).toBe(frozen);
   await page.reload();
   await expect(page.getByTestId('pool-update-attempt').first()).toHaveAttribute('data-attempt', retriedId!);

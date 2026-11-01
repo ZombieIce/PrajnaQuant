@@ -508,14 +508,328 @@ fn frozen_supplies_never_write_through_raw_destination_symlinks() {
 #[test]
 #[ignore = "explicit synthetic production-browser input export"]
 fn export_pool_update_fixture() {
+    let temporary = tempfile::tempdir().unwrap();
     let root = std::env::var_os("PRAJNA_POOL_UPDATE_FIXTURE_ROOT")
-        .expect("explicit synthetic export root");
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| temporary.path().to_owned());
     setup(Path::new(&root), false);
     fs::write(
         Path::new(&root).join("synthetic-pool-update-fixture"),
         b"synthetic only",
     )
     .unwrap();
+}
+
+#[test]
+fn round1_bound_adjustment_preserves_original_bytes_and_version() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    setup(root, true);
+    let first = run(root);
+    let mut bound = supplier("510300.XSHG");
+    bound.as_object_mut().unwrap().remove("price_unit");
+    bound["schema_version"] = json!(1);
+    bound["raw_dsv"] = json!(first.dataset.as_ref().unwrap().dsv);
+    let bytes = format!("{}\n", serde_json::to_string_pretty(&bound).unwrap()).into_bytes();
+    fs::write(root.join("update-inputs/XSHG/adjusted.json"), &bytes).unwrap();
+    let expected = prajna_data::adjusted_series::import(root, &bytes).unwrap();
+    let prepared = update(root, json!({"op":"retry","attempt":first.id}));
+    let next = update(root, json!({"op":"pool_update","attempt":prepared.id}));
+    assert!(next.price_ready);
+    assert_eq!(
+        next.members["510300.XSHG"].adjusted.as_deref(),
+        Some(expected.as_str())
+    );
+    assert_eq!(
+        fs::read(root.join("update-inputs/XSHG/adjusted.json")).unwrap(),
+        bytes
+    );
+}
+
+#[test]
+fn round1_retry_old_attempt_does_not_regress_latest_member_success() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    setup(root, true);
+    let first = run(root);
+    let newer = run(root);
+    let prepared = update(root, json!({"op":"retry","attempt":first.id}));
+    let reused = update(root, json!({"op":"pool_update","attempt":prepared.id}));
+    assert!(reused.price_ready);
+    let listed = pool_update::list(root).unwrap();
+    for id in MEMBERS {
+        assert!(newer.members[id].succeeded_at > first.members[id].succeeded_at);
+        assert_eq!(
+            listed["last_member_success"][format!("bonds:2:{id}")]["succeeded_at"],
+            json!(newer.members[id].succeeded_at)
+        );
+        assert_eq!(
+            listed["last_member_success"][format!("bonds:2:{id}")]["attempt"],
+            newer.id
+        );
+    }
+}
+
+#[test]
+fn round1_retry_supplements_initially_unconfigured_inputs_in_same_plan() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    setup(root, true);
+    let file = root.join("pool-updates/configs/synthetic.json");
+    let configured: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    let mut missing = configured.clone();
+    missing["members"]["510300.XSHG"]["adjusted_file"] = Value::Null;
+    missing["actions_file"] = Value::Null;
+    save(&file, &missing);
+    let first = run(root);
+    assert!(!first.price_ready && first.dataset.is_some());
+    let old = fs::read(root.join(format!("pool-updates/attempts/{}.json", first.id))).unwrap();
+    save(&file, &configured);
+    let prepared = update(root, json!({"op":"retry","attempt":first.id}));
+    // Both paths and bytes are frozen at retry submission.
+    fs::write(
+        root.join("update-inputs/XSHG/adjusted.json"),
+        b"changed after retry",
+    )
+    .unwrap();
+    fs::write(
+        root.join("update-inputs/actions.json"),
+        b"changed after retry",
+    )
+    .unwrap();
+    let next = update(root, json!({"op":"pool_update","attempt":prepared.id}));
+    assert_eq!(next.plan, first.plan);
+    assert_eq!(
+        next.dataset.as_ref().unwrap().dsv,
+        first.dataset.as_ref().unwrap().dsv
+    );
+    assert!(
+        next.members
+            .values()
+            .all(|m| m.reused_from.as_deref() == Some(&first.id))
+    );
+    assert!(
+        next.price_ready,
+        "supplementation must work without creating a different plan"
+    );
+    assert_eq!(next.actions["complete"], true);
+    assert_eq!(
+        fs::read(root.join(format!("pool-updates/attempts/{}.json", first.id))).unwrap(),
+        old
+    );
+}
+
+#[test]
+fn round1_contradictory_collection_reports_do_not_advance_success() {
+    for status in [
+        "failed",
+        "empty",
+        "not_attempted",
+        "bad_summary",
+        "missing_accepted",
+        "overflow",
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        setup(root, true);
+        let good = run(root);
+        let file = root.join("update-inputs/XSHE/report.json");
+        let mut report: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        if matches!(status, "failed" | "empty" | "not_attempted" | "overflow") {
+            let mut chunk = report["chunks"][0].clone();
+            chunk["index"] = json!(1);
+            chunk["status"] = json!(if status == "overflow" {
+                "failed"
+            } else {
+                status
+            });
+            chunk["candidate_attempts"] = json!(if status == "not_attempted" { 0 } else { 1 });
+            chunk["candidate_failures"] = json!([]);
+            chunk["raw_objects"] = json!([]);
+            chunk["actual_response_dates"] = json!([]);
+            chunk["actual_response_range"] = Value::Null;
+            report["chunks"].as_array_mut().unwrap().push(chunk);
+            report["summary"]["chunks_requested"] = json!(2);
+            report["summary"]["chunks_attempted"] =
+                json!(if status == "not_attempted" { 1 } else { 2 });
+            report["summary"]["candidate_http_attempts"] = json!(
+                report["summary"]["candidate_http_attempts"]
+                    .as_u64()
+                    .unwrap()
+                    + if status == "not_attempted" { 0 } else { 1 }
+            );
+            report["summary"]["accepted_response_chunks"] =
+                json!(if status == "empty" { 2 } else { 1 });
+            report["summary"]["empty_chunks"] = json!(u32::from(status == "empty"));
+            report["summary"]["not_attempted_chunks"] = json!(u32::from(status == "not_attempted"));
+            report["summary"]["failed_chunks"] =
+                json!(u32::from(status == "failed" || status == "overflow"));
+        } else if status == "missing_accepted" {
+            report["chunks"][0]["raw_objects"] = json!([]);
+            report["summary"]["raw_object_references"] = json!(0);
+        } else {
+            report["summary"]["failed_chunks"] = json!(1);
+        }
+        if status == "overflow" {
+            report["chunks"][0]["candidate_attempts"] = json!(u32::MAX);
+        }
+        assert_eq!(report["status"], "complete");
+        save(&file, &report);
+        let rejected = run(root);
+        assert!(
+            !rejected.price_ready && rejected.dataset.is_none(),
+            "contradictory {status}"
+        );
+        assert!(rejected.members["159952.XSHE"].succeeded_at.is_none());
+        assert!(rejected.members["510300.XSHG"].receipt.is_some());
+        assert_eq!(
+            pool_update::list(root).unwrap()["last_price_ready"]["bonds:2"]["attempt"],
+            good.id
+        );
+        if status == "failed" {
+            report["status"] = json!("partial");
+            save(&file, &report);
+            let partial = run(root);
+            assert!(!partial.price_ready && partial.dataset.is_none());
+            assert_eq!(partial.members["159952.XSHE"].publication, "partial");
+            assert!(partial.members["159952.XSHE"].receipt.is_some());
+            assert!(partial.members["159952.XSHE"].succeeded_at.is_none());
+        }
+    }
+}
+
+#[test]
+fn round1_retry_rejects_scope_changes_and_freezes_explicit_fact_version() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    setup(root, true);
+    let first = run(root);
+    let file = root.join("pool-updates/configs/synthetic.json");
+    let config: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    for pointer in [
+        "/start",
+        "/members/510300.XSHG/publication/calendar_version",
+        "/members/510300.XSHG/publication/status_snapshot",
+        "/members/510300.XSHG/publication/report",
+        "/members/510300.XSHG/collect",
+        "/pool/version",
+    ] {
+        let mut changed = config.clone();
+        let target = changed.pointer_mut(pointer).unwrap();
+        *target = if pointer == "/start" {
+            json!("2026-01-06")
+        } else if pointer.ends_with("collect") {
+            json!(true)
+        } else if pointer.ends_with("version") && pointer.starts_with("/pool") {
+            json!(1)
+        } else {
+            json!("different-fixed-input")
+        };
+        save(&file, &changed);
+        let error = cli(
+            env!("CARGO_BIN_EXE_prajna-pool-update"),
+            root,
+            &[],
+            &json!({"op":"retry","attempt":first.id}),
+            false,
+        );
+        assert!(
+            error["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("fixed plan scope")
+        );
+    }
+    let version = prajna_data::corporate_facts::import(
+        root,
+        &fs::read(root.join("update-inputs/actions.json")).unwrap(),
+    )
+    .unwrap();
+    let mut supplied = config.clone();
+    supplied["actions_file"] = Value::Null;
+    supplied["actions_version"] = json!(version);
+    save(
+        &root.join("pool-updates/configs/supplement.json"),
+        &supplied,
+    );
+    let prepared = update(
+        root,
+        json!({"op":"retry","attempt":first.id,"config":"supplement"}),
+    );
+    supplied["actions_version"] = json!("changed-after-submission");
+    save(
+        &root.join("pool-updates/configs/supplement.json"),
+        &supplied,
+    );
+    let next = update(root, json!({"op":"pool_update","attempt":prepared.id}));
+    assert_eq!(next.plan, first.plan);
+    assert!(next.price_ready);
+    assert_eq!(next.actions["version"], version);
+    assert_eq!(next.actions["complete"], true);
+    let mut invalid = config;
+    invalid["actions_version"] = json!(version);
+    save(&root.join("pool-updates/configs/supplement.json"), &invalid);
+    let error = cli(
+        env!("CARGO_BIN_EXE_prajna-pool-update"),
+        root,
+        &[],
+        &json!({"op":"retry","attempt":first.id,"config":"supplement"}),
+        false,
+    );
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not both")
+    );
+}
+
+#[test]
+fn round1_legacy_plan_can_explicitly_supplement_without_rewriting_old_records() {
+    use sha2::Digest;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    setup(root, true);
+    let config_file = root.join("pool-updates/configs/synthetic.json");
+    let configured = fs::read(&config_file).unwrap();
+    let mut missing: Value = serde_json::from_slice(&configured).unwrap();
+    missing["members"]["510300.XSHG"]["adjusted_file"] = Value::Null;
+    missing["actions_file"] = Value::Null;
+    save(&config_file, &missing);
+    let prepared = update(root, json!({"op":"prepare","config":"synthetic"}));
+    let mut plan: Value = serde_json::from_slice(
+        &fs::read(root.join(format!("pool-updates/plans/{}.json", prepared.plan))).unwrap(),
+    )
+    .unwrap();
+    plan.as_object_mut().unwrap().remove("config_name");
+    let plan_bytes = serde_json::to_vec(&plan).unwrap();
+    let legacy_plan = format!("{:x}", sha2::Sha256::digest(&plan_bytes));
+    let plan_path = root.join(format!("pool-updates/plans/{legacy_plan}.json"));
+    fs::write(&plan_path, &plan_bytes).unwrap();
+    let mut input = serde_json::to_value(&prepared).unwrap();
+    input["plan"] = json!(legacy_plan);
+    input.as_object_mut().unwrap().remove("supply_mapping");
+    for folder in ["attempts", "attempt-inputs"] {
+        save(
+            &root.join(format!("pool-updates/{folder}/{}.json", prepared.id)),
+            &input,
+        );
+    }
+    let first = update(root, json!({"op":"pool_update","attempt":prepared.id}));
+    assert!(!first.price_ready);
+    let old_path = root.join(format!("pool-updates/attempts/{}.json", first.id));
+    let old = fs::read(&old_path).unwrap();
+    fs::write(&config_file, configured).unwrap();
+    let next = update(
+        root,
+        json!({"op":"retry","attempt":first.id,"config":"synthetic"}),
+    );
+    let finished = update(root, json!({"op":"pool_update","attempt":next.id}));
+    assert!(finished.price_ready);
+    assert_eq!(finished.plan, legacy_plan);
+    assert_eq!(finished.actions["complete"], true);
+    assert_eq!(fs::read(plan_path).unwrap(), plan_bytes);
+    assert_eq!(fs::read(old_path).unwrap(), old);
 }
 
 #[test]

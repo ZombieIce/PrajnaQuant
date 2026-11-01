@@ -55,6 +55,10 @@ another supplier. `collect: false` explicitly consumes the supplied existing
 collector report. This is labelled `explicit_report`, never a fresh network
 success. Selected accepted Raw hashes come from the report, not unchecked config
 hashes. The report must match the member, ETF kind and exact requested range.
+Its top-level status, chunk states and recomputed summary must agree. A claimed
+complete report containing empty/failed/unattempted chunks or absent accepted
+responses is rejected; a consistent partial report may retain partial publication
+without advancing member or pool success.
 
 Calendar, security and optional opening-state versions remain explicit; v1 allows
 raw research publication without opening evidence, v2 validates the exact pinned
@@ -84,6 +88,10 @@ submission cannot alter that attempt. Complete price readiness requires actual
 adjusted rows for every requested Session per member, not only declared endpoints;
 partial imports remain immutable and visible without claiming readiness.
 
+Already-bound version-1 files are passed to the importer **byte for byte**,
+including formatting. Their existing raw-byte version identity is preserved;
+only the unbound supplier format creates a newly serialized import request.
+
 Choose either `actions_file` (the existing structured fact schema) or
 `actions_version` (a fixed stored fact version), or neither. Both is an error.
 Queries use each member and the exact requested interval; existing covered,
@@ -99,6 +107,7 @@ echo '{"op":"list"}' | prajna-pool-update --lake <LOCAL>
 echo '{"op":"prepare","config":"my-pool"}' | prajna-pool-update --lake <LOCAL>
 echo '{"op":"pool_update","attempt":"<prepared-id>"}' | prajna-pool-update --lake <LOCAL>
 echo '{"op":"retry","attempt":"<finished-id>"}' | prajna-pool-update --lake <LOCAL>
+echo '{"op":"retry","attempt":"<finished-id>","config":"supplement"}' | prajna-pool-update --lake <LOCAL>
 ```
 
 CLI envelopes are `{schema_version:1,data:...}` (exit 0) or
@@ -106,16 +115,29 @@ CLI envelopes are `{schema_version:1,data:...}` (exit 0) or
 Output is local evidence and must not be copied from real runs into chat/CI/PRs.
 `--input <file>` supplies the same bounded JSON command for queued execution.
 
-`plans/<hash>.json` fixes configuration, source locations, pool Universe and
-versions; hash validation detects changes. `attempt-inputs/<id>.json` freezes
-that attempt's supplied files and explicit reused results. `attempts/<id>.json`
+`plans/<hash>.json` fixes configuration, the original configuration name, pool
+Universe and versions; hash validation detects changes. `attempt-inputs/<id>.json`
+freezes that attempt's supply mapping, supplied files/fact version and explicit
+reused results. `attempts/<id>.json`
 is atomically updated progress. An exclusive attempt lock prevents concurrent
 execution/retry. Completed attempts are returned unchanged; an interrupted attempt
 is retried as a **new** attempt. Each successful member records its receipt,
 actual coverage and success time. Partial collections retain Raw/partial
 publication, but do not advance member success or complete the pool.
 
-Retry follows the original plan, snapshots newly supplied files, and explicitly
+Retry follows the original plan and reads its original **named** configuration
+(or the explicit `config` override / most recently selected supply configuration).
+Only `members[*].adjusted_file`, `actions_file` and `actions_version` may differ
+from the frozen configuration; pool/version/members, dates, collection mode and
+all publication/source/evidence fields must match exactly. Thus initially null
+paths can be supplied without preparing another plan. The new mapping and bytes
+are frozen before enqueue; no later config/file edit changes an attempt. A file
+and a fixed action version together remain invalid. This is explicit same-plan
+supplementation, not a global latest lookup.
+
+Older plans without a stored config name remain readable: retry without an
+override retains their fixed mappings; pass `config` to supplement them. Failed
+scope validation creates no successor attempt. Retry explicitly
 reuses only its previous successful members. Each reused receipt is rebuilt and
 checked against member, dates, calendar/security/status and Normalizer versions.
 No global latest selection, missing-member removal or implicit old-DSV substitution
@@ -126,7 +148,10 @@ No worker waits for the user to provide files. The task can finish `succeeded`
 while its persisted domain result is `needs_input`; the workbench distinguishes
 execution, raw publication, price readiness, action coverage and total-return
 applicability. Its latest success displays are derived in Rust from stored
-successful attempts, never from the requested end date.
+successful attempts, never from the requested end date. Latest member success is
+selected by that member's actual success timestamp (with its corresponding
+coverage), not by the enclosing attempt's creation time. Reusing an old success
+does not make it newer; complete price readiness is ranked by completion time.
 
 ## HTTP and browser
 
