@@ -738,6 +738,96 @@ fn round2_omitted_requested_tail_cannot_advance_member_success_or_be_reused() {
 }
 
 #[test]
+fn round3_retry_rejects_previously_succeeded_receipt_with_omitted_chunk() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    setup(root, true);
+
+    let config_path = root.join("pool-updates/configs/synthetic.json");
+    let mut config: Value = serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+    for member in config["members"].as_object_mut().unwrap().values_mut() {
+        member["publication"]["normalizer_version"] = json!("1");
+        member["publication"]
+            .as_object_mut()
+            .unwrap()
+            .remove("status_snapshot");
+    }
+    save(&config_path, &config);
+
+    let first = run(root);
+    assert!(first.price_ready);
+    let member_id = "159952.XSHE";
+    let publication: prajna_data::daily_publish::DailyPublicationSelection =
+        serde_json::from_value(config["members"][member_id]["publication"].clone()).unwrap();
+    let report_path = Path::new(&publication.report);
+    let mut report: Value = serde_json::from_slice(&fs::read(report_path).unwrap()).unwrap();
+    let dates = [DATES[0], DATES[1]];
+    let native = "sz159952";
+    let bytes = serde_json::to_vec(&json!({"code":0,"data":{native:{"day":dates.map(|date|
+        json!([date,"10","10.1","11","9","100"]))}}}))
+    .unwrap();
+    let raw = prajna_data::RawStore::open(&publication.raw_root)
+        .unwrap()
+        .put(
+            &bytes,
+            prajna_data::SourceRecordInput {
+                content_type: "application/json".into(),
+                source_kind: prajna_data::SourceKind::VendorApi,
+                source_id: "tencent_fqkline_daily".into(),
+                observed_at: "2026-10-28T00:00:00Z".into(),
+                ingested_by: "synthetic-test".into(),
+                request: json!({"method_version":"tencent-fqkline-day/1",
+                "instrument_id":member_id,"native_symbol":native,"security_kind":"etf",
+                "requested_range":{"start":DATES[0],"end":DATES[1]},"chunk_index":0,
+                "source":"synthetic.invalid","response_outcome":"accepted_response"}),
+            },
+        )
+        .unwrap();
+    report["chunks"][0]["requested_range"]["end"] = json!(DATES[1]);
+    report["chunks"][0]["actual_response_dates"] = json!(dates);
+    report["chunks"][0]["actual_response_range"] = json!({"start":DATES[0],"end":DATES[1]});
+    report["chunks"][0]["raw_objects"] = json!([{"raw_sha256":raw,"source":"synthetic.invalid",
+        "outcome":"accepted_response"}]);
+    report["chunks"][0]["not_returned_calendar_dates"] = json!([]);
+    save(report_path, &report);
+
+    let mut legacy_publication = publication;
+    legacy_publication.raw_sha256s = vec![raw];
+    let receipt_path = Path::new("pool-updates/legacy-short-chunk-receipt.json");
+    prajna_data::daily_publish::publish_daily(root, legacy_publication, receipt_path)
+        .expect("legacy single-security publication remains compatible");
+    let legacy_receipt: prajna_data::daily_publish::DailyPublicationReceipt =
+        serde_json::from_slice(&fs::read(root.join(receipt_path)).unwrap()).unwrap();
+    let prior_attempt_path = root.join(format!("pool-updates/attempts/{}.json", first.id));
+    let mut prior_attempt: Value =
+        serde_json::from_slice(&fs::read(&prior_attempt_path).unwrap()).unwrap();
+    prior_attempt["members"][member_id]["receipt"] = serde_json::to_value(legacy_receipt).unwrap();
+    save(&prior_attempt_path, &prior_attempt);
+
+    let attempts_before = fs::read_dir(root.join("pool-updates/attempt-inputs"))
+        .unwrap()
+        .count();
+    let rejected = cli(
+        env!("CARGO_BIN_EXE_prajna-pool-update"),
+        root,
+        &[],
+        &json!({"op":"retry","attempt":first.id}),
+        false,
+    );
+    assert!(
+        rejected["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("inconsistent collection report"),
+        "retry must reject a persisted success whose report omits a requested chunk"
+    );
+    let attempts_after = fs::read_dir(root.join("pool-updates/attempt-inputs"))
+        .unwrap()
+        .count();
+    assert_eq!(attempts_after, attempts_before, "no successor is created");
+}
+
+#[test]
 fn round1_retry_rejects_scope_changes_and_freezes_explicit_fact_version() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();

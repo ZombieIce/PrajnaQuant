@@ -474,6 +474,7 @@ pub fn verify_selection_scope(
     let (recipe, _) = verify_receipt(root, receipt)?;
     let report: DailyRawReport =
         serde_json::from_slice(&RawStore::open(root)?.get(&recipe.report_sha256)?)?;
+    report.validate_consistency()?;
     require(
         recipe.normalizer_id == selection.normalizer_id
             && recipe.normalizer_version == selection.normalizer_version
