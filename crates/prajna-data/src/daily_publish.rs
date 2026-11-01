@@ -429,7 +429,7 @@ pub(crate) fn verify_receipt(
     root: &Path,
     receipt: &DailyPublicationReceipt,
 ) -> Result<(Recipe, Vec<String>)> {
-    let raw = RawStore::open(&root)?;
+    let raw = RawStore::open(root)?;
     let recipe: Recipe = serde_json::from_slice(&raw.get(&receipt.recipe_sha256)?)?;
     let registry = registry(&recipe)?;
     let report: DailyRawReport = serde_json::from_slice(&raw.get(&recipe.report_sha256)?)?;
@@ -438,7 +438,7 @@ pub(crate) fn verify_receipt(
         serde_json::from_slice(&raw.get(&recipe.security_snapshot)?)?;
     snapshot.validate()?;
     validate(&report, &recipe, &calendar, &snapshot, &raw)?;
-    let manifest = read_manifest(&root, &receipt.dsv)?;
+    let manifest = read_manifest(root, &receipt.dsv)?;
     let mut inputs = recipe.raw_sha256s.clone();
     inputs.extend([
         recipe.calendar_version.clone(),
@@ -460,4 +460,29 @@ pub(crate) fn verify_receipt(
     )?;
     rebuild_dataset(&raw, &registry, &manifest)?;
     Ok((recipe, inputs))
+}
+
+/// Checks a reused successful member against its original fixed update scope.
+pub fn verify_selection_scope(
+    root: &Path,
+    receipt: &DailyPublicationReceipt,
+    selection: &DailyPublicationSelection,
+    instrument: &str,
+    start: NaiveDate,
+    end: NaiveDate,
+) -> Result<()> {
+    let (recipe, _) = verify_receipt(root, receipt)?;
+    let report: DailyRawReport =
+        serde_json::from_slice(&RawStore::open(root)?.get(&recipe.report_sha256)?)?;
+    require(
+        recipe.normalizer_id == selection.normalizer_id
+            && recipe.normalizer_version == selection.normalizer_version
+            && recipe.calendar_version == selection.calendar_version
+            && recipe.security_snapshot == selection.security_snapshot
+            && recipe.status_snapshot == selection.status_snapshot
+            && report.instrument_id == instrument
+            && report.requested_range.start == start
+            && report.requested_range.end == end,
+        "reused member does not match the fixed update plan",
+    )
 }

@@ -4,6 +4,11 @@
 bars of XSHG/XSHE stocks and ETFs (MVP-7 T02b-C). The production assembler below
 selects collection reports and fixed versions (#289). Tests use synthetic inputs.
 
+The original `publish`/`rebuild` modes below remain single-security v1/v2.
+`pool`/`rebuild-pool` add a production `cn-stock-etf-daily@3` composition of
+explicit member receipts, without changing those earlier rules or identities;
+see [fixed-pool publication](pool-updates.md#production-pool-publication).
+
 ## Fixed inputs and identity
 
 The Normalizer is constructed with exactly one #328

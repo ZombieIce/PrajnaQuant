@@ -6,7 +6,7 @@ type Member = { collection: string; publication: string; error: string | null; c
   succeeded_at: string | null; reused_from: string | null; adjusted: string | null; adjustment_error: string | null };
 type Attempt = { id: string; pool: string; pool_version: number; start: string; end: string; created_at: string;
   finished_at: string | null; status: string; price_ready: boolean; dataset: { dsv: string } | null; dataset_error: string | null;
-  members: Record<string, Member>; actions: { complete?: boolean; reason?: string; members?: Record<string, { state: string }> } };
+  members: Record<string, Member>; actions: { complete?: boolean; total_return?: string; reason?: string; members?: Record<string, { state: string }> } };
 type Data = { configs: { name: string; pool: { id: string; version: number }; start: string; end: string }[]; attempts: Attempt[];
   tasks: { attempt: string; task: { status: string; stage: string; error?: { message: string } | null } }[];
   last_price_ready: Record<string, { attempt: string; finished_at: string; dataset: { dsv: string } }>;
@@ -75,6 +75,7 @@ export default function PoolUpdates({ poolId, version, onSelect }: Props) {
         {task?.error && <ErrorBox>{task.error.message}</ErrorBox>}
         <p data-testid="update-readiness">原始池行情：{attempt.dataset ? '已发布' : '未就绪'}；价格研究输入：{attempt.price_ready ? '已就绪' : '待补充'}；行动覆盖：{attempt.actions.complete ? '范围已覆盖' : '不完整/Unknown'}</p>
         <p>行动覆盖不证明所有引擎均可运行；沪深混合池行动绑定等既有限制保持。行动缺口不阻断无关价格因子。</p>
+        <p>总回报适用性：{attempt.actions.total_return ?? '尚未核对'}</p>
         {attempt.dataset_error && <ErrorBox>{attempt.dataset_error}</ErrorBox>}
         {attempt.actions.reason && <p>行动输入：{attempt.actions.reason}</p>}
         <div className="table-wrap"><table><thead><tr><th>成员</th><th>采集 / 发布</th><th>本次实际覆盖 / 最近成功</th><th>研究输入</th></tr></thead><tbody>

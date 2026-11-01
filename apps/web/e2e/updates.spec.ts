@@ -25,6 +25,7 @@ test('production pool update, missing input retry, frozen experiment and persist
   await expect(first).toContainText('510300.XSHG');
   await expect(first).toContainText('2026-01-05 ～ 2026-01-07 · 3 条');
   await first.getByRole('button', { name: '使用此固定版本研究', exact: true }).click();
+  await expect(page.getByLabel('研究池 Dataset', { exact: true })).toHaveValue(/^dsv:sha256:[a-f0-9]{64}$/);
   const fixedDsv = await page.getByLabel('研究池 Dataset', { exact: true }).inputValue();
   await page.getByLabel('预检策略', { exact: true }).selectOption('buy_and_hold');
   await page.getByLabel('参数组合 JSON', { exact: true }).fill('{"list":[{"params_version":1}]}');
@@ -62,7 +63,7 @@ test('production pool update, missing input retry, frozen experiment and persist
   await expect(page.getByTestId('task-status')).toContainText('已完成', { timeout: 60_000 });
   const result = await (await page.request.get(`/api/v1/tasks/experiments/${taskId}/result`)).json();
   const final = result.data.runs[0].series.account_valuations.find((r: { session_date: string; valuation_point: string }) => r.session_date === '2026-01-07' && r.valuation_point === 'close');
-  // Two equal initial budgets buy 99,900 total units at 10.002. Fees 299.69994.
+  // Two equal initial budgets buy 99,900 total units at 10.002. Fees 299.75994.
   expect(final.cash).toBe('500.44006');
   expect(final.equity).toBe('1009490.44006');
   expect(final.dividend_receivable).toBe('0');

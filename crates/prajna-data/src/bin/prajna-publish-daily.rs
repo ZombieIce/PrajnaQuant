@@ -51,10 +51,12 @@ fn save_diagnostic(root: &Path, error: &str) -> std::io::Result<()> {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
-    let mode = args.next().ok_or("expected publish or rebuild")?;
+    let mode = args
+        .next()
+        .ok_or("expected publish, pool, rebuild or rebuild-pool")?;
     if mode == "--help" || mode == "-h" {
         println!(
-            "Usage: prajna-publish-daily <publish|rebuild> --root <LOCAL> --receipt <RELATIVE_JSON> --diagnostics <LOCAL> [--selection <LOCAL_JSON>]"
+            "Usage: prajna-publish-daily <publish|pool|rebuild|rebuild-pool> --root <LOCAL> --receipt <RELATIVE_JSON> --diagnostics <LOCAL> [--selection <LOCAL_JSON>]"
         );
         return Ok(());
     }

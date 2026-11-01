@@ -15,7 +15,7 @@
 
 Prepare 尽早运行 [preflight](workflow-tools.md)：核对 Node/Python/Rust、Python标准库可加载性、浏览器、`ps`/进程组可见性、loopback 端口、磁盘 10 GiB 保留量。给出实际可用环境/执行者或缺口；检查时端口可用不保证后续启动成功，浏览器文件存在不证明可启动。缺权限使用正常审批或具备能力的执行者，不放宽生产进程守卫或绕过沙箱。
 
-涉及产品路径时在实现中尽早实际运行生产入口合成 E2E，前检不替代行为验证。Acceptance Mapping 标明 CI job、命令/feature 实际覆盖；`quant-research --no-default-features` 不编译 app 读取侧，PR `web` job 显式运行 `comparison_api::tests` 和 app 生产浏览器链。其他新增 app 测试依其入口补定向运行，不能因 job 名存在推定已覆盖。
+涉及产品路径时在实现中尽早实际运行生产入口合成 E2E，前检不替代行为验证。Acceptance Mapping 标明 CI job、命令/feature 实际覆盖；`quant-research --no-default-features` 不编译 app 读取侧，PR `web` job 显式串行运行 `run_jobs::`（含 `comparison_api::tests` 与更新队列）和 app 生产浏览器链。其他新增 app 测试依其入口补定向运行，不能因 job 名存在推定已覆盖。
 
 ## 最终 HEAD 与影响复用
 

@@ -19,7 +19,7 @@ fn save(path: &Path, value: &Value) {
     fs::write(path, serde_json::to_vec(value).unwrap()).unwrap();
 }
 fn supplier(id: &str) -> Value {
-    json!({"schema_version":"supplier-adjusted/1","instrument_id":id,"method":"forward",
+    json!({"schema_version":"supplier-adjusted/1","price_unit":"CNY_per_fund_unit","instrument_id":id,"method":"forward",
         "method_version":"synthetic-unadjusted/1","source":{"source_id":"synthetic","source_version":"1","source_ref":"synthetic://fixture"},
         "observed_at":"2026-10-28T00:00:00Z","retrospective_assumption":"synthetic supplier revision, not PIT",
         "close_availability_assumption":"domestic close known after close","start":DATES[0],"end":DATES[2],
@@ -306,7 +306,7 @@ fn empty_and_source_stopped_keep_good_member_retry_and_old_success() {
 
 #[test]
 fn missing_misbound_and_short_adjustments_need_input_without_losing_raw_publication() {
-    for problem in ["missing", "misbound", "short"] {
+    for problem in ["missing", "misbound", "short", "unit"] {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();
         setup(root, true);
@@ -316,7 +316,12 @@ fn missing_misbound_and_short_adjustments_need_input_without_losing_raw_publicat
             "missing" => fs::remove_file(&file).unwrap(),
             "misbound" => {
                 value["schema_version"] = json!(1);
+                value.as_object_mut().unwrap().remove("price_unit");
                 value["raw_dsv"] = json!(format!("dsv:sha256:{}", "0".repeat(64)));
+                save(&file, &value);
+            }
+            "unit" => {
+                value["price_unit"] = json!("unknown");
                 save(&file, &value);
             }
             _ => {
@@ -366,6 +371,14 @@ fn action_four_states_do_not_block_price_research() {
         assert_eq!(
             attempt.actions["complete"],
             matches!(state, "no_events" | "covered")
+        );
+        assert_eq!(
+            attempt.actions["total_return"],
+            if matches!(state, "no_events" | "covered") {
+                "unsupported_mixed_venue"
+            } else {
+                "incomplete_facts"
+            }
         );
         let report = cli(
             env!("CARGO_BIN_EXE_prajna-momentum"),
@@ -422,6 +435,74 @@ fn interrupted_attempt_requires_explicit_retry_and_preserves_partial_facts() {
     );
     let recovered = update(root, json!({"op":"pool_update","attempt":next.id}));
     assert!(recovered.price_ready);
+}
+
+#[test]
+fn retry_rejects_receipt_from_another_member_or_fixed_scope() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    setup(root, true);
+    let attempt = run(root);
+    let file = root.join(format!("pool-updates/attempts/{}.json", attempt.id));
+    let mut corrupted = serde_json::to_value(&attempt).unwrap();
+    corrupted["members"]["510300.XSHG"]["receipt"] =
+        corrupted["members"]["159952.XSHE"]["receipt"].clone();
+    save(&file, &corrupted);
+    let response = cli(
+        env!("CARGO_BIN_EXE_prajna-pool-update"),
+        root,
+        &[],
+        &json!({"op":"retry","attempt":attempt.id}),
+        false,
+    );
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("fixed update plan")
+    );
+    let config: pool_update::Config = serde_json::from_slice(
+        &fs::read(root.join("pool-updates/configs/synthetic.json")).unwrap(),
+    )
+    .unwrap();
+    let receipt = attempt.members["510300.XSHG"].receipt.as_ref().unwrap();
+    assert!(
+        prajna_data::daily_publish::verify_selection_scope(
+            root,
+            receipt,
+            &config.members["510300.XSHG"].publication,
+            "510300.XSHG",
+            config.start.succ_opt().unwrap(),
+            config.end
+        )
+        .is_err()
+    );
+    corrupted = serde_json::to_value(&attempt).unwrap();
+    corrupted["start"] = json!("2025-01-01");
+    save(&file, &corrupted);
+    assert!(pool_update::get(root, &attempt.id).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn frozen_supplies_never_write_through_raw_destination_symlinks() {
+    for name in ["raw", "raw-sources"] {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("lake");
+        setup(&root, true);
+        let outside = temp.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join(name)).unwrap();
+        let attempt = pool_update::prepare(&root, "synthetic").unwrap();
+        let frozen = serde_json::to_value(&attempt).unwrap();
+        assert!(
+            frozen["adjusted_supplies"]["510300.XSHG"]["error"]
+                .as_str()
+                .unwrap()
+                .contains("symbolic link")
+        );
+        assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+    }
 }
 
 #[test]

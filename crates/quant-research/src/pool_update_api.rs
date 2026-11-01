@@ -51,7 +51,7 @@ fn failure(status: StatusCode, code: &str) -> Response {
     )
         .into_response()
 }
-async fn invoke(state: UpdateState, input: Value) -> Result<Value, Response> {
+async fn invoke(state: UpdateState, input: Value) -> Result<Value, Box<Response>> {
     let root = state
         .root
         .ok_or_else(|| failure(StatusCode::SERVICE_UNAVAILABLE, "dataset_root_unconfigured"))?;
@@ -80,19 +80,14 @@ async fn invoke(state: UpdateState, input: Value) -> Result<Value, Response> {
         return Err(failure(
             StatusCode::SERVICE_UNAVAILABLE,
             "pool_update_cli_unavailable",
-        ));
+        )
+        .into());
     };
     let Ok(value) = serde_json::from_slice::<Value>(&output.stdout) else {
-        return Err(failure(
-            StatusCode::BAD_GATEWAY,
-            "invalid_pool_update_response",
-        ));
+        return Err(failure(StatusCode::BAD_GATEWAY, "invalid_pool_update_response").into());
     };
     if value["schema_version"] != 1 {
-        return Err(failure(
-            StatusCode::BAD_GATEWAY,
-            "invalid_pool_update_response",
-        ));
+        return Err(failure(StatusCode::BAD_GATEWAY, "invalid_pool_update_response").into());
     }
     if !output.status.success() {
         return Err((
@@ -100,13 +95,11 @@ async fn invoke(state: UpdateState, input: Value) -> Result<Value, Response> {
             [(header::CACHE_CONTROL, "no-store")],
             Json(value),
         )
-            .into_response());
+            .into_response()
+            .into());
     }
     if !value["data"].is_object() {
-        return Err(failure(
-            StatusCode::BAD_GATEWAY,
-            "invalid_pool_update_response",
-        ));
+        return Err(failure(StatusCode::BAD_GATEWAY, "invalid_pool_update_response").into());
     }
     Ok(value)
 }
@@ -129,7 +122,7 @@ async fn list(State(state): State<UpdateState>) -> Response {
             value["data"]["tasks"] = json!(tasks);
             ([(header::CACHE_CONTROL, "no-store")], Json(value)).into_response()
         }
-        Err(response) => response,
+        Err(response) => *response,
     }
 }
 async fn change(
@@ -175,7 +168,7 @@ async fn change(
     }
     let value = match invoke(state.clone(), input).await {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let Some(id) = value["data"]["attempt"]["id"].as_str() else {
         return failure(StatusCode::BAD_GATEWAY, "invalid_pool_update_response");

@@ -44,7 +44,7 @@ struct Plan {
     config: Config,
     universe: String,
 }
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Supply {
     hash: Option<String>,
@@ -149,6 +149,13 @@ fn write<T: Serialize>(root: &Path, relative: &str, value: &T, immutable: bool) 
     Ok(())
 }
 fn put(root: &Path, bytes: &[u8], source: &str) -> Result<String> {
+    let digest = hash(bytes);
+    for relative in [
+        format!("raw/sha256/{}/{digest}", &digest[..2]),
+        format!("raw-sources/sha256/{}/{digest}.jsonl", &digest[..2]),
+    ] {
+        daily_raw::checked_output_path(root, Path::new(&relative))?;
+    }
     Ok(RawStore::open(root)?.put(
         bytes,
         SourceRecordInput {
@@ -197,6 +204,33 @@ pub fn get(root: &Path, id: &str) -> Result<Attempt> {
     identifier(id)?;
     let attempt: Attempt = read(root, &format!("attempts/{id}.json"))?;
     require(attempt.id == id, "update attempt identity mismatch")?;
+    let frozen: Attempt = read(root, &format!("attempt-inputs/{id}.json"))?;
+    let plan = load_plan(root, &attempt.plan)?;
+    require(
+        frozen.id == attempt.id
+            && frozen.plan == attempt.plan
+            && frozen.previous == attempt.previous
+            && frozen.created_at == attempt.created_at
+            && frozen.adjusted_supplies == attempt.adjusted_supplies
+            && frozen.report_supplies == attempt.report_supplies
+            && frozen.action_supply == attempt.action_supply
+            && attempt.pool == plan.config.pool.id
+            && attempt.pool_version == plan.config.pool.version
+            && attempt.start == plan.config.start
+            && attempt.end == plan.config.end
+            && attempt.members.keys().eq(plan.config.members.keys()),
+        "update attempt differs from frozen plan/inputs",
+    )?;
+    require(
+        !attempt.price_ready
+            || (attempt.status == "price_ready"
+                && attempt.finished_at.is_some()
+                && attempt.dataset.is_some()
+                && attempt.members.values().all(|m| {
+                    m.publication == "succeeded" && m.receipt.is_some() && m.adjusted.is_some()
+                })),
+        "invalid price-ready result",
+    )?;
     Ok(attempt)
 }
 fn persist(root: &Path, attempt: &Attempt) -> Result<()> {
@@ -247,15 +281,14 @@ fn make_attempt(root: &Path, plan_id: String, previous: Option<Attempt>) -> Resu
                     .receipt
                     .as_ref()
                     .ok_or("successful member missing receipt")?;
-                let name = format!("pool-updates/member-reuse/{}-{id}.json", attempt.id);
-                // Re-publish is not needed: rebuild validates the exact persisted member receipt.
-                write(
+                daily_publish::verify_selection_scope(
                     root,
-                    &format!("member-reuse/{}-{id}.json", attempt.id),
                     receipt,
-                    true,
+                    &member.publication,
+                    id,
+                    plan.config.start,
+                    plan.config.end,
                 )?;
-                daily_publish::rebuild_daily(root, Path::new(&name))?;
                 result = old.clone();
                 result.reused_from = attempt.previous.clone();
                 result.adjusted = None;
@@ -343,7 +376,7 @@ fn attempt_lock(root: &Path, id: &str) -> Result<fs::File> {
 fn publish_member<F>(
     root: &Path,
     plan: &Plan,
-    attempt: &Attempt,
+    attempt: &mut Attempt,
     id: &str,
     collector: &mut F,
     source_stopped: &mut bool,
@@ -385,6 +418,17 @@ where
         write(root, &relative, &report, true)?;
         (report, path(root, &relative)?, "explicit_report")
     };
+    let collection = match report.status {
+        daily_raw::CollectionStatus::Complete => collection,
+        daily_raw::CollectionStatus::SourceStopped => "source_stopped",
+        _ => "partial_or_failed",
+    };
+    attempt
+        .members
+        .get_mut(id)
+        .ok_or("missing member state")?
+        .collection = collection.into();
+    persist(root, attempt)?;
     require(
         report.instrument_id == id
             && report.requested_range.start == plan.config.start
@@ -410,6 +454,12 @@ where
         !selection.raw_sha256s.is_empty(),
         "collection has no accepted nonempty response; previous success retained",
     )?;
+    attempt
+        .members
+        .get_mut(id)
+        .ok_or("missing member state")?
+        .publication = "publishing".into();
+    persist(root, attempt)?;
     let receipt_path = format!("pool-updates/receipts/{}-{id}.json", attempt.id);
     let manifest = daily_publish::publish_daily(root, selection, Path::new(&receipt_path))?;
     let receipt = serde_json::from_slice(&fs::read(root.join(receipt_path))?)?;
@@ -441,6 +491,10 @@ fn import_adjustment(
         require(
             !object.contains_key("raw_dsv"),
             "unbound supplier schema cannot contain raw_dsv",
+        )?;
+        require(
+            object.remove("price_unit") == Some(json!("CNY_per_fund_unit")),
+            "supplier-adjusted/1 requires explicit CNY_per_fund_unit prices",
         )?;
         object.insert("schema_version".into(), json!(1));
         object.insert("raw_dsv".into(), json!(dsv));
@@ -477,7 +531,7 @@ fn import_adjustment(
             && expected.iter().all(|d| dates.contains(d)),
         "adjusted input actual coverage is insufficient for the requested interval",
     )?;
-    let record = json!({"schema_version":"supplier-adapter/1","source_raw":supply.hash,"dsv":dsv,"instrument":id,"version":version});
+    let record = json!({"schema_version":"supplier-adapter/1","source_raw":supply.hash,"dsv":dsv,"instrument":id,"version":version,"price_unit":"CNY_per_fund_unit"});
     let name = hash(&serde_json::to_vec(&record)?);
     write(root, &format!("imports/{name}.json"), &record, true)?;
     Ok(version)
@@ -496,8 +550,21 @@ fn action_coverage(root: &Path, plan: &Plan, attempt: &Attempt) -> Result<Value>
         complete &= matches!(scope["state"].as_str(), Some("covered" | "no_events"));
         scopes.insert(id.clone(), scope);
     }
+    let venues = plan
+        .config
+        .members
+        .keys()
+        .map(|id| id.rsplit('.').next())
+        .collect::<std::collections::BTreeSet<_>>();
+    let total_return = if !complete {
+        "incomplete_facts"
+    } else if venues.len() > 1 {
+        "unsupported_mixed_venue"
+    } else {
+        "requires_strategy_preflight"
+    };
     Ok(
-        json!({"version":version,"complete":complete,"members":scopes,
+        json!({"version":version,"complete":complete,"members":scopes,"total_return":total_return,
         "notice":"Fact coverage is not engine compatibility; mixed-Venue action binding restrictions remain."}),
     )
 }
@@ -531,6 +598,26 @@ where
         "queued attempt input changed",
     )?;
     let plan = load_plan(root, &attempt.plan)?;
+    for (id, member) in &attempt.members {
+        if member.publication == "succeeded" {
+            daily_publish::verify_selection_scope(
+                root,
+                member
+                    .receipt
+                    .as_ref()
+                    .ok_or("reused member missing receipt")?,
+                &plan
+                    .config
+                    .members
+                    .get(id)
+                    .ok_or("reused member absent from plan")?
+                    .publication,
+                id,
+                plan.config.start,
+                plan.config.end,
+            )?;
+        }
+    }
     attempt.status = "running".into();
     persist(root, &attempt)?;
     let mut source_stopped = false;
@@ -538,10 +625,21 @@ where
         if attempt.members[id].publication == "succeeded" {
             continue;
         }
+        attempt
+            .members
+            .get_mut(id)
+            .ok_or("missing member state")?
+            .collection = if plan.config.members[id].collect {
+            "collecting"
+        } else {
+            "reading_report"
+        }
+        .into();
+        persist(root, &attempt)?;
         let result = publish_member(
             root,
             &plan,
-            &attempt,
+            &mut attempt,
             id,
             &mut collector,
             &mut source_stopped,
@@ -563,7 +661,9 @@ where
                 }
             }
             Err(error) => {
-                target.collection = "failed_or_incomplete".into();
+                if matches!(target.collection.as_str(), "collecting" | "reading_report") {
+                    target.collection = "failed_or_incomplete".into();
+                }
                 target.publication = "not_ready".into();
                 target.error = Some(error.to_string());
             }
@@ -623,7 +723,9 @@ where
         attempt.dataset.is_some() && attempt.members.values().all(|m| m.adjusted.is_some());
     attempt.actions = match action_coverage(root, &plan, &attempt) {
         Ok(value) => value,
-        Err(error) => json!({"state":"unknown","complete":false,"reason":error.to_string()}),
+        Err(error) => {
+            json!({"state":"unknown","complete":false,"total_return":"incomplete_facts","reason":error.to_string()})
+        }
     };
     attempt.status = if attempt.price_ready {
         "price_ready"
