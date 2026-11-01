@@ -93,6 +93,9 @@ pub async fn serve_with_dataset_root(
     let momentum = run_jobs
         .clone()
         .momentum_router(dataset_root.clone(), socket.to_string());
+    let pool_updates = run_jobs
+        .clone()
+        .pool_update_router(dataset_root.clone(), socket.to_string());
     let experiment_results = run_jobs.clone().result_router(socket.to_string());
     let comparisons = run_jobs.clone().comparison_router(socket.to_string());
     let selections = run_jobs
@@ -125,6 +128,7 @@ pub async fn serve_with_dataset_root(
         .layer(CorsLayer::permissive())
         .merge(pool_api::router(dataset_root.clone(), socket.to_string()))
         .merge(momentum)
+        .merge(pool_updates)
         .merge(dataset_api::router(dataset_root, socket.to_string()))
         .merge(selections)
         .merge(experiment_results)

@@ -280,6 +280,13 @@ pub struct CollectionRun {
     pub report_path: PathBuf,
 }
 
+pub fn collect_daily(
+    root: &Path,
+    request: DailyRawRequest,
+) -> Result<CollectionRun, DailyRawError> {
+    DailyRawCollector::new(tencent_transport::ReqwestTransport::new(), root)?.collect(request)
+}
+
 /// Invalid configuration or local persistence failure.
 #[derive(Debug)]
 pub struct DailyRawError(String);
@@ -1053,10 +1060,7 @@ pub(crate) fn validate_raw_root(
     Ok(root)
 }
 
-pub(crate) fn checked_output_path(
-    root: &Path,
-    relative_path: &Path,
-) -> Result<PathBuf, DailyRawError> {
+pub fn checked_output_path(root: &Path, relative_path: &Path) -> Result<PathBuf, DailyRawError> {
     let components = relative_path.components().collect::<Vec<_>>();
     if components.is_empty() {
         return Err(DailyRawError::invalid(

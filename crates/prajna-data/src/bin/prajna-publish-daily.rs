@@ -74,6 +74,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .get("--diagnostics")
         .ok_or("independent local diagnostics directory is required")?;
     match mode.as_str() {
+        "pool" => {
+            let selection = serde_json::from_slice(&fs::read(
+                options.get("--selection").ok_or("selection is required")?,
+            )?)?;
+            prajna_data::pool_publish::publish(root, &selection, receipt)?;
+        }
+        "rebuild-pool" if !options.contains_key("--selection") => {
+            prajna_data::pool_publish::rebuild_receipt(root, receipt)?;
+        }
         "publish" => {
             let selection: DailyPublicationSelection = serde_json::from_slice(&fs::read(
                 options.get("--selection").ok_or("selection is required")?,

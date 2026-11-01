@@ -41,6 +41,7 @@ pub mod comparison;
 mod engine;
 pub mod opening_evidence;
 pub mod pit;
+pub mod pool_update;
 pub mod pools;
 mod python;
 pub mod selection;

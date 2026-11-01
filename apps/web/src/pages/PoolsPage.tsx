@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ErrorBox, Header, Panel } from '../shared';
+import PoolUpdates from './PoolUpdates';
 
 type Version = { version: number; universe: string; members: string[] };
 type Pool = { id: string; name: string; draft: string[]; versions: Version[] };
@@ -145,6 +146,10 @@ export default function PoolsPage() {
         <button className="primary" disabled={busy || dirty} onClick={() => void change('publish')}>发布固定版本</button>
         {dirty && <p>请先保存草稿再发布。</p>}
       </Panel>
+      <PoolUpdates key={`${id}:${version}`} poolId={id} version={version} onSelect={async (nextDsv, nextAdjusted) => {
+        const value = await api<{ data: { datasets: typeof catalog } }>('/api/v1/datasets');
+        setCatalog(value.data.datasets); setDsv(nextDsv); setAdjusted(nextAdjusted);
+      }} />
       <Panel title="读取已发布版本"><label>固定版本<select aria-label="固定版本" value={version} disabled={busy} onChange={(e) => { setVersion(Number(e.target.value)); setAdjusted({}); }}>
         {pool.versions.map((v) => <option key={v.version} value={v.version}>版本 {v.version} · {v.members.length} 只</option>)}</select></label>
         <ul data-testid="pool-members">{published?.members.map((member) => <li key={member}>{member}</li>)}</ul>
