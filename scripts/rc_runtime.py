@@ -42,6 +42,8 @@ DEMO_CONFIGS = (
     'pool-updates/configs/synthetic.json',
     'synthetic-input/XSHG/selection.json',
     'synthetic-input/XSHE/selection.json',
+    'etf.json-selection.json',
+    'stock.json-selection.json',
 )
 
 

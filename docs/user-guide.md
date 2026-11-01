@@ -68,6 +68,14 @@ DEMO="$HOME/PrajnaDemo"
 
 ### 3.1 Dataset、池与手动更新
 
+先通过发行包中的正式 CLI 重新发布一份已备好的合成 ETF 输入；同一输入幂等，新的 receipt 不覆盖旧的：
+
+```sh
+./prajna cli prajna-publish-daily publish --root "$DEMO" \
+  --selection "$DEMO/etf.json-selection.json" --receipt demo-etf-repeat.json \
+  --diagnostics "$DEMO/demo-etf-diagnostics"
+```
+
 1. 在 `/datasets` 选择一条 Dataset，再选择证券；查看原始行情、覆盖和缺口。没有 Bar 不代表零价。
    也可切换固定复权版本，查看其来源、方法和实际覆盖。目录中的一证券两 Bar 示例是预览 fixture，
    不等于满足回测门槛。

@@ -10,7 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 import rc_build as build
-from rc_runtime import DEMO_CONFIGS, RcError
+from rc_runtime import DEMO_CONFIGS, RcError, install_demo
 
 
 def git(repo, *args):
@@ -77,6 +77,29 @@ class ReleaseBuildTests(unittest.TestCase):
             (root / 'immutable.json').write_text(json.dumps({'path': str(root / 'source')}))
             with self.assertRaisesRegex(RcError, 'retains its build path'):
                 build.portable_demo(root)
+
+    def test_preview_input_is_copied_and_rebound_without_build_paths(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            lake = root / 'build/fixture/lake'
+            preview = root / 'build/fixture/input'
+            preview.mkdir(parents=True)
+            (preview / 'report.json').write_text('synthetic report')
+            alias = root / 'input-alias'
+            alias.symlink_to(preview, target_is_directory=True)
+            for name in DEMO_CONFIGS:
+                config = lake / name
+                config.parent.mkdir(parents=True, exist_ok=True)
+                config.write_text(json.dumps({'raw_root': str(preview), 'report': str(alias / 'report.json')}))
+            build.portable_demo(lake, preview, root / 'build')
+            packaged = json.loads((lake / 'etf.json-selection.json').read_text())
+            self.assertEqual(packaged['raw_root'], '@DEMO_ROOT@/synthetic-input/preview')
+            self.assertEqual(packaged['report'], '@DEMO_ROOT@/synthetic-input/preview/report.json')
+            destination = root / 'relocated lake'
+            install_demo(lake, destination)
+            installed = json.loads((destination / 'etf.json-selection.json').read_text())
+            self.assertEqual(Path(installed['raw_root']), destination / 'synthetic-input/preview')
+            self.assertEqual(Path(installed['report']).read_text(), 'synthetic report')
 
 
 if __name__ == '__main__':

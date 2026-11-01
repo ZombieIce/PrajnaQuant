@@ -98,32 +98,43 @@ def source_snapshot(repo, destination, temporary, revision):
         raise RcError('source snapshot contains excluded Git blobs')
 
 
-def portable_values(value, root):
+def portable_values(value, root, preview_input=None):
     if isinstance(value, dict):
-        return {key: portable_values(item, root) for key, item in value.items()}
+        return {key: portable_values(item, root, preview_input) for key, item in value.items()}
     if isinstance(value, list):
-        return [portable_values(item, root) for item in value]
+        return [portable_values(item, root, preview_input) for item in value]
     if isinstance(value, str) and value.startswith('/'):
-        path = Path(value)
-        if not path.is_relative_to(root) or path == root:
+        path = Path(value).resolve()
+        if preview_input is not None and (path == preview_input or path.is_relative_to(preview_input)):
+            relative = Path('synthetic-input/preview') / path.relative_to(preview_input)
+        elif path != root and path.is_relative_to(root):
+            relative = path.relative_to(root)
+        else:
             raise RcError('synthetic configuration references a path outside its fixture')
-        return DEMO_PREFIX + path.relative_to(root).as_posix()
+        return DEMO_PREFIX + relative.as_posix()
     return value
 
 
-def portable_demo(root):
+def portable_demo(root, preview_input=None, build_root=None):
+    build_path = build_root or root
+    needles = {str(build_path).encode(), str(build_path.resolve()).encode()}
+    root = root.resolve()
+    if preview_input is not None:
+        preview_input = preview_input.resolve()
+        shutil.copytree(preview_input, root / 'synthetic-input/preview')
     for name in DEMO_CONFIGS:
         path = root / name
         if not path.is_file():
             raise RcError(f'missing synthetic configuration: {name}')
-        value = portable_values(json.loads(path.read_text()), root)
+        value = portable_values(json.loads(path.read_text()), root, preview_input)
         path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
-    needle = str(root).encode()
     for path in root.rglob('*'):
         if path.is_symlink():
             raise RcError('synthetic fixture contains a symbolic link')
-        if path.is_file() and needle in path.read_bytes():
-            raise RcError(f'synthetic fixture retains its build path: {path.relative_to(root)}')
+        if path.is_file():
+            contents = path.read_bytes()
+            if any(needle in contents for needle in needles):
+                raise RcError(f'synthetic fixture retains its build path: {path.relative_to(root)}')
 
 
 def export_test(package, test, name, variable, root, log, environment):
@@ -153,7 +164,7 @@ def prepare_demo(temporary, release, log, environment):
     for name in ('corporate-actions.json', 'corporate-actions-revision.json'):
         command([str(release / 'prajna-corporate-facts'), 'import',
                  '--root', str(lake), '--input', str(facts / name)], log=log)
-    portable_demo(lake)
+    portable_demo(lake, fixture / 'input', temporary)
     return lake
 
 

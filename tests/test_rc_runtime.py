@@ -77,6 +77,8 @@ class DemoTests(unittest.TestCase):
             second = template / 'synthetic-input/XSHE/selection.json'
             second.parent.mkdir(parents=True)
             second.write_text(json.dumps({'report': '@DEMO_ROOT@/synthetic-input/XSHE/report.json'}))
+            for name in ('etf.json-selection.json', 'stock.json-selection.json'):
+                (template / name).write_text(json.dumps({'raw_root': '@DEMO_ROOT@/synthetic-input/preview'}))
             destination = root / 'independent lake'
             rc.install_demo(template, destination)
             installed = json.loads((destination / 'pool-updates/configs/synthetic.json').read_text())
