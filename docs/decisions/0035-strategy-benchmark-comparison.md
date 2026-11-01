@@ -1,6 +1,6 @@
 # ADR 0035：冻结策略—基准对照
 
-- 状态：Accepted，2026-10-30；#375，消费 ADR 0031/0033/0034。
+- 状态：Accepted，2026-10-30；#375，消费 ADR 0031/0033/0034；2026-11-01 #304 扩展 `pool_momentum_topk`，不改变既有角色/任务/结果身份。
 - 范围：本机产品入口、持久对照任务、只读对照结果与页面；不新增账户、绩效或执行核心。
 
 ## 冻结与身份
@@ -9,9 +9,11 @@
 （`adjusted_versions` + `evaluation` + `corporate_actions`），Rust `comparison::freeze`
 再复制同一 DSV/Universe/Venue/成本/本金/可用性/复权/窗口/行动版本并改写为
 `buy_and_hold + holding-benchmark@1`，保存显式再投资日历。支持 `single_etf_timing`
-（恰一 ETF → `single_etf`）与单 Venue `s2_rotation`（冻结池 → `equal_weight_pool`）。
-冻结策略必须恰展开一个 Run；多参数、多 Venue、Vector/Accurate/PIT、缺公司行动/
-窗口/复权版本或已带 `holding_benchmark` 的定义拒绝，浏览器不能提供任意基准定义。
+（恰一 ETF → `single_etf`）、单 Venue `s2_rotation` 与单 Venue
+`pool_momentum_topk`（冻结池 → `equal_weight_pool`）；后者于 #304 接入，复用其
+冻结窗口与调仓 Decision 日历。冻结策略必须恰展开一个 Run；多参数、多 Venue、
+Vector/Accurate/PIT、缺公司行动/窗口/复权版本或已带 `holding_benchmark` 的定义
+拒绝，浏览器不能提供任意基准定义。
 
 `comparison.json` 是任务请求定义，保存两个角色、各自 `definition`、预期
 `experiment`/`run` 身份、`semantic_version` 与 `comparability`。任务 `request_sha256`

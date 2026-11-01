@@ -461,7 +461,7 @@ Standard 为此新路径保存 orders/fills/费用及行动/现金/权益，尝�
 复用 `prajna-freeze-selection` 的策略冻结，再在 Rust 中派生对应 `holding_benchmark@1`：
 
 - `single_etf_timing` → `single_etf` 同证券买入持有；
-- 单 Venue `s2_rotation` → `equal_weight_pool` 冻结池期初等权持有；
+- 单 Venue `s2_rotation` 或 `pool_momentum_topk` → `equal_weight_pool` 冻结池期初等权持有；
 - 其他模板、多参数、多 Venue、Vector/Accurate/PIT、缺公司行动/窗口/复权版本拒绝。
 
 基准定义复制策略的 DSV、Universe、真实 Venue、成本、本金、最低佣金、可用性假设、

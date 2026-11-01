@@ -39,6 +39,14 @@ Universe 与成本，没有评价窗口。若只按原始 Bar 覆盖计算窗口
 5. **预检/页面后置。** T08b 复用 `selection::plan` 库函数提供 CLI/HTTP/页面与
    浏览器验证；T08a 不新增页面或预检端点。T08 完整产品验收等待 T08b。
 
+### Amendment 2026-11-01（#303/#304）
+
+后续 entry-anchored native 模板不是只过滤窗口外 Decision：`single_etf_timing`
+（#303）与 `pool_momentum_topk`（#304）仍在完整 Panel 上计算指标/动量，但把
+调仓周期锚定冻结 `evaluation.start()`，以该 Session 为第一个 Decision；窗口
+末 Decision 不成交。旧 `s2_rotation`、MA、Buy & Hold 的既有语义与身份不变。
+本修订澄清决策 3，不改变窗口、价格职责、引擎语义版本或任何已存结果。
+
 ## 考虑过的方案
 
 - **只按原始 Bar 覆盖计算窗口**：实现更小，但把研究信号可用性建立在原始价上，

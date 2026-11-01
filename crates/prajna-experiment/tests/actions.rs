@@ -1528,6 +1528,121 @@ fn frozen_equal_weight_comparison_uses_actual_lots_and_marks_incomplete_facts() 
     assert_eq!(benchmark["data"]["runs"][0]["accounting_verified"], true);
 }
 
+#[test]
+fn frozen_pool_momentum_comparison_runs_with_equal_weight_benchmark() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let dsv = fixture::prepare_executable_days(root, true, &DATES);
+    let members = ["510300.XSHG", "510880.XSHG"];
+    let adjusted = members
+        .iter()
+        .map(|member| {
+            (
+                (*member).to_string(),
+                fixture::import_adjusted(root, &dsv, member, DATES[0], DATES[9], &DATES),
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let version =
+        corporate_facts::import(root, &serde_json::to_vec(&facts("510300.XSHG")).unwrap()).unwrap();
+    let registry = pools::command(root, PoolCommand::List {}).unwrap();
+    let draft = serde_json::from_value(
+        registry["data"]["pools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|pool| pool["id"] == "dividend")
+            .unwrap()["draft"]
+            .clone(),
+    )
+    .unwrap();
+    let expected_members: Vec<String> = members.iter().map(|member| (*member).into()).collect();
+    pools::command(
+        root,
+        PoolCommand::Save {
+            id: "dividend".into(),
+            members: expected_members.clone(),
+            expected: draft,
+        },
+    )
+    .unwrap();
+    let published = pools::command(
+        root,
+        PoolCommand::Publish {
+            id: "dividend".into(),
+            expected: expected_members,
+        },
+    )
+    .unwrap();
+    let pool_version = published["data"]["pools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|pool| pool["id"] == "dividend")
+        .unwrap()["versions"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()["version"]
+        .as_u64()
+        .unwrap() as usize;
+    let selection = Selection {
+        dsv,
+        instrument: String::new(),
+        pool: Some(pools::Reference {
+            id: "dividend".into(),
+            version: pool_version,
+        }),
+        strategy: "pool_momentum_topk".into(),
+        parameter_space: Some(json!({
+            "list":[{"params_version":1,"lookback":1,"top_k":1,"rebalance_every":1}]
+        })),
+        settings: Settings {
+            initial_cash: "10000".into(),
+            commission_rate: 0.0,
+            minimum_commission: "5".into(),
+            buy_slippage_bps: 0.0,
+            sell_slippage_bps: 0.0,
+            buy_tax_rate: 0.0,
+            sell_tax_rate: 0.0,
+        },
+        adjusted,
+        corporate_actions: Some(prajna_experiment::actions::Binding {
+            version,
+            dividend_tax_rate: "0.1".into(),
+        }),
+    };
+    let frozen = freeze_comparison_cli(root, &selection, ReinvestmentPolicy::StrategyRebalance);
+    let data = &frozen["data"];
+    assert_eq!(data["benchmark"]["kind"], "equal_weight_pool");
+    assert_eq!(data["comparability"]["strategy_kind"], "pool_momentum_topk");
+    assert_eq!(data["comparability"]["benchmark_kind"], "equal_weight_pool");
+    assert_eq!(data["comparability"]["evaluation"]["start"], DATES[1]);
+    assert_eq!(data["comparability"]["evaluation"]["end"], DATES[9]);
+    assert_eq!(
+        data["comparability"]["reinvestment_calendar"]["decision_dates"],
+        json!(
+            DATES[2..=9]
+                .iter()
+                .map(|date| date.to_string())
+                .collect::<Vec<_>>()
+        )
+    );
+    for role in ["strategy", "benchmark"] {
+        let run = run_definition(
+            root,
+            &format!("pool-momentum-{role}.json"),
+            &data[role]["definition"],
+        );
+        let result = read_result(root, &run);
+        assert_eq!(close_rows(&result).len(), 9, "{role}");
+        assert_eq!(
+            result["data"]["runs"][0]["accounting_verified"], true,
+            "{role}"
+        );
+    }
+}
+
 // #378: independent close-equity mathematics over the existing hand account.
 fn near(value: &Value, expected: f64) {
     let actual = value.as_f64().unwrap();

@@ -19,15 +19,22 @@ Top-K、调仓频率与本金/成本，经现有 `prajna-freeze-selection` →
 
 复用现有 Rust `Momentum` Factor 与 `TopKRank` 排序/执行语义。T 日收盘用绑定的
 供应商复权收盘形成信号，下一可用 Session 开盘尝试成交；成交、估值、费用和
-公司行动仍使用原始 Bar（ADR 0030/0031）。未来收益标签不进入信号。缺失、
-未知可用时刻或晚于决策收盘的因子值不参与排名。
+公司行动仍使用原始 Bar（ADR 0030/0031）。未来收益标签不进入信号。生产选择
+冻结 `availability_assumption: treat_unknown_as_ts_close`：原始日线 `Unknown`
+可用时刻按该 Session close 可用处理，因此该类值可参与排名；显式不可用、非
+`ok` 状态或晚于决策收盘的可用时刻不参与。复权研究序列自身的 close 可用假设
+随绑定版本保存，`observed_at` 不是历史发布时间。
 
 每个计划调仓 Session 先收集状态为 `ok` 且 `available_at <= Session close` 的
 成员，按动量降序；**并列按 `InstrumentId` 升序**（沿用已有 TopKRank 契约）。
 实际入选数为 `min(top_k, 合格成员数)`，对实际入选数量等权（`1 / count`）。
-零个合格成员时目标为空集合，即下一 Session 清仓为全现金；后续调仓可再入场。
-参数统计窗口不足的成员只从其首次可评估 Session 起参与，不填零、不以原始价
-替代复权研究序列。
+**零候选语义：** 一个计划调仓 Session 上没有任何成员具有可用的 `ok` 动量值
+时（包括全部成员在该收盘缺少复权研究覆盖），目标为空集合，即下一 Session
+清仓为全现金；后续调仓可再入场。这是本模板按 Issue #304 AC1 / Spec D7
+“零候选为现金”声明的量化口径，与 `single_etf_timing` 对不可用信号直接跳过
+Decision、不制造现金卖出的规则不同；它不把缺失价格填零、不视为可成交，也不
+删除/压缩 Session 日历。参数统计窗口不足的成员只从其首次可评估 Session 起
+参与，不填零、不以原始价替代复权研究序列。
 
 共同评价窗口按 [ADR 0031](../decisions/0031-common-evaluation-window-and-adjusted-binding.md)
 与 [评价窗口契约](contracts/evaluation-window.md) 冻结：预热为 `lookback`
@@ -76,6 +83,16 @@ Sessions，评价起点是全部成员和全部参数组合都就绪的第一个
 执行、读取持久估值和 Full 成交，核对页面与保存定义并刷新重读。
 
 公开证据仅使用合成数据与合成 adjusted/status 输入；真实行情、严格 PIT、
-完整公司行动总回报、基准对照与盈利结论不在本契约验证范围。策略—基准比较
-仍由已交付的 #375 契约承接（`single_etf_timing` 与旧 `s2_rotation`），本模板
-的比较接入不在本票范围。
+完整公司行动总回报与盈利结论不在本契约验证范围。
+
+## 策略—基准对照
+
+本模板已接入既有 [ADR 0035](../decisions/0035-strategy-benchmark-comparison.md)
+冻结策略—基准对照：单 Venue 冻结池由 `prajna-freeze-comparison` /
+`/comparisons` 派生同池期初等权 `equal_weight_pool` 持有基准，复用同一冻结
+DSV/Universe/本金/成本/复权版本/评价窗口/公司行动版本与显式再投资日历；再
+投资日历由本模板在评价窗口内的实际 Decision close 派生（排除首个建仓
+Decision）。页面经生产对照任务读取两侧权威结果；多 Venue、Vector/Accurate/
+PIT 或非单一参数组合仍按 ADR 0035 拒绝。合成 Rust 对照测试与生产浏览器
+对照 E2E 覆盖本模板的策略/基准身份、同窗口与会计核验；真实总回报与盈利
+结论仍不在验证范围。

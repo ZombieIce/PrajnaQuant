@@ -168,8 +168,9 @@ test('pool momentum Top-K freezes parameters/costs, executes at the next Session
   expect(first.positions['510880.XSHG'].quantity).toBe('490');
   expect(first.cash).toBe('88.11802');
   expect(first.equity).toBe('9988.11802');
-  // The next scheduled Decision (five Sessions after 2026-01-06) re-targets the
-  // smaller equity and sells one 100-share lot of 510300 at 2026-01-13's open.
+  // The next scheduled Decision (2026-01-13 close, five Sessions after the
+  // start) re-targets the smaller equity and sells one 100-share lot of 510300
+  // at the 2026-01-14 open.
   expect(run.details.fills).toHaveLength(3);
   expect(run.details.fills[0].fill.order.quantity).toBe('500');
   expect(run.details.fills[0].fill.costs.commission).toBe('5.001');

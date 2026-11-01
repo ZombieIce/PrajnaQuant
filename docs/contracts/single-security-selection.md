@@ -75,7 +75,7 @@ Universe；定义失败不会产生任务或伪成功结果。默认版本/来�
 `POST /api/v1/tasks/selections`：同上字段，另有必填 `idempotency_key`，可选
 `result_level: summary|standard`（沿用 T01 缺省 summary）。新增的
 `single_etf_timing` 与 `pool_momentum_topk` 模板还接受 `full`，保存实际成交/费用
-与订单审计；其余策略仍拒绝 Full，不改变既有默认值或请求身份。Standard/择时 Full 都先尝试提升当前
+与订单审计；其余策略仍拒绝 Full，不改变既有默认值或请求身份。Standard/模板 Full 都先尝试提升当前
 Execution，仅在 CLI 明确返回“无当前 Execution”（exit 6）时执行新 Run。
 模板参数和复权/原始价格职责见[择时契约](../single-etf-timing.md)与
 [池内动量 Top-K 契约](../pool-momentum-topk.md)。无测试专用生产端点。

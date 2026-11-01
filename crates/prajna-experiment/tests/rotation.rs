@@ -200,6 +200,23 @@ fn ties_break_by_instrument_actual_count_is_equal_weighted_and_costs_are_next_se
         DATES[7]
     );
 
+    // The window-end Decision has no next Session: it stays pending and must
+    // not execute or disappear from the audit.
+    assert!(report.runs[0].summary.as_ref().unwrap().pending_at_end);
+    let pending = result
+        .attempts
+        .iter()
+        .find_map(|attempt| match &attempt.event {
+            prajna_research::strategy::ExecutionEvent::PendingAtEnd {
+                decision_session,
+                targets,
+            } => Some((decision_session, targets)),
+            _ => None,
+        })
+        .expect("window-end Decision must be recorded as PendingAtEnd");
+    assert_eq!(pending.0.session_date.to_string(), DATES[7]);
+    assert_eq!(pending.1.len(), 2);
+
     // A single-slot tie selects the lower InstrumentId (510300 < 510880) and
     // buys the full budget with the 100-share lot.
     let mut tie_selection: Selection =
@@ -355,13 +372,10 @@ fn gold_is_held_only_after_it_is_selected() {
     assert_eq!(selected["positions"].get("510880.XSHG"), None);
     assert_eq!(selected["cash"], "1971.04");
     assert_eq!(selected["equity"], "9971.04");
-    // The target weights stay inside this pool; no other pool/cash bucket is
-    // read or transferred.
+    // The strategy holds exactly the one frozen Universe resolved by the pool
+    // reference; no second pool or cash bucket is read or transferred.
     let definition = &frozen["data"]["definition"];
-    assert_eq!(
-        definition["universe"],
-        definition["universe"].as_str().unwrap()
-    );
+    assert_eq!(definition["universe"], frozen["data"]["pool"]["universe"]);
     assert_eq!(
         definition["adjusted_versions"].as_object().unwrap().len(),
         3

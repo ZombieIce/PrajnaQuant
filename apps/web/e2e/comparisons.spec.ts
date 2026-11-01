@@ -294,6 +294,65 @@ test('equal-weight pool comparison reports incomplete action facts and keeps aut
   }
 });
 
+test('pool momentum strategy freezes and compares against the equal-weight pool benchmark', async ({ page }) => {
+  test.setTimeout(120_000);
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const registry = (await (await page.request.get('/api/v1/research-pools')).json()).data;
+  const pool = registry.pools.find((item: { id: string }) => item.id === 'cross-asset');
+  const originalDraft = pool.draft as string[];
+  const members = ['510300.XSHG', '510880.XSHG'];
+  let draft = originalDraft;
+  try {
+    expect((await page.request.post('/api/v1/research-pools', { data: { op: 'save', id: 'cross-asset', expected: draft, members } })).ok()).toBe(true);
+    draft = members;
+    const published = await (await page.request.post('/api/v1/research-pools', { data: { op: 'publish', id: 'cross-asset', expected: draft } })).json();
+    const version = published.data.pools.find((item: { id: string }) => item.id === 'cross-asset').versions.at(-1).version;
+    const details = await catalogDetails(page);
+    const executable = details.find((item) => item.normalizer_version === 'synthetic-pool-executable@1' && item.bars === 650);
+    expect(executable).toBeTruthy();
+    const adjusted = executable!.detail.adjusted_series.versions as { instrument_id: string; version: string }[];
+    const actions = await originalActions(page);
+
+    await page.goto('/comparisons');
+    await selectLabel(page, '对照模式', 'pool');
+    await selectLabel(page, 'Dataset 版本', executable!.dsv);
+    await selectLabel(page, '研究池', 'cross-asset');
+    await selectLabel(page, '固定版本', String(version));
+    await selectLabel(page, '池内模板', 'pool_momentum_topk');
+    for (const member of members) {
+      const bound = adjusted.find((item) => item.instrument_id === member);
+      expect(bound).toBeTruthy();
+      await selectLabel(page, `复权版本 ${member}`, bound!.version);
+    }
+    await selectLabel(page, '公司行动事实版本', actions);
+    await page.getByLabel('动量窗口', { exact: true }).fill('1');
+    await page.getByLabel('Top-K', { exact: true }).fill('1');
+    await page.getByLabel('调仓频率', { exact: true }).fill('5');
+    await fillCosts(page, { cash: '10000', commission: '0.0003', slippage: '0', buyTax: '0', sellTax: '0' });
+    await page.getByRole('button', { name: '提交策略—基准对照', exact: true }).click();
+    await expect(page.getByTestId('comparison-status')).toContainText('已完成', { timeout: 60_000 });
+    await expect(page.getByTestId('comparison-facts')).toContainText('pool_momentum_topk');
+    await expect(page.getByTestId('comparison-facts')).toContainText('equal_weight_pool');
+    await expect(page.getByTestId('comparison-valuations')).toBeVisible();
+    const taskId = new URL(page.url()).searchParams.get('task');
+    const result = await (await page.request.get(`/api/v1/tasks/comparisons/${taskId}/result`)).json();
+    expect(result.data.comparability.strategy_kind).toBe('pool_momentum_topk');
+    expect(result.data.comparability.benchmark_kind).toBe('equal_weight_pool');
+    expect(result.data.comparability.reinvestment_calendar.decision_dates.length).toBeGreaterThan(0);
+    for (const role of ['strategy', 'benchmark']) {
+      expect(result.data[role].runs[0].accounting_verified).toBe(true);
+      expect(closeRows(result.data[role].runs[0]).length).toBeGreaterThan(1);
+    }
+    const facts = await page.getByTestId('comparison-facts').textContent();
+    await page.reload();
+    await expect(page.getByTestId('comparison-facts')).toHaveText(facts!);
+    expect(errors).toEqual([]);
+  } finally {
+    await page.request.post('/api/v1/research-pools', { data: { op: 'save', id: 'cross-asset', expected: draft, members: originalDraft } });
+  }
+});
+
 test('comparison rejects incompatible price rules and shows real task failures without fabricated results', async ({ page }) => {
   test.setTimeout(120_000);
   const details = await catalogDetails(page);

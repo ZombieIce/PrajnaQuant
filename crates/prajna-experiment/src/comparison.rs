@@ -68,7 +68,7 @@ fn experiment_error(failure: ExperimentError) -> ComparisonError {
 
 fn strategy_kind(definition: &Value) -> Result<&str, ComparisonError> {
     match definition["strategy"].as_str() {
-        Some(kind @ ("single_etf_timing" | "s2_rotation")) => Ok(kind),
+        Some(kind @ ("single_etf_timing" | "s2_rotation" | "pool_momentum_topk")) => Ok(kind),
         Some(other) => Err(error(
             "comparison_unsupported_strategy",
             format!("strategy {other} has no product holding benchmark"),
@@ -110,7 +110,10 @@ fn calendar(
                 .map_err(|e| error("comparison_calendar_failed", e))?;
             factors.insert(factor.canonical_json().to_string(), values);
         }
-        let research = if strategy.strategy_kind == "single_etf_timing" {
+        let research = if matches!(
+            strategy.strategy_kind.as_str(),
+            "single_etf_timing" | "pool_momentum_topk"
+        ) {
             Some(crate::adjusted::research_panel(strategy, root, panel).map_err(experiment_error)?)
         } else {
             None
