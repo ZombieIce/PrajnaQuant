@@ -88,6 +88,10 @@ export default function ComparisonsPage() {
   const [detail, setDetail] = useState<DatasetDetail | null>(null);
   const [detailError, setDetailError] = useState<Error | null>(null);
   const [mode, setMode] = useState<'single' | 'pool'>('single');
+  const [poolTemplate, setPoolTemplate] = useState<'s2_rotation' | 'pool_momentum_topk'>('s2_rotation');
+  const [lookback, setLookback] = useState('60');
+  const [topK, setTopK] = useState('1');
+  const [momentumFrequency, setMomentumFrequency] = useState('5');
   const [instrument, setInstrument] = useState('');
   const [adjusted, setAdjusted] = useState<Record<string, string>>({});
   const [pools, setPools] = useState<Pool[]>([]);
@@ -147,7 +151,11 @@ export default function ComparisonsPage() {
   const adjustedVersions = detail?.adjusted_series?.versions ?? [];
   const selectedActions = actions?.versions.find((version) => version.version === actionsVersion);
   const actionScopes = members.map((member) => ({ member, scope: selectedActions?.scopes.find((scope) => scope.instrument_id === member) }));
-  const parameters = useMemo(() => { try { return JSON.parse(parameterText) as unknown; } catch { return null; } }, [parameterText]);
+  const rotationParameters = { params_version: 1, lookback: Number(lookback), top_k: Number(topK), rebalance_every: Number(momentumFrequency) };
+  const parameters = useMemo(() => mode === 'pool' && poolTemplate === 'pool_momentum_topk'
+    ? { list: [rotationParameters] }
+    : (() => { try { return JSON.parse(parameterText) as unknown; } catch { return null; } })(),
+  [mode, poolTemplate, parameterText, lookback, topK, momentumFrequency]);
   const ready = Boolean(dsv && members.length && actionsVersion && members.every((member) => adjusted[member]) && (mode === 'single' || parameters));
 
   const loadTasks = useCallback(async (signal?: AbortSignal) => {
@@ -201,7 +209,7 @@ export default function ComparisonsPage() {
     try {
       const common = {
         dsv,
-        strategy: mode === 'single' ? 'single_etf_timing' : 's2_rotation',
+        strategy: mode === 'single' ? 'single_etf_timing' : poolTemplate,
         adjusted: Object.fromEntries(members.map((member) => [member, adjusted[member]])),
         corporate_actions: { version: actionsVersion, dividend_tax_rate: dividendTaxRate },
         settings: {
@@ -269,6 +277,9 @@ export default function ComparisonsPage() {
           <label>固定版本<select aria-label="固定版本" value={poolVersion} onChange={(event) => { setPoolVersion(Number(event.target.value)); setAdjusted({}); }}>
             {selectedPool?.versions.map((version) => <option key={version.version} value={version.version}>版本 {version.version} · {version.members.length} 只</option>)}
           </select></label>
+          <label>池内模板<select aria-label="池内模板" value={poolTemplate} onChange={(event) => { setPoolTemplate(event.target.value as 's2_rotation' | 'pool_momentum_topk'); setAdjusted({}); setSubmitError(null); }}>
+            <option value="s2_rotation">旧多因子轮动（s2_rotation）</option><option value="pool_momentum_topk">池内动量 Top-K 轮动</option>
+          </select></label>
           {selectedPool && <p className="hint">冻结成员：{poolMembers.join('、') || '无'}。基准使用同一冻结池成员的期初等权持有。</p>}
         </>}
         {members.map((member) => <label key={member}>复权版本 {member}<select aria-label={`复权版本 ${member}`} value={adjusted[member] ?? ''} onChange={(event) => { const next = { ...adjusted }; if (event.target.value) next[member] = event.target.value; else delete next[member]; setAdjusted(next); }}>
@@ -291,8 +302,16 @@ export default function ComparisonsPage() {
         {mode === 'single' ? <>
           <label>均线窗口（Session）<input aria-label="均线窗口" type="number" min="1" step="1" required value={maWindow} onChange={(event) => setMaWindow(event.target.value)} /></label>
           <label>调仓频率（Session）<input aria-label="调仓频率" type="number" min="1" step="1" required value={frequency} onChange={(event) => setFrequency(event.target.value)} /></label>
-        </> : <label>参数组合 JSON<textarea aria-label="参数组合 JSON" rows={4} value={parameterText} onChange={(event) => setParameterText(event.target.value)} /></label>}
-        {mode === 'pool' && !parameters && <p className="hint">请输入恰好一个 S2 参数组合；多个组合不能与单一份基准形成本票的固定比较。</p>}
+        </> : poolTemplate === 'pool_momentum_topk' ? <>
+          <p className="hint">按绑定复权收盘计算尾随动量，T 日收盘排名、下一可用 Session open 尝试成交；并列按 InstrumentId 升序，合格不足 K 按实际数量等权，零候选为全现金。基准为同一冻结池成员的期初等权买入持有，使用同一评价窗口、成本与再投资日历。</p>
+          <label>动量窗口（Session）<input aria-label="动量窗口" type="number" min="1" step="1" required value={lookback} onChange={(event) => setLookback(event.target.value)} /></label>
+          <label>Top-K<input aria-label="Top-K" type="number" min="1" step="1" required value={topK} onChange={(event) => setTopK(event.target.value)} /></label>
+          <label>调仓频率（Session）<input aria-label="调仓频率" type="number" min="1" step="1" required value={momentumFrequency} onChange={(event) => setMomentumFrequency(event.target.value)} /></label>
+        </> : <>
+          <label>参数组合 JSON<textarea aria-label="参数组合 JSON" rows={4} value={parameterText} onChange={(event) => setParameterText(event.target.value)} /></label>
+          {!parameters && <p className="hint">请输入恰好一个 S2 参数组合；多个组合不能与单一份基准形成本票的固定比较。</p>}
+        </>}
+        <p className="hint" data-testid="comparison-price-rule-hint">冻结前会按成员 `price_increment` 校验滑点后买价；粗 tick（如 0.01）下 2bp 可能不对齐并返回 comparison_price_rules_mismatch，请改用 0 或 tick 对齐的滑点（#375 保守保护，非页面计算）。</p>
         {(Object.entries({ initial_cash: '本金（CNY）', commission_rate: '佣金率', minimum_commission: '最低佣金（CNY）', buy_slippage_bps: '买入滑点（bp）', sell_slippage_bps: '卖出滑点（bp）', buy_tax_rate: '买入税率', sell_tax_rate: '卖出税率' }) as [keyof typeof settings, string][]).map(([key, label]) => <label key={key}>{label}<input aria-label={label} type="number" min={key === 'initial_cash' ? '0.00000001' : '0'} step="any" required value={settings[key]} onChange={(event) => setSettings({ ...settings, [key]: event.target.value })} /></label>)}
         <form onSubmit={submit}>
           <button type="submit" className="primary" disabled={busy || !ready}>{busy ? '正在经生产入口冻结对照…' : '提交策略—基准对照'}</button>

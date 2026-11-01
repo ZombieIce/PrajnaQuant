@@ -50,7 +50,8 @@ HTTP 与 `/pools` 页面由 [#356/T08b](https://github.com/ZombieIce/PrajnaQuant
    `common_end` = 所有成员最后一个复权行的最小日期。缺失 Session 不删除、
    不压缩日历、不填零，也不以原始价替代研究信号。
 3. **参数预热**：按冻结定义的每个参数组合声明窗口：`buy_and_hold` 0；
-   `ma_crossover` `long_window - 1`；`single_etf_timing` `ma_window - 1`；`s2_rotation` `max(short, long, vol, trend - 1)`
+   `ma_crossover` `long_window - 1`；`single_etf_timing` `ma_window - 1`；`pool_momentum_topk` `lookback`；
+   `s2_rotation` `max(short, long, vol, trend - 1)`
    （`trend` 可选；Momentum/Volatility 需要 `n + 1` closes，TrendFilter 需要 `n` closes）。
    Python、PIT 与无声明窗口的策略显式拒绝。预热 Session 数不等于观测数：
    `warmup_sessions = required_observations - 1`。
@@ -92,10 +93,11 @@ latest、不以运行时重算结果替换冻结窗口。`Experiment::parse` 在
 `Experiment::parse`/CLI/执行入口拒绝它（planning-only），持久化选择始终同时写入两者。PIT、Python 与 Accurate 定义不支持共同评价窗口；#295 起沪深同池（XSHG+XSHE）的非 PIT
 池可使用同一冻结窗口，账本仍只有一套。
 
-`single_etf_timing` 在原生 `Experiment::parse`/CLI 边界还以全部 list/grid 参数与
-冻结复权覆盖重新规划并校验就绪条件：任何组合历史不足，或定义中的预热/共同
-窗口/评价窗口与计划不一致，均拒绝；不默默改写冻结窗口或把无法就绪的参数
-报告为成功现金回测。旧策略的定义与身份保持原行为。
+`single_etf_timing` 与 `pool_momentum_topk` 在原生 `Experiment::parse`/CLI 边界还以
+全部 list/grid 参数与冻结复权覆盖重新规划并校验就绪条件：任何组合历史不足，或
+定义中的预热/共同窗口/评价窗口与计划不一致，均拒绝；不默默改写冻结窗口或把
+无法就绪的参数报告为成功现金回测。两者的调仓周期都锚定冻结评价起点。旧策略的
+定义与身份保持原行为。
 
 ## 执行边界
 
@@ -146,7 +148,7 @@ adjusted,pool?,instruments,window,runnable,blocking}}`；单 Venue 保留旧 `ve
 不补齐、不压缩也不选第一个 Venue。不把错误伪装为空覆盖或零值。
 
 Selection 可选 `parameter_space` 沿用 Experiment 的 native `list` / `grid`，
-`strategy` 接受 buy_and_hold、ma_crossover、single_etf_timing、s2_rotation。只有 buy_and_hold
+`strategy` 接受 buy_and_hold、ma_crossover、single_etf_timing、s2_rotation、pool_momentum_topk。只有 buy_and_hold
 省略时使用旧唯一 `{params_version:1}`；其它策略必须显式给出参数并绑定复权版本。
 参数由现有 native parser 验证，S2 沿用成员数/因子/策略校验；预热来自 Rust 声明，
 不接受客户端 warm-up 数。单 Venue 买入持有仍是 entry_only/retry，其它模板为既有 full_target/skip；

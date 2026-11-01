@@ -13,13 +13,22 @@ type Window = { common_start: string | null; common_end: string | null; start: s
   parameters: { label: string; warmup_sessions: number; runnable: boolean; reason?: string }[] };
 type Plan = { runnable: boolean; universe: string; venues: string[]; adjusted: Record<string, string>; window: Window | null;
   blocking: { code: string; message: string }[] };
+type RotationParameters = { params_version: number; lookback: number; top_k: number; rebalance_every: number };
+type FrozenDefinition = { dsv: string; universe: string; venues?: string[]; strategy?: string;
+  parameter_space?: { list?: RotationParameters[]; grid?: Record<string, unknown> };
+  costs?: { commission_rate?: number; buy_slippage_bps?: number; sell_slippage_bps?: number; buy_tax_rate?: number; sell_tax_rate?: number };
+  fast_event?: { initial_cash?: string; minimum_commission?: string };
+  evaluation?: { start?: string; end?: string; warmup_sessions?: number };
+};
 type Frozen = {
-  definition: { dsv: string; universe: string; venues?: string[] };
+  definition: FrozenDefinition;
   engine: { kind: string; semantic_version: string };
   venues: string[];
   window: Window | null;
   pool: { id: string; version: number };
 };
+const rotationDefaults = { lookback: '60', topK: '1', frequency: '5' };
+const defaultSettings = { initial_cash: '1000000', commission_rate: '0.0003', minimum_commission: '5', buy_slippage_bps: '2', sell_slippage_bps: '2', buy_tax_rate: '0', sell_tax_rate: '0' };
 type CallError = Error & { code?: string; details?: unknown };
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } });
@@ -59,18 +68,23 @@ export default function PoolsPage() {
   const [versions, setVersions] = useState<Adjusted[]>([]);
   const [strategy, setStrategy] = useState<string>(() => saved().strategy ?? 'buy_and_hold');
   const [parameterText, setParameterText] = useState<string>(() => saved().parameterText ?? '{"list":[{"params_version":1}]}');
+  const [rotation, setRotation] = useState(() => ({ lookback: saved().lookback ?? rotationDefaults.lookback, topK: saved().topK ?? rotationDefaults.topK, frequency: saved().frequency ?? rotationDefaults.frequency }));
+  const [settings, setSettings] = useState(() => ({ ...defaultSettings, ...(saved().settings ?? {}) }));
+  const isRotation = strategy === 'pool_momentum_topk';
+  const rotationParameters: RotationParameters = { params_version: 1, lookback: Number(rotation.lookback), top_k: Number(rotation.topK), rebalance_every: Number(rotation.frequency) };
   const [plan, setPlan] = useState<{ key: string; data: Plan } | null>(null);
   const [frozen, setFrozen] = useState<Frozen | null>(null);
   const [submitError, setSubmitError] = useState<CallError | null>(null);
   let parameters: unknown;
-  try { parameters = JSON.parse(parameterText); } catch { parameters = null; }
-  const selection = { dsv, pool: { id, version }, strategy, adjusted, parameter_space: parameters };
+  try { parameters = isRotation ? { list: [rotationParameters] } : JSON.parse(parameterText); } catch { parameters = null; }
+  const selection = { dsv, pool: { id, version }, strategy, adjusted, parameter_space: parameters,
+    ...(isRotation ? { settings: { ...settings, commission_rate: Number(settings.commission_rate), buy_slippage_bps: Number(settings.buy_slippage_bps), sell_slippage_bps: Number(settings.sell_slippage_bps), buy_tax_rate: Number(settings.buy_tax_rate), sell_tax_rate: Number(settings.sell_tax_rate) } } : {}) };
   const selectionKey = JSON.stringify(selection);
   const currentPlan = plan?.key === selectionKey ? plan.data : null;
   useEffect(() => { setTask(''); setFrozen(null); setSubmitError(null); }, [selectionKey]);
   useEffect(() => {
-    localStorage.setItem('pool-selection@1', JSON.stringify({ id, version, dsv, adjusted, strategy, parameterText }));
-  }, [id, version, dsv, adjusted, strategy, parameterText]);
+    localStorage.setItem('pool-selection@1', JSON.stringify({ id, version, dsv, adjusted, strategy, parameterText, ...rotation, settings }));
+  }, [id, version, dsv, adjusted, strategy, parameterText, rotation, settings]);
   const pool = pools.find((p) => p.id === id);
   const published = pool?.versions.find((v) => v.version === version);
   const edited = text.split(/[\s,，]+/).filter(Boolean).sort();
@@ -113,7 +127,7 @@ export default function PoolsPage() {
     if (!currentPlan?.runnable) return;
     setBusy(true); setError(''); setTask(''); setFrozen(null); setSubmitError(null);
     try {
-      const result = await call<{ task: { task_id: string }; selection: Frozen }>('/api/v1/tasks/selections', { method: 'POST', body: JSON.stringify({ ...selection, idempotency_key: crypto.randomUUID(), expected_window: currentPlan.window, result_level: 'standard' }) });
+      const result = await call<{ task: { task_id: string }; selection: Frozen }>('/api/v1/tasks/selections', { method: 'POST', body: JSON.stringify({ ...selection, idempotency_key: crypto.randomUUID(), expected_window: currentPlan.window, result_level: isRotation ? 'full' : 'standard' }) });
       setTask(result.task.task_id);
       setFrozen(result.selection);
     } catch (e) { setSubmitError(e as CallError); }
@@ -149,10 +163,19 @@ export default function PoolsPage() {
           <option value="">请选择固定 adjusted version</option>{versions.filter((v) => v.instrument_id === member).map((v) => <option key={v.version} value={v.version}>{v.method_version} · {v.version}</option>)}
         </select><code>{adjusted[member] ?? '未绑定'}</code></label>)}
         <label>预检策略<select aria-label="预检策略" disabled={busy} value={strategy} onChange={(e) => { setStrategy(e.target.value); setParameterText(''); }}>
-          <option value="buy_and_hold">买入持有</option><option value="ma_crossover">均线交叉</option><option value="s2_rotation">轮动</option></select></label>
-        <label>参数组合 JSON<textarea aria-label="参数组合 JSON" disabled={busy} value={parameterText} onChange={(e) => setParameterText(e.target.value)} /></label>
-        {!parameters && <p>请输入有效参数列表或网格 JSON，预热由 Rust 校验。</p>}
-        <p>支持单交易所与沪深同池（XSHG+XSHE）；多 Venue 基线按 ADR 0027 使用 full_target，Rust 冻结真实 Venue 集合，不补日、不压缩日历，也不选单一 Venue。复权价仅作研究，原始价负责成交/估值，分红总回报未完整验证；默认模拟成本由 Rust 冻结。</p>
+          <option value="buy_and_hold">买入持有</option><option value="ma_crossover">均线交叉</option><option value="s2_rotation">轮动（旧多因子）</option><option value="pool_momentum_topk">池内动量 Top-K 轮动</option></select></label>
+        {isRotation ? <>
+          <p className="hint">按绑定复权收盘计算尾随动量，T 日收盘排名，下一可用 Session 开盘尝试成交；并列按 InstrumentId 升序，合格不足 K 按实际数量等权，零候选为全现金。受阻买腿资金留现金、不重分配；池内黄金仅被选中时持有。默认动量窗口 60、Top-K 1、每 5 Session 调仓，仅为可编辑模拟参数。</p>
+          <label>动量窗口（Session）<input aria-label="动量窗口" type="number" min="1" step="1" required value={rotation.lookback} onChange={e => setRotation({ ...rotation, lookback: e.target.value })} /></label>
+          <label>Top-K<input aria-label="Top-K" type="number" min="1" step="1" required value={rotation.topK} onChange={e => setRotation({ ...rotation, topK: e.target.value })} /></label>
+          <label>调仓频率（Session）<input aria-label="调仓频率" type="number" min="1" step="1" required value={rotation.frequency} onChange={e => setRotation({ ...rotation, frequency: e.target.value })} /></label>
+          {(Object.entries({ initial_cash: '本金（CNY）', commission_rate: '佣金率', minimum_commission: '最低佣金（CNY）', buy_slippage_bps: '买入滑点（bp）', sell_slippage_bps: '卖出滑点（bp）', buy_tax_rate: '买入税率', sell_tax_rate: '卖出税率' }) as [string, string][]).map(([key, label]) => <label key={key}>{label}<input aria-label={label} type="number" min={key === 'initial_cash' ? '0.00000001' : '0'} step="any" required value={settings[key]} onChange={e => setSettings({ ...settings, [key]: e.target.value })} /></label>)}
+          <p className="hint" data-testid="rotation-parameters">当前模板参数：动量窗口 {rotation.lookback} · Top-K {rotation.topK} · 调仓频率 {rotation.frequency} · 本金 {settings.initial_cash} CNY · 佣金率 {settings.commission_rate} · 最低佣金 {settings.minimum_commission} · 买/卖滑点 {settings.buy_slippage_bps}/{settings.sell_slippage_bps}bp · 买/卖税 {settings.buy_tax_rate}/{settings.sell_tax_rate}</p>
+        </> : <>
+          <label>参数组合 JSON<textarea aria-label="参数组合 JSON" disabled={busy} value={parameterText} onChange={(e) => setParameterText(e.target.value)} /></label>
+          {!parameters && <p>请输入有效参数列表或网格 JSON，预热由 Rust 校验。</p>}
+        </>}
+        <p>支持单交易所与沪深同池（XSHG+XSHE）；多 Venue 基线按 ADR 0027 使用 full_target，Rust 冻结真实 Venue 集合，不补日、不压缩日历，也不选单一 Venue。复权价仅作研究，原始价负责成交/估值，分红总回报未完整验证；模拟成本、参数与手数来源随冻结定义保存。</p>
         <button className="secondary" disabled={busy || !dsv || !published || !parameters} onClick={() => void preflight()}>预检共同窗口</button>
         {currentPlan && <div data-testid="pool-preflight" className={currentPlan.runnable ? 'notice' : 'blocked'}>
           <strong>{currentPlan.runnable ? '可运行' : '不可运行'}</strong>
@@ -177,6 +200,8 @@ export default function PoolsPage() {
           <p>输入池：{frozen.pool.id} v{frozen.pool.version} · Dataset：<code>{frozen.definition.dsv}</code></p>
           <p>Venue：{frozen.venues.join('、')} · 引擎：<code>{frozen.engine.semantic_version}</code>（{frozen.engine.kind}）</p>
           <p>Universe：<code>{frozen.definition.universe}</code>{frozen.window ? ` · 评价窗口：${frozen.window.start ?? 'Unknown'} ～ ${frozen.window.end ?? 'Unknown'}（预热 ${frozen.window.warmup_sessions} Sessions）` : ''}</p>
+          {(() => { const parameters = frozen.definition.parameter_space?.list?.[0]; const costs = frozen.definition.costs; if (frozen.definition.strategy !== 'pool_momentum_topk' || !parameters) return null;
+            return <p data-testid="frozen-rotation-parameters">冻结模板：池内动量 Top-K · 动量窗口 {parameters.lookback} · Top-K {parameters.top_k} · 调仓频率 {parameters.rebalance_every} · 本金 {frozen.definition.fast_event?.initial_cash} CNY · 佣金率 {costs?.commission_rate} · 最低佣金 {frozen.definition.fast_event?.minimum_commission} · 买/卖滑点 {costs?.buy_slippage_bps}/{costs?.sell_slippage_bps}bp · 买/卖税 {costs?.buy_tax_rate}/{costs?.sell_tax_rate}</p>; })()}
           <p>浏览器只展示 Rust 冻结与持久结果，不计算费用、净值或绩效。</p>
           {task && <p><a href={`/backtests?task=${encodeURIComponent(task)}`}>查看固定池任务</a></p>}
         </div>}

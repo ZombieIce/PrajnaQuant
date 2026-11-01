@@ -468,6 +468,19 @@ impl TopKRank {
         score_values: &DataFrame,
         sessions: &[PanelSession],
     ) -> Result<Vec<Decision>, EngineError> {
+        self.decide_validated_from(score_values, sessions, None)
+    }
+
+    /// Rank at each scheduled close, optionally anchored at an explicit Session.
+    ///
+    /// A frozen evaluation window passes its first Session so the cadence starts
+    /// there; otherwise the first Session with any available score anchors it.
+    pub(crate) fn decide_validated_from(
+        &self,
+        score_values: &DataFrame,
+        sessions: &[PanelSession],
+        start: Option<NaiveDate>,
+    ) -> Result<Vec<Decision>, EngineError> {
         if score_values.schema().as_ref() != &values_schema().polars {
             return Err(EngineError::InvalidScoreValues(
                 "input must use the Factor Values v1 schema".into(),
@@ -548,11 +561,24 @@ impl TopKRank {
             }
         }
 
-        let Some(first_decision_index) = scores_by_session
-            .iter()
-            .position(|scores| !scores.is_empty())
-        else {
-            return Ok(Vec::new());
+        let first_decision_index = match start {
+            Some(date) => sessions
+                .iter()
+                .position(|session| session.session_date == date)
+                .ok_or_else(|| {
+                    EngineError::InvalidSessions(format!(
+                        "explicit decision start {date} is not a Venue Session"
+                    ))
+                })?,
+            None => {
+                let Some(index) = scores_by_session
+                    .iter()
+                    .position(|scores| !scores.is_empty())
+                else {
+                    return Ok(Vec::new());
+                };
+                index
+            }
         };
         let rebalance_every = usize::try_from(self.rebalance_every)
             .map_err(|_| EngineError::InvalidRebalanceEvery)?;
@@ -619,6 +645,7 @@ pub enum VectorStrategy {
     BuyAndHold(BuyAndHoldParams),
     MaCrossover(MaCrossoverParams),
     SingleEtfTiming(crate::timing::TimingParams),
+    PoolMomentumTopK(crate::pool_momentum::PoolMomentumTopKParams),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -679,8 +706,16 @@ impl VectorStrategy {
             {
                 Ok(())
             }
+            VectorStrategy::PoolMomentumTopK(params)
+                if params.params_version == 1
+                    && params.lookback > 0
+                    && params.top_k > 0
+                    && params.rebalance_every > 0 =>
+            {
+                Ok(())
+            }
             _ => Err(EngineError::InvalidParameters(
-                "unsupported version or MA windows".into(),
+                "unsupported version or strategy windows".into(),
             )),
         }
     }
@@ -690,6 +725,7 @@ impl VectorStrategy {
             Self::BuyAndHold(_) => "buy_and_hold",
             Self::MaCrossover(_) => "ma_crossover",
             Self::SingleEtfTiming(_) => "single_etf_timing",
+            Self::PoolMomentumTopK(_) => "pool_momentum_topk",
         }
     }
 
@@ -699,6 +735,7 @@ impl VectorStrategy {
             Self::BuyAndHold(params) => params.params_version,
             Self::MaCrossover(params) => params.params_version,
             Self::SingleEtfTiming(params) => params.params_version,
+            Self::PoolMomentumTopK(params) => params.params_version,
         }
     }
 
@@ -706,7 +743,9 @@ impl VectorStrategy {
         match self {
             Self::TopKRank(params) => params.unfilled_entry,
             Self::BuyAndHold(_) => UnfilledEntry::Retry,
-            Self::MaCrossover(_) | Self::SingleEtfTiming(_) => UnfilledEntry::Skip,
+            Self::MaCrossover(_) | Self::SingleEtfTiming(_) | Self::PoolMomentumTopK(_) => {
+                UnfilledEntry::Skip
+            }
         }
     }
 
@@ -777,6 +816,9 @@ impl VectorStrategy {
             }
             Self::SingleEtfTiming(params) => {
                 crate::timing::decide(panel, members, params, assumption, None)
+            }
+            Self::PoolMomentumTopK(params) => {
+                crate::pool_momentum::decide(panel, members, params, assumption, None)
             }
         }
     }

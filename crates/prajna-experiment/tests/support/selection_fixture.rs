@@ -7,12 +7,33 @@ use prajna_data::{
     bars_from_record_batch, execution_status_to_record_batch, publish_dataset,
     session_calendar::CalendarStore, sessions_from_record_batch,
 };
-use prajna_domain::{InstrumentKind, Price, Quantity};
+use prajna_domain::{InstrumentId, InstrumentKind, Price, Quantity};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 const DAYS: [&str; 3] = ["2026-01-05", "2026-01-06", "2026-01-07"];
+
+/// `(native symbol, Venue, kind, lot size, price increment)` of the shared
+/// synthetic Dataset. Existing fixture identities keep this exact list.
+pub type Record<'a> = (&'a str, &'a str, InstrumentKind, &'a str, &'a str);
+const DEFAULT_RECORDS: [Record<'static>; 5] = [
+    ("510300", "XSHG", InstrumentKind::Etf, "100", "0.001"),
+    ("510880", "XSHG", InstrumentKind::Etf, "10", "0.01"),
+    ("159952", "XSHE", InstrumentKind::Etf, "100", "0.001"),
+    ("600519", "XSHG", InstrumentKind::Equity, "100", "0.001"),
+    ("000001", "XSHE", InstrumentKind::Equity, "100", "0.001"),
+];
+/// The three synthetic members used by the pool momentum rotation golden:
+/// two equity/dividend ETFs with different lot sizes plus one gold ETF.
+const ROTATION_RECORDS: [Record<'static>; 3] = [
+    ("510300", "XSHG", InstrumentKind::Etf, "100", "0.001"),
+    ("510880", "XSHG", InstrumentKind::Etf, "10", "0.01"),
+    ("518880", "XSHG", InstrumentKind::Etf, "100", "0.001"),
+];
 
 pub fn prepare(root: &Path, known_listing: bool) -> String {
     prepare_days(root, known_listing, &DAYS)
@@ -20,14 +41,41 @@ pub fn prepare(root: &Path, known_listing: bool) -> String {
 
 #[allow(dead_code)]
 pub fn prepare_days(root: &Path, known_listing: bool, days: &[&str]) -> String {
-    publish(root, known_listing, days, None, false)
+    publish(
+        root,
+        known_listing,
+        days,
+        None,
+        false,
+        &DEFAULT_RECORDS,
+        &BTreeSet::new(),
+    )
 }
 
 /// Same synthetic publication as `prepare_days`, with the test-only TRADABLE
 /// execution-status table used by executable pool/rotation fixtures.
 #[allow(dead_code)]
 pub fn prepare_executable_days(root: &Path, known_listing: bool, days: &[&str]) -> String {
-    publish(root, known_listing, days, None, true)
+    publish(
+        root,
+        known_listing,
+        days,
+        None,
+        true,
+        &DEFAULT_RECORDS,
+        &BTreeSet::new(),
+    )
+}
+
+/// Executable synthetic pool-rotation Dataset with an optional set of
+/// `(InstrumentId, Session)` HALTED execution-status rows.
+#[allow(dead_code)]
+pub fn prepare_rotation_days(root: &Path, days: &[&str], blocked: &[(&str, &str)]) -> String {
+    let blocked = blocked
+        .iter()
+        .map(|(instrument, date)| (instrument.parse().unwrap(), date.parse().unwrap()))
+        .collect::<BTreeSet<(InstrumentId, NaiveDate)>>();
+    publish(root, true, days, None, true, &ROTATION_RECORDS, &blocked)
 }
 
 /// Test-only wrapper around the production v1 Normalizer adding a synthetic TRADABLE status
@@ -35,6 +83,7 @@ pub fn prepare_executable_days(root: &Path, known_listing: bool, days: &[&str]) 
 struct ExecutableStatusNormalizer {
     base: CnStockEtfDaily,
     config: String,
+    blocked: BTreeSet<(InstrumentId, NaiveDate)>,
 }
 
 impl Normalizer for ExecutableStatusNormalizer {
@@ -80,28 +129,33 @@ impl Normalizer for ExecutableStatusNormalizer {
             .map_err(|error| reject(error.to_string()))?;
         let rows = bars
             .iter()
-            .map(|bar| ExecutionStatusRow {
-                instrument_id: bar.instrument_id().clone(),
-                session_date: bar.session_date(),
-                trade_status: "TRADABLE".into(),
-                is_tradable: true,
-                available_at: opens
-                    .get(&(
-                        bar.instrument_id().venue().as_str().to_owned(),
-                        bar.session_date(),
-                    ))
-                    .copied(),
-                source: "synthetic-pool-executable@1".into(),
+            .map(|bar| {
+                let key = (bar.instrument_id().clone(), bar.session_date());
+                let blocked = self.blocked.contains(&key);
+                ExecutionStatusRow {
+                    instrument_id: bar.instrument_id().clone(),
+                    session_date: bar.session_date(),
+                    trade_status: if blocked { "HALTED" } else { "TRADABLE" }.into(),
+                    is_tradable: !blocked,
+                    available_at: opens
+                        .get(&(
+                            bar.instrument_id().venue().as_str().to_owned(),
+                            bar.session_date(),
+                        ))
+                        .copied(),
+                    source: "synthetic-pool-executable@1".into(),
+                }
             })
             .collect::<Vec<_>>();
         output.tables.execution_status =
             Some(execution_status_to_record_batch(&rows).map_err(|e| reject(e.to_string()))?);
         output.coverage["execution_status"] = json!({
-            "basis": "synthetic; every Bar TRADABLE at its Session open",
+            "basis": "synthetic; Bars TRADABLE except explicitly blocked HALTED rows",
             "rows": rows.len(),
+            "blocked_rows": self.blocked.len(),
         });
         output.synthetic_assumptions.push(
-            "synthetic execution status marks every Bar TRADABLE; not a halt, limit or real-source analysis".into(),
+            "synthetic execution status marks Bars TRADABLE except explicit HALTED test rows; not a real-source halt analysis".into(),
         );
         Ok(output)
     }
@@ -116,6 +170,8 @@ fn publish(
     days: &[&str],
     missing_xsse_session: Option<&str>,
     executable: bool,
+    records: &[Record<'_>],
+    blocked: &BTreeSet<(InstrumentId, NaiveDate)>,
 ) -> String {
     let venue_days = |venue: &str| {
         days.iter()
@@ -134,13 +190,6 @@ fn publish(
         .import_json(&serde_json::to_vec(&calendar).unwrap())
         .unwrap();
     let evidence = SecurityEvidenceStore::open(root).unwrap();
-    let records = [
-        ("510300", "XSHG", InstrumentKind::Etf),
-        ("510880", "XSHG", InstrumentKind::Etf),
-        ("159952", "XSHE", InstrumentKind::Etf),
-        ("600519", "XSHG", InstrumentKind::Equity),
-        ("000001", "XSHE", InstrumentKind::Equity),
-    ];
     let source = EvidenceSource {
         source_id: "synthetic".into(),
         source_version: "1".into(),
@@ -150,7 +199,7 @@ fn publish(
         effective_to_exclusive: None,
     };
     let mut selections = Vec::new();
-    for (symbol, venue, kind) in records {
+    for &(symbol, venue, kind, lot, price_increment) in records {
         let record = SecurityEvidenceRecord {
             instrument_id: format!("{symbol}.{venue}").parse().unwrap(),
             kind,
@@ -170,11 +219,11 @@ fn publish(
                 }
             },
             lot_size: FieldEvidence::Known {
-                value: Quantity::parse(if symbol == "510880" { "10" } else { "100" }).unwrap(),
+                value: Quantity::parse(lot).unwrap(),
                 source: source.clone(),
             },
             price_increment: FieldEvidence::Known {
-                value: Price::parse(if symbol == "510880" { "0.01" } else { "0.001" }).unwrap(),
+                value: Price::parse(price_increment).unwrap(),
                 source: source.clone(),
             },
             size_increment: FieldEvidence::Known {
@@ -214,7 +263,7 @@ fn publish(
             json!({}),
         ),
     ];
-    for (symbol, venue, _) in records {
+    for &(symbol, venue, _, _, _) in records {
         let native = format!("{}{symbol}", if venue == "XSHG" { "sh" } else { "sz" });
         let body = json!({"code":0,"data":{native:{"day":venue_days(venue).iter().map(|day|json!([day,"10","10","11","9","100"])).collect::<Vec<_>>()}}});
         hashes.push(put(&serde_json::to_vec(&body).unwrap(),"tencent_fqkline_daily",
@@ -233,7 +282,11 @@ fn publish(
             )
         );
         let mut registry = NormalizerRegistry::new();
-        assert!(registry.register(ExecutableStatusNormalizer { base, config }));
+        assert!(registry.register(ExecutableStatusNormalizer {
+            base,
+            config,
+            blocked: blocked.clone(),
+        }));
         (registry, "synthetic-pool-executable@1")
     } else {
         (
@@ -262,7 +315,15 @@ pub fn prepare_executable_multi_venue(
     known_listing: bool,
     missing_xshe_session: Option<&str>,
 ) -> (String, BTreeMap<String, String>) {
-    let dsv = publish(root, known_listing, &DAYS, missing_xshe_session, true);
+    let dsv = publish(
+        root,
+        known_listing,
+        &DAYS,
+        missing_xshe_session,
+        true,
+        &DEFAULT_RECORDS,
+        &BTreeSet::new(),
+    );
     let xsse_days = DAYS
         .iter()
         .copied()
@@ -360,8 +421,19 @@ pub fn prepare_with_adjusted(
 #[allow(dead_code)]
 /// Explicit synthetic adjusted closes, independent from the raw trading prices.
 pub fn import_closes(root: &Path, dsv: &str, dates: &[&str], closes: &[&str]) -> String {
+    import_closes_for(root, dsv, "510300.XSHG", dates, closes)
+}
+
+#[allow(dead_code)]
+pub fn import_closes_for(
+    root: &Path,
+    dsv: &str,
+    instrument: &str,
+    dates: &[&str],
+    closes: &[&str],
+) -> String {
     assert_eq!(dates.len(), closes.len());
-    let input = json!({"schema_version":1,"raw_dsv":dsv,"instrument_id":"510300.XSHG",
+    let input = json!({"schema_version":1,"raw_dsv":dsv,"instrument_id":instrument,
         "method":"forward","method_version":"synthetic-timing@1",
         "source":{"source_id":"synthetic","source_version":"1","source_ref":"timing-fixture"},
         "observed_at":"2026-10-28T00:00:00Z","retrospective_assumption":"Synthetic retrospective history, not strict PIT",

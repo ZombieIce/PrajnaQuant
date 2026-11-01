@@ -506,6 +506,15 @@ impl Experiment {
                     "single_etf_timing requires one ETF, bound adjusted inputs/evaluation and Vector or Fast Event",
                 ));
             }
+            if input.strategy == "pool_momentum_topk"
+                && (research.0.is_empty()
+                    || research.1.is_none()
+                    || input.engine == "accurate_event")
+            {
+                return Err(invalid(
+                    "pool_momentum_topk requires bound adjusted inputs/evaluation for every member and Vector or Fast Event",
+                ));
+            }
             if input.strategy == "single_etf_timing" {
                 let preview = prajna_data::dataset_preview::show(lake_root.as_ref(), &input.dsv)
                     .map_err(|e| invalid(e.to_string()))?;
@@ -577,18 +586,23 @@ impl Experiment {
             adjusted_versions,
             evaluation,
         };
-        if experiment.strategy_kind == "single_etf_timing" {
+        if matches!(
+            experiment.strategy_kind.as_str(),
+            "single_etf_timing" | "pool_momentum_topk"
+        ) {
             let planned = experiment.plan(lake_root.as_ref())?;
             if !planned.runnable {
                 return Err(invalid(format!(
-                    "single_etf_timing readiness: {}",
+                    "{} readiness: {}",
+                    experiment.strategy_kind,
                     planned.block_message()
                 )));
             }
             if planned.evaluation() != experiment.evaluation.as_ref().map(Evaluation::to_json) {
-                return Err(invalid(
-                    "single_etf_timing readiness: frozen evaluation does not match all parameter windows and adjusted coverage",
-                ));
+                return Err(invalid(format!(
+                    "{} readiness: frozen evaluation does not match all parameter windows and adjusted coverage",
+                    experiment.strategy_kind
+                )));
             }
         }
         Ok(experiment)
@@ -1111,8 +1125,11 @@ impl Experiment {
         factor_values.extend(score_values);
         let factor_time_ms = factor_started.elapsed().as_millis();
 
-        let research_panel = if self.strategy_kind == "single_etf_timing" {
-            Some(timing::research_panel(self, lake_root, &panel)?)
+        let research_panel = if matches!(
+            self.strategy_kind.as_str(),
+            "single_etf_timing" | "pool_momentum_topk"
+        ) {
+            Some(adjusted::research_panel(self, lake_root, &panel)?)
         } else {
             None
         };
@@ -3135,4 +3152,4 @@ mod tests {
 
 pub mod momentum;
 
-mod timing;
+mod adjusted;

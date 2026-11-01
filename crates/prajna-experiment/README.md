@@ -223,7 +223,7 @@ cargo test -p prajna-experiment --locked --offline
 ## Fast Event 与三种策略（MVP-3）
 
 `engine` 接受 `vector` / `fast_event` / `accurate_event`（语义版本 `vector@1` / `fast_event@1` / `accurate_event@1`）。
-`strategy` 接受 `s2_rotation`（TopKRank）、`buy_and_hold`、`ma_crossover`。
+`strategy` 接受 `s2_rotation`（TopKRank）、`buy_and_hold`、`ma_crossover`、`single_etf_timing` 与 `pool_momentum_topk`（后者见下文模板小节）。
 定义解析还接受 Python 策略引用字符串 `strategy_id@version`（两部分非空，
 无空白或额外 `@`），参数为任意 JSON object，仍使用 Grid/List。
 Rust `Experiment::run_definitions` 可在不执行策略时返回排序去重的 Run Spec/ID，
@@ -414,6 +414,13 @@ fake 的原生账户显式为 unavailable，不伪造原生快照。
 `ma_window`、`rebalance_every`；显式绑定复权版本并冻结评价窗口，页面可配置成本。
 信号复用严格趋势因子，原始成交账本不变；见[模板契约](../../docs/single-etf-timing.md)。
 
+池内动量 Top-K 轮动：`pool_momentum_topk` 的 version 1 参数为 `params_version`、
+`lookback`、`top_k`、`rebalance_every`；显式绑定逐成员复权版本并冻结共同评价
+窗口，调仓周期锚定评价起点。复用现有 Momentum 因子与 TopKRank 排序/执行：
+并列按 InstrumentId 升序，合格不足 K 按实际数量等权，零候选为全现金；受阻买腿
+留现金，黄金只在入选时持有。池页面可配置参数/成本并使用 Full 审计级别；见
+[模板契约](../../docs/pool-momentum-topk.md)。
+
 ### MVP-7 固定事实总回报账本
 
 冻结选择与原生 Experiment 定义可带 `corporate_actions: {"version":"caf:sha256:HEX",
@@ -454,7 +461,7 @@ Standard 为此新路径保存 orders/fills/费用及行动/现金/权益，尝�
 复用 `prajna-freeze-selection` 的策略冻结，再在 Rust 中派生对应 `holding_benchmark@1`：
 
 - `single_etf_timing` → `single_etf` 同证券买入持有；
-- 单 Venue `s2_rotation` → `equal_weight_pool` 冻结池期初等权持有；
+- 单 Venue `s2_rotation` 或 `pool_momentum_topk` → `equal_weight_pool` 冻结池期初等权持有；
 - 其他模板、多参数、多 Venue、Vector/Accurate/PIT、缺公司行动/窗口/复权版本拒绝。
 
 基准定义复制策略的 DSV、Universe、真实 Venue、成本、本金、最低佣金、可用性假设、

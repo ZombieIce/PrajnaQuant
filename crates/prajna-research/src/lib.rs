@@ -34,4 +34,5 @@ pub mod mvp6_coverage;
 pub mod pit_strategy;
 pub mod terminal_settlement;
 
+pub mod pool_momentum;
 pub mod timing;

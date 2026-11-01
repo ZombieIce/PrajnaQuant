@@ -75,11 +75,14 @@ impl Engine {
         }
         self.validate_mode(strategy.kind())?;
         if matches!(self, Self::AccurateEvent { .. })
-            && matches!(strategy, VectorStrategy::SingleEtfTiming(_))
+            && matches!(
+                strategy,
+                VectorStrategy::SingleEtfTiming(_) | VectorStrategy::PoolMomentumTopK(_)
+            )
         {
             return Err(self.reject(
                 strategy.kind(),
-                "single_etf_timing supports Vector/Fast Event only",
+                "this template supports Vector/Fast Event only",
             ));
         }
         if let VectorStrategy::TopKRank(params) = strategy {

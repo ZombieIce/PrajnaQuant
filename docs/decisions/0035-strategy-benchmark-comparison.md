@@ -1,6 +1,6 @@
 # ADR 0035：冻结策略—基准对照
 
-- 状态：Accepted，2026-10-30；#375，消费 ADR 0031/0033/0034。
+- 状态：Accepted，2026-10-30；#375，消费 ADR 0031/0033/0034；2026-11-01 #304 扩展 `pool_momentum_topk`，不改变既有角色/任务/结果身份。
 - 范围：本机产品入口、持久对照任务、只读对照结果与页面；不新增账户、绩效或执行核心。
 
 ## 冻结与身份
@@ -9,9 +9,11 @@
 （`adjusted_versions` + `evaluation` + `corporate_actions`），Rust `comparison::freeze`
 再复制同一 DSV/Universe/Venue/成本/本金/可用性/复权/窗口/行动版本并改写为
 `buy_and_hold + holding-benchmark@1`，保存显式再投资日历。支持 `single_etf_timing`
-（恰一 ETF → `single_etf`）与单 Venue `s2_rotation`（冻结池 → `equal_weight_pool`）。
-冻结策略必须恰展开一个 Run；多参数、多 Venue、Vector/Accurate/PIT、缺公司行动/
-窗口/复权版本或已带 `holding_benchmark` 的定义拒绝，浏览器不能提供任意基准定义。
+（恰一 ETF → `single_etf`）、单 Venue `s2_rotation` 与单 Venue
+`pool_momentum_topk`（冻结池 → `equal_weight_pool`）；后者于 #304 接入，复用其
+冻结窗口与调仓 Decision 日历。冻结策略必须恰展开一个 Run；多参数、多 Venue、
+Vector/Accurate/PIT、缺公司行动/窗口/复权版本或已带 `holding_benchmark` 的定义
+拒绝，浏览器不能提供任意基准定义。
 
 `comparison.json` 是任务请求定义，保存两个角色、各自 `definition`、预期
 `experiment`/`run` 身份、`semantic_version` 与 `comparability`。任务 `request_sha256`
@@ -36,10 +38,13 @@ lot/size/price 规则和收益口径；任一项不一致即拒绝冻结或读�
 缺此版本的旧比较仍展示权威结果，但 `comparable=false` 并列出
 `comparison:effective_rules_calendar_unverified`，不得追认旧可比结论。
 
-再投资日历在运行前声明并保存：`strategy_rebalance` 从冻结策略 Run 的
-完整研究面板评分与执行器 `windowed_decisions` 复用实际 Decision close 序列，
-保留首个可评分 Session 的周期锚点，再过滤评价窗口；不把共同评价起点当成轮动
-周期锚点。择时同样复用绑定复权面板与实际 Decision（缺失信号不虚构日期）。
+再投资日历在运行前声明并保存：`strategy_rebalance` 从冻结策略的
+`windowed_decisions` 复用实际 Decision close 序列，再过滤评价窗口，不以运行期
+latest/重算替换冻结日历。对 `s2_rotation`，完整研究面板评分保留首个可评分
+Session 的周期锚点，不把共同评价起点当成轮动周期锚点；对 entry-anchored 的
+`single_etf_timing` 与 `pool_momentum_topk`，调仓周期锚定冻结评价起点
+（ADR 0031 amendment），首个评价起点 Decision 为建仓决策，不进入再投资日历。
+缺失信号不虚构日期。
 评价起点已有独立期初建仓 Decision，再投资日历只保存其后的实际决策日，作为 #374 的
 normal decision closes，下一 Session open 只分配当时可用现金；发放前应收不可花，
 已有持仓不卖出恢复权重。`none` 显式空日历，分红留现金。页面/API 必须显式选择。
