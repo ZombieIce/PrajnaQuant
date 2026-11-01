@@ -51,10 +51,12 @@ fn save_diagnostic(root: &Path, error: &str) -> std::io::Result<()> {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
-    let mode = args.next().ok_or("expected publish or rebuild")?;
+    let mode = args
+        .next()
+        .ok_or("expected publish, pool, rebuild or rebuild-pool")?;
     if mode == "--help" || mode == "-h" {
         println!(
-            "Usage: prajna-publish-daily <publish|rebuild> --root <LOCAL> --receipt <RELATIVE_JSON> --diagnostics <LOCAL> [--selection <LOCAL_JSON>]"
+            "Usage: prajna-publish-daily <publish|pool|rebuild|rebuild-pool> --root <LOCAL> --receipt <RELATIVE_JSON> --diagnostics <LOCAL> [--selection <LOCAL_JSON>]"
         );
         return Ok(());
     }
@@ -74,6 +76,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .get("--diagnostics")
         .ok_or("independent local diagnostics directory is required")?;
     match mode.as_str() {
+        "pool" => {
+            let selection = serde_json::from_slice(&fs::read(
+                options.get("--selection").ok_or("selection is required")?,
+            )?)?;
+            prajna_data::pool_publish::publish(root, &selection, receipt)?;
+        }
+        "rebuild-pool" if !options.contains_key("--selection") => {
+            prajna_data::pool_publish::rebuild_receipt(root, receipt)?;
+        }
         "publish" => {
             let selection: DailyPublicationSelection = serde_json::from_slice(&fs::read(
                 options.get("--selection").ok_or("selection is required")?,

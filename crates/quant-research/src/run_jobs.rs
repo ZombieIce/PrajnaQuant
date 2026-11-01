@@ -39,6 +39,8 @@ use uuid::Uuid;
 mod comparison_api;
 #[path = "momentum_api.rs"]
 mod momentum_api;
+#[path = "pool_update_api.rs"]
+mod pool_update_api;
 #[path = "selection_api.rs"]
 mod selection_api;
 
@@ -361,7 +363,10 @@ impl RunJobApi {
             };
             if !matches!(
                 task.task_type.as_str(),
-                EXPERIMENT_TASK_TYPE | COMPARISON_TASK_TYPE | "prajna_momentum"
+                EXPERIMENT_TASK_TYPE
+                    | COMPARISON_TASK_TYPE
+                    | "prajna_momentum"
+                    | "prajna_pool_update"
             ) || task.task_version != EXPERIMENT_TASK_VERSION
             {
                 continue;
@@ -891,7 +896,9 @@ impl RunJobApi {
                 QueueItem::ExperimentTask(id) => {
                     let task = store.tasks.get_mut(&id).expect("queued experiment task");
                     task.status = ExperimentTaskStatus::Running;
-                    task.stage = if task.task_type == "prajna_momentum" {
+                    task.stage = if task.task_type == "prajna_pool_update" {
+                        "starting_pool_update_cli"
+                    } else if task.task_type == "prajna_momentum" {
                         "starting_momentum_cli"
                     } else {
                         "starting_experiment_cli"
@@ -987,7 +994,10 @@ impl RunJobApi {
             ));
         }
 
-        if task.task_type == "prajna_momentum" {
+        if matches!(
+            task.task_type.as_str(),
+            "prajna_momentum" | "prajna_pool_update"
+        ) {
             return self.execute_experiment_cli(
                 task,
                 &directory,
@@ -1057,7 +1067,11 @@ impl RunJobApi {
         let stdout = fs::File::create(&stdout_path)
             .map_err(|error| run_error("task_output_create_failed", &error.to_string()))?;
         let process_generation = Uuid::new_v4();
-        let cli = if task.task_type == "prajna_momentum" {
+        let cli = if task.task_type == "prajna_pool_update" {
+            std::env::var_os("PRAJNA_POOL_UPDATE_CLI")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| self.0.experiment_cli.with_file_name("prajna-pool-update"))
+        } else if task.task_type == "prajna_momentum" {
             std::env::var_os("PRAJNA_MOMENTUM_CLI")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| self.0.experiment_cli.with_file_name("prajna-momentum"))
@@ -1118,7 +1132,10 @@ impl RunJobApi {
         self.set_experiment_process_group(task.task_id, None, None)?;
         let stderr = stderr?;
         if let Some(error) = experiment_cli_error(&wait.status, &stderr) {
-            if task.task_type == "prajna_momentum" {
+            if matches!(
+                task.task_type.as_str(),
+                "prajna_momentum" | "prajna_pool_update"
+            ) {
                 if let Ok(bytes) = fs::read(&stdout_path) {
                     if let Ok(envelope) = serde_json::from_slice::<Value>(&bytes) {
                         if let (Some(code), Some(message)) = (
@@ -1136,7 +1153,26 @@ impl RunJobApi {
             .map_err(|error| run_error("experiment_cli_output_missing", &error.to_string()))?;
         let mut result: Value = serde_json::from_slice(&bytes)
             .map_err(|error| run_error("experiment_cli_output_invalid", &error.to_string()))?;
-        if task.task_type == "prajna_momentum" {
+        if task.task_type == "prajna_pool_update" {
+            let id = result["data"]["attempt"]["id"].as_str().ok_or_else(|| {
+                run_error(
+                    "pool_update_result_missing",
+                    "update CLI did not return a persisted attempt",
+                )
+            })?;
+            let request = read_experiment_request(directory).ok_or_else(|| {
+                run_error("task_request_missing", "missing frozen update request")
+            })?;
+            if request.definition["attempt"] != id
+                || !result["data"]["attempt"]["price_ready"].is_boolean()
+            {
+                return Err(run_error(
+                    "pool_update_result_mismatch",
+                    "update result differs from the frozen request",
+                ));
+            }
+            result = json!({"attempt":id,"price_ready":result["data"]["attempt"]["price_ready"]});
+        } else if task.task_type == "prajna_momentum" {
             let id = result["data"]["id"].as_str().ok_or_else(|| {
                 run_error(
                     "momentum_result_missing",
@@ -1177,14 +1213,18 @@ impl RunJobApi {
         task.process_group_id = process_group_id;
         task.process_group_generation = process_group_generation;
         task.stage = if process_group_id.is_some() {
-            if task.task_type == "prajna_momentum" {
+            if task.task_type == "prajna_pool_update" {
+                "running_pool_update_cli"
+            } else if task.task_type == "prajna_momentum" {
                 "running_momentum_cli"
             } else {
                 "running_experiment_cli"
             }
             .into()
         } else {
-            if task.task_type == "prajna_momentum" {
+            if task.task_type == "prajna_pool_update" {
+                "reading_pool_update_result"
+            } else if task.task_type == "prajna_momentum" {
                 "reading_momentum_report"
             } else {
                 "reading_experiment_result"
@@ -1312,6 +1352,15 @@ async fn submit_experiment_task(
     State(api): State<RunJobApi>,
     Json(request): Json<SubmitExperimentTask>,
 ) -> Response {
+    if task_type(&request.definition) == "prajna_pool_update" {
+        return ApiFailure::new(
+            StatusCode::BAD_REQUEST,
+            "pool_update_requires_local_route",
+            "Use the origin-checked pool update route to freeze and enqueue inputs.",
+            Value::Null,
+        )
+        .into_response();
+    }
     match api.submit_experiment_task(request) {
         Ok((task, created)) => (
             if created {
@@ -1609,7 +1658,9 @@ fn validate_experiment_task_request(request: &SubmitExperimentTask) -> Result<()
     Ok(())
 }
 fn task_type(definition: &Value) -> &'static str {
-    if definition["op"] == "submit" {
+    if definition["op"] == "pool_update" {
+        "prajna_pool_update"
+    } else if definition["op"] == "submit" {
         "prajna_momentum"
     } else {
         EXPERIMENT_TASK_TYPE
@@ -3508,6 +3559,74 @@ mod tests {
         let restored = api.get_experiment_task(failed.task_id).unwrap();
         assert!(matches!(restored.status, ExperimentTaskStatus::Failed));
         assert_eq!(restored.error.unwrap().code, "invalid_momentum");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pool_update_queue_identity_restart_and_local_route_boundary() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let cli = directory.path().join("prajna-pool-update");
+        fs::write(&cli,"#!/bin/sh\nprintf '%s\\n' '{\"schema_version\":1,\"data\":{\"attempt\":{\"id\":\"synthetic-attempt\",\"price_ready\":false}}}'\n").unwrap();
+        fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
+        let api = RunJobApi::without_worker(
+            directory.path().join("lake"),
+            Arc::new(UniverseStore::new(directory.path())),
+            directory.path().join("prajna-experiment"),
+        );
+        let request = SubmitExperimentTask {
+            idempotency_key: "update-key".into(),
+            definition: json!({"op":"pool_update","attempt":"synthetic-attempt"}),
+            result_level: None,
+        };
+        let (status, _) = api_json(
+            &api,
+            "POST",
+            "/api/v1/tasks/experiments",
+            Some(serde_json::to_value(&request).unwrap()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (task, created) = api.submit_experiment_task(request.clone()).unwrap();
+        assert!(created);
+        assert_eq!(task.task_type, "prajna_pool_update");
+        assert_eq!(
+            api.submit_experiment_task(request).unwrap().0.task_id,
+            task.task_id
+        );
+        assert!(api.process_next_queued());
+        let done = api.get_experiment_task(task.task_id).unwrap();
+        assert!(matches!(done.status, ExperimentTaskStatus::Succeeded));
+        assert_eq!(
+            done.result,
+            Some(json!({"attempt":"synthetic-attempt","price_ready":false}))
+        );
+        api.recover();
+        assert_eq!(
+            api.get_experiment_task(task.task_id).unwrap().result,
+            done.result
+        );
+        let (pending, _) = api
+            .submit_experiment_task(SubmitExperimentTask {
+                idempotency_key: "interrupted-update".into(),
+                definition: json!({"op":"pool_update","attempt":"another-attempt"}),
+                result_level: None,
+            })
+            .unwrap();
+        let restarted = RunJobApi::without_worker(
+            api.0.output.clone(),
+            api.0.universes.clone(),
+            api.0.experiment_cli.clone(),
+        );
+        restarted.recover();
+        assert!(matches!(
+            restarted
+                .get_experiment_task(pending.task_id)
+                .unwrap()
+                .status,
+            ExperimentTaskStatus::Interrupted
+        ));
+        assert!(restarted.0.gate.lock().unwrap().queue.is_empty());
     }
 
     fn fixture() -> (RunJobApi, SubmitRun, tempfile::TempDir) {

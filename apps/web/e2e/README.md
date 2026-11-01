@@ -62,12 +62,17 @@ The Playwright webServer performs these steps, all from this checkout:
    holds two fixed fact versions. The fixture covers XSHG/XSHE stock and ETF
    securities and all four scoped states, including a dividend with an exact
    amount, a split, and an event missing its amount and availability.
-6. Check the real `prajna-experiment --help`, bind it through
+6. Explicitly execute `prajna-experiment`'s ignored `export_pool_update_fixture`
+   to write two synthetic per-member collector/evidence/supplier inputs without
+   changing the preset pool registry. `updates.spec.ts` selects those inputs and
+   exercises the real `prajna-pool-update` and production pool Normalizer; this
+   new scenario does not use the older test-only multi-Venue publisher wrapper.
+7. Check the real `prajna-experiment --help`, bind it through
    `PRAJNA_EXPERIMENT_CLI`, bind `PRAJNA_DATASET_PREVIEW_CLI` and
-   `PRAJNA_SELECTION_CLI`, and launch `quant-research serve` with explicit dist,
+   `PRAJNA_SELECTION_CLI` and `PRAJNA_POOL_UPDATE_CLI`, and launch `quant-research serve` with explicit dist,
    market directory and one synthetic lake used as both `--dataset-root` and
    `--output` (T04b rejects different canonical roots).
-7. Wait for real `/api/v1/health`, then operate `/datasets` and `/backtests` in
+8. Wait for real `/api/v1/health`, then operate `/datasets`, `/pools` and `/backtests` in
    Chromium. Requests go to production API → CLI → published Parquet/manifest,
    persisted fact versions and task/result files. No success responses or
    production endpoints are mocked or added for testing.

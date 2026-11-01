@@ -20,7 +20,7 @@ use crate::{
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 /// All stores and versions are operator-selected; paths are never used on rebuild.
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DailyPublicationSelection {
     pub raw_root: String,
@@ -38,20 +38,20 @@ pub struct DailyPublicationSelection {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Recipe {
-    schema_version: u32,
-    normalizer_id: String,
-    normalizer_version: String,
-    calendar_version: String,
-    security_snapshot: String,
-    report_sha256: String,
-    raw_sha256s: Vec<String>,
+pub(crate) struct Recipe {
+    pub(crate) schema_version: u32,
+    pub(crate) normalizer_id: String,
+    pub(crate) normalizer_version: String,
+    pub(crate) calendar_version: String,
+    pub(crate) security_snapshot: String,
+    pub(crate) report_sha256: String,
+    pub(crate) raw_sha256s: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    status_snapshot: Option<String>,
+    pub(crate) status_snapshot: Option<String>,
 }
 
 /// Local receipt binds the frozen production inputs to the Dataset commit marker.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DailyPublicationReceipt {
     pub recipe_sha256: String,
@@ -66,7 +66,7 @@ fn require(condition: bool, reason: &'static str) -> Result<()> {
     }
 }
 
-fn registry(recipe: &Recipe) -> Result<NormalizerRegistry> {
+pub(crate) fn registry(recipe: &Recipe) -> Result<NormalizerRegistry> {
     let calendar = CalendarVersionId::parse(&recipe.calendar_version)?;
     let security = SecuritySnapshotId::parse(&recipe.security_snapshot)?;
     require(
@@ -90,7 +90,7 @@ fn registry(recipe: &Recipe) -> Result<NormalizerRegistry> {
     }
 }
 
-fn put(store: &RawStore, bytes: &[u8], source_id: &str) -> Result<String> {
+pub(crate) fn put(store: &RawStore, bytes: &[u8], source_id: &str) -> Result<String> {
     Ok(store.put(
         bytes,
         SourceRecordInput {
@@ -397,7 +397,7 @@ pub fn publish_daily(
     Ok(manifest)
 }
 
-fn check_tree(path: &Path) -> Result<()> {
+pub(crate) fn check_tree(path: &Path) -> Result<()> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => {
             require(
@@ -421,7 +421,15 @@ pub fn rebuild_daily(root: &Path, receipt_name: &Path) -> Result<()> {
     let root = validate_raw_root(root, &default_mvp6_root())?;
     let receipt: DailyPublicationReceipt =
         serde_json::from_slice(&fs::read(checked_output_path(&root, receipt_name)?)?)?;
-    let raw = RawStore::open(&root)?;
+    verify_receipt(&root, &receipt)?;
+    Ok(())
+}
+
+pub(crate) fn verify_receipt(
+    root: &Path,
+    receipt: &DailyPublicationReceipt,
+) -> Result<(Recipe, Vec<String>)> {
+    let raw = RawStore::open(root)?;
     let recipe: Recipe = serde_json::from_slice(&raw.get(&receipt.recipe_sha256)?)?;
     let registry = registry(&recipe)?;
     let report: DailyRawReport = serde_json::from_slice(&raw.get(&recipe.report_sha256)?)?;
@@ -430,7 +438,7 @@ pub fn rebuild_daily(root: &Path, receipt_name: &Path) -> Result<()> {
         serde_json::from_slice(&raw.get(&recipe.security_snapshot)?)?;
     snapshot.validate()?;
     validate(&report, &recipe, &calendar, &snapshot, &raw)?;
-    let manifest = read_manifest(&root, &receipt.dsv)?;
+    let manifest = read_manifest(root, &receipt.dsv)?;
     let mut inputs = recipe.raw_sha256s.clone();
     inputs.extend([
         recipe.calendar_version.clone(),
@@ -451,5 +459,31 @@ pub fn rebuild_daily(root: &Path, receipt_name: &Path) -> Result<()> {
         "receipt recipe does not match Dataset inputs",
     )?;
     rebuild_dataset(&raw, &registry, &manifest)?;
-    Ok(())
+    Ok((recipe, inputs))
+}
+
+/// Checks a reused successful member against its original fixed update scope.
+pub fn verify_selection_scope(
+    root: &Path,
+    receipt: &DailyPublicationReceipt,
+    selection: &DailyPublicationSelection,
+    instrument: &str,
+    start: NaiveDate,
+    end: NaiveDate,
+) -> Result<()> {
+    let (recipe, _) = verify_receipt(root, receipt)?;
+    let report: DailyRawReport =
+        serde_json::from_slice(&RawStore::open(root)?.get(&recipe.report_sha256)?)?;
+    report.validate_consistency()?;
+    require(
+        recipe.normalizer_id == selection.normalizer_id
+            && recipe.normalizer_version == selection.normalizer_version
+            && recipe.calendar_version == selection.calendar_version
+            && recipe.security_snapshot == selection.security_snapshot
+            && recipe.status_snapshot == selection.status_snapshot
+            && report.instrument_id == instrument
+            && report.requested_range.start == start
+            && report.requested_range.end == end,
+        "reused member does not match the fixed update plan",
+    )
 }

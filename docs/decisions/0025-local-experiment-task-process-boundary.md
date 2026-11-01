@@ -34,6 +34,15 @@ MVP-7 的本机研究任务需要复用既有数据、因子与 Experiment 能�
 
 `GET/POST /api/v1/research-pools` 复用子进程边界调用 `prajna-pools`，本机 Host/Origin/no-store 与 Dataset 路由一致；新平台 CLI 拥有池发布、既有 StaticUniverse 身份及本机持久化，旧服务只适配命令/envelope。冻结选择可显式引用已发布池版本，原单证券身份与旧 UUID Universe 不变；范围与错误见[研究池契约](../contracts/research-pools.md)。
 
+## 固定池更新适配（#313）
+
+`GET/POST /api/v1/pool-updates` 调用 `prajna-pool-update` 冻结输入，再以
+`prajna_pool_update@1` 复用同一串行队列、过程组清理和 interrupted 恢复。
+此类型只经本机 Host/Origin 受限入口提交，通用 permissive task POST 拒绝绕过；
+结果身份为固定 attempt 而非 exp/exe，旧实验类型及结果身份不变。
+更新尝试不等待用户补文件，任务执行成功仍可对应 needs_input；
+生产装配、供应商输入及显式补跑见 [ADR 0038](0038-fixed-pool-production-update.md)。
+
 ## 后果与限制
 
 此边界默认执行并读取 Summary 结果，显式请求 Standard 时会提升已有 Summary Execution；不把新平台核心编译进旧服务，也不修改已有 Experiment 身份或结果表内容（提升会按已有的显式能力补写明细；manifest 的默认级别不改变）。结果读取验证所有已保存表 hash，并由 T21 扩展返回已保存 orders/fills/费用/权重/pending 等原生明细与 Rust 估值权重投影，不提供分页或按需提升；T01 尚不提供 HTTP 取消或重试端点。持久过程组身份与清理原语为后续取消路径提供服务端能力。进程检查与 CLI 诊断验证使用合成输入，不证明真实行情、策略收益或完整 MVP-7 产品流程；受限沙箱可能无法检查或终止子进程组，此时实现拒绝清理并明确报告未验证的所有权。

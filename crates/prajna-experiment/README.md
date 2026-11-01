@@ -81,7 +81,8 @@ Venue 或显式 lot 越界时整体失败，不静默选第一个 Venue。Run Sp
 执行时的 Run Spec 规范化，只作展示/交接，不进入身份。共享轴缺日期或开收盘时刻不一致返回
 `inconsistent_venue_calendar`，所选 Venue 无 Instrument/Session 返回 `invalid_venue_selection`
 （HTTP 422），不补日、不压缩、不选第一个 Venue。多 Venue 基线仍是价格收益，不含公司行动或
-PIT；生产数据集按单证券发布，把多个单证券 Dataset 装配成池输入仍不在本入口范围。
+PIT；本选择入口仍不装配数据。生产整池 DSV 现由独立的
+[手动更新及池发布入口](../../docs/contracts/pool-updates.md) 提供，不改变旧冻结定义。
 
 ## 共同评价窗口与冻结复权研究输入（#297/T08a）
 
@@ -399,6 +400,11 @@ fake 的原生账户显式为 unavailable，不伪造原生快照。
 配置、响应、合成验证与限制见[冻结选择契约](../../docs/contracts/single-security-selection.md)。
 
 研究池：`prajna-pools --lake <LOCAL>` 通过 JSON 命令管理三池草稿/不可变版本；`prajna-freeze-selection` 可引用显式池版本，见[契约](../../docs/contracts/research-pools.md)。旧单证券选择保持兼容；跨 Venue entry-only 提交仍拒绝。
+
+手动更新：`prajna-pool-update --lake <LOCAL>` 接受 `list/prepare/retry/pool_update`
+JSON 命令，固定配置经现有采集和生产池发布器生成一个完整 DSV，再导入显式本机
+供应商复权/行动输入。任务完成、原始行情、价格就绪及行动/总回报状态分别记录；
+失败不覆盖旧可用版本。配置、版本化供应商格式、API 与补跑见[更新契约](../../docs/contracts/pool-updates.md)。
 
 共同窗口预检：`prajna-freeze-selection --lake <LOCAL> --plan` 只读返回逐成员
 覆盖、参数组合最大预热、共同评价窗口及阻断原因；HTTP

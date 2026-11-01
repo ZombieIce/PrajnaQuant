@@ -12,6 +12,7 @@ mod mvp6_actions;
 mod mvp6_coverage;
 mod normalized;
 mod normalizer;
+pub mod pool_publish;
 mod publish;
 mod raw;
 mod security_evidence;

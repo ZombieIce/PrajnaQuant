@@ -6,6 +6,12 @@ fetch, compute adjustments, publish raw Bars, derive corporate actions or book
 cash. [ADR 0030](../decisions/0030-supplier-adjusted-research-series.md) fixes the
 price roles and compatibility boundary.
 
+The [manual pool-update adapter](pool-updates.md#supplier-prices-and-action-inputs)
+can consume explicit `supplier-adjusted/1` source files without a project DSV.
+It preserves their bytes and declared CNY-per-fund-unit prices, creates a new
+bound import only after raw publication, and invokes this unchanged validation.
+It does not rebind existing objects, fetch prices or compute adjustments.
+
 ```sh
 prajna-import-adjusted --root <LOCAL_LAKE> --input <SUPPLIER_JSON>
 prajna-preview-dataset show --root <LOCAL_LAKE> --dsv <RAW_DSV>

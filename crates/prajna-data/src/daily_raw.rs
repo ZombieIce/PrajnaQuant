@@ -157,21 +157,30 @@ impl DailyRawRequest {
     }
 
     fn chunks(&self) -> Vec<DateRange> {
-        let mut ranges = Vec::new();
-        let mut start = self.start;
-        loop {
-            let max_end = start
-                .checked_add_signed(Duration::days(MAX_REQUEST_CALENDAR_DAYS - 1))
-                .unwrap_or(self.end);
-            let end = max_end.min(self.end);
-            ranges.push(DateRange { start, end });
-            if end == self.end {
-                break;
-            }
-            start = end.succ_opt().expect("end precedes the requested end");
-        }
-        ranges
+        request_ranges(self.start, self.end)
     }
+}
+
+fn request_ranges(start: NaiveDate, end: NaiveDate) -> Vec<DateRange> {
+    let mut ranges = Vec::new();
+    let mut start = start;
+    loop {
+        let max_end = start
+            .checked_add_signed(Duration::days(MAX_REQUEST_CALENDAR_DAYS - 1))
+            .unwrap_or(end);
+        let chunk_end = max_end.min(end);
+        ranges.push(DateRange {
+            start,
+            end: chunk_end,
+        });
+        if chunk_end == end {
+            break;
+        }
+        start = chunk_end
+            .succ_opt()
+            .expect("chunk end precedes the requested end");
+    }
+    ranges
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -273,11 +282,60 @@ pub struct DailyRawReport {
     pub chunks: Vec<ChunkReport>,
 }
 
+impl DailyRawReport {
+    /// Validates external reports before their completion flag can advance update success.
+    pub fn validate_consistency(&self) -> Result<(), DailyRawError> {
+        let expected_ranges = if self.requested_range.start <= self.requested_range.end {
+            request_ranges(self.requested_range.start, self.requested_range.end)
+        } else {
+            Vec::new()
+        };
+        let chunks_match_request = !expected_ranges.is_empty()
+            && self.chunks.len() == expected_ranges.len()
+            && self.chunks.iter().zip(expected_ranges).enumerate().all(
+                |(index, (chunk, range))| {
+                    u32::try_from(index).ok() == Some(chunk.index) && chunk.requested_range == range
+                },
+            );
+        self.chunks
+            .iter()
+            .try_fold(0u32, |sum, chunk| sum.checked_add(chunk.candidate_attempts))
+            .ok_or_else(|| DailyRawError::invalid("collection attempt count overflow"))?;
+        if self.chunks.is_empty()
+            || !chunks_match_request
+            || self.summary != summarize(&self.chunks)
+            || self.status
+                != collection_status(&self.chunks, self.status == CollectionStatus::SourceStopped)
+            || (self.status == CollectionStatus::SourceStopped && self.summary.failed_chunks == 0)
+            || self.chunks.iter().any(|chunk| {
+                chunk.status == ChunkStatus::Complete
+                    && (chunk.actual_response_dates.is_empty()
+                        || !chunk
+                            .raw_objects
+                            .iter()
+                            .any(|raw| raw.outcome == RawResponseOutcome::AcceptedResponse))
+            })
+        {
+            return Err(DailyRawError::invalid(
+                "inconsistent collection report requested ranges/status/chunks/summary",
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Report plus its local file path. The path is intentionally not serialized into the report.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CollectionRun {
     pub report: DailyRawReport,
     pub report_path: PathBuf,
+}
+
+pub fn collect_daily(
+    root: &Path,
+    request: DailyRawRequest,
+) -> Result<CollectionRun, DailyRawError> {
+    DailyRawCollector::new(tencent_transport::ReqwestTransport::new(), root)?.collect(request)
 }
 
 /// Invalid configuration or local persistence failure.
@@ -697,27 +755,7 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
         }
 
         let summary = summarize(&chunks);
-        let any_data = chunks
-            .iter()
-            .any(|chunk| chunk.status == ChunkStatus::Complete);
-        let has_failure = chunks.iter().any(|chunk| {
-            matches!(
-                chunk.status,
-                ChunkStatus::Failed | ChunkStatus::NotAttempted
-            )
-        });
-        let has_empty = chunks
-            .iter()
-            .any(|chunk| chunk.status == ChunkStatus::Empty);
-        let status = if self.source_stopped {
-            CollectionStatus::SourceStopped
-        } else if !has_failure && !has_empty {
-            CollectionStatus::Complete
-        } else if any_data {
-            CollectionStatus::Partial
-        } else {
-            CollectionStatus::Failed
-        };
+        let status = collection_status(&chunks, self.source_stopped);
         let report = DailyRawReport {
             schema_version: REPORT_SCHEMA_VERSION,
             report_id,
@@ -892,6 +930,18 @@ fn is_source_restriction(
         })
 }
 
+fn collection_status(chunks: &[ChunkReport], source_stopped: bool) -> CollectionStatus {
+    if source_stopped {
+        CollectionStatus::SourceStopped
+    } else if chunks.iter().all(|c| c.status == ChunkStatus::Complete) {
+        CollectionStatus::Complete
+    } else if chunks.iter().any(|c| c.status == ChunkStatus::Complete) {
+        CollectionStatus::Partial
+    } else {
+        CollectionStatus::Failed
+    }
+}
+
 fn summarize(chunks: &[ChunkReport]) -> CollectionSummary {
     let count = |status| chunks.iter().filter(|chunk| chunk.status == status).count() as u32;
     CollectionSummary {
@@ -1053,10 +1103,7 @@ pub(crate) fn validate_raw_root(
     Ok(root)
 }
 
-pub(crate) fn checked_output_path(
-    root: &Path,
-    relative_path: &Path,
-) -> Result<PathBuf, DailyRawError> {
+pub fn checked_output_path(root: &Path, relative_path: &Path) -> Result<PathBuf, DailyRawError> {
     let components = relative_path.components().collect::<Vec<_>>();
     if components.is_empty() {
         return Err(DailyRawError::invalid(

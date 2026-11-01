@@ -259,11 +259,11 @@ jobs:
           npm run build
           npm run test:e2e:check
       # These app-feature reading-side tests are excluded by core's no-default-features test.
-      - name: App reading-side regression tests
+      - name: App task and reading-side regression tests
         run: >-
           python scripts/workflow.py run --kind cargo --executor CI-web
-          --selection comparison_api::tests --log "$RUNNER_TEMP/app-reading.log"
-          -- cargo test -p quant-research --features app --lib comparison_api::tests --locked --offline
+          --selection run_jobs:: --log "$RUNNER_TEMP/app-reading.log"
+          -- cargo test -p quant-research --features app --lib run_jobs:: --locked --offline -- --test-threads=1
       - name: Synthetic browser through production API and persisted Rust results
         run: >-
           python scripts/workflow.py run --kind playwright --executor CI-web

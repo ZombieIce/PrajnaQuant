@@ -39,7 +39,7 @@ The local import command and fixed-version Rust read API for XSHG/XSHE are docum
 
 Opt-in `cn-stock-etf-daily` v2 imports a fixed, versioned opening-evidence Raw snapshot and its referenced originals, publishes complete scoped D7 status rows, and preserves missing/unknown/late evidence gates. Snapshot revisions change Dataset identity; v1 stays frozen. Synthetic production publisher → Experiment CLI → persisted Standard results are verified; real state-source correctness/coverage remains unverified. See [opening-state contract](../../docs/contracts/shanghai-shenzhen-daily-normalizer.md#opt-in-v2-opening-state-evidence).
 
-The local `prajna-publish-daily` command assembles explicit collection-report/Raw selections with pinned calendar/security versions, publishes one security per Dataset, and saves frozen rebuild receipts. CLI-to-Dataset tests are synthetic only; real coverage, adjustment and corporate actions remain unverified. Commands, selection JSON and failure/retry semantics: [Shanghai/Shenzhen daily normalizer](../../docs/contracts/shanghai-shenzhen-daily-normalizer.md).
+The local `prajna-publish-daily publish/rebuild` modes assemble explicit collection-report/Raw selections with pinned calendar/security versions, publish one security per Dataset, and save frozen rebuild receipts. `pool/rebuild-pool` compose fixed member receipts through production `cn-stock-etf-daily@3` into one all-member Dataset while preserving v1/v2. CLI-to-Dataset tests are synthetic only; real coverage remains unverified. Commands, selection JSON and failure/retry semantics: [Shanghai/Shenzhen daily normalizer](../../docs/contracts/shanghai-shenzhen-daily-normalizer.md) and [manual pool updates](../../docs/contracts/pool-updates.md).
 
 ## Read-only Dataset preview
 

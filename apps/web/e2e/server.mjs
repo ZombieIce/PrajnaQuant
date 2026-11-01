@@ -53,6 +53,9 @@ run('cargo', ['test', '-p', 'prajna-experiment', '--test', 'pools', '--locked', 
   { PRAJNA_POOL_FIXTURE_ROOT: lake });
 run('cargo', ['test', '-p', 'prajna-experiment', '--test', 'momentum', '--locked', '--offline',
   'export_momentum_fixture', '--', '--ignored', '--exact'], root, { PRAJNA_MOMENTUM_FIXTURE_ROOT: lake });
+run('cargo', ['test', '-p', 'prajna-experiment', '--test', 'pool_update', '--locked', '--offline',
+  'export_pool_update_fixture', '--', '--ignored', '--exact'], root, { PRAJNA_POOL_UPDATE_FIXTURE_ROOT: lake });
+if (!existsSync(join(lake, 'synthetic-pool-update-fixture'))) throw new Error('Pool update export did not execute');
 // Publish two synthetic fixed corporate-action fact versions (an original and a
 // revision) into the same lake through the real import CLI. No real facts and no
 // preview-time write occur afterwards.
@@ -70,7 +73,7 @@ const child = spawn(bin('quant-research'), ['serve', '--address', `127.0.0.1:${p
   '--web-dist', join(web, 'dist'), '--dataset-root', lake, '--output', lake,
   '--market-data-dir', join(local, 'market')],
   { cwd: root, env: { ...process.env, PRAJNA_DATASET_PREVIEW_CLI: bin('prajna-preview-dataset'),
-    PRAJNA_EXPERIMENT_CLI: bin('prajna-experiment'), PRAJNA_SELECTION_CLI: bin('prajna-freeze-selection'), PRAJNA_POOLS_CLI: bin('prajna-pools'), PRAJNA_MOMENTUM_CLI: bin('prajna-momentum') },
+    PRAJNA_EXPERIMENT_CLI: bin('prajna-experiment'), PRAJNA_SELECTION_CLI: bin('prajna-freeze-selection'), PRAJNA_POOLS_CLI: bin('prajna-pools'), PRAJNA_MOMENTUM_CLI: bin('prajna-momentum'), PRAJNA_POOL_UPDATE_CLI: bin('prajna-pool-update') },
     stdio: ['ignore', 'pipe', 'pipe'] });
 child.stdout.pipe(log); child.stderr.pipe(log);
 child.on('error', (error) => { console.error(error); process.exitCode = 1; });
