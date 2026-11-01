@@ -57,8 +57,12 @@ success. Selected accepted Raw hashes come from the report, not unchecked config
 hashes. The report must match the member, ETF kind and exact requested range.
 Its top-level status, chunk states and recomputed summary must agree. A claimed
 complete report containing empty/failed/unattempted chunks or absent accepted
-responses is rejected; a consistent partial report may retain partial publication
-without advancing member or pool success.
+responses is rejected. Its chunk inventory must also exactly partition the full
+requested interval using the collector's 800-calendar-day ranges, in order, with
+contiguous zero-based indices; a report cannot omit, overlap, reorder, or shorten
+a requested range and still advance success. A structurally complete partial
+report with the full requested-range partition may retain its valid partial
+publication without advancing member or pool success.
 
 Calendar, security and optional opening-state versions remain explicit; v1 allows
 raw research publication without opening evidence, v2 validates the exact pinned

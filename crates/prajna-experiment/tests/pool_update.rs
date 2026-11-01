@@ -686,16 +686,55 @@ fn round1_contradictory_collection_reports_do_not_advance_success() {
             pool_update::list(root).unwrap()["last_price_ready"]["bonds:2"]["attempt"],
             good.id
         );
-        if status == "failed" {
-            report["status"] = json!("partial");
-            save(&file, &report);
-            let partial = run(root);
-            assert!(!partial.price_ready && partial.dataset.is_none());
-            assert_eq!(partial.members["159952.XSHE"].publication, "partial");
-            assert!(partial.members["159952.XSHE"].receipt.is_some());
-            assert!(partial.members["159952.XSHE"].succeeded_at.is_none());
-        }
     }
+}
+
+#[test]
+fn round2_omitted_requested_tail_cannot_advance_member_success_or_be_reused() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    setup(root, true);
+    let report_path = root.join("update-inputs/XSHE/report.json");
+    let mut report: Value = serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
+    let dates = [DATES[0], DATES[1]];
+    let native = "sz159952";
+    let bytes = serde_json::to_vec(&json!({"code":0,"data":{native:{"day":dates.map(|date|
+        json!([date,"10","10.1","11","9","100"]))}}}))
+    .unwrap();
+    let raw = prajna_data::RawStore::open(root)
+        .unwrap()
+        .put(
+            &bytes,
+            prajna_data::SourceRecordInput {
+                content_type: "application/json".into(),
+                source_kind: prajna_data::SourceKind::VendorApi,
+                source_id: "tencent_fqkline_daily".into(),
+                observed_at: "2026-10-28T00:00:00Z".into(),
+                ingested_by: "synthetic-test".into(),
+                request: json!({"method_version":"tencent-fqkline-day/1",
+                "instrument_id":"159952.XSHE","native_symbol":native,"security_kind":"etf",
+                "requested_range":{"start":DATES[0],"end":DATES[1]},"chunk_index":0,
+                "source":"synthetic.invalid","response_outcome":"accepted_response"}),
+            },
+        )
+        .unwrap();
+    report["chunks"][0]["requested_range"]["end"] = json!(DATES[1]);
+    report["chunks"][0]["actual_response_dates"] = json!(dates);
+    report["chunks"][0]["actual_response_range"] = json!({"start":DATES[0],"end":DATES[1]});
+    report["chunks"][0]["raw_objects"] = json!([{"raw_sha256":raw,"source":"synthetic.invalid",
+        "outcome":"accepted_response"}]);
+    report["chunks"][0]["not_returned_calendar_dates"] = json!([]);
+    save(&report_path, &report);
+
+    let first = run(root);
+    assert!(
+        !first.price_ready,
+        "missing the final requested Bar must block price readiness"
+    );
+    assert_ne!(first.members["159952.XSHE"].publication, "succeeded");
+    assert!(first.members["159952.XSHE"].succeeded_at.is_none());
+    let retry = update(root, json!({"op":"retry","attempt":first.id}));
+    assert!(retry.members["159952.XSHE"].reused_from.is_none());
 }
 
 #[test]

@@ -157,21 +157,30 @@ impl DailyRawRequest {
     }
 
     fn chunks(&self) -> Vec<DateRange> {
-        let mut ranges = Vec::new();
-        let mut start = self.start;
-        loop {
-            let max_end = start
-                .checked_add_signed(Duration::days(MAX_REQUEST_CALENDAR_DAYS - 1))
-                .unwrap_or(self.end);
-            let end = max_end.min(self.end);
-            ranges.push(DateRange { start, end });
-            if end == self.end {
-                break;
-            }
-            start = end.succ_opt().expect("end precedes the requested end");
-        }
-        ranges
+        request_ranges(self.start, self.end)
     }
+}
+
+fn request_ranges(start: NaiveDate, end: NaiveDate) -> Vec<DateRange> {
+    let mut ranges = Vec::new();
+    let mut start = start;
+    loop {
+        let max_end = start
+            .checked_add_signed(Duration::days(MAX_REQUEST_CALENDAR_DAYS - 1))
+            .unwrap_or(end);
+        let chunk_end = max_end.min(end);
+        ranges.push(DateRange {
+            start,
+            end: chunk_end,
+        });
+        if chunk_end == end {
+            break;
+        }
+        start = chunk_end
+            .succ_opt()
+            .expect("chunk end precedes the requested end");
+    }
+    ranges
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -276,11 +285,24 @@ pub struct DailyRawReport {
 impl DailyRawReport {
     /// Validates external reports before their completion flag can advance update success.
     pub fn validate_consistency(&self) -> Result<(), DailyRawError> {
+        let expected_ranges = if self.requested_range.start <= self.requested_range.end {
+            request_ranges(self.requested_range.start, self.requested_range.end)
+        } else {
+            Vec::new()
+        };
+        let chunks_match_request = !expected_ranges.is_empty()
+            && self.chunks.len() == expected_ranges.len()
+            && self.chunks.iter().zip(expected_ranges).enumerate().all(
+                |(index, (chunk, range))| {
+                    u32::try_from(index).ok() == Some(chunk.index) && chunk.requested_range == range
+                },
+            );
         self.chunks
             .iter()
             .try_fold(0u32, |sum, chunk| sum.checked_add(chunk.candidate_attempts))
             .ok_or_else(|| DailyRawError::invalid("collection attempt count overflow"))?;
         if self.chunks.is_empty()
+            || !chunks_match_request
             || self.summary != summarize(&self.chunks)
             || self.status
                 != collection_status(&self.chunks, self.status == CollectionStatus::SourceStopped)
@@ -295,7 +317,7 @@ impl DailyRawReport {
             })
         {
             return Err(DailyRawError::invalid(
-                "inconsistent collection report status/chunks/summary",
+                "inconsistent collection report requested ranges/status/chunks/summary",
             ));
         }
         Ok(())

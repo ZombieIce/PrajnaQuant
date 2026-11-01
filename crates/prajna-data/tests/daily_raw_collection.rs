@@ -621,8 +621,8 @@ fn requests_are_split_at_the_transport_limit_without_overlap() {
         replies: VecDeque::from([Ok(first_reply), Ok(second_reply)]),
         requests: Rc::clone(&requests),
     };
-    let mut collector = collector(transport, root.path());
-    let run = collector
+    let mut daily_collector = collector(transport, root.path());
+    let run = daily_collector
         .collect(DailyRawRequest {
             symbol: "600519".into(),
             venue: Venue::Xshg,
@@ -658,6 +658,36 @@ fn requests_are_split_at_the_transport_limit_without_overlap() {
         sent[1].parameter,
         format!("sh600519,day,{second_start},{end},640,")
     );
+
+    let (partial_first, _) = valid_reply(
+        "sh600519",
+        "https://synthetic.invalid/partial-first",
+        &[first_date.as_str()],
+    );
+    let outside = (end + chrono::Duration::days(1)).to_string();
+    let (empty_second, _) = valid_reply(
+        "sh600519",
+        "https://synthetic.invalid/partial-empty",
+        &[outside.as_str()],
+    );
+    let partial = collector(
+        FixtureTransport {
+            replies: VecDeque::from([Ok(partial_first), Ok(empty_second)]),
+            requests: Rc::new(RefCell::new(Vec::new())),
+        },
+        root.path(),
+    )
+    .collect(DailyRawRequest {
+        symbol: "600519".into(),
+        venue: Venue::Xshg,
+        kind: SecurityKind::Stock,
+        start,
+        end,
+    })
+    .unwrap();
+    assert_eq!(partial.report.status, CollectionStatus::Partial);
+    assert_eq!(partial.report.chunks.len(), 2);
+    partial.report.validate_consistency().unwrap();
 }
 
 #[test]
