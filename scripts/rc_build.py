@@ -41,21 +41,43 @@ DECISIONS = (
 )
 
 
-def command(args, cwd=ROOT, env=None, log=None):
+def command(args, cwd=ROOT, env=None, log=None, *, stdout_only=False):
     if log is not None:
         log.write(f'\n$ {shlex.join(str(arg) for arg in args)}\n')
         log.flush()
     try:
         result = subprocess.run(args, cwd=cwd, env=env, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True)
+                                stderr=subprocess.PIPE if stdout_only else subprocess.STDOUT, text=True)
     except OSError as error:
         raise RcError(f'Cannot run {args[0]}: {error}') from error
     if log is not None:
         log.write(result.stdout)
+        if result.stderr:
+            log.write(result.stderr)
         log.flush()
     if result.returncode:
-        raise RcError(f'{args[0]} exited {result.returncode}; see build log')
+        diagnostic = 'see build log' if log is not None else (result.stderr or result.stdout).strip()
+        raise RcError(f'{args[0]} exited {result.returncode}; {diagnostic or "no diagnostic output"}')
     return result.stdout
+
+
+def tool_version(args, log):
+    value = command(args, log=log, stdout_only=True).strip()
+    if not value or len(value.splitlines()) != 1:
+        raise RcError(f'{args[0]} returned an invalid version')
+    return value
+
+
+def build_versions(log):
+    return {
+        'rustc_version': tool_version(['rustc', '--version'], log),
+        'cargo_version': tool_version(['cargo', '--version'], log),
+        'git_version': tool_version(['git', '--version'], log),
+        'node_version': tool_version(['node', '--version'], log),
+        'npm_version': tool_version(['npm', '--version'], log),
+        'python_version': platform.python_version(),
+        'macos_version': tool_version(['sw_vers', '-productVersion'], log),
+    }
 
 
 def git(repo, *args):
@@ -196,16 +218,12 @@ def build(output, version):
         revision = git(ROOT, 'rev-parse', 'HEAD').decode().strip()
         if git(ROOT, 'tag', '--list', version).strip():
             raise RcError('candidate version is already a local Git tag')
-        rustc = command(['rustc', '--version'], log=log).strip()
+        versions = build_versions(log)
         rustc_path = shutil.which('rustc')
         if not rustc_path:
             raise RcError('rustc is not available on PATH')
         build_env = {**os.environ, 'RUSTC': rustc_path, 'RUSTC_WRAPPER': '', 'RUSTC_WORKSPACE_WRAPPER': ''}
         log.write(f'\nUsing RUSTC={rustc_path}; compiler wrappers disabled; target={TARGET}\n')
-        cargo = command(['cargo', '--version'], log=log).strip()
-        git_version = command(['git', '--version'], log=log).strip()
-        node = command(['node', '--version'], log=log).strip()
-        npm = command(['npm', '--version'], log=log).strip()
         target = Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'target')).resolve()
         release = target / TARGET / 'release'
         with tempfile.TemporaryDirectory(prefix='.prajna-rc-build-', dir=output) as temp:
@@ -260,9 +278,7 @@ def build(output, version):
             files = inventory(bundle, ('bin/', 'web/', 'lib/', 'demo/', 'docs/', 'prajna', 'LICENSE'))
             metadata = {
                 'version': version, 'source_commit': revision, 'target': TARGET,
-                'rustc_version': rustc, 'cargo_version': cargo, 'node_version': node,
-                'npm_version': npm, 'git_version': git_version, 'python_version': platform.python_version(),
-                'macos_version': platform.mac_ver()[0],
+                **versions,
                 'files': {name: item['sha256'] for name, item in files.items()},
             }
             (bundle / 'release.json').write_text(json.dumps(metadata, indent=2) + '\n')

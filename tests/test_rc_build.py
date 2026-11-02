@@ -1,4 +1,5 @@
 """Synthetic checks for release source provenance and relocatable demo inputs."""
+import io
 import json
 import os
 from pathlib import Path
@@ -6,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
@@ -18,6 +20,44 @@ def git(repo, *args):
 
 
 class ReleaseBuildTests(unittest.TestCase):
+    def test_tool_version_keeps_stdout_separate_from_logged_warnings(self):
+        log = io.StringIO()
+        version = build.tool_version([
+            sys.executable, '-c',
+            'import sys; print("tool 1.2"); print("warning on stderr", file=sys.stderr)',
+        ], log)
+        self.assertEqual(version, 'tool 1.2')
+        self.assertIn('warning on stderr', log.getvalue())
+
+    def test_tool_version_rejects_empty_multiline_and_failed_output(self):
+        for script in ('pass', 'print("one\\ntwo")'):
+            with self.subTest(script=script), self.assertRaisesRegex(RcError, 'version'):
+                build.tool_version([sys.executable, '-c', script], io.StringIO())
+        log = io.StringIO()
+        with self.assertRaisesRegex(RcError, 'exited 7'):
+            build.tool_version([
+                sys.executable, '-c',
+                'import sys; print("failure diagnostic", file=sys.stderr); sys.exit(7)',
+            ], log)
+        self.assertIn('failure diagnostic', log.getvalue())
+
+    def test_build_versions_records_sw_vers_and_expected_tools(self):
+        outputs = {
+            ('rustc', '--version'): 'rustc 1.2',
+            ('cargo', '--version'): 'cargo 1.2',
+            ('git', '--version'): 'git version 1.2',
+            ('node', '--version'): 'v1.2',
+            ('npm', '--version'): '1.2',
+            ('sw_vers', '-productVersion'): '26.2',
+        }
+        log = io.StringIO()
+        with patch.object(build, 'tool_version', side_effect=lambda args, stream: outputs[tuple(args)]) as version:
+            versions = build.build_versions(log)
+        self.assertEqual(versions['macos_version'], '26.2')
+        self.assertEqual(versions['cargo_version'], 'cargo 1.2')
+        self.assertEqual(version.call_count, len(outputs))
+        version.assert_any_call(['sw_vers', '-productVersion'], log)
+
     def test_source_snapshot_keeps_commit_without_bundling_excluded_blobs(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
