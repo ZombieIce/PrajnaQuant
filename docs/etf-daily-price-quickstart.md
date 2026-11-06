@@ -49,7 +49,7 @@ prajna-import-daily-price --root "$PRAJNA_LAKE" --input-root "$PRAJNA_INPUT" \
   --config "$PRAJNA_INPUT/config.json" --fetch --receipt receipt.json
 ```
 
-先看终端状态，再在输入目录打开 `receipt.json`。归档批次在 `daily-price/batches/`，失败细节在 `daily-price/diagnostics/`，逐次响应来源和状态在 `reports/`。记录 Dataset 版本和每只 ETF 的复权版本。区分缺交易 Session、缺原始价和缺复权价，保留源响应和实际覆盖。原始价的交易日缺口可能影响成交或估值。每次导入把本次响应保存到 receipt 的 `replay_dir`（相对输入根）。用 `--replay <replay_dir>` 复跑同一组固定响应，得到相同的 Dataset 和复权版本。手工准备的复跑目录也相对输入根，文件按 `<前缀和代码>-<raw或qfq>-<起日>-<止日>.json` 命名，分段边界与请求一致。修订输入会产生新版本。真实响应、详细覆盖、身份和研究结果仅留本机。
+先看终端状态，再在输入目录打开 `receipt.json`。归档批次在 `daily-price/batches/`，失败细节在 `daily-price/diagnostics/`，逐次响应来源和状态在 `reports/`。记录 Dataset 版本和每只 ETF 的复权版本。区分缺交易 Session、缺原始价和缺复权价，保留源响应和实际覆盖。上游未返回前复权数组的分段计入 `qfq_absent_chunks`，不会用原始价代替复权价。从未除权的 ETF 可能因此整段缺复权价，无法形成信号。原始价的交易日缺口可能影响成交或估值。每次导入把本次响应保存到 receipt 的 `replay_dir`（相对输入根）。用 `--replay <replay_dir>` 复跑同一组固定响应，得到相同的 Dataset 和复权版本。手工准备的复跑目录也相对输入根，文件按 `<前缀和代码>-<raw或qfq>-<起日>-<止日>.json` 命名，分段边界与请求一致。修订输入会产生新版本。真实响应、详细覆盖、身份和研究结果仅留本机。
 
 在第二个终端复用同一组路径启动工作台。
 
