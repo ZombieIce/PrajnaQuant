@@ -41,12 +41,12 @@ impl Context {
         let evaluation =
             evaluation.ok_or_else(|| invalid("holding benchmark requires evaluation"))?;
         if input.strategy != "buy_and_hold"
-            || input.corporate_actions.is_none()
+            || (input.corporate_actions.is_none() && input.execution_mode.is_none())
             || binding.semantic_version != SEMANTIC_VERSION
             || binding.reinvestment_calendar.semantic_version != "session-close-calendar@1"
         {
             return Err(invalid(
-                "holding benchmark requires buy_and_hold, corporate_actions and supported explicit versions",
+                "holding benchmark requires buy_and_hold, a supported return basis and supported explicit versions",
             ));
         }
         let universe = StaticUniverse::load(root, &input.universe)?;
@@ -90,6 +90,11 @@ impl Context {
             ));
         }
         let dates = &binding.reinvestment_calendar.decision_dates;
+        if input.execution_mode.is_some() && !dates.is_empty() {
+            return Err(invalid(
+                "daily price holding does not reinvest cash distributions",
+            ));
+        }
         if dates.windows(2).any(|pair| pair[0] >= pair[1])
             || dates.iter().any(|date| {
                 *date <= evaluation.start()
@@ -101,9 +106,13 @@ impl Context {
                 "reinvestment dates must be increasing Session closes after entry decision and within evaluation",
             ));
         }
-        let identity = serde_json::json!({"definition":binding,"execution_rules":rules,
+        let mut identity = serde_json::json!({"definition":binding,"execution_rules":rules,
             "allocation":"equal_cash_slices_then_instrument_order_fees@1",
             "untradable":"skip_until_next_declared_decision", "return_basis":"raw_prices_plus_net_cash_actions@1"});
+        if input.execution_mode.is_some() {
+            identity["return_basis"] = "price_return".into();
+            identity["untradable"] = "skip_missing_open".into();
+        }
         Ok(Some(Self {
             binding: binding.clone(),
             identity,

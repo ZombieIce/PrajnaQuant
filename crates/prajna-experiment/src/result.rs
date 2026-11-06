@@ -190,16 +190,27 @@ fn allocation(row: &Value) -> Value {
             .map(|value| json!(value.to_string()))
             .unwrap_or(Value::Null)
     };
-    let positions =
-        row.get("positions")
-            .and_then(Value::as_object)
-            .map(|positions| {
-                positions.iter().map(|(id, position)| (id.clone(), json!({
-            "quantity": position.get("quantity"), "price": position.get("price"),
-            "market_value": position.get("market_value"),
-            "weight": ratio(position.get("market_value")),
-        }))).collect::<Map<_,_>>()
-            });
+    let positions = row
+        .get("positions")
+        .and_then(Value::as_object)
+        .map(|positions| {
+            positions
+                .iter()
+                .map(|(id, position)| {
+                    let mut value = json!({
+                        "quantity": position.get("quantity"), "price": position.get("price"),
+                        "market_value": position.get("market_value"),
+                        "weight": ratio(position.get("market_value")),
+                    });
+                    let source = &row["price_sources"][id];
+                    if let Some(stale_days) = source.get("stale_calendar_days") {
+                        value["mark_session"] = source["session_date"].clone();
+                        value["stale_calendar_days"] = stale_days.clone();
+                    }
+                    (id.clone(), value)
+                })
+                .collect::<Map<_, _>>()
+        });
     json!({
         "session_date": row.get("session_date"), "valuation_point": row.get("valuation_point"),
         "cash": row.get("cash"), "equity": row.get("equity"),

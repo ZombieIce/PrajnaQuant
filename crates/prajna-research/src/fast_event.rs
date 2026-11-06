@@ -373,7 +373,27 @@ pub fn run_fast_event(
     portfolios: &[PortfolioRun],
 ) -> Result<FastEventResult, FastEventError> {
     run_with_execution(
-        panel, statuses, config, portfolios, None, None, None, None, None,
+        panel,
+        Some(statuses),
+        config,
+        portfolios,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+}
+
+/// Models a fresh, valid raw opening price as executable. Reuses the Fast
+/// Event planner and price-return ledger with no market status or action table.
+pub fn run_fast_event_daily_price(
+    panel: &Panel,
+    config: &FastEventConfig,
+    portfolios: &[PortfolioRun],
+) -> Result<FastEventResult, FastEventError> {
+    run_with_execution(
+        panel, None, config, portfolios, None, None, None, None, None,
     )
 }
 
@@ -394,7 +414,7 @@ pub fn run_fast_event_pit(
     }
     run_with_execution(
         panel,
-        &BTreeMap::new(),
+        None,
         config,
         portfolios,
         None,
@@ -425,7 +445,7 @@ pub fn run_fast_event_with_actions(
     }
     run_with_execution(
         panel,
-        statuses,
+        Some(statuses),
         config,
         portfolios,
         None,
@@ -453,7 +473,7 @@ pub fn run_fast_event_holding(
     }
     run_with_execution(
         panel,
-        statuses,
+        Some(statuses),
         config,
         portfolios,
         None,
@@ -482,7 +502,7 @@ pub fn run_fast_event_pit_with_actions(
     }
     run_with_execution(
         panel,
-        &BTreeMap::new(),
+        None,
         config,
         portfolios,
         None,
@@ -512,7 +532,7 @@ pub fn run_fast_event_pit_with_terminal_settlement(
     let schedule = TerminalSettlementSchedule::from_market(market, panel).map_err(invalid)?;
     run_with_execution(
         panel,
-        &BTreeMap::new(),
+        None,
         config,
         portfolios,
         None,
@@ -558,7 +578,7 @@ pub fn run_lot_with_execution(
     }
     run_with_execution(
         panel,
-        statuses,
+        Some(statuses),
         config,
         portfolios,
         Some(execution),
@@ -572,7 +592,7 @@ pub fn run_lot_with_execution(
 #[allow(clippy::too_many_arguments)]
 fn run_with_execution(
     panel: &Panel,
-    statuses: &ExecutionStatusMap,
+    statuses: Option<&ExecutionStatusMap>,
     config: &FastEventConfig,
     portfolios: &[PortfolioRun],
     mut execution: Option<&mut dyn MarketExecution>,
@@ -585,6 +605,7 @@ fn run_with_execution(
     price_ticks: Option<&BTreeMap<InstrumentId, Price>>,
 ) -> Result<FastEventResult, FastEventError> {
     validate(panel, config, portfolios)?;
+    let daily_price = statuses.is_none() && pit.is_none();
     if let Some(ticks) = price_ticks {
         if panel
             .instruments
@@ -599,8 +620,7 @@ fn run_with_execution(
     if portfolios
         .iter()
         .any(|p| p.rebalance == Rebalance::CashOnly)
-        && (actions.is_none()
-            || price_ticks.is_none()
+        && ((!daily_price && (actions.is_none() || price_ticks.is_none()))
             || pit.is_some()
             || execution.is_some()
             || config.sizing != Sizing::Lot
@@ -677,6 +697,7 @@ fn run_with_execution(
                 action_processor.record(transitions);
             }
         }
+        let fresh_open = daily_price.then(|| open.fresh_ids_on(session.session_date));
         let gates = panel
             .instruments
             .iter()
@@ -692,8 +713,16 @@ fn run_with_execution(
                         id.clone(),
                         crate::pit_strategy::permits(market, panel, id, session, true),
                     ))
+                } else if let Some(fresh) = &fresh_open {
+                    Ok((id.clone(), fresh.contains(id)))
                 } else {
-                    executable(panel, statuses, id, session).map(|yes| (id.clone(), yes))
+                    executable(
+                        panel,
+                        statuses.expect("strict static execution statuses"),
+                        id,
+                        session,
+                    )
+                    .map(|yes| (id.clone(), yes))
                 }
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
@@ -1171,15 +1200,26 @@ fn run_with_execution(
             } else {
                 "Static synthetic Universe evidence does not establish PIT or dividend total return."
             },
-            "Valid raw bars mark even HALTED/UNKNOWN instruments; status gates execution only.",
+            if daily_price {
+                "Daily price simulation assumes adjusted observations are available at Session close and fresh raw opening prices are executable at the next Session open."
+            } else {
+                "Valid raw bars mark even HALTED/UNKNOWN instruments; status gates execution only."
+            },
             "Missing prices carry the last valid price of the same field, never zero.",
         ]
     };
+    if daily_price {
+        assumptions.push("Net raw price returns omit distributions and split adjustments in the ledger; ex-rights price changes can distort the reported returns.");
+    }
     if portfolios
         .iter()
         .any(|p| p.rebalance == Rebalance::CashOnly)
     {
-        assumptions.push("Holding benchmarks buy equal cash slices only on declared close Decisions; unavailable buys wait for the next declared Decision, no sales restore weights, and buy execution prices round upward to Instrument ticks before actual fees.");
+        if daily_price {
+            assumptions.push("The holding benchmark uses equal entry cash slices and skips entries without a fresh open; the strategy and benchmark apply the same price and cost rules.");
+        } else {
+            assumptions.push("Holding benchmarks buy equal cash slices only on declared close Decisions; unavailable buys wait for the next declared Decision, no sales restore weights, and buy execution prices round upward to Instrument ticks before actual fees.");
+        }
     } else if config.sizing == Sizing::Lot && !external_execution {
         assumptions.push("Normal lot full-target quantities use available cash plus securities at pre-trade valuation, excluding dividend and liquidation receivables; actual weights, cost and turnover use total NAV. Retry and entry-only retain their own budget rules.");
     }

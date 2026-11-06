@@ -285,10 +285,19 @@ fn comparability(
         ));
     }
     checks.push("summary");
+    let daily_price = !strategy["execution_mode"].is_null();
+    if daily_price || !benchmark["execution_mode"].is_null() {
+        require_equal(
+            &mut checks,
+            "execution_mode",
+            &strategy["execution_mode"],
+            &benchmark["execution_mode"],
+        )?;
+    }
     let initial_cash = strategy["fast_event"]["initial_cash"]
         .as_str()
         .ok_or_else(|| error("comparison_definition_invalid", "missing initial cash"))?;
-    Ok(json!({
+    let mut relation = json!({
         "semantic_version": RELATION_VERSION,
         "validation_version": "effective-rules-calendar@2",
         "strategy_kind": strategy_kind,
@@ -309,10 +318,14 @@ fn comparability(
         "evaluation": strategy["evaluation"],
         "corporate_actions": strategy["corporate_actions"],
         "quantity_price_rules": benchmark_run["holding_benchmark"]["execution_rules"],
-        "return_basis": "total_return",
+        "return_basis": if daily_price { "price_return" } else { "total_return" },
         "reinvestment_calendar": calendar,
         "checks": checks,
-    }))
+    });
+    if daily_price {
+        relation["execution_mode"] = strategy["execution_mode"].clone();
+    }
+    Ok(relation)
 }
 
 /// Freezes the strategy through the existing selection boundary, derives exactly
@@ -321,7 +334,14 @@ pub fn freeze(root: &Path, request: &Request) -> Result<Value, ComparisonError> 
     let selection = selection::freeze(root, &request.selection).map_err(selection_error)?;
     let definition = selection["data"]["definition"].clone();
     let strategy_kind = strategy_kind(&definition)?.to_owned();
-    if definition["corporate_actions"].is_null() {
+    let daily_price = request.selection.execution_mode.is_some();
+    if daily_price && request.reinvestment_calendar != ReinvestmentPolicy::None {
+        return Err(error(
+            "comparison_invalid_reinvestment",
+            "daily price comparison requires no dividend reinvestment",
+        ));
+    }
+    if !daily_price && definition["corporate_actions"].is_null() {
         return Err(error(
             "comparison_requires_corporate_actions",
             "a total-return holding benchmark requires a frozen corporate-actions version",
@@ -385,15 +405,17 @@ pub fn freeze(root: &Path, request: &Request) -> Result<Value, ComparisonError> 
     let benchmark_definition = benchmark_definition(&definition, benchmark_kind, &calendar)?;
     let benchmark =
         Experiment::parse(&benchmark_definition.to_string(), root).map_err(experiment_error)?;
-    strategy
-        .engine
-        .validate_comparison_prices(
-            &panel
-                .window(evaluation.start(), evaluation.end())
-                .map_err(|e| error("comparison_window_invalid", e))?,
-            &benchmark.holding_benchmark.as_ref().unwrap().price_ticks,
-        )
-        .map_err(|e| error("comparison_price_rules_mismatch", e))?;
+    if !daily_price {
+        strategy
+            .engine
+            .validate_comparison_prices(
+                &panel
+                    .window(evaluation.start(), evaluation.end())
+                    .map_err(|e| error("comparison_window_invalid", e))?,
+                &benchmark.holding_benchmark.as_ref().unwrap().price_ticks,
+            )
+            .map_err(|e| error("comparison_price_rules_mismatch", e))?;
+    }
     // The role definitions are the ones persisted/executed: both opt into the
     // complete Summary and calendar report, and only the strategy Summary binds
     // the derived holding benchmark.

@@ -34,6 +34,17 @@ pub fn prepare(
     missing_second_bar: bool,
     series: Option<Series<'_>>,
 ) -> (Value, Value) {
+    let missing: &[usize] = if missing_second_bar { &[1] } else { &[] };
+    prepare_with_missing(root, venue, kind, missing, series)
+}
+
+pub fn prepare_with_missing(
+    root: &Path,
+    venue: &str,
+    kind: InstrumentKind,
+    missing: &[usize],
+    series: Option<Series<'_>>,
+) -> (Value, Value) {
     let symbol = if venue == "XSHG" { "510300" } else { "159952" };
     let instrument = format!("{symbol}.{venue}");
     let native = format!("{}{symbol}", if venue == "XSHG" { "sh" } else { "sz" });
@@ -96,7 +107,7 @@ pub fn prepare(
     let mut selected_dates = Vec::new();
     let mut rows = Vec::new();
     for (index, date) in dates.iter().enumerate() {
-        if missing_second_bar && index == 1 {
+        if missing.contains(&index) {
             continue;
         }
         let (open, close, high, low) = bars[index];

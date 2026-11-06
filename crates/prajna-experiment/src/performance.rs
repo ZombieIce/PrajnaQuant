@@ -50,11 +50,11 @@ impl Context {
         };
         if input.engine != "fast_event"
             || input.pit.is_some()
-            || input.corporate_actions.is_none()
+            || (input.corporate_actions.is_none() && input.execution_mode.is_none())
             || input.evaluation.is_none()
         {
             return Err(invalid(
-                "complete Summary requires frozen Static Fast Event evaluation and corporate actions",
+                "complete Summary requires frozen Static Fast Event evaluation and a supported return basis",
             ));
         }
         let benchmark = if let Some(definition) = &binding.benchmark_definition {
@@ -86,6 +86,7 @@ impl Context {
                 "adjusted_versions",
                 "evaluation",
                 "corporate_actions",
+                "execution_mode",
             ] {
                 if parent.normalized[field] != other.normalized[field] {
                     return Err(invalid(format!("Summary benchmark mismatch: {field}")));
@@ -110,22 +111,24 @@ impl Context {
                     "Summary benchmark requires exactly one Run per role",
                 ));
             }
-            let panel = load_panel_for_venues(
-                root,
-                &parent.dsv,
-                &parent.venues.iter().cloned().collect::<Vec<_>>(),
-            )
-            .map_err(|e| invalid(e.to_string()))?;
-            let evaluation = parent.evaluation().unwrap();
-            parent
-                .engine
-                .validate_comparison_prices(
-                    &panel
-                        .window(evaluation.start(), evaluation.end())
-                        .map_err(|e| invalid(e.to_string()))?,
-                    &other.holding_benchmark.as_ref().unwrap().price_ticks,
+            if input.execution_mode.is_none() {
+                let panel = load_panel_for_venues(
+                    root,
+                    &parent.dsv,
+                    &parent.venues.iter().cloned().collect::<Vec<_>>(),
                 )
-                .map_err(invalid)?;
+                .map_err(|e| invalid(e.to_string()))?;
+                let evaluation = parent.evaluation().unwrap();
+                parent
+                    .engine
+                    .validate_comparison_prices(
+                        &panel
+                            .window(evaluation.start(), evaluation.end())
+                            .map_err(|e| invalid(e.to_string()))?,
+                        &other.holding_benchmark.as_ref().unwrap().price_ticks,
+                    )
+                    .map_err(invalid)?;
+            }
             other.performance = Some(Self {
                 identity: json!({"semantic_version": VERSION}),
                 calendar: false,
@@ -353,10 +356,10 @@ pub(crate) fn complete(
     ] {
         metrics.insert(name.into(), Metric::new(value, reason));
     }
-    let complete_actions = result.return_basis
-        == prajna_research::corporate_actions::ReturnBasis::TotalReturn
-        && result.corporate_action_completeness.is_complete;
-    if !complete_actions {
+    let performance_available = summary.execution_mode.is_some()
+        || (result.return_basis == prajna_research::corporate_actions::ReturnBasis::TotalReturn
+            && result.corporate_action_completeness.is_complete);
+    if !performance_available {
         for name in [
             "total_return",
             "annualized_return",
@@ -469,7 +472,7 @@ pub(crate) fn complete(
         fill_count: result.fills.len(),
         fee_settlement_count: result.account.fee_settlements().len(),
         calendar: with_calendar
-            .then(|| build_calendar(result.config.initial_cash, &closes, complete_actions)),
+            .then(|| build_calendar(result.config.initial_cash, &closes, performance_available)),
     });
     Ok(())
 }

@@ -387,3 +387,201 @@ fn export_result_details_fixture() {
     )
     .unwrap();
 }
+
+fn daily_selection(root: &Path, missing: &[usize], closes: &[&str; 10]) -> Selection {
+    let input = root.join("daily-input");
+    let mut bars = [("10", "10", "10", "10"); 10];
+    // A different close proves the transaction uses the next raw open, while
+    // same-Session mark-to-market uses the raw close.
+    bars[2] = ("10", "11", "11", "10");
+    let (mut request, _) = opening::prepare_with_missing(
+        &input,
+        "XSHG",
+        InstrumentKind::Etf,
+        missing,
+        Some((&DATES, &bars)),
+    );
+    request["normalizer_version"] = json!("1");
+    request.as_object_mut().unwrap().remove("status_snapshot");
+    let dsv = publish_daily(
+        root,
+        serde_json::from_value(request).unwrap(),
+        Path::new("daily-price-receipt.json"),
+    )
+    .unwrap()
+    .dsv;
+    let (dates, values): (Vec<_>, Vec<_>) = DATES
+        .into_iter()
+        .zip(closes.iter().copied())
+        .enumerate()
+        .filter_map(|(index, pair)| (!missing.contains(&index)).then_some(pair))
+        .unzip();
+    let adjusted = fixture::import_closes(root, &dsv, &dates, &values);
+    serde_json::from_value(json!({
+        "dsv":dsv,"instrument":"510300.XSHG","strategy":"single_etf_timing",
+        "execution_mode":"daily_price_simulation_v1",
+        "adjusted":{"510300.XSHG":adjusted},
+        "parameter_space":{"list":[{"params_version":1,"ma_window":2,"rebalance_every":2}]},
+        "settings":{"initial_cash":"10000","commission_rate":0.0003,"minimum_commission":"5",
+            "buy_slippage_bps":10,"sell_slippage_bps":10,"buy_tax_rate":0.001,"sell_tax_rate":0.002}
+    }))
+    .unwrap()
+}
+
+#[test]
+fn daily_price_compares_the_same_ledger_window_without_action_or_opening_evidence() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    let selection = daily_selection(
+        root,
+        &[4, 9],
+        &["10", "12", "12", "12", "8", "8", "8", "8", "8", "8"],
+    );
+    let frozen = prajna_experiment::comparison::freeze(
+        root,
+        &prajna_experiment::comparison::Request {
+            selection,
+            reinvestment_calendar: prajna_experiment::comparison::ReinvestmentPolicy::None,
+        },
+    )
+    .unwrap();
+    let relation = &frozen["data"]["comparability"];
+    assert_eq!(relation["return_basis"], "price_return");
+    assert_eq!(relation["execution_mode"], "daily_price_simulation_v1");
+    assert!(relation["corporate_actions"].is_null());
+    assert_eq!(relation["evaluation"]["start"], DATES[1]);
+    assert_eq!(relation["evaluation"]["end"], DATES[9]);
+
+    let strategy =
+        Experiment::parse(&frozen["data"]["strategy"]["definition"].to_string(), root).unwrap();
+    let report = strategy.execute(root, 1).unwrap();
+    let run = &report.runs[0];
+    assert!(run.error.is_none(), "{:?}", run.error);
+    let result = run.fast_event_result.as_ref().unwrap();
+    let summary = run.summary.as_ref().unwrap();
+    assert_eq!(result.sessions.len(), 9);
+    assert_eq!(result.account.fills().len(), 2);
+    let entry = serde_json::to_value(&result.account.fills()[0]).unwrap();
+    assert_eq!(entry["raw_price"], "10");
+    assert_eq!(entry["price"], "10.01");
+    assert_eq!(entry["slippage"], "9");
+    assert_eq!(entry["order"]["quantity"], "900");
+    assert_eq!(entry["costs"]["minimum_commission_top_up"], "2.2973");
+    assert_eq!(entry["costs"]["tax"], "9.009");
+
+    // 10000 - 900 * 10.01 - 5 - 9.009 = 976.991, then 900 * 11
+    // marks to 10876.991. Deferred sell on the raw-price gap retains the
+    // previous raw close. Later sale at 9.99 less 5 + 17.982 yields 9945.009.
+    let close = &result.sessions[1].close.account;
+    assert_eq!(close.cash.to_string(), "976.991");
+    assert_eq!(close.equity.to_string(), "10876.991");
+    assert_eq!(
+        result.sessions[3].close_sources[&"510300.XSHG".parse().unwrap()]
+            .session_date
+            .to_string(),
+        DATES[3]
+    );
+    assert_eq!(
+        result.sessions[4].close.account.equity.to_string(),
+        "9945.009"
+    );
+    assert_eq!(summary.deferred_count, 1);
+    assert_eq!(
+        serde_json::to_value(summary).unwrap()["adjusted_signal_gaps"]["510300.XSHG"],
+        json!([DATES[5], DATES[9]])
+    );
+    let metrics = &summary.complete.as_ref().unwrap().metrics;
+    assert!((metrics["total_return"].value.unwrap() + 0.0054991).abs() < 1e-10);
+    // The benchmark made the same entry and then held 900 shares with
+    // 976.991 cash through the last Session. Net price return is -0.0023009.
+    assert!((metrics["benchmark_return"].value.unwrap() + 0.0023009).abs() < 1e-10);
+    assert!((metrics["excess_return"].value.unwrap() + 0.0031982).abs() < 1e-10);
+    assert!(
+        summary
+            .complete
+            .as_ref()
+            .unwrap()
+            .calendar
+            .as_ref()
+            .unwrap()
+            .available
+    );
+}
+
+#[test]
+fn daily_price_skips_a_missing_buy_and_preserves_a_pending_sell_at_the_end() {
+    let closes = ["10", "12", "12", "14", "15", "16", "17", "17", "17", "17"];
+    for (missing, fill_count, skip_count, deferred_count, pending) in
+        [(&[2][..], 2, 1, 0, true), (&[8, 9][..], 1, 0, 2, true)]
+    {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        let mut selection = daily_selection(root, missing, &closes);
+        // Dates 3/5 have rising signals. With index 2 missing, index 3 is
+        // invalid and the next scheduled rising signal enters on index 6.
+        let definition = freeze(root, &selection).unwrap()["data"]["definition"].clone();
+        let report = Experiment::parse(&definition.to_string(), root)
+            .unwrap()
+            .execute(root, 1)
+            .unwrap();
+        let run = &report.runs[0];
+        assert!(run.error.is_none(), "{:?}", run.error);
+        let result = run.fast_event_result.as_ref().unwrap();
+        let summary = run.summary.as_ref().unwrap();
+        assert_eq!(summary.skipped_buy_count, skip_count);
+        assert_eq!(summary.deferred_count, deferred_count);
+        assert_eq!(summary.pending_at_end, pending);
+        assert_eq!(result.account.fills().len(), fill_count);
+        assert_eq!(
+            result
+                .sessions
+                .last()
+                .unwrap()
+                .session
+                .session_date
+                .to_string(),
+            DATES[9]
+        );
+
+        selection.parameter_space =
+            Some(json!({"list":[{"params_version":1,"ma_window":20,"rebalance_every":2}]}));
+        let failure = freeze(root, &selection).unwrap_err();
+        assert_eq!(failure.code, "evaluation_window_not_runnable");
+        assert!(
+            failure
+                .message
+                .contains("need 20 consecutive adjusted closes")
+        );
+        assert!(failure.message.contains("short by"));
+    }
+}
+
+#[test]
+fn opting_into_daily_prices_changes_experiment_and_run_identity() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    let mut selection = setup(root, true);
+    let strict = freeze(root, &selection).unwrap()["data"]["definition"].clone();
+    selection.execution_mode = Some(prajna_experiment::ExecutionMode::DailyPriceSimulationV1);
+    let daily = freeze(root, &selection).unwrap()["data"]["definition"].clone();
+    let mut omitted = daily.clone();
+    omitted.as_object_mut().unwrap().remove("execution_mode");
+    assert_eq!(omitted, strict);
+    let strict = Experiment::parse(&strict.to_string(), root).unwrap();
+    let daily = Experiment::parse(&daily.to_string(), root).unwrap();
+    assert_ne!(strict.id().unwrap(), daily.id().unwrap());
+    assert_ne!(
+        strict.run_definitions(root).unwrap()[0].run_id,
+        daily.run_definitions(root).unwrap()[0].run_id,
+    );
+    let strict = strict.execute(root, 1).unwrap();
+    let daily = daily.execute(root, 1).unwrap();
+    assert_eq!(strict.runs[0].summary.as_ref().unwrap().deferred_count, 1);
+    assert_eq!(daily.runs[0].summary.as_ref().unwrap().deferred_count, 0);
+    assert!(
+        serde_json::to_value(strict.runs[0].summary.as_ref().unwrap())
+            .unwrap()
+            .get("execution_mode")
+            .is_none()
+    );
+}

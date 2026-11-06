@@ -11,7 +11,7 @@ use prajna_research::{PanelError, StaticUniverse, UniverseError, load_panel_for_
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{Experiment, ExperimentError, window};
+use crate::{ExecutionMode, Experiment, ExperimentError, window};
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -21,6 +21,8 @@ pub struct Selection {
     pub instrument: String,
     pub pool: Option<crate::pools::Reference>,
     pub strategy: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_mode: Option<ExecutionMode>,
     /// Existing native parameter list/grid; omitted only for legacy Buy & Hold.
     pub parameter_space: Option<Value>,
     #[serde(default)]
@@ -122,6 +124,17 @@ fn prepare(root: &Path, selection: &Selection) -> Result<Prepared, SelectionErro
             "strategy must declare a native research window",
         ));
     }
+    if selection.execution_mode.is_some()
+        && (!matches!(
+            selection.strategy.as_str(),
+            "single_etf_timing" | "pool_momentum_topk"
+        ) || selection.corporate_actions.is_some())
+    {
+        return Err(error(
+            "invalid_selection",
+            "daily_price_simulation_v1 requires ETF timing or pool momentum and no corporate-actions binding",
+        ));
+    }
     let frozen_pool = selection
         .pool
         .as_ref()
@@ -173,7 +186,13 @@ fn prepare(root: &Path, selection: &Selection) -> Result<Prepared, SelectionErro
                     "security is absent from the fixed DSV",
                 )
             })?;
-        validate_instrument(instrument, venue)?;
+        validate_instrument_for_mode(instrument, venue, selection.execution_mode)?;
+        if selection.execution_mode.is_some() && instrument["kind"] != "etf" {
+            return Err(error(
+                "invalid_selection",
+                "daily price simulation requires ETF members",
+            ));
+        }
         if frozen_pool.is_some() && instrument["kind"] != "etf" {
             return Err(error(
                 "invalid_selection",
@@ -181,6 +200,12 @@ fn prepare(root: &Path, selection: &Selection) -> Result<Prepared, SelectionErro
             ));
         }
         instruments.push(instrument.clone());
+    }
+    if selection.execution_mode.is_some() && venues.len() != 1 {
+        return Err(error(
+            "unsupported_venue",
+            "daily price simulation requires one Venue",
+        ));
     }
     if selection.strategy == "single_etf_timing"
         && (universe.members().len() != 1 || instruments[0]["kind"] != "etf")
@@ -354,10 +379,11 @@ fn plan_window(
             present: sessions.iter().map(|date| dates.contains(date)).collect(),
         });
     }
-    window::plan(
+    window::plan_for_mode(
         &sessions,
         &coverage,
         &parameters(selection, prepared.universe.members().len())?,
+        selection.execution_mode,
     )
     .map_err(|message| error("invalid_selection", message))
 }
@@ -445,6 +471,9 @@ fn base_definition(
             "portfolios": [{"id": 1, "capital": settings.initial_cash}], "lot_size_source": {"kind": "instrument"}}
     });
     crate::write_venue_scope(&mut definition, &prepared.venues);
+    if let Some(mode) = selection.execution_mode {
+        definition["execution_mode"] = json!(mode);
+    }
     // ADR 0027/0028: multi-Venue Fast Event accepts only full_target. A single
     // Venue keeps the historical entry-only Buy & Hold definition and identity.
     if selection.strategy != "buy_and_hold" || prepared.venues.len() > 1 {
@@ -525,6 +554,14 @@ pub fn freeze(root: &Path, selection: &Selection) -> Result<Value, SelectionErro
         response["data"]["window"] =
             serde_json::to_value(&planned).map_err(|e| error("invalid_selection", e))?;
     }
+    if selection.execution_mode.is_some() {
+        response["data"]["limitations"][1] = json!(
+            "Adjusted prices are assumed available at Session close and valid raw opens are assumed executable"
+        );
+        response["data"]["limitations"][2] = json!(
+            "Raw price returns exclude corporate actions; ex-rights moves may distort measured returns"
+        );
+    }
     if selection.corporate_actions.is_some() {
         response["data"]["limitations"][2] = json!(
             "Fixed structured corporate actions use the raw-price account ledger; completeness is reported by the execution, not guaranteed by the binding"
@@ -581,6 +618,9 @@ pub fn plan(root: &Path, selection: &Selection) -> Result<Value, SelectionError>
         "blocking": blocking,
         "instruments": prepared.instruments,
     });
+    if let Some(mode) = selection.execution_mode {
+        data["execution_mode"] = json!(mode);
+    }
     // Single-Venue plans keep the historical `venue` spelling; mixed Venue sets
     // are never collapsed into one Venue for display or identity.
     if let Some(venue) = prepared
@@ -598,7 +638,11 @@ pub fn plan(root: &Path, selection: &Selection) -> Result<Value, SelectionError>
 }
 
 /// Rejects a previewed instrument whose immutable evidence cannot support a tradable selection.
-fn validate_instrument(instrument: &Value, venue: &str) -> Result<(), SelectionError> {
+fn validate_instrument_for_mode(
+    instrument: &Value,
+    venue: &str,
+    mode: Option<ExecutionMode>,
+) -> Result<(), SelectionError> {
     if !matches!(instrument["kind"].as_str(), Some("etf" | "equity"))
         || instrument["quote_currency"] != "CNY"
         || instrument["venue"] != venue
@@ -628,6 +672,9 @@ fn validate_instrument(instrument: &Value, venue: &str) -> Result<(), SelectionE
                 format!("positive {key} required"),
             ));
         }
+    }
+    if mode.is_some() {
+        return Ok(());
     }
     let lifecycle = &instrument["lifecycle"];
     let coverage = &instrument["coverage"];
@@ -668,7 +715,7 @@ mod tests {
 
     #[test]
     fn instrument_gate_rejects_each_missing_evidence_branch() {
-        assert!(validate_instrument(&instrument(), "XSHG").is_ok());
+        assert!(validate_instrument_for_mode(&instrument(), "XSHG", None).is_ok());
         for (pointer, replacement, code) in [
             ("/kind", json!("index"), "invalid_selection"),
             ("/quote_currency", json!("USD"), "invalid_selection"),
@@ -717,7 +764,9 @@ mod tests {
             let mut value = instrument();
             *value.pointer_mut(pointer).unwrap() = replacement;
             assert_eq!(
-                validate_instrument(&value, "XSHG").unwrap_err().code,
+                validate_instrument_for_mode(&value, "XSHG", None)
+                    .unwrap_err()
+                    .code,
                 code,
                 "{pointer}"
             );

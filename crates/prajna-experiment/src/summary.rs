@@ -8,6 +8,11 @@ use serde::{Deserialize, Serialize};
 pub struct RunSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub complete: Option<crate::performance::CompleteSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_mode: Option<crate::ExecutionMode>,
+    /// Scheduled close Sessions whose member signal inputs are missing.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub adjusted_signal_gaps: std::collections::BTreeMap<String, Vec<chrono::NaiveDate>>,
     pub total_return: Option<f64>,
     pub annualized_return: Option<f64>,
     pub n_returns: usize,
@@ -76,6 +81,8 @@ pub fn summarize(result: &VectorResult, sessions_per_year: u64) -> RunSummary {
 
     RunSummary {
         complete: None,
+        execution_mode: None,
+        adjusted_signal_gaps: Default::default(),
         total_return,
         annualized_return,
         n_returns,
