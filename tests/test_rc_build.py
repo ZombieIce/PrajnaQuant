@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.error
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -92,6 +93,55 @@ class ReleaseBuildTests(unittest.TestCase):
                                      cwd=snapshot, env=environment, capture_output=True)
             self.assertNotEqual(missing.returncode, 0)
             self.assertEqual(git(snapshot, 'remote').stdout, '')
+
+    def test_candidate_version_checks_remote_tags_not_only_local_tags(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / 'source'
+            repo.mkdir()
+            git(repo, 'init', '-q')
+            git(repo, 'config', 'user.name', 'Synthetic Fixture')
+            git(repo, 'config', 'user.email', 'synthetic@example.invalid')
+            (repo / 'tracked').write_text('synthetic source')
+            git(repo, 'add', 'tracked')
+            git(repo, '-c', 'commit.gpgsign=false', 'commit', '-qm', 'synthetic')
+            revision = git(repo, 'rev-parse', 'HEAD').stdout.strip()
+            remote = root / 'origin.git'
+            git(root, 'init', '--bare', '-q', str(remote))
+            git(repo, 'remote', 'add', 'origin', str(remote))
+            git(repo, 'push', 'origin', 'HEAD:refs/heads/main')
+            version = 'v0.1.0-rc.1'
+            git(repo, '--git-dir', str(remote), 'tag', version, revision)
+
+            self.assertFalse(git(repo, 'tag', '--list', version).stdout.strip())
+            self.assertTrue(build.remote_tag_exists(repo, version))
+            self.assertFalse(build.remote_tag_exists(repo, 'v0.1.0-rc.2'))
+
+    def test_candidate_version_check_fails_if_origin_cannot_be_checked(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            git(repo, 'init', '-q')
+            with self.assertRaisesRegex(RcError, 'origin remote is not configured'):
+                build.remote_tag_exists(repo, 'v0.1.0-rc.1')
+
+    def test_candidate_version_checks_github_releases(self):
+        response = io.BytesIO(json.dumps({'tag_name': 'v0.1.0-rc.1'}).encode())
+        with patch.object(build.urllib.request, 'urlopen', return_value=response) as urlopen:
+            self.assertTrue(build.remote_release_exists('v0.1.0-rc.1'))
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url,
+                         'https://api.github.com/repos/ZombieIce/PrajnaQuant/releases/tags/v0.1.0-rc.1')
+        self.assertEqual(request.get_header('User-agent'), 'PrajnaQuant-RC-builder')
+
+        not_found = urllib.error.HTTPError('https://api.github.com', 404, 'Not Found', {}, None)
+        with patch.object(build.urllib.request, 'urlopen', side_effect=not_found):
+            self.assertFalse(build.remote_release_exists('v0.1.0-rc.2'))
+
+    def test_candidate_version_release_check_fails_closed_on_lookup_errors(self):
+        rate_limited = urllib.error.HTTPError('https://api.github.com', 403, 'Forbidden', {}, None)
+        with patch.object(build.urllib.request, 'urlopen', side_effect=rate_limited):
+            with self.assertRaisesRegex(RcError, 'HTTP 403'):
+                build.remote_release_exists('v0.1.0-rc.1')
 
     def test_only_owned_synthetic_paths_are_made_portable(self):
         with tempfile.TemporaryDirectory() as temp:

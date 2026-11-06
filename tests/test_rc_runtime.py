@@ -77,6 +77,11 @@ class DemoTests(unittest.TestCase):
             second = template / 'synthetic-input/XSHE/selection.json'
             second.parent.mkdir(parents=True)
             second.write_text(json.dumps({'report': '@DEMO_ROOT@/synthetic-input/XSHE/report.json'}))
+            daily_price = template / 'synthetic-input/daily-price/config.json'
+            daily_price.parent.mkdir(parents=True)
+            daily_price.write_text(json.dumps({
+                'calendar_root': '@DEMO_ROOT@/synthetic-input/daily-price',
+            }))
             for name in ('etf.json-selection.json', 'stock.json-selection.json'):
                 (template / name).write_text(json.dumps({'raw_root': '@DEMO_ROOT@/synthetic-input/preview'}))
             destination = root / 'independent lake'
@@ -89,6 +94,13 @@ class DemoTests(unittest.TestCase):
             self.assertEqual(installed_selection['report'], str(destination / 'synthetic-input/XSHG/report.json'))
             installed_second = json.loads((destination / 'synthetic-input/XSHE/selection.json').read_text())
             self.assertEqual(installed_second['report'], str(destination / 'synthetic-input/XSHE/report.json'))
+            installed_daily_price = json.loads(
+                (destination / 'synthetic-input/daily-price/config.json').read_text()
+            )
+            self.assertEqual(
+                installed_daily_price['calendar_root'],
+                str(destination / 'synthetic-input/daily-price'),
+            )
             self.assertEqual((destination / 'raw/synthetic').read_bytes(), raw.read_bytes())
             self.assertIn('@DEMO_ROOT@', config.read_text())
 

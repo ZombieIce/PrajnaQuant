@@ -12,12 +12,15 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.error
+import urllib.request
 
 from rc_runtime import DEMO_CONFIGS, DEMO_PREFIX, REQUIRED_BINS, RcError, digest, git_env
 
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = 'aarch64-apple-darwin'
+GITHUB_REPOSITORY = 'ZombieIce/PrajnaQuant'
 SOURCE_PATTERNS = (
     '/.gitignore', '/Cargo.toml', '/Cargo.lock', '/src/',
     '/crates/*/Cargo.toml', '/crates/*/build.rs', '/crates/*/src/',
@@ -87,6 +90,45 @@ def build_versions(log):
 
 def git(repo, *args):
     return subprocess.check_output(['git', *args], cwd=repo, env=git_env())
+
+
+def remote_tag_exists(repo, version):
+    remotes = git(repo, 'remote').decode().splitlines()
+    if 'origin' not in remotes:
+        raise RcError('cannot verify candidate version: Git origin remote is not configured')
+    try:
+        result = subprocess.run(
+            ['git', 'ls-remote', '--exit-code', '--refs', '--tags', 'origin', f'refs/tags/{version}'],
+            cwd=repo, env=git_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RcError(f'cannot verify candidate version against origin tags: {error}') from error
+    if result.returncode == 0:
+        return bool(result.stdout.strip())
+    if result.returncode == 2:
+        return False
+    detail = result.stderr.strip() or f'git ls-remote exited {result.returncode}'
+    raise RcError(f'cannot verify candidate version against origin tags: {detail}')
+
+
+def remote_release_exists(version):
+    url = f'https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/tags/{version}'
+    request = urllib.request.Request(url, headers={
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'PrajnaQuant-RC-builder',
+    })
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            release = json.load(response)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return False
+        raise RcError(f'cannot verify candidate version against GitHub releases: HTTP {error.code}') from error
+    except (OSError, TimeoutError, json.JSONDecodeError) as error:
+        raise RcError(f'cannot verify candidate version against GitHub releases: {error}') from error
+    if not isinstance(release, dict) or release.get('tag_name') != version:
+        raise RcError('GitHub release lookup returned an unexpected response')
+    return True
 
 
 def source_snapshot(repo, destination, temporary, revision):
@@ -226,6 +268,10 @@ def build(output, version):
         revision = git(ROOT, 'rev-parse', 'HEAD').decode().strip()
         if git(ROOT, 'tag', '--list', version).strip():
             raise RcError('candidate version is already a local Git tag')
+        if remote_tag_exists(ROOT, version):
+            raise RcError('candidate version is already an origin Git tag')
+        if remote_release_exists(version):
+            raise RcError('candidate version already has a GitHub release')
         versions = build_versions(log)
         rustc_path = shutil.which('rustc')
         if not rustc_path:
