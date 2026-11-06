@@ -29,8 +29,9 @@ type Summary = {
   total_turnover: number; total_cost: number; executed_count: number; deferred_count: number; skipped_buy_count: number;
   session_count: number; pending_at_end: boolean; insufficient_sessions: boolean; zero_volatility: boolean;
   assumptions: string[]; availability_assumption: string; return_basis?: string | null; execution_mode?: string | null;
+  adjusted_signal_gaps?: Record<string, string[]>;
 };
-type Position = { quantity: string; market_value: string; price?: string };
+type Position = { quantity: string; market_value: string; price?: string; mark_session?: string; stale_calendar_days?: number };
 type ValuationRow = {
   session_date: string; valuation_point: 'open_after' | 'close'; scope?: string; portfolio_id?: number | string | null; cash: string; equity: string;
   positions?: Record<string, Position>; accounting_verified?: boolean;
@@ -309,6 +310,11 @@ function RunResult({ run }: { run: ResultRun }) {
   const chart = equityPoints.length ? { title: '账户权益（CNY，收盘估值）', points: equityPoints }
     : navPoints.length ? { title: '净值', points: navPoints } : null;
   const summary = run.summary;
+  const signalGaps = Object.entries(summary?.adjusted_signal_gaps ?? {});
+  const staleMarks = valuations.flatMap(row => Object.entries(row.positions ?? {}).flatMap(([id, position]) =>
+    position.stale_calendar_days && position.stale_calendar_days > 0
+      ? [{ date: row.session_date, point: row.valuation_point, id, mark: position.mark_session, days: position.stale_calendar_days }]
+      : []));
   const unavailable = summary?.insufficient_sessions ? '不可计算（有效收益样本不足 2）'
     : summary?.zero_volatility ? '不可计算（收益波动为零）' : '不可计算';
   const positionText = (positions: Record<string, Position> | undefined) => {
@@ -338,6 +344,10 @@ function RunResult({ run }: { run: ResultRun }) {
       {summary.pending_at_end && <ErrorBox>期末仍有 pending 目标/风险退出：最后交易日产生的待执行目标未成交，不代表已清仓。</ErrorBox>}
       {summary.insufficient_sessions && <p className="hint">有效收益样本不足 2，年化收益、波动与 Sharpe 不可计算；未以 0 代替。</p>}
       {summary.zero_volatility && <p className="hint">收益波动为零，Sharpe 不可计算；未以 0 代替。</p>}
+      {signalGaps.length > 0 && <details data-testid="adjusted-signal-gaps">
+        <summary>复权价缺失影响的信号</summary>
+        <ul>{signalGaps.map(([member, dates]) => <li key={member}>{member} · {dates.length} 日 · {dates.join('、')}</li>)}</ul>
+      </details>}
       <details><summary>收益假设与可用时刻</summary><p>{summary.availability_assumption}</p><ul>{(summary.assumptions ?? []).map((item, index) => <li key={index}>{item}</li>)}</ul></details>
     </>}
     {chart ? <Chart option={{
@@ -352,6 +362,15 @@ function RunResult({ run }: { run: ResultRun }) {
         <td>{row.session_date}</td><td>{row.valuation_point}</td><td>{row.cash}</td><td>{row.equity}</td><td>{positionText(row.positions)}</td>
       </tr>)}</tbody>
     </table></div>}
+    {staleMarks.length > 0 && <details data-testid="stale-position-marks">
+      <summary>沿用最近估值（{staleMarks.length} 条）</summary>
+      <div className="table-wrap"><table>
+        <thead><tr><th>日期</th><th>估值点</th><th>证券</th><th>价格日期</th><th>陈旧自然日数</th></tr></thead>
+        <tbody>{staleMarks.map(({ date, point, id, mark, days }) => <tr key={`${date}-${point}-${id}`}>
+          <td>{date}</td><td>{point}</td><td>{id}</td><td>{mark ?? '未记录'}</td><td>{days}</td>
+        </tr>)}</tbody>
+      </table></div>
+    </details>}
     {valuations.length === 0 && sessions.length > 0 && <div className="table-wrap"><table data-testid="session-rows">
       <thead><tr><th>日期</th><th>净值</th><th>净收益</th></tr></thead>
       <tbody>{sessions.map((row) => <tr key={row.session_date}><td>{row.session_date}</td><td>{row.nav}</td><td>{row.net_return ?? '未保存'}</td></tr>)}</tbody>
