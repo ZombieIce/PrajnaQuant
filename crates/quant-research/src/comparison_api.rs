@@ -86,6 +86,7 @@ fn freeze_status(code: &str) -> StatusCode {
         | "evaluation_window_not_runnable"
         | "invalid_venue_selection"
         | "inconsistent_venue_calendar"
+        | "comparison_invalid_reinvestment"
         | "comparison_requires_corporate_actions"
         | "comparison_requires_research_window"
         | "comparison_unsupported_strategy"
