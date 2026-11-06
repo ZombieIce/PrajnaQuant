@@ -506,6 +506,47 @@ fn daily_price_compares_the_same_ledger_window_without_action_or_opening_evidenc
             .unwrap()
             .available
     );
+
+    use prajna_experiment::{ResultLevel, StoreAction, read_persisted_result};
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let stored = strategy
+        .execute_and_store(root, &repository, ResultLevel::Standard, 1)
+        .unwrap();
+    let saved = read_persisted_result(
+        root,
+        &stored.manifest.experiment_id,
+        &stored.manifest.execution.id,
+        None,
+    )
+    .unwrap();
+    let saved_run = &saved["data"]["runs"][0];
+    let stale_close = saved_run["allocations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["session_date"] == DATES[4] && row["valuation_point"] == "close")
+        .unwrap();
+    let mark = &stale_close["positions"]["510300.XSHG"];
+    assert_eq!(mark["mark_session"], DATES[3]);
+    assert_eq!(mark["stale_calendar_days"], 1);
+    assert!(
+        saved_run["details"]["orders"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|order| {
+                order["kind"] == "deferred" && order["reason"] == "held_instrument_missing_raw_open"
+            })
+    );
+    assert_eq!(saved_run["details"]["fills"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        saved_run["summary"]["execution_mode"],
+        "daily_price_simulation_v1"
+    );
+    let replay = strategy
+        .execute_and_store(root, &repository, ResultLevel::Standard, 1)
+        .unwrap();
+    assert_eq!(replay.action, StoreAction::Replayed);
 }
 
 #[test]
