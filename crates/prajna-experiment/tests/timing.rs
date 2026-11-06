@@ -625,4 +625,47 @@ fn opting_into_daily_prices_changes_experiment_and_run_identity() {
             .get("execution_mode")
             .is_none()
     );
+
+    // A persisted strict result keeps the pre-daily shape and replays byte-checked.
+    use prajna_experiment::{ResultLevel, StoreAction, read_persisted_result};
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    selection.execution_mode = None;
+    let experiment = Experiment::parse(
+        &freeze(root, &selection).unwrap()["data"]["definition"].to_string(),
+        root,
+    )
+    .unwrap();
+    let stored = experiment
+        .execute_and_store(root, &repository, ResultLevel::Standard, 1)
+        .unwrap();
+    let saved = read_persisted_result(
+        root,
+        &stored.manifest.experiment_id,
+        &stored.manifest.execution.id,
+        None,
+    )
+    .unwrap();
+    let run = &saved["data"]["runs"][0];
+    assert!(run["summary"].get("execution_mode").is_none());
+    assert!(run["summary"].get("adjusted_signal_gaps").is_none());
+    let text = run.to_string();
+    for daily_only in [
+        "stale_calendar_days",
+        "mark_session",
+        "missing_raw_open",
+        "daily_price_simulation_v1",
+    ] {
+        assert!(!text.contains(daily_only), "{daily_only}");
+    }
+    // Standard keeps the strict table set; only daily mode adds orders and fills.
+    assert!(run["details"].get("orders").is_none());
+    assert!(
+        run["details"]["portfolio_valuations"]
+            .as_array()
+            .is_some_and(|rows| !rows.is_empty())
+    );
+    let replay = experiment
+        .execute_and_store(root, &repository, ResultLevel::Standard, 1)
+        .unwrap();
+    assert_eq!(replay.action, StoreAction::Replayed);
 }
