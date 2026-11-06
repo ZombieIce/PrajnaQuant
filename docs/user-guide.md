@@ -269,3 +269,5 @@ Node 20+ 与足够磁盘（保留至少 10 GiB）的环境运行
 `python3 scripts/rc_build.py --output /absolute/empty/local-output --version v0.1.0-rc.1`。
 脚本执行 release 构建、合成导出与打包，不创建 tag、发布 Release 或修改数据根；
 `build.log`、压缩包及摘要留在受控本机输出目录。它要求可离线构建，不能用发行包内稀疏快照代替完整 checkout。
+构建前的版本冲突检查需要访问 GitHub API，查询 `ZombieIce/PrajnaQuant` 的 tag 和 Release；
+网络、权限或限流导致无法确认时会报错停止。该检查不预留版本，正式发布前仍须重新核对。

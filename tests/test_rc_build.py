@@ -20,6 +20,12 @@ def git(repo, *args):
     return subprocess.run(['git', *args], cwd=repo, check=True, capture_output=True, text=True)
 
 
+def missing_github_version(request, timeout):
+    if request.full_url == 'https://api.github.com/repos/ZombieIce/PrajnaQuant':
+        return io.BytesIO(json.dumps({'full_name': 'ZombieIce/PrajnaQuant'}).encode())
+    raise urllib.error.HTTPError(request.full_url, 404, 'Not Found', {}, None)
+
+
 class ReleaseBuildTests(unittest.TestCase):
     def test_daily_price_importer_and_demo_input_are_in_release_inventory(self):
         self.assertIn('prajna-import-daily-price', build.DATA_BINS)
@@ -94,7 +100,35 @@ class ReleaseBuildTests(unittest.TestCase):
             self.assertNotEqual(missing.returncode, 0)
             self.assertEqual(git(snapshot, 'remote').stdout, '')
 
-    def test_candidate_version_checks_remote_tags_not_only_local_tags(self):
+    def test_candidate_version_checks_canonical_tag(self):
+        response = io.BytesIO(json.dumps({'ref': 'refs/tags/v0.1.0-rc.1'}).encode())
+        with patch.object(build.urllib.request, 'urlopen', return_value=response) as urlopen:
+            self.assertTrue(build.remote_tag_exists('v0.1.0-rc.1'))
+        self.assertEqual(
+            urlopen.call_args.args[0].full_url,
+            'https://api.github.com/repos/ZombieIce/PrajnaQuant/git/ref/tags/v0.1.0-rc.1',
+        )
+        with patch.object(build.urllib.request, 'urlopen', side_effect=missing_github_version):
+            self.assertFalse(build.remote_tag_exists('v0.1.0-rc.2'))
+
+    def test_candidate_tag_check_fails_closed_on_lookup_errors(self):
+        rate_limited = urllib.error.HTTPError('https://api.github.com', 403, 'Forbidden', {}, None)
+        with patch.object(build.urllib.request, 'urlopen', side_effect=rate_limited):
+            with self.assertRaisesRegex(RcError, 'GitHub tags: HTTP 403'):
+                build.remote_tag_exists('v0.1.0-rc.1')
+        response = io.BytesIO(json.dumps({'ref': 'refs/tags/v0.1.0-rc.10'}).encode())
+        with patch.object(build.urllib.request, 'urlopen', return_value=response):
+            with self.assertRaisesRegex(RcError, 'unexpected response'):
+                build.remote_tag_exists('v0.1.0-rc.1')
+        with patch.object(build.urllib.request, 'urlopen', return_value=io.BytesIO(b'null')):
+            with self.assertRaisesRegex(RcError, 'unexpected response'):
+                build.remote_tag_exists('v0.1.0-rc.1')
+        not_found = urllib.error.HTTPError('https://api.github.com', 404, 'Not Found', {}, None)
+        with patch.object(build.urllib.request, 'urlopen', side_effect=not_found):
+            with self.assertRaisesRegex(RcError, 'GitHub repository: HTTP 404'):
+                build.remote_tag_exists('v0.1.0-rc.1')
+
+    def test_build_rejects_canonical_tag_absent_from_fork_without_release(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             repo = root / 'source'
@@ -105,24 +139,25 @@ class ReleaseBuildTests(unittest.TestCase):
             (repo / 'tracked').write_text('synthetic source')
             git(repo, 'add', 'tracked')
             git(repo, '-c', 'commit.gpgsign=false', 'commit', '-qm', 'synthetic')
-            revision = git(repo, 'rev-parse', 'HEAD').stdout.strip()
-            remote = root / 'origin.git'
-            git(root, 'init', '--bare', '-q', str(remote))
-            git(repo, 'remote', 'add', 'origin', str(remote))
-            git(repo, 'push', 'origin', 'HEAD:refs/heads/main')
+            fork = root / 'fork.git'
+            git(root, 'init', '--bare', '-q', str(fork))
+            git(repo, 'remote', 'add', 'origin', str(fork))
             version = 'v0.1.0-rc.1'
-            git(repo, '--git-dir', str(remote), 'tag', version, revision)
 
-            self.assertFalse(git(repo, 'tag', '--list', version).stdout.strip())
-            self.assertTrue(build.remote_tag_exists(repo, version))
-            self.assertFalse(build.remote_tag_exists(repo, 'v0.1.0-rc.2'))
+            def lookup(request, timeout):
+                if request.full_url.endswith(f'/git/ref/tags/{version}'):
+                    return io.BytesIO(json.dumps({'ref': f'refs/tags/{version}'}).encode())
+                return missing_github_version(request, timeout)
 
-    def test_candidate_version_check_fails_if_origin_cannot_be_checked(self):
-        with tempfile.TemporaryDirectory() as temp:
-            repo = Path(temp)
-            git(repo, 'init', '-q')
-            with self.assertRaisesRegex(RcError, 'origin remote is not configured'):
-                build.remote_tag_exists(repo, 'v0.1.0-rc.1')
+            with patch.object(build, 'ROOT', repo), \
+                 patch.object(build.platform, 'system', return_value='Darwin'), \
+                 patch.object(build.platform, 'machine', return_value='arm64'), \
+                 patch.object(build, 'build_versions', return_value={}), \
+                 patch.object(build.shutil, 'which', return_value='/synthetic/rustc'), \
+                 patch.object(build, 'command', side_effect=RcError('build unexpectedly started')), \
+                 patch.object(build.urllib.request, 'urlopen', side_effect=lookup):
+                with self.assertRaisesRegex(RcError, 'candidate version.*tag'):
+                    build.build(root / 'output', version)
 
     def test_candidate_version_checks_github_releases(self):
         response = io.BytesIO(json.dumps({'tag_name': 'v0.1.0-rc.1'}).encode())
@@ -133,8 +168,7 @@ class ReleaseBuildTests(unittest.TestCase):
                          'https://api.github.com/repos/ZombieIce/PrajnaQuant/releases/tags/v0.1.0-rc.1')
         self.assertEqual(request.get_header('User-agent'), 'PrajnaQuant-RC-builder')
 
-        not_found = urllib.error.HTTPError('https://api.github.com', 404, 'Not Found', {}, None)
-        with patch.object(build.urllib.request, 'urlopen', side_effect=not_found):
+        with patch.object(build.urllib.request, 'urlopen', side_effect=missing_github_version):
             self.assertFalse(build.remote_release_exists('v0.1.0-rc.2'))
 
     def test_candidate_version_release_check_fails_closed_on_lookup_errors(self):

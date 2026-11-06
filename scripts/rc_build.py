@@ -92,40 +92,45 @@ def git(repo, *args):
     return subprocess.check_output(['git', *args], cwd=repo, env=git_env())
 
 
-def remote_tag_exists(repo, version):
-    remotes = git(repo, 'remote').decode().splitlines()
-    if 'origin' not in remotes:
-        raise RcError('cannot verify candidate version: Git origin remote is not configured')
-    try:
-        result = subprocess.run(
-            ['git', 'ls-remote', '--exit-code', '--refs', '--tags', 'origin', f'refs/tags/{version}'],
-            cwd=repo, env=git_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise RcError(f'cannot verify candidate version against origin tags: {error}') from error
-    if result.returncode == 0:
-        return bool(result.stdout.strip())
-    if result.returncode == 2:
-        return False
-    detail = result.stderr.strip() or f'git ls-remote exited {result.returncode}'
-    raise RcError(f'cannot verify candidate version against origin tags: {detail}')
-
-
-def remote_release_exists(version):
-    url = f'https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/tags/{version}'
+def github_version_lookup(path, kind):
+    url = f'https://api.github.com/repos/{GITHUB_REPOSITORY}'
+    if path:
+        url += f'/{path}'
     request = urllib.request.Request(url, headers={
         'Accept': 'application/vnd.github+json',
         'User-Agent': 'PrajnaQuant-RC-builder',
     })
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            release = json.load(response)
+            result = json.load(response)
     except urllib.error.HTTPError as error:
-        if error.code == 404:
-            return False
-        raise RcError(f'cannot verify candidate version against GitHub releases: HTTP {error.code}') from error
-    except (OSError, TimeoutError, json.JSONDecodeError) as error:
-        raise RcError(f'cannot verify candidate version against GitHub releases: {error}') from error
+        if error.code == 404 and path:
+            repository = github_version_lookup('', 'repository')
+            name = repository.get('full_name')
+            if not isinstance(name, str) or name.lower() != GITHUB_REPOSITORY.lower():
+                raise RcError('GitHub repository lookup returned an unexpected response')
+            return None
+        raise RcError(f'cannot verify candidate version against GitHub {kind}: HTTP {error.code}') from error
+    except (OSError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RcError(f'cannot verify candidate version against GitHub {kind}: {error}') from error
+    if not isinstance(result, dict):
+        raise RcError(f'GitHub {kind} lookup returned an unexpected response')
+    return result
+
+
+def remote_tag_exists(version):
+    tag = github_version_lookup(f'git/ref/tags/{version}', 'tags')
+    if tag is None:
+        return False
+    if not isinstance(tag, dict) or tag.get('ref') != f'refs/tags/{version}':
+        raise RcError('GitHub tag lookup returned an unexpected response')
+    return True
+
+
+def remote_release_exists(version):
+    release = github_version_lookup(f'releases/tags/{version}', 'releases')
+    if release is None:
+        return False
     if not isinstance(release, dict) or release.get('tag_name') != version:
         raise RcError('GitHub release lookup returned an unexpected response')
     return True
@@ -268,8 +273,8 @@ def build(output, version):
         revision = git(ROOT, 'rev-parse', 'HEAD').decode().strip()
         if git(ROOT, 'tag', '--list', version).strip():
             raise RcError('candidate version is already a local Git tag')
-        if remote_tag_exists(ROOT, version):
-            raise RcError('candidate version is already an origin Git tag')
+        if remote_tag_exists(version):
+            raise RcError('candidate version is already a canonical GitHub tag')
         if remote_release_exists(version):
             raise RcError('candidate version already has a GitHub release')
         versions = build_versions(log)
