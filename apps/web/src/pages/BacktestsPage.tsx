@@ -340,7 +340,8 @@ function RunResult({ run }: { run: ResultRun }) {
         <Metric label="最大回撤" value={summary.max_drawdown === null ? unavailable : pct(summary.max_drawdown)} />
         <Metric label="收益样本 / Session" value={`${summary.n_returns} / ${summary.session_count}`} />
       </section>
-      <p className="hint">执行事件 {summary.executed_count} · 延期 {summary.deferred_count} · 跳过买入 {summary.skipped_buy_count} · 累计成本率 {pct(summary.total_cost)} · 换手 {pct(summary.total_turnover)} · 收益口径 {summary.return_basis ?? '未记录'}</p>
+      <p className="hint">执行事件 {summary.executed_count} · 延期 {summary.deferred_count} · 跳过买入 {summary.skipped_buy_count} · 累计成本率 {pct(summary.total_cost)} · 换手 {pct(summary.total_turnover)} · 收益口径 {summary.return_basis === 'price_return' ? '扣费后价格收益' : summary.return_basis ?? '未记录'}</p>
+      {summary.execution_mode === dailyPriceMode && <p className="hint">跨除权日的价格跳变计入价格收益。</p>}
       {summary.pending_at_end && <ErrorBox>期末仍有 pending 目标/风险退出：最后交易日产生的待执行目标未成交，不代表已清仓。</ErrorBox>}
       {summary.insufficient_sessions && <p className="hint">有效收益样本不足 2，年化收益、波动与 Sharpe 不可计算；未以 0 代替。</p>}
       {summary.zero_volatility && <p className="hint">收益波动为零，Sharpe 不可计算；未以 0 代替。</p>}

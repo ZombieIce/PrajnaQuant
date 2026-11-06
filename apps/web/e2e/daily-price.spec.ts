@@ -161,6 +161,8 @@ test('supplier replay reaches factor, daily price ledgers and a frozen price ben
       expect(role.runs[0].summary.complete.calendar.available).toBe(true);
     }
     await expect(page.getByTestId('comparison-facts')).toContainText('日线价格模拟');
+    await expect(page.getByTestId('comparison-facts')).not.toContainText('再投资日历');
+    await expect(page.getByTestId('comparison-facts')).not.toContainText('总回报');
     await expect(page.getByTestId('comparison-chart')).toBeVisible();
     await page.reload();
     await expect(page.getByTestId('comparison-facts')).toContainText('扣费后价格收益');
