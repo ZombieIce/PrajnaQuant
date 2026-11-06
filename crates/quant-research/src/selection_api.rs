@@ -26,6 +26,7 @@ struct Request {
     #[serde(default)]
     adjusted: Option<Value>,
     corporate_actions: Option<Value>,
+    execution_mode: Option<String>,
     result_level: Option<String>,
 }
 
@@ -126,6 +127,9 @@ async fn selection(
         );
     }
     let mut selection = json!({"dsv":request.dsv,"strategy":request.strategy});
+    if let Some(mode) = request.execution_mode {
+        selection["execution_mode"] = json!(mode);
+    }
     if let Some(instrument) = request.instrument {
         selection["instrument"] = json!(instrument);
     }

@@ -646,11 +646,21 @@ fn verify_comparison(
     let end = comparison["comparability"]["evaluation"]["end"]
         .as_str()
         .ok_or_else(|| ApiFailure::internal("comparison evaluation end is missing"))?;
-    let caf = comparison["comparability"]["corporate_actions"]["version"].as_str();
+    let comparability = &comparison["comparability"];
+    let mode = &comparability["execution_mode"];
+    let daily = mode == "daily_price_simulation_v1";
+    let caf = comparability["corporate_actions"]["version"].as_str();
     let mut mismatches = Vec::new();
     let mut reasons = Vec::new();
     if comparison["comparability"]["validation_version"] != "effective-rules-calendar@2" {
         reasons.push("comparison:effective_rules_calendar_unverified".into());
+    }
+    if daily
+        && (comparability["return_basis"] != "price_return"
+            || !comparability["corporate_actions"].is_null()
+            || comparability["reinvestment_calendar"]["policy"] != "none")
+    {
+        mismatches.push("frozen daily price comparison has inconsistent assumptions".into());
     }
     let mut date_sets = Vec::new();
     for (role, result) in [("strategy", strategy), ("benchmark", benchmark)] {
@@ -677,14 +687,30 @@ fn verify_comparison(
         if !summary.is_object() {
             mismatches.push(format!("{role} summary is missing"));
         } else {
-            if summary["return_basis"] != "total_return" {
-                reasons.push(format!("{role}:return_basis_missing"));
+            if &comparison[role]["definition"]["execution_mode"] != mode
+                || &summary["execution_mode"] != mode
+            {
+                mismatches.push(format!("{role} execution mode changed"));
             }
-            if summary["corporate_action_schedule_version"].as_str() != caf {
-                reasons.push(format!("{role}:corporate_action_version_mismatch"));
-            }
-            if summary["corporate_action_completeness"]["is_complete"] != true {
-                reasons.push(format!("{role}:corporate_actions_incomplete"));
+            if daily {
+                if summary["return_basis"] != "price_return" {
+                    mismatches.push(format!("{role} price return basis changed"));
+                }
+                if !summary["corporate_action_schedule_version"].is_null() {
+                    mismatches.push(format!(
+                        "{role} daily price result has a corporate action schedule"
+                    ));
+                }
+            } else {
+                if summary["return_basis"] != "total_return" {
+                    reasons.push(format!("{role}:return_basis_missing"));
+                }
+                if summary["corporate_action_schedule_version"].as_str() != caf {
+                    reasons.push(format!("{role}:corporate_action_version_mismatch"));
+                }
+                if summary["corporate_action_completeness"]["is_complete"] != true {
+                    reasons.push(format!("{role}:corporate_actions_incomplete"));
+                }
             }
         }
         verify_complete_report(comparison, role, summary, &mut reasons, &mut mismatches);
@@ -884,6 +910,46 @@ mod tests {
             freeze_status("comparison_price_rules_mismatch"),
             StatusCode::UNPROCESSABLE_ENTITY
         );
+    }
+
+    #[test]
+    fn daily_comparison_checks_the_saved_execution_mode_and_price_basis() {
+        let mode = "daily_price_simulation_v1";
+        let comparison = json!({
+            "strategy": {"experiment": "exp", "run": "run", "definition": {"execution_mode": mode}},
+            "benchmark": {"experiment": "exp", "run": "run", "definition": {"execution_mode": mode}},
+            "comparability": {
+                "evaluation": {"start": "2026-01-05", "end": "2026-01-05"},
+                "return_basis": "price_return", "execution_mode": mode,
+                "corporate_actions": null, "reinvestment_calendar": {"policy": "none"},
+                "validation_version": "effective-rules-calendar@2"
+            }
+        });
+        let result = json!({"data": {"exp": "exp", "runs": [{
+            "run_id": "run", "status": "completed", "accounting_verified": true,
+            "summary": {"execution_mode": mode, "return_basis": "price_return", "session_count": 1},
+            "series": {"account_valuations": [{"session_date": "2026-01-05", "valuation_point": "close"}]}
+        }]}});
+        assert_eq!(
+            verify_comparison(&comparison, &result, &result).unwrap()["comparable"],
+            true
+        );
+        for (key, changed) in [
+            ("execution_mode", Value::Null),
+            ("return_basis", json!("total_return")),
+            ("corporate_action_schedule_version", json!("unexpected")),
+        ] {
+            let mut corrupted = result.clone();
+            corrupted["data"]["runs"][0]["summary"][key] = changed;
+            assert_eq!(
+                verify_comparison(&comparison, &result, &corrupted)
+                    .err()
+                    .unwrap()
+                    .0
+                    .code,
+                "comparison_result_mismatch"
+            );
+        }
     }
 
     #[test]

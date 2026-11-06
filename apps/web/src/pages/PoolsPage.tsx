@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ErrorBox, Header, Panel } from '../shared';
+import ExecutionMode, { dailyPriceLabel, dailyPriceMode } from '../components/ExecutionMode';
 import PoolUpdates from './PoolUpdates';
 
 type Version = { version: number; universe: string; members: string[] };
@@ -15,7 +16,7 @@ type Window = { common_start: string | null; common_end: string | null; start: s
 type Plan = { runnable: boolean; universe: string; venues: string[]; adjusted: Record<string, string>; window: Window | null;
   blocking: { code: string; message: string }[] };
 type RotationParameters = { params_version: number; lookback: number; top_k: number; rebalance_every: number };
-type FrozenDefinition = { dsv: string; universe: string; venues?: string[]; strategy?: string;
+type FrozenDefinition = { dsv: string; universe: string; venues?: string[]; strategy?: string; execution_mode?: string;
   parameter_space?: { list?: RotationParameters[]; grid?: Record<string, unknown> };
   costs?: { commission_rate?: number; buy_slippage_bps?: number; sell_slippage_bps?: number; buy_tax_rate?: number; sell_tax_rate?: number };
   fast_event?: { initial_cash?: string; minimum_commission?: string };
@@ -68,6 +69,7 @@ export default function PoolsPage() {
   const [adjusted, setAdjusted] = useState<Record<string, string>>(() => saved().adjusted ?? {});
   const [versions, setVersions] = useState<Adjusted[]>([]);
   const [strategy, setStrategy] = useState<string>(() => saved().strategy ?? 'buy_and_hold');
+  const [daily, setDaily] = useState<boolean>(() => saved().daily === true);
   const [parameterText, setParameterText] = useState<string>(() => saved().parameterText ?? '{"list":[{"params_version":1}]}');
   const [rotation, setRotation] = useState(() => ({ lookback: saved().lookback ?? rotationDefaults.lookback, topK: saved().topK ?? rotationDefaults.topK, frequency: saved().frequency ?? rotationDefaults.frequency }));
   const [settings, setSettings] = useState(() => ({ ...defaultSettings, ...(saved().settings ?? {}) }));
@@ -79,13 +81,14 @@ export default function PoolsPage() {
   let parameters: unknown;
   try { parameters = isRotation ? { list: [rotationParameters] } : JSON.parse(parameterText); } catch { parameters = null; }
   const selection = { dsv, pool: { id, version }, strategy, adjusted, parameter_space: parameters,
+    ...(isRotation && daily ? { execution_mode: dailyPriceMode } : {}),
     ...(isRotation ? { settings: { ...settings, commission_rate: Number(settings.commission_rate), buy_slippage_bps: Number(settings.buy_slippage_bps), sell_slippage_bps: Number(settings.sell_slippage_bps), buy_tax_rate: Number(settings.buy_tax_rate), sell_tax_rate: Number(settings.sell_tax_rate) } } : {}) };
   const selectionKey = JSON.stringify(selection);
   const currentPlan = plan?.key === selectionKey ? plan.data : null;
   useEffect(() => { setTask(''); setFrozen(null); setSubmitError(null); }, [selectionKey]);
   useEffect(() => {
-    localStorage.setItem('pool-selection@1', JSON.stringify({ id, version, dsv, adjusted, strategy, parameterText, ...rotation, settings }));
-  }, [id, version, dsv, adjusted, strategy, parameterText, rotation, settings]);
+    localStorage.setItem('pool-selection@1', JSON.stringify({ id, version, dsv, adjusted, strategy, daily, parameterText, ...rotation, settings }));
+  }, [id, version, dsv, adjusted, strategy, daily, parameterText, rotation, settings]);
   const pool = pools.find((p) => p.id === id);
   const published = pool?.versions.find((v) => v.version === version);
   const edited = text.split(/[\s,，]+/).filter(Boolean).sort();
@@ -170,6 +173,7 @@ export default function PoolsPage() {
         <label>预检策略<select aria-label="预检策略" disabled={busy} value={strategy} onChange={(e) => { setStrategy(e.target.value); setParameterText(''); }}>
           <option value="buy_and_hold">买入持有</option><option value="ma_crossover">均线交叉</option><option value="s2_rotation">轮动（旧多因子）</option><option value="pool_momentum_topk">池内动量 Top-K 轮动</option></select></label>
         {isRotation ? <>
+          <ExecutionMode daily={daily} onChange={setDaily} disabled={busy} strictLabel="严格执行" />
           <p className="hint">按绑定复权收盘计算尾随动量，T 日收盘排名，下一可用 Session 开盘尝试成交；并列按 InstrumentId 升序，合格不足 K 按实际数量等权，零候选为全现金。受阻买腿资金留现金、不重分配；池内黄金仅被选中时持有。默认动量窗口 60、Top-K 1、每 5 Session 调仓，仅为可编辑模拟参数。</p>
           <label>动量窗口（Session）<input aria-label="动量窗口" type="number" min="1" step="1" required value={rotation.lookback} onChange={e => setRotation({ ...rotation, lookback: e.target.value })} /></label>
           <label>Top-K<input aria-label="Top-K" type="number" min="1" step="1" required value={rotation.topK} onChange={e => setRotation({ ...rotation, topK: e.target.value })} /></label>
@@ -202,6 +206,7 @@ export default function PoolsPage() {
         <button className="primary" disabled={busy || !currentPlan?.runnable} onClick={() => void submit()}>提交固定池实验</button>
         {frozen && <div data-testid="frozen-selection" className="notice">
           <strong>冻结输入（Rust 选择/任务入口）</strong>
+          {frozen.definition.execution_mode === dailyPriceMode && <p>{dailyPriceLabel} · <code>{frozen.definition.execution_mode}</code></p>}
           <p>输入池：{frozen.pool.id} v{frozen.pool.version} · Dataset：<code>{frozen.definition.dsv}</code></p>
           <p>Venue：{frozen.venues.join('、')} · 引擎：<code>{frozen.engine.semantic_version}</code>（{frozen.engine.kind}）</p>
           <p>Universe：<code>{frozen.definition.universe}</code>{frozen.window ? ` · 评价窗口：${frozen.window.start ?? 'Unknown'} ～ ${frozen.window.end ?? 'Unknown'}（预热 ${frozen.window.warmup_sessions} Sessions）` : ''}</p>

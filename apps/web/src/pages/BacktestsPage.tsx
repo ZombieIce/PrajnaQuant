@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import ExecutionMode, { dailyPriceLabel, dailyPriceMode } from '../components/ExecutionMode';
 import { Chart } from '../Chart';
 import NativeResultDetails, { type NativeDetails } from '../components/NativeResultDetails';
 import { api, ErrorBox, Header, Panel, pct } from '../shared';
@@ -27,7 +28,7 @@ type Summary = {
   sharpe: number | null; max_drawdown: number | null; n_returns: number; mean_return: number | null; std_return: number | null;
   total_turnover: number; total_cost: number; executed_count: number; deferred_count: number; skipped_buy_count: number;
   session_count: number; pending_at_end: boolean; insufficient_sessions: boolean; zero_volatility: boolean;
-  assumptions: string[]; availability_assumption: string; return_basis?: string | null;
+  assumptions: string[]; availability_assumption: string; return_basis?: string | null; execution_mode?: string | null;
 };
 type Position = { quantity: string; market_value: string; price?: string };
 type ValuationRow = {
@@ -77,6 +78,7 @@ export default function BacktestsPage() {
   const [detailError, setDetailError] = useState<Error | null>(null);
   const [instrumentId, setInstrumentId] = useState('');
   const [strategy, setStrategy] = useState('buy_and_hold');
+  const [daily, setDaily] = useState(false);
   const [adjusted, setAdjusted] = useState('');
   const [maWindow, setMaWindow] = useState('60');
   const [frequency, setFrequency] = useState('5');
@@ -169,6 +171,7 @@ export default function BacktestsPage() {
         method: 'POST',
         body: JSON.stringify({ idempotency_key: crypto.randomUUID(), dsv, instrument: instrumentId, strategy, result_level: strategy === 'single_etf_timing' ? 'full' : 'standard',
           ...(strategy === 'single_etf_timing' ? { adjusted: { [instrumentId]: adjusted },
+            ...(daily ? { execution_mode: dailyPriceMode } : {}),
             parameter_space: { list: [{ params_version: 1, ma_window: Number(maWindow), rebalance_every: Number(frequency) }] },
             settings: { ...settings, commission_rate: Number(settings.commission_rate), buy_slippage_bps: Number(settings.buy_slippage_bps), sell_slippage_bps: Number(settings.sell_slippage_bps), buy_tax_rate: Number(settings.buy_tax_rate), sell_tax_rate: Number(settings.sell_tax_rate) } } : {}) }),
       });
@@ -199,6 +202,7 @@ export default function BacktestsPage() {
       <label>策略模板<select aria-label="策略模板" value={strategy} onChange={e => setStrategy(e.target.value)}>
         <option value="buy_and_hold">买入持有</option><option value="single_etf_timing">单 ETF 趋势择时（严格 close &gt; MA）</option>
       </select></label>
+      {strategy === 'single_etf_timing' && <ExecutionMode daily={daily} onChange={setDaily} disabled={busy} strictLabel="严格执行" />}
       {catalogError && errorDetails(catalogError)}
       {!catalog && !catalogError && <p role="status">正在读取已发布 Dataset 目录…</p>}
       {catalog && <>
@@ -316,6 +320,7 @@ function RunResult({ run }: { run: ResultRun }) {
     <div className="run-status">
       <span className={`status-tag ${run.status === 'completed' ? 'status-succeeded' : 'status-failed'}`}>{run.status === 'completed' ? 'Run 已完成' : `Run ${run.status}`}</span>
       <span>结果级别 {run.result_level}</span>
+      {summary?.execution_mode === dailyPriceMode && <span data-testid="result-execution-mode">{dailyPriceLabel} · <code>{summary.execution_mode}</code></span>}
       <span>账本核验：{run.accounting_verified === null ? '未记录（该引擎无此标记）' : run.accounting_verified ? '已核验' : '未通过'}</span>
     </div>
     {run.error && <ErrorBox>Run 错误：{run.error}</ErrorBox>}

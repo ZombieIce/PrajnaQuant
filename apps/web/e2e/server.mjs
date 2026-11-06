@@ -38,7 +38,7 @@ function run(command, args, cwd = root, extra = {}) {
 run('npm', ['run', 'build'], web);
 run('cargo', ['build', '-p', 'quant-research', '--bin', 'quant-research', '--locked', '--offline']);
 run('cargo', ['build', '-p', 'prajna-experiment', '--bins', '--example', 'selection_fixture', '--locked', '--offline']);
-run('cargo', ['build', '-p', 'prajna-data', '--bin', 'prajna-publish-daily', '--bin', 'prajna-corporate-facts', '--bin', 'prajna-import-adjusted', '--locked', '--offline']);
+run('cargo', ['build', '-p', 'prajna-data', '--bin', 'prajna-publish-daily', '--bin', 'prajna-corporate-facts', '--bin', 'prajna-import-adjusted', '--bin', 'prajna-import-daily-price', '--locked', '--offline']);
 run('cargo', ['test', '-p', 'prajna-data', '--test', 'dataset_preview_read', '--locked', '--offline',
   'export_synthetic_preview_fixture', '--', '--ignored', '--exact'], root,
   { PRAJNA_PREVIEW_FIXTURE_ROOT: fixture });
@@ -67,6 +67,12 @@ for (const name of ['corporate-actions.json', 'corporate-actions-revision.json']
 }
 const versions = readdirSync(join(lake, 'corporate-facts')).filter((name) => name.endsWith('.json'));
 if (versions.length !== 2) throw new Error(`Expected two fact versions, found ${versions.length}`);
+// Replay the checked-in synthetic supplier shape through the real local adapter.
+const daily = join(fixture, 'daily-price');
+run('cargo', ['test', '-p', 'prajna-data', '--test', 'daily_price_import', '--locked', '--offline',
+  'generate_e2e_input', '--', '--ignored', '--exact'], root, { PRAJNA_DAILY_PRICE_FIXTURE_ROOT: daily });
+run(bin('prajna-import-daily-price'), ['--root', lake, '--input-root', daily,
+  '--config', join(daily, 'config.json'), '--replay', 'replay', '--receipt', 'receipt.json']);
 run(bin('prajna-experiment'), ['--help']);
 const log = createWriteStream(join(local, 'server.log'), { flags: 'a' });
 const child = spawn(bin('quant-research'), ['serve', '--address', `127.0.0.1:${process.env.PRAJNA_E2E_PORT}`,
