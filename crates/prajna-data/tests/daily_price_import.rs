@@ -141,6 +141,10 @@ fn generate_e2e_input() {
 }
 
 fn cli(root: &Path, expect_success: bool) -> Option<Value> {
+    cli_replay(root, "replay", expect_success)
+}
+
+fn cli_replay(root: &Path, replay: &str, expect_success: bool) -> Option<Value> {
     let input = root.join("input");
     let output = Command::new(env!("CARGO_BIN_EXE_prajna-import-daily-price"))
         .arg("--root")
@@ -149,7 +153,7 @@ fn cli(root: &Path, expect_success: bool) -> Option<Value> {
         .arg(&input)
         .arg("--config")
         .arg(input.join("config.json"))
-        .args(["--replay", "replay", "--receipt", "receipt.json"])
+        .args(["--replay", replay, "--receipt", "receipt.json"])
         .output()
         .unwrap();
     assert_eq!(
@@ -197,7 +201,13 @@ fn replay_publishes_production_prices_and_retains_fixed_versions_across_revision
     let input = root.join("input");
     fixture(&input);
     let initial = cli(root, true).unwrap();
-    let repeated = cli(root, true).unwrap();
+    let replay_dir = initial["replay_dir"].as_str().unwrap();
+    let raw_name = format!("sh510300-raw-{START}-{END}.json");
+    assert_eq!(
+        fs::read(input.join(replay_dir).join(&raw_name)).unwrap(),
+        fs::read(input.join("replay").join(raw_name)).unwrap(),
+    );
+    let repeated = cli_replay(root, replay_dir, true).unwrap();
     assert_eq!(initial["dsv"], repeated["dsv"]);
     assert_eq!(initial["adjustments"], repeated["adjustments"]);
     assert_eq!(initial["coverage"][MEMBER]["raw_rows"], 12);
@@ -211,6 +221,7 @@ fn replay_publishes_production_prices_and_retains_fixed_versions_across_revision
         .unwrap()
         .iter()
         .flat_map(|batch| prajna_data::sessions_from_record_batch(batch).unwrap())
+        .filter(|session| session.venue_id().as_str() == "XSHG")
         .map(|session| session.session_date())
         .collect::<Vec<_>>();
     assert_eq!(sessions.len(), 12);
@@ -288,6 +299,13 @@ fn replay_rejects_duplicate_session_and_explicit_empty_qfq_with_raw_rows() {
     json_write(&path, &duplicate);
     cli(root, false);
     assert!(!input.join("receipt.json").exists());
+    for (field, value) in [(0, json!("2026-01-04")), (5, json!(-1)), (1, json!(false))] {
+        let mut invalid = original.clone();
+        invalid["data"]["sh510300"]["qfqday"][0][field] = value;
+        json_write(&path, &invalid);
+        cli(root, false);
+        assert!(!input.join("receipt.json").exists());
+    }
     let raw = json_read(&replay_path(&input, "510300", "raw"));
     let mut explicit_empty = raw.clone();
     explicit_empty["data"]["sh510300"]["qfqday"] = json!([]);

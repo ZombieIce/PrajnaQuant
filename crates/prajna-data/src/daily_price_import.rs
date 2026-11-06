@@ -3,7 +3,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
-    io,
+    io::{self, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
@@ -242,8 +242,6 @@ fn series(
                         && record.request["a_stock_data_revision"] == STOCK_DATA_REVISION
                         && record.request["requested_range"] == request_range
                         && record.request["response_outcome"] == "accepted_response"
-                        && (record.request["source"] == "local-replay")
-                            == (response.source == "local-replay")
                 })
                 .map(|record| record.observed_at);
             if observed_at.is_none() {
@@ -316,10 +314,14 @@ fn key(value: &impl Serialize) -> Result<String> {
 }
 
 fn persist(path: &Path, value: &impl Serialize, replace: bool) -> Result<()> {
+    persist_bytes(path, &serde_json::to_vec(value)?, replace)
+}
+
+fn persist_bytes(path: &Path, bytes: &[u8], replace: bool) -> Result<()> {
     let parent = path.parent().ok_or("invalid local output path")?;
     fs::create_dir_all(parent)?;
     let mut file = tempfile::NamedTempFile::new_in(parent)?;
-    serde_json::to_writer(&mut file, value)?;
+    file.write_all(bytes)?;
     file.as_file().sync_all()?;
     if replace {
         file.persist(path)?;
@@ -328,7 +330,7 @@ fn persist(path: &Path, value: &impl Serialize, replace: bool) -> Result<()> {
             Ok(_) => {}
             Err(error)
                 if error.error.kind() == io::ErrorKind::AlreadyExists
-                    && fs::read(error.file.path())? == fs::read(path)? => {}
+                    && bytes == fs::read(path)? => {}
             Err(error) => return Err(error.into()),
         }
     }
@@ -409,7 +411,6 @@ fn import_adjustment(
     member: &Member,
     adjusted: &Series,
     raw_rows: &BTreeMap<NaiveDate, AdjustedRow>,
-    acquisition: &str,
 ) -> Result<String> {
     let id = &adjusted.run.report.instrument_id;
     let request = AdjustedInput {
@@ -419,7 +420,7 @@ fn import_adjustment(
             method: "forward".into(),
             method_version: FORWARD_METHOD_VERSION.into(),
             source: CalendarSource {
-                source_id: format!("Tencent FQKline ({acquisition})"),
+                source_id: "Tencent FQKline".into(),
                 source_version: STOCK_DATA_REVISION.into(),
                 source_ref: adjusted.hashes.join(","),
             },
@@ -439,6 +440,32 @@ fn import_adjustment(
         false,
     )?;
     Ok(adjusted_series::import(lake, &bytes)?)
+}
+
+fn save_replay(
+    root: &Path,
+    raw: &RawStore,
+    collected: &BTreeMap<&String, (Series, Series)>,
+) -> Result<String> {
+    let mut files = BTreeMap::new();
+    for (unadjusted, adjusted) in collected.values() {
+        for (name, series) in [("raw", unadjusted), ("qfq", adjusted)] {
+            let report = &series.run.report;
+            for (chunk, hash) in report.chunks.iter().zip(&series.hashes) {
+                let file = format!(
+                    "{}-{name}-{}-{}.json",
+                    report.native_symbol, chunk.requested_range.start, chunk.requested_range.end,
+                );
+                files.insert(file, hash);
+            }
+        }
+    }
+    let relative = format!("daily-price/replays/{}", key(&files)?);
+    for (file, hash) in files {
+        let path = checked_output_path(root, Path::new(&relative).join(file).as_path())?;
+        persist_bytes(&path, &raw.get(hash)?, false)?;
+    }
+    Ok(relative)
 }
 
 fn gap_summary(mut missing: impl Iterator<Item = NaiveDate>) -> Value {
@@ -520,16 +547,17 @@ fn run<T: HttpTransport>(
                 member,
                 adjusted,
                 &unadjusted.rows,
-                acquisition,
             )?,
         );
     }
+    let replay_dir = save_replay(input, &raw, &collected)?;
     let batch = json!({
         "schema_version": 1,
         "kind": "daily-price-import/1",
         "a_stock_data_revision": STOCK_DATA_REVISION,
         "method": "tencent_kline(day, unadjusted and qfq, 700-calendar-day windows, count=640)",
         "acquisition": acquisition,
+        "replay_dir": replay_dir,
         "start": config.start,
         "end": config.end,
         "calendar_version": calendar_version.as_str(),
