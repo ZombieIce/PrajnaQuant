@@ -91,7 +91,7 @@ test('supplier replay reaches factor, daily price ledgers and a frozen price ben
   expect(firstClose.cash).toBe('95');
   expect(firstClose.equity).toBe('10094');
   expect(firstClose.positions[first].quantity).toBe('9900');
-  expect(strategy.details.fills[0].fill.costs).toMatchObject({ raw_price: '1', total_fees: '5' });
+  expect(strategy.details.fills[0].fill).toMatchObject({ raw_price: '1', total_fees: '5' });
   await expect(page.getByTestId('native-fills').locator('tbody tr').first()).toBeVisible();
   await page.reload();
   await expect(page.getByTestId('result-execution-mode')).toContainText('日线价格模拟');
