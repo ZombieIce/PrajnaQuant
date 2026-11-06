@@ -1,5 +1,7 @@
 # 价格因子研究产品契约（动量 / 波动率 / 严格均线趋势）
 
+日线价格研究的固定输入、T 日可用假设及缺失口径见 [ADR 0039](../decisions/0039-etf-daily-price-research.md)。
+
 `/research/momentum` → 本机 `GET/POST /api/v1/momentum-research` →
 `prajna-momentum --lake <root>`（JSON stdin/stdout）。HTTP 适配不执行量化计算；
 CLI 复用 `prajna-research` Momentum v1、Volatility v1 与 #299 新增的

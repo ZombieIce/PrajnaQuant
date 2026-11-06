@@ -1,5 +1,7 @@
 # 单 ETF 严格趋势择时（MVP-7 T14）
 
+日线价格模式沿用本策略的信号定义，价格角色和执行假设见 [ADR 0039](decisions/0039-etf-daily-price-research.md)。
+
 `/backtests` 选择 `single_etf_timing`，显式选择已发布 ETF Dataset 与该证券的
 复权版本，经现有 `/api/v1/tasks/selections` 冻结并提交。任务状态、Summary、
 NAV/权益读取现有持久任务与结果入口；刷新按 task 重读，无浏览器量化计算。

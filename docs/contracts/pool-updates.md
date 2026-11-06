@@ -1,5 +1,7 @@
 # Fixed-pool manual updates
 
+ETF 日线价格研究使用 [ADR 0039](../decisions/0039-etf-daily-price-research.md) 的本机上游适配入口，继续复用本契约的不可变发布。
+
 The local `/pools` workbench updates an explicitly published pool version through
 the existing serial task queue and `prajna-pool-update`. Rust owns collection,
 publication, input validation, coverage and readiness. Authority:

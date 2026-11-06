@@ -1,5 +1,7 @@
 # 池内动量 Top-K 轮动（MVP-7 T15）
 
+日线价格模式沿用本策略的动量与排名定义，执行和同池基准的价格口径见 [ADR 0039](decisions/0039-etf-daily-price-research.md)。
+
 `/pools` 选择已发布固定池版本与 Dataset、逐成员绑定复权版本，配置动量窗口、
 Top-K、调仓频率与本金/成本，经现有 `prajna-freeze-selection` →
 `POST /api/v1/tasks/selections` → 持久任务 → Rust Fast Event → 持久结果，得到
@@ -36,7 +38,7 @@ Decision、不制造现金卖出的规则不同；它不把缺失价格填零、
 删除/压缩 Session 日历。参数统计窗口不足的成员只从其首次可评估 Session 起
 参与，不填零、不以原始价替代复权研究序列。
 
-共同评价窗口按 [ADR 0031](../decisions/0031-common-evaluation-window-and-adjusted-binding.md)
+共同评价窗口按 [ADR 0031](decisions/0031-common-evaluation-window-and-adjusted-binding.md)
 与 [评价窗口契约](contracts/evaluation-window.md) 冻结：预热为 `lookback`
 Sessions，评价起点是全部成员和全部参数组合都就绪的第一个 Session；轮动
 周期锚定该起点，不把更早的预热 Session 当作调仓日。预热无 Decision、成交或
@@ -87,7 +89,7 @@ Sessions，评价起点是全部成员和全部参数组合都就绪的第一个
 
 ## 策略—基准对照
 
-本模板已接入既有 [ADR 0035](../decisions/0035-strategy-benchmark-comparison.md)
+本模板已接入既有 [ADR 0035](decisions/0035-strategy-benchmark-comparison.md)
 冻结策略—基准对照：单 Venue 冻结池由 `prajna-freeze-comparison` /
 `/comparisons` 派生同池期初等权 `equal_weight_pool` 持有基准，复用同一冻结
 DSV/Universe/本金/成本/复权版本/评价窗口/公司行动版本与显式再投资日历；再
