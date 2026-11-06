@@ -27,6 +27,9 @@ use sha2::{Digest, Sha256};
 use crate::{RawStore, SourceKind, SourceRecordInput, default_mvp6_root};
 
 pub const METHOD_VERSION: &str = "tencent-fqkline-day/1";
+pub(crate) const STOCK_DATA_REVISION: &str = "f21534946c42be3ad048ac938eecb1bad84cb8ab";
+const RESEARCH_REQUEST_CALENDAR_DAYS: i64 = 700;
+pub(crate) const FORWARD_METHOD_VERSION: &str = "a-stock-data-tencent-fqkline-day-qfq/1";
 pub const REPORT_SCHEMA_VERSION: u32 = 1;
 pub const MAX_REQUEST_CALENDAR_DAYS: i64 = 800;
 pub const MIN_REQUEST_INTERVAL: StdDuration = StdDuration::from_secs(1);
@@ -132,7 +135,7 @@ pub struct DailyRawRequest {
 }
 
 impl DailyRawRequest {
-    fn identity(&self) -> Result<(String, String), DailyRawError> {
+    pub(crate) fn identity(&self) -> Result<(String, String), DailyRawError> {
         if self.symbol.len() != 6 || !self.symbol.bytes().all(|byte| byte.is_ascii_digit()) {
             return Err(DailyRawError::invalid(
                 "symbol must be an explicitly configured six-digit Shanghai or Shenzhen code",
@@ -155,18 +158,14 @@ impl DailyRawRequest {
             format!("{}{code}", self.venue.native_prefix(), code = self.symbol),
         ))
     }
-
-    fn chunks(&self) -> Vec<DateRange> {
-        request_ranges(self.start, self.end)
-    }
 }
 
-fn request_ranges(start: NaiveDate, end: NaiveDate) -> Vec<DateRange> {
+fn request_ranges(start: NaiveDate, end: NaiveDate, max_days: i64) -> Vec<DateRange> {
     let mut ranges = Vec::new();
     let mut start = start;
     loop {
         let max_end = start
-            .checked_add_signed(Duration::days(MAX_REQUEST_CALENDAR_DAYS - 1))
+            .checked_add_signed(Duration::days(max_days - 1))
             .unwrap_or(end);
         let chunk_end = max_end.min(end);
         ranges.push(DateRange {
@@ -266,6 +265,8 @@ pub struct DailyRawReport {
     pub report_id: String,
     pub source: String,
     pub method_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub a_stock_data_revision: Option<String>,
     pub instrument_id: String,
     pub native_symbol: String,
     pub security_kind: SecurityKind,
@@ -285,8 +286,17 @@ pub struct DailyRawReport {
 impl DailyRawReport {
     /// Validates external reports before their completion flag can advance update success.
     pub fn validate_consistency(&self) -> Result<(), DailyRawError> {
+        let max_days = match self.a_stock_data_revision.as_deref() {
+            None => MAX_REQUEST_CALENDAR_DAYS,
+            Some(STOCK_DATA_REVISION) => RESEARCH_REQUEST_CALENDAR_DAYS,
+            Some(_) => return Err(DailyRawError::invalid("unknown collection source revision")),
+        };
         let expected_ranges = if self.requested_range.start <= self.requested_range.end {
-            request_ranges(self.requested_range.start, self.requested_range.end)
+            request_ranges(
+                self.requested_range.start,
+                self.requested_range.end,
+                max_days,
+            )
         } else {
             Vec::new()
         };
@@ -556,6 +566,33 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
     /// remain available, and each invocation gets a separate report. A failed or empty
     /// range is recorded but never deletes old Raw or advances a completion marker.
     pub fn collect(&mut self, request: DailyRawRequest) -> Result<CollectionRun, DailyRawError> {
+        self.collect_series(request, None)
+    }
+
+    pub(crate) fn collect_research(
+        &mut self,
+        request: DailyRawRequest,
+        adjustment: tencent_transport::DailyAdjustment,
+    ) -> Result<CollectionRun, DailyRawError> {
+        self.collect_series(request, Some(adjustment))
+    }
+
+    fn collect_series(
+        &mut self,
+        request: DailyRawRequest,
+        research_adjustment: Option<tencent_transport::DailyAdjustment>,
+    ) -> Result<CollectionRun, DailyRawError> {
+        use tencent_transport::DailyAdjustment;
+        let adjustment = research_adjustment.unwrap_or(DailyAdjustment::Unadjusted);
+        let method_version = match adjustment {
+            DailyAdjustment::Unadjusted => METHOD_VERSION,
+            DailyAdjustment::Forward => FORWARD_METHOD_VERSION,
+        };
+        let max_days = if research_adjustment.is_some() {
+            RESEARCH_REQUEST_CALENDAR_DAYS
+        } else {
+            MAX_REQUEST_CALENDAR_DAYS
+        };
         let (instrument_id, native_symbol) = request.identity()?;
         let requested_range = DateRange {
             start: request.start,
@@ -565,7 +602,10 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
         let observed_at = now();
         let mut chunks = Vec::new();
 
-        for (index, range) in request.chunks().into_iter().enumerate() {
+        for (index, range) in request_ranges(request.start, request.end, max_days)
+            .into_iter()
+            .enumerate()
+        {
             if self.source_stopped {
                 chunks.push(ChunkReport {
                     index: index as u32,
@@ -634,6 +674,8 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
                                             source: failure.host,
                                             outcome: RawResponseOutcome::RejectedCandidateResponse,
                                             content_type: "application/octet-stream",
+                                            research_adjustment,
+                                            method_version,
                                         },
                                     ) {
                                         Ok(reference) => raw_objects.push(reference),
@@ -656,10 +698,11 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
                                 }
                             };
 
-                        tencent_transport::fetch_unadjusted_daily_with_policy(
+                        tencent_transport::fetch_daily_with_policy(
                             &daily_request,
+                            adjustment,
                             &mut paced_transport,
-                            |bytes| parse_response_dates(bytes, &native_symbol).is_ok(),
+                            |bytes| parse_response_dates(bytes, &native_symbol, adjustment).is_ok(),
                             &mut policy,
                         )
                     };
@@ -700,8 +743,9 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
             match fetch_result {
                 Ok(response) => {
                     self.consecutive_restrictions = 0;
-                    let response_dates = parse_response_dates(&response.bytes, &native_symbol)
-                        .map_err(DailyRawError::invalid)?;
+                    let response_dates =
+                        parse_response_dates(&response.bytes, &native_symbol, adjustment)
+                            .map_err(DailyRawError::invalid)?;
                     let reference = store_raw(
                         root,
                         &self.raw,
@@ -715,6 +759,8 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
                             source: &response.source,
                             outcome: RawResponseOutcome::AcceptedResponse,
                             content_type: "application/json",
+                            research_adjustment,
+                            method_version,
                         },
                     )?;
                     chunk.raw_objects.push(reference);
@@ -760,7 +806,8 @@ impl<T: tencent_transport::HttpTransport> DailyRawCollector<T> {
             schema_version: REPORT_SCHEMA_VERSION,
             report_id,
             source: "Tencent FQKline".into(),
-            method_version: METHOD_VERSION.into(),
+            method_version: method_version.into(),
+            a_stock_data_revision: research_adjustment.map(|_| STOCK_DATA_REVISION.into()),
             instrument_id,
             native_symbol,
             security_kind: request.kind,
@@ -796,6 +843,8 @@ struct RawStoreRequest<'a> {
     source: &'a str,
     outcome: RawResponseOutcome,
     content_type: &'a str,
+    research_adjustment: Option<tencent_transport::DailyAdjustment>,
+    method_version: &'static str,
 }
 
 fn store_raw(
@@ -813,6 +862,22 @@ fn store_raw(
     checked_output_path(root, &source_relative)?;
 
     let observed_at = now();
+    let mut metadata = json!({
+        "method_version": request.method_version,
+        "instrument_id": request.instrument_id,
+        "native_symbol": request.native_symbol,
+        "security_kind": request.kind,
+        "requested_range": request.range,
+        "chunk_index": request.chunk_index,
+        "source": request.source,
+        "response_outcome": request.outcome,
+        "available_at": "unknown",
+        "units": "unknown unless separately established by T02-meta or a versioned normalizer"
+    });
+    if let Some(adjustment) = request.research_adjustment {
+        metadata["a_stock_data_revision"] = json!(STOCK_DATA_REVISION);
+        metadata["adjustment"] = json!(adjustment.parameter());
+    }
     let hash = raw
         .put(
             request.bytes,
@@ -820,18 +885,7 @@ fn store_raw(
                 content_type: request.content_type.into(),
                 source_kind: SourceKind::VendorApi,
                 source_id: SOURCE_ID.into(),
-                request: json!({
-                    "method_version": METHOD_VERSION,
-                    "instrument_id": request.instrument_id,
-                    "native_symbol": request.native_symbol,
-                    "security_kind": request.kind,
-                    "requested_range": request.range,
-                    "chunk_index": request.chunk_index,
-                    "source": request.source,
-                    "response_outcome": request.outcome,
-                    "available_at": "unknown",
-                    "units": "unknown unless separately established by T02-meta or a versioned normalizer"
-                }),
+                request: metadata,
                 observed_at,
                 ingested_by: INGESTED_BY.into(),
             },
@@ -852,7 +906,11 @@ pub(crate) fn successful_response_code(code: Option<&Value>) -> bool {
     }
 }
 
-fn parse_response_dates(bytes: &[u8], native_symbol: &str) -> Result<Vec<NaiveDate>, String> {
+pub(crate) fn response_rows(
+    bytes: &[u8],
+    native_symbol: &str,
+    adjustment: tencent_transport::DailyAdjustment,
+) -> Result<Vec<Value>, String> {
     let payload: Value = serde_json::from_slice(bytes)
         .map_err(|_| "Tencent response is not valid JSON".to_owned())?;
     if !successful_response_code(payload.get("code")) {
@@ -865,10 +923,31 @@ fn parse_response_dates(bytes: &[u8], native_symbol: &str) -> Result<Vec<NaiveDa
     if data.len() != 1 || !data.contains_key(native_symbol) {
         return Err("Tencent response does not contain exactly the requested symbol".into());
     }
-    let rows = data[native_symbol]
-        .get("day")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "Tencent response has no unadjusted day array".to_owned())?;
+    let node = &data[native_symbol];
+    let rows = match adjustment {
+        tencent_transport::DailyAdjustment::Unadjusted => node.get("day"),
+        tencent_transport::DailyAdjustment::Forward => {
+            node.get("qfqday").or_else(|| node.get("day"))
+        }
+    }
+    .and_then(Value::as_array)
+    .ok_or_else(|| "Tencent response is missing the requested daily array".to_owned())?;
+    if adjustment == tencent_transport::DailyAdjustment::Forward
+        && node.get("qfqday").is_some()
+        && rows.is_empty()
+        && node["day"].as_array().is_some_and(|raw| !raw.is_empty())
+    {
+        return Err("empty qfqday cannot use the unadjusted day array".into());
+    }
+    Ok(rows.clone())
+}
+
+fn parse_response_dates(
+    bytes: &[u8],
+    native_symbol: &str,
+    adjustment: tencent_transport::DailyAdjustment,
+) -> Result<Vec<NaiveDate>, String> {
+    let rows = response_rows(bytes, native_symbol, adjustment)?;
     rows.iter()
         .enumerate()
         .map(|(index, row)| {

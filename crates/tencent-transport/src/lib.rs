@@ -208,6 +208,43 @@ where
 pub fn fetch_unadjusted_daily_with_policy<T, V, P>(
     request: &DailyRequest,
     transport: &mut T,
+    accepts_response: V,
+    candidate_policy: P,
+) -> Result<RawDailyResponse, FetchError>
+where
+    T: HttpTransport,
+    V: FnMut(&[u8]) -> bool,
+    P: FnMut(&CandidateFailure, Option<&[u8]>) -> CandidateAction,
+{
+    fetch_daily_with_policy(
+        request,
+        DailyAdjustment::Unadjusted,
+        transport,
+        accepts_response,
+        candidate_policy,
+    )
+}
+
+/// Selects the Tencent daily price series without altering candidate or stop policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DailyAdjustment {
+    Unadjusted,
+    Forward,
+}
+
+impl DailyAdjustment {
+    pub fn parameter(self) -> &'static str {
+        match self {
+            Self::Unadjusted => "",
+            Self::Forward => "qfq",
+        }
+    }
+}
+
+pub fn fetch_daily_with_policy<T, V, P>(
+    request: &DailyRequest,
+    adjustment: DailyAdjustment,
+    transport: &mut T,
     mut accepts_response: V,
     mut candidate_policy: P,
 ) -> Result<RawDailyResponse, FetchError>
@@ -219,8 +256,11 @@ where
     validate_request(request)?;
 
     let parameter = format!(
-        "{},day,{},{},640,",
-        request.symbol, request.start, request.end
+        "{},day,{},{},640,{}",
+        request.symbol,
+        request.start,
+        request.end,
+        adjustment.parameter(),
     );
     let mut failures = Vec::new();
     for host in CANDIDATE_HOSTS {
