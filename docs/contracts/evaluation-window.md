@@ -1,5 +1,7 @@
 # 共同评价窗口与冻结复权研究输入（T08a #297）
 
+日线价格模式的适用范围、缺口和同口径基准见 [ADR 0039](../decisions/0039-etf-daily-price-research.md)。
+
 本契约固定 T08a 的行为：单交易所池（或显式启用窗口的单证券）逐成员绑定 T07
 不可变 adjusted version，按冻结复权序列的真实 Session 覆盖与全部比较参数的
 最大预热计算共同评价窗口，把它写入 Experiment 定义并进入 Experiment/Run

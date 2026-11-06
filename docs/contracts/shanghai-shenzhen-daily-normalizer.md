@@ -1,5 +1,7 @@
 # Versioned Shanghai/Shenzhen stock and ETF daily normalizer
 
+本机 ETF 上游响应如何进入同一不可变发布入口，见 [ADR 0039](../decisions/0039-etf-daily-price-research.md)。
+
 `cn-stock-etf-daily` v1 is a public Rust Normalizer for raw, unadjusted daily
 bars of XSHG/XSHE stocks and ETFs (MVP-7 T02b-C). The production assembler below
 selects collection reports and fixed versions (#289). Tests use synthetic inputs.

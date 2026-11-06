@@ -97,6 +97,19 @@ unreadable rather than rebinding it. This is retrospective research input, not
 strict PIT, sequential TRI or dividend cash flow. Synthetic CLI/golden/browser
 evidence only. Schema, commands and limits: [contract](../../docs/contracts/adjusted-research-series.md).
 
+## Local ETF daily price import
+
+`prajna-import-daily-price --root <LOCAL_LAKE> --input-root <LOCAL_INPUT> --config <JSON> --receipt <NAME.json> (--fetch | --replay <LOCAL_RELATIVE_DIR>)`
+reproduces the pinned a-stock-data Tencent daily method for unadjusted and
+forward-adjusted ETF Bars. `--fetch` uses the shared source access and stop rules;
+`--replay` reads saved responses without a network client. Calendar and security
+snapshots come from the explicit config. Members and the pool are published through
+the production pool path, adjusted versions through the importer above, and the
+receipt records source, method, units, coverage gaps and the `replay_dir` that
+reproduces the same versions. Synthetic CLI evidence only. Workflow and limits:
+[ADR 0039](../../docs/decisions/0039-etf-daily-price-research.md) and the
+[quickstart](../../docs/etf-daily-price-quickstart.md).
+
 ## Offline corporate-action facts
 
 `prajna-corporate-facts import/read` publishes and reads fixed Shanghai/Shenzhen stock/ETF fact versions in an explicit local root. Four scoped states preserve missing amounts/dates/source/history availability; price research stays independent. Commands, fields, scope semantics and compatibility: [ADR 0032](../../docs/decisions/0032-cn-corporate-action-fact-versions.md). The read-only coverage view is delivered through `/datasets`; synthetic tests only, and ledger integration remains separate.

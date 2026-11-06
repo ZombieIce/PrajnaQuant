@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import ExecutionMode, { dailyPriceLabel, dailyPriceMode } from '../components/ExecutionMode';
 import { Chart } from '../Chart';
 import { api, ErrorBox, Header, Panel, pct } from '../shared';
 
@@ -40,7 +41,7 @@ type RoleResult = { role: string; result_level: string; kind: string; definition
 type Comparability = { semantic_version: string; strategy_kind: string; benchmark_kind: string; dsv: string; universe: string;
   venues: string | string[] | null; initial_cash: string; minimum_commission: string; costs: Record<string, number>;
   sessions_per_year: number; adjusted_versions: Record<string, string>; evaluation: { start: string; end: string; warmup_sessions: number; common_start: string; common_end: string };
-  corporate_actions: { version: string; dividend_tax_rate: string }; quantity_price_rules: { instrument_id: string; lot_size: string; price_increment: string; size_increment: string }[];
+  corporate_actions: { version: string; dividend_tax_rate: string } | null; execution_mode?: string; quantity_price_rules: { instrument_id: string; lot_size: string; price_increment: string; size_increment: string }[];
   return_basis: string; reinvestment_calendar: { policy: 'strategy_rebalance' | 'none'; decision_dates: string[] };
   performance?: { summary: string; calendar: string | null } | null; checks: string[] };
 type Verification = { comparable: boolean; reasons: string[]; window: { start: string; end: string; session_count: number }; role_identities_verified: boolean };
@@ -88,6 +89,7 @@ export default function ComparisonsPage() {
   const [detail, setDetail] = useState<DatasetDetail | null>(null);
   const [detailError, setDetailError] = useState<Error | null>(null);
   const [mode, setMode] = useState<'single' | 'pool'>('single');
+  const [daily, setDaily] = useState(false);
   const [poolTemplate, setPoolTemplate] = useState<'s2_rotation' | 'pool_momentum_topk'>('s2_rotation');
   const [lookback, setLookback] = useState('60');
   const [topK, setTopK] = useState('1');
@@ -156,7 +158,8 @@ export default function ComparisonsPage() {
     ? { list: [rotationParameters] }
     : (() => { try { return JSON.parse(parameterText) as unknown; } catch { return null; } })(),
   [mode, poolTemplate, parameterText, lookback, topK, momentumFrequency]);
-  const ready = Boolean(dsv && members.length && actionsVersion && members.every((member) => adjusted[member]) && (mode === 'single' || parameters));
+  const dailyComparison = daily && (mode === 'single' || poolTemplate === 'pool_momentum_topk');
+  const ready = Boolean(dsv && members.length && (dailyComparison || actionsVersion) && members.every((member) => adjusted[member]) && (mode === 'single' || parameters));
 
   const loadTasks = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -211,7 +214,7 @@ export default function ComparisonsPage() {
         dsv,
         strategy: mode === 'single' ? 'single_etf_timing' : poolTemplate,
         adjusted: Object.fromEntries(members.map((member) => [member, adjusted[member]])),
-        corporate_actions: { version: actionsVersion, dividend_tax_rate: dividendTaxRate },
+        ...(dailyComparison ? { execution_mode: dailyPriceMode } : { corporate_actions: { version: actionsVersion, dividend_tax_rate: dividendTaxRate } }),
         settings: {
           ...settings,
           commission_rate: Number(settings.commission_rate),
@@ -226,7 +229,7 @@ export default function ComparisonsPage() {
         : { ...common, pool: { id: poolId, version: poolVersion }, parameter_space: parameters };
       const response = await call<{ task: Task; created: boolean }>('/api/v1/tasks/comparisons', {
         method: 'POST',
-        body: JSON.stringify({ idempotency_key: crypto.randomUUID(), selection, reinvestment_calendar: reinvestment }),
+        body: JSON.stringify({ idempotency_key: crypto.randomUUID(), selection, reinvestment_calendar: dailyComparison ? 'none' : reinvestment }),
       });
       setTaskId(response.task.task_id); setTask(response.task); setTaskError(null);
       setResult(null); setResultError(null);
@@ -286,24 +289,27 @@ export default function ComparisonsPage() {
           <option value="">请选择固定 adjusted version</option>
           {adjustedVersions.filter((version) => version.instrument_id === member).map((version) => <option key={version.version} value={version.version}>{version.method_version} · {version.version}</option>)}
         </select></label>)}
+        {(mode === 'single' || poolTemplate === 'pool_momentum_topk') && <ExecutionMode daily={daily} onChange={setDaily} disabled={busy} strictLabel="严格执行（总回报）" />}
         {detail.warnings.map((warning, index) => <ErrorBox key={index}>{warning}</ErrorBox>)}
-        <label>公司行动事实版本<select aria-label="公司行动事实版本" value={actionsVersion} onChange={(event) => setActionsVersion(event.target.value)}>
-          <option value="">请选择固定版本</option>
-          {actions?.versions.map((version) => <option key={version.version} value={version.version}>{version.observed_at} · {version.scopes.length} 条范围 · {version.version}</option>)}
-        </select></label>
-        {actionsError && errorDetails(actionsError)}
-        {actions && !actions.versions.length && <p role="status">没有可读取的公司行动事实版本。</p>}
-        {actionsVersion && members.length > 0 && <p className="hint">行动事实覆盖：{actionScopes.map(({ member, scope }) => `${member} ${scope ? actionStates[scope.state] ?? scope.state : '未声明'}`).join('；')}。缺事实/未知不会被页面补成完整；执行结果会明确标记不完整。</p>}
-        <label>股息税率<input aria-label="股息税率" type="number" min="0" max="0.999999999999999999" step="any" required value={dividendTaxRate} onChange={(event) => setDividendTaxRate(event.target.value)} /></label>
-        <label>再投资日历<select aria-label="再投资日历" value={reinvestment} onChange={(event) => setReinvestment(event.target.value as 'strategy_rebalance' | 'none')}>
-          <option value="strategy_rebalance">按策略调仓 Session 再投资</option><option value="none">不再投资（声明日历为空）</option>
-        </select></label>
-        <p className="hint">再投资日期由 Rust 从冻结策略的调仓 cadence 和评价窗口派生并在运行前保存；基准不卖出赢家恢复权重，分红发放前应收不用于开盘。策略与基准同本金、同窗口、同成本模型、同行动/复权版本。</p>
+        {!dailyComparison && <>
+          <label>公司行动事实版本<select aria-label="公司行动事实版本" value={actionsVersion} onChange={(event) => setActionsVersion(event.target.value)}>
+            <option value="">请选择固定版本</option>
+            {actions?.versions.map((version) => <option key={version.version} value={version.version}>{version.observed_at} · {version.scopes.length} 条范围 · {version.version}</option>)}
+          </select></label>
+          {actionsError && errorDetails(actionsError)}
+          {actions && !actions.versions.length && <p role="status">没有可读取的公司行动事实版本。</p>}
+          {actionsVersion && members.length > 0 && <p className="hint">行动事实覆盖：{actionScopes.map(({ member, scope }) => `${member} ${scope ? actionStates[scope.state] ?? scope.state : '未声明'}`).join('；')}。缺事实/未知不会被页面补成完整；执行结果会明确标记不完整。</p>}
+          <label>股息税率<input aria-label="股息税率" type="number" min="0" max="0.999999999999999999" step="any" required value={dividendTaxRate} onChange={(event) => setDividendTaxRate(event.target.value)} /></label>
+          <label>再投资日历<select aria-label="再投资日历" value={reinvestment} onChange={(event) => setReinvestment(event.target.value as 'strategy_rebalance' | 'none')}>
+            <option value="strategy_rebalance">按策略调仓 Session 再投资</option><option value="none">不再投资（声明日历为空）</option>
+          </select></label>
+          <p className="hint">再投资日期由 Rust 从冻结策略的调仓 cadence 和评价窗口派生并在运行前保存；基准不卖出赢家恢复权重，分红发放前应收不用于开盘。策略与基准同本金、同窗口、同成本模型、同行动/复权版本。</p>
+        </>}
         {mode === 'single' ? <>
           <label>均线窗口（Session）<input aria-label="均线窗口" type="number" min="1" step="1" required value={maWindow} onChange={(event) => setMaWindow(event.target.value)} /></label>
           <label>调仓频率（Session）<input aria-label="调仓频率" type="number" min="1" step="1" required value={frequency} onChange={(event) => setFrequency(event.target.value)} /></label>
         </> : poolTemplate === 'pool_momentum_topk' ? <>
-          <p className="hint">按绑定复权收盘计算尾随动量，T 日收盘排名、下一可用 Session open 尝试成交；并列按 InstrumentId 升序，合格不足 K 按实际数量等权，零候选为全现金。基准为同一冻结池成员的期初等权买入持有，使用同一评价窗口、成本与再投资日历。</p>
+          <p className="hint">按绑定复权收盘计算尾随动量，T 日收盘排名、下一可用 Session open 尝试成交；并列按 InstrumentId 升序，合格不足 K 按实际数量等权，零候选为全现金。基准为同一冻结池成员的期初等权买入持有，使用同一评价窗口、成本及收益口径。</p>
           <label>动量窗口（Session）<input aria-label="动量窗口" type="number" min="1" step="1" required value={lookback} onChange={(event) => setLookback(event.target.value)} /></label>
           <label>Top-K<input aria-label="Top-K" type="number" min="1" step="1" required value={topK} onChange={(event) => setTopK(event.target.value)} /></label>
           <label>调仓频率（Session）<input aria-label="调仓频率" type="number" min="1" step="1" required value={momentumFrequency} onChange={(event) => setMomentumFrequency(event.target.value)} /></label>
@@ -311,7 +317,7 @@ export default function ComparisonsPage() {
           <label>参数组合 JSON<textarea aria-label="参数组合 JSON" rows={4} value={parameterText} onChange={(event) => setParameterText(event.target.value)} /></label>
           {!parameters && <p className="hint">请输入恰好一个 S2 参数组合；多个组合不能与单一份基准形成本票的固定比较。</p>}
         </>}
-        <p className="hint" data-testid="comparison-price-rule-hint">冻结前会按成员 `price_increment` 校验滑点后买价；粗 tick（如 0.01）下 2bp 可能不对齐并返回 comparison_price_rules_mismatch，请改用 0 或 tick 对齐的滑点（#375 保守保护，非页面计算）。</p>
+        {!dailyComparison && <p className="hint" data-testid="comparison-price-rule-hint">冻结前会按成员 `price_increment` 校验滑点后买价；粗 tick（如 0.01）下 2bp 可能不对齐并返回 comparison_price_rules_mismatch，请改用 0 或 tick 对齐的滑点（#375 保守保护，非页面计算）。</p>}
         {(Object.entries({ initial_cash: '本金（CNY）', commission_rate: '佣金率', minimum_commission: '最低佣金（CNY）', buy_slippage_bps: '买入滑点（bp）', sell_slippage_bps: '卖出滑点（bp）', buy_tax_rate: '买入税率', sell_tax_rate: '卖出税率' }) as [keyof typeof settings, string][]).map(([key, label]) => <label key={key}>{label}<input aria-label={label} type="number" min={key === 'initial_cash' ? '0.00000001' : '0'} step="any" required value={settings[key]} onChange={(event) => setSettings({ ...settings, [key]: event.target.value })} /></label>)}
         <form onSubmit={submit}>
           <button type="submit" className="primary" disabled={busy || !ready}>{busy ? '正在经生产入口冻结对照…' : '提交策略—基准对照'}</button>
@@ -379,10 +385,11 @@ function ComparisonView({ result }: { result: ComparisonResult }) {
     <Panel title="冻结对照关系">
       <div data-testid="comparison-facts">
         <p>窗口：{c.evaluation.start} ～ {c.evaluation.end}（预热 {c.evaluation.warmup_sessions} Sessions；共同数据 {c.evaluation.common_start} ～ {c.evaluation.common_end}） · 初始本金：{c.initial_cash} CNY · {c.sessions_per_year} Sessions/年</p>
-        <p>角色：策略 <code>{c.strategy_kind}</code> 对基准 <code>{c.benchmark_kind}</code> · 收益口径：{c.return_basis === 'total_return' ? '总回报（原始价成交/估值 + 净现金行动）' : c.return_basis} · 行动版本：<code>{c.corporate_actions.version}</code>（税率 {c.corporate_actions.dividend_tax_rate}）</p>
+        <p>角色：策略 <code>{c.strategy_kind}</code> 对基准 <code>{c.benchmark_kind}</code> · 收益口径：{c.return_basis === 'total_return' ? '总回报（原始价成交/估值 + 净现金行动）' : c.return_basis === 'price_return' ? '扣费后价格收益' : c.return_basis}{c.corporate_actions && <> · 行动版本：<code>{c.corporate_actions.version}</code>（税率 {c.corporate_actions.dividend_tax_rate}）</>}</p>
+        {c.execution_mode === dailyPriceMode && <p>{dailyPriceLabel} · <code>{c.execution_mode}</code>。跨除权日的价格跳变计入价格收益。</p>}
         <p>完整绩效：<code>{c.performance?.summary ?? '未声明'}</code> · 日历报告：<code>{c.performance?.calendar ?? '未声明'}</code> · 页面只读取 Rust 已保存的指标/金额/回撤/月年收益，不重算绩效。</p>
         <p>成本：佣金 {cost.commission_rate} · 最低佣金 {c.minimum_commission} CNY · 买入滑点 {cost.buy_slippage_bps}bp · 卖出滑点 {cost.sell_slippage_bps}bp · 买入税 {cost.buy_tax_rate} · 卖出税 {cost.sell_tax_rate}。策略与基准使用同一成本模型，基准实际成交时计费。</p>
-        <p>再投资日历：{c.reinvestment_calendar.policy === 'none' ? '明确声明不再投资（空日历）' : `按策略调仓 Session（${c.reinvestment_calendar.decision_dates.join('、') || '评价窗口内无可用日期'}）`}。分红到账后的下一声明 normal decision 才能再投；应收不提前使用。</p>
+        {c.corporate_actions && <p>再投资日历：{c.reinvestment_calendar.policy === 'none' ? '明确声明不再投资（空日历）' : `按策略调仓 Session（${c.reinvestment_calendar.decision_dates.join('、') || '评价窗口内无可用日期'}）`}。分红到账后的下一声明 normal decision 才能再投；应收不提前使用。</p>}
         <p>已核对：{c.checks.join('、')} · 身份核对：{v.role_identities_verified ? '策略/基准持久 exp/Run 与冻结定义一致' : '未通过'} · 评价窗口 {v.window.start} ～ {v.window.end}（{v.window.session_count} Sessions）。</p>
       </div>
     </Panel>
@@ -463,7 +470,7 @@ function CompleteDetail({ complete, role, summary, run }: { complete: CompleteSu
       <thead><tr><th>账户币种金额（{complete.currency}）</th><th>值</th></tr></thead>
       <tbody>{amountLabels.map(([key, label]) => <tr key={key}><td>{label}</td><td data-amount={key}>{complete.amounts[key] ?? '未保存'}</td></tr>)}</tbody>
     </table></div>
-    <p className="hint">金额为 scale-18 十进制账户币种；费率/换手为累计比例，不是现金金额。成交事件 {complete.fill_count} · 费用结算事件 {complete.fee_settlement_count} · 执行 {summary.executed_count} · 延期 {summary.deferred_count} · Session {summary.session_count} · 收益口径 {summary.return_basis ?? '未记录'} · 账本核验 {run.accounting_verified === null ? '未记录' : run.accounting_verified ? '已核验' : '未通过'} · 行动事实 {summary.corporate_action_completeness?.is_complete ? '完整' : '不完整'} · 完整绩效定义 {complete.semantic_version}</p>
+    <p className="hint">金额为 scale-18 十进制账户币种；费率/换手为累计比例，不是现金金额。成交事件 {complete.fill_count} · 费用结算事件 {complete.fee_settlement_count} · 执行 {summary.executed_count} · 延期 {summary.deferred_count} · Session {summary.session_count} · 收益口径 {summary.return_basis ?? '未记录'} · 账本核验 {run.accounting_verified === null ? '未记录' : run.accounting_verified ? '已核验' : '未通过'} · 行动事实 {summary.return_basis === 'price_return' ? '价格收益模式不纳入' : summary.corporate_action_completeness?.is_complete ? '完整' : '不完整'} · 完整绩效定义 {complete.semantic_version}</p>
     {summary.pending_at_end && <p className="hint">期末仍有 pending 目标/风险退出；不代表已清仓。</p>}
   </>;
 }

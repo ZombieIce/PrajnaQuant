@@ -39,7 +39,7 @@ The Playwright webServer performs these steps, all from this checkout:
 1. `npm run build` produces the production `apps/web/dist`.
 2. Build `quant-research`, `prajna-experiment` (including
    `prajna-freeze-selection` and the `selection_fixture` example),
-   `prajna-publish-daily` and `prajna-corporate-facts` with
+   `prajna-publish-daily`, `prajna-corporate-facts` and `prajna-import-daily-price` with
    `--locked --offline`.
 3. Run `prajna-data`'s opt-in `export_synthetic_preview_fixture` integration test.
    This invokes the real `prajna-publish-daily` CLI with synthetic source bytes,
@@ -67,6 +67,11 @@ The Playwright webServer performs these steps, all from this checkout:
    changing the preset pool registry. `updates.spec.ts` selects those inputs and
    exercises the real `prajna-pool-update` and production pool Normalizer; this
    new scenario does not use the older test-only multi-Venue publisher wrapper.
+   Then run `prajna-data`'s ignored `generate_e2e_input` and import its synthetic
+   supplier responses with the real `prajna-import-daily-price --replay`. This
+   publishes two member Datasets, their pool Dataset and adjusted versions;
+   `daily-price.spec.ts` drives factor, daily-price timing, Top-K and comparison
+   from that receipt ([ADR 0039](../../../docs/decisions/0039-etf-daily-price-research.md)).
 7. Check the real `prajna-experiment --help`, bind it through
    `PRAJNA_EXPERIMENT_CLI`, bind `PRAJNA_DATASET_PREVIEW_CLI` and
    `PRAJNA_SELECTION_CLI` and `PRAJNA_POOL_UPDATE_CLI`, and launch `quant-research serve` with explicit dist,

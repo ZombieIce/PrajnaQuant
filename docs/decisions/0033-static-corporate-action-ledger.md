@@ -1,5 +1,7 @@
 # ADR 0033：Static Universe 固定公司行动账本
 
+本 ADR 适用于绑定行动事实的账本。ETF 日线模拟使用 [ADR 0039](0039-etf-daily-price-research.md) 的价格收益契约。
+
 - 状态：Accepted，2026-10-30；#307，扩展 ADR 0023/0032。
 
 ## 决定

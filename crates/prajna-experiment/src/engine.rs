@@ -413,6 +413,47 @@ impl EngineSettings {
         }
         Ok(())
     }
+    pub(super) fn validate_daily_price(
+        &self,
+        input: &DefinitionInput,
+    ) -> Result<(), ExperimentError> {
+        self.validate_static_actions(input.pit.is_some()).map_err(|_| {
+            invalid("daily_price_simulation_v1 requires Static Universe single-Venue Fast Event lot/full_target")
+        })?;
+        if !self
+            .venues
+            .iter()
+            .all(|venue| matches!(venue.as_str(), "XSHG" | "XSHE"))
+            || !matches!(
+                input.strategy.as_str(),
+                "single_etf_timing" | "pool_momentum_topk" | "buy_and_hold"
+            )
+            || (input.strategy == "buy_and_hold" && input.holding_benchmark.is_none())
+            || input.corporate_actions.is_some()
+            || input.availability_assumption != "treat_unknown_as_ts_close"
+            || input
+                .unfilled_entry
+                .as_deref()
+                .is_some_and(|policy| policy != "skip" && input.holding_benchmark.is_none())
+            || input.evaluation.is_none()
+            || input
+                .adjusted_versions
+                .as_ref()
+                .is_none_or(BTreeMap::is_empty)
+            || !matches!(
+                input
+                    .fast_event
+                    .as_ref()
+                    .map(|settings| &settings.lot_size_source),
+                Some(LotSource::Instrument)
+            )
+        {
+            return Err(invalid(
+                "daily_price_simulation_v1 requires an ETF research template or its holding benchmark, bound adjusted inputs, frozen evaluation, Instrument lots and assumed close availability",
+            ));
+        }
+        Ok(())
+    }
     pub(super) fn configure_holding_benchmark(
         &mut self,
         benchmark: &crate::benchmark::Context,
@@ -993,6 +1034,8 @@ pub(super) fn execute(
                             ),
                         }
                     }
+                } else if experiment.execution_mode.is_some() {
+                    fast_event::run_fast_event_daily_price(ledger_panel, config, &portfolios)
                 } else if let Some(actions) = &experiment.actions {
                     let schedule = actions.schedule(ledger_panel).map_err(|e| e.to_string())?;
                     if let Some(benchmark) = &experiment.holding_benchmark {
@@ -1023,6 +1066,13 @@ pub(super) fn execute(
                 experiment.sessions_per_year,
                 &experiment.availability_assumption,
             )?);
+            if let Some(mode) = experiment.execution_mode {
+                let summary = execution.summary.as_mut().expect("Fast Event summary");
+                summary.execution_mode = Some(mode);
+                summary.return_basis = Some(result.return_basis);
+                summary.adjusted_signal_gaps =
+                    crate::adjusted::signal_gaps(run, research_panel, ledger_panel, members)?;
+            }
             if let Some(context) = &experiment.performance {
                 crate::performance::complete(
                     execution.summary.as_mut().unwrap(),

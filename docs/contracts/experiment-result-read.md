@@ -1,5 +1,7 @@
 # 已保存 Experiment 结果的只读入口（T04a）
 
+显式日线价格模式及结果身份见 [ADR 0039](../decisions/0039-etf-daily-price-research.md)。旧结果沿用本契约的版本化读取。
+
 本契约固定 `prajna-experiment result` 及其 HTTP 适配的读取边界。入口只读取已持久化的 Experiment/Execution 和已经保存的结果表，不执行、不提升、不重新计算回测结果、不补零，也不修改 lake；展示权重只在 Rust 从已保存估值投影。
 
 ## CLI

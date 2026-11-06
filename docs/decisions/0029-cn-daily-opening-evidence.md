@@ -1,5 +1,7 @@
 # ADR 0029：沪深日线固定开盘状态证据
 
+本 ADR 适用于严格开盘证据路径。[ADR 0039](0039-etf-daily-price-research.md) 的日线价格模拟另行声明开盘价可用于模拟的假设。
+
 - 状态：Accepted implementation contract，2026-10-28；Issue [#350](https://github.com/ZombieIce/PrajnaQuant/issues/350) D1–D6。
 
 ## 决定

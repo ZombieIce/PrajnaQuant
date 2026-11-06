@@ -63,6 +63,13 @@ pub use storage::{
 pub use summary::{RunSummary, summarize};
 pub use worker::WorkerCommand;
 
+/// Explicit opt-in. Omission retains the status-gated execution contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    DailyPriceSimulationV1,
+}
+
 const PARAMETERS: [&str; 9] = [
     "short",
     "long",
@@ -310,6 +317,7 @@ pub struct Experiment {
     universe: String,
     venues: BTreeSet<VenueId>,
     availability_assumption: String,
+    execution_mode: Option<ExecutionMode>,
     costs: Costs,
     sessions_per_year: u64,
     parameter_space: ParameterSpace,
@@ -397,6 +405,8 @@ struct DefinitionInput {
     strategy: String,
     engine: String,
     availability_assumption: String,
+    #[serde(default)]
+    execution_mode: Option<ExecutionMode>,
     costs: Value,
     sessions_per_year: u64,
     #[serde(default)]
@@ -448,6 +458,9 @@ impl Experiment {
             ));
         }
         let mut engine = engine::EngineSettings::parse(&input, lake_root.as_ref(), &venues)?;
+        if input.execution_mode.is_some() {
+            engine.validate_daily_price(&input)?;
+        }
         if input.seed.as_ref().is_some_and(|seed| !seed.is_null()) {
             return Err(invalid("deterministic engine seed must be omitted or null"));
         }
@@ -516,15 +529,21 @@ impl Experiment {
                     "pool_momentum_topk requires bound adjusted inputs/evaluation for every member and Vector or Fast Event",
                 ));
             }
-            if input.strategy == "single_etf_timing" {
+            if input.strategy == "single_etf_timing" || input.execution_mode.is_some() {
                 let preview = prajna_data::dataset_preview::show(lake_root.as_ref(), &input.dsv)
                     .map_err(|e| invalid(e.to_string()))?;
-                let member = universe.members()[0].to_string();
-                if !preview["instruments"].as_array().is_some_and(|rows| {
-                    rows.iter()
-                        .any(|row| row["instrument_id"] == member && row["kind"] == "etf")
-                }) {
-                    return Err(invalid("single_etf_timing requires an ETF Instrument"));
+                for member in universe.members() {
+                    let member = member.to_string();
+                    if !preview["instruments"].as_array().is_some_and(|rows| {
+                        rows.iter()
+                            .any(|row| row["instrument_id"] == member && row["kind"] == "etf")
+                    }) {
+                        return Err(invalid(if input.strategy == "single_etf_timing" {
+                            "single_etf_timing requires an ETF Instrument".into()
+                        } else {
+                            format!("daily price simulation requires an ETF Instrument: {member}")
+                        }));
+                    }
                 }
             }
             adjusted_versions = research.0;
@@ -548,6 +567,9 @@ impl Experiment {
         let parameter_space = engine::parse_space(&input.strategy, &input.parameter_space)?;
         let mut normalized = normalize_definition(&input, &venues, costs, &parameter_space);
         engine.normalize_definition(&mut normalized, &input.strategy);
+        if let Some(mode) = input.execution_mode {
+            normalized["execution_mode"] = serde_json::json!(mode);
+        }
         if let Some(context) = &pit {
             normalized["pit"] = context.identity.clone();
         }
@@ -573,6 +595,7 @@ impl Experiment {
             universe: input.universe,
             venues,
             availability_assumption: input.availability_assumption,
+            execution_mode: input.execution_mode,
             costs,
             sessions_per_year: input.sessions_per_year,
             parameter_space,
@@ -763,7 +786,8 @@ impl Experiment {
                 warmup_sessions,
             });
         }
-        window::plan(&sessions, &coverage, &parameters).map_err(invalid)
+        window::plan_for_mode(&sessions, &coverage, &parameters, self.execution_mode)
+            .map_err(invalid)
     }
 
     pub fn canonical_json(&self) -> Result<Vec<u8>, ExperimentError> {
@@ -837,6 +861,9 @@ impl Experiment {
         }
         if let Some(context) = &self.performance {
             spec["summary"] = context.identity.clone();
+        }
+        if let Some(mode) = self.execution_mode {
+            spec["execution_mode"] = serde_json::json!(mode);
         }
         write_venue_scope(&mut spec, &self.venues);
         spec
@@ -1017,7 +1044,7 @@ impl Experiment {
                 .map_err(|e| invalid(e.to_string()))?;
             panel.instruments.retain(|id| members.contains(id));
         }
-        let statuses = if self.pit.is_some() {
+        let statuses = if self.pit.is_some() || self.execution_mode.is_some() {
             BTreeMap::new()
         } else {
             load_execution_status(lake_root, &self.dsv)
@@ -1027,13 +1054,15 @@ impl Experiment {
             .as_ref()
             .map_or(panel.instruments.as_slice(), |u| u.members());
 
-        // Resolve execution availability once; the callback in each Run then reads this shared map.
+        // Daily price Fast Event resolves its fresh opening gates inside the ledger.
         let mut executable_by_key = HashMap::new();
-        for instrument in members {
-            for session in &panel.sessions {
-                let allowed = executable(&panel, &statuses, instrument, session)
-                    .map_err(|error| execution_error("resolve execution status", error))?;
-                executable_by_key.insert((instrument.clone(), session.session_date), allowed);
+        if self.execution_mode.is_none() {
+            for instrument in members {
+                for session in &panel.sessions {
+                    let allowed = executable(&panel, &statuses, instrument, session)
+                        .map_err(|error| execution_error("resolve execution status", error))?;
+                    executable_by_key.insert((instrument.clone(), session.session_date), allowed);
+                }
             }
         }
 
@@ -1575,18 +1604,20 @@ fn parse_research_inputs(
             "evaluation requires common_start <= start < end <= common_end",
         ));
     }
-    for (instrument, version) in &frozen {
-        let research = adjusted_series::read(lake, version).map_err(|error| {
-            invalid(format!(
-                "bound adjusted version {version} for {instrument}: {error}"
-            ))
-        })?;
-        let first = research.rows.first().map(|row| row.trade_date);
-        let last = research.rows.last().map(|row| row.trade_date);
-        if first.is_none_or(|first| first > start) || last.is_none_or(|last| last < end) {
-            return Err(invalid(format!(
-                "bound adjusted version {version} for {instrument} has no rows at the evaluation window boundaries"
-            )));
+    if input.execution_mode.is_none() {
+        for (instrument, version) in &frozen {
+            let research = adjusted_series::read(lake, version).map_err(|error| {
+                invalid(format!(
+                    "bound adjusted version {version} for {instrument}: {error}"
+                ))
+            })?;
+            let first = research.rows.first().map(|row| row.trade_date);
+            let last = research.rows.last().map(|row| row.trade_date);
+            if first.is_none_or(|first| first > start) || last.is_none_or(|last| last < end) {
+                return Err(invalid(format!(
+                    "bound adjusted version {version} for {instrument} has no rows at the evaluation window boundaries"
+                )));
+            }
         }
     }
     Ok((

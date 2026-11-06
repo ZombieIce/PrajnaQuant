@@ -37,6 +37,8 @@ const states: Record<string, string> = {
   attempt: '执行尝试', sizing_adjustment: '数量调整（非成交）', risk_exit: '风险退出',
   order: '订单', Buy: '买入', Sell: '卖出', lot_rounding: '整手舍入', insufficient_cash: '现金不足',
   held_instrument_not_executable: '已持有证券不可执行', instrument_not_executable: '证券不可执行',
+  missing_raw_open: '缺有效未复权开盘价', held_instrument_missing_raw_open: '持仓缺有效未复权开盘价',
+  no_future_execution_session: '评价窗口内无后续交易 Session',
   missing_or_nonpositive_equity: '总权益缺失或不为正', open_after: '开盘执行后', close: '收盘',
 };
 function value(input: unknown): ReactNode {

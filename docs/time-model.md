@@ -1,5 +1,7 @@
 # 时间模型与可知性
 
+本文描述旧 ETF 诊断路径的事件序列。MVP-7 工作台显式日线价格模式的 Session 轴、价格角色与执行假设见 [ADR 0039](decisions/0039-etf-daily-price-research.md)。
+
 Batch 2 增加 `published_at`/`available_at` 状态证据列、`observed_at` 采集时间与发布快照 `data_cutoff_date`，但**没有改变** T 收盘形成信号、下一可用日 open 模拟执行的事件顺序。A 的五 ETF 历史状态 1205 格全 UNKNOWN，占位门槛复跑零成交只证明缺证拒单；513300 的 09:30–10:30 盘中限制不能映射为全日 HALTED 或日线 open 可成交。B 的 18:30 当日同步门槛与行情发布截止日是数据可用保护，不是历史公告时间或回测执行时刻。状态行 `observed_at` 绝不能代替历史 `published_at`/`available_at`。见 [`Batch 2 验收`](handoffs/batch2-integration-acceptance.md)。
 
 ## 当前策略事件序列（代码已确认）

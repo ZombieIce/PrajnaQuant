@@ -42,6 +42,13 @@ const FAST_FULL: [&str; 6] = [
     "fee_settlements",
     "corporate_actions",
 ];
+const FAST_DAILY: [&str; 5] = [
+    "account_valuations",
+    "portfolio_valuations",
+    "orders",
+    "fills",
+    "fee_settlements",
+];
 const FAST_TERMINAL_STANDARD: [&str; 4] = [
     "account_valuations",
     "portfolio_valuations",
@@ -109,6 +116,9 @@ impl ResultLevel {
         if run.is_event() {
             match self {
                 Self::Summary => &[],
+                Self::Standard | Self::Full if run.run_spec.get("execution_mode").is_some() => {
+                    &FAST_DAILY
+                }
                 Self::Standard if run.run_spec["engine"]["kind"] == "accurate_event" => {
                     &ACCURATE_STANDARD
                 }
@@ -336,7 +346,7 @@ pub struct StoredRun {
     pub not_produced_by_engine: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accounting_verified: Option<bool>,
-    /// PIT or fixed-action evidence identities survive Summary.
+    /// PIT, fixed-action evidence and daily mode identities survive Summary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_spec: Option<Value>,
 }
@@ -1206,6 +1216,7 @@ fn stored_run(
             .run_spec
             .get("pit")
             .or_else(|| execution.run_spec.get("corporate_actions"))
+            .or_else(|| execution.run_spec.get("execution_mode"))
             .map(|_| execution.run_spec.clone()),
     }
 }
@@ -2332,7 +2343,8 @@ pub(super) fn execution_rows(
         return accurate_rows(run, table);
     }
     if let Some(result) = &run.fast_event_result {
-        let mut rows = fast_rows(result, table)?;
+        let daily_price = run.run_spec.get("execution_mode").is_some();
+        let mut rows = fast_rows(result, table, daily_price)?;
         if table == "orders" && run.run_spec.get("holding_benchmark").is_some() {
             for (_, payload) in &mut rows {
                 let mut value: Value = serde_json::from_str(payload)?;
@@ -2487,6 +2499,7 @@ fn attempt_payload(attempt: &prajna_research::fast_event::FastEventAttempt) -> V
 fn fast_rows(
     result: &prajna_research::fast_event::FastEventResult,
     table: &str,
+    daily_price: bool,
 ) -> Result<Vec<(String, String)>, ExperimentError> {
     use prajna_research::fast_event::PriceField;
     let mut rows = vec![];
@@ -2497,7 +2510,14 @@ fn fast_rows(
                     ("open_after", &session.open_after, &session.open_sources),
                     ("close", &session.close, &session.close_sources),
                 ] {
-                    let source=sources.iter().map(|(id,s)| (id.to_string(),serde_json::json!({"session_date":s.session_date.to_string(),"field":match s.field {PriceField::Open=>"open",PriceField::Close=>"close"}}))).collect::<serde_json::Map<_,_>>();
+                    let source = sources.iter().map(|(id, source)| {
+                        let field = match source.field { PriceField::Open => "open", PriceField::Close => "close" };
+                        let mut value = serde_json::json!({"session_date":source.session_date.to_string(), "field":field});
+                        if daily_price {
+                            value["stale_calendar_days"] = (session.session.session_date - source.session_date).num_days().into();
+                        }
+                        (id.to_string(), value)
+                    }).collect::<serde_json::Map<_,_>>();
                     let mut push = |scope: &str,
                                     id: Option<u64>,
                                     value: &prajna_account::PortfolioValuation|
@@ -2555,8 +2575,24 @@ fn fast_rows(
             for (index, attempt) in result.attempts.iter().enumerate() {
                 let mut payload = attempt_payload(attempt);
                 if let Some(skipped) = payload.get("skipped_buys").cloned() {
-                    payload["blocked_entry_reason"] = "instrument_not_executable".into();
+                    payload["blocked_entry_reason"] = if daily_price {
+                        "missing_raw_open"
+                    } else {
+                        "instrument_not_executable"
+                    }
+                    .into();
                     payload["blocked_entries"] = skipped;
+                }
+                if daily_price {
+                    match payload["kind"].as_str() {
+                        Some("deferred") => {
+                            payload["reason"] = "held_instrument_missing_raw_open".into()
+                        }
+                        Some("pending_at_end") => {
+                            payload["reason"] = "no_future_execution_session".into()
+                        }
+                        _ => {}
+                    }
                 }
                 rows.push((format!("attempt|{index:020}"), json_payload(&payload)?));
             }

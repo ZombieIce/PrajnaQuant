@@ -109,6 +109,15 @@ pub fn plan(
     coverage: &[Coverage],
     parameters: &[Parameter],
 ) -> Result<WindowPlan, String> {
+    plan_for_mode(sessions, coverage, parameters, None)
+}
+
+pub(crate) fn plan_for_mode(
+    sessions: &[NaiveDate],
+    coverage: &[Coverage],
+    parameters: &[Parameter],
+    mode: Option<crate::ExecutionMode>,
+) -> Result<WindowPlan, String> {
     if sessions.is_empty() {
         return Err("common window requires a nonempty Session axis".into());
     }
@@ -187,7 +196,13 @@ pub fn plan(
     }
 
     let common_start = *first_indices.iter().max().expect("nonempty first indices");
-    let common_end = *last_indices.iter().min().expect("nonempty last indices");
+    let common_end = if mode.is_some() {
+        // The frozen calendar remains authoritative after the first viable
+        // signal, including Sessions after a member's last adjusted price.
+        sessions.len() - 1
+    } else {
+        *last_indices.iter().min().expect("nonempty last indices")
+    };
     let common_start_date = sessions[common_start].to_string();
     let common_end_date = sessions[common_end].to_string();
     if common_start > common_end {
@@ -228,17 +243,16 @@ pub fn plan(
             .and_then(|warmup| warmup.checked_add(1))
             .ok_or_else(|| format!("parameter {} warm-up is too large", parameter.label))?;
         let mut ready = None;
-        for index in common_start..=common_end {
-            if index + 1 < required {
-                continue;
+        let mut streak = 0usize;
+        let mut longest_streak = 0usize;
+        for index in 0..=common_end {
+            if coverage.iter().all(|member| member.present[index]) {
+                streak += 1;
+                longest_streak = longest_streak.max(streak);
+            } else {
+                streak = 0;
             }
-            let window_start = index + 1 - required;
-            let complete = (window_start..=index).all(|row| {
-                coverage
-                    .iter()
-                    .all(|member| member.present.get(row).copied().unwrap_or(false))
-            });
-            if complete {
+            if index >= common_start && streak >= required {
                 ready = Some(index);
                 break;
             }
@@ -258,6 +272,14 @@ pub fn plan(
                     "{} requires {} warm-up Session(s) with complete adjusted research coverage; the common window cannot supply them",
                     parameter.label, parameter.warmup_sessions
                 );
+                let reason = if mode.is_some() {
+                    format!(
+                        "{reason} (need {required} consecutive adjusted closes including the signal Session; have {longest_streak}, short by {})",
+                        required - longest_streak
+                    )
+                } else {
+                    reason
+                };
                 blocking.push(Blocking {
                     code: "insufficient_warmup",
                     message: reason.clone(),

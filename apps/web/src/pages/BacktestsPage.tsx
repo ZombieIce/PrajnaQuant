@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import ExecutionMode, { dailyPriceLabel, dailyPriceMode } from '../components/ExecutionMode';
 import { Chart } from '../Chart';
 import NativeResultDetails, { type NativeDetails } from '../components/NativeResultDetails';
 import { api, ErrorBox, Header, Panel, pct } from '../shared';
@@ -27,9 +28,10 @@ type Summary = {
   sharpe: number | null; max_drawdown: number | null; n_returns: number; mean_return: number | null; std_return: number | null;
   total_turnover: number; total_cost: number; executed_count: number; deferred_count: number; skipped_buy_count: number;
   session_count: number; pending_at_end: boolean; insufficient_sessions: boolean; zero_volatility: boolean;
-  assumptions: string[]; availability_assumption: string; return_basis?: string | null;
+  assumptions: string[]; availability_assumption: string; return_basis?: string | null; execution_mode?: string | null;
+  adjusted_signal_gaps?: Record<string, string[]>;
 };
-type Position = { quantity: string; market_value: string; price?: string };
+type Position = { quantity: string; market_value: string; price?: string; mark_session?: string; stale_calendar_days?: number };
 type ValuationRow = {
   session_date: string; valuation_point: 'open_after' | 'close'; scope?: string; portfolio_id?: number | string | null; cash: string; equity: string;
   positions?: Record<string, Position>; accounting_verified?: boolean;
@@ -77,6 +79,7 @@ export default function BacktestsPage() {
   const [detailError, setDetailError] = useState<Error | null>(null);
   const [instrumentId, setInstrumentId] = useState('');
   const [strategy, setStrategy] = useState('buy_and_hold');
+  const [daily, setDaily] = useState(false);
   const [adjusted, setAdjusted] = useState('');
   const [maWindow, setMaWindow] = useState('60');
   const [frequency, setFrequency] = useState('5');
@@ -169,6 +172,7 @@ export default function BacktestsPage() {
         method: 'POST',
         body: JSON.stringify({ idempotency_key: crypto.randomUUID(), dsv, instrument: instrumentId, strategy, result_level: strategy === 'single_etf_timing' ? 'full' : 'standard',
           ...(strategy === 'single_etf_timing' ? { adjusted: { [instrumentId]: adjusted },
+            ...(daily ? { execution_mode: dailyPriceMode } : {}),
             parameter_space: { list: [{ params_version: 1, ma_window: Number(maWindow), rebalance_every: Number(frequency) }] },
             settings: { ...settings, commission_rate: Number(settings.commission_rate), buy_slippage_bps: Number(settings.buy_slippage_bps), sell_slippage_bps: Number(settings.sell_slippage_bps), buy_tax_rate: Number(settings.buy_tax_rate), sell_tax_rate: Number(settings.sell_tax_rate) } } : {}) }),
       });
@@ -199,6 +203,7 @@ export default function BacktestsPage() {
       <label>策略模板<select aria-label="策略模板" value={strategy} onChange={e => setStrategy(e.target.value)}>
         <option value="buy_and_hold">买入持有</option><option value="single_etf_timing">单 ETF 趋势择时（严格 close &gt; MA）</option>
       </select></label>
+      {strategy === 'single_etf_timing' && <ExecutionMode daily={daily} onChange={setDaily} disabled={busy} strictLabel="严格执行" />}
       {catalogError && errorDetails(catalogError)}
       {!catalog && !catalogError && <p role="status">正在读取已发布 Dataset 目录…</p>}
       {catalog && <>
@@ -305,6 +310,11 @@ function RunResult({ run }: { run: ResultRun }) {
   const chart = equityPoints.length ? { title: '账户权益（CNY，收盘估值）', points: equityPoints }
     : navPoints.length ? { title: '净值', points: navPoints } : null;
   const summary = run.summary;
+  const signalGaps = Object.entries(summary?.adjusted_signal_gaps ?? {});
+  const staleMarks = valuations.flatMap(row => Object.entries(row.positions ?? {}).flatMap(([id, position]) =>
+    position.stale_calendar_days && position.stale_calendar_days > 0
+      ? [{ date: row.session_date, point: row.valuation_point, id, mark: position.mark_session, days: position.stale_calendar_days }]
+      : []));
   const unavailable = summary?.insufficient_sessions ? '不可计算（有效收益样本不足 2）'
     : summary?.zero_volatility ? '不可计算（收益波动为零）' : '不可计算';
   const positionText = (positions: Record<string, Position> | undefined) => {
@@ -316,6 +326,7 @@ function RunResult({ run }: { run: ResultRun }) {
     <div className="run-status">
       <span className={`status-tag ${run.status === 'completed' ? 'status-succeeded' : 'status-failed'}`}>{run.status === 'completed' ? 'Run 已完成' : `Run ${run.status}`}</span>
       <span>结果级别 {run.result_level}</span>
+      {summary?.execution_mode === dailyPriceMode && <span data-testid="result-execution-mode">{dailyPriceLabel} · <code>{summary.execution_mode}</code></span>}
       <span>账本核验：{run.accounting_verified === null ? '未记录（该引擎无此标记）' : run.accounting_verified ? '已核验' : '未通过'}</span>
     </div>
     {run.error && <ErrorBox>Run 错误：{run.error}</ErrorBox>}
@@ -329,10 +340,15 @@ function RunResult({ run }: { run: ResultRun }) {
         <Metric label="最大回撤" value={summary.max_drawdown === null ? unavailable : pct(summary.max_drawdown)} />
         <Metric label="收益样本 / Session" value={`${summary.n_returns} / ${summary.session_count}`} />
       </section>
-      <p className="hint">执行事件 {summary.executed_count} · 延期 {summary.deferred_count} · 跳过买入 {summary.skipped_buy_count} · 累计成本率 {pct(summary.total_cost)} · 换手 {pct(summary.total_turnover)} · 收益口径 {summary.return_basis ?? '未记录'}</p>
+      <p className="hint">执行事件 {summary.executed_count} · 延期 {summary.deferred_count} · 跳过买入 {summary.skipped_buy_count} · 累计成本率 {pct(summary.total_cost)} · 换手 {pct(summary.total_turnover)} · 收益口径 {summary.return_basis === 'price_return' ? '扣费后价格收益' : summary.return_basis ?? '未记录'}</p>
+      {summary.execution_mode === dailyPriceMode && <p className="hint">跨除权日的价格跳变计入价格收益。</p>}
       {summary.pending_at_end && <ErrorBox>期末仍有 pending 目标/风险退出：最后交易日产生的待执行目标未成交，不代表已清仓。</ErrorBox>}
       {summary.insufficient_sessions && <p className="hint">有效收益样本不足 2，年化收益、波动与 Sharpe 不可计算；未以 0 代替。</p>}
       {summary.zero_volatility && <p className="hint">收益波动为零，Sharpe 不可计算；未以 0 代替。</p>}
+      {signalGaps.length > 0 && <details data-testid="adjusted-signal-gaps">
+        <summary>复权价缺失影响的信号</summary>
+        <ul>{signalGaps.map(([member, dates]) => <li key={member}>{member} · {dates.length} 日 · {dates.join('、')}</li>)}</ul>
+      </details>}
       <details><summary>收益假设与可用时刻</summary><p>{summary.availability_assumption}</p><ul>{(summary.assumptions ?? []).map((item, index) => <li key={index}>{item}</li>)}</ul></details>
     </>}
     {chart ? <Chart option={{
@@ -347,6 +363,15 @@ function RunResult({ run }: { run: ResultRun }) {
         <td>{row.session_date}</td><td>{row.valuation_point}</td><td>{row.cash}</td><td>{row.equity}</td><td>{positionText(row.positions)}</td>
       </tr>)}</tbody>
     </table></div>}
+    {staleMarks.length > 0 && <details data-testid="stale-position-marks">
+      <summary>沿用最近估值（{staleMarks.length} 条）</summary>
+      <div className="table-wrap"><table>
+        <thead><tr><th>日期</th><th>估值点</th><th>证券</th><th>价格日期</th><th>陈旧自然日数</th></tr></thead>
+        <tbody>{staleMarks.map(({ date, point, id, mark, days }) => <tr key={`${date}-${point}-${id}`}>
+          <td>{date}</td><td>{point}</td><td>{id}</td><td>{mark ?? '未记录'}</td><td>{days}</td>
+        </tr>)}</tbody>
+      </table></div>
+    </details>}
     {valuations.length === 0 && sessions.length > 0 && <div className="table-wrap"><table data-testid="session-rows">
       <thead><tr><th>日期</th><th>净值</th><th>净收益</th></tr></thead>
       <tbody>{sessions.map((row) => <tr key={row.session_date}><td>{row.session_date}</td><td>{row.nav}</td><td>{row.net_return ?? '未保存'}</td></tr>)}</tbody>

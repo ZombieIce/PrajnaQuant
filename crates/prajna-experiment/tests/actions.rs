@@ -1401,6 +1401,7 @@ fn frozen_equal_weight_comparison_uses_actual_lots_and_marks_incomplete_facts() 
         .as_u64()
         .unwrap() as usize;
     let selection = Selection {
+        execution_mode: None,
         dsv,
         instrument: String::new(),
         pool: Some(pools::Reference {
@@ -1587,6 +1588,7 @@ fn frozen_pool_momentum_comparison_runs_with_equal_weight_benchmark() {
         .as_u64()
         .unwrap() as usize;
     let selection = Selection {
+        execution_mode: None,
         dsv,
         instrument: String::new(),
         pool: Some(pools::Reference {
