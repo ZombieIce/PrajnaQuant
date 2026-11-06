@@ -4,7 +4,9 @@
 
 MVP-6 已按[负责人裁决](https://github.com/ZombieIce/PrajnaQuant/issues/182#issuecomment-6406038887)**有保留签收并收口**：[第二轮六项工程复核](https://github.com/ZombieIce/PrajnaQuant/issues/235#issuecomment-6400855766)全部 pass，证据处理流程 fail 与第一轮 fail 保留。真实验证仅限固定名单 ETF 工程场景，不证明完整历史 Universe、无偏策略业绩或实盘正确性。固定名单幸存者偏差、UNKNOWN 收窄、首笔成交及同 Session 资金先后、终止估值和真实未触发路径限制详见 [STATUS](docs/STATUS.md)。真实数据和详细结果仅留本机。
 
-设计方向见 [ARCHITECTURE](ARCHITECTURE.md)，阶段与后续边界见[产品路线](docs/product-roadmap.md)。Web 非验收范围适用于 MVP-0～6。MVP-7 研究工作台的本机日线入口见 [ETF 日线价格研究上手指南](docs/etf-daily-price-quickstart.md)及 [ADR 0039](docs/decisions/0039-etf-daily-price-research.md)。
+设计方向见 [ARCHITECTURE](ARCHITECTURE.md)，阶段与后续边界见[产品路线](docs/product-roadmap.md)。Web 非验收范围适用于 MVP-0～6；MVP-7 已提供受限的本机研究网页工作流，验收仍按对应票据与 [STATUS](docs/STATUS.md) 的证据范围。研究工作台的本机日线入口见 [ETF 日线价格研究上手指南](docs/etf-daily-price-quickstart.md)及 [ADR 0039](docs/decisions/0039-etf-daily-price-research.md)；多市场和 Paper/Live 仍是后续目标。
+
+首个 macOS arm64 本机 ETF 工作台 RC 候选的安装、合成演示、真实输入前置与限制见[用户指南](docs/user-guide.md)，发布条件见 [Release Notes 草稿](docs/release-notes-rc.md)。候选不等于已发布或整个 MVP-7 已验收。
 
 ## 从这里开始
 
@@ -22,7 +24,7 @@ MVP-5 的 Python Decision S2/S3 64×252 合成吞吐、分段耗时、As-of View
 | `crates/prajna-py`, `python/prajna`, `pyproject.toml` | 本地 Python 3.12+ 包、受限 As-of Decision、共用 Rust 执行及 Arrow 读取 |
 | `src/`, `sql/schema.sql` | Rust `ashare-warehouse`：采集、版本化 DuckDB、Parquet 导出 |
 | `crates/quant-research/src/` | Rust `quant-research`：快照、ETF 因子研究、日频回测、参数网格、结果查询与本地 Universe 管理 API |
-| `apps/web/` | React + TypeScript + ECharts 报告和行情界面；Universe 管理、已保存结果筛选及股票/ETF K 线连接本地 API；研究工作台经本机任务 API 提交并读取新平台的持久结果 |
+| `apps/web/` | React + TypeScript + ECharts 本机工作台及报告、行情界面；版本化 Dataset、研究池、因子、受限回测/对照与持久结果经服务端 API 连接 Rust CLI；Universe 管理、已保存结果筛选及股票/ETF K 线连接本地 API |
 | `warehouse.py`, `tests/test_warehouse.py` | 早期 Python 行情入库原型及其测试；与新 `prajna` 包分开 |
 | `configs/` | 单次实验和网格 JSON 示例 |
 | `data-core/`, `research-output/` | 本地数据与结果，均被 `.gitignore` 排除；新环境需自行准备合格数据 |
@@ -48,4 +50,4 @@ cd apps/web && npm ci && npm run build && cd ../..
 cargo run -p quant-research --release -- serve --output research-output --market-data-dir data-core --web-dist apps/web/dist --address 127.0.0.1:7878
 ```
 
-`run-grid` 生成的轮动配置与 `run` 示例的单动量配置不是同一策略。`serve` 可读取已保存结果、管理本地 Universe，并从 `--market-data-dir` 的已发布不可变快照服务行情。旧诊断页面只读取已保存运行，新平台工作台任务使用上手指南中的显式 Dataset 根和 Experiment CLI。无发布指针时旧行情 API 返回不可用。日更入口与未启用的调度模板见 [本地同步操作](docs/daily-sync-operations.md) 和 [Batch 2 B 交接](docs/handoffs/batch2-b-daily-sync.md)；完整接口、Universe 契约与验收见 [API](docs/api.md)、[Universe 契约](docs/universe-contract.md)、[Batch 2 验收](docs/handoffs/batch2-integration-acceptance.md) 和 [HANDOFF](HANDOFF.md)。旧设计文档在 `docs/` 保留作背景，状态冲突以当前代码、测试和本组审计文档为准。
+`run-grid` 生成的轮动配置与 `run` 示例的单动量配置不是同一策略。旧路径使用旧仓库/结果：`serve` 可读取已保存结果、管理旧 Universe，并从 `--market-data-dir` 的已发布不可变快照服务行情；无发布指针时旧行情 API 返回不可用。新平台的固定 Dataset、任务和本机工作台需要独立数据根及对应 CLI，按[用户指南](docs/user-guide.md)启动，不应混同两条路径。旧诊断页面只读取已保存运行，新平台工作台任务使用上手指南中的显式 Dataset 根和 Experiment CLI。日更入口与未启用的调度模板见 [本地同步操作](docs/daily-sync-operations.md) 和 [Batch 2 B 交接](docs/handoffs/batch2-b-daily-sync.md)；完整接口、Universe 契约与验收见 [API](docs/api.md)、[Universe 契约](docs/universe-contract.md)、[Batch 2 验收](docs/handoffs/batch2-integration-acceptance.md) 和 [HANDOFF](HANDOFF.md)。旧设计文档在 `docs/` 保留作背景，状态冲突以当前代码、测试和本组审计文档为准。

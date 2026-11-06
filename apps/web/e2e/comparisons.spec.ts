@@ -375,7 +375,10 @@ test('comparison rejects incompatible price rules and shows real task failures w
   };
   const file = join(process.env.PRAJNA_E2E_ROOT!, 'comparison-failure-adjusted.json');
   await writeFile(file, JSON.stringify(input));
-  const imported = spawnSync(join(target(), 'debug', 'prajna-import-adjusted'), ['--root', lake(), '--input', file], { encoding: 'utf8' });
+  const bundle = process.env.PRAJNA_RC_BUNDLE;
+  const importer = bundle ? join(bundle, 'prajna') : join(target(), 'debug', 'prajna-import-adjusted');
+  const arguments_ = ['--root', lake(), '--input', file];
+  const imported = spawnSync(importer, bundle ? ['cli', 'prajna-import-adjusted', ...arguments_] : arguments_, { encoding: 'utf8' });
   expect(imported.status, imported.stderr).toBe(0);
   const adjusted = JSON.parse(imported.stdout).version;
   const actions = await originalActions(page);
