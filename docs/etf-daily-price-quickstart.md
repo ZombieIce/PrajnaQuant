@@ -1,6 +1,6 @@
 # ETF 日线价格研究上手指南
 
-准备一个小型单市场 ETF 池和一个交易日期区间。本文使用 MVP-7 本机工作台，数据和结果保存在两个由用户指定的本机目录。输入、成交和比较规则见 [ADR 0039](decisions/0039-etf-daily-price-research.md)。
+准备一个小型单市场 ETF 池和一个交易日期区间。本文使用 MVP-7 本机工作台，原始输入与已发布数据分别存放在用户指定的本机输入目录和研究库中，结果也保存在研究库。输入、成交和比较规则见 [ADR 0039](decisions/0039-etf-daily-price-research.md)。
 
 ## 构建并启动
 
@@ -24,7 +24,7 @@ mkdir -p "$PRAJNA_LAKE" "$PRAJNA_INPUT"
 
 ## 固定基础配置并导入
 
-按 [交易 Session 日历](contracts/shanghai-shenzhen-session-calendar.md) 导入覆盖整个区间的交易日历，记录发布版本。用 [证券证据入口](../crates/prajna-data/README.md#fixed-security-evidence-snapshots) 为每只 ETF 保存固定证券快照。交易所、上市日期、计价货币、手数、价格及数量增量应来自可复用的基础配置。日期区间要包含最长因子或策略参数所需的预热，以及用于模拟成交和持仓估值的后续 Session。
+按 [交易 Session 日历](contracts/shanghai-shenzhen-session-calendar.md) 导入覆盖整个区间的沪深交易日历，记录发布版本。用 [证券证据入口](../crates/prajna-data/README.md#fixed-security-evidence-snapshots) 为每只 ETF 保存固定证券快照。交易所、上市日期、计价货币、手数、价格及数量增量应来自可复用的基础配置。日期区间要包含最长因子或策略参数所需的预热，以及用于模拟成交和持仓估值的后续 Session。
 
 把日期、日历和证券快照的固定引用填入本机输入目录下的 `config.json`。导入命令以 [固定上游版本的日线方法](https://github.com/simonlin1212/a-stock-data/blob/f21534946c42be3ad048ac938eecb1bad84cb8ab/SKILL.md) 获取未复权及前复权响应，使用现有 Tencent 来源访问、间隔和停源规则。真实运行仅使用已获授权的来源。
 
@@ -49,7 +49,7 @@ prajna-import-daily-price --root "$PRAJNA_LAKE" --input-root "$PRAJNA_INPUT" \
   --config "$PRAJNA_INPUT/config.json" --fetch --receipt receipt.json
 ```
 
-先看终端的紧凑状态，再在本机打开 receipt。记录 Dataset 版本和每只 ETF 的复权版本。区分缺交易 Session、缺原始价和缺复权价，保留源响应和实际覆盖。原始价的交易日缺口可能影响成交或估值。相同固定响应使用 `--replay` 复跑，修订输入会产生新版本。真实响应、详细覆盖、身份和研究结果仅留本机。
+先看终端状态，再在输入目录打开 `receipt.json`。归档批次在 `daily-price/batches/`，失败细节在 `daily-price/diagnostics/`，逐次响应来源和状态在 `reports/`。记录 Dataset 版本和每只 ETF 的复权版本。区分缺交易 Session、缺原始价和缺复权价，保留源响应和实际覆盖。原始价的交易日缺口可能影响成交或估值。用 `--replay` 复跑已保存的响应文件。目录名相对输入根，文件按 `<前缀和代码>-<raw或qfq>-<起日>-<止日>.json` 命名，分段边界与请求一致。修订输入会产生新版本。真实响应、详细覆盖、身份和研究结果仅留本机。
 
 在第二个终端复用同一组路径启动工作台。
 
