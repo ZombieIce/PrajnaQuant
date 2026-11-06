@@ -196,7 +196,7 @@ struct Series {
     run: CollectionRun,
     rows: BTreeMap<NaiveDate, AdjustedRow>,
     hashes: Vec<String>,
-    fallback_chunks: usize,
+    qfq_absent_chunks: usize,
     observed_at: String,
 }
 
@@ -217,7 +217,7 @@ fn series(
     run.report.validate_consistency()?;
     let mut rows = BTreeMap::new();
     let mut hashes = Vec::new();
-    let mut fallback_chunks = 0;
+    let mut qfq_absent_chunks = 0;
     let mut observed_at = None;
     for chunk in &run.report.chunks {
         if !matches!(chunk.status, ChunkStatus::Complete | ChunkStatus::Empty) {
@@ -255,7 +255,7 @@ fn series(
                 .get("qfqday")
                 .is_none()
         {
-            fallback_chunks += 1;
+            qfq_absent_chunks += 1;
         }
         hashes.push(response.raw_sha256.clone());
         for value in values {
@@ -304,7 +304,7 @@ fn series(
         run,
         rows,
         hashes,
-        fallback_chunks,
+        qfq_absent_chunks,
         observed_at: observed_at.ok_or("source returned no request ranges")?,
     })
 }
@@ -512,7 +512,7 @@ fn run<T: HttpTransport>(
             "qfq_usable_rows": adjusted.rows.keys().filter(|date| unadjusted.rows.contains_key(date)).count(),
             "qfq_missing": gap_summary(member.sessions.iter().copied().filter(|date| !adjusted.rows.contains_key(date))),
             "qfq_without_raw": gap_summary(adjusted.rows.keys().copied().filter(|date| !unadjusted.rows.contains_key(date))),
-            "qfq_day_fallback_chunks": adjusted.fallback_chunks,
+            "qfq_absent_chunks": adjusted.qfq_absent_chunks,
         }));
         collected.insert(id, (unadjusted, adjusted));
     }

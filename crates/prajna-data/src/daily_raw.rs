@@ -926,9 +926,13 @@ pub(crate) fn response_rows(
     let node = &data[native_symbol];
     let rows = match adjustment {
         tencent_transport::DailyAdjustment::Unadjusted => node.get("day"),
-        tencent_transport::DailyAdjustment::Forward => {
-            node.get("qfqday").or_else(|| node.get("day"))
-        }
+        tencent_transport::DailyAdjustment::Forward => match node.get("qfqday") {
+            Some(rows) => Some(rows),
+            // Unlike the upstream convention, an absent qfqday is not evidence that
+            // adjusted prices equal raw prices; the range has no adjusted rows.
+            None if node.get("day").is_some_and(Value::is_array) => return Ok(Vec::new()),
+            None => None,
+        },
     }
     .and_then(Value::as_array)
     .ok_or_else(|| "Tencent response is missing the requested daily array".to_owned())?;

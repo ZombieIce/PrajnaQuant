@@ -312,7 +312,18 @@ fn replay_rejects_duplicate_session_and_explicit_empty_qfq_with_raw_rows() {
     json_write(&path, &explicit_empty);
     cli(root, false);
     assert!(!input.join("receipt.json").exists());
+    // A response without qfqday is a missing adjusted range, never raw prices relabelled.
     json_write(&path, &raw);
-    let fallback = cli(root, true).unwrap();
-    assert_eq!(fallback["coverage"][MEMBER]["qfq_day_fallback_chunks"], 1);
+    let absent = cli(root, true).unwrap();
+    let coverage = &absent["coverage"][MEMBER];
+    assert_eq!(coverage["qfq_absent_chunks"], 1);
+    assert_eq!(coverage["qfq_rows"], 0);
+    assert_eq!(coverage["qfq_missing"]["count"], 12);
+    assert_eq!(coverage["raw_rows"], 12);
+    let adjusted = adjusted_series::read(
+        &root.join("lake"),
+        absent["adjustments"][MEMBER].as_str().unwrap(),
+    )
+    .unwrap();
+    assert!(adjusted.rows.is_empty());
 }
