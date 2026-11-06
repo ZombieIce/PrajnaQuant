@@ -49,7 +49,7 @@ prajna-import-daily-price --root "$PRAJNA_LAKE" --input-root "$PRAJNA_INPUT" \
   --config "$PRAJNA_INPUT/config.json" --fetch --receipt receipt.json
 ```
 
-先看终端状态，再在输入目录打开 `receipt.json`。归档批次在 `daily-price/batches/`，失败细节在 `daily-price/diagnostics/`，逐次响应来源和状态在 `reports/`。记录 Dataset 版本和每只 ETF 的复权版本。区分缺交易 Session、缺原始价和缺复权价，保留源响应和实际覆盖。原始价的交易日缺口可能影响成交或估值。用 `--replay` 复跑已保存的响应文件。目录名相对输入根，文件按 `<前缀和代码>-<raw或qfq>-<起日>-<止日>.json` 命名，分段边界与请求一致。修订输入会产生新版本。真实响应、详细覆盖、身份和研究结果仅留本机。
+先看终端状态，再在输入目录打开 `receipt.json`。归档批次在 `daily-price/batches/`，失败细节在 `daily-price/diagnostics/`，逐次响应来源和状态在 `reports/`。记录 Dataset 版本和每只 ETF 的复权版本。区分缺交易 Session、缺原始价和缺复权价，保留源响应和实际覆盖。原始价的交易日缺口可能影响成交或估值。每次导入把本次响应保存到 receipt 的 `replay_dir`（相对输入根）。用 `--replay <replay_dir>` 复跑同一组固定响应，得到相同的 Dataset 和复权版本。手工准备的复跑目录也相对输入根，文件按 `<前缀和代码>-<raw或qfq>-<起日>-<止日>.json` 命名，分段边界与请求一致。修订输入会产生新版本。真实响应、详细覆盖、身份和研究结果仅留本机。
 
 在第二个终端复用同一组路径启动工作台。
 
@@ -63,7 +63,7 @@ quant-research serve --address 127.0.0.1:7878 --web-dist apps/web/dist \
 
 在浏览器打开本机工作台（`http://127.0.0.1:7878`）。
 
-1. 在 `/datasets` 选择 receipt 给出的 Dataset，确认证券、Session、行情缺口与复权绑定。要运行 Top-K，在 `/pools` 编辑并发布成员与该 Dataset 一致的池版本。
+1. 导入沿用生产池发布，目录中还会列出每只 ETF 的单证券 Dataset。在 `/datasets` 选择 receipt 的 `dsv`，确认证券、Session、行情缺口与复权绑定。要运行 Top-K，在 `/pools` 编辑并发布成员与该 Dataset 一致的池版本。
 2. 在 `/research/momentum` 选择同一 Dataset、单 ETF 或固定池版本，并逐个绑定 receipt 中的复权版本。填写窗口，提交因子任务，完成后查看保存的图表、数值和有效样本状态。
 3. 在 `/comparisons` 选择「单 ETF 择时 vs 同证券买入持有」，或选择「池内轮动 vs 同池期初等权持有」及「池内动量 Top-K 轮动」。选「日线价格模拟」，使用同一 Dataset、固定池及复权版本，配置参数、成本以及按手数可买入的本金后提交。单 ETF 和 Top-K 分别运行。两侧的评价窗口、价格收益和费用口径一致。
 4. 任务完成后检查实际成交、费用、现金、持仓权益、跳过或延期记录与期末未执行目标。打开持久结果链接并刷新，核对结果按同一任务重读。再次以同一组固定输入提交，核对两侧窗口和保存的研究结果。执行身份同时受代码来源和运行环境约束。
