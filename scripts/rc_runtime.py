@@ -24,7 +24,7 @@ REQUIRED_BINS = (
     'quant-research', 'prajna-experiment', 'prajna-pools',
     'prajna-freeze-selection', 'prajna-freeze-comparison', 'prajna-momentum',
     'prajna-pool-update', 'prajna-preview-dataset', 'prajna-publish-daily',
-    'prajna-import-adjusted', 'prajna-corporate-facts',
+    'prajna-import-adjusted', 'prajna-import-daily-price', 'prajna-corporate-facts',
     'prajna-collect-daily-raw', 'prajna-session-calendar',
     'prajna-select-security-evidence',
 )
@@ -42,6 +42,7 @@ DEMO_CONFIGS = (
     'pool-updates/configs/synthetic.json',
     'synthetic-input/XSHG/selection.json',
     'synthetic-input/XSHE/selection.json',
+    'synthetic-input/daily-price/config.json',
     'etf.json-selection.json',
     'stock.json-selection.json',
 )

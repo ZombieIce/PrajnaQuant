@@ -39,6 +39,11 @@ DECISIONS = (
     '0036-versioned-complete-performance-summary.md', '0037-authoritative-calendar-report-and-performance-page.md',
     '0038-fixed-pool-production-update.md',
 )
+DATA_BINS = (
+    'prajna-preview-dataset', 'prajna-publish-daily', 'prajna-import-adjusted',
+    'prajna-import-daily-price', 'prajna-corporate-facts', 'prajna-collect-daily-raw',
+    'prajna-session-calendar', 'prajna-select-security-evidence',
+)
 
 
 def command(args, cwd=ROOT, env=None, log=None, *, stdout_only=False):
@@ -171,6 +176,9 @@ def export_test(package, test, name, variable, root, log, environment):
 def prepare_demo(temporary, release, log, environment):
     fixture = temporary / 'fixture'
     lake = fixture / 'lake'
+    export_test('prajna-data', 'daily_price_import', 'generate_e2e_input',
+                'PRAJNA_DAILY_PRICE_FIXTURE_ROOT', lake / 'synthetic-input/daily-price',
+                log, environment)
     export_test('prajna-data', 'dataset_preview_read', 'export_synthetic_preview_fixture',
                 'PRAJNA_PREVIEW_FIXTURE_ROOT', fixture, log, environment)
     command([str(release / 'examples/selection_fixture'), str(lake)], log=log)
@@ -237,12 +245,10 @@ def build(output, version):
             command(['cargo', 'build', '-p', 'prajna-experiment', '--bins', '--example',
                      'selection_fixture', '--release', '--target', TARGET, '--locked', '--offline'],
                     log=log, env=build_env)
-            data_bins = [name for name in REQUIRED_BINS if name in {
-                'prajna-preview-dataset', 'prajna-publish-daily', 'prajna-import-adjusted',
-                'prajna-corporate-facts', 'prajna-collect-daily-raw', 'prajna-session-calendar',
-                'prajna-select-security-evidence'}]
+            if not set(DATA_BINS) <= set(REQUIRED_BINS):
+                raise RcError('a production data CLI is not in the release inventory')
             args = ['cargo', 'build', '-p', 'prajna-data']
-            for name in data_bins:
+            for name in DATA_BINS:
                 args.extend(['--bin', name])
             command([*args, '--release', '--target', TARGET, '--locked', '--offline'], log=log, env=build_env)
             print('Exporting and checking synthetic inputs...', flush=True)

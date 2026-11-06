@@ -20,6 +20,11 @@ def git(repo, *args):
 
 
 class ReleaseBuildTests(unittest.TestCase):
+    def test_daily_price_importer_and_demo_input_are_in_release_inventory(self):
+        self.assertIn('prajna-import-daily-price', build.DATA_BINS)
+        self.assertIn('prajna-import-daily-price', build.REQUIRED_BINS)
+        self.assertIn('synthetic-input/daily-price/config.json', DEMO_CONFIGS)
+
     def test_tool_version_keeps_stdout_separate_from_logged_warnings(self):
         log = io.StringIO()
         version = build.tool_version([
@@ -140,6 +145,42 @@ class ReleaseBuildTests(unittest.TestCase):
             installed = json.loads((destination / 'etf.json-selection.json').read_text())
             self.assertEqual(Path(installed['raw_root']), destination / 'synthetic-input/preview')
             self.assertEqual(Path(installed['report']).read_text(), 'synthetic report')
+
+    def test_daily_price_demo_installs_relocatable_replay_inputs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / 'lake'
+            daily_config = 'synthetic-input/daily-price/config.json'
+            input_root = root / 'synthetic-input/daily-price'
+            config = input_root / 'config.json'
+            config.parent.mkdir(parents=True)
+            config.write_text(json.dumps({
+                'calendar_root': str(input_root),
+                'calendar_version': 'sha256:synthetic-calendar',
+                'evidence_root': str(input_root),
+                'start': '2026-01-05',
+                'end': '2026-01-20',
+                'members': {'510300.XSHG': 'sha256:synthetic-snapshot'},
+            }))
+            replay = input_root / 'replay/sh510300-raw-2026-01-05-2026-01-20.json'
+            replay.parent.mkdir()
+            replay.write_bytes(b'{"synthetic":true}')
+            for name in DEMO_CONFIGS:
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if path != config:
+                    path.write_text('{}')
+
+            build.portable_demo(root)
+            destination = Path(temp) / 'relocated-lake'
+            install_demo(root, destination)
+            installed = json.loads((destination / daily_config).read_text())
+
+            self.assertEqual(installed['calendar_root'], str(destination / 'synthetic-input/daily-price'))
+            self.assertEqual(installed['evidence_root'], str(destination / 'synthetic-input/daily-price'))
+            self.assertEqual(
+                (destination / 'synthetic-input/daily-price/replay/sh510300-raw-2026-01-05-2026-01-20.json').read_bytes(),
+                b'{"synthetic":true}',
+            )
 
 
 if __name__ == '__main__':

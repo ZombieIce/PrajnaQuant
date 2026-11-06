@@ -41,6 +41,24 @@ rustc --version
 DEMO="$HOME/PrajnaDemo"
 ./prajna demo --data-root "$DEMO"
 ./prajna demo-info --data-root "$DEMO"
+```
+
+演示目录包含固定 D12 合成日线输入。使用发行包中的生产导入器离线发布一次；此输入不访问网络：
+
+```sh
+./prajna cli prajna-import-daily-price --root "$DEMO" \
+  --input-root "$DEMO/synthetic-input/daily-price" \
+  --config "$DEMO/synthetic-input/daily-price/config.json" \
+  --replay replay --receipt demo-daily-price.json
+```
+
+导入完成后，receipt 位于 `$DEMO/synthetic-input/daily-price/demo-daily-price.json`。
+服务启动后，在 `/datasets` 可查看 receipt 中的 Dataset Version；该短样本用于核对 D12 导入与覆盖，
+更长窗口研究使用 `demo-info` 提供的合成 Dataset。
+
+启动服务并确认状态：
+
+```sh
 ./prajna start --data-root "$DEMO" --port 7878
 ./prajna status --data-root "$DEMO"
 ```
@@ -139,7 +157,10 @@ DEMO="$HOME/PrajnaDemo"
 
 ## 4. 首次真实输入与更新
 
-先准备**已获授权**的独立本机数据根、真实日期范围和池版本。发行包不附真实行情、历史池、
+按 [MVP-7 D12 日线价格研究与统一验收](https://github.com/ZombieIce/PrajnaQuant/issues/286#d12-日线价格研究与统一验收)
+和[ADR 0039](decisions/0039-etf-daily-price-research.md)执行首发日线流程。
+先准备**已获授权**的独立本机输入目录、研究数据根、真实日期范围和池版本；两目录均须独立于发行包。
+发行包不附真实行情、历史池、
 复权供应文件、开盘交易状态或公司行动公告，也不证明其来源完整。原始未复权行情由现有 Tencent
 采集入口获取或使用显式已有采集报告；遵守来源许可、限速与停源/访问控制，不自动切换供应商。
 日历必须由独立来源提供沪深两个 Venue 的完整覆盖和时刻，不能从价格或工作日猜测。
@@ -149,16 +170,70 @@ DEMO="$HOME/PrajnaDemo"
 发行物中的证券证据 CLI 只选择和读取**已有**证据版本，不从公告自动生成证据库或开盘状态快照；
 若没有预先准备好的兼容证据库和所需状态快照，真实执行输入仍受阻，不能用演示数据代替。
 
-从包内终端可查询工具帮助，并以自己的合格本机文件操作：
+按[日历契约](contracts/shanghai-shenzhen-session-calendar.md)导入本机固定日历，使用已有、可发布的证券证据版本
+选择固定快照；发行包不创建证券事实或证据版本。导入器配置应将日历、证券证据根及固定版本指向这些
+本机输入，日期范围覆盖预热与后续成交/估值 Session，成员仅列目标 ETF。按以下配置形状新建
+`$INPUT/config.json`，用已导入的真实版本替换占位符；它们不是可直接运行的身份：
+
+```sh
+INPUT="$HOME/PrajnaInput"
+LAKE="$HOME/PrajnaData"
+mkdir -p "$INPUT" "$LAKE"
+```
+
+对已准备并核验来源的日历执行导入；证券证据版本必须已在指定本机证据库中，快照选择只引用这些固定版本：
+
+```sh
+./prajna cli prajna-session-calendar import --root "$INPUT" \
+  --input "$INPUT/calendar.json" --receipt calendar-receipt.json
+./prajna cli prajna-select-security-evidence --root "$INPUT" \
+  --select 510300.XSHG=sha256:<existing-evidence-version>
+```
+
+日历 receipt 提供 `calendar_version`；证券选择命令输出的 snapshot ID 填入下方 `members`，不要填单条 evidence ID。
+这些命令不会为缺失的源事实造数据；没有可发布版本时应先补齐授权证据。
+
+```json
+{
+  "calendar_root": "/absolute/local/path/input",
+  "calendar_version": "sha256:<imported-calendar-version>",
+  "evidence_root": "/absolute/local/path/input",
+  "start": "2026-01-05",
+  "end": "2026-01-30",
+  "members": {
+    "510300.XSHG": "sha256:<publishable-security-snapshot>"
+  }
+}
+```
+
+把实际版本 ID 填入新配置，不修改既有 Dataset、实验或运行身份。发行包中的日线导入器同时获取未复权
+与供应商前复权序列，并经生产 Raw、Dataset 与复权版本路径保存 receipt：
+
+```sh
+./prajna cli prajna-import-daily-price --root "$LAKE" --input-root "$INPUT" \
+  --config "$INPUT/config.json" --fetch --receipt receipt.json
+```
+
+复跑首次导入保存的固定响应时，从 `$INPUT/receipt.json` 读取 `replay_dir` 并使用相同配置、新 receipt 名称：
+
+```sh
+REPLAY_DIR="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["replay_dir"])' "$INPUT/receipt.json")"
+./prajna cli prajna-import-daily-price --root "$LAKE" --input-root "$INPUT" \
+  --config "$INPUT/config.json" --replay "$REPLAY_DIR" --receipt replay-receipt.json
+```
+
+检查 `$INPUT/receipt.json` 中的 Dataset 和复权版本、实际日期覆盖及缺口，再从 `/datasets` 选择固定版本。
+启动发行包服务后，按本指南的因子、择时/Top-K 与基准比较步骤完成研究。有限真实路径必须继续使用固定输入，
+保存结果重读并复跑。以下工具可查看固定日历、已有证券证据和旧版路径的具体参数：
 
 ```sh
 ./prajna cli prajna-session-calendar --help
-./prajna cli prajna-collect-daily-raw --help
 ./prajna cli prajna-select-security-evidence --help
+./prajna cli prajna-collect-daily-raw --help
+./prajna cli prajna-import-daily-price --help
 ./prajna cli prajna-import-adjusted --help
 ```
 
-按[日历契约](contracts/shanghai-shenzhen-session-calendar.md)导入并保存固定 receipt，
 按[日频发布契约](contracts/shanghai-shenzhen-daily-normalizer.md)准备 Raw、证券和状态证据；
 按[复权契约](contracts/adjusted-research-series.md)和
 [公司行动契约](decisions/0032-cn-corporate-action-fact-versions.md)准备供应文件/固定版本。
