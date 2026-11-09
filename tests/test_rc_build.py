@@ -27,6 +27,25 @@ def missing_github_version(request, timeout):
 
 
 class ReleaseBuildTests(unittest.TestCase):
+    def test_prepare_demo_exports_preview_before_creating_nested_daily_input(self):
+        def exporter(package, test, name, variable, root, log, environment):
+            if name == 'export_synthetic_preview_fixture':
+                self.assertFalse(root.exists(), 'preview exporter requires an absent fixture root')
+                (root / 'lake').mkdir(parents=True)
+                (root / 'input').mkdir()
+            elif name == 'generate_e2e_input':
+                root.mkdir(parents=True)
+                (root / 'config.json').write_text('{}')
+
+        with tempfile.TemporaryDirectory() as temp, \
+             patch.object(build, 'export_test', side_effect=exporter), \
+             patch.object(build, 'command'), \
+             patch.object(build, 'portable_demo') as portable:
+            root = Path(temp)
+            lake = build.prepare_demo(root, root / 'release', io.StringIO(), {})
+            self.assertTrue((lake / 'synthetic-input/daily-price/config.json').is_file())
+            portable.assert_called_once_with(lake, root / 'fixture/input', root)
+
     def test_daily_price_importer_and_demo_input_are_in_release_inventory(self):
         self.assertIn('prajna-import-daily-price', build.DATA_BINS)
         self.assertIn('prajna-import-daily-price', build.REQUIRED_BINS)

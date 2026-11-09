@@ -223,11 +223,11 @@ def export_test(package, test, name, variable, root, log, environment):
 def prepare_demo(temporary, release, log, environment):
     fixture = temporary / 'fixture'
     lake = fixture / 'lake'
+    export_test('prajna-data', 'dataset_preview_read', 'export_synthetic_preview_fixture',
+                'PRAJNA_PREVIEW_FIXTURE_ROOT', fixture, log, environment)
     export_test('prajna-data', 'daily_price_import', 'generate_e2e_input',
                 'PRAJNA_DAILY_PRICE_FIXTURE_ROOT', lake / 'synthetic-input/daily-price',
                 log, environment)
-    export_test('prajna-data', 'dataset_preview_read', 'export_synthetic_preview_fixture',
-                'PRAJNA_PREVIEW_FIXTURE_ROOT', fixture, log, environment)
     command([str(release / 'examples/selection_fixture'), str(lake)], log=log)
     export_test('prajna-experiment', 'pools', 'export_synthetic_pool_fixture',
                 'PRAJNA_POOL_FIXTURE_ROOT', lake, log, environment)
