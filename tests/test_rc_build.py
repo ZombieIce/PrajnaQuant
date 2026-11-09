@@ -50,6 +50,7 @@ class ReleaseBuildTests(unittest.TestCase):
         self.assertIn('prajna-import-daily-price', build.DATA_BINS)
         self.assertIn('prajna-import-daily-price', build.REQUIRED_BINS)
         self.assertIn('synthetic-input/daily-price/config.json', DEMO_CONFIGS)
+        self.assertIn('0039-etf-daily-price-research.md', build.DECISIONS)
 
     def test_tool_version_keeps_stdout_separate_from_logged_warnings(self):
         log = io.StringIO()

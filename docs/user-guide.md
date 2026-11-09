@@ -87,6 +87,10 @@ DEMO="$HOME/PrajnaDemo"
 
 ### 3.1 Dataset、池与手动更新
 
+本节的 `synthetic` 更新配置用于验证既有多 Venue 更新路径，不是 D12 真实输入模板；
+D12 日线研究直接使用第 2/4 节导入 receipt 中的 Dataset 和逐成员复权版本。
+日线池内 Top-K 和比较须使用同一 Venue 的固定池，不可沿用本节的跨 Venue 两成员示例。
+
 先通过发行包中的正式 CLI 重新发布一份已备好的合成 ETF 输入；同一输入幂等，新的 receipt 不覆盖旧的：
 
 ```sh
@@ -135,7 +139,9 @@ DEMO="$HOME/PrajnaDemo"
 
 1. 打开 `/backtests`，选「单 ETF 趋势择时」。在 Dataset 中选择包含 `510300.XSHG`、
    且该证券有 `synthetic-timing@1` 复权版本的 3 Session 合成 Dataset；
-   选择该证券与版本。均线窗口填 `2`、调仓频率 `1`、本金 `10000` CNY、
+   选择该证券与版本，将「执行模式」显式改为「日线价格模拟」；
+   页面应标明 `daily_price_simulation_v1`，不要保留默认的既有执行模式。
+   均线窗口填 `2`、调仓频率 `1`、本金 `10000` CNY、
    买卖滑点各 `10` bp、买入税率 `0.001`、卖出税率 `0.002`，提交。
    默认窗口对短样本不可运行时应先显示预检错误，不会伪造结果。
 2. 查看已完成任务的现金、持仓、权益、成交、费用和期末 pending。此合成例最后收盘现金应为
@@ -144,12 +150,15 @@ DEMO="$HOME/PrajnaDemo"
 3. 池内轮动使用较长的合成 Dataset：在 `/pools` 的跨资产池发布 `510300.XSHG` 和
    `510880.XSHG` 两成员版本；选择 `synthetic-momentum-request.json` 中的 130 Session DSV，
    为每个成员选择该 Dataset 下的复权版本。选择「池内动量 Top-K」，动量窗口 `1`、Top-K `1`、
-   调仓频率 `5`、本金 `10000`，先预检共同窗口再提交固定池实验并打开结果。
+   调仓频率 `5`、本金 `10000`，将「执行模式」改为「日线价格模拟」，
+   先预检共同窗口再提交固定池实验并打开结果。
 4. `/comparisons` 可对照上述单 ETF 择时与同证券买入持有，或选择「池内轮动 vs 同池期初等权持有」
-   和「池内动量 Top-K」。分别选择相同固定 Dataset、池/证券、复权、公司行动事实版本及成本；
-   演示的公司行动版本有原版和修订版，可选择较早的原版。提交并检查对照可比性、不可用原因、
-   绩效及两侧实际持仓和执行明细，再刷新重开。若事实覆盖不足，结果明确标记不完整，
-   不把空指标解释成零收益或声称完整总回报。
+   和「池内动量 Top-K」。在比较页面也将「执行模式」改为「日线价格模拟」，选择相同固定
+   Dataset、池/证券、逐成员复权版本、评价窗口及成本；无需选择公司行动版本或分红税配置。
+   提交并检查两侧均为 `daily_price_simulation_v1`、扣费价格收益、同一评价窗口与成本，
+   核对绩效及两侧实际持仓和执行明细，再刷新重开。缺失指标显示不可计算及原因，
+   不把空指标解释成零收益。严格执行（总回报）是另一路径，仍按原契约选择状态及公司行动输入，
+   不用它的前置条件阻断 D12，也不把日线结果宣称为总回报。
 
 信号使用当日收盘可观测价格，下一可用 Session 开盘执行；预热消耗的 Session 不进入可运行评价窗口。
 费用、税和滑点以冻结配置为准，滑点已经体现在成交价中，不应重复扣除。
@@ -160,15 +169,17 @@ DEMO="$HOME/PrajnaDemo"
 按 [MVP-7 D12 日线价格研究与统一验收](https://github.com/ZombieIce/PrajnaQuant/issues/286#d12-日线价格研究与统一验收)
 和[ADR 0039](decisions/0039-etf-daily-price-research.md)执行首发日线流程。
 先准备**已获授权**的独立本机输入目录、研究数据根、真实日期范围和池版本；两目录均须独立于发行包。
-发行包不附真实行情、历史池、
-复权供应文件、开盘交易状态或公司行动公告，也不证明其来源完整。原始未复权行情由现有 Tencent
-采集入口获取或使用显式已有采集报告；遵守来源许可、限速与停源/访问控制，不自动切换供应商。
+发行包不附真实行情、历史池或真实基础配置，也不证明其来源完整。D12 导入器取得未复权和供应商
+前复权日线，或重放已授权的固定原始响应；遵守来源许可、限速与停源/访问控制，不自动切换供应商。
 日历必须由独立来源提供沪深两个 Venue 的完整覆盖和时刻，不能从价格或工作日猜测。
-证券生命周期、交易单位及开盘状态必须有可核验的固定证据；Unknown 不可视为可交易。
+证券身份、生命周期、交易单位、价格及数量增量须来自可发布的固定基础配置。
 供应商复权数据需明确方法、单位 `CNY_per_fund_unit`、来源、实际行覆盖、追溯修订与收盘可用假设；
-公司行动需结构化范围、事件和可用时刻。`observed_at` 是本地观察时间，不是历史发布时间。
+缺 `qfqday` 的分段保持复权缺口，不用未复权价填充。`observed_at` 是本地观察时间，不是历史发布时间。
+D12 假设历史复权收盘在 T 日收盘后可用、下一 Session 有效未复权开盘价可用于模拟；
+**公司行动文件、逐日开盘状态表、历史发布时间及逐条来源佐证不是该模式前置**。
+这不证明真实开盘可交易或历史复权 PIT；停牌、缺价及除权跳变风险仍须报告。
 发行物中的证券证据 CLI 只选择和读取**已有**证据版本，不从公告自动生成证据库或开盘状态快照；
-若没有预先准备好的兼容证据库和所需状态快照，真实执行输入仍受阻，不能用演示数据代替。
+没有可发布的证券基础配置或固定日历时导入仍受阻，不能用演示数据代替真实基础配置。
 
 按[日历契约](contracts/shanghai-shenzhen-session-calendar.md)导入本机固定日历，使用已有、可发布的证券证据版本
 选择固定快照；发行包不创建证券事实或证据版本。导入器配置应将日历、证券证据根及固定版本指向这些
@@ -214,17 +225,57 @@ mkdir -p "$INPUT" "$LAKE"
   --config "$INPUT/config.json" --fetch --receipt receipt.json
 ```
 
-复跑首次导入保存的固定响应时，从 `$INPUT/receipt.json` 读取 `replay_dir` 并使用相同配置、新 receipt 名称：
+### 4.1 固定输入重导入：不联网、不复制旧结果
+
+保留首次导入的 `$INPUT/config.json`、其引用的固定日历/证券证据库、`$INPUT/receipt.json` 及
+receipt 的 `replay_dir` 指向的全部响应文件。`--replay` 参数是**相对于 `$INPUT` 的目录**，
+不是绝对路径；不能只保留 receipt 或只复制已发布 Dataset。若没有首次导入保存的响应，
+不能将已有 Dataset/结果冒充已完成重新导入，也不要为了复跑擅自重新取数。
+
+同一数据根重新导入可验证幂等，但不能排除读取已有发布缓存。要验证从固定输入重新发布，
+选择独立于发行包、原 `$LAKE` 及 `$INPUT` 的**全新不存在**目录；保留原始输入根和配置不变：
 
 ```sh
 REPLAY_DIR="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["replay_dir"])' "$INPUT/receipt.json")"
-./prajna cli prajna-import-daily-price --root "$LAKE" --input-root "$INPUT" \
-  --config "$INPUT/config.json" --replay "$REPLAY_DIR" --receipt replay-receipt.json
+REIMPORT_LAKE="$HOME/PrajnaReimport-$(date +%Y%m%d-%H%M%S)"
+test ! -e "$REIMPORT_LAKE" || exit 1
+test ! -e "$INPUT/reimport-receipt.json" || exit 1
+./prajna cli prajna-import-daily-price --root "$REIMPORT_LAKE" --input-root "$INPUT" \
+  --config "$INPUT/config.json" --replay "$REPLAY_DIR" --receipt reimport-receipt.json
 ```
 
-检查 `$INPUT/receipt.json` 中的 Dataset 和复权版本、实际日期覆盖及缺口，再从 `/datasets` 选择固定版本。
-启动发行包服务后，按本指南的因子、择时/Top-K 与基准比较步骤完成研究。有限真实路径必须继续使用固定输入，
-保存结果重读并复跑。以下工具可查看固定日历、已有证券证据和旧版路径的具体参数：
+receipt 保存在输入根而非新数据根；再次验证时选新的 receipt 名称，不覆盖首次记录。
+命令的真实 stdout/stderr 和详细比对只写受控本机日志，不发到聊天或 PR。
+在本机对照两份 receipt 的 `dsv`、`adjustments`、`coverage`、固定日历和证券快照；
+固定版本是否一致由实际校验决定，不能手改身份来制造一致。网络/重放批次来源记录可以不同。
+向全新根发布时，新来源记录可能使 Dataset 和复权身份不同；这不自动说明价格不同，也不能直接
+认定复算一致。应分别用各自 receipt 的身份读取并比较未复权/复权价格行、单位、日期轴及缺口，
+再核对研究和执行输出；保留身份变化的来源解释。相同根的幂等复用与全新根重建分别记录。
+
+### 4.2 日线研究、重读与全新复算
+
+首次研究使用 `$LAKE`，重导入后的独立复算使用 `$REIMPORT_LAKE`，不要复制旧数据根里的任务、
+实验、Execution 或结果。先停止原服务，再以新根启动同一个未改动的发行包：
+
+```sh
+./prajna stop --data-root "$LAKE"
+./prajna start --data-root "$REIMPORT_LAKE" --port 7878
+./prajna status --data-root "$REIMPORT_LAKE"
+```
+
+仅在原服务确由此启动器启动时运行 `stop`；若原本未运行则直接启动新根。
+从 `/datasets` 选择新 receipt 中的 Dataset，并逐成员绑定该 receipt 的复权版本；
+因子页使用相同窗口、缺失规则及标签配置，保存新报告。按第 3.3 节执行单 ETF 择时、
+同 Venue 池内 Top-K 和基准比较；新根须重新发布相同成员的固定池，记录实际池版本，
+不要凭旧池身份猜测新版本。「执行模式」在回测、池实验和比较页面分别显式选择「日线价格模拟」。
+有限样本不满足多成员/预热门槛时如实记录受限，不添加未授权成员或缩短窗口迎合结果。
+
+保存后在本机核对因子缺失与有效值、至少一笔实际模拟成交、费用/现金/持仓/pending、
+同窗口同成本的价格收益基准和 Rust 持久化绩效；任务完成本身不算成交或数学核对通过。
+刷新、关闭页面重开以及停止/重启后再次读取结果，这证明持久化读取；在新根实际提交并完成任务才是复算。
+冻结相同参数、模式、输入、代码来源和运行环境，比较保存结果与实际覆盖，
+保留不同任务/实验/Execution 身份及差异原因，不要求通过伪造身份使它们相同。
+真实明细、报告及身份仅留本机。以下工具可查看固定日历、已有证券证据和旧版路径的具体参数：
 
 ```sh
 ./prajna cli prajna-session-calendar --help
@@ -234,7 +285,10 @@ REPLAY_DIR="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["r
 ./prajna cli prajna-import-adjusted --help
 ```
 
-按[日频发布契约](contracts/shanghai-shenzhen-daily-normalizer.md)准备 Raw、证券和状态证据；
+### 4.3 既有更新与严格执行路径的边界
+
+以下是另行选择既有更新/严格执行时的契约，不是 D12 固定响应导入及日线模拟的额外前置。
+按[日频发布契约](contracts/shanghai-shenzhen-daily-normalizer.md)准备 Raw、证券和相应模式的状态证据；
 按[复权契约](contracts/adjusted-research-series.md)和
 [公司行动契约](decisions/0032-cn-corporate-action-fact-versions.md)准备供应文件/固定版本。
 在数据根的 `pool-updates/configs/` 新建与实际**已发布池版本、全部成员和日期一致**的配置；
@@ -244,8 +298,9 @@ REPLAY_DIR="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["r
 
 固定池是事后 Static Universe，不保证历史成分 PIT；三池独立、不做跨池资金配置。
 跨资产池可能跨 Venue，行情 Session 轴不一致会阻断；混合 Venue 行动总回报不支持。
-红利池和债券池同样取决于各自实际覆盖、状态及行动证据，不因预置名单而自动可用。
-真实执行状态、行动与总回报缺口须分别披露；无合格状态不能用合成 `TRADABLE` 补造。
+红利池和债券池的 D12 可用范围取决于各自实际日线与基础配置，不因预置名单而自动可用；
+严格执行/总回报另受状态及行动证据约束。真实执行状态、行动与总回报缺口分别披露，
+无合格状态不能用合成 `TRADABLE` 补造，也不能把日线模型假设当作状态证据。
 
 ## 5. 结果、备份、升级与故障
 

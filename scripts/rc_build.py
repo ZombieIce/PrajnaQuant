@@ -41,6 +41,7 @@ DECISIONS = (
     '0034-holding-benchmark-execution.md', '0035-strategy-benchmark-comparison.md',
     '0036-versioned-complete-performance-summary.md', '0037-authoritative-calendar-report-and-performance-page.md',
     '0038-fixed-pool-production-update.md',
+    '0039-etf-daily-price-research.md',
 )
 DATA_BINS = (
     'prajna-preview-dataset', 'prajna-publish-daily', 'prajna-import-adjusted',
