@@ -43,7 +43,10 @@ async function setCosts(page: Page) {
 test('supplier replay reaches factor, daily price ledgers and a frozen price benchmark in the production workbench', async ({ page }) => {
   test.setTimeout(180_000);
   if (!process.env.PRAJNA_E2E_ROOT) throw new Error('Run through npm run test:e2e');
-  const receipt = join(process.env.PRAJNA_E2E_ROOT, 'fixture', 'daily-price', 'receipt.json');
+  const receipt = process.env.PRAJNA_RC_BUNDLE
+    ? join(process.env.PRAJNA_E2E_ROOT, 'fixture', 'lake', 'synthetic-input',
+      'daily-price', 'demo-daily-price.json')
+    : join(process.env.PRAJNA_E2E_ROOT, 'fixture', 'daily-price', 'receipt.json');
   const { dsv, adjustments } = JSON.parse(await readFile(receipt, 'utf8')) as { dsv: string; adjustments: Record<string, string> };
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));

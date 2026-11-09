@@ -501,6 +501,26 @@ class PreflightTests(unittest.TestCase):
 
 
 class OwnedLifecycleTests(unittest.TestCase):
+    def test_permission_error_for_zombie_only_group_is_already_stopped(self):
+        import workflow_process as control
+        result = subprocess.CompletedProcess([], 0, '12345 Z\n12346 S\n', '')
+        with patch.object(control.os, 'getpgrp', return_value=54321), \
+             patch.object(control.os, 'killpg', side_effect=PermissionError('zombie')), \
+             patch.object(control.subprocess, 'run', return_value=result):
+            control.send_group(12345, signal.SIGCONT)
+
+    def test_permission_error_for_live_or_uninspectable_group_fails(self):
+        import workflow_process as control
+        for result in [subprocess.CompletedProcess([], 0, '12345 S\n', ''),
+                       subprocess.CompletedProcess([], 0, '12346 Z\n', ''),
+                       subprocess.CompletedProcess([], 1, '', 'denied')]:
+            with self.subTest(returncode=result.returncode), \
+                 patch.object(control.os, 'getpgrp', return_value=54321), \
+                 patch.object(control.os, 'killpg', side_effect=PermissionError('denied')), \
+                 patch.object(control.subprocess, 'run', return_value=result):
+                with self.assertRaises((PermissionError, control.ProcessControlError)):
+                    control.send_group(12345, signal.SIGCONT)
+
     def check_stopped(self, nested, reason):
         import workflow_process as control
         with tempfile.TemporaryDirectory() as d:

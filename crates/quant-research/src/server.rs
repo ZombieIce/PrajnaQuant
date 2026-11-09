@@ -133,13 +133,34 @@ pub async fn serve_with_dataset_root(
         .merge(selections)
         .merge(experiment_results)
         .merge(comparisons);
-    let app = api.fallback_service(
-        ServeDir::new(&web_dist)
-            .append_index_html_on_directories(true)
-            .not_found_service(ServeFile::new(web_dist.join("index.html"))),
-    );
+    let app = api.merge(web_router(&web_dist));
     eprintln!("Prajna Quant: http://{socket}");
     axum::serve(listener, app).await.context("run Axum server")
+}
+
+fn web_router(web_dist: &FsPath) -> Router {
+    let index = ServeFile::new(web_dist.join("index.html"));
+    let mut router = Router::new();
+    for path in [
+        "/research/momentum",
+        "/pools",
+        "/backtests",
+        "/comparisons",
+        "/datasets",
+        "/market",
+        "/factors",
+        "/factors/{*path}",
+        "/universes",
+        "/strategies",
+        "/strategies/{*path}",
+    ] {
+        router = router.route_service(path, index.clone());
+    }
+    router.fallback_service(
+        ServeDir::new(web_dist)
+            .append_index_html_on_directories(true)
+            .not_found_service(index),
+    )
 }
 
 async fn health() -> Json<Value> {
@@ -961,7 +982,44 @@ mod tests {
         AssetScope, AssetType, CoverageSegment, IndexMembershipEvent, Instrument, ManualMember,
         MembershipAction, UniverseDefinition,
     };
+    use axum::{body::Body, http::Request};
     use tempfile::tempdir;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn web_deep_links_succeed_without_hiding_missing_assets_or_apis() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("index.html"), "synthetic index").unwrap();
+        let app = web_router(dir.path());
+        for path in [
+            "/datasets",
+            "/pools",
+            "/research/momentum",
+            "/backtests",
+            "/comparisons",
+            "/factors/example",
+            "/strategies/example",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), axum::http::StatusCode::OK, "{path}");
+        }
+        for path in ["/assets/missing.js", "/api/v1/missing", "/unknown"] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                axum::http::StatusCode::NOT_FOUND,
+                "{path}"
+            );
+        }
+    }
 
     fn draft() -> UniverseDraft {
         UniverseDraft {
