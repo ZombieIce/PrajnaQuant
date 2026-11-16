@@ -22,7 +22,10 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(os.environ.get(
+    'PRAJNA_ETERNAL_BASELINE_REPOSITORY_ROOT',
+    Path(__file__).resolve().parents[1],
+)).resolve()
 ANCHOR = '2026-11-09'
 ETF_CODES = ('sh511260', 'sh518880', 'sh515080', 'sh513300', 'sz159612')
 LEGACY_PAIRS = (('sh513100', 'sh513300'), ('sh513500', 'sz159612'))
@@ -80,6 +83,61 @@ def json_default(value):
     if isinstance(value, date):
         return value.isoformat()
     raise TypeError(f'not JSON serializable: {type(value).__name__}')
+
+
+def canonical_json(value):
+    return json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+
+
+def execution_configuration():
+    return {
+        'assets': list(ETF_CODES),
+        'weights': WEIGHTS,
+        'threshold': THRESHOLD,
+        'fee_rate_one_way': FEE_RATE,
+        'rebalance_execution': 'signal at close; execute whole portfolio next common open',
+        'initial_nav_basis': 1.0,
+        'initial_capital_currency_amount': None,
+        'initial_capital_note': 'legacy simulator normalizes initial NAV to 1.0; no CNY amount is available',
+        'share_precision_note': 'holdings are legacy effective total-return-index units, not ETF share quantities',
+    }
+
+
+def manifest_identity_material(manifest):
+    return {
+        key: value for key, value in manifest.items()
+        if key not in {'input_version', 'manifest_sha256'}
+    }
+
+
+def manifest_digest_material(manifest):
+    return {key: value for key, value in manifest.items() if key != 'manifest_sha256'}
+
+
+def seal_manifest(manifest):
+    manifest['input_version'] = hashlib.sha256(
+        canonical_json(manifest_identity_material(manifest)),
+    ).hexdigest()
+    manifest['manifest_sha256'] = hashlib.sha256(
+        canonical_json(manifest_digest_material(manifest)),
+    ).hexdigest()
+    return manifest
+
+
+def validate_execution_configuration(manifest):
+    configuration = manifest.get('configuration')
+    if not isinstance(configuration, dict) or canonical_json(configuration) != canonical_json(
+        execution_configuration(),
+    ):
+        raise ValueError('snapshot execution configuration does not match replay source')
+
+
+def validate_replay_source(manifest, replay_script):
+    source_hash = manifest['files']['source/eternal_baseline.py']['sha256']
+    replay_hash = sha256_file(replay_script)
+    if replay_hash != source_hash:
+        raise ValueError('回放源码与 snapshot 冻结源码不一致')
+    return replay_hash, source_hash
 
 
 def validate_iso_date(value, label):
@@ -417,17 +475,16 @@ def freeze(args):
         for path in sorted(p for p in work.rglob('*') if p.is_file()):
             relative = path.relative_to(work).as_posix()
             inventory[relative] = {'sha256': sha256_file(path), 'bytes': path.stat().st_size}
-        version_material = json.dumps(inventory, sort_keys=True, separators=(',', ':')).encode()
-        input_version = hashlib.sha256(version_material).hexdigest()
         manifest = {
-            'schema_version': 1,
-            'input_version': input_version,
+            'schema_version': 2,
             'created_at_utc': datetime.now(timezone.utc).isoformat(),
             'source': {
                 'issue_declared_revision': 'd5d48c1',
                 'issue_revision_verified': False,
                 'revision_limit': 'local legacy source copy has no verifiable Git history',
                 'captured_source_sha256': source_hashes,
+                'replay_entrypoint': 'source/eternal_baseline.py',
+                'legacy_source_role': 'archived for provenance; not invoked by the replay adapter',
             },
             'source_inputs': source_inputs,
             'files': inventory,
@@ -440,17 +497,7 @@ def freeze(args):
                     'fund_factors': 'a-stock-data 3.10.4 §1.6 Sina hfq.js s/u',
                 },
             },
-            'configuration': {
-                'assets': list(ETF_CODES),
-                'weights': WEIGHTS,
-                'threshold': THRESHOLD,
-                'fee_rate_one_way': FEE_RATE,
-                'rebalance_execution': 'signal at close; execute whole portfolio next common open',
-                'initial_nav_basis': 1.0,
-                'initial_capital_currency_amount': None,
-                'initial_capital_note': 'legacy simulator normalizes initial NAV to 1.0; no CNY amount is available',
-                'share_precision_note': 'holdings are legacy effective total-return-index units, not ETF share quantities',
-            },
+            'configuration': execution_configuration(),
             'date_ranges': {
                 'input_warmup_start': min(warmup_days) if warmup_days else None,
                 'input_warmup_end': max(warmup_days) if warmup_days else None,
@@ -473,6 +520,7 @@ def freeze(args):
                 'impact': 'The captured reference can validate date/NAV and listed summary fields only; execution detail comparisons are unavailable.',
             },
         }
+        seal_manifest(manifest)
         write_json(work / 'manifest.json', manifest)
         if target.exists():
             raise FileExistsError(f'snapshot 已存在，不能覆盖: {target}')
@@ -583,6 +631,8 @@ def rebalance(current, weights, fee_rate, cash=0.0):
 
 
 def simulate(days, opens, closes, limits, threshold, fee_rate, portfolio=WEIGHTS):
+    if len(days) < 2 or days[0] >= days[-1]:
+        raise ValueError('共同交易日少于两个不同日期，无法计算年化收益与波动率')
     weights = list(portfolio.values())
     thresholds = threshold if isinstance(threshold, dict) else dict.fromkeys(portfolio, threshold)
     initial_value = 1.0 / (1.0 + fee_rate)
@@ -678,11 +728,21 @@ def simulate(days, opens, closes, limits, threshold, fee_rate, portfolio=WEIGHTS
 def read_snapshot(snapshot):
     manifest_path = snapshot / 'manifest.json'
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    if manifest.get('schema_version') != 2:
+        raise ValueError('unsupported snapshot manifest schema; create a new snapshot')
     expected = manifest.get('files')
     if not isinstance(expected, dict):
         raise ValueError('snapshot manifest 缺少文件摘要')
     if 'source/eternal_baseline.py' not in expected:
         raise ValueError('snapshot 缺少回放源码副本')
+    source = manifest.get('source')
+    captured_source_hashes = source.get('captured_source_sha256') if isinstance(source, dict) else None
+    if not isinstance(captured_source_hashes, dict):
+        raise ValueError('snapshot manifest 缺少冻结源码摘要')
+    for name, digest in captured_source_hashes.items():
+        details = expected.get(f'source/{name}')
+        if not isinstance(details, dict) or details.get('sha256') != digest:
+            raise ValueError(f'snapshot 源码摘要与文件清单不一致: {name}')
     actual_paths = {path.relative_to(snapshot).as_posix()
                     for path in snapshot.rglob('*') if path.is_file() and path != manifest_path}
     if actual_paths != set(expected):
@@ -691,9 +751,12 @@ def read_snapshot(snapshot):
         path = (snapshot / relative).resolve()
         if snapshot.resolve() not in path.parents or sha256_file(path) != details['sha256']:
             raise ValueError(f'snapshot 文件摘要不匹配: {relative}')
-    version_material = json.dumps(expected, sort_keys=True, separators=(',', ':')).encode()
-    if hashlib.sha256(version_material).hexdigest() != manifest.get('input_version'):
+    input_version = hashlib.sha256(canonical_json(manifest_identity_material(manifest))).hexdigest()
+    if input_version != manifest.get('input_version'):
         raise ValueError('snapshot input_version 不匹配')
+    manifest_sha256 = hashlib.sha256(canonical_json(manifest_digest_material(manifest))).hexdigest()
+    if manifest_sha256 != manifest.get('manifest_sha256'):
+        raise ValueError('snapshot manifest 摘要不匹配')
     reference = json.loads((snapshot / 'reference.json').read_text(encoding='utf-8'))
     return manifest, reference
 
@@ -772,6 +835,10 @@ def replay(args):
     if run_manifest_path.exists():
         raise FileExistsError(f'replay run manifest 已存在，不能覆盖: {run_manifest_path}')
     manifest, reference = read_snapshot(snapshot)
+    validate_execution_configuration(manifest)
+    replay_code_sha256, snapshot_code_sha256 = validate_replay_source(
+        manifest, Path(__file__).resolve(),
+    )
     bars, factors, prices, limits = {}, {}, {}, {}
     for code in HISTORY_CODES:
         bars[code] = csv_rows(snapshot / f'bars/{code}.csv.gz')[0]
@@ -788,14 +855,17 @@ def replay(args):
     old_dates = [row[0] for row in reference_rows if row[0] <= ANCHOR]
     days = ([date.fromisoformat(day) for day in old_dates if day in common]
             + [date.fromisoformat(day) for day in sorted(common) if day > ANCHOR])
-    if not days:
-        raise ValueError('回放没有共同交易日')
+    if len(days) < 2:
+        raise ValueError('回放共同交易日少于两天，无法计算年化收益与波动率')
     opens = [[prices[code][day.isoformat()][0] for code in ETF_CODES] for day in days]
     closes = [[prices[code][day.isoformat()][1] for code in ETF_CODES] for day in days]
     daily_limits = [[limits[code].get(day.isoformat(), (False, False)) for code in ETF_CODES]
                     for day in days]
+    configuration = manifest['configuration']
     navs, signals, trades, stats, daily = simulate(
-        days, opens, closes, daily_limits, THRESHOLD, FEE_RATE, WEIGHTS,
+        days, opens, closes, daily_limits,
+        configuration['threshold'], configuration['fee_rate_one_way'],
+        configuration['weights'],
     )
     comparison = compare_reference(reference, days, navs, stats, anchors)
     result = {
@@ -817,8 +887,6 @@ def replay(args):
     output.parent.mkdir(parents=True, exist_ok=True)
     write_json(output, result)
     output_sha256 = sha256_file(output)
-    replay_code_sha256 = sha256_file(Path(__file__).resolve())
-    snapshot_code_sha256 = sha256_file(snapshot / 'source/eternal_baseline.py')
     write_json(run_manifest_path, {
         'schema_version': 1,
         'run_id': hashlib.sha256(

@@ -1,5 +1,5 @@
-import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -144,6 +144,15 @@ class SimulationTests(unittest.TestCase):
         self.portfolio = {'sh510000': .5, 'sh520000': .5}
         self.unblocked = [[(False, False), (False, False)] for _ in self.days]
 
+    def test_insufficient_common_sessions_raise_a_validation_error(self):
+        for days in ([], self.days[:1]):
+            with self.subTest(session_count=len(days)):
+                with self.assertRaisesRegex(ValueError, '共同交易日少于两个'):
+                    baseline.simulate(
+                        days, self.opens[:len(days)], self.closes[:len(days)],
+                        self.unblocked[:len(days)], .10, .0005, self.portfolio,
+                    )
+
     def test_close_signal_executes_whole_portfolio_next_common_open(self):
         navs, signals, trades, stats, daily = baseline.simulate(
             self.days, self.opens, self.closes, self.unblocked,
@@ -234,7 +243,7 @@ class SimulationTests(unittest.TestCase):
         ))
 
 
-def make_replay_snapshot(snapshot):
+def make_replay_snapshot(snapshot, single_common_session=False):
     snapshot.mkdir()
     dates = ('2026-11-06', '2026-11-09', '2026-11-10', '2026-11-11')
     bars = {}
@@ -245,6 +254,8 @@ def make_replay_snapshot(snapshot):
             asset_dates = dates[:2]
         elif code in {'sh513300', 'sz159612'}:
             asset_dates = dates[1:]
+        elif single_common_session and code in baseline.ETF_CODES:
+            asset_dates = dates[2:3]
         bars[code] = [
             {
                 'date': day, 'code': code, 'open': '1', 'close': '1',
@@ -263,14 +274,26 @@ def make_replay_snapshot(snapshot):
         limits[code] = baseline.opening_limits(bars[code], actions, baseline.Decimal('.10'))
     anchors = [baseline.splice_etf(prices, limits, old, new)
                for old, new in baseline.LEGACY_PAIRS]
-    days = [date.fromisoformat(day) for day in dates]
+    common = set.intersection(*(set(prices[code]) for code in baseline.ETF_CODES))
+    days = [date.fromisoformat(day) for day in sorted(common)]
     opens = [[prices[code][day.isoformat()][0] for code in baseline.ETF_CODES] for day in days]
     closes = [[prices[code][day.isoformat()][1] for code in baseline.ETF_CODES] for day in days]
     day_limits = [[limits[code].get(day.isoformat(), (False, False))
                    for code in baseline.ETF_CODES] for day in days]
-    navs, _, _, stats, _ = baseline.simulate(
-        days, opens, closes, day_limits, baseline.THRESHOLD, baseline.FEE_RATE, baseline.WEIGHTS,
-    )
+    if len(days) < 2:
+        navs = [1.0]
+        stats = {
+            'start': days[0],
+            'end': days[-1],
+            'cagr': 0.0,
+            'max_drawdown': 0.0,
+            'rebalances': 0,
+        }
+    else:
+        navs, _, _, stats, _ = baseline.simulate(
+            days, opens, closes, day_limits,
+            baseline.THRESHOLD, baseline.FEE_RATE, baseline.WEIGHTS,
+        )
     reference_stats = {
         'start': stats['start'].isoformat(),
         'end': stats['end'].isoformat(),
@@ -295,17 +318,31 @@ def make_replay_snapshot(snapshot):
             'sha256': baseline.sha256_file(path),
             'bytes': path.stat().st_size,
         }
-    material = json.dumps(inventory, sort_keys=True, separators=(',', ':')).encode()
-    baseline.write_json(snapshot / 'manifest.json', {
-        'input_version': hashlib.sha256(material).hexdigest(),
+    manifest = {
+        'schema_version': 2,
         'files': inventory,
-        'configuration': {'initial_nav_basis': 1.0},
-    })
+        'configuration': baseline.execution_configuration(),
+        'source': {
+            'captured_source_sha256': {},
+            'replay_entrypoint': 'source/eternal_baseline.py',
+            'legacy_source_role': 'archived for provenance; not invoked by the replay adapter',
+        },
+    }
+    baseline.write_json(snapshot / 'manifest.json', baseline.seal_manifest(manifest))
+
+
+def temporary_directory_outside_repository():
+    candidates = (Path(tempfile.gettempdir()), Path('/tmp'))
+    for candidate in candidates:
+        root = candidate.resolve()
+        if root != baseline.ROOT and baseline.ROOT not in root.parents:
+            return tempfile.TemporaryDirectory(dir=root)
+    raise RuntimeError('no temporary directory outside the repository is available')
 
 
 class ReplayEntryTests(unittest.TestCase):
     def test_offline_cli_persists_result_and_checks_snapshot_integrity(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with temporary_directory_outside_repository() as directory:
             root = Path(directory)
             snapshot = root / 'snapshot'
             output = root / 'replay.json'
@@ -333,6 +370,69 @@ class ReplayEntryTests(unittest.TestCase):
             (snapshot / 'bars/sh511260.csv.gz').write_bytes(b'corrupted')
             with self.assertRaisesRegex(ValueError, '摘要不匹配'):
                 baseline.read_snapshot(snapshot)
+
+    def test_manifest_binds_configuration_and_replay_rejects_config_drift(self):
+        with temporary_directory_outside_repository() as directory:
+            snapshot = Path(directory) / 'snapshot'
+            make_replay_snapshot(snapshot)
+            manifest_path = snapshot / 'manifest.json'
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            manifest['configuration']['fee_rate_one_way'] = 999
+            manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, 'input_version 不匹配'):
+                baseline.read_snapshot(snapshot)
+
+            baseline.seal_manifest(manifest)
+            manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+            output = Path(directory) / 'replay.json'
+            script = Path(__file__).resolve().parents[1] / 'scripts/eternal_baseline.py'
+            completed = subprocess.run(
+                [sys.executable, str(script), 'replay', '--snapshot', str(snapshot),
+                 '--output', str(output)],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn('configuration does not match', completed.stderr)
+            self.assertFalse(output.exists())
+
+    def test_replay_rejects_a_runner_that_differs_from_frozen_source(self):
+        with temporary_directory_outside_repository() as directory:
+            snapshot = Path(directory) / 'snapshot'
+            make_replay_snapshot(snapshot)
+            changed_script = Path(directory) / 'changed_eternal_baseline.py'
+            changed_script.write_text(
+                Path(baseline.__file__).read_text(encoding='utf-8') + '\n# changed\n',
+                encoding='utf-8',
+            )
+            manifest, _ = baseline.read_snapshot(snapshot)
+            with self.assertRaisesRegex(ValueError, '回放源码与 snapshot 冻结源码不一致'):
+                baseline.validate_replay_source(manifest, changed_script)
+            completed = subprocess.run(
+                [sys.executable, str(changed_script), 'replay', '--snapshot', str(snapshot),
+                 '--output', str(Path(directory) / 'replay.json')],
+                capture_output=True, text=True, check=False,
+                env={
+                    **os.environ,
+                    'PRAJNA_ETERNAL_BASELINE_REPOSITORY_ROOT': str(baseline.ROOT),
+                },
+            )
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn('回放源码与 snapshot 冻结源码不一致', completed.stderr)
+
+    def test_replay_reports_insufficient_common_sessions_as_validation_error(self):
+        with temporary_directory_outside_repository() as directory:
+            snapshot = Path(directory) / 'snapshot'
+            output = Path(directory) / 'replay.json'
+            make_replay_snapshot(snapshot, single_common_session=True)
+            script = Path(__file__).resolve().parents[1] / 'scripts/eternal_baseline.py'
+            completed = subprocess.run(
+                [sys.executable, str(script), 'replay', '--snapshot', str(snapshot),
+                 '--output', str(output)],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn('共同交易日少于两天', completed.stderr)
+            self.assertFalse(output.exists())
 
 
 if __name__ == '__main__':
