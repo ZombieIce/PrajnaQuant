@@ -2,6 +2,7 @@
 """Freeze and replay the local Eternal ETF baseline without network access."""
 
 import argparse
+import ast
 import csv
 import gzip
 import hashlib
@@ -22,10 +23,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-ROOT = Path(os.environ.get(
-    'PRAJNA_ETERNAL_BASELINE_REPOSITORY_ROOT',
-    Path(__file__).resolve().parents[1],
-)).resolve()
+ROOT = Path(__file__).resolve().parents[1]
 ANCHOR = '2026-11-09'
 ETF_CODES = ('sh511260', 'sh518880', 'sh515080', 'sh513300', 'sz159612')
 LEGACY_PAIRS = (('sh513100', 'sh513300'), ('sh513500', 'sz159612'))
@@ -41,6 +39,56 @@ TENCENT_HOSTS = (
 )
 SINA_URL = 'https://finance.sina.com.cn/realstock/company/{code}/hfq.js'
 RAW_BAR_FIELDS = ('date', 'code', 'open', 'close', 'high', 'low', 'volume', 'source')
+
+
+class InputGaps(ValueError):
+    def __init__(self, gaps):
+        self.gaps = gaps
+        super().__init__(f'输入缺口待负责人裁决: {gaps[0]["impact"]}')
+
+
+def input_gap(code, day, field, impact, candidates):
+    return {'asset': code, 'date': day, 'field': field, 'impact': impact,
+            'candidate_measures': candidates}
+
+
+def legacy_source_closure(root):
+    pending = [root / 'backtest.py', root / 'dividend_data.py',
+               root / 'strategy-dashboard/daily_update.py']
+    found = set()
+    search_roots = (root, root / 'strategy-dashboard')
+    while pending:
+        path = pending.pop()
+        if path in found:
+            continue
+        found.add(path)
+        tree = ast.parse(path.read_text(encoding='utf-8-sig'), filename=str(path))
+        for node in ast.walk(tree):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+                bases = search_roots
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:
+                    base = path.parent
+                    for _ in range(node.level - 1):
+                        base = base.parent
+                    bases = (base,)
+                else:
+                    bases = search_roots
+                module = node.module or ''
+                names = [module] if module else []
+                names.extend(f'{module}.{alias.name}'.strip('.') for alias in node.names
+                             if alias.name != '*')
+            else:
+                continue
+            for name in names:
+                for base in bases:
+                    module_path = base.joinpath(*name.split('.'))
+                    for candidate in (module_path.with_suffix('.py'), module_path / '__init__.py'):
+                        if candidate.is_file() and root in candidate.resolve().parents:
+                            pending.append(candidate)
+    return sorted(found)
 
 
 def sha256_file(path):
@@ -182,7 +230,6 @@ def fetch_tencent_bars(code, start, end, response_dir, request_log):
     while cursor <= stop:
         last = min(cursor + timedelta(days=699), stop)
         params = urlencode({'param': f'{code},day,{cursor},{last},640,'})
-        errors = []
         for host_index, host in enumerate(TENCENT_HOSTS):
             url = f'{host}/appstock/app/fqkline/get?{params}'
             request = Request(url, headers={
@@ -213,12 +260,15 @@ def fetch_tencent_bars(code, start, end, response_dir, request_log):
             except (OSError, KeyError, TypeError, ValueError) as exc:
                 attempt['status'] = 'failed'
                 attempt['error'] = f'{type(exc).__name__}: {exc}'
-                errors.append(f'{host}: {exc}')
             finally:
                 attempt['completed_at_utc'] = datetime.now(timezone.utc).isoformat()
                 request_log.append(attempt)
         else:
-            raise RuntimeError(f'{code} 腾讯日线取数失败: {"; ".join(errors)}')
+            raise InputGaps([input_gap(
+                code, f'{cursor}/{last}', 'daily_bar',
+                '腾讯日线取数失败，无法确认行情覆盖',
+                ['核查请求记录及原始来源', '由负责人裁决补采或其他措施'],
+            )])
         cursor = last + timedelta(days=1)
     dates = [row['date'] for row in result]
     if dates != sorted(set(dates)):
@@ -280,7 +330,10 @@ def fetch_sina_factors(code, raw_path, request_log):
     except (OSError, KeyError, TypeError, ValueError) as exc:
         attempt['status'] = 'failed'
         attempt['error'] = f'{type(exc).__name__}: {exc}'
-        raise RuntimeError(f'{code} 新浪基金复权因子取数或校验失败: {exc}') from exc
+        raise InputGaps([input_gap(
+            code, None, 'factor', '新浪基金复权因子取数或校验失败',
+            ['核查请求记录及原始因子', '由负责人裁决补采或其他措施'],
+        )]) from exc
     finally:
         attempt['completed_at_utc'] = datetime.now(timezone.utc).isoformat()
         request_log.append(attempt)
@@ -308,11 +361,30 @@ def ensure_ordered_bars(code, rows):
         validate_iso_date(day, code)
     if any(row['code'] != code for row in rows):
         raise ValueError(f'{code} 行情包含错误标的')
+    for row in rows:
+        try:
+            volume = float(row['volume'])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise InputGaps([input_gap(
+                code, row['date'], 'volume', '成交量无效，不能作为可成交行情',
+                ['核查原始行情', '由负责人决定如何处理'],
+            )]) from exc
+        if not math.isfinite(volume) or volume <= 0:
+            raise InputGaps([input_gap(
+                code, row['date'], 'volume', '不能作为可成交行情',
+                ['核查停牌和行情来源', '由负责人决定如何处理'],
+            )])
 
 
 def private_path(path, label):
     resolved = path.expanduser().resolve()
-    if resolved == ROOT or ROOT in resolved.parents:
+    roots = [ROOT]
+    cwd = Path.cwd().resolve()
+    roots.extend(parent for parent in (cwd, *cwd.parents) if (parent / '.git').exists())
+    additional_root = os.environ.get('PRAJNA_ETERNAL_BASELINE_REPOSITORY_ROOT')
+    if additional_root:
+        roots.append(Path(additional_root).expanduser().resolve())
+    if any(resolved == root or root in resolved.parents for root in roots):
         raise ValueError(f'{label} 必须位于代码仓库之外')
     return resolved
 
@@ -337,6 +409,9 @@ def freeze(args):
     if missing:
         raise FileNotFoundError(f'缺少本机输入文件: {", ".join(missing)}')
     source_hashes_before = {name: sha256_file(path) for name, path in source_paths.items()}
+    legacy_sources = legacy_source_closure(source_root)
+    legacy_hashes_before = {path.relative_to(source_root).as_posix(): sha256_file(path)
+                            for path in legacy_sources}
     reference_data = json.loads(source_paths['reference_output'].read_text(encoding='utf-8'))
     try:
         reference_rows = reference_data['history']['etf']
@@ -364,6 +439,7 @@ def freeze(args):
     lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     os.close(lock_fd)
     work = None
+    request_log = []
     try:
         work = Path(tempfile.mkdtemp(prefix=f'.{target.name}.', suffix='.part', dir=parent))
         tencent_rows, tencent_fields = selected_rows(
@@ -377,8 +453,7 @@ def freeze(args):
         etf_rows, etf_fields = selected_rows(
             source_paths['etf_archive'],
             lambda row: row.get('code') == 'sz159612'
-            and row.get('date', '') <= ANCHOR
-            and float(row.get('volume', '0')) > 0,
+            and row.get('date', '') <= ANCHOR,
         )
         if not nasdaq_rows or not etf_rows or any(not tencent_by_code[code] for code in HISTORY_CODES
                                                   if code not in {'sh513300', 'sz159612'}):
@@ -394,13 +469,16 @@ def freeze(args):
         (work / 'source').mkdir(parents=True, exist_ok=True)
         for name in ('legacy_backtest', 'legacy_dashboard', 'legacy_data_source'):
             shutil.copyfile(source_paths[name], work / 'source' / source_paths[name].name)
+        for path in legacy_sources:
+            destination = work / 'source/legacy' / path.relative_to(source_root)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, destination)
         shutil.copyfile(Path(__file__).resolve(), work / 'source/eternal_baseline.py')
 
         saved = {code: tencent_by_code[code] for code in HISTORY_CODES}
         saved['sh513300'] = nasdaq_rows
         saved['sz159612'] = etf_rows
         fetched = {}
-        request_log = []
         response_dir = work / 'responses/bars'
         if end > ANCHOR:
             for index, code in enumerate(HISTORY_CODES):
@@ -424,7 +502,7 @@ def freeze(args):
             rows = [normalize_bar(row, 'local_archive') for row in saved[code]]
             rows.extend(
                 normalize_bar(row, 'tencent_response')
-                for row in fetched[code] if row['date'] > ANCHOR and float(row['volume']) > 0
+                for row in fetched[code] if row['date'] > ANCHOR
             )
             ensure_ordered_bars(code, rows)
             write_csv(work / f'bars/{code}.csv.gz', rows, RAW_BAR_FIELDS)
@@ -439,6 +517,9 @@ def freeze(args):
         ]
         if changed_inputs:
             raise RuntimeError(f'冻结期间本机输入发生变化: {", ".join(changed_inputs)}')
+        if any(sha256_file(path) != legacy_hashes_before[path.relative_to(source_root).as_posix()]
+               for path in legacy_sources):
+            raise RuntimeError('冻结期间旧源码依赖发生变化')
         source_hashes = {
             path.name: sha256_file(path)
             for path in source_paths.values()
@@ -461,6 +542,14 @@ def freeze(args):
             )
         for legacy_code, current_code in LEGACY_PAIRS:
             splice_etf(validated_prices, validated_limits, legacy_code, current_code)
+        gaps = [
+            input_gap(code, day, 'daily_bar', '参考日期缺少共同价格，影响回放和对照',
+                      ['核查停牌及原始档案', '由负责人裁决补采或其他措施'])
+            for code in ETF_CODES for day in reference_dates
+            if day not in validated_prices[code]
+        ]
+        if gaps:
+            raise InputGaps(gaps)
         if not set.intersection(*(set(validated_prices[code]) for code in ETF_CODES)):
             raise ValueError('所需 ETF 没有共同交易日')
         input_start_by_asset = {code: rows[0]['date'] for code, rows in bars_by_code.items()}
@@ -476,13 +565,15 @@ def freeze(args):
             relative = path.relative_to(work).as_posix()
             inventory[relative] = {'sha256': sha256_file(path), 'bytes': path.stat().st_size}
         manifest = {
-            'schema_version': 2,
+            'schema_version': 3,
             'created_at_utc': datetime.now(timezone.utc).isoformat(),
             'source': {
                 'issue_declared_revision': 'd5d48c1',
                 'issue_revision_verified': False,
                 'revision_limit': 'local legacy source copy has no verifiable Git history',
                 'captured_source_sha256': source_hashes,
+                'legacy_local_sources': legacy_hashes_before,
+                'legacy_closure_limit': 'static local imports only; dynamic imports and external dependencies unverified',
                 'replay_entrypoint': 'source/eternal_baseline.py',
                 'legacy_source_role': 'archived for provenance; not invoked by the replay adapter',
             },
@@ -513,9 +604,7 @@ def freeze(args):
                 },
             },
             'reference_fields': {
-                'available': ['dates', 'daily_nav', 'start', 'end', 'nasdaqAnchor',
-                              'nasdaqSwitch', 'sp500Anchor', 'sp500Switch', 'cagr',
-                              'max_drawdown', 'rebalances'],
+                'available': ['dates', 'daily_nav', *reference_stats.keys()],
                 'unavailable': ['signals', 'trades', 'fees', 'cash', 'holdings'],
                 'impact': 'The captured reference can validate date/NAV and listed summary fields only; execution detail comparisons are unavailable.',
             },
@@ -525,6 +614,15 @@ def freeze(args):
         if target.exists():
             raise FileExistsError(f'snapshot 已存在，不能覆盖: {target}')
         os.rename(work, target)
+    except InputGaps as exc:
+        if work is not None and work.exists():
+            if not (work / 'requests.json').exists():
+                write_json(work / 'requests.json', request_log)
+            write_json(work / 'pending-gaps.json', {'status': 'pending_decision', 'gaps': exc.gaps})
+            if target.exists():
+                raise FileExistsError(f'pending snapshot 已存在，不能覆盖: {target}') from exc
+            os.rename(work, target)
+        raise
     except BaseException:
         if work is not None and work.exists():
             shutil.rmtree(work)
@@ -536,7 +634,13 @@ def freeze(args):
 
 def total_return_prices(bars, factors):
     factor_dates = [row['date'] for row in factors]
-    if not factor_dates or sorted(set(factor_dates)) != factor_dates:
+    if not factor_dates:
+        raise InputGaps([input_gap(
+            bars[0]['code'] if bars else None, bars[0]['date'] if bars else None,
+            'factor', '缺少有效因子，无法计算总回报',
+            ['核查原始因子覆盖', '由负责人裁决补采或其他措施'],
+        )])
+    if sorted(set(factor_dates)) != factor_dates:
         raise ValueError('复权因子缺失或日期重复')
     previous_close = None
     previous_split = 1.0
@@ -546,7 +650,12 @@ def total_return_prices(bars, factors):
     for row in bars:
         day = row['date']
         factor_index = bisect_right(factor_dates, day) - 1
-        if factor_index < 0 or day in prices:
+        if factor_index < 0:
+            raise InputGaps([input_gap(
+                row['code'], day, 'factor', '缺少有效因子，无法计算总回报',
+                ['核查原始因子覆盖', '由负责人裁决补采或其他措施'],
+            )])
+        if day in prices:
             raise ValueError(f'{row["code"]} 行情缺少有效因子或日期重复')
         factor = factors[factor_index]
         split = float(factor['split'])
@@ -600,12 +709,22 @@ def splice_etf(prices, limits, legacy_code, current_code):
     legacy, current = prices[legacy_code], prices[current_code]
     overlap = legacy.keys() & current.keys()
     if not overlap:
-        raise ValueError(f'{legacy_code}/{current_code} 缺少共同收盘日')
+        legacy_span = f'{min(legacy)}..{max(legacy)}' if legacy else 'empty'
+        current_span = f'{min(current)}..{max(current)}' if current else 'empty'
+        raise InputGaps([input_gap(
+            f'{legacy_code}/{current_code}',
+            f'{legacy_span} / {current_span}', 'overlap',
+            '缺少共同收盘日，无法拼接',
+            ['核查两标的原始行情', '由负责人裁决补采或其他措施'],
+        )])
     anchor = min(overlap)
     scale = legacy[anchor][1] / current[anchor][1]
     dates = sorted(day for day in current if day > anchor)
     if not dates:
-        raise ValueError(f'{current_code} 拼接后没有可用交易日')
+        raise InputGaps([input_gap(
+            current_code, anchor, 'daily_bar', '拼接后没有可用交易日',
+            ['核查原始行情', '由负责人裁决补采或其他措施'],
+        )])
     prices[current_code] = {
         **{day: pair for day, pair in legacy.items() if day <= anchor},
         **{day: tuple(value * scale for value in current[day]) for day in dates},
@@ -631,8 +750,8 @@ def rebalance(current, weights, fee_rate, cash=0.0):
 
 
 def simulate(days, opens, closes, limits, threshold, fee_rate, portfolio=WEIGHTS):
-    if len(days) < 2 or days[0] >= days[-1]:
-        raise ValueError('共同交易日少于两个不同日期，无法计算年化收益与波动率')
+    if len(days) < 3 or days[0] >= days[-1]:
+        raise ValueError('共同交易日少于三个不同日期，无法计算年化收益与波动率')
     weights = list(portfolio.values())
     thresholds = threshold if isinstance(threshold, dict) else dict.fromkeys(portfolio, threshold)
     initial_value = 1.0 / (1.0 + fee_rate)
@@ -713,6 +832,8 @@ def simulate(days, opens, closes, limits, threshold, fee_rate, portfolio=WEIGHTS
     stats = {
         'start': days[0],
         'end': days[-1],
+        'total_return': navs[-1] - 1.0,
+        'fee_bps': round(fee_rate * 10_000, 4),
         'cagr': navs[-1] ** (1.0 / years) - 1.0,
         'annual_volatility': stdev(daily_returns) * math.sqrt(252),
         'max_drawdown': drawdown,
@@ -728,7 +849,7 @@ def simulate(days, opens, closes, limits, threshold, fee_rate, portfolio=WEIGHTS
 def read_snapshot(snapshot):
     manifest_path = snapshot / 'manifest.json'
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
-    if manifest.get('schema_version') != 2:
+    if manifest.get('schema_version') != 3:
         raise ValueError('unsupported snapshot manifest schema; create a new snapshot')
     expected = manifest.get('files')
     if not isinstance(expected, dict):
@@ -737,12 +858,22 @@ def read_snapshot(snapshot):
         raise ValueError('snapshot 缺少回放源码副本')
     source = manifest.get('source')
     captured_source_hashes = source.get('captured_source_sha256') if isinstance(source, dict) else None
-    if not isinstance(captured_source_hashes, dict):
+    required_sources = {'backtest.py', 'daily_update.py', 'dividend_data.py'}
+    if not isinstance(captured_source_hashes, dict) or not required_sources.issubset(captured_source_hashes):
         raise ValueError('snapshot manifest 缺少冻结源码摘要')
     for name, digest in captured_source_hashes.items():
         details = expected.get(f'source/{name}')
         if not isinstance(details, dict) or details.get('sha256') != digest:
             raise ValueError(f'snapshot 源码摘要与文件清单不一致: {name}')
+    legacy_sources = source.get('legacy_local_sources')
+    if not isinstance(legacy_sources, dict) or not {
+        'backtest.py', 'dividend_data.py', 'strategy-dashboard/daily_update.py',
+    }.issubset(legacy_sources):
+        raise ValueError('snapshot 缺少旧源码依赖闭包')
+    for name, digest in legacy_sources.items():
+        details = expected.get(f'source/legacy/{name}')
+        if not isinstance(details, dict) or details.get('sha256') != digest:
+            raise ValueError(f'snapshot 旧源码依赖摘要不一致: {name}')
     actual_paths = {path.relative_to(snapshot).as_posix()
                     for path in snapshot.rglob('*') if path.is_file() and path != manifest_path}
     if actual_paths != set(expected):
@@ -778,15 +909,21 @@ def compare_reference(reference, dates, navs, stats, anchors):
         'sp500Anchor': anchors[1][0],
         'sp500Switch': anchors[1][1],
     }
-    fields = ('start', 'end', 'nasdaqAnchor', 'nasdaqSwitch', 'sp500Anchor',
-              'sp500Switch', 'cagr', 'max_drawdown', 'rebalances')
+    fields = dict.fromkeys((
+        'start', 'end', 'nasdaqAnchor', 'nasdaqSwitch', 'sp500Anchor',
+        'sp500Switch', 'cagr', 'max_drawdown', 'rebalances',
+        *actual_stats, *old_stats,
+    ))
     metric_results = {}
     for field in fields:
         if field not in old_stats:
             metric_results[field] = {'status': 'unavailable_in_reference'}
         elif field not in actual_stats:
             metric_results[field] = {'status': 'unavailable_in_replay'}
-        elif isinstance(old_stats[field], (int, float)) and not isinstance(old_stats[field], bool):
+        elif (isinstance(old_stats[field], (int, float))
+              and not isinstance(old_stats[field], bool)
+              and isinstance(actual_stats[field], (int, float))
+              and not isinstance(actual_stats[field], bool)):
             difference = abs(float(old_stats[field]) - float(actual_stats[field]))
             metric_results[field] = {
                 'status': 'match' if difference <= NAV_TOLERANCE else 'mismatch',
@@ -801,7 +938,10 @@ def compare_reference(reference, dates, navs, stats, anchors):
     nav_match = date_match and len(compared_dates) == len(reference_dates) and all(
         error <= NAV_TOLERANCE for error in errors
     )
-    matched_metrics = all(result['status'] != 'mismatch' for result in metric_results.values())
+    matched_metrics = all(
+        result['status'] in {'match', 'unavailable_in_reference'}
+        for result in metric_results.values()
+    )
     return {
         'tolerance': NAV_TOLERANCE,
         'dates': {
@@ -855,8 +995,8 @@ def replay(args):
     old_dates = [row[0] for row in reference_rows if row[0] <= ANCHOR]
     days = ([date.fromisoformat(day) for day in old_dates if day in common]
             + [date.fromisoformat(day) for day in sorted(common) if day > ANCHOR])
-    if len(days) < 2:
-        raise ValueError('回放共同交易日少于两天，无法计算年化收益与波动率')
+    if len(days) < 3:
+        raise ValueError('回放共同交易日少于三天，无法计算年化收益与波动率')
     opens = [[prices[code][day.isoformat()][0] for code in ETF_CODES] for day in days]
     closes = [[prices[code][day.isoformat()][1] for code in ETF_CODES] for day in days]
     daily_limits = [[limits[code].get(day.isoformat(), (False, False)) for code in ETF_CODES]
@@ -865,7 +1005,7 @@ def replay(args):
     navs, signals, trades, stats, daily = simulate(
         days, opens, closes, daily_limits,
         configuration['threshold'], configuration['fee_rate_one_way'],
-        configuration['weights'],
+        {code: configuration['weights'][code] for code in ETF_CODES},
     )
     comparison = compare_reference(reference, days, navs, stats, anchors)
     result = {
@@ -883,6 +1023,10 @@ def replay(args):
         'signals': signals,
         'trades': trades,
         'comparison': comparison,
+        'risk_disclosures': {
+            'historical_universe': 'unverified; fixed/proxy assets may introduce survivorship or selection bias',
+            'total_return_pit': 'unverified; historical listing, distributions and factor availability are not proven point-in-time',
+        },
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     write_json(output, result)

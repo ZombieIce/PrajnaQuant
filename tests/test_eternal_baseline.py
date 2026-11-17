@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import eternal_baseline as baseline
@@ -145,9 +147,9 @@ class SimulationTests(unittest.TestCase):
         self.unblocked = [[(False, False), (False, False)] for _ in self.days]
 
     def test_insufficient_common_sessions_raise_a_validation_error(self):
-        for days in ([], self.days[:1]):
+        for days in ([], self.days[:1], self.days[:2]):
             with self.subTest(session_count=len(days)):
-                with self.assertRaisesRegex(ValueError, '共同交易日少于两个'):
+                with self.assertRaisesRegex(ValueError, '共同交易日少于三个'):
                     baseline.simulate(
                         days, self.opens[:len(days)], self.closes[:len(days)],
                         self.unblocked[:len(days)], .10, .0005, self.portfolio,
@@ -243,7 +245,7 @@ class SimulationTests(unittest.TestCase):
         ))
 
 
-def make_replay_snapshot(snapshot, single_common_session=False):
+def make_replay_snapshot(snapshot, common_session_count=None):
     snapshot.mkdir()
     dates = ('2026-11-06', '2026-11-09', '2026-11-10', '2026-11-11')
     bars = {}
@@ -254,8 +256,8 @@ def make_replay_snapshot(snapshot, single_common_session=False):
             asset_dates = dates[:2]
         elif code in {'sh513300', 'sz159612'}:
             asset_dates = dates[1:]
-        elif single_common_session and code in baseline.ETF_CODES:
-            asset_dates = dates[2:3]
+        elif common_session_count is not None and code in baseline.ETF_CODES:
+            asset_dates = dates[2:2 + common_session_count]
         bars[code] = [
             {
                 'date': day, 'code': code, 'open': '1', 'close': '1',
@@ -280,8 +282,8 @@ def make_replay_snapshot(snapshot, single_common_session=False):
     closes = [[prices[code][day.isoformat()][1] for code in baseline.ETF_CODES] for day in days]
     day_limits = [[limits[code].get(day.isoformat(), (False, False))
                    for code in baseline.ETF_CODES] for day in days]
-    if len(days) < 2:
-        navs = [1.0]
+    if len(days) < 3:
+        navs = [1.0] * len(days)
         stats = {
             'start': days[0],
             'end': days[-1],
@@ -312,6 +314,13 @@ def make_replay_snapshot(snapshot, single_common_session=False):
     source_dir = snapshot / 'source'
     source_dir.mkdir()
     shutil.copyfile(Path(baseline.__file__), source_dir / 'eternal_baseline.py')
+    for name in ('backtest.py', 'daily_update.py', 'dividend_data.py'):
+        (source_dir / name).write_text('# synthetic source\n', encoding='utf-8')
+    legacy_sources = ('backtest.py', 'dividend_data.py', 'strategy-dashboard/daily_update.py')
+    for name in legacy_sources:
+        path = source_dir / 'legacy' / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('# synthetic source\n', encoding='utf-8')
     inventory = {}
     for path in sorted(item for item in snapshot.rglob('*') if item.is_file()):
         inventory[path.relative_to(snapshot).as_posix()] = {
@@ -319,11 +328,18 @@ def make_replay_snapshot(snapshot, single_common_session=False):
             'bytes': path.stat().st_size,
         }
     manifest = {
-        'schema_version': 2,
+        'schema_version': 3,
         'files': inventory,
         'configuration': baseline.execution_configuration(),
         'source': {
-            'captured_source_sha256': {},
+            'captured_source_sha256': {
+                name: baseline.sha256_file(source_dir / name)
+                for name in ('backtest.py', 'daily_update.py', 'dividend_data.py')
+            },
+            'legacy_local_sources': {
+                name: baseline.sha256_file(source_dir / 'legacy' / name)
+                for name in legacy_sources
+            },
             'replay_entrypoint': 'source/eternal_baseline.py',
             'legacy_source_role': 'archived for provenance; not invoked by the replay adapter',
         },
@@ -338,6 +354,37 @@ def temporary_directory_outside_repository():
         if root != baseline.ROOT and baseline.ROOT not in root.parents:
             return tempfile.TemporaryDirectory(dir=root)
     raise RuntimeError('no temporary directory outside the repository is available')
+
+
+def make_legacy_input(root, fixture, missing_overlap=False):
+    root.mkdir()
+    (root / 'strategy-dashboard').mkdir()
+    (root / 'data/long_history').mkdir(parents=True)
+    (root / 'backtest.py').write_text('import local_helper\n', encoding='utf-8')
+    (root / 'local_helper.py').write_text('VALUE = 1\n', encoding='utf-8')
+    (root / 'dividend_data.py').write_text('', encoding='utf-8')
+    (root / 'strategy-dashboard/daily_update.py').write_text('import backtest\n', encoding='utf-8')
+    reference = json.loads((fixture / 'reference.json').read_text(encoding='utf-8'))
+    (root / 'strategy-dashboard/data.json').write_text(json.dumps({
+        'history': {'etf': reference['history_etf']},
+        'stats': {'etf': reference['stats_etf']},
+    }), encoding='utf-8')
+    bars = {code: baseline.csv_rows(fixture / f'bars/{code}.csv.gz')[0]
+            for code in baseline.HISTORY_CODES}
+    archive = [
+        row for code, rows in bars.items() for row in rows
+        if code not in {'sh513300', 'sz159612'} and row['date'] <= baseline.ANCHOR
+        and not (missing_overlap and code == 'sh513100' and row['date'] == baseline.ANCHOR)
+    ]
+    baseline.write_csv(root / 'data/long_history/tencent_daily.csv.gz',
+                       archive, baseline.RAW_BAR_FIELDS)
+    baseline.write_csv(root / 'strategy-dashboard/nasdaq-513300.csv.gz',
+                       [row for row in bars['sh513300'] if row['date'] <= baseline.ANCHOR],
+                       baseline.RAW_BAR_FIELDS)
+    baseline.write_csv(root / 'data/etf_daily.csv',
+                       [row for row in bars['sz159612'] if row['date'] <= baseline.ANCHOR],
+                       baseline.RAW_BAR_FIELDS)
+    return bars
 
 
 class ReplayEntryTests(unittest.TestCase):
@@ -399,7 +446,8 @@ class ReplayEntryTests(unittest.TestCase):
         with temporary_directory_outside_repository() as directory:
             snapshot = Path(directory) / 'snapshot'
             make_replay_snapshot(snapshot)
-            changed_script = Path(directory) / 'changed_eternal_baseline.py'
+            changed_script = Path(directory) / 'runner/scripts/changed_eternal_baseline.py'
+            changed_script.parent.mkdir(parents=True)
             changed_script.write_text(
                 Path(baseline.__file__).read_text(encoding='utf-8') + '\n# changed\n',
                 encoding='utf-8',
@@ -420,19 +468,151 @@ class ReplayEntryTests(unittest.TestCase):
             self.assertIn('回放源码与 snapshot 冻结源码不一致', completed.stderr)
 
     def test_replay_reports_insufficient_common_sessions_as_validation_error(self):
+        for count in (1, 2):
+            with self.subTest(session_count=count), temporary_directory_outside_repository() as directory:
+                snapshot = Path(directory) / 'snapshot'
+                output = Path(directory) / 'replay.json'
+                make_replay_snapshot(snapshot, common_session_count=count)
+                script = Path(__file__).resolve().parents[1] / 'scripts/eternal_baseline.py'
+                completed = subprocess.run(
+                    [sys.executable, str(script), 'replay', '--snapshot', str(snapshot),
+                     '--output', str(output)],
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn('共同交易日少于三天', completed.stderr)
+                self.assertFalse(output.exists())
+
+    def test_reordered_weights_preserve_asset_holdings(self):
         with temporary_directory_outside_repository() as directory:
-            snapshot = Path(directory) / 'snapshot'
-            output = Path(directory) / 'replay.json'
-            make_replay_snapshot(snapshot, single_common_session=True)
-            script = Path(__file__).resolve().parents[1] / 'scripts/eternal_baseline.py'
+            root = Path(directory)
+            snapshot = root / 'snapshot'
+            make_replay_snapshot(snapshot)
+            manifest_path = snapshot / 'manifest.json'
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            manifest['configuration']['weights'] = dict(
+                reversed(list(manifest['configuration']['weights'].items())),
+            )
+            manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+            output = root / 'replay.json'
+            script = Path(baseline.__file__)
             completed = subprocess.run(
                 [sys.executable, str(script), 'replay', '--snapshot', str(snapshot),
                  '--output', str(output)],
                 capture_output=True, text=True, check=False,
             )
-            self.assertNotEqual(completed.returncode, 0)
-            self.assertIn('共同交易日少于两天', completed.stderr)
-            self.assertFalse(output.exists())
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            holdings = json.loads(output.read_text(encoding='utf-8'))['daily'][0]['holdings']
+            total = sum(holdings.values())
+            for code, weight in baseline.WEIGHTS.items():
+                self.assertAlmostEqual(holdings[code] / total, weight)
+
+    def test_missing_source_map_rejected_even_when_resealed(self):
+        with temporary_directory_outside_repository() as directory:
+            snapshot = Path(directory) / 'snapshot'
+            make_replay_snapshot(snapshot)
+            manifest_path = snapshot / 'manifest.json'
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            manifest['source']['captured_source_sha256'] = {}
+            baseline.seal_manifest(manifest)
+            manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, '缺少冻结源码摘要'):
+                baseline.read_snapshot(snapshot)
+
+    def test_zero_volume_is_not_accepted_as_tradable(self):
+        for volume in ('0', '-1', 'nan'):
+            with self.subTest(volume=volume):
+                with self.assertRaisesRegex(ValueError, '不能作为可成交行情'):
+                    baseline.ensure_ordered_bars('sh510000', [
+                        {'date': '2020-01-02', 'code': 'sh510000', 'volume': volume},
+                    ])
+
+    def test_repository_guard_cannot_be_replaced_by_environment_override(self):
+        with temporary_directory_outside_repository() as directory:
+            snapshot = Path(directory) / 'snapshot'
+            make_replay_snapshot(snapshot)
+            with tempfile.TemporaryDirectory(dir=baseline.ROOT) as inside:
+                output = Path(inside) / 'replay.json'
+                completed = subprocess.run(
+                    [sys.executable, str(Path(baseline.__file__)), 'replay',
+                     '--snapshot', str(snapshot), '--output', str(output)],
+                    capture_output=True, text=True, check=False,
+                    env={**os.environ, 'PRAJNA_ETERNAL_BASELINE_REPOSITORY_ROOT': directory},
+                )
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn('必须位于代码仓库之外', completed.stderr)
+                self.assertFalse(output.exists())
+
+    def test_available_volatility_mismatch_is_compared(self):
+        days = [date(2020, 1, day) for day in (2, 3, 6)]
+        reference = {
+            'history_etf': [[day.isoformat(), 1.0] for day in days],
+            'stats_etf': {'annual_volatility': .2},
+        }
+        stats = {'start': days[0], 'end': days[-1], 'annual_volatility': .1}
+        result = baseline.compare_reference(reference, days, [1.0] * 3, stats, [
+            ('2020-01-01', '2020-01-02'), ('2020-01-01', '2020-01-02'),
+        ])
+        self.assertEqual(result['metrics']['annual_volatility']['status'], 'mismatch')
+        self.assertEqual(result['overall_status'], 'mismatch')
+        reference['stats_etf'] = {'unimplemented_metric': 1.0}
+        result = baseline.compare_reference(reference, days, [1.0] * 3, stats, [
+            ('2020-01-01', '2020-01-02'), ('2020-01-01', '2020-01-02'),
+        ])
+        self.assertEqual(result['metrics']['unimplemented_metric']['status'], 'unavailable_in_replay')
+        self.assertEqual(result['overall_status'], 'mismatch')
+
+    def test_freeze_captures_local_imports_and_retains_gaps_as_pending(self):
+        for scenario in ('normal', 'missing_overlap', 'missing_session', 'zero_volume', 'missing_factor'):
+            with self.subTest(scenario=scenario):
+                with temporary_directory_outside_repository() as directory:
+                    root = Path(directory)
+                    fixture = root / 'fixture'
+                    make_replay_snapshot(fixture)
+                    source = root / 'legacy'
+                    bars = make_legacy_input(source, fixture, scenario == 'missing_overlap')
+                    if scenario == 'missing_session':
+                        bars['sh511260'] = [row for row in bars['sh511260']
+                                            if row['date'] != '2026-11-10']
+                    elif scenario == 'zero_volume':
+                        for row in bars['sh511260']:
+                            if row['date'] == '2026-11-10':
+                                row['volume'] = '0'
+                    target = root / 'snapshot'
+                    def fetch_bars(code, start, end, response_dir, request_log):
+                        return [row for row in bars[code] if row['date'] > baseline.ANCHOR]
+                    def fetch_factors(code, raw_path, request_log):
+                        start = '2026-11-09' if scenario == 'missing_factor' and code == 'sh511260' else '2026-11-06'
+                        return [{'date': start, 'split': '1', 'dividend': '0'}]
+                    with patch.object(baseline, 'fetch_tencent_bars', side_effect=fetch_bars), \
+                         patch.object(baseline, 'fetch_sina_factors', side_effect=fetch_factors), \
+                         patch.object(baseline.time, 'sleep'):
+                        args = SimpleNamespace(legacy_root=source, snapshot=target)
+                        if scenario != 'normal':
+                            with self.assertRaises(baseline.InputGaps):
+                                baseline.freeze(args)
+                            pending = json.loads((target / 'pending-gaps.json').read_text())
+                            self.assertEqual(pending['status'], 'pending_decision')
+                            expected = {'missing_overlap': 'overlap',
+                                        'missing_session': 'daily_bar',
+                                        'zero_volume': 'volume',
+                                        'missing_factor': 'factor'}
+                            self.assertEqual(pending['gaps'][0]['field'], expected[scenario])
+                            self.assertFalse((target / 'manifest.json').exists())
+                        else:
+                            baseline.freeze(args)
+                            manifest, _ = baseline.read_snapshot(target)
+                            self.assertIn('local_helper.py', manifest['source']['legacy_local_sources'])
+                            self.assertEqual(baseline.replay(SimpleNamespace(
+                                snapshot=target, output=root / 'replay.json',
+                            )), 0)
+                            result = subprocess.run(
+                                [sys.executable, '-I', '-c',
+                                 'import sys; sys.path.insert(0, "."); import backtest'],
+                                cwd=target / 'source/legacy',
+                                capture_output=True, text=True, check=False,
+                            )
+                            self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == '__main__':

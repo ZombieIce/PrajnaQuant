@@ -14,7 +14,7 @@ python3.12 scripts/eternal_baseline.py freeze \
   --snapshot "<仓库外私有目录>/eternal-baseline-<新版本>"
 ```
 
-冻结会保存所需资产的本机原始 CSV 行、原始 HTTP 响应、`requests.json` 请求记录、归一化行情/因子、历史参考净值、源码副本与 SHA-256 清单。清单将配置、来源、运行环境、日期范围和输入文件一起绑定到 `input_version`，并校验 manifest 摘要。每个 snapshot 不可覆盖；遇到数据缺失、因子不完整、日期重复或请求失败会报错，不降级或静默跳过。`d5d48c1` 是 Issue 记载的源码修订，但旧本机副本无 Git 历史，manifest 明确记录其未验证状态，并固定实际源码文件摘要。
+冻结会保存所需资产的本机原始 CSV 行、原始 HTTP 响应、`requests.json` 请求记录、归一化行情/因子、历史参考净值、源码副本与 SHA-256 清单。旧源码按静态本地 import 递归归档，动态导入与外部依赖仍未验证。清单将配置、来源、运行环境、日期范围和输入文件一起绑定到 `input_version`，并校验 manifest 摘要。每个 snapshot 不可覆盖；遇到零成交量、缺重叠、缺初始因子或参考日期缺行情时，私有目录保留 `pending-gaps.json`，列出标的、日期、字段、影响及候选措施，状态为 `pending_decision`，不能作为冻结基线回放。其他数据校验或请求失败明确报错，不降级或静默跳过。`d5d48c1` 是 Issue 记载的源码修订，但旧本机副本无 Git 历史，manifest 明确记录其未验证状态。
 
 ## 离线复算
 
@@ -26,14 +26,18 @@ python3.12 scripts/eternal_baseline.py replay \
 
 `replay` 不访问网络，先校验 snapshot 文件集合与摘要，再生成逐日 NAV、现金、有效总回报指数单位持仓、信号、交易、费用及指标。结果文件必须是仓库外的新路径；同目录还会生成 `.run.json`，绑定结果 SHA-256、输入版本、回放源码摘要及运行环境。返回码 `0` 表示参考日期/NAV 与可用汇总字段在 `1e-7` 容差内匹配；返回码 `1` 表示复算完成但对拍不符；结构/输入错误会明确报错。详细输出只写本机文件。
 
-回放要求当前源码与 snapshot 中冻结的 `source/eternal_baseline.py` 完全一致；源码不同或有效配置与冻结代码不一致时会失败，不会在结果中报告未实际执行的源码/配置。需要用原 snapshot 版本回放时，显式运行该冻结副本，并让仓库路径守卫仍指向当前仓库：
+回放要求当前源码与 snapshot 中冻结的 `source/eternal_baseline.py` 完全一致；源码不同或有效配置与冻结代码不一致时会失败。新版本不接受旧 schema；如需重跑旧版本，将冻结脚本**复制**到与 snapshot 和输出均不重叠的仓库外新目录（不能直接从 snapshot 内运行，否则旧版路径守卫会拒绝）：
 
 ```sh
+mkdir -p "<仓库外私有运行目录>/scripts"
+cp "<snapshot>/source/eternal_baseline.py" "<仓库外私有运行目录>/scripts/eternal_baseline.py"
 PRAJNA_ETERNAL_BASELINE_REPOSITORY_ROOT="$(git rev-parse --show-toplevel)" \
-  python3.12 "<snapshot>/source/eternal_baseline.py" replay \
+  python3.12 "<仓库外私有运行目录>/scripts/eternal_baseline.py" replay \
   --snapshot "<snapshot>" \
   --output "<仓库外私有目录>/eternal-baseline-<新版本>-replay.json"
 ```
+
+旧 schema 运行旧冻结脚本，只能验证旧版本行为；旧版不具备当前配置/源码绑定保护，不可当作当前 head 的复算证据。运行目录和结果路径均须在仓库外；环境变量只增加保护目录，不替代脚本所在仓库的路径守卫。
 
 冻结的 `backtest.py`、`daily_update.py` 与 `dividend_data.py` 仅作为来源证据归档；独立回放适配器并不导入或执行这些旧文件。因此，snapshot 绑定证明回放使用了被冻结的适配器及其记录配置，不等于证明适配器与无法核实修订的旧生产源码等价；该等价性和需独立访问私有输入的实际复算仍是未验证证据边界。
 
@@ -52,3 +56,5 @@ python3.12 -m unittest tests.test_eternal_baseline -v
 | 日期、信号/成交、费用、现金/持仓、逐日 NAV 与指标对照 | 私有 replay JSON 与 `compare_reference` | 日期/NAV/参考可用指标对拍；原参考输出不含信号、成交、费用、现金、持仓，故这些字段明确标为不可对照，不声称通过 |
 
 旧模拟器只有归一化 `NAV=1.0`，没有人民币本金参数或参考字段；按负责人确认，manifest 记录 1.0 模型单位，并将 CNY 金额标为 unavailable。模拟器的 `units` 是旧实现使用的总回报指数单位，不应解释为实际 ETF 份额数量。旧看板源码与 Issue 声明的 `d5d48c1` 无可验证 Git 关联；摘要仅识别实际归档的源码文件，不能证明其与该修订相同或回放适配器与旧算法等价。以上限制均不通过调整策略、缩短区间或更换因子口径规避。
+
+历史资产选择及代理拼接缺少上市、退出和历史成员 PIT 证明，存在选择及幸存者偏差风险；分红、拆分与复权因子的历史可用时点也未验证，历史总回报口径的 PIT 可靠性未知。未测量这些风险的大小。

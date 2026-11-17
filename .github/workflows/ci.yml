@@ -175,6 +175,9 @@ jobs:
       - name: Tencent fallback collector (synthetic responses only)
         run: python -m unittest tests.test_tencent_fallback_collector -v
 
+      - name: Eternal baseline (synthetic inputs only)
+        run: python -m unittest tests.test_eternal_baseline -v
+
       - name: MVP-1 Vector golden tests
         run: python -m unittest tests.test_mvp1_vector_golden -v
 
