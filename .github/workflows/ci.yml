@@ -175,6 +175,9 @@ jobs:
       - name: Tencent fallback collector (synthetic responses only)
         run: python -m unittest tests.test_tencent_fallback_collector -v
 
+      - name: Eternal baseline (synthetic inputs only)
+        run: python -m unittest tests.test_eternal_baseline -v
+
       - name: MVP-1 Vector golden tests
         run: python -m unittest tests.test_mvp1_vector_golden -v
 
@@ -225,7 +228,7 @@ jobs:
     name: web-production-validation
     needs: paths
     if: needs.paths.outputs.web == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4

@@ -40,6 +40,8 @@ MVP-5 的 Python Decision S2/S3 64×252 合成吞吐、分段耗时、As-of View
 
 需要 Rust（manifest 最低版本 1.85.1，扫描环境 1.98.1）、Node/npm、已有的 DuckDB 仓库与历史 ETF/沪深300数据。研究快照要求至少 1000 条沪深300日线；空环境运行 `run` 会失败，这是输入门槛。仓库使用项目 `.cargo/config.toml` 的镜像配置。
 
+旧 ETF 永动机基线的本机冻结与离线复算见[操作说明](docs/local-eternal-baseline.md)；真实行情及详细复算结果仅保存在仓库外。
+
 ```bash
 cargo run -p quant-research --release -- run --warehouse data-core/market.duckdb --output research-output --config configs/etf_momentum_60.json
 cargo run -p quant-research --release -- run-grid --warehouse data-core/market.duckdb --output research-output --config configs/etf_rotation_smoke_grid.json
