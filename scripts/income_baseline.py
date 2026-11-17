@@ -21,7 +21,7 @@ from eternal_baseline import (
 
 REVISION = "d5d48c1"
 BALANCE_BASIS = "legacy_ex_date_income_credit"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 CODES = ("sh601288", "sh601398", "sh601939", "sh600015", "sh600036", "sh601998",
          "sh600900", "sh601318", "sh601369", "sh600941")
 CALENDAR = "sh000300"
@@ -237,11 +237,43 @@ def configuration(dashboard):
             "anchor": dashboard.INCOME_ANCHOR, "first_dates": dashboard.FIRST_DATES}
 
 
+def verified_suspension_sources(directory, evidence):
+    """Validate the raw evidence inventory relative to its containing directory."""
+    sources = evidence["sources"]
+    if not isinstance(sources, dict) or not sources:
+        raise ValueError("suspension evidence requires original source files")
+    directory = directory.resolve()
+    verified = {}
+    for relative, digest in sources.items():
+        if (not relative or "\\" in relative
+                or any(part in {"", ".", ".."} for part in relative.split("/"))
+                or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+            raise ValueError("invalid suspension source inventory entry")
+        source = directory / relative
+        if source.resolve() != source or not source.is_file():
+            raise ValueError("missing or linked suspension source")
+        if sha256_file(source) != digest:
+            raise ValueError("suspension source digest mismatch")
+        verified[relative] = source
+    return verified
+
+
+def archive_suspension_evidence(evidence_path, snapshot):
+    payload = evidence_path.read_bytes()
+    evidence = json.loads(payload)
+    for relative, source in verified_suspension_sources(evidence_path.parent, evidence).items():
+        destination = snapshot / "suspension-sources" / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+    (snapshot / "suspension-evidence.json").write_bytes(payload)
+
+
 def suspension_days(snapshot):
     path = snapshot / "suspension-evidence.json"
     if not path.is_file():
         return set()
     evidence = json.loads(path.read_bytes())
+    verified_suspension_sources(snapshot / "suspension-sources", evidence)
     if evidence["method"] != "a-stock-data 3.10.4 §6.5":
         raise ValueError("unsupported suspension evidence method")
     days = set()
@@ -559,7 +591,7 @@ def freeze(args):
     try:
         if args.suspension_evidence is not None:
             evidence = local_path(args.suspension_evidence, "suspension evidence")
-            shutil.copyfile(evidence, snapshot / "suspension-evidence.json")
+            archive_suspension_evidence(evidence, snapshot)
         stage_inputs(root, snapshot, end, args.candidates)
         config, coverage, result, details, price_gaps = execute(snapshot, reference, diagnostic=True)
         if config["capital"] != reference["incomeInitialCapital"]:

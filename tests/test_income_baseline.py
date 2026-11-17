@@ -1,9 +1,11 @@
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from unittest.mock import patch
 
@@ -127,16 +129,27 @@ class IncomeBaselineTest(unittest.TestCase):
         self.assertIn("预热", gaps[0]["impact"])
         self.assertIn("估值", gaps[1]["impact"])
 
-    def test_suspension_evidence_requires_explicit_matched_status_without_trades(self):
+    def make_suspension_evidence(self, directory):
         evidence = {"method": "a-stock-data 3.10.4 §6.5", "rows": [{
             "code": CODE, "date": DAYS[1], "baostock": {
                 "code": "sh.601398", "date": DAYS[1], "tradestatus": "0", "volume": "0", "amount": "",
             }, "tencent": None, "tdx": None,
         }]}
+        raw = directory / "batch" / "response.json"
+        raw.parent.mkdir(parents=True)
+        raw.write_text(json.dumps(evidence["rows"][0]["baostock"]))
+        evidence["sources"] = {"batch/response.json": baseline.sha256_file(raw)}
+        file = directory / "evidence.json"
+        file.write_text(json.dumps(evidence))
+        return file, evidence
+
+    def test_suspension_evidence_requires_explicit_matched_status_without_trades(self):
         with tempfile.TemporaryDirectory() as directory:
-            snapshot = Path(directory)
+            root = Path(directory)
+            evidence_file, evidence = self.make_suspension_evidence(root / "original")
+            snapshot = root / "snapshot"
+            baseline.archive_suspension_evidence(evidence_file, snapshot)
             file = snapshot / "suspension-evidence.json"
-            file.write_text(json.dumps(evidence))
             self.assertEqual(baseline.suspension_days(snapshot), {(CODE, DAYS[1])})
             evidence["rows"][0]["tencent"] = [DAYS[1], 10, 10, 10, 10, 1]
             file.write_text(json.dumps(evidence))
@@ -147,6 +160,53 @@ class IncomeBaselineTest(unittest.TestCase):
             file.write_text(json.dumps(evidence))
             with self.assertRaisesRegex(ValueError, "suspension evidence"):
                 baseline.suspension_days(snapshot)
+
+    def test_replay_binds_original_suspension_sources_after_snapshot_move(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = root / "original"
+            evidence_file, _ = self.make_suspension_evidence(original)
+            snapshot = root / "snapshot"
+            baseline.archive_suspension_evidence(evidence_file, snapshot)
+            for script in ("income_baseline.py", "eternal_baseline.py"):
+                target = snapshot / "source" / script
+                target.parent.mkdir(exist_ok=True)
+                shutil.copyfile(ROOT / "scripts" / script, target)
+            (snapshot / "reference.json").write_text("{}")
+            manifest = {"schema_version": baseline.SCHEMA_VERSION, "strategy": "income",
+                        "balance_basis": baseline.BALANCE_BASIS, "environment": baseline.environment(),
+                        "comparison_tolerances": baseline.TOLERANCES, "configuration": {}, "coverage": {},
+                        "files": baseline.digest_files(snapshot)}
+            (snapshot / "manifest.json").write_text(json.dumps(baseline.seal_manifest(manifest)))
+            relocated = snapshot.rename(root / "relocated")
+            shutil.rmtree(original)
+            args = SimpleNamespace(snapshot=relocated, output=root / "result.json")
+
+            def execute(path, _reference):
+                self.assertEqual(baseline.suspension_days(path), {(CODE, DAYS[1])})
+                return {}, {}, None, {}, []
+
+            with (patch.object(baseline, "execute", side_effect=execute),
+                  patch.object(baseline, "compare", return_value={"match": True}),
+                  patch.object(baseline, "result_fields", return_value={})):
+                self.assertEqual(baseline.replay(args), 0)
+                self.assertTrue(args.output.is_file())
+                args.output.unlink()
+                raw = relocated / "suspension-sources/batch/response.json"
+                raw.write_text("tampered")
+                with self.assertRaisesRegex(ValueError, "snapshot integrity"):
+                    baseline.replay(args)
+                raw.unlink()
+                with self.assertRaisesRegex(ValueError, "snapshot integrity"):
+                    baseline.replay(args)
+                self.assertFalse(args.output.exists())
+                # The derived evidence still requires its original bytes even if the inventory is resealed.
+                manifest_file = relocated / "manifest.json"
+                manifest["files"] = baseline.digest_files(relocated)
+                del manifest["files"]["manifest.json"]
+                manifest_file.write_text(json.dumps(baseline.seal_manifest(manifest)))
+                with self.assertRaisesRegex(ValueError, "missing or linked suspension source"):
+                    baseline.replay(args)
 
     def test_result_labels_nested_legacy_balances_and_flows(self):
         details = {

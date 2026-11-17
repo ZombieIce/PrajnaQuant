@@ -26,7 +26,7 @@ python3.12 scripts/income_baseline.py replay \
 
 ## 停牌核验
 
-可在 `freeze` 时传入 `--suspension-evidence <私有 JSON>` 保存逐日停牌证据。文件的 `method` 为 `a-stock-data 3.10.4 §6.5`，`rows` 每项含 `code`、`date`、`baostock` 原始字段和对应的 `tencent`、`tdx` 记录或 `null`。BaoStock 须明确返回相同证券与日期且 `tradestatus=0`，有实际成交的记录产生冲突。每条证据必须对应实际检测到的缺价，冻结清单绑定证据文件，离线回放再次校验。已核实停牌日继续跳过成交并沿用旧模型最近有效收盘估值。
+可在 `freeze` 时传入 `--suspension-evidence <私有 JSON>` 保存逐日停牌证据。文件的 `method` 为 `a-stock-data 3.10.4 §6.5`，`rows` 每项含 `code`、`date`、`baostock` 原始字段和对应的 `tencent`、`tdx` 记录或 `null`。BaoStock 须明确返回相同证券与日期且 `tradestatus=0`，有实际成交的记录产生冲突。每条证据必须对应实际检测到的缺价，证据 JSON 的 `sources` 必须列出原始文件相对于该 JSON 所在目录的路径和 SHA-256。冻结逐份校验并将原始文件复制到快照的 `suspension-sources/`，再由清单绑定派生记录和原始文件。离线回放在快照内重新校验，整份快照可以独立迁移。使用旧快照时可按其冻结适配器回放，原始证据校验从 schema v5 起生效。已核实停牌日继续跳过成交并沿用旧模型最近有效收盘估值。
 
 本机核验以腾讯未复权日线和能够取得的通达信盘后包交叉检查。盘后包缺失或请求失败本身只能说明没有取到该包。BaoStock 状态缺失或成交证据冲突仍须保留为待裁决缺口。
 
