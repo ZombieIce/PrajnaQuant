@@ -117,6 +117,34 @@ class IncomeBaselineTest(unittest.TestCase):
         self.assertIn("legacy_book_balance", comparison["reference_unavailable"])
         self.assertFalse(baseline.compare(reference, ([[DAYS[1], 1]], stats, [], [], {}))["match"])
 
+    def test_internal_price_gaps_split_warmup_and_run_without_flagging_prior_listing(self):
+        days = ["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-08"]
+        inputs = {CODE: (dict.fromkeys((days[0], days[2], days[-1]), (10, 10)),),
+                  "sh600941": (dict.fromkeys(days[2:], (10, 10)),)}
+        gaps = baseline.session_price_gaps(days, inputs, days[2])
+        self.assertEqual([(gap["asset"], gap["date"], gap["field"]) for gap in gaps],
+                         [(CODE, days[1], "daily_bar"), (CODE, days[3], "daily_bar")])
+        self.assertIn("预热", gaps[0]["impact"])
+        self.assertIn("估值", gaps[1]["impact"])
+
+    def test_result_labels_nested_legacy_balances_and_flows(self):
+        details = {
+            "summary": {"free_cash_used": 1},
+            "rebalance_events": [{"income_used": 2}],
+            "rebalance_transfers": [{"cash": 3}],
+            "fills": [{"cash_trade": -4}],
+            "stock_ledgers": {CODE: ([], {"dividend_cash": 5}, [{"cash_trade": -4}])},
+        }
+        result = baseline.result_fields({}, {}, {}, details)
+        self.assertIsNone(result["settled_cash_available"])
+        self.assertEqual(result["summary"], {"legacy_free_cash_used": 1})
+        self.assertEqual(result["rebalance_events"], [{"legacy_income_used": 2}])
+        self.assertEqual(result["rebalance_transfers"], [{"modeled_transfer_amount": 3}])
+        self.assertEqual(result["fills"], [{"modeled_trade_cash_flow": -4}])
+        self.assertEqual(result["stock_ledgers"][CODE],
+                         ([], {"legacy_income_balance": 5}, [{"modeled_trade_cash_flow": -4}]))
+        self.assertEqual(details["summary"], {"free_cash_used": 1})
+
     def test_cli_freeze_persists_pending_missing_inputs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

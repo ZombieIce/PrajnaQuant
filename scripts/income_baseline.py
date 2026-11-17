@@ -21,7 +21,7 @@ from eternal_baseline import (
 
 REVISION = "d5d48c1"
 BALANCE_BASIS = "legacy_ex_date_income_credit"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 CODES = ("sh601288", "sh601398", "sh601939", "sh600015", "sh600036", "sh601998",
          "sh600900", "sh601318", "sh601369", "sh600941")
 CALENDAR = "sh000300"
@@ -237,6 +237,25 @@ def configuration(dashboard):
             "anchor": dashboard.INCOME_ANCHOR, "first_dates": dashboard.FIRST_DATES}
 
 
+def session_price_gaps(days, inputs, start):
+    """Compare the exchange calendar with the tradable bars used by the legacy loader."""
+    gaps = []
+    for code, (raw, *_) in inputs.items():
+        if not raw:
+            continue  # Empty coverage is rejected by the loading or warmup checks.
+        first = min(raw)
+        for day in days:
+            if day < first or day in raw:
+                continue
+            impact = ("缺可用未复权行情，可能影响开盘成交、收盘估值或信号"
+                      if day >= start else "预热缺可用未复权行情，可能影响周线信号")
+            gaps.append(input_gap(
+                code, day, "daily_bar", impact,
+                ["核对交易所停牌或休市证据", "按固定方法准备候选原始行情，交负责人裁决"],
+            ))
+    return gaps
+
+
 def check_warmup(days, inputs, start, end, first_dates, histories):
     issues, coverage = [], {}
     for code, (raw, _, _, readings, _) in inputs.items():
@@ -319,7 +338,7 @@ def ledger(days, daily, inputs, accounts, bank_trades, capital):
     return fills, audited_daily
 
 
-def execute(snapshot, reference):
+def execute(snapshot, reference, *, diagnostic=False):
     root = snapshot / "source"
     sys.path.insert(0, str(root / "strategy-dashboard"))
     # Run in the CLI's own process and never write bytecode into the snapshot.
@@ -329,6 +348,7 @@ def execute(snapshot, reference):
     config = configuration(dashboard)
     end = reference["stats"]["income"]["end"]
     market, coverage, loaded, details, accounts = {}, {}, {}, {}, {}
+    price_gaps = []
     for code in (CALENDAR, *CODES):
         factor_rows = [] if code == CALENDAR else dashboard.load(root / "data/income_plan" / f"{code}_hfq.csv.gz")
         market[code] = [], factor_rows
@@ -336,7 +356,13 @@ def execute(snapshot, reference):
     def load_inputs(*args, **kwargs):
         days, inputs = original_load(*args, **kwargs)
         histories = dashboard.yield_history(days, inputs, 1)
-        coverage.update(check_warmup(days, inputs, config["start"], end, config["first_dates"], histories))
+        price_gaps.extend(session_price_gaps(days, inputs, config["start"]))
+        try:
+            coverage.update(check_warmup(days, inputs, config["start"], end, config["first_dates"], histories))
+        except InputGaps as exc:
+            raise InputGaps(price_gaps + exc.gaps) from exc
+        if price_gaps and not diagnostic:
+            raise InputGaps(price_gaps)
         loaded.update(inputs)
         details["signals"] = histories
         return days, inputs
@@ -361,7 +387,7 @@ def execute(snapshot, reference):
           patch.object(dashboard, "load_inputs", load_inputs), patch.object(bank, "stock_sessions", capture_stock),
           patch.object(dashboard, "income_simulate", simulate), patch.object(dashboard, "append_dividends", return_value=[])):
         result = dashboard.income_replay(reference, market, end)
-    return config, coverage, result, details
+    return config, coverage, result, details, price_gaps
 
 
 def compare(reference, result):
@@ -458,6 +484,33 @@ def compare_study(snapshot, details):
     return {"available": True, "fields": checks}
 
 
+def result_fields(config, comparison, secondary, details):
+    """Label model-specific cash fields at the serialization boundary."""
+    names = {
+        "cash": "modeled_transfer_amount",
+        "cash_trade": "modeled_trade_cash_flow",
+        "dividend_cash": "legacy_income_balance",
+        "free_cash_used": "legacy_free_cash_used",
+        "income_used": "legacy_income_used",
+        "rebalanced_cash": "legacy_rebalanced_amount",
+    }
+
+    def rename(row):
+        return {names.get(key, key): value for key, value in row.items()}
+
+    return {
+        **details,
+        "summary": rename(details["summary"]),
+        "rebalance_events": [rename(row) for row in details["rebalance_events"]],
+        "rebalance_transfers": [rename(row) for row in details["rebalance_transfers"]],
+        "fills": [rename(row) for row in details["fills"]],
+        "stock_ledgers": {code: (path, rename(summary), [rename(row) for row in trades])
+                          for code, (path, summary, trades) in details["stock_ledgers"].items()},
+        "environment": environment(), "configuration": config, "balance_basis": BALANCE_BASIS,
+        "settled_cash_available": None, "comparison": comparison, "study_comparison": secondary,
+    }
+
+
 def freeze(args):
     root = args.legacy_root.resolve()
     snapshot = local_path(args.snapshot, "snapshot")
@@ -474,15 +527,17 @@ def freeze(args):
     end = reference["stats"]["income"]["end"]
     try:
         stage_inputs(root, snapshot, end, args.candidates)
-        config, coverage, result, _ = execute(snapshot, reference)
+        config, coverage, result, details, price_gaps = execute(snapshot, reference, diagnostic=True)
         if config["capital"] != reference["incomeInitialCapital"]:
             raise ValueError("historical starting capital differs from the legacy configuration")
         comparison = compare(reference, result)
-        if not comparison["match"]:
-            write_json(snapshot / "comparison.json", comparison)
-            raise InputGaps([gap("portfolio", end, field, "固定看板参考对拍不符")
-                             for field, check in comparison["fields"].items() if not check["match"]])
+        parity_gaps = [gap("portfolio", end, field, "固定看板参考对拍不符")
+                       for field, check in comparison["fields"].items() if not check["match"]]
         study_reference(root, snapshot, config["start"], end)
+        if price_gaps or parity_gaps:
+            diagnostic = result_fields(config, comparison, compare_study(snapshot, details), details)
+            write_json(snapshot / "pending-diagnostic.json", {"status": "pending_decision", **diagnostic})
+            raise InputGaps(price_gaps + parity_gaps)
     except (ValueError, RuntimeError, KeyError, TypeError, AssertionError) as exc:
         match = re.search(r"(sh\d{6})(?: (\d{4}-\d{2}-\d{2}))?", str(exc))
         gaps = exc.gaps if isinstance(exc, InputGaps) else [
@@ -505,6 +560,8 @@ def replay(args):
     output = local_path(args.output, "output")
     if snapshot == output or snapshot in output.parents:
         raise ValueError("output overlaps snapshot")
+    if (snapshot / "pending-gaps.json").exists():
+        raise ValueError("snapshot requires input decisions")
     manifest_file = snapshot / "manifest.json"
     manifest = json.loads(manifest_file.read_bytes())
     expected = dict(manifest)
@@ -520,14 +577,13 @@ def replay(args):
     if manifest["environment"] != environment() or manifest["comparison_tolerances"] != TOLERANCES:
         raise ValueError("replay environment or tolerances differ from snapshot")
     reference = json.loads((snapshot / "reference.json").read_bytes())
-    config, coverage, result, details = execute(snapshot, reference)
+    config, coverage, result, details, _ = execute(snapshot, reference)
     if config != manifest["configuration"] or coverage != manifest["coverage"]:
         raise ValueError("effective configuration or coverage differs from snapshot")
     comparison = compare(reference, result)
     secondary = compare_study(snapshot, details)
-    write_json(output, {"input_version": manifest["input_version"], "environment": environment(),
-                        "configuration": config, "balance_basis": BALANCE_BASIS, "settled_cash_available": None,
-                        "comparison": comparison, "study_comparison": secondary, **details})
+    write_json(output, {"input_version": manifest["input_version"],
+                        **result_fields(config, comparison, secondary, details)})
     return 0 if comparison["match"] else 1
 
 

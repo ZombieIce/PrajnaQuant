@@ -68,7 +68,7 @@ POC-0 已按获确认的拆分发布为 [13 张本地执行票据](../.scratch/p
 
 ## Current Phase
 
-十股股息兼容路径已通过本机固定输入复算和看板可用字段对拍。逐笔成交与持股数量由旧模拟器及独立账本复核生成，历史看板无对应明细。旧模型账面余额含除权日模拟股息，无法据此判断已结算可用现金。见[股息基线操作说明](local-income-baseline.md)。
+十股股息兼容路径已完成诊断复算及看板可用字段对拍。发现未分类缺价，固定输入待负责人裁决。逐笔成交与持股数量由旧模拟器及独立账本复核生成，历史看板无对应明细。旧模型账面余额含除权日模拟股息，无法据此判断已结算可用现金。见[股息基线操作说明](local-income-baseline.md)。
 
 单证券研究提交已接通 `prajna-freeze-selection` → `POST /api/v1/tasks/selections` → 既有 T01 持久任务：固定 DSV、确定性单成员 Universe、Rust 显式 D7 模拟默认值与 Fast Event 定义，要求 dataset-root/output 为同一 canonical root；保留旧身份和任务入口。使用 #350 正式 @2 固定状态证据合成发布产物，验证实际执行/Standard 持久结果与手算现金、成本及 NAV；旧 @1 缺状态表仍报错，未新增推导或放宽门禁。真实历史状态覆盖、PIT 与公司行动总回报未验证。详细边界见[冻结选择契约](contracts/single-security-selection.md)。 `/backtests` 已把该入口接到浏览器：选择已发布 DSV 与单只 ETF、显示 T01 持久 queued/running/succeeded/failed/interrupted 状态、成功后经 T04a 读取 Summary 与 Standard NAV/权益序列，任务 id 保留在 URL 并支持刷新/重开重读与“最近任务”重开；失败、中断和结果读取失败显示持久错误码，缺表/未完成不显示为成功或零交易。T04d 合成浏览器 E2E 覆盖成功、v1 缺状态失败、损坏结果表与旧 `/api/v1/runs` 兼容。单 ETF 趋势择时模板已复用 T10 严格 close > MA（相等为空仓），显式冻结复权输入/窗口、调仓频率、手数来源与可编辑成本；信号采用复权收盘、Fast Event 成交/估值保留原始价，预热无成交/绩效。择时与池内动量模板的 Full 保存实际成交、费用及延期审计，除上述模板外其余策略的保存级别限制保持；独立 10 Session 合成账本与生产浏览器提交/错误/读取/刷新验证通过，含现金、成本、受阻买卖和末尾 pending，原生定义同样复核全部参数就绪与冻结窗口，不足或不一致时拒绝，见[模板契约](single-etf-timing.md)。池内动量 Top-K 轮动模板已复用 Momentum 因子与 TopKRank/原有 Fast Event：`lookback`/`top_k`/`rebalance_every` 可配置，冻结逐成员复权版本与评价窗口（周期锚定评价起点），并列按 InstrumentId、合格不足 K 按实际数量等权、零候选全现金、受阻买腿留现金、黄金仅入选持有；池页面配置参数/成本并使用 Full 审计，合成手算与生产浏览器 E2E 已覆盖，见[模板契约](pool-momentum-topk.md)。真实历史数据、真实服务重启中断与浏览器性能未验证。
 
