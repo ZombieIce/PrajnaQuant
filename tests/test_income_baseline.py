@@ -127,6 +127,27 @@ class IncomeBaselineTest(unittest.TestCase):
         self.assertIn("预热", gaps[0]["impact"])
         self.assertIn("估值", gaps[1]["impact"])
 
+    def test_suspension_evidence_requires_explicit_matched_status_without_trades(self):
+        evidence = {"method": "a-stock-data 3.10.4 §6.5", "rows": [{
+            "code": CODE, "date": DAYS[1], "baostock": {
+                "code": "sh.601398", "date": DAYS[1], "tradestatus": "0", "volume": "0", "amount": "",
+            }, "tencent": None, "tdx": None,
+        }]}
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot = Path(directory)
+            file = snapshot / "suspension-evidence.json"
+            file.write_text(json.dumps(evidence))
+            self.assertEqual(baseline.suspension_days(snapshot), {(CODE, DAYS[1])})
+            evidence["rows"][0]["tencent"] = [DAYS[1], 10, 10, 10, 10, 1]
+            file.write_text(json.dumps(evidence))
+            with self.assertRaisesRegex(ValueError, "cross-source"):
+                baseline.suspension_days(snapshot)
+            evidence["rows"][0]["tencent"] = None
+            evidence["rows"][0]["baostock"]["tradestatus"] = ""
+            file.write_text(json.dumps(evidence))
+            with self.assertRaisesRegex(ValueError, "suspension evidence"):
+                baseline.suspension_days(snapshot)
+
     def test_result_labels_nested_legacy_balances_and_flows(self):
         details = {
             "summary": {"free_cash_used": 1},

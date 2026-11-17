@@ -21,7 +21,7 @@ from eternal_baseline import (
 
 REVISION = "d5d48c1"
 BALANCE_BASIS = "legacy_ex_date_income_credit"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 CODES = ("sh601288", "sh601398", "sh601939", "sh600015", "sh600036", "sh601998",
          "sh600900", "sh601318", "sh601369", "sh600941")
 CALENDAR = "sh000300"
@@ -237,6 +237,32 @@ def configuration(dashboard):
             "anchor": dashboard.INCOME_ANCHOR, "first_dates": dashboard.FIRST_DATES}
 
 
+def suspension_days(snapshot):
+    path = snapshot / "suspension-evidence.json"
+    if not path.is_file():
+        return set()
+    evidence = json.loads(path.read_bytes())
+    if evidence["method"] != "a-stock-data 3.10.4 §6.5":
+        raise ValueError("unsupported suspension evidence method")
+    days = set()
+    for item in evidence["rows"]:
+        code, day = item["code"], iso_day(item["date"], "suspension evidence")
+        key = code, day
+        record = item["baostock"]
+        if (key in days or code not in CODES or record["date"] != day
+                or record["code"] != f"{code[:2]}.{code[2:]}" or record["tradestatus"] != "0"):
+            raise ValueError("invalid or duplicate BaoStock suspension evidence")
+        if any(float(record[field] or 0) != 0 for field in ("volume", "amount")):
+            raise ValueError("BaoStock suspension record conflicts with recorded trades")
+        tencent, tdx = item["tencent"], item["tdx"]
+        if ((tencent is not None and (tencent[0] != day or float(tencent[5]) != 0))
+                or (tdx is not None and (tdx["date"] != day or tdx["market"] + tdx["code"] != code
+                                        or any(float(tdx[key]) != 0 for key in ("volume", "amount"))))):
+            raise ValueError("cross-source evidence conflicts with BaoStock suspension")
+        days.add((code, day))
+    return days
+
+
 def session_price_gaps(days, inputs, start):
     """Compare the exchange calendar with the tradable bars used by the legacy loader."""
     gaps = []
@@ -349,6 +375,7 @@ def execute(snapshot, reference, *, diagnostic=False):
     end = reference["stats"]["income"]["end"]
     market, coverage, loaded, details, accounts = {}, {}, {}, {}, {}
     price_gaps = []
+    suspended = suspension_days(snapshot)
     for code in (CALENDAR, *CODES):
         factor_rows = [] if code == CALENDAR else dashboard.load(root / "data/income_plan" / f"{code}_hfq.csv.gz")
         market[code] = [], factor_rows
@@ -356,7 +383,11 @@ def execute(snapshot, reference, *, diagnostic=False):
     def load_inputs(*args, **kwargs):
         days, inputs = original_load(*args, **kwargs)
         histories = dashboard.yield_history(days, inputs, 1)
-        price_gaps.extend(session_price_gaps(days, inputs, config["start"]))
+        detected = session_price_gaps(days, inputs, config["start"])
+        detected_keys = {(item["asset"], item["date"]) for item in detected}
+        if suspended - detected_keys:
+            raise ValueError("suspension evidence refers to days outside the detected gaps")
+        price_gaps.extend(item for item in detected if (item["asset"], item["date"]) not in suspended)
         try:
             coverage.update(check_warmup(days, inputs, config["start"], end, config["first_dates"], histories))
         except InputGaps as exc:
@@ -526,6 +557,9 @@ def freeze(args):
     write_json(snapshot / "reference.json", reference)
     end = reference["stats"]["income"]["end"]
     try:
+        if args.suspension_evidence is not None:
+            evidence = local_path(args.suspension_evidence, "suspension evidence")
+            shutil.copyfile(evidence, snapshot / "suspension-evidence.json")
         stage_inputs(root, snapshot, end, args.candidates)
         config, coverage, result, details, price_gaps = execute(snapshot, reference, diagnostic=True)
         if config["capital"] != reference["incomeInitialCapital"]:
@@ -596,6 +630,7 @@ def main():
         command.set_defaults(handler=handler)
     subcommands.choices["freeze"].add_argument("--legacy-root", type=Path, required=True)
     subcommands.choices["freeze"].add_argument("--candidates", type=Path)
+    subcommands.choices["freeze"].add_argument("--suspension-evidence", type=Path)
     subcommands.choices["replay"].add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     os.umask(0o077)

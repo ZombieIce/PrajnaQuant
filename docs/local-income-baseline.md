@@ -24,6 +24,12 @@ python3.12 scripts/income_baseline.py replay \
 - 如需核对候选补采，可按 a-stock-data 3.10.4 §4.4 将东财 `RPT_SHAREBONUS_DET` 的原始 JSON 保存为 `<带市场前缀的代码>.json`，并给 freeze 传入 `--candidates <私有候选目录>`。候选只筛选缺事件日期的实施记录，保留原始响应和字段，状态为待裁决。不得据通用辅助函数的单位注释直接变更旧派息账本。
 - 原证券组合、50 万元初始资金、90/10 仓位、周股息率分位、KDJ、陕鼓动力价格区间、银行校准及 `cash_then_sell` 按旧路径执行。股息与税费复投规则由同一旧模拟器执行。固定历史组合及分红可用性未做 PIT 证明。
 
+## 停牌核验
+
+可在 `freeze` 时传入 `--suspension-evidence <私有 JSON>` 保存逐日停牌证据。文件的 `method` 为 `a-stock-data 3.10.4 §6.5`，`rows` 每项含 `code`、`date`、`baostock` 原始字段和对应的 `tencent`、`tdx` 记录或 `null`。BaoStock 须明确返回相同证券与日期且 `tradestatus=0`，有实际成交的记录产生冲突。每条证据必须对应实际检测到的缺价，冻结清单绑定证据文件，离线回放再次校验。已核实停牌日继续跳过成交并沿用旧模型最近有效收盘估值。
+
+本机核验以腾讯未复权日线和能够取得的通达信盘后包交叉检查。盘后包缺失或请求失败本身只能说明没有取到该包。BaoStock 状态缺失或成交证据冲突仍须保留为待裁决缺口。
+
 ## 历史余额口径
 
 `legacy_book_balance` 是历史模型未投资账面余额，包含模型按除权日计入的股息。它只用于还原旧看板和核对权益。结果的 `settled_cash_available` 为 `null`，因为输入没有独立到账流水，无法区分已到账现金与应收。嵌套账本、校准划转及成交也使用 `legacy_income_balance`、`legacy_free_cash_used`、`modeled_transfer_amount` 和 `modeled_trade_cash_flow` 等模型字段。该结果不能用于可用资金判断。相同快照按其冻结适配器回放，当前适配器输出使用新版本口径。
