@@ -20,6 +20,8 @@ from eternal_baseline import (
 )
 
 REVISION = "d5d48c1"
+BALANCE_BASIS = "legacy_ex_date_income_credit"
+SCHEMA_VERSION = 2
 CODES = ("sh601288", "sh601398", "sh601939", "sh600015", "sh600036", "sh601998",
          "sh600900", "sh601318", "sh601369", "sh600941")
 CALENDAR = "sh000300"
@@ -61,7 +63,36 @@ def read_revision(root, filename):
     )
 
 
+def imported_sources(root, relative, node):
+    if isinstance(node, ast.Import):
+        names = [alias.name.split(".") for alias in node.names]
+        bases = (Path(), Path("strategy-dashboard"))
+    elif isinstance(node, ast.ImportFrom):
+        package = relative.parent
+        if node.level:
+            for _ in range(node.level - 1):
+                package = package.parent
+            bases = (package,)
+        else:
+            bases = (Path(), Path("strategy-dashboard"))
+        module = node.module.split(".") if node.module else []
+        names = [module, *[module + [alias.name] for alias in node.names if alias.name != "*"]]
+    else:
+        return
+    for base in bases:
+        for parts in names:
+            for depth in range(len(parts) + 1):
+                initializer = base.joinpath(*parts[:depth], "__init__.py")
+                if (root / initializer).is_file():
+                    yield initializer
+            if parts:
+                module_file = base.joinpath(*parts).with_suffix(".py")
+                if (root / module_file).is_file():
+                    yield module_file
+
+
 def archive_source(root, destination):
+    root = root.resolve()
     entry = Path("strategy-dashboard/daily_update.py")
     pending = {entry: read_revision(root, "daily_update.py")}
     archived = set()
@@ -72,17 +103,12 @@ def archive_source(root, destination):
         target.write_bytes(source)
         archived.add(relative)
         for node in ast.walk(ast.parse(source)):
-            if isinstance(node, ast.Import):
-                names = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-                names = [node.module]
-            else:
-                continue
-            for module in names:
-                candidate = Path(*module.split(".")).with_suffix(".py")
-                if (candidate not in archived and candidate not in pending and (root / candidate).is_file()
-                        and root in (root / candidate).resolve().parents):
-                    pending[candidate] = (root / candidate).read_bytes()
+            for candidate in imported_sources(root, relative, node):
+                if candidate in archived or candidate in pending:
+                    continue
+                if root not in (root / candidate).resolve().parents:
+                    raise ValueError("legacy source dependency points outside the source tree")
+                pending[candidate] = (root / candidate).read_bytes()
 
 
 def iso_day(value, field):
@@ -248,8 +274,9 @@ def ledger(days, daily, inputs, accounts, bank_trades, capital):
     fills.sort(key=lambda row: row["day"])
     for fill in fills:
         by_day[fill["day"]].append(fill)
-    cash = capital
+    legacy_balance = capital
     total_fees = 0.0
+    audited_daily = []
     for index, row in enumerate(daily):
         day = row["day"]
         gross = sum(path[index]["gross_dividend"] for path, _, _ in accounts.values())
@@ -260,11 +287,13 @@ def ledger(days, daily, inputs, accounts, bank_trades, capital):
                 raise ValueError("dividend differs from opening shares times cash per share")
         if not ledger_equal(tax, sum(fill["tax"] for fill in by_day[day])):
             raise ValueError("dividend tax ledger mismatch")
-        cash += gross - tax
+        # Reconcile the legacy simulation, which credits income at ex-date.
+        # No settlement calendar is available to reconstruct spendable cash.
+        legacy_balance += gross - tax
         for fill in by_day[day]:
             sign = -1 if fill["side"] in {"sell", "core_sell"} else 1
             holdings[fill["code"]] += sign * fill["shares"]
-            cash -= sign * fill["shares"] * fill["price"] + fill["fee"]
+            legacy_balance -= sign * fill["shares"] * fill["price"] + fill["fee"]
             total_fees += fill["fee"]
         stock_values = {}
         for code, (raw, *_) in inputs.items():
@@ -275,17 +304,19 @@ def ledger(days, daily, inputs, accounts, bank_trades, capital):
             if holdings[code] < 0 or not ledger_equal(equity, expected):
                 raise ValueError("holding ledger mismatch")
             stock_values[code] = equity
-        if not ledger_equal(cash + sum(stock_values.values()), row["value"]):
-            raise ValueError("cash plus marked shares differs from daily value")
-        if "cash" in row and (not ledger_equal(cash, row["cash"]) or any(
+        if not ledger_equal(legacy_balance + sum(stock_values.values()), row["value"]):
+            raise ValueError("legacy balance plus marked shares differs from daily value")
+        if "cash" in row and (not ledger_equal(legacy_balance, row["cash"]) or any(
             not ledger_equal(value, row["stock_values"][code]) for code, value in stock_values.items()
         )):
             raise ValueError("reconstructed allocations differ from legacy accounts")
-        row.update(cash=cash, stock_values=stock_values, holdings=holdings.copy(),
-                   marks={code: marks[code] for code in marks})
+        audited = dict(row, legacy_book_balance=legacy_balance, stock_values=stock_values, holdings=holdings.copy(),
+                       marks=marks.copy())
+        audited.pop("cash", None)
+        audited_daily.append(audited)
     if not ledger_equal(total_fees, sum(detail["fees"] for _, detail, _ in accounts.values())):
         raise ValueError("fee ledger mismatch")
-    return fills
+    return fills, audited_daily
 
 
 def execute(snapshot, reference):
@@ -317,8 +348,8 @@ def execute(snapshot, reference):
 
     def simulate(*args, **kwargs):
         summary, daily, events, trades = original_simulate(*args, **kwargs)
-        fills = ledger(args[0], daily, loaded, accounts, trades, config["capital"])
-        details.update(summary=summary, daily=daily, rebalance_events=events,
+        fills, audited_daily = ledger(args[0], daily, loaded, accounts, trades, config["capital"])
+        details.update(summary=summary, daily=audited_daily, rebalance_events=events,
                        rebalance_transfers=trades, fills=fills, stock_ledgers=accounts)
         return summary, daily, events, trades
 
@@ -363,7 +394,7 @@ def compare(reference, result):
             for k, value in expected.items())}
     unavailable = ["action_dates", "fills", "fees", "share_quantities"]
     if not reference.get("incomeAllocations"):
-        unavailable.extend(("cash", "stock_values"))
+        unavailable.extend(("legacy_book_balance", "stock_values"))
     return {"fields": checked, "reference_unavailable": unavailable,
             "match": all(field["match"] for field in checked.values())}
 
@@ -459,7 +490,7 @@ def freeze(args):
                 "legacy_input_or_ledger", str(exc))]
         write_json(snapshot / "pending-gaps.json", {"status": "pending_decision", "gaps": gaps})
         return 2
-    manifest = {"schema_version": 1, "strategy": "income", "dashboard_revision": REVISION,
+    manifest = {"schema_version": SCHEMA_VERSION, "strategy": "income", "balance_basis": BALANCE_BASIS, "dashboard_revision": REVISION,
                 "source_provenance": "dashboard files from Git; adjacent legacy modules frozen from working files",
                 "environment": environment(), "configuration": config, "coverage": coverage, "end": end,
                 "method": "a-stock-data 3.10.4", "volume_unit": "Tencent raw lots",
@@ -479,7 +510,8 @@ def replay(args):
     expected = dict(manifest)
     actual_files = digest_files(snapshot)
     del actual_files["manifest.json"]
-    if (manifest["schema_version"] != 1 or manifest["strategy"] != "income"
+    if (manifest["schema_version"] != SCHEMA_VERSION or manifest["strategy"] != "income"
+            or manifest["balance_basis"] != BALANCE_BASIS
             or seal_manifest(expected) != manifest or manifest["files"] != actual_files):
         raise ValueError("snapshot integrity check failed")
     for file in (Path(__file__), Path(__file__).with_name("eternal_baseline.py")):
@@ -494,7 +526,8 @@ def replay(args):
     comparison = compare(reference, result)
     secondary = compare_study(snapshot, details)
     write_json(output, {"input_version": manifest["input_version"], "environment": environment(),
-                        "configuration": config, "comparison": comparison, "study_comparison": secondary, **details})
+                        "configuration": config, "balance_basis": BALANCE_BASIS, "settled_cash_available": None,
+                        "comparison": comparison, "study_comparison": secondary, **details})
     return 0 if comparison["match"] else 1
 
 

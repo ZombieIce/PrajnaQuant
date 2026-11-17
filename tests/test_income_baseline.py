@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 import tempfile
@@ -57,13 +58,55 @@ class IncomeBaselineTest(unittest.TestCase):
         trades = [{"day": DAYS[0], "side": "core_buy", "shares": 100, "price": 10, "cash_trade": -1005, "tax": 0},
                   {"day": DAYS[1], "side": "sell", "shares": 100, "price": 11, "cash_trade": 1094, "tax": 10}]
         accounts = {CODE: (path, {"fees": 11}, trades)}
-        fills = baseline.ledger(DAYS, daily, inputs, accounts, [], 2000)
+        fills, audited = baseline.ledger(DAYS, daily, inputs, accounts, [], 2000)
         self.assertEqual([fill["fee"] for fill in fills], [5, 6])
-        self.assertEqual([row["cash"] for row in daily], [995, 2129])
-        self.assertEqual([row["holdings"][CODE] for row in daily], [100, 0])
+        self.assertEqual([row["legacy_book_balance"] for row in audited], [995, 2129])
+        self.assertEqual([row["holdings"][CODE] for row in audited], [100, 0])
         path[1]["dividend_tax"] = 0
         with self.assertRaisesRegex(ValueError, "dividend tax"):
             baseline.ledger(DAYS, daily, inputs, accounts, [], 2000)
+
+    def test_ex_date_income_funding_is_reported_as_legacy_book_balance(self):
+        daily = [{"day": DAYS[0], "value": 1000}, {"day": DAYS[1], "value": 2000,
+                 "cash": 0, "stock_values": {CODE: 2000}}]
+        raw = dict.fromkeys(DAYS, (10, 10))
+        inputs = {CODE: (raw, {DAYS[1]: 10}, {}, {}, raw)}
+        path = [{"day": DAYS[0], "equity": 1000, "gross_dividend": 0, "dividend_tax": 0},
+                {"day": DAYS[1], "equity": 2000, "gross_dividend": 1000, "dividend_tax": 0}]
+        trades = [{"day": DAYS[0], "side": "core_buy", "shares": 100, "price": 10, "cash_trade": -1000, "tax": 0},
+                  {"day": DAYS[1], "side": "core_buy", "shares": 100, "price": 10, "cash_trade": -1000, "tax": 0}]
+        _, audited = baseline.ledger(DAYS, daily, inputs, {CODE: (path, {"fees": 0}, trades)}, [], 1000)
+        self.assertEqual(audited[1]["legacy_book_balance"], 0)
+        self.assertNotIn("cash", audited[1])
+        self.assertNotIn("available_cash", audited[1])
+        self.assertEqual(daily[1]["cash"], 0)
+
+    def test_archives_relative_imports_and_package_initializers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "source"
+            files = {
+                "book/__init__.py": "from .registry import marker",
+                "book/registry.py": "marker = 0",
+                "book/ledger/__init__.py": "from .. import registry",
+                "book/ledger/check.py": "from .fees import fee",
+                "book/ledger/fees.py": "fee = 1",
+                "book/unused.py": "",
+            }
+            for name, source in files.items():
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(source)
+            dest = Path(directory) / "archive"
+            with patch.object(baseline, "read_revision", return_value=b"from book.ledger import check"):
+                baseline.archive_source(root, dest)
+            expected = (set(files) - {"book/unused.py"}) | {"strategy-dashboard/daily_update.py"}
+            self.assertEqual(set(baseline.digest_files(dest)), expected)
+            result = subprocess.run(
+                [sys.executable, "-B", "-I", "-c",
+                 "import sys; sys.path.insert(0, sys.argv[1]); from book.ledger import check; assert check.fee == 1",
+                 dest], capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_reference_comparison_checks_date_axes_and_lists_unavailable_fields(self):
         stats = {"start": DAYS[0], "end": DAYS[1], "cagr": .1}
@@ -71,8 +114,36 @@ class IncomeBaselineTest(unittest.TestCase):
         matching = (reference["history"]["income"], stats, [], [], {})
         comparison = baseline.compare(reference, matching)
         self.assertTrue(comparison["match"])
-        self.assertIn("cash", comparison["reference_unavailable"])
+        self.assertIn("legacy_book_balance", comparison["reference_unavailable"])
         self.assertFalse(baseline.compare(reference, ([[DAYS[1], 1]], stats, [], [], {}))["match"])
+
+    def test_cli_freeze_persists_pending_missing_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dashboard = root / "legacy" / "strategy-dashboard"
+            dashboard.mkdir(parents=True)
+            (dashboard / "daily_update.py").write_text("# synthetic legacy entry")
+            (dashboard / "data.json").write_text(json.dumps({
+                "history": {"income": [[DAYS[1], 1.0]]},
+                "stats": {"income": {"start": DAYS[1], "end": DAYS[1]}},
+            }))
+            for command in (
+                ["init", "-q"], ["add", "daily_update.py", "data.json"],
+                ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                 "-c", "commit.gpgsign=false", "commit", "-qm", "synthetic dashboard"],
+                ["branch", baseline.REVISION],
+            ):
+                subprocess.run(["git", "-C", dashboard, *command], check=True, capture_output=True)
+            snapshot = root / "snapshot"
+            result = subprocess.run([
+                sys.executable, str(ROOT / "scripts/income_baseline.py"), "freeze",
+                "--legacy-root", dashboard.parent, "--snapshot", snapshot,
+            ], capture_output=True)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            pending = json.loads((snapshot / "pending-gaps.json").read_bytes())
+            self.assertEqual(pending["status"], "pending_decision")
+            self.assertIn(baseline.CALENDAR, {gap["asset"] for gap in pending["gaps"]})
+            self.assertFalse((snapshot / "manifest.json").exists())
 
     def test_cli_rejects_pending_or_unsealed_snapshot_without_output(self):
         with tempfile.TemporaryDirectory() as directory:
