@@ -1,11 +1,13 @@
 import json
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from zipfile import ZipFile
 
 from unittest.mock import patch
 
@@ -135,10 +137,11 @@ class IncomeBaselineTest(unittest.TestCase):
                 "code": "sh.601398", "date": DAYS[1], "tradestatus": "0", "volume": "0", "amount": "",
             }, "tencent": None, "tdx": None,
         }]}
-        raw = directory / "batch" / "response.json"
+        raw = directory / "batch" / f"baostock-{CODE}.json"
         raw.parent.mkdir(parents=True)
-        raw.write_text(json.dumps(evidence["rows"][0]["baostock"]))
-        evidence["sources"] = {"batch/response.json": baseline.sha256_file(raw)}
+        record = evidence["rows"][0]["baostock"]
+        raw.write_text(json.dumps({"error_code": "0", "fields": list(record), "rows": [list(record.values())]}))
+        evidence["sources"] = {f"batch/{raw.name}": baseline.sha256_file(raw)}
         file = directory / "evidence.json"
         file.write_text(json.dumps(evidence))
         return file, evidence
@@ -153,13 +156,73 @@ class IncomeBaselineTest(unittest.TestCase):
             self.assertEqual(baseline.suspension_days(snapshot), {(CODE, DAYS[1])})
             evidence["rows"][0]["tencent"] = [DAYS[1], 10, 10, 10, 10, 1]
             file.write_text(json.dumps(evidence))
-            with self.assertRaisesRegex(ValueError, "cross-source"):
+            with self.assertRaisesRegex(ValueError, "does not match archived"):
                 baseline.suspension_days(snapshot)
             evidence["rows"][0]["tencent"] = None
             evidence["rows"][0]["baostock"]["tradestatus"] = ""
             file.write_text(json.dumps(evidence))
-            with self.assertRaisesRegex(ValueError, "suspension evidence"):
+            with self.assertRaisesRegex(ValueError, "does not match archived"):
                 baseline.suspension_days(snapshot)
+
+    def test_derived_suspension_cannot_override_a_successful_baostock_response(self):
+        for discrepancy in ("traded", "absent", "unsuccessful"):
+            with self.subTest(discrepancy=discrepancy), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                evidence_file, evidence = self.make_suspension_evidence(root / "original")
+                relative = next(iter(evidence["sources"]))
+                raw = evidence_file.parent / relative
+                payload = json.loads(raw.read_bytes())
+                if discrepancy == "traded":
+                    payload["rows"][0][payload["fields"].index("tradestatus")] = "1"
+                    payload["rows"][0][payload["fields"].index("volume")] = "100"
+                elif discrepancy == "absent":
+                    payload["rows"] = []
+                else:
+                    payload["error_code"] = "error"
+                raw.write_text(json.dumps(payload))
+                evidence["sources"][relative] = baseline.sha256_file(raw)
+                evidence_file.write_text(json.dumps(evidence))
+                snapshot = root / "snapshot"
+                baseline.archive_suspension_evidence(evidence_file, snapshot)
+                with self.assertRaisesRegex(ValueError, "archived source|BaoStock source"):
+                    baseline.suspension_days(snapshot)
+
+    def test_derived_suspension_cannot_hide_archived_cross_source_trades(self):
+        day = DAYS[1]
+        for provider in ("tencent", "tdx"):
+            with self.subTest(provider=provider), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                evidence_file, evidence = self.make_suspension_evidence(root / "original")
+                if provider == "tencent":
+                    raw = evidence_file.parent / f"tencent-{CODE}-{day}-0.json"
+                    raw.write_text(json.dumps({"code": 0, "data": {CODE: {"day": [[day, 10, 10, 10, 10, 5]]}}}))
+                else:
+                    ymd = day.replace("-", "")
+                    raw = evidence_file.parent / f"tdx-{ymd}.zip"
+                    code_table = bytearray(150)
+                    code_table[:6] = CODE[2:].encode("ascii")
+                    code_table[40:44] = b"Test"
+                    bars = bytearray(512)
+                    struct.pack_into("<5d", bars, 4, 10, 10, 10, 10, 10)
+                    struct.pack_into("<Q", bars, 56, 100)
+                    struct.pack_into("<d", bars, 72, 1000)
+                    with ZipFile(raw, "w") as archive:
+                        archive.writestr(f"sh{ymd[2:]}.cod", code_table)
+                        archive.writestr(f"sh{ymd[2:]}.md1", bars)
+                evidence["sources"][raw.name] = baseline.sha256_file(raw)
+                evidence_file.write_text(json.dumps(evidence))
+                snapshot = root / "snapshot"
+                baseline.archive_suspension_evidence(evidence_file, snapshot)
+                with self.assertRaisesRegex(ValueError, "does not match archived"):
+                    baseline.suspension_days(snapshot)
+                # Even a faithfully derived row may not classify a day with trades as suspended.
+                parser = baseline.raw_tencent(raw, CODE) if provider == "tencent" else baseline.raw_tdx(
+                    raw, ymd, {(CODE, day)},
+                )
+                evidence["rows"][0][provider] = next(parser)[1]
+                (snapshot / "suspension-evidence.json").write_text(json.dumps(evidence))
+                with self.assertRaisesRegex(ValueError, "cross-source evidence conflicts"):
+                    baseline.suspension_days(snapshot)
 
     def test_replay_binds_original_suspension_sources_after_snapshot_move(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -192,7 +255,7 @@ class IncomeBaselineTest(unittest.TestCase):
                 self.assertEqual(baseline.replay(args), 0)
                 self.assertTrue(args.output.is_file())
                 args.output.unlink()
-                raw = relocated / "suspension-sources/batch/response.json"
+                raw = relocated / "suspension-sources" / "batch" / f"baostock-{CODE}.json"
                 raw.write_text("tampered")
                 with self.assertRaisesRegex(ValueError, "snapshot integrity"):
                     baseline.replay(args)

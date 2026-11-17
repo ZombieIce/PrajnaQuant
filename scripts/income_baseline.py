@@ -8,8 +8,10 @@ import os
 import platform
 import re
 import shutil
+import struct
 import subprocess
 import sys
+from zipfile import BadZipFile, ZipFile
 from collections import defaultdict
 from pathlib import Path
 from unittest.mock import patch
@@ -21,7 +23,7 @@ from eternal_baseline import (
 
 REVISION = "d5d48c1"
 BALANCE_BASIS = "legacy_ex_date_income_credit"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 CODES = ("sh601288", "sh601398", "sh601939", "sh600015", "sh600036", "sh601998",
          "sh600900", "sh601318", "sh601369", "sh600941")
 CALENDAR = "sh000300"
@@ -268,19 +270,115 @@ def archive_suspension_evidence(evidence_path, snapshot):
     (snapshot / "suspension-evidence.json").write_bytes(payload)
 
 
+def raw_baostock(source, code):
+    payload = json.loads(source.read_bytes())
+    fields = payload["fields"]
+    required = {"date", "code", "tradestatus", "volume", "amount"}
+    if (payload["error_code"] != "0" or not isinstance(fields, list)
+            or not required.issubset(fields) or len(fields) != len(set(fields))
+            or not isinstance(payload["rows"], list)):
+        raise ValueError("invalid BaoStock source response")
+    for row in payload["rows"]:
+        if not isinstance(row, list) or len(row) != len(fields):
+            raise ValueError("invalid BaoStock source row")
+        record = dict(zip(fields, row))
+        if record["code"] != f"{code[:2]}.{code[2:]}":
+            raise ValueError("unexpected security in BaoStock source")
+        yield (code, iso_day(record["date"], "BaoStock source date")), record
+
+
+def raw_tencent(source, code):
+    payload = json.loads(source.read_bytes())
+    if payload["code"] != 0 or not isinstance(payload["data"][code]["day"], list):
+        raise ValueError("invalid Tencent source response")
+    for row in payload["data"][code]["day"]:
+        if not isinstance(row, list) or len(row) < 6:
+            raise ValueError("invalid Tencent source row")
+        yield (code, iso_day(row[0], "Tencent source date")), row
+
+
+def raw_tdx(source, ymd, keys):
+    day = iso_day(f"{ymd[:4]}-{ymd[4:6]}-{ymd[6:]}", "TDX source date")
+    try:
+        with ZipFile(source) as archive:
+            codes = archive.read(f"sh{ymd[2:]}.cod")
+            bars = archive.read(f"sh{ymd[2:]}.md1")
+    except (BadZipFile, KeyError) as exc:
+        raise ValueError("invalid Shanghai TDX source package") from exc
+    if not codes or len(codes) % 150 or len(bars) % 512 or len(codes) // 150 != len(bars) // 512:
+        raise ValueError("invalid Shanghai TDX source table size")
+    seen_codes, seen_slots = set(), set()
+    for offset in range(0, len(codes), 150):
+        ticker = codes[offset:offset + 6].decode("ascii")
+        slot, = struct.unpack_from("<H", codes, offset + 32)
+        if (not re.fullmatch(r"[0-9]{6}", ticker) or slot >= len(bars) // 512
+                or ticker in seen_codes or slot in seen_slots):
+            raise ValueError("invalid security index in Shanghai TDX source")
+        seen_codes.add(ticker)
+        seen_slots.add(slot)
+        key = ("sh" + ticker, day)
+        if key not in keys:
+            continue
+        start = slot * 512
+        prev, opening, high, low, close = struct.unpack_from("<5d", bars, start + 4)
+        volume, = struct.unpack_from("<Q", bars, start + 56)
+        amount, = struct.unpack_from("<d", bars, start + 72)
+        if not all(math.isfinite(value) for value in (prev, opening, high, low, close, amount)):
+            raise ValueError("invalid Shanghai TDX source prices or turnover")
+        if close <= 0 and not (volume or amount):
+            continue
+        name = codes[offset + 40:offset + 72].split(b"\0")[0].decode("gbk").strip()
+        yield key, {"date": day, "market": "sh", "code": ticker, "name": name,
+                    "prev_close": round(prev, 4), "open": round(opening, 4),
+                    "high": round(high, 4), "low": round(low, 4), "close": round(close, 4),
+                    "volume": volume, "amount": round(amount, 2)}
+
+
+def suspension_source_records(sources, keys):
+    records = {"baostock": {}, "tencent": {}, "tdx": {}}
+    for source in sources.values():
+        if match := re.fullmatch(r"baostock-(sh[0-9]{6})\.json", source.name):
+            provider, rows = "baostock", raw_baostock(source, match[1])
+        elif match := re.fullmatch(r"tencent-(sh[0-9]{6})-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+\.json", source.name):
+            provider, rows = "tencent", raw_tencent(source, match[1])
+        elif match := re.fullmatch(r"tdx-([0-9]{8})\.zip", source.name):
+            provider, rows = "tdx", raw_tdx(source, match[1], keys)
+        elif source.name in {"classifications.json", "final-classifications.json", "requests.json", "tdx-checks.json"}:
+            continue
+        else:
+            raise ValueError("unrecognized suspension source artifact")
+        index = records[provider]
+        for key, row in rows:
+            if key in keys:
+                if key in index and index[key] != row:
+                    raise ValueError("conflicting duplicate raw suspension source records")
+                index[key] = row
+    return records
+
+
 def suspension_days(snapshot):
     path = snapshot / "suspension-evidence.json"
     if not path.is_file():
         return set()
     evidence = json.loads(path.read_bytes())
-    verified_suspension_sources(snapshot / "suspension-sources", evidence)
+    directory = snapshot / "suspension-sources"
+    sources = verified_suspension_sources(directory, evidence)
+    actual = {path.relative_to(directory).as_posix() for path in directory.rglob("*") if path.is_file()}
+    if actual != sources.keys():
+        raise ValueError("archived suspension sources do not match the evidence inventory")
+    rows = evidence["rows"]
+    records = suspension_source_records(sources, {(row["code"], row["date"]) for row in rows})
     if evidence["method"] != "a-stock-data 3.10.4 §6.5":
         raise ValueError("unsupported suspension evidence method")
     days = set()
-    for item in evidence["rows"]:
+    for item in rows:
         code, day = item["code"], iso_day(item["date"], "suspension evidence")
         key = code, day
-        record = item["baostock"]
+        if records["baostock"].get(key) is None or any(
+            index.get(key) != item[provider] for provider, index in records.items()
+        ):
+            raise ValueError("derived suspension row does not match archived source records")
+        record = records["baostock"][key]
         if (key in days or code not in CODES or record["date"] != day
                 or record["code"] != f"{code[:2]}.{code[2:]}" or record["tradestatus"] != "0"):
             raise ValueError("invalid or duplicate BaoStock suspension evidence")
