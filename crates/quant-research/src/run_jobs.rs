@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     ffi::OsString,
     fs,
     io::{Read, Write},
@@ -57,6 +57,10 @@ const MAX_SNAPSHOT_ROWS: i64 = 2_000_000;
 const MAX_UNIVERSE_INSTRUMENTS: usize = 100;
 const EXPERIMENT_TASK_TYPE: &str = "prajna_experiment";
 const EXPERIMENT_TASK_VERSION: u32 = 1;
+const ETERNAL_COMPAT_TASK_TYPE: &str = "prajna_eternal_compat";
+const ETERNAL_COMPAT_TASK_VERSION: u32 = 1;
+const ETERNAL_COMPAT_ASSETS: [&str; 5] =
+    ["sh511260", "sh518880", "sh515080", "sh513300", "sz159612"];
 const COMPARISON_TASK_TYPE: &str = "prajna_comparison";
 const DEFAULT_RESULT_LEVEL: &str = "summary";
 
@@ -162,6 +166,8 @@ pub struct ExperimentTask {
     pub process_group_id: Option<u32>,
     #[serde(default)]
     pub process_group_generation: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_config: Option<Value>,
     pub result: Option<Value>,
     pub error: Option<RunError>,
 }
@@ -209,6 +215,7 @@ struct Store {
     tasks: HashMap<Uuid, ExperimentTask>,
     idempotency: HashMap<String, (String, Uuid)>,
     task_idempotency: HashMap<String, (String, Uuid)>,
+    eternal_compat_idempotency: HashMap<String, (String, Uuid)>,
     queue: VecDeque<QueueItem>,
     active: bool,
 }
@@ -292,6 +299,30 @@ impl RunJobApi {
                 get(list_experiment_tasks).post(submit_experiment_task),
             )
             .route("/api/v1/tasks/experiments/{id}", get(get_experiment_task))
+            .route(
+                "/api/v1/tasks/eternal-compat",
+                post(submit_eternal_compat_task),
+            )
+            .route(
+                "/api/v1/tasks/eternal-compat/{id}",
+                get(get_eternal_compat_task),
+            )
+            .with_state(self)
+    }
+    pub fn eternal_compat_result_router(self, authority: String) -> Router {
+        Router::new()
+            .route(
+                "/api/v1/tasks/eternal-compat/{id}/result",
+                get(get_eternal_compat_result),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                super::dataset_api::LocalPage::new(
+                    authority,
+                    "compat_result_origin_forbidden",
+                    "Eternal compatibility results are restricted to the configured local workbench origin.",
+                ),
+                super::dataset_api::local_page,
+            ))
             .with_state(self)
     }
     pub fn result_router(self, authority: String) -> Router {
@@ -361,14 +392,18 @@ impl RunJobApi {
             let Ok(mut task) = serde_json::from_slice::<ExperimentTask>(&bytes) else {
                 continue;
             };
-            if !matches!(
-                task.task_type.as_str(),
-                EXPERIMENT_TASK_TYPE
-                    | COMPARISON_TASK_TYPE
-                    | "prajna_momentum"
-                    | "prajna_pool_update"
-            ) || task.task_version != EXPERIMENT_TASK_VERSION
-            {
+            let supported_version = if task.task_type == ETERNAL_COMPAT_TASK_TYPE {
+                task.task_version == ETERNAL_COMPAT_TASK_VERSION
+            } else {
+                matches!(
+                    task.task_type.as_str(),
+                    EXPERIMENT_TASK_TYPE
+                        | COMPARISON_TASK_TYPE
+                        | "prajna_momentum"
+                        | "prajna_pool_update"
+                ) && task.task_version == EXPERIMENT_TASK_VERSION
+            };
+            if !supported_version {
                 continue;
             }
             let process_group_generation = task.process_group_generation;
@@ -408,7 +443,12 @@ impl RunJobApi {
                 task.error = Some(error);
                 task.updated_at = chrono::Utc::now().to_rfc3339();
             }
-            store.task_idempotency.insert(
+            let index = if task.task_type == ETERNAL_COMPAT_TASK_TYPE {
+                &mut store.eternal_compat_idempotency
+            } else {
+                &mut store.task_idempotency
+            };
+            index.insert(
                 task.idempotency_key.clone(),
                 (task.request_sha256.clone(), task.task_id),
             );
@@ -531,12 +571,23 @@ impl RunJobApi {
         validate_experiment_task_request(&request)?;
         let request_hash = canonical_experiment_task_hash(&request)?;
         let task_result_level = result_level.unwrap_or_else(default_result_level);
+        let task_type = task_type(&request.definition);
+        let effective_config = (task_type == ETERNAL_COMPAT_TASK_TYPE)
+            .then(|| validate_eternal_compat_definition(&request.definition))
+            .transpose()?;
         let mut store = self
             .0
             .gate
             .lock()
             .map_err(|_| ApiFailure::internal("run store lock poisoned"))?;
-        if let Some((old_hash, task_id)) = store.task_idempotency.get(&request.idempotency_key) {
+        let existing = if task_type == ETERNAL_COMPAT_TASK_TYPE {
+            store
+                .eternal_compat_idempotency
+                .get(&request.idempotency_key)
+        } else {
+            store.task_idempotency.get(&request.idempotency_key)
+        };
+        if let Some((old_hash, task_id)) = existing {
             if old_hash != &request_hash {
                 return Err(ApiFailure::new(
                     StatusCode::CONFLICT,
@@ -562,8 +613,12 @@ impl RunJobApi {
         let now = chrono::Utc::now().to_rfc3339();
         let task = ExperimentTask {
             task_id: Uuid::new_v4(),
-            task_type: task_type(&request.definition).into(),
-            task_version: EXPERIMENT_TASK_VERSION,
+            task_type: task_type.into(),
+            task_version: if task_type == ETERNAL_COMPAT_TASK_TYPE {
+                ETERNAL_COMPAT_TASK_VERSION
+            } else {
+                EXPERIMENT_TASK_VERSION
+            },
             status: ExperimentTaskStatus::Queued,
             stage: "queued".into(),
             created_at: now.clone(),
@@ -573,14 +628,21 @@ impl RunJobApi {
             result_level: task_result_level,
             process_group_id: None,
             process_group_generation: None,
+            effective_config,
             result: None,
             error: None,
         };
         persist_experiment_request(&self.0.output, task.task_id, &request)?;
         persist_experiment_task(&self.0.output, &task)?;
-        store
-            .task_idempotency
-            .insert(request.idempotency_key, (request_hash, task.task_id));
+        if task_type == ETERNAL_COMPAT_TASK_TYPE {
+            store
+                .eternal_compat_idempotency
+                .insert(request.idempotency_key, (request_hash, task.task_id));
+        } else {
+            store
+                .task_idempotency
+                .insert(request.idempotency_key, (request_hash, task.task_id));
+        }
         store
             .queue
             .push_back(QueueItem::ExperimentTask(task.task_id));
@@ -842,7 +904,24 @@ impl RunJobApi {
         self.0.gate.lock().ok()?.jobs.get(&id).cloned()
     }
     fn get_experiment_task(&self, id: Uuid) -> Option<ExperimentTask> {
-        self.0.gate.lock().ok()?.tasks.get(&id).cloned()
+        self.0
+            .gate
+            .lock()
+            .ok()?
+            .tasks
+            .get(&id)
+            .filter(|task| task.task_type != ETERNAL_COMPAT_TASK_TYPE)
+            .cloned()
+    }
+    fn get_eternal_compat_task(&self, id: Uuid) -> Option<ExperimentTask> {
+        self.0
+            .gate
+            .lock()
+            .ok()?
+            .tasks
+            .get(&id)
+            .filter(|task| task.task_type == ETERNAL_COMPAT_TASK_TYPE)
+            .cloned()
     }
     fn list(&self) -> Vec<RunJob> {
         let mut jobs = self
@@ -860,7 +939,13 @@ impl RunJobApi {
             .0
             .gate
             .lock()
-            .map(|g| g.tasks.values().cloned().collect::<Vec<_>>())
+            .map(|g| {
+                g.tasks
+                    .values()
+                    .filter(|task| task.task_type != ETERNAL_COMPAT_TASK_TYPE)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
         tasks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         tasks.truncate(100);
@@ -896,7 +981,9 @@ impl RunJobApi {
                 QueueItem::ExperimentTask(id) => {
                     let task = store.tasks.get_mut(&id).expect("queued experiment task");
                     task.status = ExperimentTaskStatus::Running;
-                    task.stage = if task.task_type == "prajna_pool_update" {
+                    task.stage = if task.task_type == ETERNAL_COMPAT_TASK_TYPE {
+                        "starting_compatibility_runner"
+                    } else if task.task_type == "prajna_pool_update" {
                         "starting_pool_update_cli"
                     } else if task.task_type == "prajna_momentum" {
                         "starting_momentum_cli"
@@ -994,6 +1081,56 @@ impl RunJobApi {
             ));
         }
 
+        if task.task_type == ETERNAL_COMPAT_TASK_TYPE {
+            let current_config =
+                validate_eternal_compat_definition(&request.definition).map_err(|error| error.0)?;
+            let effective_config = task.effective_config.as_ref().ok_or_else(|| {
+                run_error(
+                    "compat_config_missing",
+                    "persisted effective compatibility configuration is missing",
+                )
+            })?;
+            if effective_config != &current_config {
+                return Err(run_error(
+                    "compat_config_changed",
+                    "persisted effective configuration differs from the frozen request",
+                ));
+            }
+            let snapshot_path = request.definition["snapshot_path"]
+                .as_str()
+                .ok_or_else(|| {
+                    run_error(
+                        "compat_input_reference_missing",
+                        "persisted compatibility snapshot reference is missing",
+                    )
+                })?;
+            let runner_input = json!({
+                "task_id": task.task_id.to_string(),
+                "snapshot_path": snapshot_path,
+                "config": effective_config,
+            });
+            let input_path = directory.join("compat-input.json");
+            let bytes = serde_json::to_vec_pretty(&runner_input)
+                .map_err(|error| run_error("compat_input_persist_failed", &error.to_string()))?;
+            atomic_write(&input_path, &bytes)
+                .map_err(|error| run_error("compat_input_persist_failed", &error.to_string()))?;
+            let runner =
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/eternal_compat.py");
+            return self.execute_experiment_cli(
+                task,
+                &directory,
+                vec![
+                    runner.into_os_string(),
+                    OsString::from("run"),
+                    OsString::from("--request"),
+                    input_path.into_os_string(),
+                    OsString::from("--output"),
+                    directory.join("compat-result.json").into_os_string(),
+                ],
+                "compat.stdout",
+            );
+        }
+
         if matches!(
             task.task_type.as_str(),
             "prajna_momentum" | "prajna_pool_update"
@@ -1067,7 +1204,12 @@ impl RunJobApi {
         let stdout = fs::File::create(&stdout_path)
             .map_err(|error| run_error("task_output_create_failed", &error.to_string()))?;
         let process_generation = Uuid::new_v4();
-        let cli = if task.task_type == "prajna_pool_update" {
+        let compatibility_task = task.task_type == ETERNAL_COMPAT_TASK_TYPE;
+        let cli = if compatibility_task {
+            std::env::var_os("PRAJNA_ETERNAL_COMPAT_PYTHON")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("python3.12"))
+        } else if task.task_type == "prajna_pool_update" {
             std::env::var_os("PRAJNA_POOL_UPDATE_CLI")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| self.0.experiment_cli.with_file_name("prajna-pool-update"))
@@ -1090,7 +1232,16 @@ impl RunJobApi {
             process_generation,
             self.0.process_inspector.clone(),
         )
-        .map_err(|error| run_error("experiment_cli_spawn_failed", &error.to_string()))?;
+        .map_err(|error| {
+            run_error(
+                if compatibility_task {
+                    "compat_runner_spawn_failed"
+                } else {
+                    "experiment_cli_spawn_failed"
+                },
+                &error.to_string(),
+            )
+        })?;
         let group_id = process.process_group_id();
         let stderr = process.take_stderr().ok_or_else(|| {
             run_error(
@@ -1132,6 +1283,9 @@ impl RunJobApi {
         self.set_experiment_process_group(task.task_id, None, None)?;
         let stderr = stderr?;
         if let Some(error) = experiment_cli_error(&wait.status, &stderr) {
+            if compatibility_task {
+                return Err(eternal_compat_cli_error(&wait.status, &stderr));
+            }
             if matches!(
                 task.task_type.as_str(),
                 "prajna_momentum" | "prajna_pool_update"
@@ -1180,6 +1334,88 @@ impl RunJobApi {
                 )
             })?;
             result = json!({"report_id":id});
+        } else if compatibility_task {
+            let Some(compat_run_id) = result.get("compat_run_id").and_then(Value::as_str) else {
+                return Err(run_error(
+                    "compat_runner_identity_missing",
+                    "compatibility runner did not return a run identity",
+                ));
+            };
+            let Some(expected_sha256) = result.get("result_sha256").and_then(Value::as_str) else {
+                return Err(run_error(
+                    "compat_runner_result_hash_missing",
+                    "compatibility runner did not return a result digest",
+                ));
+            };
+            let result_path = directory.join("compat-result.json");
+            let result_bytes = fs::read(&result_path)
+                .map_err(|error| run_error("compat_result_missing", &error.to_string()))?;
+            let actual_sha256 = format!("{:x}", Sha256::digest(&result_bytes));
+            if actual_sha256 != expected_sha256 {
+                return Err(run_error(
+                    "compat_result_hash_mismatch",
+                    "compatibility runner result digest does not match persisted output",
+                ));
+            }
+            let persisted: Value = serde_json::from_slice(&result_bytes)
+                .map_err(|error| run_error("compat_result_invalid", &error.to_string()))?;
+            let expected_task_id = task.task_id.to_string();
+            let input_version =
+                persisted["identity"]["input_version"]
+                    .as_str()
+                    .ok_or_else(|| {
+                        run_error(
+                            "compat_result_identity_missing",
+                            "compatibility result has no frozen input version",
+                        )
+                    })?;
+            let effective_config = task.effective_config.as_ref().ok_or_else(|| {
+                run_error(
+                    "compat_config_missing",
+                    "persisted effective compatibility configuration is missing",
+                )
+            })?;
+            let config_matches = [
+                "initial_nav",
+                "weights",
+                "rebalance_threshold",
+                "fee_rate_one_way",
+            ]
+            .into_iter()
+            .all(|key| persisted["effective_config"][key] == effective_config[key]);
+            if persisted["identity"]["compat_run_id"].as_str() != Some(compat_run_id)
+                || persisted["identity"]["task_id"].as_str() != Some(expected_task_id.as_str())
+                || persisted["identity"]["task_type"].as_str() != Some("eternal_compat@1")
+                || persisted["identity"]["strategy_version"].as_str() != Some("eternal_compat@1")
+                || persisted["identity"]["runner_sha256"].as_str().is_none()
+                || persisted["identity"]["frozen_replay_source_sha256"]
+                    .as_str()
+                    .is_none()
+                || persisted["identity"]["input_manifest_sha256"]
+                    .as_str()
+                    .is_none()
+                || persisted["runtime"]["python"].as_str().is_none()
+                || persisted["runtime"]["platform"].as_str().is_none()
+                || persisted["effective_config"]["initial_capital_unit"].as_str()
+                    != Some("model_nav")
+                || !persisted["effective_config"]["initial_capital_currency_amount"].is_null()
+                || !persisted["summary"].is_object()
+                || !persisted["daily"].is_array()
+                || !persisted["signals"].is_array()
+                || !persisted["trades"].is_array()
+                || !config_matches
+            {
+                return Err(run_error(
+                    "compat_result_identity_mismatch",
+                    "persisted compatibility result does not match its task/config contract",
+                ));
+            }
+            result = json!({
+                "compat_run_id": compat_run_id,
+                "input_version": input_version,
+                "result_sha256": expected_sha256,
+                "result_file": "compat-result.json",
+            });
         } else if result.get("exp").and_then(Value::as_str).is_none()
             || result.get("exe").and_then(Value::as_str).is_none()
         {
@@ -1213,7 +1449,9 @@ impl RunJobApi {
         task.process_group_id = process_group_id;
         task.process_group_generation = process_group_generation;
         task.stage = if process_group_id.is_some() {
-            if task.task_type == "prajna_pool_update" {
+            if task.task_type == ETERNAL_COMPAT_TASK_TYPE {
+                "running_compatibility_runner"
+            } else if task.task_type == "prajna_pool_update" {
                 "running_pool_update_cli"
             } else if task.task_type == "prajna_momentum" {
                 "running_momentum_cli"
@@ -1222,7 +1460,9 @@ impl RunJobApi {
             }
             .into()
         } else {
-            if task.task_type == "prajna_pool_update" {
+            if task.task_type == ETERNAL_COMPAT_TASK_TYPE {
+                "reading_compatibility_result"
+            } else if task.task_type == "prajna_pool_update" {
                 "reading_pool_update_result"
             } else if task.task_type == "prajna_momentum" {
                 "reading_momentum_report"
@@ -1352,11 +1592,46 @@ async fn submit_experiment_task(
     State(api): State<RunJobApi>,
     Json(request): Json<SubmitExperimentTask>,
 ) -> Response {
+    if task_type(&request.definition) == ETERNAL_COMPAT_TASK_TYPE {
+        return ApiFailure::new(
+            StatusCode::BAD_REQUEST,
+            "compat_task_requires_local_route",
+            "Use the Eternal compatibility task route.",
+            Value::Null,
+        )
+        .into_response();
+    }
     if task_type(&request.definition) == "prajna_pool_update" {
         return ApiFailure::new(
             StatusCode::BAD_REQUEST,
             "pool_update_requires_local_route",
             "Use the origin-checked pool update route to freeze and enqueue inputs.",
+            Value::Null,
+        )
+        .into_response();
+    }
+    match api.submit_experiment_task(request) {
+        Ok((task, created)) => (
+            if created {
+                StatusCode::ACCEPTED
+            } else {
+                StatusCode::OK
+            },
+            Json(json!({"task":task,"created":created})),
+        )
+            .into_response(),
+        Err(error) => error.into_response(),
+    }
+}
+async fn submit_eternal_compat_task(
+    State(api): State<RunJobApi>,
+    Json(request): Json<SubmitExperimentTask>,
+) -> Response {
+    if task_type(&request.definition) != ETERNAL_COMPAT_TASK_TYPE {
+        return ApiFailure::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_compat_request",
+            "definition.op must be eternal_compat",
             Value::Null,
         )
         .into_response();
@@ -1394,6 +1669,145 @@ async fn get_experiment_task(State(api): State<RunJobApi>, Path(id): Path<String
         )
         .into_response(),
     }
+}
+async fn get_eternal_compat_task(State(api): State<RunJobApi>, Path(id): Path<String>) -> Response {
+    let Ok(id) = Uuid::parse_str(&id) else {
+        return ApiFailure::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "invalid Eternal compatibility task id",
+            Value::Null,
+        )
+        .into_response();
+    };
+    match api.get_eternal_compat_task(id) {
+        Some(task) => Json(task).into_response(),
+        None => ApiFailure::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "Eternal compatibility task not found",
+            Value::Null,
+        )
+        .into_response(),
+    }
+}
+async fn get_eternal_compat_result(
+    State(api): State<RunJobApi>,
+    Path(id): Path<String>,
+) -> Response {
+    let Ok(id) = Uuid::parse_str(&id) else {
+        return ApiFailure::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "invalid Eternal compatibility task id",
+            Value::Null,
+        )
+        .into_response();
+    };
+    let Some(task) = api.get_eternal_compat_task(id) else {
+        return ApiFailure::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "Eternal compatibility task not found",
+            Value::Null,
+        )
+        .into_response();
+    };
+    if !matches!(task.status, ExperimentTaskStatus::Succeeded) {
+        return ApiFailure::new(
+            StatusCode::CONFLICT,
+            "compat_result_unavailable",
+            "Eternal compatibility result is available only for a succeeded task",
+            json!({"status":task.status,"error":task.error}),
+        )
+        .into_response();
+    }
+    let Some(reference) = task.result.as_ref() else {
+        return ApiFailure::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "compat_result_reference_missing",
+            "succeeded compatibility task has no persisted result reference",
+            Value::Null,
+        )
+        .into_response();
+    };
+    if reference["result_file"].as_str() != Some("compat-result.json") {
+        return ApiFailure::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "compat_result_reference_invalid",
+            "persisted compatibility result reference is invalid",
+            Value::Null,
+        )
+        .into_response();
+    }
+    let directory = experiment_task_dir(&api.0.output, task.task_id);
+    let result_path = directory.join("compat-result.json");
+    let bytes = match fs::read(&result_path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return ApiFailure::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "compat_result_read_failed",
+                "persisted compatibility result could not be read",
+                json!({"cause":error.to_string()}),
+            )
+            .into_response();
+        }
+    };
+    let expected_hash = reference["result_sha256"].as_str();
+    let actual_hash = format!("{:x}", Sha256::digest(&bytes));
+    if expected_hash != Some(actual_hash.as_str()) {
+        return ApiFailure::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "compat_result_hash_mismatch",
+            "persisted compatibility result digest does not match its task record",
+            Value::Null,
+        )
+        .into_response();
+    }
+    let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
+        return ApiFailure::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "compat_result_invalid",
+            "persisted compatibility result is invalid JSON",
+            Value::Null,
+        )
+        .into_response();
+    };
+    let expected_task_id = task.task_id.to_string();
+    if value["schema_version"].as_u64() != Some(1)
+        || value["identity"]["task_id"].as_str() != Some(expected_task_id.as_str())
+        || value["identity"]["task_type"].as_str() != Some("eternal_compat@1")
+        || value["identity"]["strategy_version"].as_str() != Some("eternal_compat@1")
+        || value["identity"]["compat_run_id"].as_str() != reference["compat_run_id"].as_str()
+        || value["identity"]["input_version"].as_str() != reference["input_version"].as_str()
+        || !task.effective_config.as_ref().is_some_and(|config| {
+            [
+                "initial_nav",
+                "weights",
+                "rebalance_threshold",
+                "fee_rate_one_way",
+            ]
+            .into_iter()
+            .all(|key| value["effective_config"][key] == config[key])
+                && value["effective_config"]["initial_capital_unit"].as_str() == Some("model_nav")
+                && value["effective_config"]["initial_capital_currency_amount"].is_null()
+        })
+    {
+        return ApiFailure::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "compat_result_identity_mismatch",
+            "persisted compatibility result identity does not match its task record",
+            Value::Null,
+        )
+        .into_response();
+    }
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(Body::from(bytes))
+        .expect("fixed compatibility result response")
 }
 async fn get_experiment_result(State(api): State<RunJobApi>, Path(id): Path<String>) -> Response {
     let Ok(id) = Uuid::parse_str(&id) else {
@@ -1655,10 +2069,15 @@ fn validate_experiment_task_request(request: &SubmitExperimentTask) -> Result<()
             Value::Null,
         ));
     }
+    if task_type(&request.definition) == ETERNAL_COMPAT_TASK_TYPE {
+        validate_eternal_compat_definition(&request.definition)?;
+    }
     Ok(())
 }
 fn task_type(definition: &Value) -> &'static str {
-    if definition["op"] == "pool_update" {
+    if definition["op"] == "eternal_compat" {
+        ETERNAL_COMPAT_TASK_TYPE
+    } else if definition["op"] == "pool_update" {
         "prajna_pool_update"
     } else if definition["op"] == "submit" {
         "prajna_momentum"
@@ -1666,10 +2085,148 @@ fn task_type(definition: &Value) -> &'static str {
         EXPERIMENT_TASK_TYPE
     }
 }
+fn compat_config_failure(field: &str, message: &str) -> ApiFailure {
+    ApiFailure::new(
+        StatusCode::BAD_REQUEST,
+        "invalid_compat_config",
+        message,
+        json!({"field":field}),
+    )
+}
+fn validate_eternal_compat_definition(definition: &Value) -> Result<Value, ApiFailure> {
+    let Some(object) = definition.as_object() else {
+        return Err(compat_config_failure(
+            "definition",
+            "definition must be a JSON object",
+        ));
+    };
+    if object
+        .keys()
+        .any(|key| !matches!(key.as_str(), "op" | "snapshot_path" | "config"))
+    {
+        return Err(compat_config_failure(
+            "definition",
+            "definition contains an unsupported field",
+        ));
+    }
+    if definition["op"] != "eternal_compat" {
+        return Err(compat_config_failure("op", "op must be eternal_compat"));
+    }
+    let Some(snapshot) = definition["snapshot_path"].as_str() else {
+        return Err(compat_config_failure(
+            "snapshot_path",
+            "snapshot_path must be an absolute path string",
+        ));
+    };
+    if snapshot.trim().is_empty() || !FsPath::new(snapshot).is_absolute() {
+        return Err(compat_config_failure(
+            "snapshot_path",
+            "snapshot_path must be an absolute path string",
+        ));
+    }
+    let empty_config = serde_json::Map::new();
+    let config = match definition.get("config") {
+        None => &empty_config,
+        Some(value) => value
+            .as_object()
+            .ok_or_else(|| compat_config_failure("config", "config must be a JSON object"))?,
+    };
+    if config.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "initial_nav" | "weights" | "rebalance_threshold" | "fee_rate_one_way"
+        )
+    }) {
+        return Err(compat_config_failure(
+            "config",
+            "config contains an unsupported field",
+        ));
+    }
+
+    let number = |field: &str, default: f64, minimum: f64, maximum: Option<f64>| {
+        let value = match config.get(field) {
+            None => default,
+            Some(value) => value.as_f64().ok_or_else(|| {
+                compat_config_failure(field, &format!("{field} must be a number"))
+            })?,
+        };
+        if !value.is_finite() || value < minimum || maximum.is_some_and(|maximum| value > maximum) {
+            return Err(compat_config_failure(
+                field,
+                &format!("{} is outside its permitted numeric range", field),
+            ));
+        }
+        Ok(value)
+    };
+    let initial_nav = number("initial_nav", 1.0, f64::MIN_POSITIVE, None)?;
+    let threshold = number("rebalance_threshold", 0.10, 0.0, Some(1.0))?;
+    let fee_rate = number("fee_rate_one_way", 0.0005, 0.0, None)?;
+    if fee_rate >= 1.0 {
+        return Err(compat_config_failure(
+            "fee_rate_one_way",
+            "fee_rate_one_way must be less than 1.0",
+        ));
+    }
+
+    let mut weights = BTreeMap::new();
+    if let Some(value) = config.get("weights") {
+        let Some(values) = value.as_object() else {
+            return Err(compat_config_failure(
+                "weights",
+                "weights must contain exactly the five fixed assets",
+            ));
+        };
+        if values.len() != ETERNAL_COMPAT_ASSETS.len()
+            || ETERNAL_COMPAT_ASSETS
+                .iter()
+                .any(|asset| !values.contains_key(*asset))
+        {
+            return Err(compat_config_failure(
+                "weights",
+                "weights must contain exactly the five fixed assets",
+            ));
+        }
+        for asset in ETERNAL_COMPAT_ASSETS {
+            let weight = values[asset].as_f64().unwrap_or(f64::NAN);
+            if !weight.is_finite() || weight < 0.0 {
+                return Err(compat_config_failure(
+                    "weights",
+                    "each asset weight must be a finite non-negative number",
+                ));
+            }
+            weights.insert(asset.to_string(), weight);
+        }
+        let total: f64 = weights.values().sum();
+        if (total - 1.0).abs() > 1e-9 {
+            return Err(compat_config_failure(
+                "weights",
+                "asset weights must sum to 1.0",
+            ));
+        }
+    } else {
+        for (asset, weight) in ETERNAL_COMPAT_ASSETS
+            .into_iter()
+            .zip([0.30, 0.20, 0.20, 0.25, 0.05])
+        {
+            weights.insert(asset.to_string(), weight);
+        }
+    }
+    Ok(json!({
+        "initial_nav": initial_nav,
+        "weights": weights,
+        "rebalance_threshold": threshold,
+        "fee_rate_one_way": fee_rate,
+    }))
+}
 fn canonical_experiment_task_hash(request: &SubmitExperimentTask) -> Result<String, ApiFailure> {
+    let task_type = task_type(&request.definition);
     let mut value = json!({
-        "task_type": task_type(&request.definition),
-        "task_version": EXPERIMENT_TASK_VERSION,
+        "task_type": task_type,
+        "task_version": if task_type == ETERNAL_COMPAT_TASK_TYPE {
+            ETERNAL_COMPAT_TASK_VERSION
+        } else {
+            EXPERIMENT_TASK_VERSION
+        },
         "definition": &request.definition,
     });
     if let Some(level) = &request.result_level {
@@ -1887,6 +2444,26 @@ fn experiment_cli_error(status: &ExitStatus, stderr: &BoundedStderr) -> Option<R
         message: "prajna-experiment exited unsuccessfully".into(),
         details: cli_result_details(status, stderr),
     })
+}
+
+fn eternal_compat_cli_error(status: &ExitStatus, stderr: &BoundedStderr) -> RunError {
+    let child_error = serde_json::from_str::<Value>(&stderr.text).ok();
+    let code = child_error
+        .as_ref()
+        .and_then(|value| value["error"]["code"].as_str())
+        .filter(|code| {
+            code.starts_with("compat_") || *code == "invalid_config" || *code == "invalid_request"
+        })
+        .unwrap_or("compat_runner_failed");
+    let message = child_error
+        .as_ref()
+        .and_then(|value| value["error"]["message"].as_str())
+        .unwrap_or("versioned compatibility runner exited unsuccessfully");
+    RunError {
+        code: code.into(),
+        message: message.into(),
+        details: cli_result_details(status, stderr),
+    }
 }
 
 fn process_group_cleanup_error_with_cli(
@@ -2612,6 +3189,255 @@ mod tests {
                     .contains_key(&request.idempotency_key)
             );
         }
+    }
+
+    #[tokio::test]
+    async fn eternal_compat_config_is_validated_and_has_separate_task_identity() {
+        let (api, _, dir) = fixture();
+        let request = eternal_compat_request(
+            "shared-task-key",
+            dir.path().join("not-created-snapshot"),
+            json!({}),
+        );
+        let (task, created) = api.submit_experiment_task(request.clone()).unwrap();
+        assert!(created);
+        assert_eq!(task.task_type, ETERNAL_COMPAT_TASK_TYPE);
+        assert_eq!(task.task_version, ETERNAL_COMPAT_TASK_VERSION);
+        assert_eq!(task.effective_config.as_ref().unwrap()["initial_nav"], 1.0);
+        assert_eq!(
+            task.effective_config.as_ref().unwrap()["weights"]["sz159612"],
+            0.05
+        );
+        assert_eq!(
+            api.submit_experiment_task(request).unwrap().0.task_id,
+            task.task_id
+        );
+        assert!(api.get_experiment_task(task.task_id).is_none());
+        assert_eq!(api.list_experiment_tasks().len(), 0);
+
+        let native = SubmitExperimentTask {
+            idempotency_key: "shared-task-key".into(),
+            definition: json!({"name":"native synthetic task"}),
+            result_level: None,
+        };
+        let (native_task, native_created) = api.submit_experiment_task(native).unwrap();
+        assert!(native_created);
+        assert_eq!(native_task.task_type, EXPERIMENT_TASK_TYPE);
+        assert!(api.get_experiment_task(native_task.task_id).is_some());
+        assert_eq!(api.list_experiment_tasks().len(), 1);
+
+        let invalid = eternal_compat_request(
+            "invalid-weight-key",
+            dir.path().join("not-created-snapshot"),
+            json!({"weights":{"sh511260":1.0}}),
+        );
+        let error = api.submit_experiment_task(invalid).unwrap_err();
+        assert_eq!(error.1, StatusCode::BAD_REQUEST);
+        assert_eq!(error.0.code, "invalid_compat_config");
+        assert_eq!(error.0.details["field"], "weights");
+
+        let null_config = eternal_compat_request(
+            "null-config",
+            dir.path().join("not-created-snapshot"),
+            Value::Null,
+        );
+        assert_eq!(
+            api.submit_experiment_task(null_config)
+                .unwrap_err()
+                .0
+                .details["field"],
+            "config"
+        );
+
+        let (status, _) = api_json(
+            &api,
+            "POST",
+            "/api/v1/tasks/experiments",
+            Some(
+                serde_json::to_value(eternal_compat_request(
+                    "wrong-route",
+                    dir.path().join("not-created-snapshot"),
+                    json!({}),
+                ))
+                .unwrap(),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(api.list_experiment_tasks().len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn eternal_compat_child_process_failure_is_structured_and_restart_durable() {
+        let (api, _, dir) = fixture();
+        let request = eternal_compat_request(
+            "missing-input-child",
+            dir.path().join("missing-frozen-snapshot"),
+            json!({}),
+        );
+        let (task, _) = api.submit_experiment_task(request).unwrap();
+        assert!(api.process_next_queued());
+        let failed = api.get_eternal_compat_task(task.task_id).unwrap();
+        assert!(matches!(failed.status, ExperimentTaskStatus::Failed));
+        assert_eq!(
+            failed.error.as_ref().unwrap().code,
+            "compat_input_unavailable"
+        );
+        assert_eq!(failed.error.as_ref().unwrap().details["exit_code"], 2);
+        assert!(failed.result.is_none());
+        assert!(
+            !experiment_task_dir(&api.0.output, task.task_id)
+                .join("compat-result.json")
+                .exists()
+        );
+
+        let restarted = RunJobApi::without_worker(
+            api.0.output.clone(),
+            api.0.universes.clone(),
+            api.0.experiment_cli.clone(),
+        );
+        restarted.recover();
+        let restored = restarted.get_eternal_compat_task(task.task_id).unwrap();
+        assert!(matches!(restored.status, ExperimentTaskStatus::Failed));
+        assert_eq!(
+            restored.error.as_ref().unwrap().code,
+            "compat_input_unavailable"
+        );
+        assert_eq!(restored.error.as_ref().unwrap().details["exit_code"], 2);
+        let (status, restored_json) = api_json(
+            &restarted,
+            "GET",
+            &format!("/api/v1/tasks/eternal-compat/{}", task.task_id),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(restored_json["error"]["code"], "compat_input_unavailable");
+        let response = restarted
+            .eternal_compat_result_router("127.0.0.1:7878".into())
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("GET")
+                    .uri(format!(
+                        "/api/v1/tasks/eternal-compat/{}/result",
+                        task.task_id
+                    ))
+                    .header("host", "127.0.0.1:7878")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            error["error"]["details"]["error"]["code"],
+            "compat_input_unavailable"
+        );
+    }
+
+    #[tokio::test]
+    async fn eternal_compat_result_is_hash_checked_and_readable_after_restart() {
+        let (api, _, dir) = fixture();
+        let request = eternal_compat_request(
+            "saved-result",
+            dir.path().join("fixed-synthetic-snapshot"),
+            json!({}),
+        );
+        let (mut task, _) = api.submit_experiment_task(request).unwrap();
+        task.status = ExperimentTaskStatus::Succeeded;
+        task.stage = "complete".into();
+        let compat_run_id = "synthetic-compat-run-v1";
+        let input_version = "synthetic-input-v1";
+        let mut effective_config = task.effective_config.clone().unwrap();
+        effective_config["initial_capital_unit"] = json!("model_nav");
+        effective_config["initial_capital_currency_amount"] = Value::Null;
+        let result = json!({
+            "schema_version": 1,
+            "identity": {
+                "compat_run_id": compat_run_id,
+                "task_id": task.task_id.to_string(),
+                "task_type": "eternal_compat@1",
+                "strategy_version": "eternal_compat@1",
+                "input_version": input_version,
+                "runner_sha256": "synthetic-runner-hash",
+                "frozen_replay_source_sha256": "synthetic-source-hash",
+                "input_manifest_sha256": "synthetic-manifest-hash"
+            },
+            "effective_config": effective_config,
+            "runtime": {"python":"3.12 synthetic","platform":"synthetic"},
+            "summary": {"total_return": 0.0},
+            "daily": [],
+            "signals": [],
+            "trades": [],
+        });
+        let directory = experiment_task_dir(&api.0.output, task.task_id);
+        let bytes = serde_json::to_vec(&result).unwrap();
+        fs::write(directory.join("compat-result.json"), &bytes).unwrap();
+        task.result = Some(json!({
+            "compat_run_id": compat_run_id,
+            "input_version": input_version,
+            "result_sha256": format!("{:x}", Sha256::digest(&bytes)),
+            "result_file": "compat-result.json"
+        }));
+        persist_experiment_task(&api.0.output, &task).unwrap();
+
+        let restarted = RunJobApi::without_worker(
+            api.0.output.clone(),
+            api.0.universes.clone(),
+            api.0.experiment_cli.clone(),
+        );
+        restarted.recover();
+        let restored = restarted.get_eternal_compat_task(task.task_id).unwrap();
+        assert!(matches!(restored.status, ExperimentTaskStatus::Succeeded));
+        assert_eq!(
+            restored.result.as_ref().unwrap()["compat_run_id"],
+            compat_run_id
+        );
+        let response = restarted
+            .clone()
+            .eternal_compat_result_router("127.0.0.1:7878".into())
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("GET")
+                    .uri(format!(
+                        "/api/v1/tasks/eternal-compat/{}/result",
+                        task.task_id
+                    ))
+                    .header("host", "127.0.0.1:7878")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), result);
+
+        fs::write(directory.join("compat-result.json"), b"modified").unwrap();
+        let response = restarted
+            .eternal_compat_result_router("127.0.0.1:7878".into())
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("GET")
+                    .uri(format!(
+                        "/api/v1/tasks/eternal-compat/{}/result",
+                        task.task_id
+                    ))
+                    .header("host", "127.0.0.1:7878")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -3449,8 +4275,25 @@ mod tests {
             result_level: "summary".into(),
             process_group_id: None,
             process_group_generation: None,
+            effective_config: None,
             result: None,
             error: None,
+        }
+    }
+
+    fn eternal_compat_request(
+        idempotency_key: &str,
+        snapshot: PathBuf,
+        config: Value,
+    ) -> SubmitExperimentTask {
+        SubmitExperimentTask {
+            idempotency_key: idempotency_key.into(),
+            definition: json!({
+                "op": "eternal_compat",
+                "snapshot_path": snapshot,
+                "config": config,
+            }),
+            result_level: None,
         }
     }
 

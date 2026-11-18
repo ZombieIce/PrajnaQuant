@@ -12,6 +12,8 @@ use quant_research::{
 };
 #[cfg(feature = "app")]
 use std::fs;
+#[cfg(feature = "app")]
+use std::net::IpAddr;
 use std::path::PathBuf;
 #[cfg(feature = "app")]
 use uuid::Uuid;
@@ -186,6 +188,37 @@ enum Command {
         address: String,
         #[arg(long, default_value = "apps/web/dist")]
         web_dist: PathBuf,
+    },
+    /// Submit and read versioned Eternal compatibility runs through the local task service.
+    #[cfg(feature = "app")]
+    EternalCompat {
+        #[command(subcommand)]
+        command: EternalCompatCommand,
+    },
+}
+
+#[cfg(feature = "app")]
+#[derive(Subcommand)]
+enum EternalCompatCommand {
+    Submit {
+        #[arg(long, default_value = "http://127.0.0.1:7878")]
+        server: String,
+        #[arg(long)]
+        snapshot: PathBuf,
+        #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        idempotency_key: Option<String>,
+    },
+    Status {
+        #[arg(long, default_value = "http://127.0.0.1:7878")]
+        server: String,
+        task_id: String,
+    },
+    Result {
+        #[arg(long, default_value = "http://127.0.0.1:7878")]
+        server: String,
+        task_id: String,
     },
 }
 #[tokio::main]
@@ -511,6 +544,131 @@ async fn main() -> Result<()> {
                 dataset_root,
             )
             .await?
+        }
+        #[cfg(feature = "app")]
+        Command::EternalCompat { command } => eternal_compat_command(command).await?,
+    }
+    Ok(())
+}
+
+#[cfg(feature = "app")]
+async fn eternal_compat_command(command: EternalCompatCommand) -> Result<()> {
+    use anyhow::Context as _;
+    use serde_json::{Value, json};
+    use std::{fs, path::Path};
+
+    fn client(server: &str) -> Result<(reqwest::Client, String)> {
+        let url = reqwest::Url::parse(server).context("invalid local task service URL")?;
+        anyhow::ensure!(
+            url.scheme() == "http"
+                && url.username().is_empty()
+                && url.password().is_none()
+                && url.query().is_none()
+                && url.fragment().is_none(),
+            "task service must be a plain local HTTP URL without credentials or query"
+        );
+        let host = url.host_str().context("task service URL has no host")?;
+        let loopback = host == "localhost"
+            || host
+                .parse::<IpAddr>()
+                .is_ok_and(|address| address.is_loopback());
+        anyhow::ensure!(
+            loopback,
+            "Eternal compatibility CLI only accepts loopback task services"
+        );
+        let base = server.trim_end_matches('/');
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?;
+        Ok((client, base.to_owned()))
+    }
+
+    async fn response_json(response: reqwest::Response) -> Result<Value> {
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .context("read local task service response")?;
+        anyhow::ensure!(
+            status.is_success(),
+            "local task service returned {status}: {text}"
+        );
+        serde_json::from_str(&text).context("local task service returned invalid JSON")
+    }
+
+    fn require_absolute(path: &Path) -> Result<&Path> {
+        anyhow::ensure!(path.is_absolute(), "snapshot path must be absolute");
+        Ok(path)
+    }
+
+    match command {
+        EternalCompatCommand::Submit {
+            server,
+            snapshot,
+            config,
+            idempotency_key,
+        } => {
+            require_absolute(&snapshot)?;
+            let config = match config {
+                Some(path) => {
+                    let bytes = fs::read(&path)
+                        .with_context(|| format!("read config {}", path.display()))?;
+                    let value: Value =
+                        serde_json::from_slice(&bytes).context("parse config JSON")?;
+                    anyhow::ensure!(value.is_object(), "config file must contain a JSON object");
+                    value
+                }
+                None => json!({}),
+            };
+            let idempotency_key =
+                idempotency_key.unwrap_or_else(|| format!("eternal-compat-{}", Uuid::new_v4()));
+            let body = json!({
+                "idempotency_key": idempotency_key,
+                "definition": {
+                    "op": "eternal_compat",
+                    "snapshot_path": snapshot,
+                    "config": config,
+                }
+            });
+            let (client, base) = client(&server)?;
+            let response = client
+                .post(format!("{base}/api/v1/tasks/eternal-compat"))
+                .json(&body)
+                .send()
+                .await
+                .context("submit Eternal compatibility task to local service")?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response_json(response).await?)?
+            );
+        }
+        EternalCompatCommand::Status { server, task_id } => {
+            let (client, base) = client(&server)?;
+            let response = client
+                .get(format!("{base}/api/v1/tasks/eternal-compat/{task_id}"))
+                .send()
+                .await
+                .context("read Eternal compatibility task status")?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response_json(response).await?)?
+            );
+        }
+        EternalCompatCommand::Result { server, task_id } => {
+            let (client, base) = client(&server)?;
+            let response = client
+                .get(format!(
+                    "{base}/api/v1/tasks/eternal-compat/{task_id}/result"
+                ))
+                .send()
+                .await
+                .context("read persisted Eternal compatibility result")?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response_json(response).await?)?
+            );
         }
     }
     Ok(())

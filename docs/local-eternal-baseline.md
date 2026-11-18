@@ -41,6 +41,23 @@ PRAJNA_ETERNAL_BASELINE_REPOSITORY_ROOT="$(git rev-parse --show-toplevel)" \
 
 冻结的 `backtest.py`、`daily_update.py` 与 `dividend_data.py` 仅作为来源证据归档；独立回放适配器并不导入或执行这些旧文件。因此，snapshot 绑定证明回放使用了被冻结的适配器及其记录配置，不等于证明适配器与无法核实修订的旧生产源码等价；该等价性和需独立访问私有输入的实际复算仍是未验证证据边界。
 
+## CLI 兼容配置任务（#394）
+
+已运行本机服务后，生产 CLI 将冻结 snapshot 路径和配置提交到同一任务队列。Snapshot 路径必须为绝对路径；任务保存该输入引用、有效配置和状态。配置错误在受理时按字段拒绝且不建任务；受理后的缺失/损坏输入、子进程错误会形成可重启读取的 `failed` 状态和本机错误详情。
+
+```sh
+quant-research eternal-compat submit \
+  --snapshot "<仓库外私有目录>/eternal-baseline-<版本>"
+quant-research eternal-compat status <task-id>
+quant-research eternal-compat result <task-id>
+```
+
+`submit` 默认生成幂等键并使用 `NAV=1.0` 模型单位、固定五资产 `30/20/20/25/5` 权重、`10%` 调仓阈值与单边 `5 bp` 费率。可用 `--config <JSON 文件>` 提交部分变体，例如配置 `{"rebalance_threshold":0.05}`；有效的完整配置会随任务和结果持久化。可调字段为 `initial_nav`（正的模型 NAV 单位）、`weights`（恰为五个固定标的且总和 1）、`rebalance_threshold`（0 到 1）及 `fee_rate_one_way`（0 到小于 1）。没有人民币本金字段；绝对 CNY 金额不可用，`initial_nav` 不应解释为 CNY。可用 `--server http://127.0.0.1:7878` 指定其他 loopback 服务地址，CLI 拒绝非 loopback URL。
+
+任务类型/版本为 `prajna_eternal_compat@1`，其兼容运行 ID 与输出文件、摘要、冻结输入版本、兼容 runner/源代码摘要和运行环境独立于 Rust Experiment、Run、Execution。`status` 可在重启后读取终态及失败原因；`result` 仅对成功任务返回通过 SHA-256 校验的已保存 JSON。未成功任务的 result 请求返回冲突及持久错误，损坏输出不会作为成功结果返回。服务端持久文件和 CLI 完整结果均可能含详细研究数据，只应留在本机私有输出目录，不要复制到 GitHub 或公开日志。
+
+本票只做合成验证：默认/配置变体、阈值信号与下一共同开盘执行、无效配置、缺失输入、子进程失败和重启持久读取。当前 turn 未访问真实行情或冻结本机输入，真实冻结 snapshot 比较为 **BLOCKED**；合成结果不代表 #394 真实对拍或验收完成。
+
 ```sh
 python3.12 -m unittest tests.test_eternal_baseline -v
 ```
