@@ -7,6 +7,7 @@ import sys
 import unittest
 import uuid
 from contextlib import redirect_stderr
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
@@ -198,6 +199,89 @@ class EternalCompatibilityTests(unittest.TestCase):
         failure = json.loads(output.with_name("compat-failure.json").read_text())["error"]
         self.assertEqual(failure["code"], "compat_scaled_value_precision_loss")
         self.assertEqual(failure["details"]["asset"], "sz159612")
+        self.assertFalse(output.exists())
+
+    def test_normalized_positive_holding_underflow_fails_before_scaling(self):
+        bars_path = self.snapshot / "bars/sh511260.csv.gz"
+        bars, fields = baseline.csv_rows(bars_path)
+        for row in bars:
+            if row["date"] == "2026-11-09":
+                row.update(close="0.5", low="0.5")
+        baseline.write_csv(bars_path, bars, fields)
+        seal_snapshot(self.snapshot)
+
+        weights = dict(baseline.WEIGHTS)
+        weights["sh518880"] += weights["sh511260"]
+        weights["sh511260"] = 5e-324
+        completed, output = self.run_compat(
+            "normalized-holding-underflow",
+            {"initial_nav": 1e100, "weights": weights},
+        )
+        self.assertEqual(completed.returncode, 2, completed.stderr)
+        failure = json.loads(output.with_name("compat-failure.json").read_text())["error"]
+        self.assertEqual(failure["code"], "compat_normalized_value_underflow")
+        self.assertEqual(failure["details"], {
+            "field": "daily.holdings", "asset": "sh511260", "date": "2026-11-09",
+        })
+        self.assertFalse(output.exists())
+
+        weights["sh511260"] = 0.0
+        zero_weight, result = self.run_compat(
+            "zero-weight", {"initial_nav": 10.0, "weights": weights},
+        )
+        self.assertEqual(zero_weight.returncode, 0, zero_weight.stderr)
+        self.assertEqual(json.loads(result.read_text())["daily"][1]["holdings"]["sh511260"], 0)
+
+    def test_normalized_units_cannot_disappear_for_positive_weight(self):
+        row = {
+            "date": date(2026, 11, 9),
+            "units": {"sh511260": 0.0},
+            "holdings": {"sh511260": 0.0},
+        }
+        with self.assertRaises(compat.RunnerError) as caught:
+            compat._validate_normalized_holdings([row], {"sh511260": 5e-324})
+        self.assertEqual(caught.exception.code, "compat_normalized_value_underflow")
+        self.assertEqual(caught.exception.details["field"], "daily.units")
+
+    def test_validation_time_input_gaps_preserve_known_details(self):
+        bars_path = self.snapshot / "bars/sh511260.csv.gz"
+        bars, fields = baseline.csv_rows(bars_path)
+        bars[0]["volume"] = "0"
+        baseline.write_csv(bars_path, bars, fields)
+        seal_snapshot(self.snapshot)
+
+        completed, output = self.run_compat("validation-gap")
+        self.assertEqual(completed.returncode, 2, completed.stderr)
+        failure = json.loads(output.with_name("compat-failure.json").read_text())
+        self.assertTrue(failure["structured_details_complete"])
+        self.assertEqual(failure["error"]["code"], "compat_input_invalid")
+        details = failure["error"]["details"]
+        self.assertEqual(details["input_gaps"], [{
+            "asset": "sh511260", "date": "2026-11-06", "field": "volume",
+            "source": "synthetic", "impact": "不能作为可成交行情",
+            "candidate_measures": ["核查停牌和行情来源", "由负责人决定如何处理"],
+        }])
+        self.assertEqual(
+            [check["name"] for check in details["checks_not_run"]],
+            ["common_session_validation", "simulation", "frozen_reference_comparison"],
+        )
+        self.assertFalse(output.exists())
+
+    def test_factor_input_gap_does_not_invent_a_bar_source(self):
+        factors_path = self.snapshot / "factors/sh511260.csv.gz"
+        factors, fields = baseline.csv_rows(factors_path)
+        factors[0]["date"] = "2026-11-09"
+        baseline.write_csv(factors_path, factors, fields)
+        seal_snapshot(self.snapshot)
+
+        completed, output = self.run_compat("factor-validation-gap")
+        self.assertEqual(completed.returncode, 2, completed.stderr)
+        failure = json.loads(output.with_name("compat-failure.json").read_text())
+        gap = failure["error"]["details"]["input_gaps"][0]
+        self.assertEqual((gap["asset"], gap["date"], gap["field"]),
+                         ("sh511260", "2026-11-06", "factor"))
+        self.assertNotIn("source", gap)
+        self.assertTrue(failure["structured_details_complete"])
         self.assertFalse(output.exists())
 
     def test_default_reference_mismatch_fails_without_publishing_a_result(self):

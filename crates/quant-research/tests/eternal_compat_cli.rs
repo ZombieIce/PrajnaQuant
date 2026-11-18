@@ -328,7 +328,7 @@ fn task_count(output: &Path) -> usize {
         .unwrap_or(0)
 }
 
-fn make_synthetic_snapshot(python: &str, path: &Path, threshold_prices: bool) {
+fn make_synthetic_snapshot(python: &str, path: &Path, scenario: &str) {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
@@ -343,9 +343,9 @@ from test_eternal_baseline import make_replay_snapshot
 from test_eternal_compat import seal_snapshot
 import eternal_baseline as baseline
 snapshot = Path(sys.argv[3])
-threshold_prices = sys.argv[4] == "true"
+scenario = sys.argv[4]
 make_replay_snapshot(snapshot)
-if threshold_prices:
+if scenario == "threshold":
     for code in baseline.HISTORY_CODES:
         path = snapshot / f"bars/{code}.csv.gz"
         rows, fields = baseline.csv_rows(path)
@@ -361,6 +361,16 @@ if threshold_prices:
     reference["history_etf"] = [[day, nav * 100.0] for day, nav in reference["history_etf"]]
     reference_path.unlink()
     baseline.write_json(reference_path, reference)
+elif scenario in ("validation-gap", "normalized-underflow"):
+    path = snapshot / "bars/sh511260.csv.gz"
+    rows, fields = baseline.csv_rows(path)
+    if scenario == "validation-gap":
+        rows[0]["volume"] = "0"
+    else:
+        for row in rows:
+            if row["date"] == "2026-11-09":
+                row.update(close="0.5", low="0.5")
+    baseline.write_csv(path, rows, fields)
 seal_snapshot(snapshot)
 "#;
     let output = Command::new(python)
@@ -376,7 +386,7 @@ seal_snapshot(snapshot)
                 .to_str()
                 .expect("UTF-8 scripts directory"),
             path.to_str().expect("UTF-8 synthetic snapshot path"),
-            if threshold_prices { "true" } else { "false" },
+            scenario,
         ])
         .stdin(Stdio::null())
         .output()
@@ -409,10 +419,93 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
     let output_root = artifacts.path().join("service-output");
     let initial_snapshot = artifacts.path().join("initial-snapshot");
     let threshold_snapshot = artifacts.path().join("threshold-snapshot");
-    make_synthetic_snapshot(&python, &initial_snapshot, false);
-    make_synthetic_snapshot(&python, &threshold_snapshot, true);
+    let validation_gap_snapshot = artifacts.path().join("validation-gap-snapshot");
+    let normalized_underflow_snapshot = artifacts.path().join("normalized-underflow-snapshot");
+    make_synthetic_snapshot(&python, &initial_snapshot, "initial");
+    make_synthetic_snapshot(&python, &threshold_snapshot, "threshold");
+    make_synthetic_snapshot(&python, &validation_gap_snapshot, "validation-gap");
+    make_synthetic_snapshot(
+        &python,
+        &normalized_underflow_snapshot,
+        "normalized-underflow",
+    );
 
     let mut service = LocalService::start(&output_root, &python);
+
+    let validation_gap_id = submit(
+        &mut service,
+        &validation_gap_snapshot,
+        &json!({}),
+        "synthetic-validation-gap",
+        artifacts.path(),
+    );
+    let validation_gap_status = terminal_status(&mut service, &validation_gap_id);
+    assert_eq!(validation_gap_status["status"], "failed");
+    assert_eq!(
+        validation_gap_status["error"]["code"],
+        "compat_input_invalid"
+    );
+    let validation_details = &validation_gap_status["error"]["details"];
+    assert_eq!(validation_details["runner_error_details_complete"], true);
+    let gap = &validation_details["runner_error"]["details"]["input_gaps"][0];
+    assert_eq!(gap["asset"], "sh511260");
+    assert_eq!(gap["date"], "2026-11-06");
+    assert_eq!(gap["field"], "volume");
+    assert_eq!(gap["source"], "synthetic");
+    assert!(!gap["impact"].as_str().unwrap().is_empty());
+    assert_eq!(gap["candidate_measures"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        validation_details["runner_error"]["details"]["checks_not_run"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+
+    let normalized_underflow_id = submit(
+        &mut service,
+        &normalized_underflow_snapshot,
+        &json!({
+            "initial_nav": 1e100,
+            "weights": {
+                "sh511260": f64::from_bits(1),
+                "sh518880": 0.5,
+                "sh515080": 0.2,
+                "sh513300": 0.25,
+                "sz159612": 0.05
+            }
+        }),
+        "synthetic-normalized-underflow",
+        artifacts.path(),
+    );
+    let normalized_underflow_status = terminal_status(&mut service, &normalized_underflow_id);
+    assert_eq!(normalized_underflow_status["status"], "failed");
+    assert_eq!(
+        normalized_underflow_status["error"]["code"],
+        "compat_normalized_value_underflow"
+    );
+    assert_eq!(
+        normalized_underflow_status["error"]["details"]["runner_error"]["details"],
+        json!({"field": "daily.holdings", "asset": "sh511260", "date": "2026-11-09"})
+    );
+    for id in [&validation_gap_id, &normalized_underflow_id] {
+        assert!(
+            !output_root
+                .join("tasks")
+                .join(id)
+                .join("compat-result.json")
+                .exists()
+        );
+        let unavailable = run_cli(&[
+            "eternal-compat".into(),
+            "result".into(),
+            "--server".into(),
+            service.url(),
+            id.clone(),
+        ]);
+        assert!(!unavailable.status.success());
+        assert!(String::from_utf8_lossy(&unavailable.stderr).contains("compat_result_unavailable"));
+    }
 
     let default_capital_id = submit(
         &mut service,
@@ -920,6 +1013,30 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
 
     service.stop();
     service = LocalService::start(&output_root, &python);
+    for (id, before) in [
+        (&validation_gap_id, &validation_gap_status),
+        (&normalized_underflow_id, &normalized_underflow_status),
+    ] {
+        let after = status(&mut service, id);
+        assert_eq!(after["status"], "failed");
+        assert_eq!(after["error"], before["error"]);
+        let unavailable = run_cli(&[
+            "eternal-compat".into(),
+            "result".into(),
+            "--server".into(),
+            service.url(),
+            id.clone(),
+        ]);
+        assert!(!unavailable.status.success());
+        assert!(String::from_utf8_lossy(&unavailable.stderr).contains("compat_result_unavailable"));
+        assert!(
+            !output_root
+                .join("tasks")
+                .join(id)
+                .join("compat-result.json")
+                .exists()
+        );
+    }
     assert_eq!(
         status(&mut service, &default_capital_id)["status"],
         "succeeded"
@@ -1151,7 +1268,7 @@ fn production_cli_rejects_invalid_configs_without_creating_tasks() {
     let python = std::env::var("PRAJNA_TEST_PYTHON").unwrap_or_else(|_| "python3.12".into());
     let output_root = artifacts.path().join("service-output");
     let snapshot = artifacts.path().join("synthetic-snapshot");
-    make_synthetic_snapshot(&python, &snapshot, false);
+    make_synthetic_snapshot(&python, &snapshot, "initial");
     let mut service = LocalService::start(&output_root, &python);
 
     let minimum_normal = submit(

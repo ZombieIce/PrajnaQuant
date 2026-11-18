@@ -185,6 +185,24 @@ def _scaled_result(navs, signals, trades, stats, daily, initial_nav):
     return scaled_navs, signals, scaled_trades, scaled_stats, scaled_daily
 
 
+def _validate_normalized_holdings(daily, weights):
+    for row in daily:
+        for asset, weight in weights.items():
+            units = row["units"][asset]
+            holding = row["holdings"][asset]
+            field = (
+                "daily.units" if weight > 0 and units == 0
+                else "daily.holdings" if units > 0 and holding == 0
+                else None
+            )
+            if field:
+                raise RunnerError(
+                    "compat_normalized_value_underflow",
+                    "positive normalized allocation underflowed before capital scaling",
+                    {"field": field, "asset": asset, "date": row["date"].isoformat()},
+                )
+
+
 def _pending_gap_error(code, message, report_status):
     reason = "blocked by the pending-gap report"
     return RunnerError(
@@ -442,6 +460,7 @@ def _read_pending_gap_report(snapshot):
 
 
 def _load_simulation(snapshot):
+    bars = {}
     try:
         pending_gap_report = _read_pending_gap_report(snapshot)
         if pending_gap_report is not None:
@@ -462,7 +481,7 @@ def _load_simulation(snapshot):
         baseline.validate_execution_configuration(manifest)
         baseline.validate_replay_source(manifest, Path(baseline.__file__).resolve())
 
-        bars, factors, prices, limits = {}, {}, {}, {}
+        factors, prices, limits = {}, {}, {}
         for code in baseline.HISTORY_CODES:
             bars[code] = baseline.csv_rows(snapshot / f"bars/{code}.csv.gz")[0]
             factors[code] = baseline.csv_rows(snapshot / f"factors/{code}.csv.gz")[0]
@@ -491,6 +510,32 @@ def _load_simulation(snapshot):
         return manifest, reference, anchors, days, opens, closes, day_limits
     except RunnerError:
         raise
+    except baseline.InputGaps as error:
+        gaps = []
+        for gap in error.gaps:
+            gap = dict(gap)
+            if gap.get("field") == "volume" and "source" not in gap:
+                for row in bars.get(gap.get("asset"), []):
+                    if row.get("date") == gap.get("date") and row.get("source"):
+                        gap["source"] = row["source"]
+                        break
+            gaps.append(gap)
+        reason = "blocked by validation-time input gaps"
+        raise RunnerError(
+            "compat_input_invalid",
+            f"frozen snapshot is unavailable or invalid: {error}",
+            {
+                "input_gaps": gaps,
+                "checks_not_run": [
+                    {"name": name, "status": "not_run", "reason": reason}
+                    for name in (
+                        "common_session_validation",
+                        "simulation",
+                        "frozen_reference_comparison",
+                    )
+                ],
+            },
+        ) from error
     except OSError as error:
         raise RunnerError("compat_input_unavailable", f"frozen snapshot is unavailable: {error}") from error
     except (KeyError, TypeError, ValueError, ArithmeticError, json.JSONDecodeError) as error:
@@ -524,6 +569,7 @@ def run(request, output):
         config["fee_rate_one_way"],
         config["weights"],
     )
+    _validate_normalized_holdings(daily, config["weights"])
     comparison = baseline.compare_reference(reference, days, navs, stats, anchors)
     navs, signals, trades, stats, daily = _scaled_result(
         navs, signals, trades, stats, daily, config["initial_nav"],

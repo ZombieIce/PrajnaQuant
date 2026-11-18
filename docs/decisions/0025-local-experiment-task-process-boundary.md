@@ -53,9 +53,13 @@ MVP-7 的本机研究任务需要复用既有数据、因子与 Experiment 能�
 
 冻结参考比较使用单位 NAV 模拟轨迹和相应归一化汇总指标；`initial_nav` 只缩放输出账本值，不改变相同策略路径的参考 NAV 判定。正值缩放若溢出、下溢为零，或除回资本后相对归一化值的误差超过 `1e-12`（零绝对容差），runner 显式失败并持久化字段/标的原因，不产生误导性的成功账本。默认有效配置要求冻结参考对拍 `match`；不匹配由 runner 以 `compat_default_reference_mismatch` 失败且不写成功结果，任务服务持久化该子进程原因并在重启后读取。配置变体仍记录参考对比，但 `evaluation_mode=informational_variant` 明确其仅供说明，不因偏离默认参考而失败；默认有效配置标为 `required_default_parity`。兼容任务 submit/status 与结果路由均复用 `LocalPage` Host/Origin 检查：loopback CLI 可不带 Origin，异源请求拒绝。该限制只装配在兼容任务独立路由，不扩展到既有 Experiment task 或旧 run 路由。
 
+模拟得到的逐日归一化单位/持仓在缩放前检查：正权重单位或正单位持仓下溢为零时，以 `compat_normalized_value_underflow` 持久化字段、标的和日期并拒绝结果；零权重仍可为零。
+
 若输入包含 `pending-gaps.json`，runner 在读取 manifest 前先检查该报告，以支持无 manifest 的待裁决快照。有效报告及全部 gap 字段（不筛选可选 `source` 或未知字段）保存在 `error.details.runner_error.details.pending_gap_report`；数值必须能跨 Python/Rust JSON 边界无损表示：小数转有限 binary64 后的最短十进制表示必须与输入数值相等（允许 `0.1`，拒绝精度损失或下溢），整数限于 `i64`/`u64`。字符串和键必须为有效 Unicode，不能含孤立 surrogate；JSON 对象不能含重复键。非标准常量、不可表示数值、无效 Unicode/重复键或无效结构以 `compat_pending_gaps_invalid` 拒绝，并明确 `report_contents_persisted: false`，不静默丢弃/变形原报告。可解码的原始 JSON 文本保存为 `pending_gap_report_raw_json`；可解析报告的其余字段和 gaps 保存在 `recoverable_pending_gap_report`，不支持的数值/字符串用显式标签保留原始 token，非法 Unicode 键省略并由原文保留；恢复规则明确记录，不称原类型完整。重复键或语法错误不猜测结构。拒绝报告的 `structured_details_complete` 为 false，并跨服务/重启传播，即使原文和可恢复字段已保存。错误 sidecar 自身序列化失败时，保留错误码/消息和省略原因并标记诊断不完整；失败发射不能因原始详情含无效数字而崩溃。有效报告同处列出未运行的 manifest/清单/配置/源码、bar/factor、总回报价/涨跌停、历史拼接、共同交易日、模拟及参考对比阶段。不可读报告与符号链接/其他非普通文件分别显式失败；悬空链接不会被视为缺失，FIFO 等类型在读取前拒绝以避免阻塞。任何此类失败均不生成 `compat-result.json`。完整 gap 明细走 sidecar 而非 stderr，以免超过 16 KiB 时静默截断。
 
 为使 sidecar 始终处于跨语言可解析范围，pending-gap JSON 容器嵌套深度上限为 64；超限输入保留原始 JSON 与可恢复的 gap 字段，过深子树使用 `unsupported_json_depth` 标记，并明确诊断不完整。兼容 runner 非零退出与进程组清理异常同时发生时，清理错误的 `details.cli_error` 保留 sidecar 结构化 runner 错误；进程重启后再次清理失败也保留原嵌套错误，不丢失 gaps 或 `checks_not_run`。
+
+运行时校验抛出的 `InputGaps` 在 `compat_input_invalid` 的 `input_gaps` 中保留原始已知字段；成交量 gap 还保留对应 bar 已有来源。共同交易日校验、模拟和参考比较注明未运行，诊断沿同一 sidecar/状态路径持久化。
 
 ## 后果与限制
 
