@@ -239,31 +239,49 @@ def configuration(dashboard):
             "anchor": dashboard.INCOME_ANCHOR, "first_dates": dashboard.FIRST_DATES}
 
 
+def source_scope(name, keys):
+    for provider, suffix in (("baostock", ""), ("tencent", r"-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+")):
+        if match := re.fullmatch(rf"{provider}-(sh[0-9]{{6}}){suffix}\.json", name):
+            return provider, sorted(key for key in keys if key[0] == match[1])
+    if match := re.fullmatch(r"tdx-([0-9]{8})\.zip", name):
+        return "tdx", sorted(key for key in keys if key[1].replace("-", "") == match[1])
+    return "inventory", sorted(keys)
+
+
 def verified_suspension_sources(directory, evidence):
     """Validate the raw evidence inventory relative to its containing directory."""
     sources = evidence["sources"]
-    if not isinstance(sources, dict) or not sources:
-        raise ValueError("suspension evidence requires original source files")
     directory = directory.resolve()
     verified = {}
+    issues = []
+    keys = {(row["code"], row["date"]) for row in evidence["rows"]}
+    if not isinstance(sources, dict) or not sources:
+        return {}, [gap(*key, "inventory.source", "suspension evidence requires original source files")
+                    for key in sorted(keys) or [("unknown", None)]]
     for relative, digest in sources.items():
-        if (not relative or "\\" in relative
-                or any(part in {"", ".", ".."} for part in relative.split("/"))
-                or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
-            raise ValueError("invalid suspension source inventory entry")
         source = directory / relative
-        if source.resolve() != source or not source.is_file():
-            raise ValueError("missing or linked suspension source")
-        if sha256_file(source) != digest:
-            raise ValueError("suspension source digest mismatch")
-        verified[relative] = source
-    return verified
+        if (not relative or "\\" in relative or any(part in {"", ".", ".."} for part in relative.split("/"))):
+            field, impact = "source", "invalid suspension source inventory entry"
+        elif source.resolve() != source or not source.is_file():
+            field, impact = "source", "missing or linked suspension source"
+        elif not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest) or sha256_file(source) != digest:
+            field, impact = "digest", "suspension source digest mismatch"
+        else:
+            verified[relative] = source
+            continue
+        provider, affected = source_scope(source.name, keys)
+        issues.extend(gap(*key, f"{provider}.{field}", f"{impact}: {relative}")
+                      for key in affected or [("unknown", None)])
+    return verified, issues
 
 
 def archive_suspension_evidence(evidence_path, snapshot):
     payload = evidence_path.read_bytes()
     evidence = json.loads(payload)
-    for relative, source in verified_suspension_sources(evidence_path.parent, evidence).items():
+    sources, issues = verified_suspension_sources(evidence_path.parent, evidence)
+    if issues:
+        classified_suspension_days(evidence, sources, issues)
+    for relative, source in sources.items():
         destination = snapshot / "suspension-sources" / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
@@ -334,8 +352,9 @@ def raw_tdx(source, ymd, keys):
                     "volume": volume, "amount": round(amount, 2)}
 
 
-def suspension_source_records(sources, keys):
+def suspension_source_records(sources, keys, issues):
     records = {"baostock": {}, "tencent": {}, "tdx": {}}
+    conflicts = set()
     for source in sources.values():
         if match := re.fullmatch(r"baostock-(sh[0-9]{6})\.json", source.name):
             provider, rows = "baostock", raw_baostock(source, match[1])
@@ -355,15 +374,16 @@ def suspension_source_records(sources, keys):
             for key, row in rows:
                 if key in keys:
                     if key in index and index[key] != row:
-                        raise InputGaps([gap(*key, f"{provider}.record", "conflicting duplicate raw suspension source records")])
+                        conflicts.add((provider, key))
+                        continue
                     index[key] = row
-        except InputGaps:
-            raise
-        except (ValueError, KeyError, TypeError) as exc:
+        except (ValueError, KeyError, TypeError):
             if not affected:
                 raise
-            raise InputGaps([gap(*key, f"{provider}.response", "archived source response cannot verify suspension")
-                             for key in sorted(affected)]) from exc
+            issues.extend(gap(*key, f"{provider}.response", "archived source response cannot verify suspension")
+                          for key in sorted(affected))
+    issues.extend(gap(*key, f"{provider}.record", "conflicting duplicate raw suspension source records")
+                  for provider, key in sorted(conflicts))
     return records
 
 
@@ -373,16 +393,20 @@ def suspension_days(snapshot):
         return set()
     evidence = json.loads(path.read_bytes())
     directory = snapshot / "suspension-sources"
-    sources = verified_suspension_sources(directory, evidence)
+    sources, issues = verified_suspension_sources(directory, evidence)
     actual = {path.relative_to(directory).as_posix() for path in directory.rglob("*") if path.is_file()}
-    if actual != sources.keys():
+    if not issues and actual != sources.keys():
         raise ValueError("archived suspension sources do not match the evidence inventory")
+    return classified_suspension_days(evidence, sources, issues)
+
+
+def classified_suspension_days(evidence, sources, issues):
     rows = evidence["rows"]
-    records = suspension_source_records(sources, {(row["code"], row["date"]) for row in rows})
+    records = suspension_source_records(sources, {(row["code"], row["date"]) for row in rows}, issues)
+    unresolved = {(item["asset"], item["date"], item["field"].split(".")[0]) for item in issues}
     if evidence["method"] != "a-stock-data 3.10.4 §6.5":
         raise ValueError("unsupported suspension evidence method")
     days = set()
-    issues = []
     for item in rows:
         code, day = item["code"], iso_day(item["date"], "suspension evidence")
         key = code, day
@@ -390,6 +414,8 @@ def suspension_days(snapshot):
             issues.append(gap(*key, "suspension.identity", "duplicate or out-of-universe suspension claim"))
         days.add(key)
         for provider, index in records.items():
+            if (*key, provider) in unresolved or (*key, "inventory") in unresolved:
+                continue
             raw = index.get(key)
             derived = item.get(provider)
             if provider not in item or raw != derived or (provider == "baostock" and raw is None):

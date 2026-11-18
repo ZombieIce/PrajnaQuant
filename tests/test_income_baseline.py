@@ -337,6 +337,43 @@ class IncomeBaselineTest(unittest.TestCase):
             self.assertTrue(all(item["impact"] and item["candidate_measures"] for item in pending["gaps"]))
             self.assertFalse((conflict / "manifest.json").exists())
 
+            for fault, field in (("missing", "source"), ("tampered", "digest"),
+                                 ("duplicates", "record"), ("mixed", "record")):
+                with self.subTest(fault=fault):
+                    file, batch = self.make_suspension_evidence(root / fault)
+                    first = batch["rows"][0]
+                    second = dict(first, date=DAYS[0], baostock=dict(first["baostock"], date=DAYS[0]))
+                    batch["rows"].append(second)
+                    relative = next(iter(batch["sources"]))
+                    raw = file.parent / relative
+                    if fault == "missing":
+                        raw.unlink()
+                    elif fault == "tampered":
+                        raw.write_text("modified")
+                    else:
+                        payload = json.loads(raw.read_bytes())
+                        payload["rows"] = [[record[name] for name in payload["fields"]]
+                                           for claim in batch["rows"]
+                                           for record in (claim["baostock"], dict(claim["baostock"], volume="1"))]
+                        raw.write_text(json.dumps(payload))
+                        batch["sources"][relative] = baseline.sha256_file(raw)
+                    expected = [(CODE, day, f"baostock.{field}") for day in DAYS]
+                    if fault == "mixed":
+                        batch["sources"][f"tdx-{DAYS[0].replace('-', '')}.zip"] = "0" * 64
+                        expected.append((CODE, DAYS[0], "tdx.source"))
+                    file.write_text(json.dumps(batch))
+                    target = root / ("pending-" + fault)
+                    result = subprocess.run([sys.executable, str(ROOT / "scripts/income_baseline.py"), "freeze",
+                                             "--legacy-root", dashboard.parent, "--snapshot", target,
+                                             "--suspension-evidence", file], capture_output=True)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    pending = json.loads((target / "pending-gaps.json").read_bytes())
+                    self.assertEqual(pending["status"], "pending_decision")
+                    self.assertCountEqual([(item["asset"], item["date"], item["field"]) for item in pending["gaps"]],
+                                          expected)
+                    self.assertTrue(all(item["impact"] and item["candidate_measures"] for item in pending["gaps"]))
+                    self.assertFalse((target / "manifest.json").exists())
+
     def test_cli_rejects_pending_or_unsealed_snapshot_without_output(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
