@@ -509,6 +509,27 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
             > 16
     );
 
+    let precision_id = submit(
+        &mut service,
+        &initial_snapshot,
+        &json!({"initial_nav": f64::MIN_POSITIVE, "weights": {
+            "sh511260":0.4999999999999997, "sh518880":3e-16,
+            "sh515080":0.20, "sh513300":0.25, "sz159612":0.05
+        }}),
+        "synthetic-subnormal-precision",
+        artifacts.path(),
+    );
+    let precision_status = terminal_status(&mut service, &precision_id);
+    assert_eq!(precision_status["status"], "failed");
+    assert_eq!(
+        precision_status["error"]["code"],
+        "compat_scaled_value_precision_loss"
+    );
+    assert_eq!(
+        precision_status["error"]["details"]["runner_error"]["details"]["asset"],
+        "sh518880"
+    );
+
     let ledger_config = json!({
         "initial_nav": 10.0,
         "weights": {
@@ -630,7 +651,8 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
                 "impact": "synthetic first gap",
                 "candidate_measures": ["synthetic first option"],
                 "source": "synthetic-source-a",
-                "extra_detail": long_detail
+                "extra_detail": long_detail,
+                "extra_nested": ["😀", 0.1]
             },
             {
                 "asset": "sh518880",
@@ -693,7 +715,8 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
             .as_array()
             .unwrap()
             .iter()
-            .all(|check| check["status"] == "not_run")
+            .all(|check| check["status"] == "not_run"
+                && check["reason"] == "blocked by the pending-gap report")
     );
     let failed_task_dir = output_root.join("tasks").join(&failed_id);
     assert!(
@@ -736,7 +759,7 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
     );
     assert_eq!(
         nonrepresentable_status["error"]["details"]["runner_error_details_complete"],
-        true
+        false
     );
     assert_eq!(
         nonrepresentable_status["error"]["details"]["runner_error"]["details"]["report_status"],
@@ -769,6 +792,84 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
         String::from_utf8_lossy(&nonrepresentable_result.stderr)
             .contains("compat_result_unavailable")
     );
+
+    let mut invalid_reports = Vec::new();
+    for (label, payload, expected_status) in [
+        (
+            "rounded-decimal",
+            r#"{"status":"pending_decision","gaps":[{"asset":"sh511260","metric":9007199254740993.0},{"asset":"sh518880","date":"2026-11-10","field":"daily_bar","source":"synthetic-b","impact":"second gap","candidate_measures":["option"]}]}"#,
+            "non_representable_number",
+        ),
+        (
+            "lone-surrogate",
+            r#"{"status":"pending_decision","gaps":[{"source":"\ud800"}]}"#,
+            "invalid",
+        ),
+        (
+            "duplicate-key",
+            r#"{"status":"pending_decision","gaps":[{"source":"a","source":"b"}]}"#,
+            "invalid",
+        ),
+        ("malformed", "{", "invalid"),
+    ] {
+        let snapshot = artifacts.path().join(label);
+        fs::create_dir_all(&snapshot).expect("create invalid synthetic snapshot");
+        fs::write(snapshot.join("pending-gaps.json"), payload)
+            .expect("write invalid synthetic gap report");
+        let id = submit(&mut service, &snapshot, &json!({}), label, artifacts.path());
+        let failed = terminal_status(&mut service, &id);
+        assert_eq!(failed["status"], "failed", "{label}");
+        assert_eq!(
+            failed["error"]["code"], "compat_pending_gaps_invalid",
+            "{label}"
+        );
+        let details = &failed["error"]["details"];
+        assert_eq!(details["runner_error_details_complete"], false, "{label}");
+        assert_eq!(
+            details["runner_error"]["details"]["report_status"],
+            expected_status
+        );
+        assert_eq!(
+            details["runner_error"]["details"]["report_contents_persisted"],
+            false
+        );
+        assert!(
+            details["runner_error"]["details"]
+                .get("pending_gap_report")
+                .is_none()
+        );
+        assert_eq!(
+            details["runner_error"]["details"]["checks_not_run"],
+            runner_error["details"]["checks_not_run"]
+        );
+        assert!(
+            !output_root
+                .join("tasks")
+                .join(&id)
+                .join("compat-result.json")
+                .exists()
+        );
+        if label == "rounded-decimal" {
+            let recovered = &details["runner_error"]["details"]["recoverable_pending_gap_report"];
+            assert_eq!(recovered["gaps"][0]["asset"], "sh511260");
+            assert_eq!(
+                recovered["gaps"][0]["metric"],
+                json!({"unsupported_json_number":"9007199254740993.0"})
+            );
+            assert_eq!(
+                recovered["gaps"][1],
+                json!({
+                    "asset":"sh518880", "date":"2026-11-10", "field":"daily_bar",
+                    "source":"synthetic-b", "impact":"second gap", "candidate_measures":["option"]
+                })
+            );
+        }
+        assert_eq!(
+            details["runner_error"]["details"]["pending_gap_report_raw_json"],
+            payload
+        );
+        invalid_reports.push((id, failed["error"].clone()));
+    }
 
     service.stop();
     service = LocalService::start(&output_root, &python);
@@ -840,6 +941,28 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
             .join("compat-result.json")
             .exists()
     );
+    invalid_reports.push((precision_id, precision_status["error"].clone()));
+    for (id, expected_error) in invalid_reports {
+        let failed = status(&mut service, &id);
+        assert_eq!(failed["status"], "failed");
+        assert_eq!(failed["error"], expected_error);
+        let unavailable = run_cli(&[
+            "eternal-compat".into(),
+            "result".into(),
+            "--server".into(),
+            service.url(),
+            id.clone(),
+        ]);
+        assert!(!unavailable.status.success());
+        assert!(String::from_utf8_lossy(&unavailable.stderr).contains("compat_result_unavailable"));
+        assert!(
+            !output_root
+                .join("tasks")
+                .join(id)
+                .join("compat-result.json")
+                .exists()
+        );
+    }
     let restarted = status(&mut service, &failed_id);
     assert_eq!(restarted["status"], "failed");
     assert_eq!(

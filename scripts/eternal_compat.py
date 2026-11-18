@@ -139,6 +139,12 @@ def _scaled_result(navs, signals, trades, stats, daily, initial_nav):
                 "positive compatibility result value underflowed during capital scaling",
                 details,
             )
+        if not math.isclose(scaled / initial_nav, value, rel_tol=1e-12, abs_tol=0.0):
+            raise RunnerError(
+                "compat_scaled_value_precision_loss",
+                "capital scaling cannot preserve normalized values within 1e-12 relative tolerance",
+                details,
+            )
         return scaled
 
     scaled_navs = [scale(value, "daily.nav") for value in navs]
@@ -186,6 +192,7 @@ def _pending_gap_error(code, message, report_status):
         {
             "report_file": "pending-gaps.json",
             "report_status": report_status,
+            "report_contents_persisted": False,
             "checks_not_run": [
                 {"name": name, "status": "not_run", "reason": reason}
                 for name in PENDING_GAP_CHECKS
@@ -220,9 +227,71 @@ def _parse_compatible_json_float(value):
         exact = Decimal(value)
     except (InvalidOperation, OverflowError, ValueError) as error:
         raise NonRepresentableJsonNumber from error
-    if not math.isfinite(number) or (number == 0 and not exact.is_zero()):
+    if not math.isfinite(number) or Decimal(str(number)) != exact:
         raise NonRepresentableJsonNumber
     return number
+
+
+def _validate_json_strings(value):
+    if isinstance(value, str):
+        value.encode("utf-8")
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            _validate_json_strings(key)
+            _validate_json_strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            _validate_json_strings(item)
+
+
+def _attach_recoverable_report(failure, payload):
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeError:
+        return
+    failure.details["pending_gap_report_raw_json"] = text
+    failure.details["report_raw_json_persisted"] = True
+
+    def number(parser, token):
+        try:
+            return parser(token)
+        except NonRepresentableJsonNumber:
+            return {"unsupported_json_number": token}
+
+    def strings(value):
+        if isinstance(value, str):
+            try:
+                value.encode("utf-8")
+            except UnicodeError:
+                return {"unsupported_json_string": json.dumps(value)}
+        elif isinstance(value, dict):
+            recovered = {}
+            for key, item in value.items():
+                try:
+                    key.encode("utf-8")
+                except UnicodeError:
+                    continue
+                recovered[key] = strings(item)
+            return recovered
+        elif isinstance(value, list):
+            return [strings(item) for item in value]
+        return value
+
+    try:
+        recovered = json.loads(
+            text,
+            object_pairs_hook=_unique_json_object,
+            parse_int=lambda token: number(_parse_compatible_json_int, token),
+            parse_float=lambda token: number(_parse_compatible_json_float, token),
+            parse_constant=lambda token: {"unsupported_json_number": token},
+        )
+        failure.details["recoverable_pending_gap_report"] = strings(recovered)
+        failure.details["report_recovery_encoding"] = (
+            "supported fields unchanged; unsupported numeric/string values are tagged "
+            "with original JSON tokens; invalid Unicode keys omitted; raw JSON retained"
+        )
+    except (ValueError, RecursionError):
+        pass
 
 
 def _read_pending_gap_report(snapshot):
@@ -286,6 +355,7 @@ def _read_pending_gap_report(snapshot):
             parse_int=_parse_compatible_json_int,
             parse_float=_parse_compatible_json_float,
         )
+        _validate_json_strings(report)
     except NonRepresentableJsonNumber as error:
         failure = _pending_gap_error(
             "compat_pending_gaps_invalid",
@@ -294,10 +364,11 @@ def _read_pending_gap_report(snapshot):
         )
         failure.details["report_contents_persisted"] = False
         failure.details["report_contents_not_persisted_reason"] = (
-            "report contains a number outside the portable JSON numeric range"
+            "report contains a number outside the lossless portable JSON numeric range"
         )
+        _attach_recoverable_report(failure, payload)
         raise failure from error
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RecursionError) as error:
+    except (UnicodeError, json.JSONDecodeError, ValueError, RecursionError) as error:
         failure = _pending_gap_error(
             "compat_pending_gaps_invalid",
             "pending gap report is invalid JSON",
@@ -307,6 +378,7 @@ def _read_pending_gap_report(snapshot):
         failure.details["report_contents_not_persisted_reason"] = (
             "report is not valid standard JSON"
         )
+        _attach_recoverable_report(failure, payload)
         raise failure from error
 
     if (
@@ -325,6 +397,7 @@ def _read_pending_gap_report(snapshot):
         failure.details["report_contents_not_persisted_reason"] = (
             "report structure is invalid"
         )
+        _attach_recoverable_report(failure, payload)
         raise failure
 
     return report
@@ -340,6 +413,7 @@ def _load_simulation(snapshot):
                 "pending_decision",
             ).details
             details["pending_gap_report"] = pending_gap_report
+            details["report_contents_persisted"] = True
             raise RunnerError(
                 "compat_input_gaps_pending",
                 "snapshot has unresolved input gaps; no replay checks were run",
@@ -501,7 +575,8 @@ def _persist_failure(output, error):
     code = error.code if isinstance(error.code, str) else "compat_runner_failed"
     message = str(error)
     failure = {"error": {"code": code, "message": message, "details": error.details}}
-    details_complete = True
+    details_complete = error.details.get("report_contents_persisted", True)
+    failure["structured_details_complete"] = details_complete
     try:
         payload = canonical_json(failure) + b"\n"
     except (TypeError, ValueError, OverflowError, RecursionError, UnicodeError):

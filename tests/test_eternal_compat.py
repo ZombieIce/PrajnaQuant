@@ -187,6 +187,19 @@ class EternalCompatibilityTests(unittest.TestCase):
         self.assertEqual(failure["details"]["asset"], tiny_asset)
         self.assertFalse(output_path.exists())
 
+    def test_nonzero_subnormal_allocation_with_insufficient_precision_fails(self):
+        weights = dict(baseline.WEIGHTS)
+        weights["sh511260"] += weights["sz159612"] - 3e-16
+        weights["sz159612"] = 3e-16
+        completed, output = self.run_compat("scaled-imprecise", {
+            "initial_nav": sys.float_info.min, "weights": weights,
+        })
+        self.assertEqual(completed.returncode, 2, completed.stderr)
+        failure = json.loads(output.with_name("compat-failure.json").read_text())["error"]
+        self.assertEqual(failure["code"], "compat_scaled_value_precision_loss")
+        self.assertEqual(failure["details"]["asset"], "sz159612")
+        self.assertFalse(output.exists())
+
     def test_default_reference_mismatch_fails_without_publishing_a_result(self):
         reference_path = self.snapshot / "reference.json"
         reference = json.loads(reference_path.read_text(encoding="utf-8"))
@@ -215,7 +228,7 @@ class EternalCompatibilityTests(unittest.TestCase):
                     "impact": "synthetic first gap",
                     "candidate_measures": ["synthetic first option"],
                     "source": "synthetic-source-a",
-                    "extra_field": "retained-a",
+                    "extra_field": {"nested": ["retained-a", "😀", 0.1]},
                 },
                 {
                     "asset": "sh518880",
@@ -268,15 +281,22 @@ class EternalCompatibilityTests(unittest.TestCase):
             ("positive-overflow", "1e1000", "non_representable_number"),
             ("negative-underflow", "1e-1000", "non_representable_number"),
             ("integer-overflow", "18446744073709551616", "non_representable_number"),
+            ("rounded-decimal", "9007199254740993.0", "non_representable_number"),
+            ("rounded-fraction", "0.1234567890123456789", "non_representable_number"),
             ("nonstandard-constant", "NaN", "invalid"),
         ):
             with self.subTest(number=number):
                 snapshot = self.directory / f"pending-{label}"
                 snapshot.mkdir()
+                known = {
+                    "asset": "sh518880", "date": "2026-11-10", "field": "daily_bar",
+                    "source": "synthetic-b", "impact": "second gap",
+                    "candidate_measures": ["option"],
+                }
+                first = {**known, "asset": "sh511260", "extra_numeric": "NUMBER_TOKEN"}
+                report = {"status": "pending_decision", "gaps": [first, known]}
                 (snapshot / "pending-gaps.json").write_text(
-                    '{"status":"pending_decision","gaps":[{"asset":"sh511260",'
-                    f'"extra_numeric":{number}' + "}]}",
-                    encoding="utf-8",
+                    json.dumps(report).replace('"NUMBER_TOKEN"', number), encoding="utf-8",
                 )
 
                 completed, output_path = self.run_compat(
@@ -288,6 +308,7 @@ class EternalCompatibilityTests(unittest.TestCase):
                 summary = json.loads(completed.stderr)["error"]
                 self.assertEqual(summary["code"], "compat_pending_gaps_invalid")
                 self.assertTrue(summary["details"]["structured_details_persisted"])
+                self.assertFalse(summary["details"]["structured_details_complete"])
                 failure = json.loads(
                     output_path.with_name("compat-failure.json").read_text(
                         encoding="utf-8"
@@ -296,6 +317,40 @@ class EternalCompatibilityTests(unittest.TestCase):
                 self.assertEqual(failure["details"]["report_status"], expected_status)
                 self.assertFalse(failure["details"]["report_contents_persisted"])
                 self.assertNotIn("pending_gap_report", failure["details"])
+                recovered = failure["details"]["recoverable_pending_gap_report"]
+                self.assertEqual(
+                    {key: value for key, value in recovered["gaps"][0].items()
+                     if key != "extra_numeric"}, {**known, "asset": "sh511260"},
+                )
+                self.assertEqual(recovered["gaps"][0]["extra_numeric"],
+                                 {"unsupported_json_number": number})
+                self.assertEqual(recovered["gaps"][1], {
+                    "asset": "sh518880", "date": "2026-11-10", "field": "daily_bar",
+                    "source": "synthetic-b", "impact": "second gap",
+                    "candidate_measures": ["option"],
+                })
+                self.assertIn(number, failure["details"]["pending_gap_report_raw_json"])
+                self.assertFalse(output_path.exists())
+
+    def test_pending_report_rejects_lone_surrogates_and_duplicate_keys(self):
+        for label, fragment in (
+            ("surrogate-value", '"extra":"\\ud800"'),
+            ("surrogate-key", '"\\udfff":"extra"'),
+            ("duplicate-key", '"source":"first","source":"second"'),
+        ):
+            with self.subTest(label=label):
+                snapshot = self.directory / label
+                snapshot.mkdir()
+                (snapshot / "pending-gaps.json").write_text(
+                    '{"status":"pending_decision","gaps":[{' + fragment + ' }]}',
+                    encoding="utf-8",
+                )
+                completed, output_path = self.run_compat(label, snapshot=snapshot)
+                self.assertEqual(completed.returncode, 2, completed.stderr)
+                failure = json.loads(output_path.with_name("compat-failure.json").read_text())
+                self.assertEqual(failure["error"]["code"], "compat_pending_gaps_invalid")
+                self.assertFalse(failure["error"]["details"]["report_contents_persisted"])
+                self.assertNotIn("pending_gap_report", failure["error"]["details"])
                 self.assertFalse(output_path.exists())
 
     def test_failure_serialization_falls_back_to_partial_durable_diagnostics(self):
@@ -324,6 +379,21 @@ class EternalCompatibilityTests(unittest.TestCase):
             failure["error"]["details"]["failure_details_omitted_reason"],
         )
         self.assertFalse(output_path.exists())
+
+    def test_failure_sidecar_store_failure_is_explicitly_incomplete(self):
+        from unittest.mock import patch
+
+        output = self.directory / "store-failure-result.json"
+        stderr = io.StringIO()
+        with patch.object(compat.os, "replace", side_effect=PermissionError("synthetic")):
+            with redirect_stderr(stderr):
+                compat._emit_failure(output, compat.RunnerError("compat_synthetic", "synthetic"))
+        details = json.loads(stderr.getvalue())["error"]["details"]
+        self.assertFalse(details["structured_details_persisted"])
+        self.assertFalse(details["structured_details_complete"])
+        self.assertTrue(details["structured_details_persistence_failed"])
+        self.assertFalse(output.with_name("compat-failure.json").exists())
+        self.assertFalse(list(self.directory.glob(".compat-failure.json.*.tmp")))
 
     def test_dangling_pending_report_symlink_fails_without_result(self):
         dangling_snapshot = self.directory / "dangling-pending-snapshot"

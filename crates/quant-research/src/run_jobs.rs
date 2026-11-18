@@ -3426,6 +3426,50 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn invalid_or_unreadable_compat_failure_sidecar_is_never_complete() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let failure_path = directory.path().join("compat-failure.json");
+        let stderr = BoundedStderr {
+            text: serde_json::to_string(&json!({"error": {
+                "code": "compat_input_gaps_pending",
+                "message": "synthetic failure",
+                "details": {"structured_details_persisted": true,
+                    "structured_details_complete": true}
+            }}))
+            .unwrap(),
+            truncated: false,
+            capture_incomplete: false,
+        };
+        for payload in [
+            r#"{"error":{"code":"compat_input_gaps_pending","message":"synthetic failure","details":{"source":"\ud800"}}}"#,
+            "{",
+        ] {
+            fs::write(&failure_path, payload).unwrap();
+            let error =
+                eternal_compat_cli_error(&ExitStatus::from_raw(1 << 8), &stderr, &failure_path);
+            assert_eq!(error.code, "compat_input_gaps_pending");
+            assert_eq!(error.details["runner_error_details_complete"], false);
+            assert!(error.details.get("runner_error").is_none());
+            assert!(
+                error.details["runner_error_details_issue"]
+                    .as_str()
+                    .unwrap()
+                    .contains("missing or invalid")
+            );
+        }
+        fs::remove_file(&failure_path).unwrap();
+        for unreadable_path in [&failure_path, directory.path()] {
+            let error =
+                eternal_compat_cli_error(&ExitStatus::from_raw(1 << 8), &stderr, unreadable_path);
+            assert_eq!(error.details["runner_error_details_complete"], false);
+            assert!(error.details.get("runner_error").is_none());
+        }
+    }
+
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[tokio::test(flavor = "current_thread")]
     async fn eternal_compat_submit_and_status_enforce_local_origin_and_allow_cli() {
