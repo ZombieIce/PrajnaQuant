@@ -221,7 +221,7 @@ class IncomeBaselineTest(unittest.TestCase):
                 )
                 evidence["rows"][0][provider] = next(parser)[1]
                 (snapshot / "suspension-evidence.json").write_text(json.dumps(evidence))
-                with self.assertRaisesRegex(ValueError, "cross-source evidence conflicts"):
+                with self.assertRaisesRegex(baseline.InputGaps, "turnover conflicts"):
                     baseline.suspension_days(snapshot)
 
     def test_replay_binds_original_suspension_sources_after_snapshot_move(self):
@@ -316,6 +316,26 @@ class IncomeBaselineTest(unittest.TestCase):
             self.assertEqual(pending["status"], "pending_decision")
             self.assertIn(baseline.CALENDAR, {gap["asset"] for gap in pending["gaps"]})
             self.assertFalse((snapshot / "manifest.json").exists())
+
+            evidence_file, evidence = self.make_suspension_evidence(root / "original")
+            row = evidence["rows"][0]
+            row["baostock"]["tradestatus"] = "1"
+            row["tencent"] = [DAYS[1], 10, 10, 10, 10, 1]
+            evidence["rows"].append(dict(row, date=DAYS[0], tencent=None))
+            evidence_file.write_text(json.dumps(evidence))
+            conflict = root / "conflict"
+            result = subprocess.run([sys.executable, str(ROOT / "scripts/income_baseline.py"), "freeze",
+                                     "--legacy-root", dashboard.parent, "--snapshot", conflict,
+                                     "--suspension-evidence", evidence_file], capture_output=True)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            pending = json.loads((conflict / "pending-gaps.json").read_bytes())
+            self.assertEqual(pending["status"], "pending_decision")
+            self.assertEqual({(item["asset"], item["date"], item["field"]) for item in pending["gaps"]}, {
+                (CODE, DAYS[1], "baostock.tradestatus"), (CODE, DAYS[1], "tencent.record"),
+                (CODE, DAYS[0], "baostock.record"),
+            })
+            self.assertTrue(all(item["impact"] and item["candidate_measures"] for item in pending["gaps"]))
+            self.assertFalse((conflict / "manifest.json").exists())
 
     def test_cli_rejects_pending_or_unsealed_snapshot_without_output(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -339,20 +339,31 @@ def suspension_source_records(sources, keys):
     for source in sources.values():
         if match := re.fullmatch(r"baostock-(sh[0-9]{6})\.json", source.name):
             provider, rows = "baostock", raw_baostock(source, match[1])
+            affected = [key for key in keys if key[0] == match[1]]
         elif match := re.fullmatch(r"tencent-(sh[0-9]{6})-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+\.json", source.name):
             provider, rows = "tencent", raw_tencent(source, match[1])
+            affected = [key for key in keys if key[0] == match[1]]
         elif match := re.fullmatch(r"tdx-([0-9]{8})\.zip", source.name):
             provider, rows = "tdx", raw_tdx(source, match[1], keys)
+            affected = [key for key in keys if key[1].replace("-", "") == match[1]]
         elif source.name in {"classifications.json", "final-classifications.json", "requests.json", "tdx-checks.json"}:
             continue
         else:
             raise ValueError("unrecognized suspension source artifact")
         index = records[provider]
-        for key, row in rows:
-            if key in keys:
-                if key in index and index[key] != row:
-                    raise ValueError("conflicting duplicate raw suspension source records")
-                index[key] = row
+        try:
+            for key, row in rows:
+                if key in keys:
+                    if key in index and index[key] != row:
+                        raise InputGaps([gap(*key, f"{provider}.record", "conflicting duplicate raw suspension source records")])
+                    index[key] = row
+        except InputGaps:
+            raise
+        except (ValueError, KeyError, TypeError) as exc:
+            if not affected:
+                raise
+            raise InputGaps([gap(*key, f"{provider}.response", "archived source response cannot verify suspension")
+                             for key in sorted(affected)]) from exc
     return records
 
 
@@ -371,25 +382,42 @@ def suspension_days(snapshot):
     if evidence["method"] != "a-stock-data 3.10.4 §6.5":
         raise ValueError("unsupported suspension evidence method")
     days = set()
+    issues = []
     for item in rows:
         code, day = item["code"], iso_day(item["date"], "suspension evidence")
         key = code, day
-        if records["baostock"].get(key) is None or any(
-            index.get(key) != item[provider] for provider, index in records.items()
-        ):
-            raise ValueError("derived suspension row does not match archived source records")
-        record = records["baostock"][key]
-        if (key in days or code not in CODES or record["date"] != day
-                or record["code"] != f"{code[:2]}.{code[2:]}" or record["tradestatus"] != "0"):
-            raise ValueError("invalid or duplicate BaoStock suspension evidence")
-        if any(float(record[field] or 0) != 0 for field in ("volume", "amount")):
-            raise ValueError("BaoStock suspension record conflicts with recorded trades")
-        tencent, tdx = item["tencent"], item["tdx"]
-        if ((tencent is not None and (tencent[0] != day or float(tencent[5]) != 0))
-                or (tdx is not None and (tdx["date"] != day or tdx["market"] + tdx["code"] != code
-                                        or any(float(tdx[key]) != 0 for key in ("volume", "amount"))))):
-            raise ValueError("cross-source evidence conflicts with BaoStock suspension")
-        days.add((code, day))
+        if key in days or code not in CODES:
+            issues.append(gap(*key, "suspension.identity", "duplicate or out-of-universe suspension claim"))
+        days.add(key)
+        for provider, index in records.items():
+            raw = index.get(key)
+            derived = item.get(provider)
+            if provider not in item or raw != derived or (provider == "baostock" and raw is None):
+                fields = ["record"]
+                if isinstance(raw, dict) and isinstance(derived, dict):
+                    fields = sorted(field for field in raw.keys() | derived.keys()
+                                    if field not in raw or field not in derived or raw[field] != derived[field])
+                elif provider == "tencent" and isinstance(derived, list) and isinstance(raw, list):
+                    if len(raw) == len(derived) and raw[:5] == derived[:5] and raw[6:] == derived[6:]:
+                        fields = ["volume"]
+                issues.extend(gap(*key, f"{provider}.{field}",
+                                  "derived suspension row does not match archived source records; suspension unverified")
+                              for field in fields)
+                continue
+            if raw is None:
+                continue
+            if provider == "baostock" and raw["tradestatus"] != "0":
+                issues.append(gap(*key, "baostock.tradestatus", "archived status does not confirm suspension"))
+            turnover = {"volume": raw[5]} if provider == "tencent" else {field: raw[field] for field in ("volume", "amount")}
+            for field, value in turnover.items():
+                try:
+                    zero = float((value or 0) if provider == "baostock" else value) == 0
+                except (ValueError, TypeError):
+                    zero = False
+                if not zero:
+                    issues.append(gap(*key, f"{provider}.{field}", "source turnover conflicts with suspension"))
+    if issues:
+        raise InputGaps(issues)
     return days
 
 
@@ -494,7 +522,7 @@ def ledger(days, daily, inputs, accounts, bank_trades, capital):
     return fills, audited_daily
 
 
-def execute(snapshot, reference, *, diagnostic=False):
+def execute(snapshot, reference, *, diagnostic=False, suspended=None):
     root = snapshot / "source"
     sys.path.insert(0, str(root / "strategy-dashboard"))
     # Run in the CLI's own process and never write bytecode into the snapshot.
@@ -505,7 +533,8 @@ def execute(snapshot, reference, *, diagnostic=False):
     end = reference["stats"]["income"]["end"]
     market, coverage, loaded, details, accounts = {}, {}, {}, {}, {}
     price_gaps = []
-    suspended = suspension_days(snapshot)
+    if suspended is None:
+        suspended = suspension_days(snapshot)
     for code in (CALENDAR, *CODES):
         factor_rows = [] if code == CALENDAR else dashboard.load(root / "data/income_plan" / f"{code}_hfq.csv.gz")
         market[code] = [], factor_rows
@@ -516,7 +545,8 @@ def execute(snapshot, reference, *, diagnostic=False):
         detected = session_price_gaps(days, inputs, config["start"])
         detected_keys = {(item["asset"], item["date"]) for item in detected}
         if suspended - detected_keys:
-            raise ValueError("suspension evidence refers to days outside the detected gaps")
+            raise InputGaps([gap(*key, "suspension.date", "suspension evidence outside detected price gaps")
+                             for key in sorted(suspended - detected_keys)])
         price_gaps.extend(item for item in detected if (item["asset"], item["date"]) not in suspended)
         try:
             coverage.update(check_warmup(days, inputs, config["start"], end, config["first_dates"], histories))
@@ -690,8 +720,9 @@ def freeze(args):
         if args.suspension_evidence is not None:
             evidence = local_path(args.suspension_evidence, "suspension evidence")
             archive_suspension_evidence(evidence, snapshot)
+        suspended = suspension_days(snapshot)
         stage_inputs(root, snapshot, end, args.candidates)
-        config, coverage, result, details, price_gaps = execute(snapshot, reference, diagnostic=True)
+        config, coverage, result, details, price_gaps = execute(snapshot, reference, diagnostic=True, suspended=suspended)
         if config["capital"] != reference["incomeInitialCapital"]:
             raise ValueError("historical starting capital differs from the legacy configuration")
         comparison = compare(reference, result)
