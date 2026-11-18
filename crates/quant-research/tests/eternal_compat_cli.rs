@@ -1,0 +1,551 @@
+#![cfg(feature = "app")]
+
+use serde_json::{Value, json};
+use std::{
+    fs,
+    net::{SocketAddr, TcpListener, TcpStream},
+    path::{Path, PathBuf},
+    process::{Child, Command, Output, Stdio},
+    thread,
+    time::{Duration, Instant},
+};
+use uuid::Uuid;
+
+const CLI: &str = env!("CARGO_BIN_EXE_quant-research");
+
+struct TestArtifacts(PathBuf);
+
+impl TestArtifacts {
+    fn new() -> Self {
+        let root = PathBuf::from(
+            std::env::var_os("PRAJNA_TEST_ARTIFACTS")
+                .expect("PRAJNA_TEST_ARTIFACTS must point to a session validation folder"),
+        );
+        let directory = root.join(format!("eternal-compat-cli-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).expect("create synthetic compatibility test directory");
+        Self(directory)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TestArtifacts {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+struct LocalService {
+    child: Child,
+    address: SocketAddr,
+}
+
+impl LocalService {
+    fn start(output: &Path, python: &str) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("reserve loopback port");
+        let address = listener.local_addr().expect("read reserved loopback port");
+        drop(listener);
+
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("resolve repository root");
+        let child = Command::new(CLI)
+            .args([
+                "serve",
+                "--output",
+                output.to_str().expect("UTF-8 test output path"),
+                "--market-data-dir",
+                output
+                    .join("market-data")
+                    .to_str()
+                    .expect("UTF-8 test market-data path"),
+                "--address",
+                &address.to_string(),
+                "--web-dist",
+                repository
+                    .join("apps/web/dist")
+                    .to_str()
+                    .expect("UTF-8 web path"),
+            ])
+            .env("PRAJNA_ETERNAL_COMPAT_PYTHON", python)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start production local service");
+        let mut service = Self { child, address };
+        service.wait_until_ready();
+        service
+    }
+
+    fn wait_until_ready(&mut self) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < deadline {
+            if self
+                .child
+                .try_wait()
+                .expect("check service process")
+                .is_some()
+            {
+                panic!("production local service exited before accepting requests");
+            }
+            if TcpStream::connect_timeout(&self.address, Duration::from_millis(100)).is_ok() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        panic!("production local service did not start before timeout");
+    }
+
+    fn url(&self) -> String {
+        format!("http://{}", self.address)
+    }
+
+    fn stop(&mut self) {
+        if self
+            .child
+            .try_wait()
+            .expect("check service process")
+            .is_none()
+        {
+            self.child.kill().expect("stop production local service");
+            self.child.wait().expect("wait for local service exit");
+        }
+    }
+}
+
+impl Drop for LocalService {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+fn run_cli(arguments: &[String]) -> Output {
+    Command::new(CLI)
+        .args(arguments)
+        .stdin(Stdio::null())
+        .output()
+        .expect("run production compatibility CLI")
+}
+
+fn successful_json(arguments: &[String]) -> Value {
+    let output = run_cli(arguments);
+    assert!(
+        output.status.success(),
+        "production CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("production CLI returns JSON")
+}
+
+fn submit(
+    server: &LocalService,
+    snapshot: &Path,
+    config: &Value,
+    key: &str,
+    artifacts: &Path,
+) -> String {
+    let config_path = artifacts.join(format!("{key}.json"));
+    fs::write(
+        &config_path,
+        serde_json::to_vec(config).expect("serialize synthetic config"),
+    )
+    .expect("write synthetic config");
+    let response = successful_json(&[
+        "eternal-compat".into(),
+        "submit".into(),
+        "--server".into(),
+        server.url(),
+        "--snapshot".into(),
+        snapshot
+            .to_str()
+            .expect("UTF-8 synthetic snapshot path")
+            .into(),
+        "--config".into(),
+        config_path.to_str().expect("UTF-8 config path").into(),
+        "--idempotency-key".into(),
+        key.into(),
+    ]);
+    response["task"]["task_id"]
+        .as_str()
+        .expect("submit returns task id")
+        .to_owned()
+}
+
+fn status(server: &LocalService, task_id: &str) -> Value {
+    successful_json(&[
+        "eternal-compat".into(),
+        "status".into(),
+        "--server".into(),
+        server.url(),
+        task_id.into(),
+    ])
+}
+
+fn terminal_status(server: &LocalService, task_id: &str) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let task = status(server, task_id);
+        if matches!(task["status"].as_str(), Some("succeeded" | "failed")) {
+            return task;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "task did not reach a terminal state"
+        );
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn result(server: &LocalService, task_id: &str) -> Value {
+    successful_json(&[
+        "eternal-compat".into(),
+        "result".into(),
+        "--server".into(),
+        server.url(),
+        task_id.into(),
+    ])
+}
+
+fn task_count(output: &Path) -> usize {
+    fs::read_dir(output.join("tasks"))
+        .map(|entries| entries.count())
+        .unwrap_or(0)
+}
+
+fn make_synthetic_snapshot(python: &str, path: &Path, threshold_prices: bool) {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("resolve repository root");
+    let script = r#"
+import json
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
+from test_eternal_baseline import make_replay_snapshot
+from test_eternal_compat import seal_snapshot
+import eternal_baseline as baseline
+snapshot = Path(sys.argv[3])
+threshold_prices = sys.argv[4] == "true"
+make_replay_snapshot(snapshot)
+if threshold_prices:
+    for code in baseline.HISTORY_CODES:
+        path = snapshot / f"bars/{code}.csv.gz"
+        rows, fields = baseline.csv_rows(path)
+        for row in rows:
+            row.update(open="100", close="100", high="100", low="100")
+            if code == "sh511260" and row["date"] == "2026-11-09":
+                row["close"] = "106"
+            if code == "sh511260" and row["date"] == "2026-11-10":
+                row.update(open="106", close="106", high="106")
+        baseline.write_csv(path, rows, fields)
+    reference_path = snapshot / "reference.json"
+    reference = json.loads(reference_path.read_text(encoding="utf-8"))
+    reference["history_etf"] = [[day, nav * 100.0] for day, nav in reference["history_etf"]]
+    reference_path.unlink()
+    baseline.write_json(reference_path, reference)
+seal_snapshot(snapshot)
+"#;
+    let output = Command::new(python)
+        .args([
+            "-c",
+            script,
+            repository
+                .join("tests")
+                .to_str()
+                .expect("UTF-8 tests directory"),
+            repository
+                .join("scripts")
+                .to_str()
+                .expect("UTF-8 scripts directory"),
+            path.to_str().expect("UTF-8 synthetic snapshot path"),
+            if threshold_prices { "true" } else { "false" },
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .expect("create synthetic replay snapshot");
+    assert!(
+        output.status.success(),
+        "synthetic snapshot helper failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
+    let artifacts = TestArtifacts::new();
+    let python = std::env::var("PRAJNA_TEST_PYTHON").unwrap_or_else(|_| "python3.12".into());
+    let output_root = artifacts.path().join("service-output");
+    let initial_snapshot = artifacts.path().join("initial-snapshot");
+    let threshold_snapshot = artifacts.path().join("threshold-snapshot");
+    make_synthetic_snapshot(&python, &initial_snapshot, false);
+    make_synthetic_snapshot(&python, &threshold_snapshot, true);
+
+    let mut service = LocalService::start(&output_root, &python);
+
+    let ledger_config = json!({
+        "initial_nav": 10.0,
+        "weights": {
+            "sh511260": 0.25,
+            "sh518880": 0.20,
+            "sh515080": 0.20,
+            "sh513300": 0.25,
+            "sz159612": 0.10
+        },
+        "rebalance_threshold": 0.10,
+        "fee_rate_one_way": 0.001
+    });
+    let ledger_id = submit(
+        &service,
+        &initial_snapshot,
+        &ledger_config,
+        "synthetic-ledger",
+        artifacts.path(),
+    );
+    let ledger_status = terminal_status(&service, &ledger_id);
+    assert_eq!(ledger_status["status"], "succeeded");
+    let ledger = result(&service, &ledger_id);
+    let day = &ledger["daily"][0];
+    let expected_units = [
+        ("sh511260", 2500.0 / 1001.0),
+        ("sh518880", 2000.0 / 1001.0),
+        ("sh515080", 2000.0 / 1001.0),
+        ("sh513300", 2500.0 / 1001.0),
+        ("sz159612", 1000.0 / 1001.0),
+    ];
+    for (asset, expected) in expected_units {
+        let units = day["units"][asset].as_f64().expect("persisted model units");
+        let holding = day["holdings"][asset]
+            .as_f64()
+            .expect("persisted initial holding");
+        assert!((units - expected).abs() < 1e-12);
+        assert!((holding - expected).abs() < 1e-12);
+    }
+    assert!((day["nav"].as_f64().unwrap() - 10_000.0 / 1001.0).abs() < 1e-12);
+    assert!((day["fees"].as_f64().unwrap() - 10.0 / 1001.0).abs() < 1e-12);
+    assert_eq!(day["cash"], 0.0);
+    assert_eq!(
+        ledger["effective_config"]["initial_capital_unit"],
+        "model_nav"
+    );
+    assert!(ledger["effective_config"]["initial_capital_currency_amount"].is_null());
+
+    let threshold_five = json!({"initial_nav":10.0,"rebalance_threshold":0.05});
+    let threshold_ten = json!({"initial_nav":10.0,"rebalance_threshold":0.10});
+    let five_id = submit(
+        &service,
+        &threshold_snapshot,
+        &threshold_five,
+        "synthetic-threshold-five",
+        artifacts.path(),
+    );
+    let ten_id = submit(
+        &service,
+        &threshold_snapshot,
+        &threshold_ten,
+        "synthetic-threshold-ten",
+        artifacts.path(),
+    );
+    assert_eq!(terminal_status(&service, &five_id)["status"], "succeeded");
+    assert_eq!(terminal_status(&service, &ten_id)["status"], "succeeded");
+    let five = result(&service, &five_id);
+    let ten = result(&service, &ten_id);
+    assert!(!five["signals"].as_array().unwrap().is_empty());
+    assert_eq!(five["signals"][0]["signal_date"], "2026-11-09");
+    assert!(
+        five["signals"][0]["trigger_details"]
+            .as_str()
+            .unwrap()
+            .contains("gain:0.06000000")
+    );
+    assert_eq!(five["trades"][0]["signal_date"], "2026-11-09");
+    assert_eq!(five["trades"][0]["intended_date"], "2026-11-10");
+    assert_eq!(five["trades"][0]["trade_date"], "2026-11-10");
+    assert!(ten["signals"].as_array().unwrap().is_empty());
+    assert!(ten["trades"].as_array().unwrap().is_empty());
+
+    let high_fee_id = submit(
+        &service,
+        &threshold_snapshot,
+        &json!({
+            "initial_nav": 10.0,
+            "rebalance_threshold": 0.05,
+            "fee_rate_one_way": 0.9999999995
+        }),
+        "synthetic-high-fee-runtime-limitation",
+        artifacts.path(),
+    );
+    let high_fee = terminal_status(&service, &high_fee_id);
+    assert_eq!(high_fee["status"], "failed");
+    assert_eq!(high_fee["error"]["code"], "compat_runner_failed");
+    assert!(
+        high_fee["error"]["details"]["runner_error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("未收敛")
+    );
+
+    let pending_snapshot = artifacts.path().join("pending-only-snapshot");
+    fs::create_dir_all(&pending_snapshot).expect("create pending-only synthetic snapshot");
+    let long_detail = format!("synthetic-gap-{}", "x".repeat(24_000));
+    let pending_report = json!({
+        "status": "pending_decision",
+        "gaps": [
+            {
+                "asset": "sh511260",
+                "date": "2026-11-09",
+                "field": "volume",
+                "impact": "synthetic first gap",
+                "candidate_measures": ["synthetic first option"],
+                "source": "synthetic-source-a",
+                "extra_detail": long_detail
+            },
+            {
+                "asset": "sh518880",
+                "date": "2026-11-10",
+                "field": "daily_bar",
+                "impact": "synthetic second gap",
+                "candidate_measures": ["synthetic second option"],
+                "source": "synthetic-source-b",
+                "extra_detail": "retained second detail"
+            }
+        ]
+    });
+    fs::write(
+        pending_snapshot.join("pending-gaps.json"),
+        serde_json::to_vec(&pending_report).expect("serialize synthetic gap report"),
+    )
+    .expect("write synthetic gap report");
+    let failed_id = submit(
+        &service,
+        &pending_snapshot,
+        &json!({}),
+        "synthetic-pending-gaps",
+        artifacts.path(),
+    );
+    let failed = terminal_status(&service, &failed_id);
+    assert_eq!(failed["status"], "failed");
+    assert_eq!(failed["error"]["code"], "compat_input_gaps_pending");
+    assert_eq!(
+        failed["error"]["details"]["runner_error_details_complete"],
+        true
+    );
+    assert_eq!(failed["error"]["details"]["stderr_truncated"], false);
+    let runner_error = &failed["error"]["details"]["runner_error"];
+    assert_eq!(
+        runner_error["details"]["pending_gap_report"],
+        pending_report
+    );
+    assert_eq!(
+        runner_error["details"]["checks_not_run"]
+            .as_array()
+            .unwrap()
+            .len(),
+        6
+    );
+    assert!(
+        runner_error["details"]["checks_not_run"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|check| check["status"] == "not_run")
+    );
+    let failed_task_dir = output_root.join("tasks").join(&failed_id);
+    assert!(
+        fs::metadata(failed_task_dir.join("compat-failure.json"))
+            .expect("structured failure sidecar exists")
+            .len()
+            > 16 * 1024
+    );
+    assert!(!failed_task_dir.join("compat-result.json").exists());
+    let result_attempt = run_cli(&[
+        "eternal-compat".into(),
+        "result".into(),
+        "--server".into(),
+        service.url(),
+        failed_id.clone(),
+    ]);
+    assert!(!result_attempt.status.success());
+    assert!(String::from_utf8_lossy(&result_attempt.stderr).contains("compat_result_unavailable"));
+
+    service.stop();
+    service = LocalService::start(&output_root, &python);
+    let restarted = status(&service, &failed_id);
+    assert_eq!(restarted["status"], "failed");
+    assert_eq!(
+        restarted["error"]["details"]["runner_error"]["details"]["pending_gap_report"],
+        pending_report
+    );
+    assert_eq!(
+        restarted["error"]["details"]["runner_error"]["details"]["checks_not_run"],
+        runner_error["details"]["checks_not_run"]
+    );
+    assert!(!failed_task_dir.join("compat-result.json").exists());
+}
+
+#[test]
+fn production_cli_rejects_invalid_configs_without_creating_tasks() {
+    let artifacts = TestArtifacts::new();
+    let python = std::env::var("PRAJNA_TEST_PYTHON").unwrap_or_else(|_| "python3.12".into());
+    let output_root = artifacts.path().join("service-output");
+    let snapshot = artifacts.path().join("synthetic-snapshot");
+    make_synthetic_snapshot(&python, &snapshot, false);
+    let service = LocalService::start(&output_root, &python);
+
+    let minimum_normal = submit(
+        &service,
+        &snapshot,
+        &json!({"initial_nav":f64::MIN_POSITIVE,"fee_rate_one_way":0.9999999995}),
+        "synthetic-near-boundary-valid",
+        artifacts.path(),
+    );
+    assert_eq!(
+        terminal_status(&service, &minimum_normal)["status"],
+        "succeeded"
+    );
+
+    let existing_tasks = task_count(&output_root);
+    for (key, config) in [
+        ("zero-nav", json!({"initial_nav":0.0})),
+        ("negative-nav", json!({"initial_nav":-1.0})),
+        ("subnormal-nav", json!({"initial_nav":f64::from_bits(1)})),
+        ("fee-one", json!({"fee_rate_one_way":1.0})),
+        ("fee-over-one", json!({"fee_rate_one_way":1.1})),
+        ("unsupported-field", json!({"rebalance_threshhold":0.05})),
+    ] {
+        let config_path = artifacts.path().join(format!("{key}.json"));
+        fs::write(
+            &config_path,
+            serde_json::to_vec(&config).expect("serialize invalid synthetic config"),
+        )
+        .expect("write invalid synthetic config");
+        let output = run_cli(&[
+            "eternal-compat".into(),
+            "submit".into(),
+            "--server".into(),
+            service.url(),
+            "--snapshot".into(),
+            snapshot.to_str().expect("UTF-8 snapshot path").into(),
+            "--config".into(),
+            config_path.to_str().expect("UTF-8 config path").into(),
+            "--idempotency-key".into(),
+            format!("synthetic-{key}"),
+        ]);
+        assert!(
+            !output.status.success(),
+            "invalid config {key} was accepted"
+        );
+        if key == "unsupported-field" {
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("rebalance_threshhold"),
+                "unsupported field was not identified in the rejection"
+            );
+        }
+        assert_eq!(task_count(&output_root), existing_tasks);
+    }
+}

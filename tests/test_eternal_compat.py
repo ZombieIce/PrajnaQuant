@@ -129,6 +129,112 @@ class EternalCompatibilityTests(unittest.TestCase):
         self.assertIn("default", error["message"])
         self.assertFalse(output_path.exists())
 
+    def test_pending_gap_report_is_structured_before_manifest_validation(self):
+        pending_snapshot = self.directory / "pending-only-snapshot"
+        pending_snapshot.mkdir()
+        report = {
+            "status": "pending_decision",
+            "gaps": [
+                {
+                    "asset": "sh511260",
+                    "date": "2026-11-09",
+                    "field": "volume",
+                    "impact": "synthetic first gap",
+                    "candidate_measures": ["synthetic first option"],
+                    "source": "synthetic-source-a",
+                    "extra_field": "retained-a",
+                },
+                {
+                    "asset": "sh518880",
+                    "date": "2026-11-10",
+                    "field": "daily_bar",
+                    "impact": "synthetic second gap",
+                    "candidate_measures": ["synthetic second option"],
+                    "source": "synthetic-source-b",
+                    "extra_field": "retained-b",
+                },
+            ],
+        }
+        (pending_snapshot / "pending-gaps.json").write_text(
+            json.dumps(report), encoding="utf-8",
+        )
+
+        completed, output_path = self.run_compat(
+            "pending-only-snapshot",
+            snapshot=pending_snapshot,
+        )
+
+        self.assertEqual(completed.returncode, 2)
+        summary = json.loads(completed.stderr)["error"]
+        self.assertTrue(summary["details"]["structured_details_persisted"])
+        persisted = json.loads(
+            output_path.with_name("compat-failure.json").read_text(encoding="utf-8")
+        )
+        error = persisted["error"]
+        self.assertEqual(error["code"], "compat_input_gaps_pending")
+        self.assertEqual(error["details"]["pending_gap_report"], report)
+        self.assertEqual(
+            [check["name"] for check in error["details"]["checks_not_run"]],
+            [
+                "snapshot_manifest_validation",
+                "snapshot_file_inventory_validation",
+                "snapshot_configuration_validation",
+                "frozen_source_validation",
+                "simulation",
+                "frozen_reference_comparison",
+            ],
+        )
+        self.assertFalse(output_path.exists())
+
+    def test_malformed_and_unreadable_pending_gap_reports_fail_explicitly(self):
+        malformed = self.directory / "malformed-pending-snapshot"
+        malformed.mkdir()
+        (malformed / "pending-gaps.json").write_text("{not-json", encoding="utf-8")
+        malformed_result, malformed_output = self.run_compat(
+            "malformed-pending",
+            snapshot=malformed,
+        )
+        self.assertEqual(malformed_result.returncode, 2)
+        self.assertEqual(
+            json.loads(malformed_result.stderr)["error"]["code"],
+            "compat_pending_gaps_invalid",
+        )
+        self.assertFalse(malformed_output.exists())
+
+        unreadable = self.directory / "unreadable-pending-snapshot"
+        unreadable.mkdir()
+        (unreadable / "pending-gaps.json").mkdir()
+        unreadable_result, unreadable_output = self.run_compat(
+            "unreadable-pending",
+            snapshot=unreadable,
+        )
+        self.assertEqual(unreadable_result.returncode, 2)
+        self.assertEqual(
+            json.loads(unreadable_result.stderr)["error"]["code"],
+            "compat_pending_gaps_unreadable",
+        )
+        self.assertFalse(unreadable_output.exists())
+
+    def test_config_boundaries_match_documented_positive_nav_and_subunit_fee(self):
+        accepted = compat.validate_config({
+            "initial_nav": sys.float_info.min,
+            "fee_rate_one_way": 0.9999999995,
+        })
+        self.assertEqual(accepted["initial_nav"], sys.float_info.min)
+        self.assertEqual(accepted["fee_rate_one_way"], 0.9999999995)
+        for value in (0.0, -1.0):
+            with self.subTest(initial_nav=value):
+                with self.assertRaisesRegex(compat.RunnerError, "greater than zero"):
+                    compat.validate_config({"initial_nav": value})
+        for value in (1e-310, sys.float_info.min / 2):
+            with self.subTest(initial_nav=value):
+                with self.assertRaisesRegex(compat.RunnerError, "minimum normal positive"):
+                    compat.validate_config({"initial_nav": value})
+        for value in (1.0, 1.1):
+            with self.subTest(fee_rate_one_way=value):
+                with self.assertRaisesRegex(compat.RunnerError, "less than 1.0"):
+                    compat.validate_config({"fee_rate_one_way": value})
+
     def test_threshold_change_controls_synthetic_close_signal_and_next_open_trade(self):
         bars_path = self.snapshot / "bars/sh511260.csv.gz"
         bars, fields = baseline.csv_rows(bars_path)

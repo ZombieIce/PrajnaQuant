@@ -52,11 +52,17 @@ quant-research eternal-compat status <task-id>
 quant-research eternal-compat result <task-id>
 ```
 
-`submit` 默认生成幂等键并使用 `NAV=1.0` 模型单位、固定五资产 `30/20/20/25/5` 权重、`10%` 调仓阈值与单边 `5 bp` 费率。可用 `--config <JSON 文件>` 提交部分变体，例如配置 `{"rebalance_threshold":0.05}`；有效的完整配置会随任务和结果持久化。可调字段为 `initial_nav`（正的模型 NAV 单位）、`weights`（恰为五个固定标的且总和 1）、`rebalance_threshold`（0 到 1）及 `fee_rate_one_way`（0 到小于 1）。没有人民币本金字段；绝对 CNY 金额不可用，`initial_nav` 不应解释为 CNY。可用 `--server http://127.0.0.1:7878` 指定其他 loopback 服务地址，CLI 拒绝非 loopback URL。
+`submit` 默认生成幂等键并使用 `NAV=1.0` 模型单位、固定五资产 `30/20/20/25/5` 权重、`10%` 调仓阈值与单边 `5 bp` 费率。可用 `--config <JSON 文件>` 提交部分变体，例如配置 `{"rebalance_threshold":0.05}`；有效的完整配置会随任务和结果持久化。可调字段为 `initial_nav`（至少 `f64::MIN_POSITIVE` 的有限模型 NAV 单位）、`weights`（恰为五个固定标的且总和 1）、`rebalance_threshold`（0 到 1）及 `fee_rate_one_way`（0 到小于 1）。NAV 必须不小于最小正规正 `f64`：虽大于零的次正规值也会通过普通正数检查，但乘以资产权重可能舍入为零，故 Rust 服务与 Python runner 均拒绝此数值区间。没有人民币本金字段；绝对 CNY 金额不可用，`initial_nav` 不应解释为 CNY。可用 `--server http://127.0.0.1:7878` 指定其他 loopback 服务地址，CLI 拒绝非 loopback URL。
 
 任务类型/版本为 `prajna_eternal_compat@1`，其兼容运行 ID 与输出文件、摘要、冻结输入版本、兼容 runner/源代码摘要和运行环境独立于 Rust Experiment、Run、Execution。默认有效配置必须与冻结参考对拍为 `match`；不匹配时 runner 以 `compat_default_reference_mismatch` 失败，不写成功结果，任务状态及原因持久化。显式变体仍保存 `frozen_reference_comparison`，其中 `evaluation_mode=informational_variant` 表示参考差异仅供说明，不会单因对比不匹配而失败；只有有效默认配置标为 `required_default_parity`。`status` 可在重启后读取终态及失败原因；`result` 仅对成功任务返回通过 SHA-256 校验的已保存 JSON。未成功任务的 result 请求返回冲突及持久错误，损坏输出不会作为成功结果返回。兼容任务 submit/status 和 result 路由都只接受配置的本机 Host 与同源 Origin；CLI 的 loopback 请求不带 Origin 时允许。原生任务与旧 run 路由不因此增加该限制。服务端持久文件和 CLI 完整结果均可能含详细研究数据，只应留在本机私有输出目录，不要复制到 GitHub 或公开日志。
 
-本票只做合成验证：默认/配置变体、阈值信号与下一共同开盘执行、无效配置、缺失输入、子进程失败和重启持久读取。当前 turn 未访问真实行情或冻结本机输入，真实冻结 snapshot 比较为 **BLOCKED**；合成结果不代表 #394 真实对拍或验收完成。
+若 snapshot 含 `pending-gaps.json`，runner 会在读取 manifest 前检查它，因此无 manifest 的 pending-only snapshot 也会以 `compat_input_gaps_pending` 失败，不会写成功结果。有效 gap 报告的全部字段（包括可选 `source` 和未预先识别的字段）保存在本机任务状态 `error.details.runner_error.details.pending_gap_report`；`checks_not_run` 明列未执行的 manifest/文件清单/配置/源码校验、模拟和参考比较。畸形或不可读的报告分别以 `compat_pending_gaps_invalid` / `compat_pending_gaps_unreadable` 显示。完整 runner 失败结构写入任务目录的 `compat-failure.json`，stderr 仍受服务端 16 KiB 上限并只输出短摘要；只有 sidecar 通过错误码/消息校验后，状态才标记 `runner_error_details_complete: true`。sidecar 丢失/损坏会明确标记诊断不完整，而不会假称 stderr 包含全部 gaps。结果读取对失败任务仍返回冲突。
+
+结果中的 `units` 与对应 `holdings` 使用旧模拟器的总回报指数单位，不是 ETF 实际份额。数值边界之外，配置被受理也不保证每次都能执行成功：冻结 `eternal_baseline.py` 的 `rebalance` 使用固定 12 轮费用迭代，合成有效长仓例子在单边费率 `0.001` 收敛，但在 `0.5`、`0.9` 和 `0.9999999995` 下会显式报费用求解不收敛；这会作为运行时失败持久化，不扩大接受验证或更改冻结算法。修改 `eternal_baseline.py` 会使 snapshot 的源码绑定失效，须先获负责人裁决。
+
+实现者在干净代码头使用负责人授权的私有输入运行了真实回放 harness：生产 CLI 默认配置与 5% 变体、expected replay 逐项对比及结果重启读取均通过。比较对象是 #392 的 expected replay，不是历史 dashboard reference；本次有限复验不表示 #394 整体验收完成，也不证明冻结适配器与旧生产源码等价、历史 PIT/Universe/调整数据覆盖或未触发路径。两次真实运行均未出现 directional-deferral 事件，因此该真实路径仍未验证。完整输入、结果与运行日志仅留本机私有目录，不发布。
+
+合成回归仍覆盖默认/配置变体、阈值信号与下一共同开盘执行、无效配置、缺失输入、子进程失败和重启持久读取；合成结果本身不替代上述受限真实回放，也不代表 #394 整体验收完成。
 
 ```sh
 python3.12 -m unittest tests.test_eternal_baseline -v

@@ -1296,7 +1296,11 @@ impl RunJobApi {
         let stderr = stderr?;
         if let Some(error) = experiment_cli_error(&wait.status, &stderr) {
             if compatibility_task {
-                return Err(eternal_compat_cli_error(&wait.status, &stderr));
+                return Err(eternal_compat_cli_error(
+                    &wait.status,
+                    &stderr,
+                    &directory.join("compat-failure.json"),
+                ));
             }
             if matches!(
                 task.task_type.as_str(),
@@ -2149,9 +2153,18 @@ fn validate_eternal_compat_definition(definition: &Value) -> Result<Value, ApiFa
             "initial_nav" | "weights" | "rebalance_threshold" | "fee_rate_one_way"
         )
     }) {
+        let field = config
+            .keys()
+            .find(|key| {
+                !matches!(
+                    key.as_str(),
+                    "initial_nav" | "weights" | "rebalance_threshold" | "fee_rate_one_way"
+                )
+            })
+            .expect("unsupported config key was detected");
         return Err(compat_config_failure(
-            "config",
-            "config contains an unsupported field",
+            field,
+            &format!("unsupported config field: {field}"),
         ));
     }
 
@@ -2458,7 +2471,11 @@ fn experiment_cli_error(status: &ExitStatus, stderr: &BoundedStderr) -> Option<R
     })
 }
 
-fn eternal_compat_cli_error(status: &ExitStatus, stderr: &BoundedStderr) -> RunError {
+fn eternal_compat_cli_error(
+    status: &ExitStatus,
+    stderr: &BoundedStderr,
+    failure_path: &FsPath,
+) -> RunError {
     let child_error = serde_json::from_str::<Value>(&stderr.text).ok();
     let code = child_error
         .as_ref()
@@ -2471,10 +2488,36 @@ fn eternal_compat_cli_error(status: &ExitStatus, stderr: &BoundedStderr) -> RunE
         .as_ref()
         .and_then(|value| value["error"]["message"].as_str())
         .unwrap_or("versioned compatibility runner exited unsuccessfully");
+    let mut details = cli_result_details(status, stderr);
+    let structured_details_persisted = child_error
+        .as_ref()
+        .and_then(|value| value["error"]["details"]["structured_details_persisted"].as_bool())
+        == Some(true);
+    let failure = fs::read(failure_path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+    if structured_details_persisted
+        && failure.as_ref().is_some_and(|value| {
+            value["error"]["code"].as_str() == Some(code)
+                && value["error"]["message"].as_str() == Some(message)
+                && value["error"]["details"].is_object()
+        })
+    {
+        details["runner_error"] =
+            failure.expect("validated structured compatibility error")["error"].clone();
+        details["runner_error_details_complete"] = json!(true);
+    } else {
+        details["runner_error_details_complete"] = json!(false);
+        details["runner_error_details_issue"] = json!(if structured_details_persisted {
+            "structured compatibility failure details were missing or invalid"
+        } else {
+            "runner did not confirm persistence of complete structured failure details"
+        });
+    }
     RunError {
         code: code.into(),
         message: message.into(),
-        details: cli_result_details(status, stderr),
+        details,
     }
 }
 
@@ -3227,6 +3270,22 @@ mod tests {
         assert!(api.get_experiment_task(task.task_id).is_none());
         assert_eq!(api.list_experiment_tasks().len(), 0);
 
+        let boundary = eternal_compat_request(
+            "numeric-boundary",
+            dir.path().join("not-created-snapshot"),
+            json!({"initial_nav":f64::MIN_POSITIVE,"fee_rate_one_way":0.9999999995}),
+        );
+        let (boundary_task, created) = api.submit_experiment_task(boundary).unwrap();
+        assert!(created);
+        assert_eq!(
+            boundary_task.effective_config.as_ref().unwrap()["initial_nav"],
+            f64::MIN_POSITIVE
+        );
+        assert_eq!(
+            boundary_task.effective_config.as_ref().unwrap()["fee_rate_one_way"],
+            0.9999999995
+        );
+
         let native = SubmitExperimentTask {
             idempotency_key: "shared-task-key".into(),
             definition: json!({"name":"native synthetic task"}),
@@ -3247,6 +3306,35 @@ mod tests {
         assert_eq!(error.1, StatusCode::BAD_REQUEST);
         assert_eq!(error.0.code, "invalid_compat_config");
         assert_eq!(error.0.details["field"], "weights");
+
+        for (key, value) in [
+            ("initial_nav", json!(0.0)),
+            ("initial_nav", json!(-1.0)),
+            ("initial_nav", json!(f64::from_bits(1))),
+            ("fee_rate_one_way", json!(1.0)),
+            ("fee_rate_one_way", json!(1.1)),
+        ] {
+            let config = Value::Object([(key.to_owned(), value)].into_iter().collect());
+            let invalid = eternal_compat_request(
+                &format!("invalid-{key}"),
+                dir.path().join("not-created-snapshot"),
+                config,
+            );
+            let error = api.submit_experiment_task(invalid).unwrap_err();
+            assert_eq!(error.1, StatusCode::BAD_REQUEST);
+            assert_eq!(error.0.code, "invalid_compat_config");
+            assert_eq!(error.0.details["field"], key);
+        }
+
+        let unsupported = eternal_compat_request(
+            "unsupported-config-key",
+            dir.path().join("not-created-snapshot"),
+            json!({"rebalance_threshhold":0.05}),
+        );
+        let error = api.submit_experiment_task(unsupported).unwrap_err();
+        assert_eq!(error.1, StatusCode::BAD_REQUEST);
+        assert_eq!(error.0.details["field"], "rebalance_threshhold");
+        assert!(error.0.message.contains("rebalance_threshhold"));
 
         let null_config = eternal_compat_request(
             "null-config",

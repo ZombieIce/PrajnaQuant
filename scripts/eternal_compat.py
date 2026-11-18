@@ -21,6 +21,14 @@ DEFAULT_CONFIG = {
     "rebalance_threshold": baseline.THRESHOLD,
     "fee_rate_one_way": baseline.FEE_RATE,
 }
+PENDING_GAP_CHECKS = (
+    "snapshot_manifest_validation",
+    "snapshot_file_inventory_validation",
+    "snapshot_configuration_validation",
+    "frozen_source_validation",
+    "simulation",
+    "frozen_reference_comparison",
+)
 
 
 class RunnerError(Exception):
@@ -60,20 +68,33 @@ def validate_config(value):
             raise RunnerError("invalid_config", "weights must contain exactly the five fixed assets")
         config["weights"] = weights
 
-    def finite_number(field, minimum, maximum=None):
+    def finite_number(field, minimum=None, maximum=None):
         number = config[field]
         if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number):
             raise RunnerError("invalid_config", f"{field} must be a finite number")
-        if number < minimum or (maximum is not None and number > maximum):
-            bound = f"{minimum}..{maximum}" if maximum is not None else f">={minimum}"
+        if (minimum is not None and number < minimum) or (
+            maximum is not None and number > maximum
+        ):
+            bound = (
+                f"{minimum}..{maximum}"
+                if minimum is not None and maximum is not None
+                else f">={minimum}" if minimum is not None else f"<={maximum}"
+            )
             raise RunnerError("invalid_config", f"{field} must be {bound}")
         config[field] = float(number)
 
-    finite_number("initial_nav", 0.0)
+    finite_number("initial_nav")
     if config["initial_nav"] <= 0:
         raise RunnerError("invalid_config", "initial_nav must be greater than zero model units")
+    if config["initial_nav"] < sys.float_info.min:
+        raise RunnerError(
+            "invalid_config",
+            "initial_nav must be at least the minimum normal positive f64 value",
+        )
     finite_number("rebalance_threshold", 0.0, 1.0)
-    finite_number("fee_rate_one_way", 0.0, 0.999999999)
+    finite_number("fee_rate_one_way", 0.0)
+    if config["fee_rate_one_way"] >= 1.0:
+        raise RunnerError("invalid_config", "fee_rate_one_way must be less than 1.0")
 
     weights = config["weights"]
     if any(
@@ -117,13 +138,96 @@ def _scaled_result(navs, signals, trades, stats, daily, initial_nav):
     return scaled_navs, signals, scaled_trades, scaled_stats, scaled_daily
 
 
+def _pending_gap_error(code, message, report_status):
+    reason = "blocked by the pending-gap report"
+    return RunnerError(
+        code,
+        message,
+        {
+            "report_file": "pending-gaps.json",
+            "report_status": report_status,
+            "checks_not_run": [
+                {"name": name, "status": "not_run", "reason": reason}
+                for name in PENDING_GAP_CHECKS
+            ],
+        },
+    )
+
+
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object key: {key}")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(value):
+    raise ValueError(f"non-standard JSON constant: {value}")
+
+
+def _read_pending_gap_report(snapshot):
+    path = snapshot / "pending-gaps.json"
+    try:
+        payload = path.read_bytes()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise _pending_gap_error(
+            "compat_pending_gaps_unreadable",
+            "pending gap report could not be read",
+            "unreadable",
+        ) from error
+
+    try:
+        report = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+        raise _pending_gap_error(
+            "compat_pending_gaps_invalid",
+            "pending gap report is invalid JSON",
+            "invalid",
+        ) from error
+
+    if (
+        not isinstance(report, dict)
+        or report.get("status") != "pending_decision"
+        or not isinstance(report.get("gaps"), list)
+        or not report["gaps"]
+        or any(not isinstance(gap, dict) for gap in report["gaps"])
+    ):
+        raise _pending_gap_error(
+            "compat_pending_gaps_invalid",
+            "pending gap report has an invalid structure",
+            "invalid",
+        )
+
+    return report
+
+
 def _load_simulation(snapshot):
     try:
+        pending_gap_report = _read_pending_gap_report(snapshot)
+        if pending_gap_report is not None:
+            details = _pending_gap_error(
+                "compat_input_gaps_pending",
+                "snapshot has unresolved input gaps; no replay checks were run",
+                "pending_decision",
+            ).details
+            details["pending_gap_report"] = pending_gap_report
+            raise RunnerError(
+                "compat_input_gaps_pending",
+                "snapshot has unresolved input gaps; no replay checks were run",
+                details,
+            )
+
         manifest, reference = baseline.read_snapshot(snapshot)
         baseline.validate_execution_configuration(manifest)
         baseline.validate_replay_source(manifest, Path(baseline.__file__).resolve())
-        if (snapshot / "pending-gaps.json").exists():
-            raise RunnerError("compat_input_unavailable", "snapshot has unresolved input gaps")
 
         bars, factors, prices, limits = {}, {}, {}, {}
         for code in baseline.HISTORY_CODES:
@@ -268,6 +372,47 @@ def run(request, output):
     return {"compat_run_id": compat_run_id, "result_sha256": sha256_bytes(payload)}
 
 
+def _persist_failure(output, error):
+    failure_path = Path(output).resolve().with_name("compat-failure.json")
+    temporary_path = failure_path.with_name(
+        f".{failure_path.name}.{os.getpid()}.tmp"
+    )
+    failure = {
+        "error": {
+            "code": error.code,
+            "message": str(error),
+            "details": error.details,
+        }
+    }
+    payload = canonical_json(failure) + b"\n"
+    try:
+        failure_path.parent.mkdir(parents=True, exist_ok=True)
+        with temporary_path.open("xb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, failure_path)
+        return True
+    except OSError:
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False
+
+
+def _emit_failure(output, error):
+    details_persisted = _persist_failure(output, error)
+    summary = {
+        "code": error.code,
+        "message": str(error),
+        "details": {"structured_details_persisted": details_persisted},
+    }
+    if not details_persisted:
+        summary["details"]["structured_details_persistence_failed"] = True
+    print(json.dumps({"error": summary}), file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -280,18 +425,15 @@ def main():
         print(json.dumps(run(request, args.output), separators=(",", ":")))
         return 0
     except RunnerError as error:
-        details = {"code": error.code, "message": str(error)}
-        if error.details:
-            details["details"] = error.details
-        print(json.dumps({"error": details}), file=sys.stderr)
+        _emit_failure(args.output, error)
         return 2
     except OSError as error:
         wrapped = RunnerError("compat_input_unavailable", f"runner input or output is unavailable: {error}")
-        print(json.dumps({"error": {"code": wrapped.code, "message": str(wrapped)}}), file=sys.stderr)
+        _emit_failure(args.output, wrapped)
         return 2
     except Exception as error:
         wrapped = RunnerError("compat_runner_failed", str(error))
-        print(json.dumps({"error": {"code": wrapped.code, "message": str(wrapped)}}), file=sys.stderr)
+        _emit_failure(args.output, wrapped)
         return 2
 
 

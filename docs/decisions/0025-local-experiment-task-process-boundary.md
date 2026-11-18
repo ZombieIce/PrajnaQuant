@@ -49,9 +49,11 @@ MVP-7 的本机研究任务需要复用既有数据、因子与 Experiment 能�
 
 服务在受理时验证并保存解析后的完整配置：模型单位初始 NAV（默认 `1.0`）、固定五资产权重（默认 `30/20/20/25/5` 且合计为 `1.0`）、调仓阈值（默认 `10%`）和单边费率（默认 `5 bp`）。配置只接受模型 NAV，不接受或推断 CNY 金额；结果明确记录 `initial_capital_currency_amount: null`。快照路径和输入版本固定到任务请求/结果，执行器还记录兼容策略与 runner 版本、runner/冻结回放源码摘要及 Python/平台环境。`scripts/eternal_baseline.py` 及其冻结默认配置、schema 和参考输入均不因变体修改。
 
-`prajna_eternal_compat@1` 受理后若快照不可用、子进程异常或结果身份/hash 无效，任务以 `failed` 保存具体错误码及受限子进程诊断，且不发布成功结果；服务重启恢复终态失败原因，成功结果则从独立文件校验摘要后读取。状态路由提供持久错误，结果路由对未成功任务返回 `409`，缺任务返回 `404`，损坏输出返回 `500`；成功结果为 `no-store`。所有输出仅位于配置的本机研究目录。
+`prajna_eternal_compat@1` 受理后若快照不可用、子进程异常或结果身份/hash 无效，任务以 `failed` 保存具体错误码及受限子进程诊断，且不发布成功结果；服务重启恢复终态失败原因，成功结果则从独立文件校验摘要后读取。状态路由提供持久错误，结果路由对未成功任务返回 `409`，缺任务返回 `404`，损坏输出返回 `500`；成功结果为 `no-store`。所有输出仅位于配置的本机研究目录。兼容 runner 的失败包完整写入任务目录 `compat-failure.json`，stderr 只携带短错误摘要；服务仍按既有规则将 stderr 限制为最多 16 KiB，并仅在 sidecar JSON 与 stderr 的错误码/消息一致时，将完整 runner 错误存入 `task.json` 的 `error.details.runner_error`，同时标记 `runner_error_details_complete: true`。sidecar 缺失、无效或不匹配时显式标记为不完整，不把有界 stderr 当作完整 gap 报告。
 
 默认有效配置要求冻结参考对拍 `match`；不匹配由 runner 以 `compat_default_reference_mismatch` 失败且不写成功结果，任务服务持久化该子进程原因并在重启后读取。配置变体仍记录参考对比，但 `evaluation_mode=informational_variant` 明确其仅供说明，不因偏离默认参考而失败；默认有效配置标为 `required_default_parity`。兼容任务 submit/status 与结果路由均复用 `LocalPage` Host/Origin 检查：loopback CLI 可不带 Origin，异源请求拒绝。该限制只装配在兼容任务独立路由，不扩展到既有 Experiment task 或旧 run 路由。
+
+若输入包含 `pending-gaps.json`，runner 在读取 manifest 前先检查该报告，以支持无 manifest 的待裁决快照。有效报告及全部 gap 字段（不筛选可选 `source` 或未知字段）保存在 `error.details.runner_error.details.pending_gap_report`；同处列出明确的 `checks_not_run`。缺少 manifest 不会覆盖或折叠这些输入缺口。畸形与不可读报告分别显式失败；任何此类失败均不生成 `compat-result.json`。完整 gap 明细走 sidecar 而非 stderr，以免超过 16 KiB 时静默截断。
 
 ## 后果与限制
 
