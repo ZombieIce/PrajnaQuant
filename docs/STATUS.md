@@ -68,7 +68,7 @@ POC-0 已按获确认的拆分发布为 [13 张本地执行票据](../.scratch/p
 
 ## Current Phase
 
-本机 Eternal 兼容 CLI 经既有 Axum task service 提交，持久化有效配置与成功结果/失败原因，可在重启后通过 status/result 读取；不混用原生 Experiment/Run/Execution 路径。加载失败的已知缺口及逐标的/代理对检查完成范围可查询；逐资产归一化和缩放后估值对照单位数与当日指数的独立精确乘积，超出 `1e-12` 相对误差时拒绝成功结果。子进程失败与进程组清理同时异常时，`details.cli_error` 保留结构化 runner 诊断并可在重启后读取；超过 64 层的 gap JSON 保留原文与可恢复 gap 字段，明确标记诊断不完整。默认配置的 `required_default_parity` 会对冻结历史 reference 的日期、NAV 与其中可用的汇总字段做有限对拍；缺少的信号、交易、费用、现金及持仓明细仅与负责人授权的 #392 expected replay 对拍，并非完整历史看板明细对照。这不证明冻结适配器与历史生产源码等价，也不证明历史 Universe/PIT/调整数据覆盖。真实 directional-deferral 未触发，路径仍未验证。详见[本机兼容基线说明](local-eternal-baseline.md)。
+本机 Eternal 兼容 CLI 经既有 Axum task service 提交，持久化有效配置与成功结果/失败原因，可在重启后通过 status/result 读取；不混用原生 Experiment/Run/Execution 路径。加载失败的已知缺口及逐标的/代理对检查完成范围可查询；逐资产归一化和缩放后单位数先对照由本金、权重、费用和执行开盘价独立推导的初始/调仓分配，估值再对照单位数与当日指数的独立精确乘积，任一环超出 `1e-12` 相对误差时拒绝成功结果。子进程失败与进程组清理同时异常时，`details.cli_error` 保留结构化 runner 诊断并可在重启后读取；超过 64 层的 gap JSON 保留原文与可恢复 gap 字段，明确标记诊断不完整。默认配置的 `required_default_parity` 会对冻结历史 reference 的日期、NAV 与其中可用的汇总字段做有限对拍；缺少的信号、交易、费用、现金及持仓明细仅与负责人授权的 #392 expected replay 对拍，并非完整历史看板明细对照。这不证明冻结适配器与历史生产源码等价，也不证明历史 Universe/PIT/调整数据覆盖。真实 directional-deferral 未触发，路径仍未验证。详见[本机兼容基线说明](local-eternal-baseline.md)。
 
 十股股息兼容路径已完成本机固定输入复算及看板可用字段对拍。缺价日期采用明示的历史停牌状态核验，停牌证据随新版本固定。逐笔成交与持股数量由旧模拟器及独立账本复核生成，历史看板无对应明细。旧模型账面余额含除权日模拟股息，无法据此判断已结算可用现金。见[股息基线操作说明](local-income-baseline.md)。
 

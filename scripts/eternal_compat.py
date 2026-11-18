@@ -254,8 +254,88 @@ def _validate_normalized_holdings(daily, weights):
                 )
 
 
+_RELATIVE_TOLERANCE = Fraction("1e-12")
+
+
+def _within_relative_tolerance(actual, expected):
+    return abs(Fraction(actual) - expected) <= abs(expected) * _RELATIVE_TOLERANCE
+
+
+def _fee_solved_net_capital(holdings, cash, weights, fee_rate):
+    """Exact root of net = capital - fee * sum(|net * weight - holding|)."""
+    capital = sum(holdings, cash)
+    breakpoints = sorted({
+        holding / weight for holding, weight in zip(holdings, weights) if weight > 0
+    })
+    bounds = [Fraction(0), *breakpoints]
+    for index, lower in enumerate(bounds):
+        upper = bounds[index + 1] if index + 1 < len(bounds) else None
+        signed_weight, signed_holding = Fraction(0), Fraction(0)
+        for holding, weight in zip(holdings, weights):
+            if weight == 0:
+                signed_holding -= holding
+            elif holding / weight <= lower:
+                signed_weight += weight
+                signed_holding += holding
+            else:
+                signed_weight -= weight
+                signed_holding -= holding
+        # The fee equation is strictly increasing because 0 <= fee < 1.
+        net = (capital + fee_rate * signed_holding) / (1 + fee_rate * signed_weight)
+        if net >= lower and (upper is None or net <= upper):
+            return net
+    raise ArithmeticError("fee equation has no non-negative net capital")
+
+
+def _validate_allocation_units(daily, opens, trades, config, principal, phase):
+    """Derive units from principal, weights, fee and execution prices, not from the ledger."""
+    weights = [Fraction(config["weights"][asset]) for asset in baseline.ETF_CODES]
+    fee_rate = Fraction(config["fee_rate_one_way"])
+    trade_days = {trade["trade_date"] for trade in trades}
+    previous, previous_cash = None, None
+    for index, row in enumerate(daily):
+        actual = [row["units"][asset] for asset in baseline.ETF_CODES]
+        if not all(math.isfinite(value) for value in actual):
+            raise RunnerError(
+                f"compat_{phase}_value_unrepresentable",
+                f"{phase} allocation units contain a non-finite value",
+                {"field": "daily.units", "date": row["date"].isoformat()},
+            )
+        prices = [Fraction(price) for price in opens[index]]
+        if index == 0:
+            net, basis = Fraction(principal) / (1 + fee_rate), "initial"
+        elif row["date"] in trade_days:
+            holdings = [Fraction(units) * price for units, price in zip(previous, prices)]
+            net = _fee_solved_net_capital(holdings, Fraction(previous_cash), weights, fee_rate)
+            basis = "rebalance"
+        else:
+            for asset, units, before in zip(baseline.ETF_CODES, actual, previous):
+                if units != before:
+                    raise RunnerError(
+                        f"compat_{phase}_allocation_precision_loss",
+                        f"{phase} units changed without an executed trade",
+                        {"field": "daily.units", "asset": asset, "date": row["date"].isoformat(),
+                         "allocation_basis": "carried_forward"},
+                    )
+            previous_cash = row["cash"]
+            continue
+        for asset, units, weight, price in zip(baseline.ETF_CODES, actual, weights, prices):
+            if not _within_relative_tolerance(units, net * weight / price):
+                raise RunnerError(
+                    f"compat_{phase}_allocation_precision_loss",
+                    f"{phase} units differ from the independently derived allocation "
+                    "by more than 1e-12 relative",
+                    {
+                        "field": "daily.units", "asset": asset, "date": row["date"].isoformat(),
+                        "allocation_basis": f"{basis}: fee_solved_net * weight / open_price",
+                        "relative_tolerance": 1e-12,
+                    },
+                )
+        previous, previous_cash = actual, row["cash"]
+
+
 def _validate_holding_valuations(daily, closes, phase):
-    tolerance = Fraction("1e-12")
+    tolerance = _RELATIVE_TOLERANCE
     for row, prices in zip(daily, closes, strict=True):
         for asset, price in zip(baseline.ETF_CODES, prices, strict=True):
             units, holding = row["units"][asset], row["holdings"][asset]
@@ -669,11 +749,13 @@ def run(request, output):
         config["weights"],
     )
     _validate_normalized_holdings(daily, config["weights"])
+    _validate_allocation_units(daily, opens, trades, config, 1, "normalized")
     _validate_holding_valuations(daily, closes, "normalized")
     comparison = baseline.compare_reference(reference, days, navs, stats, anchors)
     navs, signals, trades, stats, daily = _scaled_result(
         navs, signals, trades, stats, daily, config["initial_nav"],
     )
+    _validate_allocation_units(daily, opens, trades, config, config["initial_nav"], "scaled")
     _validate_holding_valuations(daily, closes, "scaled")
     is_default_config = config == validate_config({})
     comparison["evaluation_mode"] = (
