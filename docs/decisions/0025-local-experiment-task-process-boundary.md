@@ -51,6 +51,8 @@ MVP-7 的本机研究任务需要复用既有数据、因子与 Experiment 能�
 
 `prajna_eternal_compat@1` 受理后若快照不可用、子进程异常或结果身份/hash 无效，任务以 `failed` 保存具体错误码及受限子进程诊断，且不发布成功结果；服务重启恢复终态失败原因，成功结果则从独立文件校验摘要后读取。状态路由提供持久错误，结果路由对未成功任务返回 `409`，缺任务返回 `404`，损坏输出返回 `500`；成功结果为 `no-store`。所有输出仅位于配置的本机研究目录。
 
+默认有效配置要求冻结参考对拍 `match`；不匹配由 runner 以 `compat_default_reference_mismatch` 失败且不写成功结果，任务服务持久化该子进程原因并在重启后读取。配置变体仍记录参考对比，但 `evaluation_mode=informational_variant` 明确其仅供说明，不因偏离默认参考而失败；默认有效配置标为 `required_default_parity`。兼容任务 submit/status 与结果路由均复用 `LocalPage` Host/Origin 检查：loopback CLI 可不带 Origin，异源请求拒绝。该限制只装配在兼容任务独立路由，不扩展到既有 Experiment task 或旧 run 路由。
+
 ## 后果与限制
 
 此边界默认执行并读取 Summary 结果，显式请求 Standard 时会提升已有 Summary Execution；不把新平台核心编译进旧服务，也不修改已有 Experiment 身份或结果表内容（提升会按已有的显式能力补写明细；manifest 的默认级别不改变）。结果读取验证所有已保存表 hash，并由 T21 扩展返回已保存 orders/fills/费用/权重/pending 等原生明细与 Rust 估值权重投影，不提供分页或按需提升；T01 尚不提供 HTTP 取消或重试端点。持久过程组身份与清理原语为后续取消路径提供服务端能力。进程检查与 CLI 诊断验证使用合成输入，不证明真实行情、策略收益或完整 MVP-7 产品流程；受限沙箱可能无法检查或终止子进程组，此时实现拒绝清理并明确报告未验证的所有权。

@@ -299,6 +299,10 @@ impl RunJobApi {
                 get(list_experiment_tasks).post(submit_experiment_task),
             )
             .route("/api/v1/tasks/experiments/{id}", get(get_experiment_task))
+            .with_state(self)
+    }
+    pub fn eternal_compat_router(self, authority: String) -> Router {
+        Router::new()
             .route(
                 "/api/v1/tasks/eternal-compat",
                 post(submit_eternal_compat_task),
@@ -307,6 +311,14 @@ impl RunJobApi {
                 "/api/v1/tasks/eternal-compat/{id}",
                 get(get_eternal_compat_task),
             )
+            .layer(axum::middleware::from_fn_with_state(
+                super::dataset_api::LocalPage::new(
+                    authority,
+                    "compat_task_origin_forbidden",
+                    "Eternal compatibility tasks are restricted to the configured local workbench origin.",
+                ),
+                super::dataset_api::local_page,
+            ))
             .with_state(self)
     }
     pub fn eternal_compat_result_router(self, authority: String) -> Router {
@@ -3267,6 +3279,112 @@ mod tests {
         assert_eq!(api.list_experiment_tasks().len(), 1);
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn eternal_compat_submit_and_status_enforce_local_origin_and_allow_cli() {
+        let (api, _, dir) = fixture();
+        let request = eternal_compat_request(
+            "origin-guard",
+            dir.path().join("synthetic-snapshot"),
+            json!({}),
+        );
+        let uri = "/api/v1/tasks/eternal-compat";
+        let (status, body) = eternal_compat_api_json(
+            &api,
+            "127.0.0.1:7878",
+            "POST",
+            uri,
+            "127.0.0.1:7878",
+            None,
+            Some(serde_json::to_value(request.clone()).unwrap()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let task_id = body["task"]["task_id"].as_str().unwrap();
+        let status_uri = format!("{uri}/{task_id}");
+
+        let (status, body) = eternal_compat_api_json(
+            &api,
+            "127.0.0.1:7878",
+            "GET",
+            &status_uri,
+            "127.0.0.1:7878",
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["task_id"], task_id);
+
+        let (status, body) = eternal_compat_api_json(
+            &api,
+            "127.0.0.1:7878",
+            "GET",
+            &status_uri,
+            "synthetic-review.invalid",
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["error"]["code"], "compat_task_origin_forbidden");
+
+        let (status, body) = eternal_compat_api_json(
+            &api,
+            "127.0.0.1:7878",
+            "GET",
+            &status_uri,
+            "127.0.0.1:7878",
+            Some("https://synthetic-review.invalid"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["error"]["code"], "compat_task_origin_forbidden");
+
+        let (status, body) = eternal_compat_api_json(
+            &api,
+            "127.0.0.1:7878",
+            "POST",
+            uri,
+            "synthetic-review.invalid",
+            None,
+            Some(serde_json::to_value(request.clone()).unwrap()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["error"]["code"], "compat_task_origin_forbidden");
+
+        let (status, body) = eternal_compat_api_json(
+            &api,
+            "127.0.0.1:7878",
+            "POST",
+            uri,
+            "127.0.0.1:7878",
+            Some("https://synthetic-review.invalid"),
+            Some(serde_json::to_value(request).unwrap()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["error"]["code"], "compat_task_origin_forbidden");
+
+        let response = api
+            .clone()
+            .router()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/tasks/experiments")
+                    .header("host", "synthetic-review.invalid")
+                    .header("origin", "https://synthetic-review.invalid")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn eternal_compat_child_process_failure_is_structured_and_restart_durable() {
@@ -3305,10 +3423,13 @@ mod tests {
             "compat_input_unavailable"
         );
         assert_eq!(restored.error.as_ref().unwrap().details["exit_code"], 2);
-        let (status, restored_json) = api_json(
+        let (status, restored_json) = eternal_compat_api_json(
             &restarted,
+            "127.0.0.1:7878",
             "GET",
             &format!("/api/v1/tasks/eternal-compat/{}", task.task_id),
+            "127.0.0.1:7878",
+            None,
             None,
         )
         .await;
@@ -3337,6 +3458,105 @@ mod tests {
         assert_eq!(
             error["error"]["details"]["error"]["code"],
             "compat_input_unavailable"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn eternal_compat_default_parity_mismatch_is_failed_and_restart_readable() {
+        let (api, _, dir) = fixture();
+        let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let snapshot = dir.path().join("default-parity-mismatch");
+        let script = r#"
+import json
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(sys.argv[1]) / "tests"))
+import test_eternal_baseline
+import test_eternal_compat
+snapshot = Path(sys.argv[2])
+test_eternal_baseline.make_replay_snapshot(snapshot)
+reference_path = snapshot / "reference.json"
+reference = json.loads(reference_path.read_text(encoding="utf-8"))
+reference["history_etf"][0][1] += 0.1
+reference_path.write_text(json.dumps(reference), encoding="utf-8")
+test_eternal_compat.seal_snapshot(snapshot)
+"#;
+        let prepared = Command::new("python3.12")
+            .arg("-c")
+            .arg(script)
+            .arg(repository)
+            .arg(&snapshot)
+            .output()
+            .unwrap();
+        assert!(
+            prepared.status.success(),
+            "synthetic fixture setup failed: {}",
+            String::from_utf8_lossy(&prepared.stderr)
+        );
+
+        let request = eternal_compat_request("default-parity-mismatch", snapshot, json!({}));
+        let (task, _) = api.submit_experiment_task(request).unwrap();
+        assert!(api.process_next_queued());
+        let failed = api.get_eternal_compat_task(task.task_id).unwrap();
+        assert!(matches!(failed.status, ExperimentTaskStatus::Failed));
+        assert_eq!(
+            failed.error.as_ref().unwrap().code,
+            "compat_default_reference_mismatch"
+        );
+        assert_eq!(failed.error.as_ref().unwrap().details["exit_code"], 2);
+        assert!(failed.result.is_none());
+        assert!(
+            !experiment_task_dir(&api.0.output, task.task_id)
+                .join("compat-result.json")
+                .exists()
+        );
+
+        let restarted = RunJobApi::without_worker(
+            api.0.output.clone(),
+            api.0.universes.clone(),
+            api.0.experiment_cli.clone(),
+        );
+        restarted.recover();
+        let (status, restored) = eternal_compat_api_json(
+            &restarted,
+            "127.0.0.1:7878",
+            "GET",
+            &format!("/api/v1/tasks/eternal-compat/{}", task.task_id),
+            "127.0.0.1:7878",
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            restored["error"]["code"],
+            "compat_default_reference_mismatch"
+        );
+
+        let response = restarted
+            .eternal_compat_result_router("127.0.0.1:7878".into())
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("GET")
+                    .uri(format!(
+                        "/api/v1/tasks/eternal-compat/{}/result",
+                        task.task_id
+                    ))
+                    .header("host", "127.0.0.1:7878")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            error["error"]["details"]["error"]["code"],
+            "compat_default_reference_mismatch"
         );
     }
 
@@ -4328,6 +4548,43 @@ mod tests {
             .await
             .unwrap();
         (status, serde_json::from_slice(&body).unwrap())
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    async fn eternal_compat_api_json(
+        api: &RunJobApi,
+        authority: &str,
+        method: &str,
+        uri: &str,
+        host: &str,
+        origin: Option<&str>,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
+        let bytes = body
+            .map(|value| serde_json::to_vec(&value).unwrap())
+            .unwrap_or_default();
+        let mut request = axum::http::Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("host", host)
+            .header("content-type", "application/json");
+        if let Some(origin) = origin {
+            request = request.header("origin", origin);
+        }
+        let response = api
+            .clone()
+            .eternal_compat_router(authority.into())
+            .oneshot(request.body(Body::from(bytes)).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
     }
 
     fn member(code: &str, exchange: &str) -> ManualMember {

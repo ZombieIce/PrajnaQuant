@@ -77,6 +77,10 @@ class EternalCompatibilityTests(unittest.TestCase):
             default_result["frozen_reference_comparison"]["overall_status"],
             "match",
         )
+        self.assertEqual(
+            default_result["frozen_reference_comparison"]["evaluation_mode"],
+            "required_default_parity",
+        )
 
         variant, variant_path = self.run_compat("variant", {
             "initial_nav": 10.0,
@@ -95,12 +99,35 @@ class EternalCompatibilityTests(unittest.TestCase):
         self.assertEqual(variant_result["effective_config"]["initial_nav"], 10.0)
         self.assertEqual(variant_result["summary"]["fee_bps"], 10.0)
         self.assertAlmostEqual(variant_result["daily"][0]["nav"], 10 / 1.001)
+        self.assertEqual(
+            variant_result["frozen_reference_comparison"]["overall_status"],
+            "mismatch",
+        )
+        self.assertEqual(
+            variant_result["frozen_reference_comparison"]["evaluation_mode"],
+            "informational_variant",
+        )
         self.assertNotEqual(
             default_result["identity"]["compat_run_id"],
             variant_result["identity"]["compat_run_id"],
         )
         for row in variant_result["daily"]:
             self.assertAlmostEqual(row["nav"], row["cash"] + sum(row["holdings"].values()))
+
+    def test_default_reference_mismatch_fails_without_publishing_a_result(self):
+        reference_path = self.snapshot / "reference.json"
+        reference = json.loads(reference_path.read_text(encoding="utf-8"))
+        reference["history_etf"][0][1] += 0.1
+        reference_path.write_text(json.dumps(reference), encoding="utf-8")
+        seal_snapshot(self.snapshot)
+
+        completed, output_path = self.run_compat("default-reference-mismatch")
+
+        self.assertEqual(completed.returncode, 2)
+        error = json.loads(completed.stderr)["error"]
+        self.assertEqual(error["code"], "compat_default_reference_mismatch")
+        self.assertIn("default", error["message"])
+        self.assertFalse(output_path.exists())
 
     def test_threshold_change_controls_synthetic_close_signal_and_next_open_trade(self):
         bars_path = self.snapshot / "bars/sh511260.csv.gz"
@@ -111,7 +138,10 @@ class EternalCompatibilityTests(unittest.TestCase):
         baseline.write_csv(bars_path, bars, fields)
         seal_snapshot(self.snapshot)
 
-        under, under_path = self.run_compat("threshold-10", {"rebalance_threshold": .10})
+        under, under_path = self.run_compat(
+            "threshold-10",
+            {"initial_nav": 10.0, "rebalance_threshold": .10},
+        )
         over, over_path = self.run_compat(
             "threshold-5",
             {
