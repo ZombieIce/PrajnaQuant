@@ -35,6 +35,7 @@ PENDING_GAP_CHECKS = (
     "simulation",
     "frozen_reference_comparison",
 )
+MAX_PENDING_GAP_REPORT_NESTING = 64
 
 
 class RunnerError(Exception):
@@ -244,6 +245,19 @@ def _validate_json_strings(value):
             _validate_json_strings(item)
 
 
+def _pending_report_depth_exceeded(value, initial_depth=1):
+    pending = [(value, initial_depth)]
+    while pending:
+        current, depth = pending.pop()
+        if not isinstance(current, (dict, list)):
+            continue
+        if depth > MAX_PENDING_GAP_REPORT_NESTING:
+            return True
+        children = current.values() if isinstance(current, dict) else current
+        pending.extend((child, depth + 1) for child in children)
+    return False
+
+
 def _attach_recoverable_report(failure, payload):
     try:
         text = payload.decode("utf-8")
@@ -258,7 +272,9 @@ def _attach_recoverable_report(failure, payload):
         except NonRepresentableJsonNumber:
             return {"unsupported_json_number": token}
 
-    def strings(value):
+    def strings(value, depth=1):
+        if isinstance(value, (dict, list)) and depth > MAX_PENDING_GAP_REPORT_NESTING:
+            return {"unsupported_json_depth": "see pending_gap_report_raw_json"}
         if isinstance(value, str):
             try:
                 value.encode("utf-8")
@@ -271,10 +287,19 @@ def _attach_recoverable_report(failure, payload):
                     key.encode("utf-8")
                 except UnicodeError:
                     continue
-                recovered[key] = strings(item)
+                child_depth = depth + 1
+                if (
+                    not (depth == 1 and key in ("status", "gaps"))
+                    and _pending_report_depth_exceeded(item, child_depth)
+                ):
+                    recovered[key] = {
+                        "unsupported_json_depth": "see pending_gap_report_raw_json"
+                    }
+                else:
+                    recovered[key] = strings(item, child_depth)
             return recovered
         elif isinstance(value, list):
-            return [strings(item) for item in value]
+            return [strings(item, depth + 1) for item in value]
         return value
 
     try:
@@ -287,8 +312,8 @@ def _attach_recoverable_report(failure, payload):
         )
         failure.details["recoverable_pending_gap_report"] = strings(recovered)
         failure.details["report_recovery_encoding"] = (
-            "supported fields unchanged; unsupported numeric/string values are tagged "
-            "with original JSON tokens; invalid Unicode keys omitted; raw JSON retained"
+            "supported values through depth 64 unchanged; unsupported numeric/string "
+            "values and deeper subtrees are tagged; invalid Unicode keys omitted; raw JSON retained"
         )
     except (ValueError, RecursionError):
         pass
@@ -380,6 +405,19 @@ def _read_pending_gap_report(snapshot):
         )
         _attach_recoverable_report(failure, payload)
         raise failure from error
+
+    if _pending_report_depth_exceeded(report):
+        failure = _pending_gap_error(
+            "compat_pending_gaps_invalid",
+            "pending gap report exceeds the supported JSON nesting depth",
+            "depth_limit_exceeded",
+        )
+        failure.details["report_contents_persisted"] = False
+        failure.details["report_contents_not_persisted_reason"] = (
+            f"report nesting exceeds the portable limit of {MAX_PENDING_GAP_REPORT_NESTING}"
+        )
+        _attach_recoverable_report(failure, payload)
+        raise failure
 
     if (
         not isinstance(report, dict)

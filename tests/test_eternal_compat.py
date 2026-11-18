@@ -276,6 +276,76 @@ class EternalCompatibilityTests(unittest.TestCase):
         )
         self.assertFalse(output_path.exists())
 
+    def test_deep_pending_metadata_keeps_queryable_gaps_with_raw_report(self):
+        nested = None
+        for _ in range(130):
+            nested = [nested]
+        report = {
+            "status": "pending_decision",
+            "gaps": [
+                {
+                    "asset": "sh511260",
+                    "date": "2026-11-09",
+                    "field": "volume",
+                    "source": "synthetic-source-a",
+                    "impact": "first gap remains queryable",
+                    "candidate_measures": ["synthetic first option"],
+                    "extra_deep": nested,
+                },
+                {
+                    "asset": "sh518880",
+                    "date": "2026-11-10",
+                    "field": "daily_bar",
+                    "source": "synthetic-source-b",
+                    "impact": "second gap remains queryable",
+                    "candidate_measures": ["synthetic second option"],
+                },
+            ],
+        }
+        payload = json.dumps(report, separators=(",", ":"))
+        pending_snapshot = self.directory / "deep-pending-snapshot"
+        pending_snapshot.mkdir()
+        (pending_snapshot / "pending-gaps.json").write_text(payload, encoding="utf-8")
+
+        completed, output_path = self.run_compat(
+            "deep-pending-metadata",
+            snapshot=pending_snapshot,
+        )
+
+        self.assertEqual(completed.returncode, 2)
+        summary = json.loads(completed.stderr)["error"]
+        self.assertEqual(summary["code"], "compat_pending_gaps_invalid")
+        self.assertFalse(summary["details"]["structured_details_complete"])
+        failure = json.loads(
+            output_path.with_name("compat-failure.json").read_text(encoding="utf-8")
+        )
+        error = failure["error"]
+        self.assertEqual(error["details"]["report_status"], "depth_limit_exceeded")
+        self.assertFalse(error["details"]["report_contents_persisted"])
+        self.assertEqual(error["details"]["pending_gap_report_raw_json"], payload)
+        recovered = error["details"]["recoverable_pending_gap_report"]
+        self.assertEqual(
+            recovered["gaps"][0]["asset"],
+            "sh511260",
+        )
+        self.assertEqual(
+            recovered["gaps"][0]["extra_deep"],
+            {"unsupported_json_depth": "see pending_gap_report_raw_json"},
+        )
+        self.assertEqual(
+            recovered["gaps"][1],
+            {
+                "asset": "sh518880",
+                "date": "2026-11-10",
+                "field": "daily_bar",
+                "source": "synthetic-source-b",
+                "impact": "second gap remains queryable",
+                "candidate_measures": ["synthetic second option"],
+            },
+        )
+        self.assertEqual(len(error["details"]["checks_not_run"]), 10)
+        self.assertFalse(output_path.exists())
+
     def test_nonrepresentable_pending_report_numbers_fail_with_structured_diagnostics(self):
         for label, number, expected_status in (
             ("positive-overflow", "1e1000", "non_representable_number"),

@@ -55,6 +55,8 @@ MVP-7 的本机研究任务需要复用既有数据、因子与 Experiment 能�
 
 若输入包含 `pending-gaps.json`，runner 在读取 manifest 前先检查该报告，以支持无 manifest 的待裁决快照。有效报告及全部 gap 字段（不筛选可选 `source` 或未知字段）保存在 `error.details.runner_error.details.pending_gap_report`；数值必须能跨 Python/Rust JSON 边界无损表示：小数转有限 binary64 后的最短十进制表示必须与输入数值相等（允许 `0.1`，拒绝精度损失或下溢），整数限于 `i64`/`u64`。字符串和键必须为有效 Unicode，不能含孤立 surrogate；JSON 对象不能含重复键。非标准常量、不可表示数值、无效 Unicode/重复键或无效结构以 `compat_pending_gaps_invalid` 拒绝，并明确 `report_contents_persisted: false`，不静默丢弃/变形原报告。可解码的原始 JSON 文本保存为 `pending_gap_report_raw_json`；可解析报告的其余字段和 gaps 保存在 `recoverable_pending_gap_report`，不支持的数值/字符串用显式标签保留原始 token，非法 Unicode 键省略并由原文保留；恢复规则明确记录，不称原类型完整。重复键或语法错误不猜测结构。拒绝报告的 `structured_details_complete` 为 false，并跨服务/重启传播，即使原文和可恢复字段已保存。错误 sidecar 自身序列化失败时，保留错误码/消息和省略原因并标记诊断不完整；失败发射不能因原始详情含无效数字而崩溃。有效报告同处列出未运行的 manifest/清单/配置/源码、bar/factor、总回报价/涨跌停、历史拼接、共同交易日、模拟及参考对比阶段。不可读报告与符号链接/其他非普通文件分别显式失败；悬空链接不会被视为缺失，FIFO 等类型在读取前拒绝以避免阻塞。任何此类失败均不生成 `compat-result.json`。完整 gap 明细走 sidecar 而非 stderr，以免超过 16 KiB 时静默截断。
 
+为使 sidecar 始终处于跨语言可解析范围，pending-gap JSON 容器嵌套深度上限为 64；超限输入保留原始 JSON 与可恢复的 gap 字段，过深子树使用 `unsupported_json_depth` 标记，并明确诊断不完整。兼容 runner 非零退出与进程组清理异常同时发生时，清理错误的 `details.cli_error` 保留 sidecar 结构化 runner 错误；进程重启后再次清理失败也保留原嵌套错误，不丢失 gaps 或 `checks_not_run`。
+
 ## 后果与限制
 
 此边界默认执行并读取 Summary 结果，显式请求 Standard 时会提升已有 Summary Execution；不把新平台核心编译进旧服务，也不修改已有 Experiment 身份或结果表内容（提升会按已有的显式能力补写明细；manifest 的默认级别不改变）。结果读取验证所有已保存表 hash，并由 T21 扩展返回已保存 orders/fills/费用/权重/pending 等原生明细与 Rust 估值权重投影，不提供分页或按需提升；T01 尚不提供 HTTP 取消或重试端点。持久过程组身份与清理原语为后续取消路径提供服务端能力。进程检查与 CLI 诊断验证使用合成输入，不证明真实行情、策略收益或完整 MVP-7 产品流程；受限沙箱可能无法检查或终止子进程组，此时实现拒绝清理并明确报告未验证的所有权。

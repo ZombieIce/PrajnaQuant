@@ -94,6 +94,14 @@ struct LocalService {
 
 impl LocalService {
     fn start(output: &Path, python: &str) -> Self {
+        Self::start_with_search_path(output, python, None)
+    }
+
+    fn start_with_search_path(
+        output: &Path,
+        python: &str,
+        search_path: Option<&std::ffi::OsStr>,
+    ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("reserve loopback port");
         let address = listener.local_addr().expect("read reserved loopback port");
         drop(listener);
@@ -102,7 +110,8 @@ impl LocalService {
             .join("../..")
             .canonicalize()
             .expect("resolve repository root");
-        let mut child = Command::new(CLI)
+        let mut command = Command::new(CLI);
+        command
             .args([
                 "serve",
                 "--output",
@@ -123,9 +132,11 @@ impl LocalService {
             .env("PRAJNA_ETERNAL_COMPAT_PYTHON", python)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("start production local service");
+            .stderr(Stdio::piped());
+        if let Some(search_path) = search_path {
+            command.env("PATH", search_path);
+        }
+        let mut child = command.spawn().expect("start production local service");
         let stderr = child.stderr.take().expect("capture service startup marker");
         let expected_marker = format!("Prajna Quant: http://{address}");
         let (sender, receiver) = mpsc::channel();
@@ -871,6 +882,42 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
         invalid_reports.push((id, failed["error"].clone()));
     }
 
+    let nested_value = format!("{}null{}", "[".repeat(130), "]".repeat(130));
+    let deep_report = format!(
+        r#"{{"status":"pending_decision","gaps":[{{"asset":"sh511260","date":"2026-11-09","field":"volume","source":"synthetic-source-a","impact":"first gap remains queryable","candidate_measures":["synthetic first option"],"extra_deep":{nested_value}}},{{"asset":"sh518880","date":"2026-11-10","field":"daily_bar","source":"synthetic-source-b","impact":"second gap remains queryable","candidate_measures":["synthetic second option"]}}]}}"#
+    );
+    let deep_snapshot = artifacts.path().join("deep-pending-snapshot");
+    fs::create_dir_all(&deep_snapshot).expect("create deep pending snapshot");
+    fs::write(deep_snapshot.join("pending-gaps.json"), deep_report)
+        .expect("write deeply nested synthetic gap report");
+    let deep_id = submit(
+        &mut service,
+        &deep_snapshot,
+        &json!({}),
+        "synthetic-deep-pending-metadata",
+        artifacts.path(),
+    );
+    let deep_status = terminal_status(&mut service, &deep_id);
+    assert_eq!(deep_status["status"], "failed");
+    assert_eq!(deep_status["error"]["code"], "compat_pending_gaps_invalid");
+    let deep_error = &deep_status["error"]["details"]["runner_error"]["details"];
+    assert_eq!(deep_error["report_status"], "depth_limit_exceeded");
+    assert_eq!(deep_error["report_contents_persisted"], false);
+    assert_eq!(
+        deep_error["recoverable_pending_gap_report"]["gaps"][0]["asset"],
+        "sh511260"
+    );
+    assert_eq!(
+        deep_error["recoverable_pending_gap_report"]["gaps"][0]["extra_deep"],
+        json!({"unsupported_json_depth":"see pending_gap_report_raw_json"})
+    );
+    assert_eq!(
+        deep_error["recoverable_pending_gap_report"]["gaps"][1]["source"],
+        "synthetic-source-b"
+    );
+    assert_eq!(deep_error["checks_not_run"].as_array().unwrap().len(), 10);
+    invalid_reports.push((deep_id, deep_status["error"].clone()));
+
     service.stop();
     service = LocalService::start(&output_root, &python);
     assert_eq!(
@@ -974,6 +1021,112 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
         runner_error["details"]["checks_not_run"]
     );
     assert!(!failed_task_dir.join("compat-result.json").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn cleanup_failure_preserves_compat_gap_diagnostics_across_restart() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let artifacts = TestArtifacts::new();
+    let python = std::env::var("PRAJNA_TEST_PYTHON").unwrap_or_else(|_| "python3.12".into());
+    let output_root = artifacts.path().join("service-output");
+    let inspector_dir = artifacts.path().join("inspector-bin");
+    fs::create_dir_all(&inspector_dir).expect("create synthetic inspector directory");
+    let inspector = inspector_dir.join("ps");
+    fs::write(&inspector, "#!/bin/sh\nexit 1\n").expect("write failing process inspector");
+    fs::set_permissions(&inspector, fs::Permissions::from_mode(0o755))
+        .expect("make failing process inspector executable");
+    let mut search_paths = vec![inspector_dir];
+    search_paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").expect("test environment has PATH"),
+    ));
+    let search_path = std::env::join_paths(search_paths).expect("join synthetic PATH");
+    let mut service =
+        LocalService::start_with_search_path(&output_root, &python, Some(search_path.as_os_str()));
+
+    let snapshot = artifacts.path().join("pending-only-snapshot");
+    fs::create_dir_all(&snapshot).expect("create pending-only snapshot");
+    let report = json!({
+        "status": "pending_decision",
+        "gaps": [
+            {
+                "asset": "sh511260",
+                "date": "2026-11-09",
+                "field": "volume",
+                "source": "synthetic-source-a",
+                "impact": "first gap",
+                "candidate_measures": ["first option"]
+            },
+            {
+                "asset": "sh518880",
+                "date": "2026-11-10",
+                "field": "daily_bar",
+                "source": "synthetic-source-b",
+                "impact": "second gap",
+                "candidate_measures": ["second option"]
+            }
+        ]
+    });
+    fs::write(
+        snapshot.join("pending-gaps.json"),
+        serde_json::to_vec(&report).expect("serialize synthetic pending report"),
+    )
+    .expect("write synthetic pending report");
+
+    let task_id = submit(
+        &mut service,
+        &snapshot,
+        &json!({}),
+        "synthetic-cleanup-failure-pending-gaps",
+        artifacts.path(),
+    );
+    let failed = terminal_status(&mut service, &task_id);
+    assert_eq!(failed["status"], "failed");
+    assert_eq!(
+        failed["error"]["code"],
+        "process_group_ownership_unverified"
+    );
+    let cli_error = failed["error"]["details"]["cli_error"].clone();
+    assert_eq!(cli_error["code"], "compat_input_gaps_pending");
+    assert_eq!(
+        cli_error["details"]["runner_error"]["details"]["pending_gap_report"],
+        report
+    );
+    assert_eq!(
+        cli_error["details"]["runner_error"]["details"]["checks_not_run"]
+            .as_array()
+            .unwrap()
+            .len(),
+        10
+    );
+    assert!(
+        cli_error["details"]["runner_error"]["details"]["checks_not_run"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|check| check["status"] == "not_run"
+                && check["reason"] == "blocked by the pending-gap report")
+    );
+    assert_eq!(cli_error["details"]["runner_error_details_complete"], true);
+    assert!(
+        !output_root
+            .join("tasks")
+            .join(&task_id)
+            .join("compat-result.json")
+            .exists()
+    );
+
+    service.stop();
+    service =
+        LocalService::start_with_search_path(&output_root, &python, Some(search_path.as_os_str()));
+    let restarted = status(&mut service, &task_id);
+    assert_eq!(
+        restarted["error"]["code"],
+        "process_group_ownership_unverified"
+    );
+    assert_eq!(restarted["error"]["details"]["cli_error"], cli_error);
+    service.stop();
 }
 
 #[test]

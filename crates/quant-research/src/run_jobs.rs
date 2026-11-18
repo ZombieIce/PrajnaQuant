@@ -1292,10 +1292,13 @@ impl RunJobApi {
             )),
         };
         if let Some(cleanup_error) = wait.cleanup_error {
+            let compatibility_failure_path =
+                compatibility_task.then(|| directory.join("compat-failure.json"));
             return Err(process_group_cleanup_error_with_cli(
                 cleanup_error,
                 &wait.status,
                 &stderr,
+                compatibility_failure_path.as_deref(),
             ));
         }
         self.set_experiment_process_group(task.task_id, None, None)?;
@@ -2535,8 +2538,17 @@ fn process_group_cleanup_error_with_cli(
     error: ProcessGroupCleanupError,
     status: &ExitStatus,
     stderr: &Result<BoundedStderr, RunError>,
+    compatibility_failure_path: Option<&FsPath>,
 ) -> RunError {
     let mut cleanup_error = process_group_cleanup_error(error);
+    if let (Some(failure_path), Ok(stderr)) = (compatibility_failure_path, stderr) {
+        if !status.success() {
+            cleanup_error.details = json!({
+                "cli_error": eternal_compat_cli_error(status, stderr, failure_path),
+            });
+            return cleanup_error;
+        }
+    }
     match stderr {
         Ok(stderr) => {
             if let Some(cli_error) = experiment_cli_error(status, stderr) {
