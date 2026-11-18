@@ -1056,6 +1056,7 @@ fn cleanup_failure_preserves_compat_gap_diagnostics_across_restart() {
                 "field": "volume",
                 "source": "synthetic-source-a",
                 "impact": "first gap",
+                "metric": 0.24378642307954934,
                 "candidate_measures": ["first option"]
             },
             {
@@ -1094,6 +1095,13 @@ fn cleanup_failure_preserves_compat_gap_diagnostics_across_restart() {
         report
     );
     assert_eq!(
+        cli_error["details"]["runner_error"]["details"]["pending_gap_report"]["gaps"][0]["metric"]
+            .as_f64()
+            .expect("preserved synthetic gap metric")
+            .to_bits(),
+        0x3fcf_3464_bd2a_f124
+    );
+    assert_eq!(
         cli_error["details"]["runner_error"]["details"]["checks_not_run"]
             .as_array()
             .unwrap()
@@ -1126,6 +1134,14 @@ fn cleanup_failure_preserves_compat_gap_diagnostics_across_restart() {
         "process_group_ownership_unverified"
     );
     assert_eq!(restarted["error"]["details"]["cli_error"], cli_error);
+    assert_eq!(
+        restarted["error"]["details"]["cli_error"]["details"]["runner_error"]["details"]
+            ["pending_gap_report"]["gaps"][0]["metric"]
+            .as_f64()
+            .expect("preserved restarted synthetic gap metric")
+            .to_bits(),
+        0x3fcf_3464_bd2a_f124
+    );
     service.stop();
 }
 
