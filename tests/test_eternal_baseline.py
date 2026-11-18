@@ -347,8 +347,8 @@ def make_replay_snapshot(snapshot, common_session_count=None):
     baseline.write_json(snapshot / 'manifest.json', baseline.seal_manifest(manifest))
 
 
-def temporary_directory_outside_repository():
-    candidates = (Path(tempfile.gettempdir()), Path('/tmp'))
+def temporary_directory_outside_repository(candidates=None):
+    candidates = candidates or (Path(tempfile.gettempdir()), Path('/tmp'))
     for candidate in candidates:
         root = candidate.resolve()
         if root != baseline.ROOT and baseline.ROOT not in root.parents:

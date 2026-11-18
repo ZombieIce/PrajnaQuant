@@ -3,9 +3,11 @@
 use serde_json::{Value, json};
 use std::{
     fs,
-    net::{SocketAddr, TcpListener, TcpStream},
+    io::{BufRead, BufReader},
+    net::{SocketAddr, TcpListener},
     path::{Path, PathBuf},
     process::{Child, Command, Output, Stdio},
+    sync::mpsc::{self, Receiver},
     thread,
     time::{Duration, Instant},
 };
@@ -13,27 +15,75 @@ use uuid::Uuid;
 
 const CLI: &str = env!("CARGO_BIN_EXE_quant-research");
 
-struct TestArtifacts(PathBuf);
+fn repository_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("resolve repository root")
+}
+
+fn temp_root_outside_repository(candidate: &Path, repository: &Path) -> Option<PathBuf> {
+    let candidate = candidate.canonicalize().ok()?;
+    let repository = repository.canonicalize().ok()?;
+    if candidate == repository || candidate.starts_with(&repository) {
+        None
+    } else {
+        Some(candidate)
+    }
+}
+
+fn first_temp_root_outside_repository(
+    candidates: impl IntoIterator<Item = PathBuf>,
+    repository: &Path,
+) -> Option<PathBuf> {
+    candidates
+        .into_iter()
+        .find_map(|candidate| temp_root_outside_repository(&candidate, repository))
+}
+
+struct TestArtifacts {
+    path: PathBuf,
+    temporary: Option<tempfile::TempDir>,
+}
 
 impl TestArtifacts {
     fn new() -> Self {
-        let root = PathBuf::from(
-            std::env::var_os("PRAJNA_TEST_ARTIFACTS")
-                .expect("PRAJNA_TEST_ARTIFACTS must point to a session validation folder"),
-        );
-        let directory = root.join(format!("eternal-compat-cli-{}", Uuid::new_v4()));
-        fs::create_dir_all(&directory).expect("create synthetic compatibility test directory");
-        Self(directory)
+        if let Some(root) = std::env::var_os("PRAJNA_TEST_ARTIFACTS") {
+            let directory =
+                PathBuf::from(root).join(format!("eternal-compat-cli-{}", Uuid::new_v4()));
+            fs::create_dir_all(&directory).expect("create synthetic compatibility test directory");
+            return Self {
+                path: directory,
+                temporary: None,
+            };
+        }
+
+        let repository = repository_root();
+        let root = first_temp_root_outside_repository(
+            [std::env::temp_dir(), PathBuf::from("/tmp")],
+            &repository,
+        )
+        .expect("find a temporary directory outside the repository");
+        let temporary = tempfile::Builder::new()
+            .prefix("eternal-compat-cli-")
+            .tempdir_in(root)
+            .expect("create synthetic compatibility test directory");
+        Self {
+            path: temporary.path().to_path_buf(),
+            temporary: Some(temporary),
+        }
     }
 
     fn path(&self) -> &Path {
-        &self.0
+        &self.path
     }
 }
 
 impl Drop for TestArtifacts {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        if self.temporary.is_none() {
+            let _ = fs::remove_dir_all(&self.path);
+        }
     }
 }
 
@@ -52,7 +102,7 @@ impl LocalService {
             .join("../..")
             .canonicalize()
             .expect("resolve repository root");
-        let child = Command::new(CLI)
+        let mut child = Command::new(CLI)
             .args([
                 "serve",
                 "--output",
@@ -73,34 +123,85 @@ impl LocalService {
             .env("PRAJNA_ETERNAL_COMPAT_PYTHON", python)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .expect("start production local service");
+        let stderr = child.stderr.take().expect("capture service startup marker");
+        let expected_marker = format!("Prajna Quant: http://{address}");
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            for line in BufReader::new(stderr).lines() {
+                match line {
+                    Ok(line) if line.trim() == expected_marker => {
+                        let _ = sender.send(true);
+                        return;
+                    }
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
+            }
+            let _ = sender.send(false);
+        });
         let mut service = Self { child, address };
-        service.wait_until_ready();
+        service.wait_until_ready(receiver);
         service
     }
 
-    fn wait_until_ready(&mut self) {
+    fn wait_until_ready(&mut self, marker: Receiver<bool>) {
         let deadline = Instant::now() + Duration::from_secs(20);
         while Instant::now() < deadline {
-            if self
-                .child
-                .try_wait()
-                .expect("check service process")
-                .is_some()
-            {
-                panic!("production local service exited before accepting requests");
+            self.assert_alive();
+            match marker.recv_timeout(Duration::from_millis(25)) {
+                Ok(true) => {
+                    self.assert_alive();
+                    assert!(
+                        Self::health_check(self.address),
+                        "production local service failed its health check"
+                    );
+                    self.assert_alive();
+                    return;
+                }
+                Ok(false) => panic!("production local service exited without its startup marker"),
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    panic!("production local service startup marker reader stopped")
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
-            if TcpStream::connect_timeout(&self.address, Duration::from_millis(100)).is_ok() {
-                return;
-            }
-            thread::sleep(Duration::from_millis(25));
         }
         panic!("production local service did not start before timeout");
     }
 
-    fn url(&self) -> String {
+    fn health_check(address: SocketAddr) -> bool {
+        let client = match reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(2))
+            .build()
+        {
+            Ok(client) => client,
+            Err(_) => return false,
+        };
+        let response = client
+            .get(format!("http://{address}/api/v1/health"))
+            .send()
+            .and_then(|response| response.error_for_status())
+            .and_then(|response| response.json::<Value>());
+        matches!(
+            response,
+            Ok(value) if value["status"] == "ok" && value["service"] == "prajna-quant"
+        )
+    }
+
+    fn assert_alive(&mut self) {
+        assert!(
+            self.child
+                .try_wait()
+                .expect("check service process")
+                .is_none(),
+            "production local service exited before the request"
+        );
+    }
+
+    fn url(&mut self) -> String {
+        self.assert_alive();
         format!("http://{}", self.address)
     }
 
@@ -142,7 +243,7 @@ fn successful_json(arguments: &[String]) -> Value {
 }
 
 fn submit(
-    server: &LocalService,
+    server: &mut LocalService,
     snapshot: &Path,
     config: &Value,
     key: &str,
@@ -175,7 +276,7 @@ fn submit(
         .to_owned()
 }
 
-fn status(server: &LocalService, task_id: &str) -> Value {
+fn status(server: &mut LocalService, task_id: &str) -> Value {
     successful_json(&[
         "eternal-compat".into(),
         "status".into(),
@@ -185,7 +286,7 @@ fn status(server: &LocalService, task_id: &str) -> Value {
     ])
 }
 
-fn terminal_status(server: &LocalService, task_id: &str) -> Value {
+fn terminal_status(server: &mut LocalService, task_id: &str) -> Value {
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         let task = status(server, task_id);
@@ -200,7 +301,7 @@ fn terminal_status(server: &LocalService, task_id: &str) -> Value {
     }
 }
 
-fn result(server: &LocalService, task_id: &str) -> Value {
+fn result(server: &mut LocalService, task_id: &str) -> Value {
     successful_json(&[
         "eternal-compat".into(),
         "result".into(),
@@ -277,6 +378,20 @@ seal_snapshot(snapshot)
 }
 
 #[test]
+fn temporary_artifacts_fall_back_when_tmpdir_is_inside_repository() {
+    let repository = repository_root();
+    let outside = repository
+        .parent()
+        .expect("repository has an outside parent")
+        .canonicalize()
+        .expect("canonicalize outside parent");
+    let selected =
+        first_temp_root_outside_repository([repository.clone(), outside.clone()], &repository)
+            .expect("select a root outside the repository");
+    assert_eq!(selected, outside);
+}
+
+#[test]
 fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
     let artifacts = TestArtifacts::new();
     let python = std::env::var("PRAJNA_TEST_PYTHON").unwrap_or_else(|_| "python3.12".into());
@@ -301,15 +416,15 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
         "fee_rate_one_way": 0.001
     });
     let ledger_id = submit(
-        &service,
+        &mut service,
         &initial_snapshot,
         &ledger_config,
         "synthetic-ledger",
         artifacts.path(),
     );
-    let ledger_status = terminal_status(&service, &ledger_id);
+    let ledger_status = terminal_status(&mut service, &ledger_id);
     assert_eq!(ledger_status["status"], "succeeded");
-    let ledger = result(&service, &ledger_id);
+    let ledger = result(&mut service, &ledger_id);
     let day = &ledger["daily"][0];
     let expected_units = [
         ("sh511260", 2500.0 / 1001.0),
@@ -338,23 +453,29 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
     let threshold_five = json!({"initial_nav":10.0,"rebalance_threshold":0.05});
     let threshold_ten = json!({"initial_nav":10.0,"rebalance_threshold":0.10});
     let five_id = submit(
-        &service,
+        &mut service,
         &threshold_snapshot,
         &threshold_five,
         "synthetic-threshold-five",
         artifacts.path(),
     );
     let ten_id = submit(
-        &service,
+        &mut service,
         &threshold_snapshot,
         &threshold_ten,
         "synthetic-threshold-ten",
         artifacts.path(),
     );
-    assert_eq!(terminal_status(&service, &five_id)["status"], "succeeded");
-    assert_eq!(terminal_status(&service, &ten_id)["status"], "succeeded");
-    let five = result(&service, &five_id);
-    let ten = result(&service, &ten_id);
+    assert_eq!(
+        terminal_status(&mut service, &five_id)["status"],
+        "succeeded"
+    );
+    assert_eq!(
+        terminal_status(&mut service, &ten_id)["status"],
+        "succeeded"
+    );
+    let five = result(&mut service, &five_id);
+    let ten = result(&mut service, &ten_id);
     assert!(!five["signals"].as_array().unwrap().is_empty());
     assert_eq!(five["signals"][0]["signal_date"], "2026-11-09");
     assert!(
@@ -370,7 +491,7 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
     assert!(ten["trades"].as_array().unwrap().is_empty());
 
     let high_fee_id = submit(
-        &service,
+        &mut service,
         &threshold_snapshot,
         &json!({
             "initial_nav": 10.0,
@@ -380,7 +501,7 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
         "synthetic-high-fee-runtime-limitation",
         artifacts.path(),
     );
-    let high_fee = terminal_status(&service, &high_fee_id);
+    let high_fee = terminal_status(&mut service, &high_fee_id);
     assert_eq!(high_fee["status"], "failed");
     assert_eq!(high_fee["error"]["code"], "compat_runner_failed");
     assert!(
@@ -422,13 +543,13 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
     )
     .expect("write synthetic gap report");
     let failed_id = submit(
-        &service,
+        &mut service,
         &pending_snapshot,
         &json!({}),
         "synthetic-pending-gaps",
         artifacts.path(),
     );
-    let failed = terminal_status(&service, &failed_id);
+    let failed = terminal_status(&mut service, &failed_id);
     assert_eq!(failed["status"], "failed");
     assert_eq!(failed["error"]["code"], "compat_input_gaps_pending");
     assert_eq!(
@@ -445,8 +566,21 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
         runner_error["details"]["checks_not_run"]
             .as_array()
             .unwrap()
-            .len(),
-        6
+            .iter()
+            .map(|check| check["name"].as_str().expect("check label"))
+            .collect::<Vec<_>>(),
+        vec![
+            "snapshot_manifest_validation",
+            "snapshot_file_inventory_validation",
+            "snapshot_configuration_validation",
+            "frozen_source_validation",
+            "bar_and_factor_validation",
+            "total_return_price_and_limit_construction",
+            "historical_overlap_and_splice_validation",
+            "common_session_validation",
+            "simulation",
+            "frozen_reference_comparison",
+        ]
     );
     assert!(
         runner_error["details"]["checks_not_run"]
@@ -475,7 +609,7 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
 
     service.stop();
     service = LocalService::start(&output_root, &python);
-    let restarted = status(&service, &failed_id);
+    let restarted = status(&mut service, &failed_id);
     assert_eq!(restarted["status"], "failed");
     assert_eq!(
         restarted["error"]["details"]["runner_error"]["details"]["pending_gap_report"],
@@ -495,17 +629,17 @@ fn production_cli_rejects_invalid_configs_without_creating_tasks() {
     let output_root = artifacts.path().join("service-output");
     let snapshot = artifacts.path().join("synthetic-snapshot");
     make_synthetic_snapshot(&python, &snapshot, false);
-    let service = LocalService::start(&output_root, &python);
+    let mut service = LocalService::start(&output_root, &python);
 
     let minimum_normal = submit(
-        &service,
+        &mut service,
         &snapshot,
         &json!({"initial_nav":f64::MIN_POSITIVE,"fee_rate_one_way":0.9999999995}),
         "synthetic-near-boundary-valid",
         artifacts.path(),
     );
     assert_eq!(
-        terminal_status(&service, &minimum_normal)["status"],
+        terminal_status(&mut service, &minimum_normal)["status"],
         "succeeded"
     );
 

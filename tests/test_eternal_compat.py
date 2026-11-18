@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import eternal_baseline as baseline
 import eternal_compat as compat
-from test_eternal_baseline import make_replay_snapshot
+from test_eternal_baseline import make_replay_snapshot, temporary_directory_outside_repository
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,15 +37,20 @@ def seal_snapshot(snapshot):
 class EternalCompatibilityTests(unittest.TestCase):
     def setUp(self):
         artifact_root = os.environ.get("PRAJNA_TEST_ARTIFACTS")
-        if not artifact_root:
-            self.fail("PRAJNA_TEST_ARTIFACTS must point to the session validation folder")
-        self.directory = Path(artifact_root) / f"eternal-compat-{uuid.uuid4()}"
+        self._temporary_artifacts = None
+        if artifact_root:
+            root = Path(artifact_root)
+        else:
+            self._temporary_artifacts = temporary_directory_outside_repository()
+            self.addCleanup(self._temporary_artifacts.cleanup)
+            root = Path(self._temporary_artifacts.name)
+        self.directory = root / f"eternal-compat-{uuid.uuid4()}"
         self.directory.mkdir(parents=True)
         self.addCleanup(shutil.rmtree, self.directory)
         self.snapshot = self.directory / "snapshot"
         make_replay_snapshot(self.snapshot)
 
-    def run_compat(self, name, config=None, snapshot=None):
+    def run_compat(self, name, config=None, snapshot=None, timeout=30):
         request = {
             "task_id": f"synthetic-{name}",
             "snapshot_path": str(snapshot or self.snapshot),
@@ -62,8 +67,18 @@ class EternalCompatibilityTests(unittest.TestCase):
             capture_output=True,
             text=True,
             check=False,
+            timeout=timeout,
         )
         return completed, output_path
+
+    def test_test_artifacts_and_temp_root_fallback_stay_outside_repository(self):
+        repository = ROOT.resolve()
+        self.assertNotIn(repository, self.directory.resolve().parents)
+
+        with temporary_directory_outside_repository((ROOT, self.directory)) as fallback:
+            fallback_path = Path(fallback).resolve()
+            self.assertNotIn(repository, fallback_path.parents)
+            self.assertNotEqual(repository, fallback_path)
 
     def test_default_and_variant_config_are_persisted_with_model_nav_units(self):
         default, default_path = self.run_compat("default")
@@ -180,13 +195,44 @@ class EternalCompatibilityTests(unittest.TestCase):
                 "snapshot_file_inventory_validation",
                 "snapshot_configuration_validation",
                 "frozen_source_validation",
+                "bar_and_factor_validation",
+                "total_return_price_and_limit_construction",
+                "historical_overlap_and_splice_validation",
+                "common_session_validation",
                 "simulation",
                 "frozen_reference_comparison",
             ],
         )
         self.assertFalse(output_path.exists())
 
-    def test_malformed_and_unreadable_pending_gap_reports_fail_explicitly(self):
+    def test_dangling_pending_report_symlink_fails_without_result(self):
+        dangling_snapshot = self.directory / "dangling-pending-snapshot"
+        shutil.copytree(self.snapshot, dangling_snapshot)
+        (dangling_snapshot / "pending-gaps.json").symlink_to("missing-report.json")
+
+        completed, output_path = self.run_compat(
+            "dangling-pending-symlink",
+            snapshot=dangling_snapshot,
+        )
+
+        self.assertEqual(completed.returncode, 2)
+        stderr_error = json.loads(completed.stderr)["error"]
+        self.assertEqual(
+            stderr_error["code"],
+            "compat_pending_gaps_unsupported",
+        )
+        error = json.loads(
+            output_path.with_name("compat-failure.json").read_text(encoding="utf-8")
+        )["error"]
+        self.assertEqual(error["code"], "compat_pending_gaps_unsupported")
+        self.assertIn("regular file", error["message"])
+        self.assertEqual(
+            error["details"]["report_status"],
+            "unsupported_file_type",
+        )
+        self.assertFalse(output_path.exists())
+
+    def test_malformed_nonregular_and_unreadable_pending_gap_reports_fail_explicitly(self):
         malformed = self.directory / "malformed-pending-snapshot"
         malformed.mkdir()
         (malformed / "pending-gaps.json").write_text("{not-json", encoding="utf-8")
@@ -211,9 +257,52 @@ class EternalCompatibilityTests(unittest.TestCase):
         self.assertEqual(unreadable_result.returncode, 2)
         self.assertEqual(
             json.loads(unreadable_result.stderr)["error"]["code"],
-            "compat_pending_gaps_unreadable",
+            "compat_pending_gaps_unsupported",
+        )
+        self.assertIn(
+            "regular file",
+            json.loads(unreadable_result.stderr)["error"]["message"],
         )
         self.assertFalse(unreadable_output.exists())
+
+        if hasattr(os, "geteuid") and os.geteuid() != 0:
+            unreadable_file_snapshot = self.directory / "unreadable-file-pending-snapshot"
+            unreadable_file_snapshot.mkdir()
+            report_path = unreadable_file_snapshot / "pending-gaps.json"
+            report_path.write_text("{}", encoding="utf-8")
+            report_path.chmod(0)
+            try:
+                file_result, file_output = self.run_compat(
+                    "unreadable-pending-file",
+                    snapshot=unreadable_file_snapshot,
+                )
+            finally:
+                report_path.chmod(0o600)
+            self.assertEqual(file_result.returncode, 2)
+            self.assertEqual(
+                json.loads(file_result.stderr)["error"]["code"],
+                "compat_pending_gaps_unreadable",
+            )
+            self.assertFalse(file_output.exists())
+
+    def test_pending_gap_fifo_is_rejected_without_blocking(self):
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("FIFO reports are unavailable on this platform")
+        fifo_snapshot = self.directory / "fifo-pending-snapshot"
+        fifo_snapshot.mkdir()
+        os.mkfifo(fifo_snapshot / "pending-gaps.json")
+
+        completed, output_path = self.run_compat(
+            "fifo-pending",
+            snapshot=fifo_snapshot,
+            timeout=5,
+        )
+
+        self.assertEqual(completed.returncode, 2)
+        error = json.loads(completed.stderr)["error"]
+        self.assertEqual(error["code"], "compat_pending_gaps_unsupported")
+        self.assertIn("regular file", error["message"])
+        self.assertFalse(output_path.exists())
 
     def test_config_boundaries_match_documented_positive_nav_and_subunit_fee(self):
         accepted = compat.validate_config({

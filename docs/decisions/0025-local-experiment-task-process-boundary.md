@@ -53,7 +53,7 @@ MVP-7 的本机研究任务需要复用既有数据、因子与 Experiment 能�
 
 默认有效配置要求冻结参考对拍 `match`；不匹配由 runner 以 `compat_default_reference_mismatch` 失败且不写成功结果，任务服务持久化该子进程原因并在重启后读取。配置变体仍记录参考对比，但 `evaluation_mode=informational_variant` 明确其仅供说明，不因偏离默认参考而失败；默认有效配置标为 `required_default_parity`。兼容任务 submit/status 与结果路由均复用 `LocalPage` Host/Origin 检查：loopback CLI 可不带 Origin，异源请求拒绝。该限制只装配在兼容任务独立路由，不扩展到既有 Experiment task 或旧 run 路由。
 
-若输入包含 `pending-gaps.json`，runner 在读取 manifest 前先检查该报告，以支持无 manifest 的待裁决快照。有效报告及全部 gap 字段（不筛选可选 `source` 或未知字段）保存在 `error.details.runner_error.details.pending_gap_report`；同处列出明确的 `checks_not_run`。缺少 manifest 不会覆盖或折叠这些输入缺口。畸形与不可读报告分别显式失败；任何此类失败均不生成 `compat-result.json`。完整 gap 明细走 sidecar 而非 stderr，以免超过 16 KiB 时静默截断。
+若输入包含 `pending-gaps.json`，runner 在读取 manifest 前先检查该报告，以支持无 manifest 的待裁决快照。有效报告及全部 gap 字段（不筛选可选 `source` 或未知字段）保存在 `error.details.runner_error.details.pending_gap_report`；同处列出未运行的 manifest/清单/配置/源码、bar/factor、总回报价/涨跌停、历史拼接、共同交易日、模拟及参考对比阶段。畸形报告、不可读报告与符号链接/其他非普通文件分别显式失败；悬空链接不会被视为缺失，FIFO 等类型在读取前拒绝以避免阻塞。任何此类失败均不生成 `compat-result.json`。完整 gap 明细走 sidecar 而非 stderr，以免超过 16 KiB 时静默截断。
 
 ## 后果与限制
 

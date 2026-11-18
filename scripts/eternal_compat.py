@@ -7,6 +7,7 @@ import json
 import math
 import os
 import platform
+import stat
 import sys
 from datetime import date
 from pathlib import Path
@@ -26,6 +27,10 @@ PENDING_GAP_CHECKS = (
     "snapshot_file_inventory_validation",
     "snapshot_configuration_validation",
     "frozen_source_validation",
+    "bar_and_factor_validation",
+    "total_return_price_and_limit_construction",
+    "historical_overlap_and_splice_validation",
+    "common_session_validation",
     "simulation",
     "frozen_reference_comparison",
 )
@@ -170,7 +175,7 @@ def _reject_json_constant(value):
 def _read_pending_gap_report(snapshot):
     path = snapshot / "pending-gaps.json"
     try:
-        payload = path.read_bytes()
+        metadata = path.lstat()
     except FileNotFoundError:
         return None
     except OSError as error:
@@ -179,6 +184,46 @@ def _read_pending_gap_report(snapshot):
             "pending gap report could not be read",
             "unreadable",
         ) from error
+
+    if not stat.S_ISREG(metadata.st_mode):
+        raise _pending_gap_error(
+            "compat_pending_gaps_unsupported",
+            "pending gap report must be a regular file",
+            "unsupported_file_type",
+        )
+
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise _pending_gap_error(
+            "compat_pending_gaps_unreadable",
+            "pending gap report could not be read",
+            "unreadable",
+        ) from error
+
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise _pending_gap_error(
+                "compat_pending_gaps_unsupported",
+                "pending gap report must be a regular file",
+                "unsupported_file_type",
+            )
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = None
+            payload = stream.read()
+    except OSError as error:
+        raise _pending_gap_error(
+            "compat_pending_gaps_unreadable",
+            "pending gap report could not be read",
+            "unreadable",
+        ) from error
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
     try:
         report = json.loads(
