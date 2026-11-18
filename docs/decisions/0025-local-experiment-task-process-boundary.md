@@ -43,6 +43,14 @@ MVP-7 的本机研究任务需要复用既有数据、因子与 Experiment 能�
 更新尝试不等待用户补文件，任务执行成功仍可对应 needs_input；
 生产装配、供应商输入及显式补跑见 [ADR 0038](0038-fixed-pool-production-update.md)。
 
+## 永动机兼容任务（#394）
+
+旧 `quant-research` CLI 的 `eternal-compat submit/status/result` 经本机 Axum 任务服务提交、查询及读取版本化 Python 兼容运行；任务类型为 `prajna_eternal_compat@1`，使用自己的兼容运行 ID、不可覆盖结果文件及结果摘要。它复用现有单 worker 队列、进程组所有权/代际标记、任务状态持久化和结构化失败恢复，但不创建 Rust Experiment、Run 或 Execution，也不借用其身份或结果表。普通 Experiment task 列表与读取路由继续排除该类型。
+
+服务在受理时验证并保存解析后的完整配置：模型单位初始 NAV（默认 `1.0`）、固定五资产权重（默认 `30/20/20/25/5` 且合计为 `1.0`）、调仓阈值（默认 `10%`）和单边费率（默认 `5 bp`）。配置只接受模型 NAV，不接受或推断 CNY 金额；结果明确记录 `initial_capital_currency_amount: null`。快照路径和输入版本固定到任务请求/结果，执行器还记录兼容策略与 runner 版本、runner/冻结回放源码摘要及 Python/平台环境。`scripts/eternal_baseline.py` 及其冻结默认配置、schema 和参考输入均不因变体修改。
+
+`prajna_eternal_compat@1` 受理后若快照不可用、子进程异常或结果身份/hash 无效，任务以 `failed` 保存具体错误码及受限子进程诊断，且不发布成功结果；服务重启恢复终态失败原因，成功结果则从独立文件校验摘要后读取。状态路由提供持久错误，结果路由对未成功任务返回 `409`，缺任务返回 `404`，损坏输出返回 `500`；成功结果为 `no-store`。所有输出仅位于配置的本机研究目录。
+
 ## 后果与限制
 
 此边界默认执行并读取 Summary 结果，显式请求 Standard 时会提升已有 Summary Execution；不把新平台核心编译进旧服务，也不修改已有 Experiment 身份或结果表内容（提升会按已有的显式能力补写明细；manifest 的默认级别不改变）。结果读取验证所有已保存表 hash，并由 T21 扩展返回已保存 orders/fills/费用/权重/pending 等原生明细与 Rust 估值权重投影，不提供分页或按需提升；T01 尚不提供 HTTP 取消或重试端点。持久过程组身份与清理原语为后续取消路径提供服务端能力。进程检查与 CLI 诊断验证使用合成输入，不证明真实行情、策略收益或完整 MVP-7 产品流程；受限沙箱可能无法检查或终止子进程组，此时实现拒绝清理并明确报告未验证的所有权。
