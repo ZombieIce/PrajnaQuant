@@ -227,7 +227,8 @@ class EternalCompatibilityTests(unittest.TestCase):
 
         weights["sh511260"] = 0.0
         zero_weight, result = self.run_compat(
-            "zero-weight", {"initial_nav": 10.0, "weights": weights},
+            "zero-weight",
+            {"initial_nav": 10.0, "weights": weights, "rebalance_threshold": 1.0},
         )
         self.assertEqual(zero_weight.returncode, 0, zero_weight.stderr)
         self.assertEqual(json.loads(result.read_text())["daily"][1]["holdings"]["sh511260"], 0)
@@ -388,9 +389,123 @@ class EternalCompatibilityTests(unittest.TestCase):
             F(10, 11),
         )
 
+    def test_fee_amounts_follow_independently_derived_fee(self):
+        F = compat.Fraction
+        weights = {code: 0.2 for code in baseline.ETF_CODES}
+        config = {"weights": weights, "fee_rate_one_way": 0.01}
+        opens = [[1.0] * 5, [1.0, 1.0, 1.0, 1.0, 1.5], [1.0] * 5]
+        # Hand calculation: initial fee is 1 - 1/1.01. On 11-09 holdings are
+        # (h, h, h, h, 1.5h), h = 1/5.05; buying four and selling one gives
+        # N = 5.5h - 0.01 * (4 * (N/5 - h) + (1.5h - N/5)) = 5.525h / 1.006.
+        net0 = F(1) / F("1.01")
+        h = net0 / 5
+        capital = h * F("5.5")
+        net1 = compat._fee_solved_net_capital(
+            [h, h, h, h, h * F("1.5")], F(0), [F(1, 5)] * 5, F("0.01"),
+        )
+        self.assertEqual(net1, (capital + F("0.01") * (h * 4 - h * F("1.5"))) / (1 + F("0.01") * F("0.6")))
+        fees = [float(1 - net0), float(capital - net1), 0.0]
+
+        def ledger(**changes):
+            units0 = [float(net0 / 5)] * 5
+            units1 = [float(net1 / 5 / F(price)) for price in opens[1]]
+            rows = [
+                {"date": date(2026, 11, day), "cash": 0.0, "fees": fee,
+                 "units": dict(zip(baseline.ETF_CODES, units))}
+                for day, fee, units in ((6, fees[0], units0), (9, fees[1], units1), (10, 0.0, units1))
+            ]
+            trades = [{"trade_date": date(2026, 11, 9), "fees_in_initial_nav": fees[1]}]
+            stats = {"fees_in_initial_nav": fees[0] + fees[1]}
+            for target, field, value in changes.get("edits", ()):
+                container = {"rows": rows, "trade": trades[0], "stats": stats}[target]
+                if target == "rows":
+                    container[field[0]][field[1]] = value
+                else:
+                    container[field] = value
+            return rows, trades, stats
+
+        cases = (
+            ("hand-calculated", (), None),
+            ("trade-fee-1e-9-high", (("trade", "fees_in_initial_nav", fees[1] * (1 + 1e-9)),),
+             ("trades.fees_in_initial_nav", "2026-11-09", "rebalance")),
+            ("daily-fee-mismatch", (("rows", (1, "fees"), fees[1] * (1 - 1e-9)),),
+             ("daily.fees", "2026-11-09", "rebalance")),
+            ("initial-fee-dropped", (("rows", (0, "fees"), 0.0),),
+             ("daily.fees", "2026-11-06", "initial")),
+            ("fee-without-trade", (("rows", (2, "fees"), 1e-300),),
+             ("daily.fees", "2026-11-10", "no_trade")),
+            ("summary-mismatch", (("stats", "fees_in_initial_nav", fees[0]),),
+             ("summary.fees_in_initial_nav", None, "sum")),
+        )
+        for label, edits, failure in cases:
+            with self.subTest(label=label):
+                rows, trades, stats = ledger(edits=edits)
+                if failure is None:
+                    compat._validate_allocation_and_fees(rows, opens, trades, stats, config, 1, "normalized")
+                    continue
+                with self.assertRaises(compat.RunnerError) as caught:
+                    compat._validate_allocation_and_fees(rows, opens, trades, stats, config, 1, "normalized")
+                details = caught.exception.details
+                self.assertEqual(caught.exception.code, "compat_normalized_fee_precision_loss")
+                self.assertEqual(details["field"], failure[0])
+                self.assertEqual(details.get("date"), failure[1])
+                self.assertTrue(details["fee_basis"].startswith(failure[2]))
+                self.assertEqual(details["relative_tolerance"], 1e-10)
+
+    def test_fee_precision_failures_do_not_publish_results(self):
+        def write_bars(snapshot, next_open):
+            path = snapshot / "bars/sh511260.csv.gz"
+            bars, fields = baseline.csv_rows(path)
+            for row in bars:
+                if row["date"] == "2026-11-09":
+                    row.update(close="1.06", high="1.06")
+                if row["date"] >= "2026-11-10" and next_open is not None:
+                    row.update(open=next_open, high=next_open, low=next_open, close=next_open)
+            baseline.write_csv(path, bars, fields)
+            seal_snapshot(snapshot)
+
+        # label, fee, threshold, next open of the triggering asset, failure (field, date) or None.
+        cases = (
+            ("tiny-fee-rate", 1e-7, 1.0, None, ("daily.fees", "2026-11-06")),
+            ("zero-turnover-rebalance", 0.001, 0.05, None,
+             ("trades.fees_in_initial_nav", "2026-11-10")),
+            ("small-fee-rate", 1e-6, 1.0, None, None),
+            ("zero-fee-rebalance", 0.0, 0.05, None, None),
+            ("ordinary-fee-rebalance", 0.001, 0.05, "1.06", None),
+        )
+        for label, fee, threshold, next_open, failure in cases:
+            with self.subTest(label=label):
+                snapshot = self.directory / label
+                shutil.copytree(self.snapshot, snapshot)
+                write_bars(snapshot, next_open)
+                completed, output = self.run_compat(label, {
+                    "initial_nav": 10.0, "fee_rate_one_way": fee,
+                    "rebalance_threshold": threshold,
+                }, snapshot=snapshot)
+                if failure is not None:
+                    self.assertEqual(completed.returncode, 2, completed.stderr)
+                    self.assertFalse(output.exists())
+                    error = json.loads(output.with_name("compat-failure.json").read_text())["error"]
+                    self.assertEqual(error["code"], "compat_normalized_fee_precision_loss")
+                    self.assertEqual(error["details"]["field"], failure[0])
+                    self.assertEqual(error["details"]["date"], failure[1])
+                    continue
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                result = json.loads(output.read_text())
+                F = compat.Fraction
+                expected = F(10) - F(10) / (1 + F(fee))
+                self.assertLessEqual(
+                    abs(F(result["daily"][0]["fees"]) - expected), expected * F("1e-10"),
+                )
+                if threshold < 1.0:
+                    self.assertEqual(len(result["trades"]), 1)
+                if fee == 0.0:
+                    self.assertTrue(all(row["fees"] == 0.0 for row in result["daily"]))
+                    self.assertEqual(result["summary"]["fees_in_initial_nav"], 0.0)
+
     def test_units_cannot_change_without_an_executed_trade(self):
         rows = [
-            {"date": date(2026, 11, day), "cash": 0.0,
+            {"date": date(2026, 11, day), "cash": 0.0, "fees": 0.0,
              "units": {code: weight for code, weight in baseline.WEIGHTS.items()}}
             for day in (6, 9)
         ]
@@ -398,7 +513,7 @@ class EternalCompatibilityTests(unittest.TestCase):
         opens = [[1.0] * len(baseline.ETF_CODES)] * 2
         config = {"weights": baseline.WEIGHTS, "fee_rate_one_way": 0.0}
         with self.assertRaises(compat.RunnerError) as caught:
-            compat._validate_allocation_units(rows, opens, [], config, 1, "normalized")
+            compat._validate_allocation_and_fees(rows, opens, [], {}, config, 1, "normalized")
         self.assertEqual(caught.exception.code, "compat_normalized_allocation_precision_loss")
         self.assertEqual(caught.exception.details["allocation_basis"], "carried_forward")
         self.assertEqual(caught.exception.details["asset"], "sz159612")
@@ -908,6 +1023,8 @@ class EternalCompatibilityTests(unittest.TestCase):
         for row in bars:
             if row["date"] == "2026-11-09":
                 row["close"] = "1.06"
+            if row["date"] >= "2026-11-10":
+                row.update(open="1.06", high="1.06", low="1.06", close="1.06")
         baseline.write_csv(bars_path, bars, fields)
         seal_snapshot(self.snapshot)
 

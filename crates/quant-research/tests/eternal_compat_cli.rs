@@ -1160,49 +1160,77 @@ fn production_cli_rejects_imprecise_ledgers_across_restart() {
     let artifacts = TestArtifacts::new();
     let python = std::env::var("PRAJNA_TEST_PYTHON").unwrap_or_else(|_| "python3.12".into());
     let output_root = artifacts.path().join("service-output");
-    // (snapshot scenario, one-way fee, expected code, failing date)
+    let tiny = json!({
+        "sh511260": f64::from_bits(1), "sh518880": 0.5,
+        "sh515080": 0.2, "sh513300": 0.25, "sz159612": 0.05
+    });
+    let ordinary = json!({
+        "sh511260": 0.3, "sh518880": 0.2,
+        "sh515080": 0.2, "sh513300": 0.25, "sz159612": 0.05
+    });
+    // (snapshot scenario, one-way fee, weights, expected code, failing date, failing field)
     let cases = [
         (
             "normalized-imprecise",
             0.0,
+            &tiny,
             "compat_normalized_value_precision_loss",
             "2026-11-09",
+            "daily.holdings",
         ),
         (
             "initial",
             0.5,
+            &tiny,
             "compat_normalized_allocation_precision_loss",
             "2026-11-06",
+            "daily.units",
+        ),
+        (
+            "initial",
+            1e-7,
+            &ordinary,
+            "compat_normalized_fee_precision_loss",
+            "2026-11-06",
+            "daily.fees",
         ),
     ];
     let mut service = LocalService::start(&output_root, &python);
     let mut failures = Vec::new();
-    for (scenario, fee, code, date) in cases {
-        let snapshot = artifacts.path().join(format!("imprecise-{scenario}"));
+    for (index, (scenario, fee, weights, code, date, field)) in cases.into_iter().enumerate() {
+        let snapshot = artifacts
+            .path()
+            .join(format!("imprecise-{index}-{scenario}"));
         make_synthetic_snapshot(&python, &snapshot, scenario);
         let id = submit(
             &mut service,
             &snapshot,
             &json!({
-                "initial_nav": 1e100, "fee_rate_one_way": fee,
-                "weights": {
-                    "sh511260": f64::from_bits(1), "sh518880": 0.5,
-                    "sh515080": 0.2, "sh513300": 0.25, "sz159612": 0.05
-                }
+                "initial_nav": 1e100, "fee_rate_one_way": fee, "weights": weights,
             }),
-            &format!("synthetic-imprecise-{scenario}"),
+            &format!("synthetic-imprecise-{index}-{scenario}"),
             artifacts.path(),
         );
         let before = terminal_status(&mut service, &id);
         assert_eq!(
             before["status"], "failed",
-            "imprecise ledger must not succeed: {scenario}"
+            "imprecise ledger must not succeed: {scenario} fee {fee}"
         );
         assert_eq!(before["error"]["code"], code);
         let details = &before["error"]["details"];
         assert_eq!(details["runner_error_details_complete"], true);
-        assert_eq!(details["runner_error"]["details"]["asset"], "sh511260");
-        assert_eq!(details["runner_error"]["details"]["date"], date);
+        let runner_details = &details["runner_error"]["details"];
+        assert_eq!(runner_details["date"], date);
+        assert_eq!(runner_details["field"], field);
+        if field == "daily.fees" {
+            assert_eq!(
+                runner_details["fee_basis"],
+                "initial: capital - fee_solved_net"
+            );
+            assert_eq!(runner_details["relative_tolerance"], 1e-10);
+        } else {
+            assert_eq!(runner_details["asset"], "sh511260");
+        }
         failures.push((id, before));
     }
     for pass in 0..2 {

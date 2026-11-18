@@ -255,10 +255,13 @@ def _validate_normalized_holdings(daily, weights):
 
 
 _RELATIVE_TOLERANCE = Fraction("1e-12")
+# A fee is capital minus post-fee capital, so binary64 cancellation limits its own
+# relative precision. The frozen solver converges only to 1e-13 of capital.
+_FEE_RELATIVE_TOLERANCE = Fraction("1e-10")
 
 
-def _within_relative_tolerance(actual, expected):
-    return abs(Fraction(actual) - expected) <= abs(expected) * _RELATIVE_TOLERANCE
+def _within_relative_tolerance(actual, expected, tolerance=_RELATIVE_TOLERANCE):
+    return abs(Fraction(actual) - expected) <= abs(expected) * tolerance
 
 
 def _fee_solved_net_capital(holdings, cash, weights, fee_rate):
@@ -287,25 +290,41 @@ def _fee_solved_net_capital(holdings, cash, weights, fee_rate):
     raise ArithmeticError("fee equation has no non-negative net capital")
 
 
-def _validate_allocation_units(daily, opens, trades, config, principal, phase):
-    """Derive units from principal, weights, fee and execution prices, not from the ledger."""
+def _fee_precision_error(phase, field, date, basis):
+    details = {"field": field, "fee_basis": basis, "relative_tolerance": 1e-10}
+    if date is not None:
+        details["date"] = date.isoformat()
+    return RunnerError(
+        f"compat_{phase}_fee_precision_loss",
+        f"{phase} fee differs from the independently derived fee by more than 1e-10 relative",
+        details,
+    )
+
+
+def _validate_allocation_and_fees(daily, opens, trades, stats, config, principal, phase):
+    """Derive units, fees and cash from principal, weights, fee and execution prices."""
     weights = [Fraction(config["weights"][asset]) for asset in baseline.ETF_CODES]
     fee_rate = Fraction(config["fee_rate_one_way"])
-    trade_days = {trade["trade_date"] for trade in trades}
+    trades_by_day = {trade["trade_date"]: trade for trade in trades}
     previous, previous_cash = None, None
+    total_fees = Fraction(0)
     for index, row in enumerate(daily):
+        day = row["date"]
         actual = [row["units"][asset] for asset in baseline.ETF_CODES]
-        if not all(math.isfinite(value) for value in actual):
+        if not all(math.isfinite(value) for value in (*actual, row["cash"], row["fees"])):
             raise RunnerError(
                 f"compat_{phase}_value_unrepresentable",
-                f"{phase} allocation units contain a non-finite value",
-                {"field": "daily.units", "date": row["date"].isoformat()},
+                f"{phase} allocation units, cash or fees contain a non-finite value",
+                {"field": "daily", "date": day.isoformat()},
             )
         prices = [Fraction(price) for price in opens[index]]
+        trade = trades_by_day.get(day)
         if index == 0:
-            net, basis = Fraction(principal) / (1 + fee_rate), "initial"
-        elif row["date"] in trade_days:
+            capital = Fraction(principal)
+            net, basis = capital / (1 + fee_rate), "initial"
+        elif trade is not None:
             holdings = [Fraction(units) * price for units, price in zip(previous, prices)]
+            capital = sum(holdings, Fraction(previous_cash))
             net = _fee_solved_net_capital(holdings, Fraction(previous_cash), weights, fee_rate)
             basis = "rebalance"
         else:
@@ -314,10 +333,18 @@ def _validate_allocation_units(daily, opens, trades, config, principal, phase):
                     raise RunnerError(
                         f"compat_{phase}_allocation_precision_loss",
                         f"{phase} units changed without an executed trade",
-                        {"field": "daily.units", "asset": asset, "date": row["date"].isoformat(),
+                        {"field": "daily.units", "asset": asset, "date": day.isoformat(),
                          "allocation_basis": "carried_forward"},
                     )
-            previous_cash = row["cash"]
+            if row["fees"] != 0:
+                raise _fee_precision_error(phase, "daily.fees", day, "no_trade: zero")
+            if row["cash"] != previous_cash:
+                raise RunnerError(
+                    f"compat_{phase}_allocation_precision_loss",
+                    f"{phase} cash changed without an executed trade",
+                    {"field": "daily.cash", "date": day.isoformat(),
+                     "allocation_basis": "carried_forward"},
+                )
             continue
         for asset, units, weight, price in zip(baseline.ETF_CODES, actual, weights, prices):
             if not _within_relative_tolerance(units, net * weight / price):
@@ -326,17 +353,41 @@ def _validate_allocation_units(daily, opens, trades, config, principal, phase):
                     f"{phase} units differ from the independently derived allocation "
                     "by more than 1e-12 relative",
                     {
-                        "field": "daily.units", "asset": asset, "date": row["date"].isoformat(),
+                        "field": "daily.units", "asset": asset, "date": day.isoformat(),
                         "allocation_basis": f"{basis}: fee_solved_net * weight / open_price",
                         "relative_tolerance": 1e-12,
                     },
                 )
+        # The model invests all post-fee capital, so the fee is exactly capital - net.
+        fee = capital - net
+        if trade is not None and not _within_relative_tolerance(
+            trade["fees_in_initial_nav"], fee, _FEE_RELATIVE_TOLERANCE,
+        ):
+            raise _fee_precision_error(
+                phase, "trades.fees_in_initial_nav", day, f"{basis}: capital - fee_solved_net",
+            )
+        if not _within_relative_tolerance(row["fees"], fee, _FEE_RELATIVE_TOLERANCE):
+            raise _fee_precision_error(phase, "daily.fees", day, f"{basis}: capital - fee_solved_net")
+        if row["cash"] != 0:
+            raise RunnerError(
+                f"compat_{phase}_allocation_precision_loss",
+                f"{phase} cash remains after full post-fee allocation",
+                {"field": "daily.cash", "date": day.isoformat(),
+                 "allocation_basis": f"{basis}: zero residual cash"},
+            )
+        total_fees += fee
         previous, previous_cash = actual, row["cash"]
+    if not math.isfinite(stats["fees_in_initial_nav"]) or not _within_relative_tolerance(
+        stats["fees_in_initial_nav"], total_fees, _FEE_RELATIVE_TOLERANCE,
+    ):
+        raise _fee_precision_error(
+            phase, "summary.fees_in_initial_nav", None, "sum of independently derived fees",
+        )
 
 
 def _validate_holding_valuations(daily, closes, phase):
-    tolerance = _RELATIVE_TOLERANCE
     for row, prices in zip(daily, closes, strict=True):
+        expected_nav = Fraction(row["cash"]) if math.isfinite(row["cash"]) else None
         for asset, price in zip(baseline.ETF_CODES, prices, strict=True):
             units, holding = row["units"][asset], row["holdings"][asset]
             details = {
@@ -352,12 +403,31 @@ def _validate_holding_valuations(daily, closes, phase):
                 )
             # Exact products avoid repeating the binary64 underflow being checked.
             expected = Fraction(units) * Fraction(price)
-            if abs(Fraction(holding) - expected) > abs(expected) * tolerance:
+            if not _within_relative_tolerance(holding, expected):
                 raise RunnerError(
                     f"compat_{phase}_value_precision_loss",
                     f"{phase} holding differs from units times close index by more than 1e-12 relative",
                     details,
                 )
+            if expected_nav is not None:
+                expected_nav += expected
+        details = {
+            "field": "daily.nav", "date": row["date"].isoformat(),
+            "valuation_basis": "cash + sum(units * close_total_return_index)",
+            "relative_tolerance": 1e-12,
+        }
+        if expected_nav is None or not math.isfinite(row["nav"]):
+            raise RunnerError(
+                f"compat_{phase}_value_unrepresentable",
+                f"{phase} NAV valuation contains a non-finite value",
+                details,
+            )
+        if not _within_relative_tolerance(row["nav"], expected_nav):
+            raise RunnerError(
+                f"compat_{phase}_value_precision_loss",
+                f"{phase} NAV differs from cash plus unit valuations by more than 1e-12 relative",
+                details,
+            )
 
 
 def _pending_gap_error(code, message, report_status):
@@ -749,13 +819,15 @@ def run(request, output):
         config["weights"],
     )
     _validate_normalized_holdings(daily, config["weights"])
-    _validate_allocation_units(daily, opens, trades, config, 1, "normalized")
+    _validate_allocation_and_fees(daily, opens, trades, stats, config, 1, "normalized")
     _validate_holding_valuations(daily, closes, "normalized")
     comparison = baseline.compare_reference(reference, days, navs, stats, anchors)
     navs, signals, trades, stats, daily = _scaled_result(
         navs, signals, trades, stats, daily, config["initial_nav"],
     )
-    _validate_allocation_units(daily, opens, trades, config, config["initial_nav"], "scaled")
+    _validate_allocation_and_fees(
+        daily, opens, trades, stats, config, config["initial_nav"], "scaled",
+    )
     _validate_holding_valuations(daily, closes, "scaled")
     is_default_config = config == validate_config({})
     comparison["evaluation_mode"] = (
