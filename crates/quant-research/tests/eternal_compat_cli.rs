@@ -403,6 +403,112 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
 
     let mut service = LocalService::start(&output_root, &python);
 
+    let default_capital_id = submit(
+        &mut service,
+        &initial_snapshot,
+        &json!({}),
+        "synthetic-default-capital",
+        artifacts.path(),
+    );
+    let scaled_capital_id = submit(
+        &mut service,
+        &initial_snapshot,
+        &json!({"initial_nav":10.0}),
+        "synthetic-scaled-capital",
+        artifacts.path(),
+    );
+    assert_eq!(
+        terminal_status(&mut service, &default_capital_id)["status"],
+        "succeeded"
+    );
+    assert_eq!(
+        terminal_status(&mut service, &scaled_capital_id)["status"],
+        "succeeded"
+    );
+    let default_capital = result(&mut service, &default_capital_id);
+    let scaled_capital = result(&mut service, &scaled_capital_id);
+    assert_eq!(
+        scaled_capital["frozen_reference_comparison"]["overall_status"],
+        "match"
+    );
+    assert_eq!(
+        scaled_capital["frozen_reference_comparison"]["daily_nav"]["status"],
+        "match"
+    );
+    assert_eq!(
+        scaled_capital["frozen_reference_comparison"]["evaluation_mode"],
+        "informational_variant"
+    );
+    for (default_day, scaled_day) in default_capital["daily"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(scaled_capital["daily"].as_array().unwrap())
+    {
+        for field in ["nav", "cash", "fees"] {
+            let expected = default_day[field].as_f64().unwrap() * 10.0;
+            let actual = scaled_day[field].as_f64().unwrap();
+            assert!((actual - expected).abs() < 1e-10);
+        }
+        for field in ["units", "holdings"] {
+            for asset in ["sh511260", "sh518880", "sh515080", "sh513300", "sz159612"] {
+                let expected = default_day[field][asset].as_f64().unwrap() * 10.0;
+                let actual = scaled_day[field][asset].as_f64().unwrap();
+                assert!((actual - expected).abs() < 1e-10);
+            }
+        }
+    }
+
+    let underflow_id = submit(
+        &mut service,
+        &initial_snapshot,
+        &json!({
+            "initial_nav": f64::MIN_POSITIVE,
+            "weights": {
+                "sh511260": 0.4999999999999999,
+                "sh518880": 1e-16,
+                "sh515080": 0.20,
+                "sh513300": 0.25,
+                "sz159612": 0.05
+            }
+        }),
+        "synthetic-scaled-allocation-underflow",
+        artifacts.path(),
+    );
+    let underflow_status = terminal_status(&mut service, &underflow_id);
+    assert_eq!(underflow_status["status"], "failed");
+    assert_eq!(
+        underflow_status["error"]["code"],
+        "compat_scaled_value_underflow"
+    );
+    assert_eq!(
+        underflow_status["error"]["details"]["runner_error"]["details"]["field"],
+        "daily.units"
+    );
+    assert_eq!(
+        underflow_status["error"]["details"]["runner_error"]["details"]["asset"],
+        "sh518880"
+    );
+    let underflow_result = run_cli(&[
+        "eternal-compat".into(),
+        "result".into(),
+        "--server".into(),
+        service.url(),
+        underflow_id.clone(),
+    ]);
+    assert!(!underflow_result.status.success());
+    assert!(
+        String::from_utf8_lossy(&underflow_result.stderr).contains("compat_result_unavailable")
+    );
+    let underflow_task_dir = output_root.join("tasks").join(&underflow_id);
+    assert!(!underflow_task_dir.join("compat-result.json").exists());
+    assert!(
+        fs::metadata(underflow_task_dir.join("compat-failure.json"))
+            .expect("underflow failure sidecar exists")
+            .len()
+            > 16
+    );
+
     let ledger_config = json!({
         "initial_nav": 10.0,
         "weights": {
@@ -607,8 +713,133 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
     assert!(!result_attempt.status.success());
     assert!(String::from_utf8_lossy(&result_attempt.stderr).contains("compat_result_unavailable"));
 
+    let nonrepresentable_snapshot = artifacts.path().join("nonrepresentable-pending-snapshot");
+    fs::create_dir_all(&nonrepresentable_snapshot)
+        .expect("create non-representable synthetic snapshot");
+    fs::write(
+        nonrepresentable_snapshot.join("pending-gaps.json"),
+        br#"{"status":"pending_decision","gaps":[{"asset":"sh511260","metric":1e1000}]}"#,
+    )
+    .expect("write non-representable synthetic gap report");
+    let nonrepresentable_id = submit(
+        &mut service,
+        &nonrepresentable_snapshot,
+        &json!({}),
+        "synthetic-nonrepresentable-gap-number",
+        artifacts.path(),
+    );
+    let nonrepresentable_status = terminal_status(&mut service, &nonrepresentable_id);
+    assert_eq!(nonrepresentable_status["status"], "failed");
+    assert_eq!(
+        nonrepresentable_status["error"]["code"],
+        "compat_pending_gaps_invalid"
+    );
+    assert_eq!(
+        nonrepresentable_status["error"]["details"]["runner_error_details_complete"],
+        true
+    );
+    assert_eq!(
+        nonrepresentable_status["error"]["details"]["runner_error"]["details"]["report_status"],
+        "non_representable_number"
+    );
+    assert_eq!(
+        nonrepresentable_status["error"]["details"]["runner_error"]["details"]["report_contents_persisted"],
+        false
+    );
+    let nonrepresentable_task_dir = output_root.join("tasks").join(&nonrepresentable_id);
+    assert!(
+        nonrepresentable_task_dir
+            .join("compat-failure.json")
+            .exists()
+    );
+    assert!(
+        !nonrepresentable_task_dir
+            .join("compat-result.json")
+            .exists()
+    );
+    let nonrepresentable_result = run_cli(&[
+        "eternal-compat".into(),
+        "result".into(),
+        "--server".into(),
+        service.url(),
+        nonrepresentable_id.clone(),
+    ]);
+    assert!(!nonrepresentable_result.status.success());
+    assert!(
+        String::from_utf8_lossy(&nonrepresentable_result.stderr)
+            .contains("compat_result_unavailable")
+    );
+
     service.stop();
     service = LocalService::start(&output_root, &python);
+    assert_eq!(
+        status(&mut service, &default_capital_id)["status"],
+        "succeeded"
+    );
+    let restarted_default_capital = result(&mut service, &default_capital_id);
+    let restarted_scaled_capital = result(&mut service, &scaled_capital_id);
+    assert_eq!(
+        restarted_scaled_capital["frozen_reference_comparison"]["overall_status"],
+        "match"
+    );
+    assert_eq!(
+        restarted_scaled_capital["daily"][0]["nav"],
+        scaled_capital["daily"][0]["nav"]
+    );
+    assert_eq!(
+        restarted_default_capital["daily"][0]["nav"],
+        default_capital["daily"][0]["nav"]
+    );
+    let restarted_underflow = status(&mut service, &underflow_id);
+    assert_eq!(restarted_underflow["status"], "failed");
+    assert_eq!(
+        restarted_underflow["error"]["code"],
+        "compat_scaled_value_underflow"
+    );
+    assert_eq!(
+        restarted_underflow["error"]["details"]["runner_error"]["details"]["asset"],
+        "sh518880"
+    );
+    let underflow_result_after_restart = run_cli(&[
+        "eternal-compat".into(),
+        "result".into(),
+        "--server".into(),
+        service.url(),
+        underflow_id.clone(),
+    ]);
+    assert!(!underflow_result_after_restart.status.success());
+    assert!(
+        String::from_utf8_lossy(&underflow_result_after_restart.stderr)
+            .contains("compat_result_unavailable")
+    );
+    assert!(!underflow_task_dir.join("compat-result.json").exists());
+    let restarted_nonrepresentable = status(&mut service, &nonrepresentable_id);
+    assert_eq!(restarted_nonrepresentable["status"], "failed");
+    assert_eq!(
+        restarted_nonrepresentable["error"]["code"],
+        "compat_pending_gaps_invalid"
+    );
+    assert_eq!(
+        restarted_nonrepresentable["error"]["details"]["runner_error"]["details"]["report_status"],
+        "non_representable_number"
+    );
+    let nonrepresentable_result_after_restart = run_cli(&[
+        "eternal-compat".into(),
+        "result".into(),
+        "--server".into(),
+        service.url(),
+        nonrepresentable_id.clone(),
+    ]);
+    assert!(!nonrepresentable_result_after_restart.status.success());
+    assert!(
+        String::from_utf8_lossy(&nonrepresentable_result_after_restart.stderr)
+            .contains("compat_result_unavailable")
+    );
+    assert!(
+        !nonrepresentable_task_dir
+            .join("compat-result.json")
+            .exists()
+    );
     let restarted = status(&mut service, &failed_id);
     assert_eq!(restarted["status"], "failed");
     assert_eq!(

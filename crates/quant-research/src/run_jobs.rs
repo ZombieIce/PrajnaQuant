@@ -61,6 +61,12 @@ const ETERNAL_COMPAT_TASK_TYPE: &str = "prajna_eternal_compat";
 const ETERNAL_COMPAT_TASK_VERSION: u32 = 1;
 const ETERNAL_COMPAT_ASSETS: [&str; 5] =
     ["sh511260", "sh518880", "sh515080", "sh513300", "sz159612"];
+const ETERNAL_COMPAT_CONFIG_FIELDS: [&str; 4] = [
+    "initial_nav",
+    "weights",
+    "rebalance_threshold",
+    "fee_rate_one_way",
+];
 const COMPARISON_TASK_TYPE: &str = "prajna_comparison";
 const DEFAULT_RESULT_LEVEL: &str = "summary";
 
@@ -1391,14 +1397,7 @@ impl RunJobApi {
                     "persisted effective compatibility configuration is missing",
                 )
             })?;
-            let config_matches = [
-                "initial_nav",
-                "weights",
-                "rebalance_threshold",
-                "fee_rate_one_way",
-            ]
-            .into_iter()
-            .all(|key| persisted["effective_config"][key] == effective_config[key]);
+            let config_matches = eternal_compat_result_config_matches(&persisted, effective_config);
             if persisted["identity"]["compat_run_id"].as_str() != Some(compat_run_id)
                 || persisted["identity"]["task_id"].as_str() != Some(expected_task_id.as_str())
                 || persisted["identity"]["task_type"].as_str() != Some("eternal_compat@1")
@@ -1412,9 +1411,6 @@ impl RunJobApi {
                     .is_none()
                 || persisted["runtime"]["python"].as_str().is_none()
                 || persisted["runtime"]["platform"].as_str().is_none()
-                || persisted["effective_config"]["initial_capital_unit"].as_str()
-                    != Some("model_nav")
-                || !persisted["effective_config"]["initial_capital_currency_amount"].is_null()
                 || !persisted["summary"].is_object()
                 || !persisted["daily"].is_array()
                 || !persisted["signals"].is_array()
@@ -1797,18 +1793,10 @@ async fn get_eternal_compat_result(
         || value["identity"]["strategy_version"].as_str() != Some("eternal_compat@1")
         || value["identity"]["compat_run_id"].as_str() != reference["compat_run_id"].as_str()
         || value["identity"]["input_version"].as_str() != reference["input_version"].as_str()
-        || !task.effective_config.as_ref().is_some_and(|config| {
-            [
-                "initial_nav",
-                "weights",
-                "rebalance_threshold",
-                "fee_rate_one_way",
-            ]
-            .into_iter()
-            .all(|key| value["effective_config"][key] == config[key])
-                && value["effective_config"]["initial_capital_unit"].as_str() == Some("model_nav")
-                && value["effective_config"]["initial_capital_currency_amount"].is_null()
-        })
+        || !task
+            .effective_config
+            .as_ref()
+            .is_some_and(|config| eternal_compat_result_config_matches(&value, config))
     {
         return ApiFailure::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -2108,6 +2096,13 @@ fn compat_config_failure(field: &str, message: &str) -> ApiFailure {
         message,
         json!({"field":field}),
     )
+}
+fn eternal_compat_result_config_matches(result: &Value, expected: &Value) -> bool {
+    ETERNAL_COMPAT_CONFIG_FIELDS
+        .into_iter()
+        .all(|field| result["effective_config"][field] == expected[field])
+        && result["effective_config"]["initial_capital_unit"].as_str() == Some("model_nav")
+        && result["effective_config"]["initial_capital_currency_amount"].is_null()
 }
 fn validate_eternal_compat_definition(definition: &Value) -> Result<Value, ApiFailure> {
     let Some(object) = definition.as_object() else {
@@ -2493,6 +2488,11 @@ fn eternal_compat_cli_error(
         .as_ref()
         .and_then(|value| value["error"]["details"]["structured_details_persisted"].as_bool())
         == Some(true);
+    let stderr_details_complete = child_error
+        .as_ref()
+        .and_then(|value| value["error"]["details"].get("structured_details_complete"))
+        .map(|value| value.as_bool() == Some(true))
+        .unwrap_or(true);
     let failure = fs::read(failure_path)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
@@ -2503,15 +2503,25 @@ fn eternal_compat_cli_error(
                 && value["error"]["details"].is_object()
         })
     {
-        details["runner_error"] =
-            failure.expect("validated structured compatibility error")["error"].clone();
-        details["runner_error_details_complete"] = json!(true);
+        let failure = failure.expect("validated structured compatibility error");
+        let sidecar_details_complete = failure
+            .get("structured_details_complete")
+            .map(|value| value.as_bool() == Some(true))
+            .unwrap_or(true);
+        details["runner_error"] = failure["error"].clone();
+        let details_complete = stderr_details_complete && sidecar_details_complete;
+        details["runner_error_details_complete"] = json!(details_complete);
+        if !details_complete {
+            details["runner_error_details_issue"] = json!(
+                "runner failure details are marked incomplete; the original error is retained"
+            );
+        }
     } else {
         details["runner_error_details_complete"] = json!(false);
         details["runner_error_details_issue"] = json!(if structured_details_persisted {
             "structured compatibility failure details were missing or invalid"
         } else {
-            "runner did not confirm persistence of complete structured failure details"
+            "runner did not confirm persistence of structured failure details"
         });
     }
     RunError {
@@ -3365,6 +3375,55 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(api.list_experiment_tasks().len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn incomplete_compat_failure_sidecar_is_retained_and_marked_incomplete() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let failure_path = directory.path().join("compat-failure.json");
+        fs::write(
+            &failure_path,
+            serde_json::to_vec(&json!({
+                "error": {
+                    "code": "compat_synthetic_failure",
+                    "message": "synthetic failure",
+                    "details": {
+                        "failure_details_omitted_reason":
+                            "original failure details were not JSON serializable"
+                    }
+                },
+                "structured_details_complete": false
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let stderr = BoundedStderr {
+            text: serde_json::to_string(&json!({
+                "error": {
+                    "code": "compat_synthetic_failure",
+                    "message": "synthetic failure",
+                    "details": {
+                        "structured_details_persisted": true,
+                        "structured_details_complete": false
+                    }
+                }
+            }))
+            .unwrap(),
+            truncated: false,
+            capture_incomplete: false,
+        };
+
+        let error = eternal_compat_cli_error(&ExitStatus::from_raw(1 << 8), &stderr, &failure_path);
+
+        assert_eq!(error.code, "compat_synthetic_failure");
+        assert_eq!(error.details["runner_error_details_complete"], false);
+        assert_eq!(
+            error.details["runner_error"]["details"]["failure_details_omitted_reason"],
+            "original failure details were not JSON serializable"
+        );
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]

@@ -10,6 +10,7 @@ import platform
 import stat
 import sys
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import eternal_baseline as baseline
@@ -41,6 +42,10 @@ class RunnerError(Exception):
         super().__init__(message)
         self.code = code
         self.details = details or {}
+
+
+class NonRepresentableJsonNumber(ValueError):
+    pass
 
 
 def canonical_json(value):
@@ -117,11 +122,33 @@ def validate_config(value):
 
 
 def _scaled_result(navs, signals, trades, stats, daily, initial_nav):
-    scaled_navs = [value * initial_nav for value in navs]
+    def scale(value, field, asset=None):
+        scaled = value * initial_nav
+        details = {"field": field}
+        if asset is not None:
+            details["asset"] = asset
+        if not math.isfinite(scaled):
+            raise RunnerError(
+                "compat_scaled_value_unrepresentable",
+                "scaled compatibility result value is not representable",
+                details,
+            )
+        if value > 0 and scaled == 0:
+            raise RunnerError(
+                "compat_scaled_value_underflow",
+                "positive compatibility result value underflowed during capital scaling",
+                details,
+            )
+        return scaled
+
+    scaled_navs = [scale(value, "daily.nav") for value in navs]
     scaled_trades = [
         {
             **trade,
-            "fees_in_initial_nav": trade["fees_in_initial_nav"] * initial_nav,
+            "fees_in_initial_nav": scale(
+                trade["fees_in_initial_nav"],
+                "trades.fees_in_initial_nav",
+            ),
         }
         for trade in trades
     ]
@@ -129,16 +156,24 @@ def _scaled_result(navs, signals, trades, stats, daily, initial_nav):
     for row in daily:
         scaled_daily.append({
             **row,
-            "nav": row["nav"] * initial_nav,
-            "cash": row["cash"] * initial_nav,
-            "fees": row["fees"] * initial_nav,
-            "units": {key: value * initial_nav for key, value in row["units"].items()},
-            "holdings": {key: value * initial_nav for key, value in row["holdings"].items()},
+            "nav": scale(row["nav"], "daily.nav"),
+            "cash": scale(row["cash"], "daily.cash"),
+            "fees": scale(row["fees"], "daily.fees"),
+            "units": {
+                key: scale(value, "daily.units", key)
+                for key, value in row["units"].items()
+            },
+            "holdings": {
+                key: scale(value, "daily.holdings", key)
+                for key, value in row["holdings"].items()
+            },
         })
     scaled_stats = {
         **stats,
-        "total_return": scaled_navs[-1] / initial_nav - 1.0,
-        "fees_in_initial_nav": stats["fees_in_initial_nav"] * initial_nav,
+        "fees_in_initial_nav": scale(
+            stats["fees_in_initial_nav"],
+            "summary.fees_in_initial_nav",
+        ),
     }
     return scaled_navs, signals, scaled_trades, scaled_stats, scaled_daily
 
@@ -170,6 +205,24 @@ def _unique_json_object(pairs):
 
 def _reject_json_constant(value):
     raise ValueError(f"non-standard JSON constant: {value}")
+
+
+def _parse_compatible_json_int(value):
+    number = int(value)
+    if number < -(2**63) or number > 2**64 - 1:
+        raise NonRepresentableJsonNumber
+    return number
+
+
+def _parse_compatible_json_float(value):
+    try:
+        number = float(value)
+        exact = Decimal(value)
+    except (InvalidOperation, OverflowError, ValueError) as error:
+        raise NonRepresentableJsonNumber from error
+    if not math.isfinite(number) or (number == 0 and not exact.is_zero()):
+        raise NonRepresentableJsonNumber
+    return number
 
 
 def _read_pending_gap_report(snapshot):
@@ -230,13 +283,31 @@ def _read_pending_gap_report(snapshot):
             payload.decode("utf-8"),
             object_pairs_hook=_unique_json_object,
             parse_constant=_reject_json_constant,
+            parse_int=_parse_compatible_json_int,
+            parse_float=_parse_compatible_json_float,
         )
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
-        raise _pending_gap_error(
+    except NonRepresentableJsonNumber as error:
+        failure = _pending_gap_error(
+            "compat_pending_gaps_invalid",
+            "pending gap report contains a non-representable number",
+            "non_representable_number",
+        )
+        failure.details["report_contents_persisted"] = False
+        failure.details["report_contents_not_persisted_reason"] = (
+            "report contains a number outside the portable JSON numeric range"
+        )
+        raise failure from error
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RecursionError) as error:
+        failure = _pending_gap_error(
             "compat_pending_gaps_invalid",
             "pending gap report is invalid JSON",
             "invalid",
-        ) from error
+        )
+        failure.details["report_contents_persisted"] = False
+        failure.details["report_contents_not_persisted_reason"] = (
+            "report is not valid standard JSON"
+        )
+        raise failure from error
 
     if (
         not isinstance(report, dict)
@@ -245,11 +316,16 @@ def _read_pending_gap_report(snapshot):
         or not report["gaps"]
         or any(not isinstance(gap, dict) for gap in report["gaps"])
     ):
-        raise _pending_gap_error(
+        failure = _pending_gap_error(
             "compat_pending_gaps_invalid",
             "pending gap report has an invalid structure",
             "invalid",
         )
+        failure.details["report_contents_persisted"] = False
+        failure.details["report_contents_not_persisted_reason"] = (
+            "report structure is invalid"
+        )
+        raise failure
 
     return report
 
@@ -336,10 +412,10 @@ def run(request, output):
         config["fee_rate_one_way"],
         config["weights"],
     )
+    comparison = baseline.compare_reference(reference, days, navs, stats, anchors)
     navs, signals, trades, stats, daily = _scaled_result(
         navs, signals, trades, stats, daily, config["initial_nav"],
     )
-    comparison = baseline.compare_reference(reference, days, navs, stats, anchors)
     is_default_config = config == validate_config({})
     comparison["evaluation_mode"] = (
         "required_default_parity" if is_default_config else "informational_variant"
@@ -422,14 +498,27 @@ def _persist_failure(output, error):
     temporary_path = failure_path.with_name(
         f".{failure_path.name}.{os.getpid()}.tmp"
     )
-    failure = {
-        "error": {
-            "code": error.code,
-            "message": str(error),
-            "details": error.details,
+    code = error.code if isinstance(error.code, str) else "compat_runner_failed"
+    message = str(error)
+    failure = {"error": {"code": code, "message": message, "details": error.details}}
+    details_complete = True
+    try:
+        payload = canonical_json(failure) + b"\n"
+    except (TypeError, ValueError, OverflowError, RecursionError, UnicodeError):
+        details_complete = False
+        failure = {
+            "error": {
+                "code": code,
+                "message": message,
+                "details": {
+                    "failure_details_omitted_reason": (
+                        "original failure details were not JSON serializable"
+                    )
+                },
+            },
+            "structured_details_complete": False,
         }
-    }
-    payload = canonical_json(failure) + b"\n"
+        payload = canonical_json(failure) + b"\n"
     try:
         failure_path.parent.mkdir(parents=True, exist_ok=True)
         with temporary_path.open("xb") as stream:
@@ -437,21 +526,24 @@ def _persist_failure(output, error):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary_path, failure_path)
-        return True
+        return True, details_complete
     except OSError:
         try:
             temporary_path.unlink(missing_ok=True)
         except OSError:
             pass
-        return False
+        return False, False
 
 
 def _emit_failure(output, error):
-    details_persisted = _persist_failure(output, error)
+    details_persisted, details_complete = _persist_failure(output, error)
     summary = {
-        "code": error.code,
+        "code": error.code if isinstance(error.code, str) else "compat_runner_failed",
         "message": str(error),
-        "details": {"structured_details_persisted": details_persisted},
+        "details": {
+            "structured_details_persisted": details_persisted,
+            "structured_details_complete": details_complete,
+        },
     }
     if not details_persisted:
         summary["details"]["structured_details_persistence_failed"] = True

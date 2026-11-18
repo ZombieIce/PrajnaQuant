@@ -1,10 +1,12 @@
 import json
+import io
 import os
 import shutil
 import subprocess
 import sys
 import unittest
 import uuid
+from contextlib import redirect_stderr
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
@@ -129,6 +131,62 @@ class EternalCompatibilityTests(unittest.TestCase):
         for row in variant_result["daily"]:
             self.assertAlmostEqual(row["nav"], row["cash"] + sum(row["holdings"].values()))
 
+    def test_capital_only_variant_compares_normalized_nav_and_scales_ledger(self):
+        default, default_path = self.run_compat("capital-default")
+        capital, capital_path = self.run_compat(
+            "capital-only-variant",
+            {"initial_nav": 10.0},
+        )
+        self.assertEqual(default.returncode, 0, default.stderr)
+        self.assertEqual(capital.returncode, 0, capital.stderr)
+        default_result = json.loads(default_path.read_text(encoding="utf-8"))
+        capital_result = json.loads(capital_path.read_text(encoding="utf-8"))
+        comparison = capital_result["frozen_reference_comparison"]
+        self.assertEqual(comparison["overall_status"], "match")
+        self.assertEqual(comparison["daily_nav"]["status"], "match")
+        self.assertEqual(comparison["evaluation_mode"], "informational_variant")
+        self.assertAlmostEqual(
+            capital_result["summary"]["total_return"],
+            default_result["summary"]["total_return"],
+        )
+        for default_day, capital_day in zip(
+            default_result["daily"],
+            capital_result["daily"],
+            strict=True,
+        ):
+            for field in ("nav", "cash", "fees"):
+                self.assertAlmostEqual(capital_day[field], default_day[field] * 10)
+            for field in ("units", "holdings"):
+                for asset in baseline.ETF_CODES:
+                    self.assertAlmostEqual(
+                        capital_day[field][asset],
+                        default_day[field][asset] * 10,
+                    )
+
+    def test_positive_allocation_that_underflows_fails_without_result(self):
+        weights = dict(baseline.WEIGHTS)
+        tiny_asset = "sz159612"
+        tiny_weight = 1e-16
+        weights["sh511260"] += weights[tiny_asset] - tiny_weight
+        weights[tiny_asset] = tiny_weight
+        config = {
+            "initial_nav": sys.float_info.min,
+            "weights": weights,
+        }
+
+        completed, output_path = self.run_compat("scaled-allocation-underflow", config)
+
+        self.assertEqual(completed.returncode, 2)
+        summary = json.loads(completed.stderr)["error"]
+        self.assertEqual(summary["code"], "compat_scaled_value_underflow")
+        failure = json.loads(
+            output_path.with_name("compat-failure.json").read_text(encoding="utf-8")
+        )["error"]
+        self.assertEqual(failure["code"], "compat_scaled_value_underflow")
+        self.assertEqual(failure["details"]["field"], "daily.units")
+        self.assertEqual(failure["details"]["asset"], tiny_asset)
+        self.assertFalse(output_path.exists())
+
     def test_default_reference_mismatch_fails_without_publishing_a_result(self):
         reference_path = self.snapshot / "reference.json"
         reference = json.loads(reference_path.read_text(encoding="utf-8"))
@@ -202,6 +260,68 @@ class EternalCompatibilityTests(unittest.TestCase):
                 "simulation",
                 "frozen_reference_comparison",
             ],
+        )
+        self.assertFalse(output_path.exists())
+
+    def test_nonrepresentable_pending_report_numbers_fail_with_structured_diagnostics(self):
+        for label, number, expected_status in (
+            ("positive-overflow", "1e1000", "non_representable_number"),
+            ("negative-underflow", "1e-1000", "non_representable_number"),
+            ("integer-overflow", "18446744073709551616", "non_representable_number"),
+            ("nonstandard-constant", "NaN", "invalid"),
+        ):
+            with self.subTest(number=number):
+                snapshot = self.directory / f"pending-{label}"
+                snapshot.mkdir()
+                (snapshot / "pending-gaps.json").write_text(
+                    '{"status":"pending_decision","gaps":[{"asset":"sh511260",'
+                    f'"extra_numeric":{number}' + "}]}",
+                    encoding="utf-8",
+                )
+
+                completed, output_path = self.run_compat(
+                    f"pending-{label}",
+                    snapshot=snapshot,
+                )
+
+                self.assertEqual(completed.returncode, 2, completed.stderr)
+                summary = json.loads(completed.stderr)["error"]
+                self.assertEqual(summary["code"], "compat_pending_gaps_invalid")
+                self.assertTrue(summary["details"]["structured_details_persisted"])
+                failure = json.loads(
+                    output_path.with_name("compat-failure.json").read_text(
+                        encoding="utf-8"
+                    )
+                )["error"]
+                self.assertEqual(failure["details"]["report_status"], expected_status)
+                self.assertFalse(failure["details"]["report_contents_persisted"])
+                self.assertNotIn("pending_gap_report", failure["details"])
+                self.assertFalse(output_path.exists())
+
+    def test_failure_serialization_falls_back_to_partial_durable_diagnostics(self):
+        output_path = self.directory / "serialization-failure-result.json"
+        stderr = io.StringIO()
+        error = compat.RunnerError(
+            "compat_synthetic_failure",
+            "synthetic failure with unsupported diagnostic",
+            {"unsupported_numeric_detail": float("inf")},
+        )
+
+        with redirect_stderr(stderr):
+            compat._emit_failure(output_path, error)
+
+        summary = json.loads(stderr.getvalue())["error"]
+        self.assertEqual(summary["code"], error.code)
+        self.assertTrue(summary["details"]["structured_details_persisted"])
+        self.assertFalse(summary["details"]["structured_details_complete"])
+        failure = json.loads(
+            output_path.with_name("compat-failure.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(failure["error"]["code"], error.code)
+        self.assertFalse(failure["structured_details_complete"])
+        self.assertIn(
+            "original failure details were not JSON serializable",
+            failure["error"]["details"]["failure_details_omitted_reason"],
         )
         self.assertFalse(output_path.exists())
 
