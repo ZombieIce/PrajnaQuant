@@ -97,6 +97,7 @@ pub async fn serve_with_dataset_root(
         .clone()
         .pool_update_router(dataset_root.clone(), socket.to_string());
     let experiment_results = run_jobs.clone().result_router(socket.to_string());
+    let eternal_compat_tasks = run_jobs.clone().eternal_compat_router(socket.to_string());
     let eternal_compat_results = run_jobs
         .clone()
         .eternal_compat_result_router(socket.to_string());
@@ -135,6 +136,7 @@ pub async fn serve_with_dataset_root(
         .merge(dataset_api::router(dataset_root, socket.to_string()))
         .merge(selections)
         .merge(experiment_results)
+        .merge(eternal_compat_tasks)
         .merge(eternal_compat_results)
         .merge(comparisons);
     let app = api.fallback_service(

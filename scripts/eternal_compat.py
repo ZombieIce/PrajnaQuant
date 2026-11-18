@@ -24,9 +24,10 @@ DEFAULT_CONFIG = {
 
 
 class RunnerError(Exception):
-    def __init__(self, code, message):
+    def __init__(self, code, message, details=None):
         super().__init__(message)
         self.code = code
+        self.details = details or {}
 
 
 def canonical_json(value):
@@ -190,6 +191,22 @@ def run(request, output):
         navs, signals, trades, stats, daily, config["initial_nav"],
     )
     comparison = baseline.compare_reference(reference, days, navs, stats, anchors)
+    is_default_config = config == validate_config({})
+    comparison["evaluation_mode"] = (
+        "required_default_parity" if is_default_config else "informational_variant"
+    )
+    if is_default_config and comparison["overall_status"] != "match":
+        raise RunnerError(
+            "compat_default_reference_mismatch",
+            "frozen-reference comparison mismatch for the effective default configuration",
+            {
+                "comparison": {
+                    "overall_status": comparison["overall_status"],
+                    "dates": comparison["dates"]["status"],
+                    "daily_nav": comparison["daily_nav"]["status"],
+                }
+            },
+        )
     runner_sha256 = sha256_file(Path(__file__).resolve())
     baseline_sha256 = sha256_file(Path(baseline.__file__).resolve())
     identity_material = {
@@ -263,7 +280,10 @@ def main():
         print(json.dumps(run(request, args.output), separators=(",", ":")))
         return 0
     except RunnerError as error:
-        print(json.dumps({"error": {"code": error.code, "message": str(error)}}), file=sys.stderr)
+        details = {"code": error.code, "message": str(error)}
+        if error.details:
+            details["details"] = error.details
+        print(json.dumps({"error": details}), file=sys.stderr)
         return 2
     except OSError as error:
         wrapped = RunnerError("compat_input_unavailable", f"runner input or output is unavailable: {error}")

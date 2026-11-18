@@ -54,7 +54,7 @@ quant-research eternal-compat result <task-id>
 
 `submit` 默认生成幂等键并使用 `NAV=1.0` 模型单位、固定五资产 `30/20/20/25/5` 权重、`10%` 调仓阈值与单边 `5 bp` 费率。可用 `--config <JSON 文件>` 提交部分变体，例如配置 `{"rebalance_threshold":0.05}`；有效的完整配置会随任务和结果持久化。可调字段为 `initial_nav`（正的模型 NAV 单位）、`weights`（恰为五个固定标的且总和 1）、`rebalance_threshold`（0 到 1）及 `fee_rate_one_way`（0 到小于 1）。没有人民币本金字段；绝对 CNY 金额不可用，`initial_nav` 不应解释为 CNY。可用 `--server http://127.0.0.1:7878` 指定其他 loopback 服务地址，CLI 拒绝非 loopback URL。
 
-任务类型/版本为 `prajna_eternal_compat@1`，其兼容运行 ID 与输出文件、摘要、冻结输入版本、兼容 runner/源代码摘要和运行环境独立于 Rust Experiment、Run、Execution。`status` 可在重启后读取终态及失败原因；`result` 仅对成功任务返回通过 SHA-256 校验的已保存 JSON。未成功任务的 result 请求返回冲突及持久错误，损坏输出不会作为成功结果返回。服务端持久文件和 CLI 完整结果均可能含详细研究数据，只应留在本机私有输出目录，不要复制到 GitHub 或公开日志。
+任务类型/版本为 `prajna_eternal_compat@1`，其兼容运行 ID 与输出文件、摘要、冻结输入版本、兼容 runner/源代码摘要和运行环境独立于 Rust Experiment、Run、Execution。默认有效配置必须与冻结参考对拍为 `match`；不匹配时 runner 以 `compat_default_reference_mismatch` 失败，不写成功结果，任务状态及原因持久化。显式变体仍保存 `frozen_reference_comparison`，其中 `evaluation_mode=informational_variant` 表示参考差异仅供说明，不会单因对比不匹配而失败；只有有效默认配置标为 `required_default_parity`。`status` 可在重启后读取终态及失败原因；`result` 仅对成功任务返回通过 SHA-256 校验的已保存 JSON。未成功任务的 result 请求返回冲突及持久错误，损坏输出不会作为成功结果返回。兼容任务 submit/status 和 result 路由都只接受配置的本机 Host 与同源 Origin；CLI 的 loopback 请求不带 Origin 时允许。原生任务与旧 run 路由不因此增加该限制。服务端持久文件和 CLI 完整结果均可能含详细研究数据，只应留在本机私有输出目录，不要复制到 GitHub 或公开日志。
 
 本票只做合成验证：默认/配置变体、阈值信号与下一共同开盘执行、无效配置、缺失输入、子进程失败和重启持久读取。当前 turn 未访问真实行情或冻结本机输入，真实冻结 snapshot 比较为 **BLOCKED**；合成结果不代表 #394 真实对拍或验收完成。
 
