@@ -178,6 +178,9 @@ jobs:
       - name: Eternal baseline (synthetic inputs only)
         run: python -m unittest tests.test_eternal_baseline -v
 
+      - name: Income baseline (synthetic inputs only)
+        run: python -m unittest tests.test_income_baseline -v
+
       - name: MVP-1 Vector golden tests
         run: python -m unittest tests.test_mvp1_vector_golden -v
 
