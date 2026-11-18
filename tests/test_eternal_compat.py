@@ -243,29 +243,161 @@ class EternalCompatibilityTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "compat_normalized_value_underflow")
         self.assertEqual(caught.exception.details["field"], "daily.units")
 
-    def test_validation_time_input_gaps_preserve_known_details(self):
-        bars_path = self.snapshot / "bars/sh511260.csv.gz"
-        bars, fields = baseline.csv_rows(bars_path)
-        bars[0]["volume"] = "0"
-        baseline.write_csv(bars_path, bars, fields)
-        seal_snapshot(self.snapshot)
+    def test_nonzero_normalized_valuation_loss_is_not_a_successful_ledger(self):
+        for label, weight, close, error_code in (
+            ("zero-underflow", 5e-324, "0.5", "compat_normalized_value_underflow"),
+            ("nonzero-loss", 5e-324, "0.75", "compat_normalized_value_precision_loss"),
+            ("another-loss", 5e-324, "0.625", "compat_normalized_value_precision_loss"),
+            ("zero-weight", 0.0, "0.75", None),
+            ("ordinary-weight", 0.3, "0.75", None),
+            ("small-normal-weight", 1e-300, "0.75", None),
+            ("exact-subnormal", 1e-323, "0.5", None),
+        ):
+            with self.subTest(label=label):
+                snapshot = self.directory / label
+                shutil.copytree(self.snapshot, snapshot)
+                path = snapshot / "bars/sh511260.csv.gz"
+                bars, fields = baseline.csv_rows(path)
+                for row in bars:
+                    if row["date"] == "2026-11-09":
+                        row.update(close=close, low=close)
+                baseline.write_csv(path, bars, fields)
+                seal_snapshot(snapshot)
+                weights = dict(baseline.WEIGHTS)
+                weights["sh518880"] += weights["sh511260"] - weight
+                weights["sh511260"] = weight
+                completed, output = self.run_compat(label, {
+                    "initial_nav": 1e100, "fee_rate_one_way": 0.0,
+                    "rebalance_threshold": 1.0, "weights": weights,
+                }, snapshot=snapshot)
+                if error_code is None:
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+                    result = json.loads(output.read_text())
+                    for row in result["daily"]:
+                        for asset in baseline.ETF_CODES:
+                            price = (
+                                float(close)
+                                if asset == "sh511260" and row["date"] == "2026-11-09" else 1.0
+                            )
+                            expected = row["units"][asset] * price
+                            actual = row["holdings"][asset]
+                            if expected == 0:
+                                self.assertEqual(actual, 0)
+                            else:
+                                self.assertLessEqual(abs(actual - expected) / expected, 1e-12)
+                    continue
+                if completed.returncode == 0:
+                    result = json.loads(output.read_text())
+                    row = result["daily"][1]
+                    expected = row["units"]["sh511260"] * float(close)
+                    relative_error = abs(row["holdings"]["sh511260"] - expected) / expected
+                    self.fail(f"published a ledger with {relative_error:.6f} relative valuation error")
+                self.assertEqual(completed.returncode, 2, completed.stderr)
+                failure = json.loads(output.with_name("compat-failure.json").read_text())
+                self.assertTrue(failure["structured_details_complete"])
+                error = failure["error"]
+                self.assertEqual(error["code"], error_code)
+                self.assertEqual(error["details"]["asset"], "sh511260")
+                self.assertEqual(error["details"]["date"], "2026-11-09")
+                self.assertFalse(output.exists())
 
-        completed, output = self.run_compat("validation-gap")
-        self.assertEqual(completed.returncode, 2, completed.stderr)
-        failure = json.loads(output.with_name("compat-failure.json").read_text())
-        self.assertTrue(failure["structured_details_complete"])
-        self.assertEqual(failure["error"]["code"], "compat_input_invalid")
-        details = failure["error"]["details"]
-        self.assertEqual(details["input_gaps"], [{
-            "asset": "sh511260", "date": "2026-11-06", "field": "volume",
-            "source": "synthetic", "impact": "不能作为可成交行情",
-            "candidate_measures": ["核查停牌和行情来源", "由负责人决定如何处理"],
-        }])
-        self.assertEqual(
-            [check["name"] for check in details["checks_not_run"]],
-            ["common_session_validation", "simulation", "frozen_reference_comparison"],
-        )
-        self.assertFalse(output.exists())
+    def test_validation_time_input_gaps_preserve_known_details(self):
+        first_two = ("sh511260", "sh518880")
+        for scenario, asset, field, expectations in (
+            ("early-bar", "sh511260", "volume", {
+                "bar_loading": ("partial", ("sh511260",), None),
+                "factor_loading": ("partial", ("sh511260",), None),
+                "bar_validation": ("partial", (), "sh511260"),
+                "total_return_price_and_factor_validation": ("not_run", (), None),
+                "opening_limit_construction": ("not_run", (), None),
+                "historical_overlap_and_splice_validation": ("not_run", (), None),
+            }),
+            ("middle-factor", "sh515080", "factor", {
+                "bar_loading": ("partial", (*first_two, "sh515080"), None),
+                "factor_loading": ("partial", (*first_two, "sh515080"), None),
+                "bar_validation": ("partial", (*first_two, "sh515080"), None),
+                "total_return_price_and_factor_validation": ("partial", first_two, "sh515080"),
+                "opening_limit_construction": ("partial", first_two, None),
+                "historical_overlap_and_splice_validation": ("not_run", (), None),
+            }),
+            ("second-splice", "sh513500/sz159612", "overlap", {
+                "bar_loading": ("completed", baseline.HISTORY_CODES, None),
+                "factor_loading": ("completed", baseline.HISTORY_CODES, None),
+                "bar_validation": ("completed", baseline.HISTORY_CODES, None),
+                "total_return_price_and_factor_validation": ("completed", baseline.HISTORY_CODES, None),
+                "opening_limit_construction": ("completed", baseline.HISTORY_CODES, None),
+                "historical_overlap_and_splice_validation": (
+                    "partial", ("sh513100/sh513300",), "sh513500/sz159612",
+                ),
+            }),
+        ):
+            with self.subTest(scenario=scenario):
+                snapshot = self.directory / scenario
+                shutil.copytree(self.snapshot, snapshot)
+                if scenario == "middle-factor":
+                    path = snapshot / f"factors/{asset}.csv.gz"
+                    rows, fields = baseline.csv_rows(path)
+                    rows[0]["date"] = "2026-11-09"
+                else:
+                    code = "sh513500" if scenario == "second-splice" else asset
+                    path = snapshot / f"bars/{code}.csv.gz"
+                    rows, fields = baseline.csv_rows(path)
+                    if scenario == "early-bar":
+                        rows[0]["volume"] = "0"
+                    else:
+                        rows = rows[:1]
+                baseline.write_csv(path, rows, fields)
+                if scenario == "early-bar":
+                    later = snapshot / "bars/sh513500.csv.gz"
+                    later_rows, later_fields = baseline.csv_rows(later)
+                    later_rows[0]["volume"] = "0"
+                    baseline.write_csv(later, later_rows, later_fields)
+                seal_snapshot(snapshot)
+                completed, output = self.run_compat(scenario, snapshot=snapshot)
+                self.assertEqual(completed.returncode, 2, completed.stderr)
+                failure = json.loads(output.with_name("compat-failure.json").read_text())
+                self.assertTrue(failure["structured_details_complete"])
+                self.assertEqual(failure["error"]["code"], "compat_input_invalid")
+                details = failure["error"]["details"]
+                self.assertEqual(len(details["input_gaps"]), 1)
+                gap = details["input_gaps"][0]
+                self.assertEqual((gap["asset"], gap["field"]), (asset, field))
+                self.assertTrue(gap["date"])
+                self.assertTrue(gap["impact"])
+                self.assertTrue(gap["candidate_measures"])
+                if scenario == "early-bar":
+                    self.assertEqual(gap["source"], "synthetic")
+                else:
+                    self.assertNotIn("source", gap)
+                progress = details["check_progress"]
+                for name in (
+                    "snapshot_manifest_and_inventory_validation",
+                    "snapshot_configuration_validation", "frozen_source_validation",
+                ):
+                    self.assertEqual(progress[name], {"status": "completed"})
+                for name, (status, completed_scopes, partial_scope) in expectations.items():
+                    scopes = (
+                        ("sh513100/sh513300", "sh513500/sz159612")
+                        if name == "historical_overlap_and_splice_validation"
+                        else baseline.HISTORY_CODES
+                    )
+                    expected = dict.fromkeys(scopes, "not_run")
+                    expected.update(dict.fromkeys(completed_scopes, "completed"))
+                    if partial_scope is not None:
+                        expected[partial_scope] = "partial"
+                    self.assertEqual(progress[name], {"status": status, "scopes": expected}, name)
+                for name in ("common_session_validation", "simulation", "frozen_reference_comparison"):
+                    self.assertEqual(progress[name], {"status": "not_run"})
+                unfinished = {item["name"]: item for item in details["checks_not_run"]}
+                expected_unfinished = {
+                    name for name, (status, _, _) in expectations.items() if status != "completed"
+                } | {"common_session_validation", "simulation", "frozen_reference_comparison"}
+                self.assertEqual(set(unfinished), expected_unfinished)
+                for name, item in unfinished.items():
+                    self.assertEqual(item["status"], progress[name]["status"])
+                    self.assertEqual(item.get("scopes"), progress[name].get("scopes"))
+                    self.assertTrue(item["reason"])
+                self.assertFalse(output.exists())
 
     def test_factor_input_gap_does_not_invent_a_bar_source(self):
         factors_path = self.snapshot / "factors/sh511260.csv.gz"

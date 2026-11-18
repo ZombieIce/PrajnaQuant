@@ -11,6 +11,7 @@ import stat
 import sys
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from fractions import Fraction
 from pathlib import Path
 
 import eternal_baseline as baseline
@@ -47,6 +48,56 @@ class RunnerError(Exception):
 
 class NonRepresentableJsonNumber(ValueError):
     pass
+
+
+class _LoadChecks:
+    def __init__(self):
+        scopes = {
+            "snapshot_manifest_and_inventory_validation": (None,),
+            "snapshot_configuration_validation": (None,),
+            "frozen_source_validation": (None,),
+            **{
+                name: baseline.HISTORY_CODES
+                for name in (
+                    "bar_loading", "factor_loading", "bar_validation",
+                    "total_return_price_and_factor_validation", "opening_limit_construction",
+                )
+            },
+            "historical_overlap_and_splice_validation": tuple(
+                f"{old}/{new}" for old, new in baseline.LEGACY_PAIRS
+            ),
+            "common_session_validation": (None,),
+            "simulation": (None,),
+            "frozen_reference_comparison": (None,),
+        }
+        self.statuses = {
+            name: dict.fromkeys(items, "not_run") for name, items in scopes.items()
+        }
+
+    def run(self, name, action, *args, scope=None):
+        self.statuses[name][scope] = "partial"
+        result = action(*args)
+        self.statuses[name][scope] = "completed"
+        return result
+
+    def report(self):
+        progress, unfinished = {}, []
+        for name, scopes in self.statuses.items():
+            states = set(scopes.values())
+            status = (
+                "completed" if states == {"completed"}
+                else "not_run" if states == {"not_run"} else "partial"
+            )
+            item = {"status": status}
+            if None not in scopes:
+                item["scopes"] = dict(scopes)
+            progress[name] = item
+            if status != "completed":
+                unfinished.append({
+                    "name": name, **item,
+                    "reason": "snapshot validation stopped before this check completed",
+                })
+        return {"check_progress": progress, "checks_not_run": unfinished}
 
 
 def canonical_json(value):
@@ -200,6 +251,32 @@ def _validate_normalized_holdings(daily, weights):
                     "compat_normalized_value_underflow",
                     "positive normalized allocation underflowed before capital scaling",
                     {"field": field, "asset": asset, "date": row["date"].isoformat()},
+                )
+
+
+def _validate_holding_valuations(daily, closes, phase):
+    tolerance = Fraction("1e-12")
+    for row, prices in zip(daily, closes, strict=True):
+        for asset, price in zip(baseline.ETF_CODES, prices, strict=True):
+            units, holding = row["units"][asset], row["holdings"][asset]
+            details = {
+                "field": "daily.holdings", "asset": asset, "date": row["date"].isoformat(),
+                "valuation_basis": "units * close_total_return_index",
+                "relative_tolerance": 1e-12,
+            }
+            if not all(math.isfinite(value) for value in (units, holding, price)):
+                raise RunnerError(
+                    f"compat_{phase}_value_unrepresentable",
+                    f"{phase} holding valuation contains a non-finite value",
+                    details,
+                )
+            # Exact products avoid repeating the binary64 underflow being checked.
+            expected = Fraction(units) * Fraction(price)
+            if abs(Fraction(holding) - expected) > abs(expected) * tolerance:
+                raise RunnerError(
+                    f"compat_{phase}_value_precision_loss",
+                    f"{phase} holding differs from units times close index by more than 1e-12 relative",
+                    details,
                 )
 
 
@@ -461,6 +538,7 @@ def _read_pending_gap_report(snapshot):
 
 def _load_simulation(snapshot):
     bars = {}
+    checks = _LoadChecks()
     try:
         pending_gap_report = _read_pending_gap_report(snapshot)
         if pending_gap_report is not None:
@@ -477,21 +555,42 @@ def _load_simulation(snapshot):
                 details,
             )
 
-        manifest, reference = baseline.read_snapshot(snapshot)
-        baseline.validate_execution_configuration(manifest)
-        baseline.validate_replay_source(manifest, Path(baseline.__file__).resolve())
+        manifest, reference = checks.run(
+            "snapshot_manifest_and_inventory_validation", baseline.read_snapshot, snapshot,
+        )
+        checks.run(
+            "snapshot_configuration_validation", baseline.validate_execution_configuration, manifest,
+        )
+        checks.run(
+            "frozen_source_validation", baseline.validate_replay_source,
+            manifest, Path(baseline.__file__).resolve(),
+        )
 
         factors, prices, limits = {}, {}, {}
         for code in baseline.HISTORY_CODES:
-            bars[code] = baseline.csv_rows(snapshot / f"bars/{code}.csv.gz")[0]
-            factors[code] = baseline.csv_rows(snapshot / f"factors/{code}.csv.gz")[0]
-            baseline.ensure_ordered_bars(code, bars[code])
-            prices[code], actions = baseline.total_return_prices(bars[code], factors[code])
-            limits[code] = baseline.opening_limits(bars[code], actions, baseline.Decimal(".10"))
+            bars[code] = checks.run(
+                "bar_loading", baseline.csv_rows, snapshot / f"bars/{code}.csv.gz", scope=code,
+            )[0]
+            factors[code] = checks.run(
+                "factor_loading", baseline.csv_rows, snapshot / f"factors/{code}.csv.gz", scope=code,
+            )[0]
+            checks.run("bar_validation", baseline.ensure_ordered_bars, code, bars[code], scope=code)
+            prices[code], actions = checks.run(
+                "total_return_price_and_factor_validation",
+                baseline.total_return_prices, bars[code], factors[code], scope=code,
+            )
+            limits[code] = checks.run(
+                "opening_limit_construction", baseline.opening_limits,
+                bars[code], actions, baseline.Decimal(".10"), scope=code,
+            )
         anchors = [
-            baseline.splice_etf(prices, limits, old, new)
+            checks.run(
+                "historical_overlap_and_splice_validation", baseline.splice_etf,
+                prices, limits, old, new, scope=f"{old}/{new}",
+            )
             for old, new in baseline.LEGACY_PAIRS
         ]
+        checks.statuses["common_session_validation"][None] = "partial"
         common = set.intersection(*(set(prices[code]) for code in baseline.ETF_CODES))
         reference_rows = reference["history_etf"]
         old_dates = [row[0] for row in reference_rows if row[0] <= baseline.ANCHOR]
@@ -507,8 +606,11 @@ def _load_simulation(snapshot):
             [limits[code].get(day.isoformat(), (False, False)) for code in baseline.ETF_CODES]
             for day in days
         ]
+        checks.statuses["common_session_validation"][None] = "completed"
         return manifest, reference, anchors, days, opens, closes, day_limits
-    except RunnerError:
+    except RunnerError as error:
+        if "checks_not_run" not in error.details:
+            error.details.update(checks.report())
         raise
     except baseline.InputGaps as error:
         gaps = []
@@ -520,26 +622,23 @@ def _load_simulation(snapshot):
                         gap["source"] = row["source"]
                         break
             gaps.append(gap)
-        reason = "blocked by validation-time input gaps"
         raise RunnerError(
             "compat_input_invalid",
             f"frozen snapshot is unavailable or invalid: {error}",
             {
                 "input_gaps": gaps,
-                "checks_not_run": [
-                    {"name": name, "status": "not_run", "reason": reason}
-                    for name in (
-                        "common_session_validation",
-                        "simulation",
-                        "frozen_reference_comparison",
-                    )
-                ],
+                **checks.report(),
             },
         ) from error
     except OSError as error:
-        raise RunnerError("compat_input_unavailable", f"frozen snapshot is unavailable: {error}") from error
+        raise RunnerError(
+            "compat_input_unavailable", f"frozen snapshot is unavailable: {error}", checks.report(),
+        ) from error
     except (KeyError, TypeError, ValueError, ArithmeticError, json.JSONDecodeError) as error:
-        raise RunnerError("compat_input_invalid", f"frozen snapshot is unavailable or invalid: {error}") from error
+        raise RunnerError(
+            "compat_input_invalid",
+            f"frozen snapshot is unavailable or invalid: {error}", checks.report(),
+        ) from error
 
 
 def run(request, output):
@@ -570,10 +669,12 @@ def run(request, output):
         config["weights"],
     )
     _validate_normalized_holdings(daily, config["weights"])
+    _validate_holding_valuations(daily, closes, "normalized")
     comparison = baseline.compare_reference(reference, days, navs, stats, anchors)
     navs, signals, trades, stats, daily = _scaled_result(
         navs, signals, trades, stats, daily, config["initial_nav"],
     )
+    _validate_holding_valuations(daily, closes, "scaled")
     is_default_config = config == validate_config({})
     comparison["evaluation_mode"] = (
         "required_default_parity" if is_default_config else "informational_variant"

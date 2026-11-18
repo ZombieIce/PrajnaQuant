@@ -54,7 +54,7 @@ quant-research eternal-compat result <task-id>
 
 `submit` 默认生成幂等键并使用 `NAV=1.0` 模型单位、固定五资产 `30/20/20/25/5` 权重、`10%` 调仓阈值与单边 `5 bp` 费率。可用 `--config <JSON 文件>` 提交部分变体，例如配置 `{"rebalance_threshold":0.05}`；有效的完整配置会随任务和结果持久化。可调字段为 `initial_nav`（至少 `f64::MIN_POSITIVE` 的有限模型 NAV 单位）、`weights`（恰为五个固定标的且总和 1）、`rebalance_threshold`（0 到 1）及 `fee_rate_one_way`（0 到小于 1）。有效配置并不保证所有缩放后账本值都可表示：如果正 NAV、单位、持仓或费用缩放后溢出、舍入为零，或除回初始 NAV 后不能在相对误差 `1e-12`（零绝对容差）内还原归一化值，runner 会显式失败、持久化字段/标的原因且不发布结果；不会把正配置静默变成零持仓。没有人民币本金字段；绝对 CNY 金额不可用，`initial_nav` 不应解释为 CNY。可用 `--server http://127.0.0.1:7878` 指定其他 loopback 服务地址，CLI 拒绝非 loopback URL。
 
-资本缩放前也核查逐日归一化结果：正权重的单位数或正单位数的持仓若已下溢为零，以 `compat_normalized_value_underflow` 失败并记录字段、标的和日期；零权重允许零持仓。这不改变冻结模拟算法。
+资本缩放前也核查逐日归一化结果：正权重的单位数或正单位数的持仓若已下溢为零，以 `compat_normalized_value_underflow` 失败并记录字段、标的和日期；零权重允许零持仓。归一化和缩放后账本均逐资产核对 `holdings = units × 当日收盘总回报指数`：从有限 binary64 的精确有理数值建立独立乘积，要求相对该乘积的误差不超过 `1e-12`，不使用全组合 NAV 或固定绝对容差。即使中间值仍非零，也能识别次正规舍入造成的重大相对误差；零预期必须对应零估值。超限分别以 `compat_normalized_value_precision_loss` / `compat_scaled_value_precision_loss` 失败，保存字段、标的、日期、估值依据和容差，不发布结果。这不改变冻结模拟算法或接受配置范围。
 
 任务类型/版本为 `prajna_eternal_compat@1`，其兼容运行 ID 与输出文件、摘要、冻结输入版本、兼容 runner/源代码摘要和运行环境独立于 Rust Experiment、Run、Execution。参考比较始终使用单位 NAV 模拟结果；`initial_nav` 只缩放结果中的 NAV、单位、持仓、现金和费用，因此仅改变初始模型 NAV 不会制造归一化参考 NAV 的假 mismatch。默认有效配置必须与冻结参考对拍为 `match`；不匹配时 runner 以 `compat_default_reference_mismatch` 失败，不写成功结果，任务状态及原因持久化。显式变体仍保存 `frozen_reference_comparison`，其中 `evaluation_mode=informational_variant` 表示有效配置造成的参考差异仅供说明，不会单因对比不匹配而失败；只有有效默认配置标为 `required_default_parity`。`status` 可在重启后读取终态及失败原因；`result` 仅对成功任务返回通过 SHA-256 校验的已保存 JSON。未成功任务的 result 请求返回冲突及持久错误，损坏输出不会作为成功结果返回。兼容任务 submit/status 和 result 路由都只接受配置的本机 Host 与同源 Origin；CLI 的 loopback 请求不带 Origin 时允许。原生任务与旧 run 路由不因此增加该限制。服务端持久文件和 CLI 完整结果均可能含详细研究数据，只应留在本机私有输出目录，不要复制到 GitHub 或公开日志。
 
@@ -62,7 +62,7 @@ quant-research eternal-compat result <task-id>
 
 为确保完整 sidecar 可由 Rust status/restart 解析，pending-gap JSON 容器嵌套深度上限为 64。超限报告以 `compat_pending_gaps_invalid` fail-closed；原始 JSON 仍保存，普通 gap 字段和其他可恢复内容进入 `recoverable_pending_gap_report`，过深子树以 `unsupported_json_depth` 标记，诊断完整标志为 false。若兼容子进程失败同时遇到进程组清理异常，外层清理错误会在 `details.cli_error` 保留 sidecar 中的结构化 runner 错误；服务重启再次清理时继续保留该嵌套诊断。
 
-读取及校验冻结数据时发现的 `InputGaps` 以 `compat_input_invalid` 失败；已知 gap 保存在 `runner_error.details.input_gaps`，包括原有标的、日期、字段、影响及候选措施。成交量 gap 在对应 bar 有来源时附带其来源；不会臆造其他来源。共同交易日校验、模拟和参考比较标为未运行，详情经任务状态持久化并可在重启后查询。
+读取及校验冻结数据时发现的 `InputGaps` 以 `compat_input_invalid` 失败；已知 gap 保存在 `runner_error.details.input_gaps`，包括原有标的、日期、字段、影响及候选措施。成交量 gap 在对应 bar 有来源时附带其来源；不会臆造其他来源。加载失败的 `check_progress` 记录实际执行范围：清单/文件完整性、配置、源码，逐标的 bar/factor 读取、bar 校验、因子校验与总回报价构造、涨跌停构造，逐代理对历史拼接，以及共同交易日、模拟和参考比较。`completed` 表示该调用已返回；`partial` 表示已开始但未完成，或仅部分标的/代理对完成；`not_run` 表示尚未调用。分组的 `scopes` 保留每个标的或代理对的状态；不会声称失败调用内部具体检查了多少行。`checks_not_run` 列出尚未完成的阶段，保留 `partial` 与具体范围，而非固定三项。保持首个失败即退出，不枚举尚未检查数据的假想缺口。详情通过 sidecar、任务状态及重启查询保存；诊断完整标志仅表示已知诊断及执行范围完整保存，不表示所有检查已通过。
 
 结果中的 `units` 是旧模拟器的有效总回报指数单位；`holdings` 是相应持仓按模型 NAV 估值的金额，不是总回报指数单位、ETF 实际份额或 CNY。数值边界之外，配置被受理也不保证每次都能执行成功：冻结 `eternal_baseline.py` 的 `rebalance` 使用固定 12 轮费用迭代，合成有效长仓例子在单边费率 `0.001` 收敛，但在 `0.5`、`0.9` 和 `0.9999999995` 下会显式报费用求解不收敛；这会作为运行时失败持久化，不扩大接受验证或更改冻结算法。修改 `eternal_baseline.py` 会使 snapshot 的源码绑定失效，须先获负责人裁决。
 

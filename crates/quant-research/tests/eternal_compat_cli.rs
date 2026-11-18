@@ -361,7 +361,7 @@ if scenario == "threshold":
     reference["history_etf"] = [[day, nav * 100.0] for day, nav in reference["history_etf"]]
     reference_path.unlink()
     baseline.write_json(reference_path, reference)
-elif scenario in ("validation-gap", "normalized-underflow"):
+elif scenario in ("validation-gap", "normalized-underflow", "normalized-imprecise"):
     path = snapshot / "bars/sh511260.csv.gz"
     rows, fields = baseline.csv_rows(path)
     if scenario == "validation-gap":
@@ -369,7 +369,8 @@ elif scenario in ("validation-gap", "normalized-underflow"):
     else:
         for row in rows:
             if row["date"] == "2026-11-09":
-                row.update(close="0.5", low="0.5")
+                price = "0.75" if scenario == "normalized-imprecise" else "0.5"
+                row.update(close=price, low=price)
     baseline.write_csv(path, rows, fields)
 seal_snapshot(snapshot)
 "#;
@@ -454,13 +455,26 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
     assert_eq!(gap["source"], "synthetic");
     assert!(!gap["impact"].as_str().unwrap().is_empty());
     assert_eq!(gap["candidate_measures"].as_array().unwrap().len(), 2);
+    let progress = &validation_details["runner_error"]["details"]["check_progress"];
+    assert_eq!(progress["bar_validation"]["status"], "partial");
     assert_eq!(
-        validation_details["runner_error"]["details"]["checks_not_run"]
-            .as_array()
-            .unwrap()
-            .len(),
-        3
+        progress["bar_validation"]["scopes"],
+        json!({
+            "sh511260": "partial", "sh518880": "not_run", "sh515080": "not_run",
+            "sh513300": "not_run", "sz159612": "not_run",
+            "sh513100": "not_run", "sh513500": "not_run"
+        })
     );
+    for name in [
+        "total_return_price_and_factor_validation",
+        "opening_limit_construction",
+        "historical_overlap_and_splice_validation",
+        "common_session_validation",
+        "simulation",
+        "frozen_reference_comparison",
+    ] {
+        assert_eq!(progress[name]["status"], "not_run", "{name}");
+    }
 
     let normalized_underflow_id = submit(
         &mut service,
@@ -1138,6 +1152,68 @@ fn production_cli_reads_persisted_ledger_thresholds_and_pending_gap_failures() {
         runner_error["details"]["checks_not_run"]
     );
     assert!(!failed_task_dir.join("compat-result.json").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn production_cli_rejects_nonzero_valuation_loss_across_restart() {
+    let artifacts = TestArtifacts::new();
+    let python = std::env::var("PRAJNA_TEST_PYTHON").unwrap_or_else(|_| "python3.12".into());
+    let output_root = artifacts.path().join("service-output");
+    let snapshot = artifacts.path().join("normalized-imprecise");
+    make_synthetic_snapshot(&python, &snapshot, "normalized-imprecise");
+    let mut service = LocalService::start(&output_root, &python);
+    let id = submit(
+        &mut service,
+        &snapshot,
+        &json!({
+            "initial_nav": 1e100, "fee_rate_one_way": 0.0,
+            "weights": {
+                "sh511260": f64::from_bits(1), "sh518880": 0.5,
+                "sh515080": 0.2, "sh513300": 0.25, "sz159612": 0.05
+            }
+        }),
+        "synthetic-nonzero-valuation-loss",
+        artifacts.path(),
+    );
+    let before = terminal_status(&mut service, &id);
+    assert_eq!(
+        before["status"], "failed",
+        "imprecise ledger must not succeed"
+    );
+    assert_eq!(
+        before["error"]["code"],
+        "compat_normalized_value_precision_loss"
+    );
+    let details = &before["error"]["details"];
+    assert_eq!(details["runner_error_details_complete"], true);
+    assert_eq!(details["runner_error"]["details"]["asset"], "sh511260");
+    assert_eq!(details["runner_error"]["details"]["date"], "2026-11-09");
+    for pass in 0..2 {
+        if pass == 1 {
+            service.stop();
+            service = LocalService::start(&output_root, &python);
+        }
+        let current = status(&mut service, &id);
+        assert_eq!(current["status"], "failed");
+        assert_eq!(current["error"], before["error"]);
+        let unavailable = run_cli(&[
+            "eternal-compat".into(),
+            "result".into(),
+            "--server".into(),
+            service.url(),
+            id.clone(),
+        ]);
+        assert!(!unavailable.status.success());
+        assert!(String::from_utf8_lossy(&unavailable.stderr).contains("compat_result_unavailable"));
+        assert!(
+            !output_root
+                .join("tasks")
+                .join(&id)
+                .join("compat-result.json")
+                .exists()
+        );
+    }
 }
 
 #[cfg(unix)]
