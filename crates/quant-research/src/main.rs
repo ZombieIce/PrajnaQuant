@@ -554,6 +554,7 @@ async fn main() -> Result<()> {
 #[cfg(feature = "app")]
 async fn eternal_compat_command(command: EternalCompatCommand) -> Result<()> {
     use anyhow::Context as _;
+    use quant_research::eternal_compat_json;
     use serde_json::{Value, json};
     use std::{fs, path::Path};
 
@@ -595,7 +596,8 @@ async fn eternal_compat_command(command: EternalCompatCommand) -> Result<()> {
             status.is_success(),
             "local task service returned {status}: {text}"
         );
-        serde_json::from_str(&text).context("local task service returned invalid JSON")
+        eternal_compat_json::decode(text.as_bytes())
+            .context("local task service returned invalid JSON")
     }
 
     fn require_absolute(path: &Path) -> Result<&Path> {
@@ -616,7 +618,7 @@ async fn eternal_compat_command(command: EternalCompatCommand) -> Result<()> {
                     let bytes = fs::read(&path)
                         .with_context(|| format!("read config {}", path.display()))?;
                     let value: Value =
-                        serde_json::from_slice(&bytes).context("parse config JSON")?;
+                        eternal_compat_json::decode(&bytes).context("parse config JSON")?;
                     anyhow::ensure!(value.is_object(), "config file must contain a JSON object");
                     value
                 }

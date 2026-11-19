@@ -45,6 +45,8 @@ MVP-7 的本机研究任务需要复用既有数据、因子与 Experiment 能�
 
 ## 永动机兼容任务（#394）
 
+兼容任务的 JSON 小数在兼容入口和兼容持久化读回处独立解析，避免更改既有 Experiment task 的小数解析及幂等哈希。受理前拒绝数值溢出或非零舍入为零；权重不做归一化。建仓及实际调仓时，兼容 runner 另核对同一开盘时点的交易资金守恒，具体输入及失败口径见 [本机回放说明](../local-eternal-baseline.md)。
+
 旧 `quant-research` CLI 的 `eternal-compat submit/status/result` 经本机 Axum 任务服务提交、查询及读取版本化 Python 兼容运行；任务类型为 `prajna_eternal_compat@1`，使用自己的兼容运行 ID、不可覆盖结果文件及结果摘要。它复用现有单 worker 队列、进程组所有权/代际标记、任务状态持久化和结构化失败恢复，但不创建 Rust Experiment、Run 或 Execution，也不借用其身份或结果表。普通 Experiment task 列表与读取路由继续排除该类型。
 
 服务在受理时验证并保存解析后的完整配置：模型单位初始 NAV（默认 `1.0`）、固定五资产权重（默认 `30/20/20/25/5` 且合计为 `1.0`）、调仓阈值（默认 `10%`）和单边费率（默认 `5 bp`）。配置只接受模型 NAV，不接受或推断 CNY 金额；结果明确记录 `initial_capital_currency_amount: null`。快照路径和输入版本固定到任务请求/结果，执行器还记录兼容策略与 runner 版本、runner/冻结回放源码摘要及 Python/平台环境。`scripts/eternal_baseline.py` 及其冻结默认配置、schema 和参考输入均不因变体修改。

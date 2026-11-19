@@ -112,6 +112,23 @@ def sha256_file(path):
     return baseline.sha256_file(path)
 
 
+class _RawConfigNumber:
+    def __init__(self, token):
+        self.token = token
+
+    def as_float(self, field):
+        number = float(self.token)
+        mantissa = self.token.lower().split("e", 1)[0]
+        if not math.isfinite(number) or (
+            number == 0 and any(digit in "123456789" for digit in mantissa)
+        ):
+            raise RunnerError(
+                "invalid_config", f"{field}: number overflows or underflows binary64",
+                {"field": field},
+            )
+        return number
+
+
 def validate_config(value):
     if not isinstance(value, dict):
         raise RunnerError("invalid_config", "config must be a JSON object")
@@ -132,6 +149,8 @@ def validate_config(value):
 
     def finite_number(field, minimum=None, maximum=None):
         number = config[field]
+        if isinstance(number, _RawConfigNumber):
+            number = number.as_float(field)
         if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number):
             raise RunnerError("invalid_config", f"{field} must be a finite number")
         if (minimum is not None and number < minimum) or (
@@ -158,18 +177,22 @@ def validate_config(value):
     if config["fee_rate_one_way"] >= 1.0:
         raise RunnerError("invalid_config", "fee_rate_one_way must be less than 1.0")
 
-    weights = config["weights"]
-    if any(
-        isinstance(weight, bool)
-        or not isinstance(weight, (int, float))
-        or not math.isfinite(weight)
-        or weight < 0
-        for weight in weights.values()
-    ):
-        raise RunnerError("invalid_config", "each weight must be a finite non-negative number")
-    if not math.isclose(sum(weights.values()), 1.0, rel_tol=0.0, abs_tol=1e-9):
-        raise RunnerError("invalid_config", "weights must sum to 1.0")
-    config["weights"] = {code: float(weights[code]) for code in baseline.ETF_CODES}
+    weights = {}
+    total = 0.0
+    for code in baseline.ETF_CODES:
+        field = f"weights.{code}"
+        weight = config["weights"][code]
+        if isinstance(weight, _RawConfigNumber):
+            weight = weight.as_float(field)
+        if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not 0 <= weight <= 1:
+            raise RunnerError("invalid_config", f"{field} must be a finite number in 0..1",
+                              {"field": field})
+        weights[code] = float(weight)
+        total += weight
+    # Allow binary64 representation noise, not an unallocated (or unfunded) target.
+    if abs(total - 1.0) > 4 * sys.float_info.epsilon:
+        raise RunnerError("invalid_config", "weights must sum to 1.0", {"field": "weights"})
+    config["weights"] = weights
     return config
 
 
@@ -291,12 +314,13 @@ def _fee_solved_net_capital(holdings, cash, weights, fee_rate):
 
 
 def _fee_precision_error(phase, field, date, basis):
-    details = {"field": field, "fee_basis": basis, "relative_tolerance": 1e-10}
+    tolerance = float(_FEE_RELATIVE_TOLERANCE)
+    details = {"field": field, "fee_basis": basis, "relative_tolerance": tolerance}
     if date is not None:
         details["date"] = date.isoformat()
     return RunnerError(
         f"compat_{phase}_fee_precision_loss",
-        f"{phase} fee differs from the independently derived fee by more than 1e-10 relative",
+        f"{phase} fee differs from the independently derived fee by more than {tolerance:g} relative",
         details,
     )
 
@@ -374,6 +398,20 @@ def _validate_allocation_and_fees(daily, opens, trades, stats, config, principal
                 f"{phase} cash remains after full post-fee allocation",
                 {"field": "daily.cash", "date": day.isoformat(),
                  "allocation_basis": f"{basis}: zero residual cash"},
+            )
+        post_trade = sum(
+            (Fraction(units) * price for units, price in zip(actual, prices)),
+            Fraction(row["cash"]),
+        )
+        if not _within_relative_tolerance(post_trade + Fraction(row["fees"]), capital):
+            raise RunnerError(
+                f"compat_{phase}_capital_conservation_loss",
+                f"{phase} execution-open positions, cash and fees do not conserve capital",
+                {
+                    "field": "daily", "date": day.isoformat(),
+                    "capital_basis": f"{basis}: post_trade_open_value + cash + fees = pre_trade_capital",
+                    "relative_tolerance": float(_RELATIVE_TOLERANCE),
+                },
             )
         total_fees += fee
         previous, previous_cash = actual, row["cash"]
@@ -972,7 +1010,10 @@ def main():
     run_parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
-        request = json.loads(args.request.read_text(encoding="utf-8"))
+        request = json.loads(
+            args.request.read_text(encoding="utf-8"),
+            parse_float=_RawConfigNumber, parse_int=_RawConfigNumber,
+        )
         print(json.dumps(run(request, args.output), separators=(",", ":")))
         return 0
     except RunnerError as error:

@@ -102,6 +102,15 @@ impl LocalService {
         python: &str,
         search_path: Option<&std::ffi::OsStr>,
     ) -> Self {
+        Self::start_binary(Path::new(CLI), output, python, search_path)
+    }
+
+    fn start_binary(
+        binary: &Path,
+        output: &Path,
+        python: &str,
+        search_path: Option<&std::ffi::OsStr>,
+    ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("reserve loopback port");
         let address = listener.local_addr().expect("read reserved loopback port");
         drop(listener);
@@ -110,7 +119,7 @@ impl LocalService {
             .join("../..")
             .canonicalize()
             .expect("resolve repository root");
-        let mut command = Command::new(CLI);
+        let mut command = Command::new(binary);
         command
             .args([
                 "serve",
@@ -250,7 +259,8 @@ fn successful_json(arguments: &[String]) -> Value {
         "production CLI failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    serde_json::from_slice(&output.stdout).expect("production CLI returns JSON")
+    quant_research::eternal_compat_json::decode(&output.stdout)
+        .expect("production CLI returns JSON")
 }
 
 fn submit(
@@ -345,16 +355,17 @@ import eternal_baseline as baseline
 snapshot = Path(sys.argv[3])
 scenario = sys.argv[4]
 make_replay_snapshot(snapshot)
-if scenario == "threshold":
+if scenario in ("threshold", "capital-initial", "capital-rebalance"):
+    price = "106" if scenario == "threshold" else "150"
     for code in baseline.HISTORY_CODES:
         path = snapshot / f"bars/{code}.csv.gz"
         rows, fields = baseline.csv_rows(path)
         for row in rows:
             row.update(open="100", close="100", high="100", low="100")
             if code == "sh511260" and row["date"] == "2026-11-09":
-                row["close"] = "106"
+                row["close"] = price
             if code == "sh511260" and row["date"] == "2026-11-10":
-                row.update(open="106", close="106", high="106")
+                row.update(open=price, close=price, high=price)
         baseline.write_csv(path, rows, fields)
     reference_path = snapshot / "reference.json"
     reference = json.loads(reference_path.read_text(encoding="utf-8"))
@@ -1446,4 +1457,247 @@ fn production_cli_rejects_invalid_configs_without_creating_tasks() {
         }
         assert_eq!(task_count(&output_root), existing_tasks);
     }
+}
+
+#[test]
+fn raw_compat_config_numbers_are_validated_at_both_entry_points() {
+    let artifacts = TestArtifacts::new();
+    let python = std::env::var("PRAJNA_TEST_PYTHON").unwrap_or_else(|_| "python3.12".into());
+    let output_root = artifacts.path().join("service-output");
+    let snapshot = artifacts.path().join("synthetic-snapshot");
+    make_synthetic_snapshot(&python, &snapshot, "initial");
+    let mut service = LocalService::start(&output_root, &python);
+    let client = reqwest::blocking::Client::new();
+    let cases = [
+        (
+            "weight",
+            r#"{"weights":{"sh511260":1e-324,"sh518880":0.5,"sh515080":0.2,"sh513300":0.25,"sz159612":0.05}}"#,
+            "weights.sh511260",
+        ),
+        (
+            "positive-fee",
+            r#"{"fee_rate_one_way":1e-324}"#,
+            "fee_rate_one_way",
+        ),
+        (
+            "negative-fee",
+            r#"{"fee_rate_one_way":-1e-400}"#,
+            "fee_rate_one_way",
+        ),
+        ("overflow-nav", r#"{"initial_nav":1e309}"#, "initial_nav"),
+        (
+            "overweight",
+            r#"{"initial_nav":1e12,"fee_rate_one_way":0,"weights":{"sh511260":0.3,"sh518880":0.2,"sh515080":0.2,"sh513300":0.25,"sz159612":0.0500000009}}"#,
+            "weights",
+        ),
+        (
+            "underweight",
+            r#"{"initial_nav":1e12,"fee_rate_one_way":0,"weights":{"sh511260":0.3,"sh518880":0.2,"sh515080":0.2,"sh513300":0.25,"sz159612":0.0499999995}}"#,
+            "weights",
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (label, raw, field) in cases {
+        let config_path = artifacts.path().join(format!("{label}.json"));
+        fs::write(&config_path, raw).unwrap();
+        let output = run_cli(&[
+            "eternal-compat".into(),
+            "submit".into(),
+            "--server".into(),
+            service.url(),
+            "--snapshot".into(),
+            snapshot.to_str().unwrap().into(),
+            "--config".into(),
+            config_path.to_str().unwrap().into(),
+            "--idempotency-key".into(),
+            label.into(),
+        ]);
+        if output.status.success() || !String::from_utf8_lossy(&output.stderr).contains(field) {
+            failures.push(format!(
+                "CLI {label}: expected a rejection identifying {field}"
+            ));
+        }
+        let wire = format!(
+            r#"{{"idempotency_key":"direct-{label}","definition":{{"op":"eternal_compat","snapshot_path":{},"config":{raw}}}}}"#,
+            json!(snapshot),
+        );
+        let response = client
+            .post(format!("{}/api/v1/tasks/eternal-compat", service.url()))
+            .header("Content-Type", "application/json")
+            .body(wire)
+            .send()
+            .unwrap();
+        let status = response.status();
+        let body: Value = response.json().unwrap_or(Value::Null);
+        if status != 400 || body["error"]["details"]["field"] != field {
+            failures.push(format!("HTTP {label}: {status}; expected field {field}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(task_count(&output_root), 0);
+
+    // Both genuine zeros (even with an exponent) and a nonzero binary64 subnormal survive.
+    let raw = r#"{"initial_nav":1e100,"fee_rate_one_way":0e-400,"weights":{"sh511260":5e-324,"sh518880":0.5,"sh515080":0.2,"sh513300":0.3,"sz159612":0}}"#;
+    let config_path = artifacts.path().join("valid.json");
+    fs::write(&config_path, raw).unwrap();
+    let response = successful_json(&[
+        "eternal-compat".into(),
+        "submit".into(),
+        "--server".into(),
+        service.url(),
+        "--snapshot".into(),
+        snapshot.to_str().unwrap().into(),
+        "--config".into(),
+        config_path.to_str().unwrap().into(),
+        "--idempotency-key".into(),
+        "valid-raw".into(),
+    ]);
+    let id = response["task"]["task_id"].as_str().unwrap();
+    assert_eq!(terminal_status(&mut service, id)["status"], "succeeded");
+    let ledger = result(&mut service, id);
+    assert!(ledger["daily"][0]["units"]["sh511260"].as_f64().unwrap() > 0.0);
+    assert_eq!(ledger["daily"][0]["units"]["sz159612"].as_f64(), Some(0.0));
+    assert_eq!(
+        ledger["effective_config"]["fee_rate_one_way"].as_f64(),
+        Some(0.0)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn capital_conservation_failure_at_either_execution_is_durable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let artifacts = TestArtifacts::new();
+    let python = std::env::var("PRAJNA_TEST_PYTHON").unwrap_or_else(|_| "python3.12".into());
+    let output_root = artifacts.path().join("service-output");
+    let wrapper = artifacts.path().join("fault-injected-python");
+    let python_shell = python.replace('\'', "'\\''");
+    // Perturb only the recorded fee, by less than its own tolerance but by more than
+    // the capital tolerance. The real runner, validators and persistence still execute.
+    fs::write(
+        &wrapper,
+        format!(
+            r#"#!/bin/sh
+exec '{python_shell}' - "$@" <<'PY'
+import json
+import runpy
+import sys
+from pathlib import Path
+
+sys.argv = sys.argv[1:]
+runner = Path(sys.argv[0])
+sys.path.insert(0, str(runner.parent))
+import eternal_baseline
+
+simulate = eternal_baseline.simulate
+request = json.loads(Path(sys.argv[sys.argv.index("--request") + 1]).read_text())
+initial = Path(request["snapshot_path"]).name == "capital-initial"
+
+def simulate_with_fee_drift(*args):
+    replay = simulate(*args)
+    if initial:
+        row = replay[-1][0]
+    else:
+        day = replay[2][0]["trade_date"]
+        row = next(row for row in replay[-1] if row["date"] == day)
+    row["fees"] *= 1 + 8e-11
+    return replay
+
+eternal_baseline.simulate = simulate_with_fee_drift
+runpy.run_path(str(runner), run_name="__main__")
+PY
+"#
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut service = LocalService::start(&output_root, wrapper.to_str().unwrap());
+    let mut failed = Vec::new();
+    for (scenario, date, basis) in [
+        ("capital-initial", "2026-11-06", "initial"),
+        ("capital-rebalance", "2026-11-10", "rebalance"),
+    ] {
+        let snapshot = artifacts.path().join(scenario);
+        make_synthetic_snapshot(&python, &snapshot, scenario);
+        let id = submit(
+            &mut service,
+            &snapshot,
+            &json!({"rebalance_threshold":0.1, "fee_rate_one_way":0.1}),
+            scenario,
+            artifacts.path(),
+        );
+        let task = terminal_status(&mut service, &id);
+        assert_eq!(task["status"], "failed", "{task}");
+        assert_eq!(
+            task["error"]["code"], "compat_normalized_capital_conservation_loss",
+            "{task}"
+        );
+        assert_eq!(
+            task["error"]["details"]["runner_error_details_complete"],
+            true
+        );
+        let details = &task["error"]["details"]["runner_error"]["details"];
+        assert_eq!(details["date"], date);
+        assert!(
+            details["capital_basis"]
+                .as_str()
+                .unwrap()
+                .starts_with(basis)
+        );
+        failed.push((id, task["error"].clone()));
+    }
+    service.stop();
+    let mut service = LocalService::start(&output_root, &python);
+    for (id, original) in failed {
+        assert_eq!(status(&mut service, &id)["error"], original);
+        let output = run_cli(&[
+            "eternal-compat".into(),
+            "result".into(),
+            "--server".into(),
+            service.url(),
+            id,
+        ]);
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("compat_result_unavailable"));
+    }
+}
+
+#[test]
+#[ignore = "requires PRAJNA_TASK_UPGRADE_BASE_BIN built from ca3fe828"]
+fn native_task_idempotency_survives_baseline_upgrade() {
+    let artifacts = TestArtifacts::new();
+    let base =
+        PathBuf::from(std::env::var_os("PRAJNA_TASK_UPGRADE_BASE_BIN").expect("baseline binary"));
+    assert_ne!(
+        base.canonicalize().unwrap(),
+        Path::new(CLI).canonicalize().unwrap()
+    );
+    let output = artifacts.path().join("service-output");
+    let mut service = LocalService::start_binary(&base, &output, "python3.12", None);
+    let client = reqwest::blocking::Client::new();
+    let raw = r#"{"idempotency_key":"synthetic-native-upgrade","definition":{"parameters":{"metric":0.24378642307954934}}}"#;
+    let post = |service: &mut LocalService, body: &str| {
+        let response = client
+            .post(format!("{}/api/v1/tasks/experiments", service.url()))
+            .header("Content-Type", "application/json")
+            .body(body.to_owned())
+            .send()
+            .unwrap();
+        (response.status(), response.json::<Value>().unwrap())
+    };
+    let (status, created) = post(&mut service, raw);
+    assert_eq!(status, 202, "{created}");
+    let id = created["task"]["task_id"].as_str().unwrap();
+    service.stop();
+
+    let mut service = LocalService::start(&output, "python3.12");
+    let (status, replayed) = post(&mut service, raw);
+    assert_eq!(status, 200, "{replayed}");
+    assert_eq!(replayed["created"], false);
+    assert_eq!(replayed["task"]["task_id"], id);
+    let (status, conflict) = post(&mut service, &raw.replace("0.24378642307954934", "0.25"));
+    assert_eq!(status, 409, "{conflict}");
+    assert_eq!(conflict["error"]["code"], "idempotency_conflict");
+    assert_eq!(task_count(&output), 1);
 }

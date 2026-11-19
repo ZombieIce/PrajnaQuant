@@ -57,11 +57,13 @@ class EternalCompatibilityTests(unittest.TestCase):
         request = {
             "task_id": f"synthetic-{name}",
             "snapshot_path": str(snapshot or self.snapshot),
-            "config": config or {},
         }
+        config_json = config if isinstance(config, str) else json.dumps(config or {})
         request_path = self.directory / f"{name}-request.json"
         output_path = self.directory / f"{name}-result.json"
-        request_path.write_text(json.dumps(request), encoding="utf-8")
+        request_path.write_text(
+            json.dumps(request)[:-1] + f',"config":{config_json}}}', encoding="utf-8",
+        )
         completed = subprocess.run(
             [
                 sys.executable, str(RUNNER), "run",
@@ -451,6 +453,65 @@ class EternalCompatibilityTests(unittest.TestCase):
                 self.assertEqual(details.get("date"), failure[1])
                 self.assertTrue(details["fee_basis"].startswith(failure[2]))
                 self.assertEqual(details["relative_tolerance"], 1e-10)
+
+    def test_runner_rejects_unrepresentable_raw_config_numbers_with_fields(self):
+        cases = (
+            ("positive-fee", '{"fee_rate_one_way":1e-324}', "fee_rate_one_way"),
+            ("negative-fee", '{"fee_rate_one_way":-1e-400}', "fee_rate_one_way"),
+            ("overflow-nav", '{"initial_nav":1e309}', "initial_nav"),
+            ("weight", '{"weights":{"sh511260":1e-324,"sh518880":0.5,'
+             '"sh515080":0.2,"sh513300":0.25,"sz159612":0.05}}', "weights.sh511260"),
+        )
+        for label, raw, field in cases:
+            with self.subTest(label=label):
+                completed, output = self.run_compat(label, raw)
+                self.assertEqual(completed.returncode, 2, completed.stderr)
+                self.assertFalse(output.exists())
+                error = json.loads(output.with_name("compat-failure.json").read_text())["error"]
+                self.assertEqual(error["code"], "invalid_config")
+                self.assertEqual(error["details"]["field"], field)
+        completed, output = self.run_compat(
+            "valid", '{"initial_nav":0.24378642307954934,"fee_rate_one_way":0e-400}',
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(json.loads(output.read_text())["effective_config"]["initial_nav"],
+                         0.24378642307954934)
+
+    def test_initial_and_rebalanced_capital_is_conserved(self):
+        path = self.snapshot / "bars/sh511260.csv.gz"
+        bars, fields = baseline.csv_rows(path)
+        for row in bars:
+            if row["date"] >= "2026-11-09":
+                row.update(close="1.06", high="1.06")
+            if row["date"] >= "2026-11-10":
+                row.update(open="1.06", low="1.06")
+        baseline.write_csv(path, bars, fields)
+        seal_snapshot(self.snapshot)
+        principal = 1e12
+        for label, last_weight in (("excess", 0.0500000009), ("deficit", 0.0499999995), ("exact", 0.05)):
+            with self.subTest(last_weight=last_weight):
+                completed, output = self.run_compat(label, {
+                    "initial_nav": principal, "fee_rate_one_way": 0.0,
+                    "rebalance_threshold": 0.05,
+                    "weights": dict(zip(baseline.ETF_CODES, (0.3, 0.2, 0.2, 0.25, last_weight))),
+                })
+                if label != "exact":
+                    old_bias = None
+                    if output.exists():
+                        old_bias = json.loads(output.read_text())["daily"][0]["nav"] - principal
+                    self.assertEqual(completed.returncode, 2, f"initial NAV bias: {old_bias}")
+                    self.assertFalse(output.exists())
+                    error = json.loads(output.with_name("compat-failure.json").read_text())["error"]
+                    self.assertEqual(error["code"], "invalid_config")
+                    self.assertIn("weights", error["message"])
+                    continue
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                result = json.loads(output.read_text())
+                self.assertEqual(len(result["trades"]), 1)
+                self.assertAlmostEqual(result["daily"][0]["nav"] / principal, 1)
+                trade_day = next(row for row in result["daily"] if row["date"] == "2026-11-10")
+                # The 30% asset rose 6%; open equals close and the fee is zero.
+                self.assertAlmostEqual(trade_day["nav"] / principal, 1.018)
 
     def test_fee_precision_failures_do_not_publish_results(self):
         def write_bars(snapshot, next_open):

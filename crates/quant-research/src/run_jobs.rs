@@ -4,7 +4,7 @@ use super::universe_api::UniverseStore;
 use crate::{
     core::ExperimentConfig,
     data::{self, SnapshotManifest},
-    runner,
+    eternal_compat_json, runner,
     universe::{AssetScope, UniverseDefinition},
 };
 use axum::{
@@ -16,8 +16,8 @@ use axum::{
     routing::{get, post},
 };
 use duckdb::Connection;
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde_json::{Value, json, value::RawValue};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
@@ -407,7 +407,7 @@ impl RunJobApi {
             let directory = entry.path();
             let path = directory.join("task.json");
             let Ok(bytes) = fs::read(path) else { continue };
-            let Ok(mut task) = serde_json::from_slice::<ExperimentTask>(&bytes) else {
+            let Some(mut task) = read_saved_task(&bytes) else {
                 continue;
             };
             let supported_version = if task.task_type == ETERNAL_COMPAT_TASK_TYPE {
@@ -1067,7 +1067,8 @@ impl RunJobApi {
         if task.task_type == COMPARISON_TASK_TYPE {
             return self.execute_comparison_task(task, &directory);
         }
-        let request = read_experiment_request(&directory).ok_or_else(|| {
+        let compatibility_task = task.task_type == ETERNAL_COMPAT_TASK_TYPE;
+        let request = read_task_request(&directory, compatibility_task).ok_or_else(|| {
             run_error(
                 "task_request_missing",
                 "persisted experiment task request is missing or invalid",
@@ -1090,8 +1091,8 @@ impl RunJobApi {
         let definition_path = directory.join("experiment.json");
         let definition_bytes = fs::read(&definition_path)
             .map_err(|error| run_error("task_definition_missing", &error.to_string()))?;
-        let definition: Value = serde_json::from_slice(&definition_bytes)
-            .map_err(|error| run_error("task_definition_invalid", &error.to_string()))?;
+        let definition: Value = decode_task_json(&definition_bytes, compatibility_task)
+            .map_err(|error| run_error("task_definition_invalid", &error))?;
         if definition != request.definition {
             return Err(run_error(
                 "task_definition_changed",
@@ -1099,7 +1100,7 @@ impl RunJobApi {
             ));
         }
 
-        if task.task_type == ETERNAL_COMPAT_TASK_TYPE {
+        if compatibility_task {
             let current_config =
                 validate_eternal_compat_definition(&request.definition).map_err(|error| error.0)?;
             let effective_config = task.effective_config.as_ref().ok_or_else(|| {
@@ -1382,7 +1383,7 @@ impl RunJobApi {
                     "compatibility runner result digest does not match persisted output",
                 ));
             }
-            let persisted: Value = serde_json::from_slice(&result_bytes)
+            let persisted = eternal_compat_json::decode(&result_bytes)
                 .map_err(|error| run_error("compat_result_invalid", &error.to_string()))?;
             let expected_task_id = task.task_id.to_string();
             let input_version =
@@ -1640,8 +1641,30 @@ async fn submit_experiment_task(
 }
 async fn submit_eternal_compat_task(
     State(api): State<RunJobApi>,
-    Json(request): Json<SubmitExperimentTask>,
+    Json(raw): Json<Box<RawValue>>,
 ) -> Response {
+    let value = match eternal_compat_json::decode(raw.get().as_bytes()) {
+        Ok(value) => value,
+        Err(error) => {
+            let field = error
+                .field
+                .strip_prefix("definition.config.")
+                .unwrap_or(&error.field);
+            return compat_config_failure(field, &error.to_string()).into_response();
+        }
+    };
+    let request: SubmitExperimentTask = match serde_json::from_value(value) {
+        Ok(request) => request,
+        Err(error) => {
+            return ApiFailure::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_compat_request",
+                &error.to_string(),
+                Value::Null,
+            )
+            .into_response();
+        }
+    };
     if task_type(&request.definition) != ETERNAL_COMPAT_TASK_TYPE {
         return ApiFailure::new(
             StatusCode::BAD_REQUEST,
@@ -1780,7 +1803,7 @@ async fn get_eternal_compat_result(
         )
         .into_response();
     }
-    let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
+    let Ok(value) = eternal_compat_json::decode(&bytes) else {
         return ApiFailure::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "compat_result_invalid",
@@ -2209,18 +2232,21 @@ fn validate_eternal_compat_definition(definition: &Value) -> Result<Value, ApiFa
                 "weights must contain exactly the five fixed assets",
             ));
         }
+        let mut total = 0.0;
         for asset in ETERNAL_COMPAT_ASSETS {
             let weight = values[asset].as_f64().unwrap_or(f64::NAN);
-            if !weight.is_finite() || weight < 0.0 {
+            if !(0.0..=1.0).contains(&weight) {
+                let field = format!("weights.{asset}");
                 return Err(compat_config_failure(
-                    "weights",
-                    "each asset weight must be a finite non-negative number",
+                    &field,
+                    &format!("{field} must be a finite number in 0..1"),
                 ));
             }
             weights.insert(asset.to_string(), weight);
+            total += weight;
         }
-        let total: f64 = weights.values().sum();
-        if (total - 1.0).abs() > 1e-9 {
+        // Same accumulation order and representation allowance as the Python runner.
+        if (total - 1.0_f64).abs() > 4.0 * f64::EPSILON {
             return Err(compat_config_failure(
                 "weights",
                 "asset weights must sum to 1.0",
@@ -2347,7 +2373,31 @@ fn experiment_task_dir(root: &FsPath, task_id: Uuid) -> PathBuf {
     root.join("tasks").join(task_id.to_string())
 }
 fn read_experiment_request(directory: &FsPath) -> Option<SubmitExperimentTask> {
-    serde_json::from_slice(&fs::read(directory.join("request.json")).ok()?).ok()
+    read_task_request(directory, false)
+}
+fn read_task_request(directory: &FsPath, compatibility: bool) -> Option<SubmitExperimentTask> {
+    decode_task_json(
+        &fs::read(directory.join("request.json")).ok()?,
+        compatibility,
+    )
+    .ok()
+}
+fn decode_task_json<T: DeserializeOwned>(bytes: &[u8], compatibility: bool) -> Result<T, String> {
+    if compatibility {
+        let value = eternal_compat_json::decode(bytes).map_err(|error| error.to_string())?;
+        serde_json::from_value(value).map_err(|error| error.to_string())
+    } else {
+        serde_json::from_slice(bytes).map_err(|error| error.to_string())
+    }
+}
+fn read_saved_task(bytes: &[u8]) -> Option<ExperimentTask> {
+    #[derive(Deserialize)]
+    struct TaskHeader {
+        task_type: String,
+    }
+
+    let header: TaskHeader = serde_json::from_slice(bytes).ok()?;
+    decode_task_json(bytes, header.task_type == ETERNAL_COMPAT_TASK_TYPE).ok()
 }
 fn persist_experiment_request(
     root: &FsPath,
@@ -2498,7 +2548,7 @@ fn eternal_compat_cli_error(
         .unwrap_or(true);
     let failure = fs::read(failure_path)
         .ok()
-        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+        .and_then(|bytes| eternal_compat_json::decode(&bytes).ok());
     if structured_details_persisted
         && failure.as_ref().is_some_and(|value| {
             value["error"]["code"].as_str() == Some(code)

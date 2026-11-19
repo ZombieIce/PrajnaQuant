@@ -5,6 +5,9 @@ pub mod core;
 #[cfg(feature = "app")]
 pub mod data;
 #[cfg(feature = "app")]
+#[doc(hidden)]
+pub mod eternal_compat_json;
+#[cfg(feature = "app")]
 pub mod experiment;
 pub mod factor;
 pub mod feature;
