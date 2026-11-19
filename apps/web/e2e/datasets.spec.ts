@@ -10,7 +10,7 @@ test('production Dataset page reads synthetic ETF and stock, lifecycle, gaps, Ba
   const errors: string[] = [], requests: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('request', request => { if (request.url().includes('/api/')) requests.push(request.url()); });
-  await page.goto('/datasets');
+  expect((await page.goto('/datasets'))?.status()).toBe(200);
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('研究数据预览');
   const versions = page.getByLabel('Dataset 版本', { exact: true });
   // The shared synthetic lake also holds two #350 @2 selection Datasets; this

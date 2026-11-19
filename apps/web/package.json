@@ -7,8 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "test:e2e": "node e2e/run.mjs",
+    "test:e2e:rc": "playwright test --config playwright.rc.config.ts",
     "test:e2e:list": "playwright test --list",
-    "test:e2e:check": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck playwright.config.ts e2e/*.spec.ts && playwright test --list"
+    "test:e2e:check": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck playwright.config.ts playwright.rc.config.ts e2e/*.spec.ts && playwright test --list"
   },
   "dependencies": {
     "echarts": "^5.6.0",

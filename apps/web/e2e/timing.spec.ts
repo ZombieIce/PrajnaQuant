@@ -61,6 +61,15 @@ test('strict timing uses configured adjusted signal, freezes costs, reads and re
   // mark at raw10.1, never adjusted12: 976.991+9090=10066.991.
   expect(last.cash).toBe('976.991'); expect(last.equity).toBe('10066.991');
   expect(last.positions['510300.XSHG'].quantity).toBe('900');
+  const fill = run.details.fills[0].fill;
+  expect(fill.order.quantity).toBe('900'); expect(fill.price).toBe('10.01');
+  expect(fill.costs).toEqual({ commission: '2.7027', minimum_commission_top_up: '2.2973', tax: '9.009' });
+  expect(fill.slippage).toBe('9');
+  await expect(page.getByTestId('native-fills')).toContainText(fill.price);
+  for (const amount of [fill.costs.commission, fill.costs.minimum_commission_top_up, fill.costs.tax]) {
+    await expect(page.getByTestId('native-fills')).toContainText(amount);
+  }
+  await expect(page.getByTestId('native-pending')).toContainText('2026-01-07');
   const expected = rows.map(row => [row.session_date, row.valuation_point, row.cash, row.equity,
     Object.values(row.positions ?? {}).map((p: { quantity: string }) => p.quantity).join(' / ') || '无持仓']);
   const table = () => page.getByTestId('valuation-rows').locator('tbody tr').evaluateAll(rows => rows.map(row => Array.from((row as HTMLTableRowElement).cells).map(cell => cell.textContent ?? '')));

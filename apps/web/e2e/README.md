@@ -34,6 +34,33 @@ Arguments pass through, for example `npm run test:e2e -- --grep 'corrupt version
 
 `test:e2e:check` typechecks the configuration/specs and checks test discovery.
 
+## Installed RC production E2E
+
+The RC config reuses the production assertions against an installed bundle and
+its own synthetic data root. Build and unpack the candidate first, then run:
+
+```sh
+export PRAJNA_RC_BUNDLE=/absolute/path/to/prajna-quant-v0.1.0-rc.1-macos-arm64
+export PRAJNA_E2E_ROOT=/absolute/path/to/independent/validation
+mkdir -p "$PRAJNA_E2E_ROOT/fixture"
+"$PRAJNA_RC_BUNDLE/prajna" demo --data-root "$PRAJNA_E2E_ROOT/fixture/lake"
+"$PRAJNA_RC_BUNDLE/prajna" cli prajna-import-daily-price \
+  --root "$PRAJNA_E2E_ROOT/fixture/lake" \
+  --input-root "$PRAJNA_E2E_ROOT/fixture/lake/synthetic-input/daily-price" \
+  --config "$PRAJNA_E2E_ROOT/fixture/lake/synthetic-input/daily-price/config.json" \
+  --replay replay --receipt demo-daily-price.json
+"$PRAJNA_RC_BUNDLE/prajna" start --data-root "$PRAJNA_E2E_ROOT/fixture/lake" --port 18789
+export PRAJNA_CHROME_EXECUTABLE='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+cd apps/web
+npm run test:e2e:rc
+"$PRAJNA_RC_BUNDLE/prajna" stop --data-root "$PRAJNA_E2E_ROOT/fixture/lake"
+```
+
+The suite uses the bundle's own D12 receipt and browser-facing production APIs.
+Keep the validation root, bundle checksum, command output and result counts local;
+do not publish real-data paths or research identities. The RC config refuses to
+run unless the installed bundle reports its service ready.
+
 The Playwright webServer performs these steps, all from this checkout:
 
 1. `npm run build` produces the production `apps/web/dist`.

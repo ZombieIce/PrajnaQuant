@@ -83,6 +83,20 @@ def send_group(group, sig):
         os.killpg(group, sig)
     except ProcessLookupError:
         pass
+    except PermissionError as denied:
+        try:
+            result = subprocess.run(['ps', '-axo', 'pgid=,stat='], capture_output=True,
+                                    text=True, timeout=5)
+            if result.returncode:
+                raise ProcessControlError('process group inspection unavailable')
+            rows = [line.split() for line in result.stdout.splitlines()]
+            if not rows or any(len(row) != 2 for row in rows):
+                raise ProcessControlError('invalid process group inspection')
+            states = [state for pgid, state in rows if int(pgid) == group]
+        except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+            raise ProcessControlError('process group inspection unavailable') from error
+        if not states or any(not state.startswith('Z') for state in states):
+            raise denied
 
 
 class OwnedRun:
