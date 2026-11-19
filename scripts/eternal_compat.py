@@ -1,0 +1,1033 @@
+#!/usr/bin/env python3
+"""Run versioned Eternal compatibility configurations against a frozen snapshot."""
+
+import argparse
+import hashlib
+import json
+import math
+import os
+import platform
+import stat
+import sys
+from datetime import date
+from decimal import Decimal, InvalidOperation
+from fractions import Fraction
+from pathlib import Path
+
+import eternal_baseline as baseline
+
+
+RUNNER_VERSION = "eternal_compat@1"
+DEFAULT_CONFIG = {
+    "initial_nav": 1.0,
+    "weights": baseline.WEIGHTS,
+    "rebalance_threshold": baseline.THRESHOLD,
+    "fee_rate_one_way": baseline.FEE_RATE,
+}
+PENDING_GAP_CHECKS = (
+    "snapshot_manifest_validation",
+    "snapshot_file_inventory_validation",
+    "snapshot_configuration_validation",
+    "frozen_source_validation",
+    "bar_and_factor_validation",
+    "total_return_price_and_limit_construction",
+    "historical_overlap_and_splice_validation",
+    "common_session_validation",
+    "simulation",
+    "frozen_reference_comparison",
+)
+MAX_PENDING_GAP_REPORT_NESTING = 64
+
+
+class RunnerError(Exception):
+    def __init__(self, code, message, details=None):
+        super().__init__(message)
+        self.code = code
+        self.details = details or {}
+
+
+class NonRepresentableJsonNumber(ValueError):
+    pass
+
+
+class _LoadChecks:
+    def __init__(self):
+        scopes = {
+            "snapshot_manifest_and_inventory_validation": (None,),
+            "snapshot_configuration_validation": (None,),
+            "frozen_source_validation": (None,),
+            **{
+                name: baseline.HISTORY_CODES
+                for name in (
+                    "bar_loading", "factor_loading", "bar_validation",
+                    "total_return_price_and_factor_validation", "opening_limit_construction",
+                )
+            },
+            "historical_overlap_and_splice_validation": tuple(
+                f"{old}/{new}" for old, new in baseline.LEGACY_PAIRS
+            ),
+            "common_session_validation": (None,),
+            "simulation": (None,),
+            "frozen_reference_comparison": (None,),
+        }
+        self.statuses = {
+            name: dict.fromkeys(items, "not_run") for name, items in scopes.items()
+        }
+
+    def run(self, name, action, *args, scope=None):
+        self.statuses[name][scope] = "partial"
+        result = action(*args)
+        self.statuses[name][scope] = "completed"
+        return result
+
+    def report(self):
+        progress, unfinished = {}, []
+        for name, scopes in self.statuses.items():
+            states = set(scopes.values())
+            status = (
+                "completed" if states == {"completed"}
+                else "not_run" if states == {"not_run"} else "partial"
+            )
+            item = {"status": status}
+            if None not in scopes:
+                item["scopes"] = dict(scopes)
+            progress[name] = item
+            if status != "completed":
+                unfinished.append({
+                    "name": name, **item,
+                    "reason": "snapshot validation stopped before this check completed",
+                })
+        return {"check_progress": progress, "checks_not_run": unfinished}
+
+
+def canonical_json(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+
+
+def sha256_bytes(value):
+    return hashlib.sha256(value).hexdigest()
+
+
+def sha256_file(path):
+    return baseline.sha256_file(path)
+
+
+class _RawConfigNumber:
+    def __init__(self, token):
+        self.token = token
+
+    def as_float(self, field):
+        number = float(self.token)
+        mantissa = self.token.lower().split("e", 1)[0]
+        if not math.isfinite(number) or (
+            number == 0 and any(digit in "123456789" for digit in mantissa)
+        ):
+            raise RunnerError(
+                "invalid_config", f"{field}: number overflows or underflows binary64",
+                {"field": field},
+            )
+        return number
+
+
+def validate_config(value):
+    if not isinstance(value, dict):
+        raise RunnerError("invalid_config", "config must be a JSON object")
+    unknown = set(value) - set(DEFAULT_CONFIG)
+    if unknown:
+        raise RunnerError("invalid_config", f"unknown config field: {sorted(unknown)[0]}")
+
+    config = dict(DEFAULT_CONFIG)
+    config["weights"] = dict(DEFAULT_CONFIG["weights"])
+    config.update(value)
+    if "weights" in value:
+        weights = value["weights"]
+        if not isinstance(weights, dict):
+            raise RunnerError("invalid_config", "weights must be an object with the five fixed assets")
+        if set(weights) != set(baseline.ETF_CODES):
+            raise RunnerError("invalid_config", "weights must contain exactly the five fixed assets")
+        config["weights"] = weights
+
+    def finite_number(field, minimum=None, maximum=None):
+        number = config[field]
+        if isinstance(number, _RawConfigNumber):
+            number = number.as_float(field)
+        if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number):
+            raise RunnerError("invalid_config", f"{field} must be a finite number")
+        if (minimum is not None and number < minimum) or (
+            maximum is not None and number > maximum
+        ):
+            bound = (
+                f"{minimum}..{maximum}"
+                if minimum is not None and maximum is not None
+                else f">={minimum}" if minimum is not None else f"<={maximum}"
+            )
+            raise RunnerError("invalid_config", f"{field} must be {bound}")
+        config[field] = float(number)
+
+    finite_number("initial_nav")
+    if config["initial_nav"] <= 0:
+        raise RunnerError("invalid_config", "initial_nav must be greater than zero model units")
+    if config["initial_nav"] < sys.float_info.min:
+        raise RunnerError(
+            "invalid_config",
+            "initial_nav must be at least the minimum normal positive f64 value",
+        )
+    finite_number("rebalance_threshold", 0.0, 1.0)
+    finite_number("fee_rate_one_way", 0.0)
+    if config["fee_rate_one_way"] >= 1.0:
+        raise RunnerError("invalid_config", "fee_rate_one_way must be less than 1.0")
+
+    weights = {}
+    total = 0.0
+    for code in baseline.ETF_CODES:
+        field = f"weights.{code}"
+        weight = config["weights"][code]
+        if isinstance(weight, _RawConfigNumber):
+            weight = weight.as_float(field)
+        if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not 0 <= weight <= 1:
+            raise RunnerError("invalid_config", f"{field} must be a finite number in 0..1",
+                              {"field": field})
+        weights[code] = float(weight)
+        total += weight
+    # Allow binary64 representation noise, not an unallocated (or unfunded) target.
+    if abs(total - 1.0) > 4 * sys.float_info.epsilon:
+        raise RunnerError("invalid_config", "weights must sum to 1.0", {"field": "weights"})
+    config["weights"] = weights
+    return config
+
+
+def _scaled_result(navs, signals, trades, stats, daily, initial_nav):
+    def scale(value, field, asset=None):
+        scaled = value * initial_nav
+        details = {"field": field}
+        if asset is not None:
+            details["asset"] = asset
+        if not math.isfinite(scaled):
+            raise RunnerError(
+                "compat_scaled_value_unrepresentable",
+                "scaled compatibility result value is not representable",
+                details,
+            )
+        if value > 0 and scaled == 0:
+            raise RunnerError(
+                "compat_scaled_value_underflow",
+                "positive compatibility result value underflowed during capital scaling",
+                details,
+            )
+        if not math.isclose(scaled / initial_nav, value, rel_tol=1e-12, abs_tol=0.0):
+            raise RunnerError(
+                "compat_scaled_value_precision_loss",
+                "capital scaling cannot preserve normalized values within 1e-12 relative tolerance",
+                details,
+            )
+        return scaled
+
+    scaled_navs = [scale(value, "daily.nav") for value in navs]
+    scaled_trades = [
+        {
+            **trade,
+            "fees_in_initial_nav": scale(
+                trade["fees_in_initial_nav"],
+                "trades.fees_in_initial_nav",
+            ),
+        }
+        for trade in trades
+    ]
+    scaled_daily = []
+    for row in daily:
+        scaled_daily.append({
+            **row,
+            "nav": scale(row["nav"], "daily.nav"),
+            "cash": scale(row["cash"], "daily.cash"),
+            "fees": scale(row["fees"], "daily.fees"),
+            "units": {
+                key: scale(value, "daily.units", key)
+                for key, value in row["units"].items()
+            },
+            "holdings": {
+                key: scale(value, "daily.holdings", key)
+                for key, value in row["holdings"].items()
+            },
+        })
+    scaled_stats = {
+        **stats,
+        "fees_in_initial_nav": scale(
+            stats["fees_in_initial_nav"],
+            "summary.fees_in_initial_nav",
+        ),
+    }
+    return scaled_navs, signals, scaled_trades, scaled_stats, scaled_daily
+
+
+def _validate_normalized_holdings(daily, weights):
+    for row in daily:
+        for asset, weight in weights.items():
+            units = row["units"][asset]
+            holding = row["holdings"][asset]
+            field = (
+                "daily.units" if weight > 0 and units == 0
+                else "daily.holdings" if units > 0 and holding == 0
+                else None
+            )
+            if field:
+                raise RunnerError(
+                    "compat_normalized_value_underflow",
+                    "positive normalized allocation underflowed before capital scaling",
+                    {"field": field, "asset": asset, "date": row["date"].isoformat()},
+                )
+
+
+_RELATIVE_TOLERANCE = Fraction("1e-12")
+# A fee is capital minus post-fee capital, so binary64 cancellation limits its own
+# relative precision. The frozen solver converges only to 1e-13 of capital.
+_FEE_RELATIVE_TOLERANCE = Fraction("1e-10")
+
+
+def _within_relative_tolerance(actual, expected, tolerance=_RELATIVE_TOLERANCE):
+    return abs(Fraction(actual) - expected) <= abs(expected) * tolerance
+
+
+def _fee_solved_net_capital(holdings, cash, weights, fee_rate):
+    """Exact root of net = capital - fee * sum(|net * weight - holding|)."""
+    capital = sum(holdings, cash)
+    breakpoints = sorted({
+        holding / weight for holding, weight in zip(holdings, weights) if weight > 0
+    })
+    bounds = [Fraction(0), *breakpoints]
+    for index, lower in enumerate(bounds):
+        upper = bounds[index + 1] if index + 1 < len(bounds) else None
+        signed_weight, signed_holding = Fraction(0), Fraction(0)
+        for holding, weight in zip(holdings, weights):
+            if weight == 0:
+                signed_holding -= holding
+            elif holding / weight <= lower:
+                signed_weight += weight
+                signed_holding += holding
+            else:
+                signed_weight -= weight
+                signed_holding -= holding
+        # The fee equation is strictly increasing because 0 <= fee < 1.
+        net = (capital + fee_rate * signed_holding) / (1 + fee_rate * signed_weight)
+        if net >= lower and (upper is None or net <= upper):
+            return net
+    raise ArithmeticError("fee equation has no non-negative net capital")
+
+
+def _fee_precision_error(phase, field, date, basis):
+    tolerance = float(_FEE_RELATIVE_TOLERANCE)
+    details = {"field": field, "fee_basis": basis, "relative_tolerance": tolerance}
+    if date is not None:
+        details["date"] = date.isoformat()
+    return RunnerError(
+        f"compat_{phase}_fee_precision_loss",
+        f"{phase} fee differs from the independently derived fee by more than {tolerance:g} relative",
+        details,
+    )
+
+
+def _validate_allocation_and_fees(daily, opens, trades, stats, config, principal, phase):
+    """Derive units, fees and cash from principal, weights, fee and execution prices."""
+    weights = [Fraction(config["weights"][asset]) for asset in baseline.ETF_CODES]
+    fee_rate = Fraction(config["fee_rate_one_way"])
+    trades_by_day = {trade["trade_date"]: trade for trade in trades}
+    previous, previous_cash = None, None
+    total_fees = Fraction(0)
+    for index, row in enumerate(daily):
+        day = row["date"]
+        actual = [row["units"][asset] for asset in baseline.ETF_CODES]
+        if not all(math.isfinite(value) for value in (*actual, row["cash"], row["fees"])):
+            raise RunnerError(
+                f"compat_{phase}_value_unrepresentable",
+                f"{phase} allocation units, cash or fees contain a non-finite value",
+                {"field": "daily", "date": day.isoformat()},
+            )
+        prices = [Fraction(price) for price in opens[index]]
+        trade = trades_by_day.get(day)
+        if index == 0:
+            capital = Fraction(principal)
+            net, basis = capital / (1 + fee_rate), "initial"
+        elif trade is not None:
+            holdings = [Fraction(units) * price for units, price in zip(previous, prices)]
+            capital = sum(holdings, Fraction(previous_cash))
+            net = _fee_solved_net_capital(holdings, Fraction(previous_cash), weights, fee_rate)
+            basis = "rebalance"
+        else:
+            for asset, units, before in zip(baseline.ETF_CODES, actual, previous):
+                if units != before:
+                    raise RunnerError(
+                        f"compat_{phase}_allocation_precision_loss",
+                        f"{phase} units changed without an executed trade",
+                        {"field": "daily.units", "asset": asset, "date": day.isoformat(),
+                         "allocation_basis": "carried_forward"},
+                    )
+            if row["fees"] != 0:
+                raise _fee_precision_error(phase, "daily.fees", day, "no_trade: zero")
+            if row["cash"] != previous_cash:
+                raise RunnerError(
+                    f"compat_{phase}_allocation_precision_loss",
+                    f"{phase} cash changed without an executed trade",
+                    {"field": "daily.cash", "date": day.isoformat(),
+                     "allocation_basis": "carried_forward"},
+                )
+            continue
+        for asset, units, weight, price in zip(baseline.ETF_CODES, actual, weights, prices):
+            if not _within_relative_tolerance(units, net * weight / price):
+                raise RunnerError(
+                    f"compat_{phase}_allocation_precision_loss",
+                    f"{phase} units differ from the independently derived allocation "
+                    "by more than 1e-12 relative",
+                    {
+                        "field": "daily.units", "asset": asset, "date": day.isoformat(),
+                        "allocation_basis": f"{basis}: fee_solved_net * weight / open_price",
+                        "relative_tolerance": 1e-12,
+                    },
+                )
+        # The model invests all post-fee capital, so the fee is exactly capital - net.
+        fee = capital - net
+        if trade is not None and not _within_relative_tolerance(
+            trade["fees_in_initial_nav"], fee, _FEE_RELATIVE_TOLERANCE,
+        ):
+            raise _fee_precision_error(
+                phase, "trades.fees_in_initial_nav", day, f"{basis}: capital - fee_solved_net",
+            )
+        if not _within_relative_tolerance(row["fees"], fee, _FEE_RELATIVE_TOLERANCE):
+            raise _fee_precision_error(phase, "daily.fees", day, f"{basis}: capital - fee_solved_net")
+        if row["cash"] != 0:
+            raise RunnerError(
+                f"compat_{phase}_allocation_precision_loss",
+                f"{phase} cash remains after full post-fee allocation",
+                {"field": "daily.cash", "date": day.isoformat(),
+                 "allocation_basis": f"{basis}: zero residual cash"},
+            )
+        post_trade = sum(
+            (Fraction(units) * price for units, price in zip(actual, prices)),
+            Fraction(row["cash"]),
+        )
+        if not _within_relative_tolerance(post_trade + Fraction(row["fees"]), capital):
+            raise RunnerError(
+                f"compat_{phase}_capital_conservation_loss",
+                f"{phase} execution-open positions, cash and fees do not conserve capital",
+                {
+                    "field": "daily", "date": day.isoformat(),
+                    "capital_basis": f"{basis}: post_trade_open_value + cash + fees = pre_trade_capital",
+                    "relative_tolerance": float(_RELATIVE_TOLERANCE),
+                },
+            )
+        total_fees += fee
+        previous, previous_cash = actual, row["cash"]
+    if not math.isfinite(stats["fees_in_initial_nav"]) or not _within_relative_tolerance(
+        stats["fees_in_initial_nav"], total_fees, _FEE_RELATIVE_TOLERANCE,
+    ):
+        raise _fee_precision_error(
+            phase, "summary.fees_in_initial_nav", None, "sum of independently derived fees",
+        )
+
+
+def _validate_holding_valuations(daily, closes, phase):
+    for row, prices in zip(daily, closes, strict=True):
+        expected_nav = Fraction(row["cash"]) if math.isfinite(row["cash"]) else None
+        for asset, price in zip(baseline.ETF_CODES, prices, strict=True):
+            units, holding = row["units"][asset], row["holdings"][asset]
+            details = {
+                "field": "daily.holdings", "asset": asset, "date": row["date"].isoformat(),
+                "valuation_basis": "units * close_total_return_index",
+                "relative_tolerance": 1e-12,
+            }
+            if not all(math.isfinite(value) for value in (units, holding, price)):
+                raise RunnerError(
+                    f"compat_{phase}_value_unrepresentable",
+                    f"{phase} holding valuation contains a non-finite value",
+                    details,
+                )
+            # Exact products avoid repeating the binary64 underflow being checked.
+            expected = Fraction(units) * Fraction(price)
+            if not _within_relative_tolerance(holding, expected):
+                raise RunnerError(
+                    f"compat_{phase}_value_precision_loss",
+                    f"{phase} holding differs from units times close index by more than 1e-12 relative",
+                    details,
+                )
+            if expected_nav is not None:
+                expected_nav += expected
+        details = {
+            "field": "daily.nav", "date": row["date"].isoformat(),
+            "valuation_basis": "cash + sum(units * close_total_return_index)",
+            "relative_tolerance": 1e-12,
+        }
+        if expected_nav is None or not math.isfinite(row["nav"]):
+            raise RunnerError(
+                f"compat_{phase}_value_unrepresentable",
+                f"{phase} NAV valuation contains a non-finite value",
+                details,
+            )
+        if not _within_relative_tolerance(row["nav"], expected_nav):
+            raise RunnerError(
+                f"compat_{phase}_value_precision_loss",
+                f"{phase} NAV differs from cash plus unit valuations by more than 1e-12 relative",
+                details,
+            )
+
+
+def _pending_gap_error(code, message, report_status):
+    reason = "blocked by the pending-gap report"
+    return RunnerError(
+        code,
+        message,
+        {
+            "report_file": "pending-gaps.json",
+            "report_status": report_status,
+            "report_contents_persisted": False,
+            "checks_not_run": [
+                {"name": name, "status": "not_run", "reason": reason}
+                for name in PENDING_GAP_CHECKS
+            ],
+        },
+    )
+
+
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object key: {key}")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(value):
+    raise ValueError(f"non-standard JSON constant: {value}")
+
+
+def _parse_compatible_json_int(value):
+    number = int(value)
+    if number < -(2**63) or number > 2**64 - 1:
+        raise NonRepresentableJsonNumber
+    return number
+
+
+def _parse_compatible_json_float(value):
+    try:
+        number = float(value)
+        exact = Decimal(value)
+    except (InvalidOperation, OverflowError, ValueError) as error:
+        raise NonRepresentableJsonNumber from error
+    if not math.isfinite(number) or Decimal(str(number)) != exact:
+        raise NonRepresentableJsonNumber
+    return number
+
+
+def _validate_json_strings(value):
+    if isinstance(value, str):
+        value.encode("utf-8")
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            _validate_json_strings(key)
+            _validate_json_strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            _validate_json_strings(item)
+
+
+def _pending_report_depth_exceeded(value, initial_depth=1):
+    pending = [(value, initial_depth)]
+    while pending:
+        current, depth = pending.pop()
+        if not isinstance(current, (dict, list)):
+            continue
+        if depth > MAX_PENDING_GAP_REPORT_NESTING:
+            return True
+        children = current.values() if isinstance(current, dict) else current
+        pending.extend((child, depth + 1) for child in children)
+    return False
+
+
+def _attach_recoverable_report(failure, payload):
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeError:
+        return
+    failure.details["pending_gap_report_raw_json"] = text
+    failure.details["report_raw_json_persisted"] = True
+
+    def number(parser, token):
+        try:
+            return parser(token)
+        except NonRepresentableJsonNumber:
+            return {"unsupported_json_number": token}
+
+    def strings(value, depth=1):
+        if isinstance(value, (dict, list)) and depth > MAX_PENDING_GAP_REPORT_NESTING:
+            return {"unsupported_json_depth": "see pending_gap_report_raw_json"}
+        if isinstance(value, str):
+            try:
+                value.encode("utf-8")
+            except UnicodeError:
+                return {"unsupported_json_string": json.dumps(value)}
+        elif isinstance(value, dict):
+            recovered = {}
+            for key, item in value.items():
+                try:
+                    key.encode("utf-8")
+                except UnicodeError:
+                    continue
+                child_depth = depth + 1
+                if (
+                    not (depth == 1 and key in ("status", "gaps"))
+                    and _pending_report_depth_exceeded(item, child_depth)
+                ):
+                    recovered[key] = {
+                        "unsupported_json_depth": "see pending_gap_report_raw_json"
+                    }
+                else:
+                    recovered[key] = strings(item, child_depth)
+            return recovered
+        elif isinstance(value, list):
+            return [strings(item, depth + 1) for item in value]
+        return value
+
+    try:
+        recovered = json.loads(
+            text,
+            object_pairs_hook=_unique_json_object,
+            parse_int=lambda token: number(_parse_compatible_json_int, token),
+            parse_float=lambda token: number(_parse_compatible_json_float, token),
+            parse_constant=lambda token: {"unsupported_json_number": token},
+        )
+        failure.details["recoverable_pending_gap_report"] = strings(recovered)
+        failure.details["report_recovery_encoding"] = (
+            "supported values through depth 64 unchanged; unsupported numeric/string "
+            "values and deeper subtrees are tagged; invalid Unicode keys omitted; raw JSON retained"
+        )
+    except (ValueError, RecursionError):
+        pass
+
+
+def _read_pending_gap_report(snapshot):
+    path = snapshot / "pending-gaps.json"
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise _pending_gap_error(
+            "compat_pending_gaps_unreadable",
+            "pending gap report could not be read",
+            "unreadable",
+        ) from error
+
+    if not stat.S_ISREG(metadata.st_mode):
+        raise _pending_gap_error(
+            "compat_pending_gaps_unsupported",
+            "pending gap report must be a regular file",
+            "unsupported_file_type",
+        )
+
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise _pending_gap_error(
+            "compat_pending_gaps_unreadable",
+            "pending gap report could not be read",
+            "unreadable",
+        ) from error
+
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise _pending_gap_error(
+                "compat_pending_gaps_unsupported",
+                "pending gap report must be a regular file",
+                "unsupported_file_type",
+            )
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = None
+            payload = stream.read()
+    except OSError as error:
+        raise _pending_gap_error(
+            "compat_pending_gaps_unreadable",
+            "pending gap report could not be read",
+            "unreadable",
+        ) from error
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+    try:
+        report = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
+            parse_int=_parse_compatible_json_int,
+            parse_float=_parse_compatible_json_float,
+        )
+        _validate_json_strings(report)
+    except NonRepresentableJsonNumber as error:
+        failure = _pending_gap_error(
+            "compat_pending_gaps_invalid",
+            "pending gap report contains a non-representable number",
+            "non_representable_number",
+        )
+        failure.details["report_contents_persisted"] = False
+        failure.details["report_contents_not_persisted_reason"] = (
+            "report contains a number outside the lossless portable JSON numeric range"
+        )
+        _attach_recoverable_report(failure, payload)
+        raise failure from error
+    except (UnicodeError, json.JSONDecodeError, ValueError, RecursionError) as error:
+        failure = _pending_gap_error(
+            "compat_pending_gaps_invalid",
+            "pending gap report is invalid JSON",
+            "invalid",
+        )
+        failure.details["report_contents_persisted"] = False
+        failure.details["report_contents_not_persisted_reason"] = (
+            "report is not valid standard JSON"
+        )
+        _attach_recoverable_report(failure, payload)
+        raise failure from error
+
+    if _pending_report_depth_exceeded(report):
+        failure = _pending_gap_error(
+            "compat_pending_gaps_invalid",
+            "pending gap report exceeds the supported JSON nesting depth",
+            "depth_limit_exceeded",
+        )
+        failure.details["report_contents_persisted"] = False
+        failure.details["report_contents_not_persisted_reason"] = (
+            f"report nesting exceeds the portable limit of {MAX_PENDING_GAP_REPORT_NESTING}"
+        )
+        _attach_recoverable_report(failure, payload)
+        raise failure
+
+    if (
+        not isinstance(report, dict)
+        or report.get("status") != "pending_decision"
+        or not isinstance(report.get("gaps"), list)
+        or not report["gaps"]
+        or any(not isinstance(gap, dict) for gap in report["gaps"])
+    ):
+        failure = _pending_gap_error(
+            "compat_pending_gaps_invalid",
+            "pending gap report has an invalid structure",
+            "invalid",
+        )
+        failure.details["report_contents_persisted"] = False
+        failure.details["report_contents_not_persisted_reason"] = (
+            "report structure is invalid"
+        )
+        _attach_recoverable_report(failure, payload)
+        raise failure
+
+    return report
+
+
+def _load_simulation(snapshot):
+    bars = {}
+    checks = _LoadChecks()
+    try:
+        pending_gap_report = _read_pending_gap_report(snapshot)
+        if pending_gap_report is not None:
+            details = _pending_gap_error(
+                "compat_input_gaps_pending",
+                "snapshot has unresolved input gaps; no replay checks were run",
+                "pending_decision",
+            ).details
+            details["pending_gap_report"] = pending_gap_report
+            details["report_contents_persisted"] = True
+            raise RunnerError(
+                "compat_input_gaps_pending",
+                "snapshot has unresolved input gaps; no replay checks were run",
+                details,
+            )
+
+        manifest, reference = checks.run(
+            "snapshot_manifest_and_inventory_validation", baseline.read_snapshot, snapshot,
+        )
+        checks.run(
+            "snapshot_configuration_validation", baseline.validate_execution_configuration, manifest,
+        )
+        checks.run(
+            "frozen_source_validation", baseline.validate_replay_source,
+            manifest, Path(baseline.__file__).resolve(),
+        )
+
+        factors, prices, limits = {}, {}, {}
+        for code in baseline.HISTORY_CODES:
+            bars[code] = checks.run(
+                "bar_loading", baseline.csv_rows, snapshot / f"bars/{code}.csv.gz", scope=code,
+            )[0]
+            factors[code] = checks.run(
+                "factor_loading", baseline.csv_rows, snapshot / f"factors/{code}.csv.gz", scope=code,
+            )[0]
+            checks.run("bar_validation", baseline.ensure_ordered_bars, code, bars[code], scope=code)
+            prices[code], actions = checks.run(
+                "total_return_price_and_factor_validation",
+                baseline.total_return_prices, bars[code], factors[code], scope=code,
+            )
+            limits[code] = checks.run(
+                "opening_limit_construction", baseline.opening_limits,
+                bars[code], actions, baseline.Decimal(".10"), scope=code,
+            )
+        anchors = [
+            checks.run(
+                "historical_overlap_and_splice_validation", baseline.splice_etf,
+                prices, limits, old, new, scope=f"{old}/{new}",
+            )
+            for old, new in baseline.LEGACY_PAIRS
+        ]
+        checks.statuses["common_session_validation"][None] = "partial"
+        common = set.intersection(*(set(prices[code]) for code in baseline.ETF_CODES))
+        reference_rows = reference["history_etf"]
+        old_dates = [row[0] for row in reference_rows if row[0] <= baseline.ANCHOR]
+        days = (
+            [date.fromisoformat(day) for day in old_dates if day in common]
+            + [date.fromisoformat(day) for day in sorted(common) if day > baseline.ANCHOR]
+        )
+        if len(days) < 3:
+            raise RunnerError("compat_input_invalid", "common trading sessions contain fewer than three dates")
+        opens = [[prices[code][day.isoformat()][0] for code in baseline.ETF_CODES] for day in days]
+        closes = [[prices[code][day.isoformat()][1] for code in baseline.ETF_CODES] for day in days]
+        day_limits = [
+            [limits[code].get(day.isoformat(), (False, False)) for code in baseline.ETF_CODES]
+            for day in days
+        ]
+        checks.statuses["common_session_validation"][None] = "completed"
+        return manifest, reference, anchors, days, opens, closes, day_limits
+    except RunnerError as error:
+        if "checks_not_run" not in error.details:
+            error.details.update(checks.report())
+        raise
+    except baseline.InputGaps as error:
+        gaps = []
+        for gap in error.gaps:
+            gap = dict(gap)
+            if gap.get("field") == "volume" and "source" not in gap:
+                for row in bars.get(gap.get("asset"), []):
+                    if row.get("date") == gap.get("date") and row.get("source"):
+                        gap["source"] = row["source"]
+                        break
+            gaps.append(gap)
+        raise RunnerError(
+            "compat_input_invalid",
+            f"frozen snapshot is unavailable or invalid: {error}",
+            {
+                "input_gaps": gaps,
+                **checks.report(),
+            },
+        ) from error
+    except OSError as error:
+        raise RunnerError(
+            "compat_input_unavailable", f"frozen snapshot is unavailable: {error}", checks.report(),
+        ) from error
+    except (KeyError, TypeError, ValueError, ArithmeticError, json.JSONDecodeError) as error:
+        raise RunnerError(
+            "compat_input_invalid",
+            f"frozen snapshot is unavailable or invalid: {error}", checks.report(),
+        ) from error
+
+
+def run(request, output):
+    if not isinstance(request, dict):
+        raise RunnerError("invalid_request", "runner request must be a JSON object")
+    task_id = request.get("task_id")
+    snapshot_value = request.get("snapshot_path")
+    if not isinstance(task_id, str) or not task_id:
+        raise RunnerError("invalid_request", "task_id is required")
+    if not isinstance(snapshot_value, str) or not snapshot_value:
+        raise RunnerError("invalid_request", "snapshot_path is required")
+    snapshot = Path(snapshot_value).expanduser()
+    if not snapshot.is_absolute():
+        raise RunnerError("invalid_request", "snapshot_path must be absolute")
+    output = Path(output).resolve()
+    if output.exists():
+        raise RunnerError("compat_output_exists", "compatibility result output already exists")
+
+    config = validate_config(request.get("config", {}))
+    manifest, reference, anchors, days, opens, closes, day_limits = _load_simulation(snapshot)
+    navs, signals, trades, stats, daily = baseline.simulate(
+        days,
+        opens,
+        closes,
+        day_limits,
+        config["rebalance_threshold"],
+        config["fee_rate_one_way"],
+        config["weights"],
+    )
+    _validate_normalized_holdings(daily, config["weights"])
+    _validate_allocation_and_fees(daily, opens, trades, stats, config, 1, "normalized")
+    _validate_holding_valuations(daily, closes, "normalized")
+    comparison = baseline.compare_reference(reference, days, navs, stats, anchors)
+    navs, signals, trades, stats, daily = _scaled_result(
+        navs, signals, trades, stats, daily, config["initial_nav"],
+    )
+    _validate_allocation_and_fees(
+        daily, opens, trades, stats, config, config["initial_nav"], "scaled",
+    )
+    _validate_holding_valuations(daily, closes, "scaled")
+    is_default_config = config == validate_config({})
+    comparison["evaluation_mode"] = (
+        "required_default_parity" if is_default_config else "informational_variant"
+    )
+    if is_default_config and comparison["overall_status"] != "match":
+        raise RunnerError(
+            "compat_default_reference_mismatch",
+            "frozen-reference comparison mismatch for the effective default configuration",
+            {
+                "comparison": {
+                    "overall_status": comparison["overall_status"],
+                    "dates": comparison["dates"]["status"],
+                    "daily_nav": comparison["daily_nav"]["status"],
+                }
+            },
+        )
+    runner_sha256 = sha256_file(Path(__file__).resolve())
+    baseline_sha256 = sha256_file(Path(baseline.__file__).resolve())
+    identity_material = {
+        "task_id": task_id,
+        "runner": RUNNER_VERSION,
+        "runner_sha256": runner_sha256,
+        "baseline_sha256": baseline_sha256,
+        "input_version": manifest["input_version"],
+        "config": config,
+    }
+    compat_run_id = sha256_bytes(canonical_json(identity_material))
+    result = {
+        "schema_version": 1,
+        "identity": {
+            "compat_run_id": compat_run_id,
+            "task_type": RUNNER_VERSION,
+            "task_id": task_id,
+            "strategy_version": RUNNER_VERSION,
+            "runner_sha256": runner_sha256,
+            "frozen_replay_source_sha256": baseline_sha256,
+            "input_version": manifest["input_version"],
+            "input_manifest_sha256": manifest["manifest_sha256"],
+        },
+        "effective_config": {
+            **config,
+            "initial_capital_currency_amount": None,
+            "initial_capital_unit": "model_nav",
+            "initial_capital_note": "absolute CNY amount is unavailable",
+        },
+        "runtime": {"python": sys.version, "platform": platform.platform()},
+        "summary": {
+            **stats,
+            "nasdaqAnchor": anchors[0][0],
+            "nasdaqSwitch": anchors[0][1],
+            "sp500Anchor": anchors[1][0],
+            "sp500Switch": anchors[1][1],
+        },
+        "daily": daily,
+        "signals": signals,
+        "trades": trades,
+        "frozen_reference_comparison": comparison,
+        "risk_disclosures": {
+            "historical_universe": "unverified; fixed/proxy assets may introduce survivorship or selection bias",
+            "total_return_pit": "unverified; historical listing, distributions and factor availability are not proven point-in-time",
+        },
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(
+        result,
+        ensure_ascii=False,
+        indent=2,
+        allow_nan=False,
+        default=baseline.json_default,
+    ).encode() + b"\n"
+    with output.open("xb") as stream:
+        stream.write(payload)
+        stream.flush()
+        os.fsync(stream.fileno())
+    return {"compat_run_id": compat_run_id, "result_sha256": sha256_bytes(payload)}
+
+
+def _persist_failure(output, error):
+    failure_path = Path(output).resolve().with_name("compat-failure.json")
+    temporary_path = failure_path.with_name(
+        f".{failure_path.name}.{os.getpid()}.tmp"
+    )
+    code = error.code if isinstance(error.code, str) else "compat_runner_failed"
+    message = str(error)
+    failure = {"error": {"code": code, "message": message, "details": error.details}}
+    details_complete = error.details.get("report_contents_persisted", True)
+    failure["structured_details_complete"] = details_complete
+    try:
+        payload = canonical_json(failure) + b"\n"
+    except (TypeError, ValueError, OverflowError, RecursionError, UnicodeError):
+        details_complete = False
+        failure = {
+            "error": {
+                "code": code,
+                "message": message,
+                "details": {
+                    "failure_details_omitted_reason": (
+                        "original failure details were not JSON serializable"
+                    )
+                },
+            },
+            "structured_details_complete": False,
+        }
+        payload = canonical_json(failure) + b"\n"
+    try:
+        failure_path.parent.mkdir(parents=True, exist_ok=True)
+        with temporary_path.open("xb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, failure_path)
+        return True, details_complete
+    except OSError:
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False, False
+
+
+def _emit_failure(output, error):
+    details_persisted, details_complete = _persist_failure(output, error)
+    summary = {
+        "code": error.code if isinstance(error.code, str) else "compat_runner_failed",
+        "message": str(error),
+        "details": {
+            "structured_details_persisted": details_persisted,
+            "structured_details_complete": details_complete,
+        },
+    }
+    if not details_persisted:
+        summary["details"]["structured_details_persistence_failed"] = True
+    print(json.dumps({"error": summary}), file=sys.stderr)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    run_parser = commands.add_parser("run")
+    run_parser.add_argument("--request", type=Path, required=True)
+    run_parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    try:
+        request = json.loads(
+            args.request.read_text(encoding="utf-8"),
+            parse_float=_RawConfigNumber, parse_int=_RawConfigNumber,
+        )
+        print(json.dumps(run(request, args.output), separators=(",", ":")))
+        return 0
+    except RunnerError as error:
+        _emit_failure(args.output, error)
+        return 2
+    except OSError as error:
+        wrapped = RunnerError("compat_input_unavailable", f"runner input or output is unavailable: {error}")
+        _emit_failure(args.output, wrapped)
+        return 2
+    except Exception as error:
+        wrapped = RunnerError("compat_runner_failed", str(error))
+        _emit_failure(args.output, wrapped)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

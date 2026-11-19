@@ -179,6 +179,7 @@ impl RunJobApi {
             result_level: "standard".into(),
             process_group_id: None,
             process_group_generation: None,
+            effective_config: None,
             result: None,
             error: None,
         };

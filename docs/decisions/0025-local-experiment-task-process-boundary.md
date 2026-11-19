@@ -43,6 +43,26 @@ MVP-7 的本机研究任务需要复用既有数据、因子与 Experiment 能�
 更新尝试不等待用户补文件，任务执行成功仍可对应 needs_input；
 生产装配、供应商输入及显式补跑见 [ADR 0038](0038-fixed-pool-production-update.md)。
 
+## 永动机兼容任务（#394）
+
+兼容任务的 JSON 小数在兼容入口和兼容持久化读回处独立解析，避免更改既有 Experiment task 的小数解析及幂等哈希。受理前拒绝数值溢出或非零舍入为零；权重不做归一化。建仓及实际调仓时，兼容 runner 另核对同一开盘时点的交易资金守恒，具体输入及失败口径见 [本机回放说明](../local-eternal-baseline.md)。
+
+旧 `quant-research` CLI 的 `eternal-compat submit/status/result` 经本机 Axum 任务服务提交、查询及读取版本化 Python 兼容运行；任务类型为 `prajna_eternal_compat@1`，使用自己的兼容运行 ID、不可覆盖结果文件及结果摘要。它复用现有单 worker 队列、进程组所有权/代际标记、任务状态持久化和结构化失败恢复，但不创建 Rust Experiment、Run 或 Execution，也不借用其身份或结果表。普通 Experiment task 列表与读取路由继续排除该类型。
+
+服务在受理时验证并保存解析后的完整配置：模型单位初始 NAV（默认 `1.0`）、固定五资产权重（默认 `30/20/20/25/5` 且合计为 `1.0`）、调仓阈值（默认 `10%`）和单边费率（默认 `5 bp`）。配置只接受模型 NAV，不接受或推断 CNY 金额；结果明确记录 `initial_capital_currency_amount: null`。快照路径和输入版本固定到任务请求/结果，执行器还记录兼容策略与 runner 版本、runner/冻结回放源码摘要及 Python/平台环境。`scripts/eternal_baseline.py` 及其冻结默认配置、schema 和参考输入均不因变体修改。
+
+`prajna_eternal_compat@1` 受理后若快照不可用、子进程异常或结果身份/hash 无效，任务以 `failed` 保存具体错误码及受限子进程诊断，且不发布成功结果；服务重启恢复终态失败原因，成功结果则从独立文件校验摘要后读取。状态路由提供持久错误，结果路由对未成功任务返回 `409`，缺任务返回 `404`，损坏输出返回 `500`；成功结果为 `no-store`。所有输出仅位于配置的本机研究目录。兼容 runner 的失败包写入任务目录 `compat-failure.json`，stderr 只携带短错误摘要；服务仍按既有规则将 stderr 限制为最多 16 KiB，并仅在 sidecar JSON 与 stderr 的错误码/消息一致时，将 runner 错误存入 `task.json` 的 `error.details.runner_error`。sidecar 与 stderr 均确认诊断完整时才标记 `runner_error_details_complete: true`。若原错误详情自身无法 JSON 序列化，runner 改写为只保留错误码/消息和省略原因的部分 sidecar；该失败仍可查询，但状态必须明确标记诊断不完整。sidecar 缺失、无效或不匹配也显式标记为不完整，不把有界 stderr 当作完整 gap 报告。
+
+冻结参考比较使用单位 NAV 模拟轨迹和相应归一化汇总指标；`initial_nav` 只缩放输出账本值，不改变相同策略路径的参考 NAV 判定。正值缩放若溢出、下溢为零，或除回资本后相对归一化值的误差超过 `1e-12`（零绝对容差），runner 显式失败并持久化字段/标的原因，不产生误导性的成功账本。默认有效配置要求冻结参考对拍 `match`；不匹配由 runner 以 `compat_default_reference_mismatch` 失败且不写成功结果，任务服务持久化该子进程原因并在重启后读取。配置变体仍记录参考对比，但 `evaluation_mode=informational_variant` 明确其仅供说明，不因偏离默认参考而失败；默认有效配置标为 `required_default_parity`。兼容任务 submit/status 与结果路由均复用 `LocalPage` Host/Origin 检查：loopback CLI 可不带 Origin，异源请求拒绝。该限制只装配在兼容任务独立路由，不扩展到既有 Experiment task 或旧 run 路由。
+
+模拟得到的逐日归一化单位/持仓在缩放前检查：正权重单位或正单位持仓下溢为零时，以 `compat_normalized_value_underflow` 持久化字段、标的和日期并拒绝结果；零权重仍可为零。随后不依赖账本自身，而由本金、配置权重、单边费率和执行开盘价独立推导初始及每次实际调仓的逐资产单位数（调仓净值为费用方程的精确有理数根），非调仓日要求单位数不变；相对误差超过 `1e-12` 时以 `compat_normalized_allocation_precision_loss` 或 `compat_scaled_allocation_precision_loss` 拒绝结果。同一推导给出每次初始/调仓的独立费用（资本减精确费用后净值）；逐日、逐笔和汇总费用相对自身超过 `1e-10`（零预期须为零），或非交易日出现费用、现金未归零/未沿用时，以 `compat_normalized_fee_precision_loss` 或 `compat_scaled_fee_precision_loss` 拒绝结果。费用采用较宽容差是因为它是资本量之差，冻结求解器只按资本 `1e-13` 收敛；授权真实默认费用误差已高于 `1e-12`。之后归一化及资本缩放后的每个资产估值，均对照由单位数和当日收盘总回报指数的精确有理数乘积建立的独立预期；允许相对误差为 `1e-12`，零绝对容差；逐日 NAV 同样对照现金加各资产精确估值。非零中间值也可能失精；超限以对应阶段的 `compat_normalized_value_precision_loss` 或 `compat_scaled_value_precision_loss` 失败，不以组合 NAV 掩盖小持仓错误，不修改冻结算法或配置范围。
+
+若输入包含 `pending-gaps.json`，runner 在读取 manifest 前先检查该报告，以支持无 manifest 的待裁决快照。有效报告及全部 gap 字段（不筛选可选 `source` 或未知字段）保存在 `error.details.runner_error.details.pending_gap_report`；数值必须能跨 Python/Rust JSON 边界无损表示：小数转有限 binary64 后的最短十进制表示必须与输入数值相等（允许 `0.1`，拒绝精度损失或下溢），整数限于 `i64`/`u64`。字符串和键必须为有效 Unicode，不能含孤立 surrogate；JSON 对象不能含重复键。非标准常量、不可表示数值、无效 Unicode/重复键或无效结构以 `compat_pending_gaps_invalid` 拒绝，并明确 `report_contents_persisted: false`，不静默丢弃/变形原报告。可解码的原始 JSON 文本保存为 `pending_gap_report_raw_json`；可解析报告的其余字段和 gaps 保存在 `recoverable_pending_gap_report`，不支持的数值/字符串用显式标签保留原始 token，非法 Unicode 键省略并由原文保留；恢复规则明确记录，不称原类型完整。重复键或语法错误不猜测结构。拒绝报告的 `structured_details_complete` 为 false，并跨服务/重启传播，即使原文和可恢复字段已保存。错误 sidecar 自身序列化失败时，保留错误码/消息和省略原因并标记诊断不完整；失败发射不能因原始详情含无效数字而崩溃。有效报告同处列出未运行的 manifest/清单/配置/源码、bar/factor、总回报价/涨跌停、历史拼接、共同交易日、模拟及参考对比阶段。不可读报告与符号链接/其他非普通文件分别显式失败；悬空链接不会被视为缺失，FIFO 等类型在读取前拒绝以避免阻塞。任何此类失败均不生成 `compat-result.json`。完整 gap 明细走 sidecar 而非 stderr，以免超过 16 KiB 时静默截断。
+
+为使 sidecar 始终处于跨语言可解析范围，pending-gap JSON 容器嵌套深度上限为 64；超限输入保留原始 JSON 与可恢复的 gap 字段，过深子树使用 `unsupported_json_depth` 标记，并明确诊断不完整。兼容 runner 非零退出与进程组清理异常同时发生时，清理错误的 `details.cli_error` 保留 sidecar 结构化 runner 错误；进程重启后再次清理失败也保留原嵌套错误，不丢失 gaps 或 `checks_not_run`。
+
+运行时校验抛出的 `InputGaps` 在 `compat_input_invalid` 的 `input_gaps` 中保留原始已知字段；成交量 gap 还保留对应 bar 已有来源。加载失败的 `check_progress` 记录完整调用边界：清单/文件完整性、配置、源码，逐标的读取、bar 校验、因子/总回报价及涨跌停构造，逐代理对历史拼接，共同交易日、模拟和参考比较。状态区分 `completed`、`partial`（开始未完成或分组内仅部分完成）、`not_run`，`scopes` 记录各标的/代理对；`checks_not_run` 包含尚未完成阶段及其范围。保留提前失败，不推测未调用检查的结论。诊断完整标志表示已知内容及执行范围完整保存，并非所有检查完成；诊断沿同一 sidecar/状态路径持久化。
+
 ## 后果与限制
 
 此边界默认执行并读取 Summary 结果，显式请求 Standard 时会提升已有 Summary Execution；不把新平台核心编译进旧服务，也不修改已有 Experiment 身份或结果表内容（提升会按已有的显式能力补写明细；manifest 的默认级别不改变）。结果读取验证所有已保存表 hash，并由 T21 扩展返回已保存 orders/fills/费用/权重/pending 等原生明细与 Rust 估值权重投影，不提供分页或按需提升；T01 尚不提供 HTTP 取消或重试端点。持久过程组身份与清理原语为后续取消路径提供服务端能力。进程检查与 CLI 诊断验证使用合成输入，不证明真实行情、策略收益或完整 MVP-7 产品流程；受限沙箱可能无法检查或终止子进程组，此时实现拒绝清理并明确报告未验证的所有权。
